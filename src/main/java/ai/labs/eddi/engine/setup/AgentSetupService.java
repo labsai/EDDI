@@ -45,6 +45,7 @@ import ai.labs.eddi.secrets.crypto.EnvelopeCrypto;
 import ai.labs.eddi.secrets.model.SecretMetadata;
 import ai.labs.eddi.secrets.model.SecretReference;
 import ai.labs.eddi.utils.LogSanitizer;
+import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -134,6 +135,21 @@ public class AgentSetupService {
     @Inject
     @ConfigProperty(name = "eddi.setup.vault-key-reuse", defaultValue = VAULT_KEY_REUSE_CHECKSUM)
     String vaultKeyReuse = VAULT_KEY_REUSE_CHECKSUM;
+
+    /**
+     * Strict parse, same reasoning as {@code VaultGrantGate.Mode.parseStrict}: an
+     * unrecognised value fails startup rather than degrading. The degraded
+     * behaviour here would be "no reuse" — exactly the vault growth this setting
+     * exists to prevent, with every visible sign saying it is on. Runs only under
+     * CDI; a directly constructed instance (tests) keeps the default.
+     */
+    @PostConstruct
+    void validateVaultKeyReuse() {
+        if (!VAULT_KEY_REUSE_CHECKSUM.equalsIgnoreCase(vaultKeyReuse) && !VAULT_KEY_REUSE_NEVER.equalsIgnoreCase(vaultKeyReuse)) {
+            throw new IllegalArgumentException("Unknown eddi.setup.vault-key-reuse value '" + vaultKeyReuse + "'. Valid values: "
+                    + VAULT_KEY_REUSE_CHECKSUM + ", " + VAULT_KEY_REUSE_NEVER);
+        }
+    }
 
     @Inject
     public AgentSetupService(IRestInterfaceFactory restInterfaceFactory, IRestAgentAdministration agentAdmin,
@@ -1050,6 +1066,7 @@ public class AgentSetupService {
         // ${eddivault:...})
         if (isVaultReference(key)) {
             LOGGER.infof("API key for agent '%s' is already a vault reference — using as-is.", LogSanitizer.sanitize(agentName));
+            warnIfMissing(SecretReference.parse(key), agentName);
             return key;
         }
 
@@ -1071,7 +1088,7 @@ public class AgentSetupService {
             // Timestamp suffix prevents collision when two agents share the same name
             String sanitizedName = agentName.toLowerCase().replaceAll("[^a-z0-9]", "-");
             String keyName = "setup." + sanitizedName + "." + System.currentTimeMillis() + ".apiKey";
-            return storeSecret(keyName, key, agentName, createdResources);
+            return storeSecret(new SecretReference(SecretReference.DEFAULT_TENANT, keyName), key, agentName, createdResources);
         } catch (ISecretProvider.SecretProviderException e) {
             LOGGER.error("Failed to vault API key for agent '" + LogSanitizer.sanitize(agentName) + "': " + e.getMessage()
                     + " — falling back to plaintext storage.");
@@ -1129,9 +1146,9 @@ public class AgentSetupService {
 
         if (existing != null) {
             if (haveNewPlaintext && !EnvelopeCrypto.sha256Hex(key).equals(existing.checksum())) {
-                throw new AgentSetupException("vaultKeyName '" + ref.keyName() + "' already holds a different value. Setup will not "
-                        + "overwrite it, because other agents may reference it. Use a different vaultKeyName, omit apiKey to reuse the "
-                        + "stored value, or rotate the key through the secrets API first.");
+                throw new AgentSetupException("vaultKeyName '" + ref.keyName() + "' already holds a value that does not match the "
+                        + "apiKey supplied. Setup will not overwrite it, because other agents may reference it. Use a different "
+                        + "vaultKeyName, omit apiKey to reuse the stored value, or rotate the key through the secrets API first.");
             }
             LOGGER.infof("Agent '%s' reuses existing vault key '%s'.", LogSanitizer.sanitize(agentName),
                     LogSanitizer.sanitize(ref.keyName()));
@@ -1139,8 +1156,8 @@ public class AgentSetupService {
         }
 
         if (!haveNewPlaintext) {
-            throw new AgentSetupException("vaultKeyName '" + ref.keyName() + "' does not exist in the vault and no apiKey was supplied to "
-                    + "create it. Supply apiKey to store the key under that name, or name an existing vault key.");
+            throw new AgentSetupException("vaultKeyName '" + ref.keyName() + "' does not exist in the vault and no plaintext apiKey was "
+                    + "supplied to create it. Supply the key in apiKey to store it under that name, or name an existing vault key.");
         }
 
         try {
@@ -1151,7 +1168,7 @@ public class AgentSetupService {
             // triggers rollback, a concurrent setup may already have reused the entry,
             // and rollback would pull the key out from under an agent that is not ours.
             // Leaving it also means the retry finds the key already in place.
-            return storeSecret(ref.keyName(), key, agentName, null);
+            return storeSecret(ref, key, agentName, null);
         } catch (ISecretProvider.SecretProviderException e) {
             throw new AgentSetupException("Could not store the API key under vault key '" + ref.keyName() + "': " + e.getMessage(), e);
         }
@@ -1161,9 +1178,8 @@ public class AgentSetupService {
      * Write one secret and record it for rollback. Split out so the named and the
      * generated path cannot drift on the grant list or the rollback bookkeeping.
      */
-    private String storeSecret(String keyName, String plaintext, String agentName, Map<String, Object> createdResources)
+    private String storeSecret(SecretReference ref, String plaintext, String agentName, Map<String, Object> createdResources)
             throws ISecretProvider.SecretProviderException {
-        var ref = new SecretReference(SecretReference.DEFAULT_TENANT, keyName);
         // "*" is deliberate. allowedAgents IS enforced now (VaultGrantGate, at
         // deploy time), so this list is a real access-control decision — but the
         // agent being set up does not have an ID yet at this point, and the key is
@@ -1177,9 +1193,9 @@ public class AgentSetupService {
         // Recorded only once the write succeeded: a name whose store threw does not
         // exist, and rollback would log a spurious "could not remove" warning for it.
         if (createdResources != null) {
-            createdResources.put(VAULTED_SECRET_KEY, keyName);
+            createdResources.put(VAULTED_SECRET_KEY, ref.keyName());
         }
-        LOGGER.infof("API key vaulted for agent '%s' (key: %s)", LogSanitizer.sanitize(agentName), LogSanitizer.sanitize(keyName));
+        LOGGER.infof("API key vaulted for agent '%s' (key: %s)", LogSanitizer.sanitize(agentName), LogSanitizer.sanitize(ref.keyName()));
         return ref.toReferenceString();
     }
 
@@ -1223,6 +1239,28 @@ public class AgentSetupService {
             // fall through and store a new entry rather than failing the setup.
             LOGGER.debugf("Could not scan the vault for a reusable API key: %s", e.getMessage());
             return null;
+        }
+    }
+
+    /**
+     * A pass-through {@code apiKey} reference is accepted as-is — that has always
+     * been the contract, and callers may legitimately vault the key after setup or
+     * hold it under a tenant this check cannot see. But by far the commonest cause
+     * of a dangling reference is a typo in a paste, and the result is an agent that
+     * deploys fine and fails on its first turn. Say so now, in the log, while the
+     * caller is still looking.
+     */
+    private void warnIfMissing(SecretReference ref, String agentName) {
+        if (!secretProvider.isAvailable()) {
+            return;
+        }
+        try {
+            secretProvider.getMetadata(ref);
+        } catch (ISecretProvider.SecretNotFoundException e) {
+            LOGGER.warnf("Agent '%s' references vault key '%s', which does not exist (yet). The agent will fail to resolve its API "
+                    + "key at runtime until that secret is created.", LogSanitizer.sanitize(agentName), LogSanitizer.sanitize(ref.keyName()));
+        } catch (ISecretProvider.SecretProviderException e) {
+            LOGGER.debugf("Could not check vault key '%s': %s", LogSanitizer.sanitize(ref.keyName()), e.getMessage());
         }
     }
 

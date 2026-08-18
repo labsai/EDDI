@@ -111,6 +111,23 @@ class AgentSetupVaultKeyReuseTest {
             assertFalse(createdResources.containsKey(AgentSetupService.VAULTED_SECRET_KEY));
         }
 
+        /**
+         * Pass-through has always been accepted as-is and still is — a caller may vault
+         * the key after setup. But the entry is looked up so a typo'd paste is at least
+         * visible in the log rather than surfacing as an agent that deploys and then
+         * fails on its first turn.
+         */
+        @Test
+        @DisplayName("a reference to a missing key is still accepted, and looked up")
+        void danglingReferenceIsAcceptedButChecked() throws Exception {
+            when(secretProvider.getMetadata(any())).thenThrow(new ISecretProvider.SecretNotFoundException("nope"));
+
+            assertEquals("${vault:typo-key}", vaultApiKey("${vault:typo-key}", null));
+
+            verify(secretProvider).getMetadata(new SecretReference(SecretReference.DEFAULT_TENANT, "typo-key"));
+            verify(secretProvider, never()).store(any(), anyString(), anyString(), any());
+        }
+
         @Test
         @DisplayName("a value merely CONTAINING a reference is not one")
         void embeddedReferenceIsNotAReference() throws Exception {
@@ -281,7 +298,7 @@ class AgentSetupVaultKeyReuseTest {
 
             var e = assertThrows(AgentSetupService.AgentSetupException.class, () -> vaultApiKey(KEY, "openai-prod"));
 
-            assertTrue(e.getMessage().contains("already holds a different value"), e.getMessage());
+            assertTrue(e.getMessage().contains("does not match"), e.getMessage());
             verify(secretProvider, never()).store(any(), anyString(), anyString(), any());
         }
 
@@ -340,6 +357,25 @@ class AgentSetupVaultKeyReuseTest {
         @DisplayName("blank vaultKeyName is treated as absent")
         void blankNameIsAbsent() throws Exception {
             assertTrue(vaultApiKey(KEY, "   ").startsWith("${vault:setup.my-agent."));
+        }
+
+        /**
+         * The reference is parsed for its tenant, so the create must honour it too. The
+         * first cut looked the entry up under "acme" and then created it under
+         * "default" — a setup that "worked" and left the agent referencing a secret
+         * that did not exist where it pointed.
+         */
+        @Test
+        @DisplayName("a tenant-qualified name is created in that tenant")
+        void tenantQualifiedNameStaysInItsTenant() throws Exception {
+            when(secretProvider.getMetadata(any())).thenThrow(new ISecretProvider.SecretNotFoundException("nope"));
+
+            assertEquals("${vault:acme/openai-prod}", vaultApiKey(KEY, "${vault:acme/openai-prod}"));
+
+            var ref = ArgumentCaptor.forClass(SecretReference.class);
+            verify(secretProvider).store(ref.capture(), eq(KEY), anyString(), any());
+            assertEquals("acme", ref.getValue().tenantId());
+            assertEquals("openai-prod", ref.getValue().keyName());
         }
 
         @Test
@@ -409,6 +445,37 @@ class AgentSetupVaultKeyReuseTest {
         void neverEchoesPlaintext() throws Exception {
             assertNull(vaultReferenceOrNull(KEY));
             assertNull(vaultReferenceOrNull(null));
+        }
+    }
+
+    // ─── eddi.setup.vault-key-reuse ──────────────────────────────────────
+
+    @Nested
+    @DisplayName("eddi.setup.vault-key-reuse")
+    class ReuseMode {
+
+        /**
+         * Same convention as eddi.vault.grant-enforcement: an unrecognised value fails
+         * startup. Degrading would mean "no reuse" — the original bug back, with every
+         * visible sign saying dedup is on.
+         */
+        @Test
+        @DisplayName("an unrecognised value fails startup instead of silently disabling reuse")
+        void unknownModeFailsFast() {
+            service.vaultKeyReuse = "checksumm";
+
+            var e = assertThrows(IllegalArgumentException.class, service::validateVaultKeyReuse);
+
+            assertTrue(e.getMessage().contains("checksumm"), e.getMessage());
+        }
+
+        @Test
+        @DisplayName("both documented values pass, case-insensitively")
+        void knownModesPass() {
+            for (String ok : List.of("checksum", "never", "CHECKSUM", "Never")) {
+                service.vaultKeyReuse = ok;
+                service.validateVaultKeyReuse();
+            }
         }
     }
 }

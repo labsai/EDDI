@@ -110,6 +110,30 @@ A second read of the change turned up six things, all fixed on this branch:
 the extra `SetupResult` component. 356 tests across the setup suites and repo-wide guards, green,
 Checkstyle clean.
 
+### Second review pass (different reviewer)
+
+One real bug and three smaller items, all fixed:
+
+- **`vaultKeyName: "${vault:acme/openai"` created the secret in the `default` tenant.** `useNamedVaultKey` parsed
+  the tenant for the *lookup* but `storeSecret` rebuilt the reference with `DEFAULT_TENANT` for the *create* — so a
+  missing tenant-qualified key produced a setup that "worked" and an agent whose reference pointed at nothing.
+  `storeSecret` now takes the full `SecretReference`. Mutation-checked: reverting it fails the new test.
+- **`eddi.setup.vault-key-reuse` silently degraded on a typo.** `checksumm` behaved as `never` — dedup off, which is
+  the original bug back with every visible sign saying it is on. Now strict-parsed in a `@PostConstruct`, failing
+  startup, matching the `eddi.vault.grant-enforcement` convention. Directly constructed instances (tests) are unaffected.
+- **A dangling `apiKey: "${vault:typo}"` was accepted in silence.** Pass-through stays accepted (a caller may vault the
+  key after setup) but the entry is now looked up and a WARN logged if absent — the alternative was an agent that
+  deploys clean and fails on its first turn. The `verifyNoInteractions` assertions on the old pass-through tests became
+  `never().store(...)`, which is what they actually meant.
+- Two error messages tightened (`already holds a different value` was wrong when the stored checksum is null;
+  `no apiKey was supplied` was wrong when a *reference* was supplied), and both MCP `apiKey` tool descriptions now
+  say that `apiKeyVaultReference` from an earlier call can be passed back to share the key.
+
+Not changed after consideration: `group-wizard.tsx` builds every member slot from a template up front, so
+seeding-on-add would not reach them; the backend checksum dedup covers the vault-growth half regardless.
+
+360 backend tests green (`AgentSetupVaultKeyReuseTest` at 29), Checkstyle clean.
+
 ### EDDI-Manager — `feat/setup-vault-key-reuse`
 
 The earlier note in this entry said the wizard and team builder "still render the API key as a bare text

@@ -295,12 +295,12 @@ One provider key usually serves many agents, so setup avoids storing it many tim
 | What you pass | What setup does |
 | ------------- | --------------- |
 | `vaultKeyName: "openai-prod"` (with or without `apiKey`) | Uses that entry. With `apiKey` it **creates** the entry under exactly that name; without one, the entry must already exist. Never overwrites an entry holding a different value — the request is rejected instead, because other agents may already point at it. Accepts the `${vault:openai-prod}` form too. |
-| `apiKey: "${vault:openai-prod}"` | Used as-is, never re-vaulted. Surrounding whitespace is trimmed first, so a pasted reference still counts as one. |
+| `apiKey: "${vault:openai-prod}"` | Used as-is, never re-vaulted. Surrounding whitespace is trimmed first, so a pasted reference still counts as one. If the key does not exist the setup still succeeds (you may vault it afterwards) but a warning is logged — the agent cannot resolve its credential until it does. |
 | `apiKey: "sk-…"` (plaintext) | Reused if the vault already holds that exact value, otherwise stored under a generated name. |
 
 Plaintext reuse is matched on the SHA-256 checksum the vault already stores per entry — nothing is decrypted to make the decision — and only entries with `allowedAgents` unset or `["*"]` are candidates, since referencing a narrowed grant from a new agent produces a config that [grant enforcement](#agent-grants-allowedagents) rejects at deploy time. When several entries match, the oldest wins, so repeated setups converge on one entry rather than depending on listing order.
 
-Set `eddi.setup.vault-key-reuse=never` to switch plaintext reuse off and give every agent its own entry again — appropriate when two agents hold the same-valued key today but must be able to rotate independently. Neither setting affects the first two rows above: those are explicit caller decisions.
+Set `eddi.setup.vault-key-reuse=never` to switch plaintext reuse off and give every agent its own entry again — appropriate when two agents hold the same-valued key today but must be able to rotate independently. Neither setting affects the first two rows above: those are explicit caller decisions. Any other value fails startup, as `eddi.vault.grant-enforcement` does — a typo must not silently switch de-duplication off.
 
 Every setup response carries **`apiKeyVaultReference`** — the reference the created agent's LLM config actually points at, whether this call vaulted the key or reused an entry that already held it. Pass it straight back as `vaultKeyName` (or as `apiKey`) on the next setup to put another agent on the same credential. It is `null` when the vault is disabled and the key was stored in plaintext: the plaintext is a secret and is never echoed back in a response body.
 

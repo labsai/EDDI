@@ -715,8 +715,8 @@ class AgentSetupServiceBranchCoverageTest {
             String result = invokeVaultApiKey(vaultRef, "MyAgent");
 
             assertEquals(vaultRef, result, "Already-vaulted reference should be returned unchanged");
-            // Should NOT attempt to store anything
-            verifyNoInteractions(secretProvider);
+            // Looked up (so a dangling reference is logged) but never re-vaulted
+            verify(secretProvider, never()).store(any(), anyString(), anyString(), anyList());
         }
 
         @Test
@@ -745,7 +745,8 @@ class AgentSetupServiceBranchCoverageTest {
             String result = invokeVaultApiKey(legacyRef, "LegacyAgent");
 
             assertEquals(legacyRef, result, "Legacy eddivault reference should be returned unchanged");
-            verifyNoInteractions(secretProvider);
+            // Looked up (so a dangling reference is logged) but never re-vaulted
+            verify(secretProvider, never()).store(any(), anyString(), anyString(), anyList());
         }
 
         @Test
@@ -756,7 +757,8 @@ class AgentSetupServiceBranchCoverageTest {
             String result = invokeVaultApiKey(fullRef, "MultiTenantAgent");
 
             assertEquals(fullRef, result, "Full-form vault reference should be returned unchanged");
-            verifyNoInteractions(secretProvider);
+            // Looked up (so a dangling reference is logged) but never re-vaulted
+            verify(secretProvider, never()).store(any(), anyString(), anyString(), anyList());
         }
     }
 }
