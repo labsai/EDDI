@@ -356,7 +356,8 @@ public class AgentSetupService {
 
         // The auto-vaulted secret is created BEFORE the LLM document, so a later
         // failure would leave a unique setup.<name>.<timestamp>.apiKey behind and a
-        // retry loop would grow the vault without bound.
+        // retry loop would grow the vault without bound. Only ever set for an entry
+        // no other setup can be referencing — see vaultApiKey for when that holds.
         Object vaultedKey = createdResources.get(VAULTED_SECRET_KEY);
         if (vaultedKey instanceof String keyName) {
             try {
@@ -1042,10 +1043,14 @@ public class AgentSetupService {
      *            to store under and reuse; null or blank to let this method choose
      * @param createdResources
      *            when non-null, the key name of a secret <b>newly created</b> by
-     *            this call is recorded here so a failed setup can remove it again.
-     *            A <em>reused</em> entry is deliberately never recorded: rollback
-     *            deletes what it finds there, and a shared key must survive the
-     *            failure of one agent that happened to reference it.
+     *            this call — and that no other setup can find — is recorded here so
+     *            a failed setup can remove it again. A <em>reused</em> entry, a
+     *            caller-<em>named</em> entry, and (under {@code checksum} reuse) a
+     *            generated one are deliberately never recorded: rollback deletes
+     *            what it finds there, and a key another agent may already point at
+     *            must survive the failure of the one that happened to create it.
+     *            Also used to carry non-fatal warnings (see
+     *            {@link #VAULT_GRANT_WARNING}) into {@code SetupResult.resources}.
      */
     private String vaultApiKey(String apiKey, String agentName, String vaultKeyName, Map<String, Object> createdResources)
             throws AgentSetupException {
@@ -1066,7 +1071,7 @@ public class AgentSetupService {
         // ${eddivault:...})
         if (isVaultReference(key)) {
             LOGGER.infof("API key for agent '%s' is already a vault reference — using as-is.", LogSanitizer.sanitize(agentName));
-            warnIfMissing(SecretReference.parse(key), agentName);
+            checkReferencedSecret(SecretReference.parse(key), agentName, createdResources);
             return key;
         }
 
@@ -1088,7 +1093,18 @@ public class AgentSetupService {
             // Timestamp suffix prevents collision when two agents share the same name
             String sanitizedName = agentName.toLowerCase().replaceAll("[^a-z0-9]", "-");
             String keyName = "setup." + sanitizedName + "." + System.currentTimeMillis() + ".apiKey";
-            return storeSecret(new SecretReference(SecretReference.DEFAULT_TENANT, keyName), key, agentName, createdResources);
+            // Rollback deletes what is recorded here, and that is only safe while nobody
+            // else can be referencing the entry. Under `never` that holds: the name is
+            // unique and no other setup will find it. Under `checksum` it does not — the
+            // moment a second setup with the same key runs, this entry is THEIR
+            // reference too, and a rollback triggered by this setup's later failure
+            // would break every agent that reused it in the meantime. The growth this
+            // rollback was added to prevent (a retry loop minting a key per attempt)
+            // cannot happen under `checksum` anyway: the retry finds this very entry by
+            // value and reuses it. So under `checksum` the entry is left in place, and
+            // is either reused by the retry or is one harmless orphan.
+            Map<String, Object> rollbackRegistry = VAULT_KEY_REUSE_NEVER.equalsIgnoreCase(vaultKeyReuse) ? createdResources : null;
+            return storeSecret(new SecretReference(SecretReference.DEFAULT_TENANT, keyName), key, agentName, rollbackRegistry);
         } catch (ISecretProvider.SecretProviderException e) {
             LOGGER.error("Failed to vault API key for agent '" + LogSanitizer.sanitize(agentName) + "': " + e.getMessage()
                     + " — falling back to plaintext storage.");
@@ -1152,6 +1168,7 @@ public class AgentSetupService {
             }
             LOGGER.infof("Agent '%s' reuses existing vault key '%s'.", LogSanitizer.sanitize(agentName),
                     LogSanitizer.sanitize(ref.keyName()));
+            warnIfRestricted(existing, agentName, createdResources);
             return ref.toReferenceString();
         }
 
@@ -1243,24 +1260,57 @@ public class AgentSetupService {
     }
 
     /**
+     * {@code SetupResult.resources} key under which a non-fatal vault warning is
+     * returned to the caller. {@code resources} is already the channel for
+     * {@code deployWarning}/{@code deployError}, and the REST and MCP callers see
+     * it; a server-side log line alone would not reach them.
+     */
+    static final String VAULT_GRANT_WARNING = "vaultGrantWarning";
+
+    /**
      * A pass-through {@code apiKey} reference is accepted as-is — that has always
      * been the contract, and callers may legitimately vault the key after setup or
      * hold it under a tenant this check cannot see. But by far the commonest cause
      * of a dangling reference is a typo in a paste, and the result is an agent that
-     * deploys fine and fails on its first turn. Say so now, in the log, while the
-     * caller is still looking.
+     * deploys fine and fails on its first turn. Say so now, while the caller is
+     * still looking. Likewise for a grant the new agent cannot satisfy — see
+     * {@link #warnIfRestricted}.
      */
-    private void warnIfMissing(SecretReference ref, String agentName) {
+    private void checkReferencedSecret(SecretReference ref, String agentName, Map<String, Object> resources) {
         if (!secretProvider.isAvailable()) {
             return;
         }
         try {
-            secretProvider.getMetadata(ref);
+            warnIfRestricted(secretProvider.getMetadata(ref), agentName, resources);
         } catch (ISecretProvider.SecretNotFoundException e) {
             LOGGER.warnf("Agent '%s' references vault key '%s', which does not exist (yet). The agent will fail to resolve its API "
                     + "key at runtime until that secret is created.", LogSanitizer.sanitize(agentName), LogSanitizer.sanitize(ref.keyName()));
         } catch (ISecretProvider.SecretProviderException e) {
             LOGGER.debugf("Could not check vault key '%s': %s", LogSanitizer.sanitize(ref.keyName()), e.getMessage());
+        }
+    }
+
+    /**
+     * The checksum path simply skips a narrowly granted entry, but a caller who
+     * NAMED one, or pasted its reference, meant it — and a brand-new agent's ID
+     * cannot be in any grant list that already exists, so under
+     * {@code eddi.vault.grant-enforcement=enforce} the deployment WILL be blocked.
+     * That is not a reason to refuse the setup: the legitimate flow is exactly
+     * setup without deploy, widen the grant to the new agent ID, then deploy. It is
+     * a reason to say so now, in the response as well as the log, instead of
+     * letting the caller discover it as {@code deployed: false}.
+     */
+    private void warnIfRestricted(SecretMetadata metadata, String agentName, Map<String, Object> resources) {
+        if (metadata == null || isUnrestricted(metadata)) {
+            return;
+        }
+        String warning = "Vault key '" + metadata.keyName() + "' is granted only to " + metadata.allowedAgents()
+                + ". The agent being created cannot be on that list yet, so with eddi.vault.grant-enforcement=enforce its "
+                + "deployment will be blocked until the grant is widened to '*' or to the new agent's ID (secrets REST API, "
+                + "PATCH allowedAgents).";
+        LOGGER.warnf("Agent '%s': %s", LogSanitizer.sanitize(agentName), LogSanitizer.sanitize(warning));
+        if (resources != null) {
+            resources.put(VAULT_GRANT_WARNING, warning);
         }
     }
 

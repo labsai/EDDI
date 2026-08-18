@@ -59,9 +59,9 @@ decisions, not defaults. Field-injected like the neighbouring
   `vaultKeyName` must fail while rollback still has nothing to undo, not after a parser, ruleset, LLM
   config and workflow already exist.
 
-`vaultKeyName` is deliberately **not** exposed on the MCP `setup_agent` / `create_api_agent` tools (the
-same call the existing `hitlConfig` and `maxToolIterations` comments make): a model that could choose
-the name could point a new agent at any unrestricted secret in the vault by naming it. The MCP path
+`vaultKeyName` is deliberately **not** exposed on the MCP `setup_agent` / `create_api_agent` tools. *(Rationale
+corrected in the third review pass below — an earlier version of this paragraph claimed it stopped a model
+pointing an agent at an arbitrary secret, which `apiKey: "${vault:...}"` already allows.)* The MCP path
 still de-duplicates by checksum, so it does not grow the vault either.
 
 **Files:** `AgentSetupService.java` (trim, `useNamedVaultKey`, `findReusableSecret`, `storeSecret`,
@@ -133,6 +133,43 @@ Not changed after consideration: `group-wizard.tsx` builds every member slot fro
 seeding-on-add would not reach them; the backend checksum dedup covers the vault-growth half regardless.
 
 360 backend tests green (`AgentSetupVaultKeyReuseTest` at 29), Checkstyle clean.
+
+### Third review pass (max effort)
+
+Read the final file state end-to-end and reasoned about the system around it — rollback, the deploy-time
+grant gate, tenants, concurrency, and what the lower-privileged MCP tier can do with the new surface. Four
+findings, all fixed:
+
+1. **Rollback could delete a secret other agents already shared.** Under `checksum` reuse, agent A stores
+   `setup.a.T.apiKey`, agents B..N (parallel bulk provisioning, same key) reuse it, A fails at step 6 → A's
+   rollback deleted the entry B..N point at; they deployed fine and would break on their first turn. The
+   growth that rollback exists to prevent cannot happen under `checksum` (a retry finds A's entry by value), so
+   a generated entry is now registered for rollback **only under `never`**, where nobody else can find it.
+2. **Restricted grants were handled inconsistently.** The checksum path skipped narrowed entries (correctly),
+   but naming one via `vaultKeyName`, or pasting its reference, sailed through and ended as `deployed: false`
+   with the reason only in the server log — a brand-new agent's ID cannot be on any existing grant list, so
+   under `enforce` that outcome is certain. Both paths now WARN and put `resources.vaultGrantWarning` in the
+   response. Not refused: setup-without-deploy → widen grant → deploy is the legitimate flow.
+3. **The MCP rationale was false.** "A model that could choose the name could point a new agent at any
+   unrestricted secret" — the tool already advertises `apiKey: "${vault:name}"`, so it already can. The real
+   reason: MCP setup tools are reachable by `eddi-editor` while REST setup is `eddi-admin`, and what
+   `vaultKeyName` uniquely adds (naming a new entry; a value-must-match check) is a name-squatting and
+   value-oracle surface an editor does not need. Corrected in the two `McpSetupTools` comments, the docs, and
+   the paragraph above.
+4. `SetupResult.apiKeyVaultReference` javadoc now also names the keyless-provider null case.
+
+Verified against the real `VaultSecretProvider` rather than the mocks: `getMetadata` and `listKeys` both
+return the checksum (so the mismatch check and the reuse scan actually see it), `getMetadata` has no
+access-timestamp side effect, and `store` runs `getOrCreateDek`, so a tenant-qualified `vaultKeyName` can
+create the first secret in a new tenant.
+
+Considered and left: the checksum scan lists all default-tenant metadata per setup (setup is rare); an admin
+who can already read checksums via the secrets list gains no new oracle from checksum reuse; two concurrent
+first-time setups with the same key can create two entries, and later setups converge on the older one.
+
+365 backend tests green (`AgentSetupVaultKeyReuseTest` at 34), Checkstyle clean. Manager: the wizard success screen
+now renders `resources.vaultGrantWarning` verbatim (backend-authored, no new i18n keys) — its picker lists every
+vault key including narrowly granted ones, and this is where the user learns why such an agent will not deploy.
 
 ### EDDI-Manager — `feat/setup-vault-key-reuse`
 

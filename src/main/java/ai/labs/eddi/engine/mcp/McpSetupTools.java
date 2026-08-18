@@ -92,12 +92,16 @@ public class McpSetupTools {
             // REST setup endpoint.
             var request = new SetupAgentRequest(agentName, systemPrompt, provider, model, apiKey, baseUrl, introMessage, enableBuiltInTools,
                     builtInToolsWhitelist, enableQuickReplies, enableSentimentAnalysis, mcpServerUrls, deploy, environment, null,
-                    // vaultKeyName is not exposed here either: naming the vault entry
-                    // an agent's credential lands in is an operator decision, and a
-                    // model that could choose it could point a new agent at any
-                    // unrestricted secret in the vault by name. A plaintext apiKey
-                    // still de-duplicates by checksum, so the MCP path does not grow
-                    // the vault either.
+                    // vaultKeyName is not exposed here. Not for reuse — apiKey already
+                    // accepts a ${vault:...} reference (see its description), so an
+                    // MCP caller can put an agent on an existing key today, and a
+                    // plaintext apiKey de-duplicates by checksum. What vaultKeyName adds
+                    // is choosing the NAME of a newly created entry and a
+                    // value-must-match check on an existing one — and these tools are
+                    // reachable by eddi-editor while REST setup is eddi-admin. Neither
+                    // is needed to provision an agent, and neither belongs on the
+                    // lower tier: name-squatting an entry an operator intends to create,
+                    // and a per-request "does key X hold value V" oracle.
                     null);
             var result = agentSetupService.setupAgent(request);
             return jsonSerialization.serialize(result);
@@ -150,7 +154,7 @@ public class McpSetupTools {
             // a model provisioning an agent must not raise its own iteration budget.
             var request = new CreateApiAgentRequest(agentName, systemPrompt, openApiSpec, provider, model, apiKey, apiBaseUrl, apiAuth, endpoints,
                     enableQuickReplies, enableSentimentAnalysis, deploy, environment, llmBaseUrl, null, mcpServerUrls, null,
-                    null); // vaultKeyName — withheld from this tool for the reason given on setup_agent
+                    null); // vaultKeyName — withheld for the reason given on setup_agent
             var result = agentSetupService.createApiAgent(request);
             return jsonSerialization.serialize(result);
         } catch (AgentSetupException e) {

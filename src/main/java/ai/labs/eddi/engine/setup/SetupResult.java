@@ -39,9 +39,10 @@ import java.util.Map;
  *            points at — whether this setup vaulted the key or reused an entry
  *            that already held it. Pass it back as {@code vaultKeyName} (or as
  *            {@code apiKey}) on the next setup to put another agent on the same
- *            credential without re-entering it. Null when the vault is disabled
- *            and the key was stored in plaintext: the plaintext is a secret and
- *            is deliberately never echoed back in a response body.
+ *            credential without re-entering it. Null for a provider that needs
+ *            no key, and null when the vault is disabled and the key was stored
+ *            in plaintext: the plaintext is a secret and is deliberately never
+ *            echoed back in a response body.
  *
  * @author ginccc
  */

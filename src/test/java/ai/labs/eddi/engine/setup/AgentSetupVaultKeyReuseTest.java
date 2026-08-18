@@ -128,6 +128,33 @@ class AgentSetupVaultKeyReuseTest {
             verify(secretProvider, never()).store(any(), anyString(), anyString(), any());
         }
 
+        /**
+         * A brand-new agent's ID cannot be in any grant list that already exists, so
+         * under enforce the deployment will be blocked. Not a reason to refuse — the
+         * legitimate flow is setup without deploy, widen the grant, deploy — but a
+         * reason to tell the caller in the response, not only in the server log.
+         */
+        @Test
+        @DisplayName("a reference to a narrowly granted key is accepted, with a warning in the result")
+        void restrictedReferenceWarnsInResult() throws Exception {
+            when(secretProvider.getMetadata(any())).thenReturn(entry("scoped", KEY, Instant.EPOCH, List.of("agent-42")));
+
+            assertEquals("${vault:scoped}", vaultApiKey("${vault:scoped}", null));
+
+            String warning = String.valueOf(createdResources.get(AgentSetupService.VAULT_GRANT_WARNING));
+            assertTrue(warning.contains("agent-42") && warning.contains("blocked"), warning);
+        }
+
+        @Test
+        @DisplayName("an unrestricted reference carries no warning")
+        void unrestrictedReferenceIsQuiet() throws Exception {
+            when(secretProvider.getMetadata(any())).thenReturn(entry("open", KEY, Instant.EPOCH, List.of("*")));
+
+            vaultApiKey("${vault:open}", null);
+
+            assertFalse(createdResources.containsKey(AgentSetupService.VAULT_GRANT_WARNING));
+        }
+
         @Test
         @DisplayName("a value merely CONTAINING a reference is not one")
         void embeddedReferenceIsNotAReference() throws Exception {
@@ -230,6 +257,37 @@ class AgentSetupVaultKeyReuseTest {
             assertTrue(vaultApiKey(KEY, null).startsWith("${vault:setup.my-agent."));
         }
 
+        /**
+         * Under checksum reuse a freshly created entry is a shared resource the moment
+         * a second setup with the same key runs — parallel bulk provisioning does
+         * exactly that. Recording it for rollback would let the FIRST agent's failure
+         * delete the key every later one already points at, and the growth rollback
+         * exists to prevent cannot happen here anyway: a retry finds this entry by
+         * value and reuses it.
+         */
+        @Test
+        @DisplayName("under checksum reuse, a fresh entry is NOT registered for rollback")
+        void freshEntryNotRollbackFodderUnderChecksum() throws Exception {
+            vaultApiKey(KEY, null);
+
+            verify(secretProvider).store(any(), eq(KEY), anyString(), any());
+            assertFalse(createdResources.containsKey(AgentSetupService.VAULTED_SECRET_KEY));
+        }
+
+        /**
+         * Under `never` nobody else can find the entry, so the original rollback still
+         * applies.
+         */
+        @Test
+        @DisplayName("under never, a fresh entry IS registered for rollback")
+        void freshEntryIsRollbackFodderUnderNever() throws Exception {
+            service.vaultKeyReuse = AgentSetupService.VAULT_KEY_REUSE_NEVER;
+
+            vaultApiKey(KEY, null);
+
+            assertTrue(String.valueOf(createdResources.get(AgentSetupService.VAULTED_SECRET_KEY)).startsWith("setup.my-agent."));
+        }
+
         @Test
         @DisplayName("the stored value is trimmed, not the raw paste")
         void storesTheTrimmedKey() throws Exception {
@@ -245,6 +303,7 @@ class AgentSetupVaultKeyReuseTest {
         @Test
         @DisplayName("a failed store records nothing for rollback")
         void failedStoreRecordsNothing() throws Exception {
+            service.vaultKeyReuse = AgentSetupService.VAULT_KEY_REUSE_NEVER; // the mode that DOES record on success
             doThrow(new ISecretProvider.SecretProviderException("disk full")).when(secretProvider).store(any(), anyString(), anyString(),
                     any());
 
@@ -267,6 +326,16 @@ class AgentSetupVaultKeyReuseTest {
 
             assertEquals("${vault:openai-prod}", vaultApiKey(null, "openai-prod"));
             verify(secretProvider, never()).store(any(), anyString(), anyString(), any());
+        }
+
+        @Test
+        @DisplayName("naming a narrowly granted key is accepted, with a warning in the result")
+        void restrictedNamedKeyWarnsInResult() throws Exception {
+            when(secretProvider.getMetadata(any())).thenReturn(entry("scoped", KEY, Instant.EPOCH, List.of("agent-42")));
+
+            assertEquals("${vault:scoped}", vaultApiKey(null, "scoped"));
+
+            assertTrue(String.valueOf(createdResources.get(AgentSetupService.VAULT_GRANT_WARNING)).contains("agent-42"));
         }
 
         @Test

@@ -306,7 +306,13 @@ Every setup response carries **`apiKeyVaultReference`** — the reference the cr
 
 `vaultKeyName` must match `[a-zA-Z0-9._-]{1,128}` — the same charset the secrets REST API enforces, because the value gets embedded in `${vault:<tenant>/<key>}` where a `/` would re-parse as a tenant separator and a `}` would truncate the reference. Use the `${vault:tenant/key}` form for a non-default tenant. Naming one key in `vaultKeyName` and a *different* one in `apiKey` is rejected rather than silently resolved in favour of either.
 
-`vaultKeyName` is a REST-only field. It is deliberately absent from the MCP `setup_agent` / `create_api_agent` tools, where a model choosing the name could point a new agent at any unrestricted secret in the vault by naming it.
+`vaultKeyName` is a REST-only field (`eddi-admin`). The MCP `setup_agent` / `create_api_agent` tools do not carry it — not to prevent reuse, which their `apiKey` already supports as a `${vault:...}` reference, but because the two things it *adds* (choosing the name of a newly created entry, and a value-must-match check on an existing one) are not needed to provision an agent and do not belong on the `eddi-editor` tier those tools are open to: name-squatting an entry an operator intends to create, and a per-request "does key X hold value V" oracle.
+
+Naming, or pasting a reference to, a secret whose `allowedAgents` is narrowed is accepted — the legitimate flow is setup without deploy, widen the grant to the new agent's ID, deploy — but a brand-new agent cannot be on any existing grant list, so under `enforce` a `deploy: true` setup will end as `deployed: false`. The response says so up front in `resources.vaultGrantWarning`. (Plaintext reuse simply skips such entries.)
+
+### What rollback does with the vault
+
+A setup that fails part-way rolls back the documents it created. It also removes the secret it vaulted — but only when nothing else can be referencing it: under `never` (unique per-agent names) it does; under `checksum` a freshly stored entry is a shared resource the moment a second setup with the same key runs, so it is left in place — a retry finds it by value and reuses it, and at worst it is one orphan. A caller-named entry is never rolled back for the same reason.
 
 ### Collision Prevention
 
