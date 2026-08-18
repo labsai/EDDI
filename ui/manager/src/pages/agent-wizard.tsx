@@ -27,6 +27,7 @@ import {
   KeyRound,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 import { useSetupAgent, useCreateApiAgent } from "@/hooks/use-agent-setup";
 import {
   LLM_PROVIDERS,
@@ -290,17 +291,25 @@ export function AgentWizardPage() {
                 >
                   {result.apiKeyVaultReference}
                 </code>
-                <button
-                  type="button"
-                  onClick={() => {
-                    void navigator.clipboard?.writeText(result.apiKeyVaultReference!);
-                    toast.success(t("setupWizard.vaultKeyCopied", "Vault reference copied"));
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 shrink-0 text-xs"
+                  onClick={async () => {
+                    // Awaited: reporting "copied" before the write resolves is a lie
+                    // in a non-secure context or when permission is denied, and the
+                    // rejection would go unhandled.
+                    try {
+                      await navigator.clipboard.writeText(result.apiKeyVaultReference!);
+                      toast.success(t("setupWizard.vaultKeyCopied", "Vault reference copied"));
+                    } catch {
+                      toast.error(t("common.copyFailed", "Failed to copy to clipboard"));
+                    }
                   }}
-                  className="shrink-0 rounded-md border border-border px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
                   data-testid="wizard-vault-reference-copy"
                 >
                   {t("common.copy", "Copy")}
-                </button>
+                </Button>
               </div>
             </div>
           )}

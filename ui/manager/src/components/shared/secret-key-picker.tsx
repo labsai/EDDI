@@ -554,7 +554,13 @@ export function SecretKeyPicker({
       // the reference as the api key — which the backend has to trim on its side
       // to recognise, and which the chip below would render with the stray
       // whitespace baked in.
-      if (isVaultRef(newValue) && newValue.trim().endsWith("}")) {
+      //
+      // Keyed off isVaultRef alone, deliberately. Gating on endsWith("}") too
+      // covered only the braced form, so the unbraced spellings isVaultRef also
+      // accepts ("vault:key", legacy "eddivault:key") fell through untrimmed: the
+      // chip rendered from the trimmed value while the parent kept — and
+      // submitted — the raw paste.
+      if (isVaultRef(newValue)) {
         onChange(newValue.trim());
         closePopup();
         return;

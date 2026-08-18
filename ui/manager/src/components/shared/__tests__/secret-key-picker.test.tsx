@@ -113,6 +113,28 @@ describe("SecretKeyPicker", () => {
     expect(screen.getByTestId("secret-key-picker-clear")).toBeInTheDocument();
   });
 
+  /**
+   * isVaultRef also accepts the unbraced spellings. Gating normalisation on a
+   * trailing "}" left those untrimmed: the chip rendered from the trimmed value
+   * while the parent kept — and submitted — the raw paste.
+   */
+  it("normalises the unbraced and legacy reference forms too", async () => {
+    const user = userEvent.setup();
+    const { rerender } = renderWithProviders(
+      <SecretKeyPicker value="" onChange={mockOnChange} />
+    );
+
+    await user.click(screen.getByTestId("secret-key-picker-input"));
+    await user.paste("  vault:openai-key  ");
+    expect(mockOnChange).toHaveBeenLastCalledWith("vault:openai-key");
+
+    mockOnChange.mockReset();
+    rerender(<SecretKeyPicker value="" onChange={mockOnChange} />);
+    await user.click(screen.getByTestId("secret-key-picker-input"));
+    await user.paste("  eddivault:legacy-key  ");
+    expect(mockOnChange).toHaveBeenLastCalledWith("eddivault:legacy-key");
+  });
+
   it("normalises a pasted reference before handing it up", async () => {
     const user = userEvent.setup();
     renderWithProviders(<SecretKeyPicker value="" onChange={mockOnChange} />);
