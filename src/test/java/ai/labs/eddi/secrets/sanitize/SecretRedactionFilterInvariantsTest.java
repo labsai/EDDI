@@ -341,42 +341,38 @@ class SecretRedactionFilterInvariantsTest {
     }
 
     /**
-     * An apostrophe-quoted value ends at the first double quote, whatever its
-     * escaping — so a Python-style repr of a password with a double quote in it is
-     * cut at that quote. Pinned as a DELIBERATE limit, with the reasoning:
-     * <ul>
-     * <li>the rule this scan replaced stopped at a double quote too, so this is the
-     * status quo on that leak, not a regression;
-     * <li>letting an apostrophe value run past a double quote, inside JSON, let it
-     * open in one string and close in another at a different nesting level, eating
-     * the brace between — a carrier the Manager's escalation checks then skip;
-     * <li>and it is what keeps redaction idempotent: a pass never removes a quote.
-     * </ul>
-     * An apostrophe value with no double quote in it — the overwhelmingly common
-     * Python and shell shape — is redacted whole, as the next test shows.
+     * An apostrophe-quoted value that opened OUTSIDE any double-quoted string — a
+     * Python repr, a shell export — may contain double quotes and is redacted
+     * whole, to its matching apostrophe. A review rightly refused a test that
+     * asserted the opposite: this is a plausible log carrier and a double quote
+     * inside the value must not disable redaction.
      */
     @Test
-    void anApostropheQuotedValueStopsAtADoubleQuote() {
+    void anApostropheQuotedValueOutsideAnyDoubleQuotedStringMayContainDoubleQuotes() {
         String redacted = SecretRedactionFilter
                 .redact("{'user': 'x', 'password': 'pa\"ss-" + CANARY + "\", done', 'n': 1}");
-
-        assertEquals("{'user': 'x', 'password': 'pa\"ss-" + CANARY + "\", done', 'n': 1}", redacted,
-                "under the floor up to the quote, so left alone — the documented trade");
-    }
-
-    @Test
-    void anApostropheQuotedValueWithoutADoubleQuoteIsRedactedWhole() {
-        String redacted = SecretRedactionFilter
-                .redact("{'user': 'x', 'password': 'pa-ss-" + CANARY + ", done', 'n': 1}");
 
         assertFalse(redacted.contains(CANARY), redacted);
         assertEquals("{'user': 'x', 'password': '<REDACTED>', 'n': 1}", redacted);
     }
 
+    @Test
+    void severalApostropheValuesWithDoubleQuotesAreEachRedactedWholeAndIdempotently() {
+        String input = "{'password': 'pa\"ss-" + CANARY + "', 'token': 'x\"y-" + CANARY + "', 'n': 1}";
+
+        String redacted = SecretRedactionFilter.redact(input);
+
+        assertFalse(redacted.contains(CANARY), redacted);
+        assertEquals("{'password': '<REDACTED>', 'token': '<REDACTED>', 'n': 1}", redacted);
+        assertEquals(redacted, SecretRedactionFilter.redact(redacted));
+    }
+
     /**
-     * The JSON case that forced the rule above: an apostrophe opened in one string
-     * and a stray apostrophe in a sibling string at a DIFFERENT nesting level. Run
-     * to the matching apostrophe, the value would have eaten the brace between.
+     * An apostrophe-quoted value that opened INSIDE a double-quoted string cannot
+     * cross that string's end. The case that forced it: an apostrophe opened in one
+     * JSON string and a stray apostrophe in a sibling string at a DIFFERENT nesting
+     * level — run to the matching apostrophe, the value would have eaten the brace
+     * between.
      */
     @Test
     void anApostropheOpenedInOneJsonStringCannotCloseInAnother() {
@@ -386,6 +382,48 @@ class SecretRedactionFilterInvariantsTest {
 
         assertEquals(document, redacted, "nothing here is a secret, and the structure must survive");
         assertTrue(parses(redacted));
+    }
+
+    @Test
+    void anApostropheValueInsideAJsonStringIsStillRedactedUpToThatStringsEnd() {
+        String document = "{\"msg\":\"auth with token:'" + CANARY + "\",\"n\":1}";
+
+        String redacted = SecretRedactionFilter.redact(document);
+
+        assertFalse(redacted.contains(CANARY), redacted);
+        assertEquals("{\"msg\":\"auth with token:'<REDACTED>\",\"n\":1}", redacted);
+        assertTrue(parses(redacted));
+    }
+
+    /**
+     * The one shape the two rules above leave on the table, pinned with its reason:
+     * a Python repr nested INSIDE a JSON string, whose secret contains a double
+     * quote. The apostrophe opened inside a double-quoted string, so it stops at
+     * the next double quote of any escaping — here the escaped one in the secret.
+     * Stopping only at the bare string terminator would redact this whole, but it
+     * would also let a depth-one string's {@code \"} terminator be removed, and a
+     * fuzzer showed that making nested carriers non-idempotent. The rule before
+     * this branch cut this value at the same place, so it is the status quo.
+     */
+    @Test
+    void aPythonReprNestedInAJsonStringWithAQuoteInTheSecretIsADocumentedLimit() {
+        String document = json(ordered(entry("log", "{'password': 'pa\"ss-" + CANARY + "'}"), entry("n", 1)));
+
+        String redacted = SecretRedactionFilter.redact(document);
+
+        assertTrue(redacted.contains(CANARY), "documented limit; see the javadoc");
+        assertTrue(parses(redacted));
+        assertEquals(redacted, SecretRedactionFilter.redact(redacted));
+    }
+
+    @Test
+    void aPythonReprNestedInAJsonStringWithoutAQuoteInTheSecretIsRedactedWhole() {
+        String document = json(ordered(entry("log", "{'password': 'pa-ss-" + CANARY + "'}"), entry("n", 1)));
+
+        String redacted = SecretRedactionFilter.redact(document);
+
+        assertFalse(redacted.contains(CANARY), redacted);
+        assertEquals(json(ordered(entry("log", "{'password': '<REDACTED>'}"), entry("n", 1))), redacted);
     }
 
     /** The length floor, at its boundary and on the non-string values under it. */
@@ -527,13 +565,13 @@ class SecretRedactionFilterInvariantsTest {
                 () -> "redaction must be idempotent\n  in:  " + visible(document) + "\n  out: " + visible(redacted));
         boolean exempt = SecretReference.compiledPattern().matcher(secret).matches()
                 || secret.matches("(?:sk-ant-|sk-|Bearer\\s)?<REDACTED>");
-        // A secret with no backslash and no quote character of either kind inside
-        // it is unambiguous, and the scanner has no excuse to miss it. A quote of
-        // the CLOSING kind inside the secret ends the value early in any reading; a
-        // double quote inside an apostrophe value ends it by the documented rule
-        // (see anApostropheQuotedValueStopsAtADoubleQuote) — both are cuts the
-        // filter makes on purpose, not leaks for this oracle to report.
-        boolean unambiguous = !secret.contains("\\") && secret.indexOf(quote) < 0 && secret.indexOf('"') < 0;
+        // A secret with no backslash and no quote of the CLOSING kind inside it is
+        // unambiguous, and the scanner has no excuse to miss it. A double quote in
+        // an apostrophe secret is fine at the top level (the value is free) but a
+        // deliberate cut once nested inside a JSON string — see
+        // aPythonReprNestedInAJsonStringWithAQuoteInTheSecretIsADocumentedLimit.
+        boolean nestedApostropheWithDoubleQuote = quote == '\'' && depth > 0 && secret.indexOf('"') >= 0;
+        boolean unambiguous = !secret.contains("\\") && secret.indexOf(quote) < 0 && !nestedApostropheWithDoubleQuote;
         if (!exempt && secret.length() >= 8 && unambiguous) {
             assertFalse(redacted.contains(CANARY),
                     () -> "secret survived\n  in:  " + visible(document) + "\n  out: " + visible(redacted));
@@ -562,10 +600,23 @@ class SecretRedactionFilterInvariantsTest {
         return out.toString();
     }
 
+    /**
+     * Whether the WHOLE text is one JSON document — the same question the filter
+     * asks to decide a carrier, and the same one JavaScript's {@code JSON.parse}
+     * asks in the Manager. Jackson's {@code readTree} alone is more lenient: it
+     * reads the first value and ignores whatever follows, so it calls
+     * {@code "a" trailing junk} JSON. Something that is not a whole document is not
+     * a carrier, and nothing here promises anything about it.
+     */
     private static boolean parses(String text) {
-        try {
-            MAPPER.readTree(text);
-            return true;
+        try (com.fasterxml.jackson.core.JsonParser parser = MAPPER.getFactory().createParser(text)) {
+            if (parser.nextToken() == null) {
+                return false;
+            }
+            parser.skipChildren();
+            // Exactly one root value: Jackson accepts a root value SEQUENCE, so
+            // reading merely to the end calls `{"a":1}"junk" 222` a document.
+            return parser.nextToken() == null;
         } catch (Exception e) {
             return false;
         }

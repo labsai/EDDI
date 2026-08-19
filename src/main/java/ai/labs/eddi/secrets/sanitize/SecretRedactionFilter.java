@@ -5,7 +5,10 @@
 package ai.labs.eddi.secrets.sanitize;
 
 import ai.labs.eddi.secrets.model.SecretReference;
+import com.fasterxml.jackson.core.JsonFactory;
+import com.fasterxml.jackson.core.JsonParser;
 
+import java.io.IOException;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -18,6 +21,16 @@ import java.util.regex.Pattern;
 public final class SecretRedactionFilter {
 
     private static final String REDACTED = "<REDACTED>";
+
+    /** Shared, thread-safe, and used only to answer "is this a JSON document". */
+    private static final JsonFactory JSON = new JsonFactory();
+
+    /**
+     * Above this length a message is assumed to be a JSON carrier rather than
+     * parsed to find out — the safe assumption, and it keeps an unbounded parse off
+     * the logging path.
+     */
+    private static final int MAXIMUM_CARRIER_CHECK_LENGTH = 1 << 20;
 
     /**
      * Do not re-redact a value an earlier rule has already replaced.
@@ -241,6 +254,7 @@ public final class SecretRedactionFilter {
      */
     private static String redactQuotedValues(String message) {
         Matcher matcher = QUOTED_VALUE_START.matcher(message);
+        boolean freeApostropheValues = apostropheValuesMayContainDoubleQuotes(message);
         StringBuilder out = new StringBuilder(message.length());
         int copiedUpTo = 0;
         int searchFrom = 0;
@@ -259,7 +273,11 @@ public final class SecretRedactionFilter {
                 continue;
             }
 
-            int valueEnd = endOfValue(message, valueStart, quote, openingEscaping);
+            // Inside a JSON document an apostrophe value cannot cross the string
+            // it sits in; outside one — a Python repr, a shell export — it is free
+            // to contain double quotes. See apostropheValuesMayContainDoubleQuotes.
+            boolean boundByDoubleQuote = quote == '\'' && !freeApostropheValues;
+            int valueEnd = endOfValue(message, valueStart, quote, openingEscaping, boundByDoubleQuote);
 
             String value = message.substring(valueStart, valueEnd);
             if (isExempt(value)) {
@@ -268,8 +286,17 @@ public final class SecretRedactionFilter {
                 searchFrom = valueEnd;
                 continue;
             }
-            if (value.length() < MINIMUM_SECRET_LENGTH) {
-                // Under the floor, so left legible — and its text is still live: a
+            if (value.isBlank() || value.length() < MINIMUM_SECRET_LENGTH) {
+                // Too short to be a secret, or blank. Whitespace is never a secret
+                // and redacting it can only destroy structure — a fuzzer found the
+                // shape that needs saying out loud: a JSON string ENDING in a
+                // credential word, `"…token:"`, whose closing quote reads as a
+                // value's opening quote and whose "value" is the whitespace after
+                // it. isKeyNameEndingInASeparator cannot see that one — it looks
+                // for a separator AHEAD of the quote and there is none — but a
+                // blank value settles it whatever the shape around it.
+                //
+                // Either way the value is left legible — and its text is still live: a
                 // credential field can START inside it. `SECRET:'SECRET:'<long>'`
                 // reads first as a 7-character value of `SECRET:`, whose closing
                 // apostrophe is the second field's opening one; resuming past that
@@ -293,6 +320,16 @@ public final class SecretRedactionFilter {
                 ? message
                 : out.append(message, copiedUpTo, message.length()).toString();
     }
+
+    /**
+     * How far back the key-name walk below will look. A JSON key is short; a longer
+     * run of identifier characters in front of a credential word is not a key name,
+     * and treating it as a real field (so its value IS redacted) is the safe
+     * direction. The walk is already linear overall — each run is walked at most
+     * once, because no credential name is a suffix of another — but a bound costs
+     * nothing and needs no such argument.
+     */
+    private static final int MAXIMUM_KEY_NAME_PREFIX = 256;
 
     /**
      * Whether what {@link #QUOTED_VALUE_START} just matched is really a quoted JSON
@@ -320,8 +357,9 @@ public final class SecretRedactionFilter {
         if (!keyClose.isEmpty()) {
             return false;
         }
+        int stopAt = Math.max(0, nameStart - MAXIMUM_KEY_NAME_PREFIX);
         int i = nameStart - 1;
-        while (i >= 0 && isIdentifierChar(text.charAt(i))) {
+        while (i >= stopAt && isIdentifierChar(text.charAt(i))) {
             i--;
         }
         boolean insideQuotedKey = i >= 0 && (text.charAt(i) == '"' || text.charAt(i) == '\'');
@@ -348,20 +386,14 @@ public final class SecretRedactionFilter {
      * depth 0, {@code \\\"} at depth 1), skipped whatever follows it; and a quote
      * from a SHALLOWER level when it does not divide — the enclosing string closed
      * before this value did, so the value ends here.
-     * <li><b>For an apostrophe value only, any double quote.</b> JSON has no
-     * apostrophe quoting, so Jackson never escapes one and the depth arithmetic
-     * cannot see its context: an apostrophe value may sit in a JSON string at any
-     * depth, or in none. A fuzzer showed what letting it run to its matching
-     * apostrophe does inside JSON: opened in one string and closed in another at a
-     * different nesting level, it ate the brace between and left the carrier
-     * unparseable — and the Manager's escalation checks skip a body that does not
-     * parse, the failure this whole filter exists to prevent. Stopping at the first
-     * double quote of ANY escaping never crosses a string boundary at any depth,
-     * and keeps the invariant idempotency rests on: a pass never removes or
-     * re-escapes a quote. The cost is that an apostrophe-quoted secret with a
-     * double quote inside it ({@code {'password': 'pa"ss'}}) is cut at the quote —
-     * which is exactly what the rule this scan replaced did too, so it is the
-     * status quo on that leak and an improvement on everything else.
+     * <li><b>For an apostrophe value in a JSON document, any double quote.</b> It
+     * is text inside a double-quoted string and cannot cross that string's end; a
+     * fuzzer showed one opening in one JSON string and closing in another at a
+     * different nesting level, eating the brace between. In a message that is NOT a
+     * JSON document — a Python repr, a shell export — an apostrophe value is free
+     * to its matching apostrophe, so {@code {'password': 'pa"ss'}} is redacted
+     * whole. Which applies is {@link #apostropheValuesMayContainDoubleQuotes}'s
+     * answer, per message.
      * <li><b>End of input.</b> A value that never closes — a body cut short by the
      * preview cap — is redacted to the end. Everything after its opening quote IS
      * the secret, and a truncated body is exactly where a leak goes unnoticed.
@@ -383,7 +415,7 @@ public final class SecretRedactionFilter {
      * quote, and stripping three from in front of that turned a run of escaped
      * backslashes odd and the bare quote into an escaped one.
      */
-    private static int endOfValue(String text, int from, char quote, int openingEscaping) {
+    private static int endOfValue(String text, int from, char quote, int openingEscaping, boolean boundByDoubleQuote) {
         int depthUnit = openingEscaping + 1;
         int backslashes = 0;
         for (int i = from; i < text.length(); i++) {
@@ -398,12 +430,81 @@ public final class SecretRedactionFilter {
                 if (!escapedAtThisDepth) {
                     return i - escapingOf(backslashes);
                 }
-            } else if (c == '"' && quote == '\'') {
+            } else if (c == '"' && boundByDoubleQuote) {
                 return i - escapingOf(backslashes);
             }
             backslashes = 0;
         }
         return text.length();
+    }
+
+    /**
+     * Whether apostrophe-quoted values in this message may contain double quotes.
+     * <p>
+     * They may exactly when the message is not a JSON document — a Python repr, a
+     * shell {@code export}, a bare log line. Then {@code {'password': 'pa"ss'}} is
+     * redacted whole, which is what it must be: that is a carrier real logs hold
+     * and the double quote is content.
+     * <p>
+     * Inside a JSON document they may not. JSON has no apostrophe quoting, so an
+     * apostrophe value there is text inside a double-quoted string and cannot cross
+     * that string's end; a fuzzer showed one opening in one string and closing in
+     * another at a different nesting level, eating the brace between and leaving
+     * the carrier unparseable — and the Manager's escalation checks skip a body
+     * that does not parse, the failure this whole filter exists to prevent.
+     * <p>
+     * The decision is per MESSAGE, and JSON-ness is the discriminator precisely
+     * because redaction preserves it: a JSON document redacts to a JSON document,
+     * so a second pass decides the same way and the filter stays idempotent. A
+     * per-POSITION decision — "is this apostrophe inside a double-quoted string" —
+     * reads as more precise and is not stable: a free apostrophe value may CONTAIN
+     * double quotes, redaction deletes them, and the next pass counts differently.
+     * A fuzzer found that within seconds.
+     * <p>
+     * Cost is gated to nearly nothing on the logging path: a message with no
+     * apostrophe cannot have an apostrophe value, and one that does not begin like
+     * a JSON document needs no parse. Anything longer than
+     * {@link #MAXIMUM_CARRIER_CHECK_LENGTH} is assumed to BE a carrier, which is
+     * the safe default — bounding never tears a document, it only leaves an
+     * embedded double quote in a Python-style secret.
+     */
+    private static boolean apostropheValuesMayContainDoubleQuotes(String message) {
+        if (message.indexOf('\'') < 0) {
+            return false;
+        }
+        if (message.length() > MAXIMUM_CARRIER_CHECK_LENGTH) {
+            return false;
+        }
+        String trimmed = message.stripLeading();
+        if (trimmed.isEmpty()) {
+            return true;
+        }
+        char first = trimmed.charAt(0);
+        if (first != '{' && first != '[' && first != '"') {
+            return true;
+        }
+        return !isJsonDocument(message);
+    }
+
+    /**
+     * Whether the whole message is ONE JSON document — what {@code JSON.parse}
+     * means by it, and so what the Manager means.
+     * <p>
+     * Exactly one root value, deliberately. Jackson's streaming parser accepts a
+     * root value SEQUENCE, so simply reading to the end calls {@code {"a":1}"junk"
+     * 222} a document; a fuzzer found that reading, and the trailing text is
+     * precisely the not-a-carrier case this has to exclude.
+     */
+    private static boolean isJsonDocument(String message) {
+        try (JsonParser parser = JSON.createParser(message)) {
+            if (parser.nextToken() == null) {
+                return false;
+            }
+            parser.skipChildren();
+            return parser.nextToken() == null;
+        } catch (IOException e) {
+            return false;
+        }
     }
 
     /**

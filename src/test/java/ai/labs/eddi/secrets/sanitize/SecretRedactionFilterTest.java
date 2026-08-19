@@ -275,6 +275,24 @@ class SecretRedactionFilterTest {
         }
 
         @Test
+        void aStringEndingInACredentialWordIsNotAKeyWithAValue() {
+            // Found by a fuzzer. `"…token:"` is a whole JSON string; its CLOSING
+            // quote reads as a value's opening quote, and the whitespace after it
+            // reads as a 36-character value. Redacting whitespace can only destroy
+            // structure — it never protects a secret — so a blank value is left
+            // alone whatever the shape around it.
+            String input = "\"----------------token:\"" + "	".repeat(36);
+            assertEquals(input, SecretRedactionFilter.redact(input));
+            assertValidJson(input);
+        }
+
+        @Test
+        void anAllWhitespaceValueIsLeftAlone() {
+            String input = "{\"password\":\"          \",\"n\":1}";
+            assertEquals(input, SecretRedactionFilter.redact(input));
+        }
+
+        @Test
         void theKeyWithASeparatorGuardDoesNotCatchAValueStartingWithAColon() {
             // Distinguished from the case above by the key-close quote being present.
             String result = SecretRedactionFilter.redact("{\"password\": \":starts-with-colon\",\"n\":1}");
@@ -351,23 +369,12 @@ class SecretRedactionFilterTest {
         }
 
         @Test
-        void aSingleQuotedValueStopsAtADoubleQuote() {
-            // NOT the mirror image, deliberately. An apostrophe value ends at the
-            // first double quote of any escaping: JSON has no apostrophe quoting, so
-            // an apostrophe value may be sitting inside a JSON string at any depth,
-            // and one that ran on to its matching apostrophe could open in one
-            // string and close in another at a different nesting level, eating the
-            // brace between. The rule this scan replaced stopped at a double quote
-            // too, so this is the status quo on the tail here, not a regression —
-            // and the shape it protects is the one the Manager's checks depend on.
+        void aSingleQuotedValueMayContainDoubleQuotes() {
+            // Free text — the apostrophe opened outside any double-quoted string, so
+            // the value runs to its matching apostrophe and a double quote inside it
+            // is content. (Opened INSIDE a double-quoted string it could not cross
+            // that string's end; the invariant suite pins both.)
             String result = SecretRedactionFilter.redact("password='abcdefgh\"SURVIVING-TAIL'");
-
-            assertEquals("password='<REDACTED>\"SURVIVING-TAIL'", result);
-        }
-
-        @Test
-        void aSingleQuotedValueWithoutADoubleQuoteIsRedactedWhole() {
-            String result = SecretRedactionFilter.redact("password='abcdefgh SURVIVING-TAIL, and more'");
 
             assertFalse(result.contains("SURVIVING-TAIL"), result);
             assertEquals("password='<REDACTED>'", result);

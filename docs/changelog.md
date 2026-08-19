@@ -271,9 +271,48 @@ eight minutes, also zero**. Discovered inputs are kept as regression seeds under
 `SecretRedactionFilterInvariantsTestInputs/`, and failure messages spell out control characters.
 
 The invariant matrix grew again — 11 keys × 33 shapes × 8 placements, plus every key × shape through
-four carriers and every key × shape truncated: **6 336 cases across both suites.**
+four carriers and every key × shape truncated: **4 882 cases across both suites**, plus 18 fuzz seeds.
 
-**Verified:** `SecretRedactionFilterTest` grows from 14 to 64 cases — three new nested classes
+**CodeRabbit's third review refused a leak I had documented, and was right to.** I had pinned "an
+apostrophe-quoted value ends at the first double quote" as a deliberate limit, with the reasoning
+that it matched the pre-branch behaviour. But `{'password': 'pa"ss…'}` is a Python repr real logs
+carry, and "the old rule leaked here too" is not a reason to keep leaking — especially not with a
+test asserting the canary survives under a `password` key.
+
+What the limit was actually protecting was narrower than the rule: an apostrophe value that opened
+**inside a double-quoted JSON string** must not cross that string's end (a fuzzer had shown one
+opening in one string and closing in another at a different nesting level, eating the brace
+between). An apostrophe that opened **outside** any double-quoted string — a Python repr, a shell
+`export` — has no such constraint. The discriminator is per MESSAGE and it is **JSON-ness**, because that is what redaction provably
+preserves: a JSON document redacts to a JSON document, so a second pass decides the same way and the
+filter stays idempotent. A per-POSITION decision — "is this apostrophe inside a double-quoted
+string" — reads as more precise and is not stable: a free apostrophe value may CONTAIN double
+quotes, redaction deletes them, and the next pass counts differently. I wrote that version first
+and a fuzzer broke it in seconds. Two further corrections came from the same fuzzer: "one JSON
+document" has to mean exactly one ROOT VALUE (Jackson's streaming parser accepts a root value
+sequence, so `{"a":1}"junk" 222` reads as a document otherwise), and the test's own JSON check had
+to be tightened the same way — `readTree` alone ignores trailing content, so the oracle and the
+filter disagreed about what a carrier is. Cost on the logging path is gated to nothing: a message
+with no apostrophe, or one that does not begin like a JSON document, is never parsed.
+
+So a free-standing Python or shell secret with a double quote in it is redacted whole, and a
+JSON carrier still cannot be torn. What remains is one genuinely narrow shape, pinned with its
+reason: a Python repr nested INSIDE a JSON string whose secret contains a double quote, cut at that
+quote — because stopping only at the bare terminator would let a depth-one string's `\"` be removed,
+which is what made nested carriers non-idempotent. Also taken: the backward key-name walk is bounded
+at 256 characters (it was already linear — no credential name is a suffix of another — but a bound
+needs no such argument).
+
+**And the blind fuzzer, re-run on the reworked scan, found one more — the last of this round.**
+`"----------------token:"` followed by 36 tabs. That is a whole JSON string whose CLOSING quote reads
+as a value's opening quote, and the whitespace after it reads as a 36-character value; out came
+`"----------------token:"<REDACTED>`, no longer parseable. `isKeyNameEndingInASeparator` cannot see
+this one — it looks for a separator AHEAD of the quote and there is none. The fix is a floor the
+shape cannot argue with: **a blank value is never redacted.** Whitespace is not a secret, so
+redacting it can only ever destroy structure. It joins the under-floor branch, so its text stays live
+and a credential field starting inside it is still found.
+
+**Verified:** `SecretRedactionFilterTest` grows from 14 to 66 cases — three new nested classes
 (`RedactedJsonStaysJson`, which parses every redacted result with Jackson; `ASecretIsRedactedInFull`,
 parameterised over all six delimiters; `AlreadyRedactedValuesKeepTheirPrefix`) plus idempotency, the
 8-char floor, and a neighbouring-field-not-swallowed case. `RequestRedactorTest`, `ResolvedRequestTest`,
