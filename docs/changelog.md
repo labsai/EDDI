@@ -67,7 +67,31 @@ Design decisions:
   request URIs never reach the filter whole — `RequestRedactor` scans each query parameter's value
   on its own. Pinned as a test so the next person does not "fix" it.
 
-**Verified:** `SecretRedactionFilterTest` grows from 15 to 32 cases — three new nested classes
+**A review pass before pushing found four more leaks in the first draft of this fix**, all in the
+same two decisions, all now pinned as regression tests:
+
+- **The closing quote was "any quote", not the opening one.** `"password":"abcdefgh'xyz"` terminated
+  at the apostrophe and published the tail; `"password":"it's-a-secret"` was cut to `it` at that same
+  apostrophe, fell under the 8-character floor, and was not redacted **at all**. The closing quote is
+  now a backreference to the opening one, which also lets the value class admit the *other* quote
+  character — that is what makes both cases whole.
+- **The "already redacted" guard asked whether the marker appeared ANYWHERE in the value.** It reads
+  as the more cautious rule and is the leakier one: it skipped
+  `"secret":"the key sk-ant-<REDACTED> is here"`, leaving the text around the marker unredacted under
+  a key that says it is a secret — and it handed anyone who knows the marker a **bypass**, since a
+  value of `my<REDACTED>pass` passed through untouched. The guard is now anchored to the START of the
+  value, which is the condition actually meant and the narrow one.
+
+Both were reasoned about while writing the first draft and dismissed as theoretical. They are not:
+a throwaway probe printing the filter's actual output for a dozen shapes found all four in one run.
+
+**Pinned as a known limit, not fixed:** an escaped quote INSIDE a value ends it early
+(`"he said \"x\" done"` redacts up to the `\"`). `\"` is a terminator in an escaped-JSON body and a
+literal in a plain one and the filter cannot tell which it is looking at; resolved in favour of the
+escaped body, because the other reading runs the match past the real end of the field and eats the
+document. Still an improvement — the old rule stopped at the first space and redacted nothing there.
+
+**Verified:** `SecretRedactionFilterTest` grows from 14 to 40 cases — three new nested classes
 (`RedactedJsonStaysJson`, which parses every redacted result with Jackson; `ASecretIsRedactedInFull`,
 parameterised over all six delimiters; `AlreadyRedactedValuesKeepTheirPrefix`) plus idempotency, the
 8-char floor, and a neighbouring-field-not-swallowed case. `RequestRedactorTest`, `ResolvedRequestTest`,

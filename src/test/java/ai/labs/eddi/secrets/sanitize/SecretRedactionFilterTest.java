@@ -15,6 +15,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class SecretRedactionFilterTest {
 
     private static final String ANTHROPIC_KEY = "sk-ant-api03-CeIJ4onq59Mf_oN4mICgfgScyJO5bfxFSS3Sdvo1Zgo2F7zUfEvx";
+    private static final String REDACTED_MARKER = "<REDACTED>";
 
     @Test
     void redact_openaiKey() {
@@ -290,6 +291,62 @@ class SecretRedactionFilterTest {
             String input = "{\"password\":\"abc\",\"note\":\"nothing secret here\"}";
             assertEquals(input, SecretRedactionFilter.redact(input));
         }
+
+        @Test
+        void theWrongQuoteCharacterCannotEndTheValue() {
+            // Found in review. Accepting "any quote" as the terminator let an
+            // apostrophe close a double-quoted value: everything after it was
+            // published.
+            String result = SecretRedactionFilter.redact("{\"password\":\"abcdefgh'SURVIVING-TAIL\",\"n\":1}");
+
+            assertFalse(result.contains("SURVIVING-TAIL"), result);
+            assertEquals("{\"password\":\"<REDACTED>\",\"n\":1}", result);
+        }
+
+        @Test
+        void anApostropheEarlyInAValueDoesNotPutItUnderTheLengthFloor() {
+            // Same root cause, worse symptom: the value was cut to "it" — two
+            // characters, under the 8-char floor — so nothing matched at all and the
+            // whole password went out in the clear.
+            String result = SecretRedactionFilter.redact("{\"password\":\"it's-a-secret-value\",\"n\":1}");
+
+            assertFalse(result.contains("secret-value"), result);
+            assertEquals("{\"password\":\"<REDACTED>\",\"n\":1}", result);
+        }
+
+        @Test
+        void aSingleQuotedValueMayContainDoubleQuotes() {
+            // The mirror image, which the backreference gets for free.
+            String result = SecretRedactionFilter.redact("password='abcdefgh\"SURVIVING-TAIL'");
+
+            assertFalse(result.contains("SURVIVING-TAIL"), result);
+            assertEquals("password='<REDACTED>'", result);
+        }
+
+        @Test
+        void anUnterminatedValueIsStillRedacted() {
+            // A truncated body has no closing quote, so the quoted rule cannot fire.
+            // The loose rule is the safety net and must still catch it — a body cut
+            // short is exactly when a leak would go unnoticed.
+            String result = SecretRedactionFilter.redact("{\"apiKey\": \"unterminated-secret-value");
+
+            assertFalse(result.contains("unterminated-secret"), result);
+            assertTrue(result.contains(REDACTED_MARKER), result);
+        }
+
+        @Test
+        void anEscapedQuoteInsideAValueEndsItEarly() {
+            // A pinned LIMIT, not an aspiration. `\"` is a terminator in an
+            // escaped-JSON body and a literal inside a plain one, and the filter
+            // cannot tell which it is looking at. Resolved in favour of the escaped
+            // body: reading it the other way runs the match past the real end of the
+            // field and eats the rest of the document. Still an improvement — the
+            // old rule stopped at the first space and redacted nothing here.
+            String result = SecretRedactionFilter.redact("{\"password\":\"he said \\\"x\\\" done\",\"n\":1}");
+
+            assertFalse(result.contains("he said"), result);
+            assertTrue(result.startsWith("{\"password\":\"<REDACTED>"), result);
+        }
     }
 
     /**
@@ -311,6 +368,28 @@ class SecretRedactionFilterTest {
         void aBearerTokenKeepsItsPrefixInsideAJsonField() {
             String input = "{\"Authorization\":\"Bearer eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ0ZXN0In0.signature\"}";
             assertEquals("{\"Authorization\":\"Bearer <REDACTED>\"}", SecretRedactionFilter.redact(input));
+        }
+
+        /**
+         * The guard is anchored to the start of the value. Both cases below passed
+         * through untouched while it asked whether the marker appeared ANYWHERE — which
+         * reads as the more cautious rule and is the leakier one.
+         */
+        @Test
+        void aValueMerelyCONTAININGARedactedFragmentIsStillRedacted() {
+            String input = "{\"secret\":\"the key sk-ant-<REDACTED> is SURVIVING-TAIL\",\"n\":1}";
+            String result = SecretRedactionFilter.redact(input);
+
+            assertFalse(result.contains("SURVIVING-TAIL"), result);
+            assertEquals("{\"secret\":\"<REDACTED>\",\"n\":1}", result);
+        }
+
+        @Test
+        void writingTheMarkerIntoYourOwnSecretIsNotABypass() {
+            String result = SecretRedactionFilter.redact("{\"password\":\"my<REDACTED>SURVIVING-TAIL\",\"n\":1}");
+
+            assertFalse(result.contains("SURVIVING-TAIL"), result);
+            assertEquals("{\"password\":\"<REDACTED>\",\"n\":1}", result);
         }
     }
 }
