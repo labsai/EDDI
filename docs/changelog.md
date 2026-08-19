@@ -49,11 +49,9 @@ Design decisions:
 
 - **The quoted rule ends the value at its closing quote, not at the first delimiter.** That is what
   closes the partial-redaction leak; a secret with a comma or a space in it is now redacted whole.
-- **Two negative lookaheads guard it, and they deliberately use backtracking quantifiers** where the
-  rest of the file is possessive (ReDoS). `(?![^"']*<REDACTED>)` asks "does the marker appear
-  anywhere before the closing quote"; a possessive class there consumes the marker itself, finds
-  nothing left to match, and the guard is silently inert. Both stay bounded by a quote they cannot
-  cross.
+- **`notAlreadyRedacted(endOfValue)` stops a later rule re-redacting an earlier rule's output**,
+  and it requires the redacted form to be the WHOLE value — each rule passes the lookahead that ends
+  its own. Both looser readings leak; see below.
 - **That marker guard also fixes a small regression the old rule had all along**: `sk-ant-` and
   `Bearer ` prefixes say what KIND of credential was found, and the generic rule used to strip them
   back off every named field. `{"apiKey":"sk-ant-…"}` now keeps `sk-ant-<REDACTED>`.
@@ -85,13 +83,26 @@ same two decisions, all now pinned as regression tests:
 Both were reasoned about while writing the first draft and dismissed as theoretical. They are not:
 a throwaway probe printing the filter's actual output for a dozen shapes found all four in one run.
 
-**Pinned as a known limit, not fixed:** an escaped quote INSIDE a value ends it early
-(`"he said \"x\" done"` redacts up to the `\"`). `\"` is a terminator in an escaped-JSON body and a
-literal in a plain one and the filter cannot tell which it is looking at; resolved in favour of the
-escaped body, because the other reading runs the match past the real end of the field and eats the
-document. Still an improvement — the old rule stopped at the first space and redacted nothing there.
+**A PR review round (CodeRabbit) then found two more, both Critical, both real** — verified with the
+same probe before touching anything:
 
-**Verified:** `SecretRedactionFilterTest` grows from 14 to 40 cases — three new nested classes
+- **A redacted PREFIX is not a redacted value.** The guard had been anchored to the start of the
+  value, which is the mirror of the mistake above: the `sk-ant-` rule's *own* class stops at a
+  delimiter, so `"apiKey":"sk-ant-abcdefghijklmnopqrst,SECRET-TAIL"` becomes
+  `"apiKey":"sk-ant-<REDACTED>,SECRET-TAIL"` — and the guard then skipped it, publishing the tail.
+  The redacted form must now be the **whole** value, so a partly-redacted one is taken over and
+  replaced entirely. That loses the `sk-ant-` hint in exactly that case: intended, because the hint
+  is not worth a leak.
+- **The escaped-quote case was a leak, not an acceptable limit.** I had pinned
+  `"he said \"x\" SECRET"` → `"<REDACTED>\"x\" SECRET"` as a documented trade-off. It is a partial
+  publication of a secret and CodeRabbit was right to reject that framing. `\"` is a terminator in an
+  escaped-JSON body and an escaped quote inside the value in a plain one; closing at the first
+  candidate leaks, closing at the last eats the document. The value is now **lazy and may cross an
+  escape**, with the closing quote required to be followed by something that actually ends a JSON
+  value (`\s*[,}\]]` or end of input). That picks correctly in both readings: the escaped body closes
+  at its `\"` because `}` follows, the plain one carries on past `\"x\"` because a letter does.
+
+**Verified:** `SecretRedactionFilterTest` grows from 14 to 46 cases — three new nested classes
 (`RedactedJsonStaysJson`, which parses every redacted result with Jackson; `ASecretIsRedactedInFull`,
 parameterised over all six delimiters; `AlreadyRedactedValuesKeepTheirPrefix`) plus idempotency, the
 8-char floor, and a neighbouring-field-not-swallowed case. `RequestRedactorTest`, `ResolvedRequestTest`,

@@ -24,19 +24,34 @@ public final class SecretRedactionFilter {
      * that. Without this guard the name-based rules below strip the prefix straight
      * back off, which is what the rule they replace did to every named field.
      * <p>
-     * Anchored to the START of the value, deliberately. A "does the marker appear
-     * anywhere in this value" guard reads as more thorough and is strictly worse:
-     * it skips {@code "secret":"the key sk-ant-<REDACTED> is here"}, leaving the
-     * text around the marker unredacted under a key that says it is a secret — and
-     * it hands anyone who knows the marker a bypass, since a value of
-     * {@code my<REDACTED>pass} then passes through untouched. Beginning with a
-     * redacted form is the condition actually meant, and it is the narrow one.
+     * The redacted form has to be the WHOLE value, which is why the caller supplies
+     * the lookahead that ends it. Both looser readings leak:
+     * <ul>
+     * <li>"the marker appears anywhere in the value" skips
+     * {@code "secret":"the key sk-ant-<REDACTED> is here"}, leaving the text around
+     * the marker unredacted under a key that says it is a secret — and it hands
+     * anyone who knows the marker a bypass via
+     * {@code "password":"my<REDACTED>pass"};
+     * <li>"the value begins with a redacted form" skips
+     * {@code "apiKey":"sk-ant-<REDACTED>,SECRET-TAIL"}. Not hypothetical: the
+     * {@code sk-ant-} rule's own class stops at a delimiter, so it produces exactly
+     * that shape from {@code sk-ant-abcdefghijklmnopqrst,SECRET-TAIL} — and the
+     * tail is real secret material.
+     * </ul>
+     * A value only PARTLY redacted is therefore taken over by the rules below and
+     * replaced whole, which loses the {@code sk-ant-} hint. That is the intended
+     * trade: the hint is worth having, and it is not worth a leak.
      * <p>
-     * The optional prefix is the one non-possessive quantifier in this file: it has
-     * to be free to try {@code sk-ant-}, then {@code sk-}, then nothing, and it is
-     * bounded by three short literal alternatives, so it is no ReDoS surface.
+     * The optional prefix is the one non-possessive quantifier in this file — it
+     * has to be free to try {@code sk-ant-}, then {@code sk-}, then nothing — and
+     * it is bounded by three short literal alternatives, so it is no ReDoS surface.
+     *
+     * @param endOfValue
+     *            zero-width lookahead matching where the calling rule's value ends
      */
-    private static final String NOT_ALREADY_REDACTED = "(?!(?:sk-ant-|sk-|Bearer\\s)?" + REDACTED + ")";
+    private static String notAlreadyRedacted(String endOfValue) {
+        return "(?!(?:sk-ant-|sk-|Bearer\\s)?" + REDACTED + endOfValue + ")";
+    }
 
     /**
      * Ordered list of redaction patterns. Each pattern has a compiled regex and a
@@ -47,9 +62,13 @@ public final class SecretRedactionFilter {
     // followed by a literal that is NOT a member of the class (a '.', '}', a quote,
     // or the string end), so a correct match never needs to give characters back —
     // the possessive form yields identical results while running in linear time on
-    // adversarial inputs (e.g. long repetitions of "${vault:"). The single
-    // exception is the optional prefix inside NOT_ALREADY_REDACTED, documented
-    // there.
+    // adversarial inputs (e.g. long repetitions of "${vault:").
+    //
+    // Two exceptions, both documented where they are: the optional prefix inside
+    // notAlreadyRedacted(), and the quoted rule's LAZY value, which has to be free
+    // to try each candidate closing quote. That one is bounded by the next
+    // UNESCAPED quote, so the candidates it tries are the escaped quotes inside one
+    // field — a handful, not a combinatorial space.
     private static final List<RedactionRule> RULES = List.of(
             // Anthropic API keys: sk-ant-... — underscores INCLUDED. Real keys carry
             // them, and a class without '_' stopped matching at the first one: a full
@@ -99,16 +118,20 @@ public final class SecretRedactionFilter {
             // pair together also lets the value class admit the OTHER quote
             // character, which is what makes both of those whole again.
             //
-            // Known limit: an escaped quote INSIDE a value ends it early
-            // (`"he said \"x\" done"` redacts up to `\"`). That is the same
-            // ambiguity the backslash tolerance exists for — `\"` is a terminator in
-            // an escaped-JSON body and a literal in a plain one — and it is resolved
-            // in favour of the escaped body, because reading it the other way runs
-            // the match past the real end of the field and eats the document.
+            // `\"` is genuinely ambiguous — a terminator in an escaped-JSON body, an
+            // escaped quote INSIDE the value in a plain one — and the filter cannot
+            // tell which document it is reading. Stopping at the first one leaked
+            // the rest of the value (`"he said \"x\" SECRET"` kept `x\" SECRET`);
+            // running to the last one ate the document. So the value is LAZY and may
+            // cross an escape, and the closing quote must be followed by something
+            // that actually ends a JSON value. The first candidate satisfying that
+            // is the right one in both readings: the escaped body closes at its `\"`
+            // because `}` follows, the plain one carries on past `\"x\"` because a
+            // letter does and closes at the real quote before the comma.
             new RedactionRule(Pattern.compile(
                     "(?i)(api[_-]?key|token|secret|password|authorization)((?:\\\\*+[\"'])?+\\s*+[=:]\\s*+)(\\\\*+)([\"'])"
-                            + "(?!\\$\\{(?:vault|eddivault):)" + NOT_ALREADY_REDACTED
-                            + "(?:(?!\\4)[^\\\\]|\\\\(?!\\4)){8,}+(\\\\*+)\\4"),
+                            + "(?!\\$\\{(?:vault|eddivault):)" + notAlreadyRedacted("(?=\\\\*+\\4)")
+                            + "(?:(?!\\4)[^\\\\]|\\\\.){8,}?(\\\\*+)\\4(?=\\s*[,}\\]]|$)"),
                     "$1$2$3$4" + REDACTED + "$5$4"),
 
             // The same, for a JSON value that carries no quotes of its own — a
@@ -117,7 +140,7 @@ public final class SecretRedactionFilter {
             // document parseable: `{"token":12345678}` → `{"token":"<REDACTED>"}`.
             new RedactionRule(Pattern.compile(
                     "(?i)(api[_-]?key|token|secret|password|authorization)(\\\\*+)([\"'])(\\s*+:\\s*+)"
-                            + "(?!\\\\*+[\"'])" + NOT_ALREADY_REDACTED
+                            + "(?!\\\\*+[\"'])" + notAlreadyRedacted("(?=[\\s,;}{\\]\"']|$)")
                             + "[^\\s,;}{\\]\"'\\\\]{8,}+"),
                     "$1$2$3$4$2$3" + REDACTED + "$2$3"),
 
@@ -126,7 +149,7 @@ public final class SecretRedactionFilter {
             // and the value replaced.
             new RedactionRule(Pattern.compile(
                     "(?i)(api[_-]?key|token|secret|password|authorization)((?:\\\\*+[\"'])?+\\s*+[=:]\\s*+(?:\\\\*+[\"'])?+)"
-                            + NOT_ALREADY_REDACTED
+                            + notAlreadyRedacted("(?=['\"\\\\\\s,;}{\\]]|$)")
                             + "[^'\"\\\\\\s,;}{\\]]{8,}+"),
                     "$1$2" + REDACTED));
 

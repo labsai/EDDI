@@ -17,6 +17,12 @@ class SecretRedactionFilterTest {
     private static final String ANTHROPIC_KEY = "sk-ant-api03-CeIJ4onq59Mf_oN4mICgfgScyJO5bfxFSS3Sdvo1Zgo2F7zUfEvx";
     private static final String REDACTED_MARKER = "<REDACTED>";
 
+    /** Redaction must never turn a JSON document into something that is not one. */
+    private static void assertValidJson(String value) {
+        assertDoesNotThrow(() -> new ObjectMapper().readTree(value),
+                () -> "redaction produced something that is no longer JSON: " + value);
+    }
+
     @Test
     void redact_openaiKey() {
         String input = "Using key sk-abcdefghij1234567890abcdef to call API";
@@ -251,10 +257,6 @@ class SecretRedactionFilterTest {
             assertEquals("password: <REDACTED>", SecretRedactionFilter.redact("password: hunter2butlonger"));
         }
 
-        private void assertValidJson(String value) {
-            assertDoesNotThrow(() -> new ObjectMapper().readTree(value),
-                    () -> "redaction produced something that is no longer JSON: " + value);
-        }
     }
 
     /**
@@ -335,17 +337,30 @@ class SecretRedactionFilterTest {
         }
 
         @Test
-        void anEscapedQuoteInsideAValueEndsItEarly() {
-            // A pinned LIMIT, not an aspiration. `\"` is a terminator in an
-            // escaped-JSON body and a literal inside a plain one, and the filter
-            // cannot tell which it is looking at. Resolved in favour of the escaped
-            // body: reading it the other way runs the match past the real end of the
-            // field and eats the rest of the document. Still an improvement — the
-            // old rule stopped at the first space and redacted nothing here.
-            String result = SecretRedactionFilter.redact("{\"password\":\"he said \\\"x\\\" done\",\"n\":1}");
+        void anEscapedQuoteInsideAValueDoesNotEndItEarly() {
+            // `\"` is a terminator in an escaped-JSON body and an escaped quote
+            // inside the value in a plain one. Closing at the first one left the
+            // rest of the secret in the output; closing at the last one ate the
+            // document. The closing quote now has to be followed by something that
+            // ends a JSON value, which picks the right one in both readings.
+            String result = SecretRedactionFilter.redact("{\"password\":\"he said \\\"x\\\" SURVIVING-TAIL\",\"n\":1}");
 
-            assertFalse(result.contains("he said"), result);
-            assertTrue(result.startsWith("{\"password\":\"<REDACTED>"), result);
+            assertFalse(result.contains("SURVIVING-TAIL"), result);
+            assertEquals("{\"password\":\"<REDACTED>\",\"n\":1}", result);
+            assertValidJson(result);
+        }
+
+        @Test
+        void anEscapedJsonValueStillClosesAtItsOwnQuote() {
+            // The other side of that ambiguity, and the reason the lazy value cannot
+            // simply run to the last quote: here `\"` really is the terminator, and
+            // consuming past it would swallow the rest of the enclosing document.
+            String input = "{\"requestBody\": \"{\\\"llm\\\": {\\\"apiKey\\\": \\\"abcdefghijklmno\\\"}}\"}";
+            String result = SecretRedactionFilter.redact(input);
+
+            assertFalse(result.contains("abcdefghijklmno"), result);
+            assertEquals("{\"requestBody\": \"{\\\"llm\\\": {\\\"apiKey\\\": \\\"<REDACTED>\\\"}}\"}", result);
+            assertValidJson(result);
         }
     }
 
@@ -387,6 +402,23 @@ class SecretRedactionFilterTest {
 
             assertFalse(result.contains("SURVIVING-TAIL"), result);
             assertEquals("{\"secret\":\"<REDACTED>\",\"n\":1}", result);
+        }
+
+        /**
+         * ...and the mirror of it. An earlier rule's own value class stops at a
+         * delimiter, so it can leave a value only PARTLY redacted — treating a redacted
+         * PREFIX as a redacted value publishes whatever follows.
+         */
+        @ParameterizedTest(name = "the sk-ant- rule stopped at [{0}]")
+        @ValueSource(strings = {",", " ", ";", "}", "]"})
+        void aPartiallyRedactedValueIsTakenOverAndReplacedWhole(String delimiter) {
+            String input = "{\"apiKey\":\"sk-ant-abcdefghijklmnopqrst" + delimiter + "SURVIVING-TAIL\",\"n\":1}";
+            String result = SecretRedactionFilter.redact(input);
+
+            assertFalse(result.contains("SURVIVING-TAIL"), result);
+            // The sk-ant- hint is lost here, deliberately: it is worth having, and
+            // it is not worth publishing the tail to keep.
+            assertEquals("{\"apiKey\":\"<REDACTED>\",\"n\":1}", result);
         }
 
         @Test
