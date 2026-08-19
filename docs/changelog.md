@@ -7,6 +7,87 @@
 
 
 
+## 🔒 fix(secrets): redaction preserves the JSON it redacts, and stops cutting secrets short (2026-08-19)
+
+**Repo:** EDDI (`fix/redaction-preserves-json`)
+
+`SecretRedactionFilter`'s generic rule ran over the raw request TEXT and matched the key's closing
+quote, the colon **and** the value's opening quote — then replaced all three along with the value
+(`"$1=" + REDACTED`). So an ordinary body came back malformed:
+
+```
+{"modelName":"x","apiKey":"sk-ant-…"}   →   {"modelName":"x","apiKey=<REDACTED>"}
+{"token":12345678,"n":1}                →   {"token=<REDACTED>,"n":1}
+```
+
+— a bare string where a key/value pair was. The `sk-…` and `Bearer …` rules replace only the value
+and leave the document valid; this one did not, and it runs **last**, so it re-mangled what those
+had already redacted correctly.
+
+**Every reader of a redacted body parses it, and both of the Manager's failed silently.** Reported
+from EDDI-Manager PR #173: the approval diff for a gated whole-document `PUT` fell back to comparing
+raw text and rendered every line of the stored config as deleted against the proposed body as one
+added line. Worse, `detectEscalationFlags` runs *every* capability-grant check behind a `JSON.parse`,
+so a request that embedded a credential **and** granted `dynamicAgents.allowCreation` warned about
+the credential alone — and an approver reads "no second warning" as "no capability grant", which is
+the exact false negative that check exists to prevent.
+
+**A second defect, found while fixing the first.** The value class stops at `,`, whitespace, `;`,
+`{`, `}` and `]`, so a secret *containing* one of those was redacted only up to that character and
+the tail survived into the "redacted" output: `"password":"abcdefgh,SURVIVING-TAIL"` became
+`"password=<REDACTED>,SURVIVING-TAIL"`. That is a leak, not a formatting problem.
+
+**The generic rule is now three rules**, replacing the value and nothing else:
+
+| Shape | Rule | Result |
+| --- | --- | --- |
+| `{"apiKey":"sk-…"}` — quoted value | runs to the **closing quote**, keeps both quotes | `{"apiKey":"sk-ant-<REDACTED>"}` |
+| `{"token":12345678}` — no quotes of its own | marker takes the **key's quote style** | `{"token":"<REDACTED>"}` |
+| `?api_key=…`, `password: …` — not JSON | separator put back, no quotes invented | `?api_key=<REDACTED>` |
+
+Design decisions:
+
+- **The quoted rule ends the value at its closing quote, not at the first delimiter.** That is what
+  closes the partial-redaction leak; a secret with a comma or a space in it is now redacted whole.
+- **Two negative lookaheads guard it, and they deliberately use backtracking quantifiers** where the
+  rest of the file is possessive (ReDoS). `(?![^"']*<REDACTED>)` asks "does the marker appear
+  anywhere before the closing quote"; a possessive class there consumes the marker itself, finds
+  nothing left to match, and the guard is silently inert. Both stay bounded by a quote they cannot
+  cross.
+- **That marker guard also fixes a small regression the old rule had all along**: `sk-ant-` and
+  `Bearer ` prefixes say what KIND of credential was found, and the generic rule used to strip them
+  back off every named field. `{"apiKey":"sk-ant-…"}` now keeps `sk-ant-<REDACTED>`.
+- **The vault carve-out is explicit now.** `${vault:…}` survived only as a side effect of the value
+  class excluding `{`/`}`; the quoted rule runs past braces, so it carries
+  `(?!\$\{(?:vault|eddivault):)` as a stated rule instead — which is also what keeps the carve-out
+  from being lost the next time that class is tuned.
+- **`&` is still not a value delimiter, on purpose.** Adding it would make query-string redaction
+  tidier but would cut short every secret containing an `&` in every other context and leak the
+  tail. Over-redacting a raw URL that happens to sit in a log line is the safer trade, and real
+  request URIs never reach the filter whole — `RequestRedactor` scans each query parameter's value
+  on its own. Pinned as a test so the next person does not "fix" it.
+
+**Verified:** `SecretRedactionFilterTest` grows from 15 to 32 cases — three new nested classes
+(`RedactedJsonStaysJson`, which parses every redacted result with Jackson; `ASecretIsRedactedInFull`,
+parameterised over all six delimiters; `AlreadyRedactedValuesKeepTheirPrefix`) plus idempotency, the
+8-char floor, and a neighbouring-field-not-swallowed case. `RequestRedactorTest`, `ResolvedRequestTest`,
+the three `ApiCallExecutor*` suites, `ConversationMemoryUtilitiesHitlTest`,
+`LifecycleManagerErrorClassificationTest`, `SlackToolPauseNotificationTest` and
+`RestAgentEngineToolPauseDetailsTest` all pass unchanged.
+
+Full `./mvnw test` locally reports failures in `WebSearchToolTest`, `SafeHttpClientTest`,
+`SlackWebApiClientTest` (loopback sockets — the documented sandbox limitation in AGENTS.md) and
+`DocumentationLinksTest` (scans an untracked local `.history/` folder). **Confirmed pre-existing**:
+the same classes fail identically with these changes stashed. CI is the source of truth for those.
+
+**Manager side:** EDDI-Manager PR #173 shipped a client-side repair (`src/lib/redacted-json.ts`) that
+reconstructs the mangled shape before parsing. It stays — it is the tolerance layer for bodies
+arriving from backends that predate this fix — and becomes a no-op against a backend with it, since
+a body that already parses is returned untouched.
+
+---
+
+
 ## 🔒 fix(docker): bump UBI9 base digest for CVE-2026-11940 (python3 tarfile filter bypass) (2026-08-17)
 
 **Repo:** EDDI (`fix/trivy-cve-2026-11940-base-image`)
