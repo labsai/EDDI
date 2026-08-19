@@ -290,7 +290,7 @@ EDDI implements open standards — not proprietary APIs:
 | **[A2A](https://google.github.io/A2A/)** (Agent-to-Agent Protocol)   | Full implementation             | Cross-platform agent communication, Agent Cards, and skill discovery                                     |
 | **[OpenAPI](https://www.openapis.org/)** 3.1                         | Native generation + consumption | Auto-generated spec. Paste any OpenAPI spec → get a fully deployed API-calling agent                     |
 | **OAuth 2.0 / OIDC**                                                 | Keycloak integration            | Authentication, authorization, and multi-tenant isolation                                                |
-| **SSE** (Server-Sent Events)                                         | Streaming transport             | Real-time chat responses, group discussion feeds, and live log streaming                                 |
+| **SSE** (Server-Sent Events)                                         | Streaming transport             | Token-by-token chat responses, including most tool-enabled turns, which stream over the provider's streaming transport instead of going silent until the tool loop finishes (a single-chunk fallback still applies to cascade agents, providers without a streaming builder, and a few other configurations) — plus a live `tool_call` event for "Using {tool}…" status, group discussion feeds, and live log streaming |
 
 ### 💭 Memory & Context Management
 

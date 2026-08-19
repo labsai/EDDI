@@ -7,6 +7,87 @@
 
 
 
+## 🔎 fix(docs): four unresolved review findings on #671, all confirmed (2026-08-19)
+
+**Repo:** EDDI (`chore/eddi-version-6-3-0`)
+
+Checked every open review thread on the PR against current source rather than assuming they were
+stale from an earlier push. All four were real.
+
+**Two overclaimed the streaming feature.** `README.md` and `docs/README.md` both stated, unqualified,
+that tool-enabled turns stream token-by-token. `LlmTask`'s own Javadoc lists the single-chunk fallback
+conditions it still uses: the kill-switch off, no event sink, output-suppressed tasks, providers with
+no streaming builder, and the whole cascade-agent path (`LlmTask.java` around lines 1360 and 1433).
+Both lines now say "most tool-enabled turns" and name the fallback cases, rather than promising a
+guarantee the code does not keep.
+
+**Two were inaccuracies in this changelog's own prose**, not in the shipped docs:
+
+- The version-bump entry's "Bundled agent" bullet described renaming `Agent+Father-6.2.0.zip` to
+  `Agent+Father-6.3.0.zip`. Accurate when written, but a later merge of `main` into this branch brought
+  in the Agent Father's removal, and neither file exists in the final tree. Corrected in place with a
+  note explaining why the original text is not simply wrong, since it describes what that commit
+  actually did at that point in the branch's history, just not what the branch ends at.
+- The tag-fix entry claimed the only remaining `v6.x` strings in the two release docs were the new
+  prefix warnings. `release-signing.md` still says "Starting with v6.0.0" and "Images published before
+  v6.0.0" in two places, historical feature-enablement facts that were deliberately left alone for the
+  same reason `security.md`'s `**Version: >=6.0.0**` was, but that makes them a second kind of
+  remaining `v6.x` string the earlier sentence did not account for.
+
+---
+
+
+## 🏷️ fix(docs): two REST tags leaked an internal work-item number into Swagger UI (2026-08-19)
+
+**Repo:** EDDI (`chore/eddi-version-6-3-0`)
+
+`IRestGroupTemplates` and `IRestGroupWorkspace` both carried `@Tag(name = "13. Agent Groups", ...)` — the
+`13` is the internal I13 (standing teams) work-item number from planning, never cleaned up to the project's
+actual "Category / Subcategory" tag convention (`Agents / Groups`, `Conversations / Groups`, etc., see
+`OpenApiConfig`). It surfaced as a literal `13. AGENT GROUPS` heading in the Swagger UI, reported from the
+rendered docs.
+
+Renamed both to `Agents / Groups`, matching the sibling `IRestAgentGroupStore` (same `/groupstore/` path
+prefix, same tag already), so all three now merge into the one existing section instead of splitting off
+a stray fourth one. Descriptions were left as-is — each interface's description is accurate to what it
+does; only the tag name was wrong. Swept the rest of `src/main/java` for any other numeric-prefixed
+`@Tag` and found none.
+
+---
+
+
+## ⬆️ chore(deps): Quarkus 3.38.3, and every safe patch/minor ahead of the 6.3.0 release (2026-08-19)
+
+**Repo:** EDDI (`chore/eddi-version-6-3-0`)
+
+Quarkus platform `3.38.2` → **`3.38.3`**, plus the patch and minor updates that `versions:display-dependency-updates`
+reported for the artefacts **we pin ourselves**. The report is dominated by transitives the Quarkus BOM manages
+(dozens of `wildfly-elytron` entries offering `3.0.0.Alpha1`); those are the platform's to move, not ours, and were
+filtered out rather than followed.
+
+Taken: `jackson-core`/`jackson-databind` 2.22.1 → 2.22.2, `classgraph` 4.8.184 → 4.8.192, `jinjava` 2.8.3 → 2.8.4,
+`jnats` 2.26.0 → 2.26.2, `swagger-annotations` 2.2.52 → 2.2.54, `swagger-parser` 2.1.45 → 2.1.47, `bcprov-lts8on`
+2.73.12 → 2.73.12.1.
+
+**`langchain4j-community` 1.18.0-beta28 → 1.19.0-beta29** is the one judgement call. It is a minor bump on a
+beta-tagged artefact, which the "patch only" rule would exclude, but it removes a real version skew: core,
+`langchain4j-libs` and `langchain4j-beta` all sit at 1.19.0 while community alone lagged a minor behind. Aligning the
+stack is lower risk than shipping it split.
+
+**Deliberately not taken**, because this release is meant to be a stable state: `jsonschema-generator` 5.0.0,
+`json-path` 3.0.0, `json-schema-validator` 3.0.6, `bson4jackson` 3.2.0, `testcontainers` 2.0.5, `wiremock` 4.0.0-beta,
+`quarkus-mcp-server` 2.0.0.CR2, and Quarkus 3.39.0.CR1. Every one is a major jump or a pre-release.
+
+**Verified, and the verification mattered.** `mvnw clean compile` is green. A targeted run over the areas these bumps
+touch is **6,943 tests, 0 failures, 10 errors** — every error `Unable to establish loopback connection` or `failed to
+create a child event loop` in `LanguageModelBuildersTest`'s streaming cases. Because `langchain4j-community` feeds the
+model builders, "environmental" could not simply be assumed: the same class was re-run with the pre-bump `pom.xml`
+stashed in, and produced the **identical 10 errors on the same test methods**. The cause is the local JVM's inability
+to bind a loopback socket, which is a known limitation of this environment; CI is the gate for those.
+
+---
+
+
 ## 🔒 fix(secrets): redaction preserves the JSON it redacts, and stops cutting secrets short (2026-08-19)
 
 **Repo:** EDDI (`fix/redaction-json-safe`)
@@ -2351,6 +2432,169 @@ does recommend); and unescaped property interpolation in a hand-assembled JSON b
 `install.ps1` lacking a UTF-8 BOM while containing 16 emoji — real, but true on `main` too, and
 this PR *removed* two of those emoji rather than adding any. These deserve their own pass: the
 rename arguably raises the stakes, since the config is now explicitly the canonical reference.
+
+---
+
+
+
+## 📘 docs(readme): sync both READMEs with what landed on main for 6.3.0 (2026-08-11)
+
+**Repo:** EDDI (`chore/eddi-version-6-3-0`)
+
+Audited `README.md` and `docs/README.md` against `origin/main` after merging 589 files of it into the
+release branch. Main had already swapped Agent Father for the **Platform Operator** in the root
+README (quick start, feature bullet, and the now-dead deep-dive doc row). Verified there is no
+surviving `Agent Father` / `agent-father` reference in either README, `SUMMARY.md` or `AGENTS.md`,
+that the `docs/agent-father-*.md` pages are gone, that `install.sh` no longer claims to deploy a
+starter agent, and that every relative doc link in both files still resolves.
+
+Two real gaps remained, both features main shipped that neither README mentioned:
+
+1. **`docs/README.md` never got the Platform Operator at all.** The root README names it twice; the
+   docs index still described orchestration as if the meta-agent did not exist. Added to *Multi-Agent
+   Orchestration* with the two real entry points (`/manage/operator`, `/manage/agents/wizard`) taken
+   from `getting-started.md` rather than invented. There is no dedicated operator page to link — a
+   gap worth closing separately.
+2. **Streaming was undersold in both.** Main shipped `ToolLoopStreamingChatModel` (tool-enabled turns
+   now stream token-by-token instead of going silent until the tool loop finishes) and a live
+   `tool_call` SSE event for "Using {tool}…" status. The root README's SSE row said only "real-time
+   chat responses"; the docs index listed no streaming at all under *Protocols & Interoperability*.
+   Both now say what actually happens. Verified in code first — `ToolLoopStreamingChatModel.java`,
+   `RestAgentEngineStreaming` emitting `event: tool_call`, and the `onToolCall` hook on
+   `ConversationEventSink` / `IConversationService.StreamingResponseHandler` — not from the changelog
+   alone.
+
+**Counts re-checked, none needed changing:** 84 entries in `McpToolFilter.MCP_TOOLS` against the
+"80+" floor; 14,645 test annotations against "14,000+"; 7 named `DiscussionStyle` values (`CUSTOM` is
+the eighth and correctly not counted as a preset style). These are deliberately floors, which is
+exactly why they survived a 589-file merge without edits.
+
+Deliberately unchanged: the "12 LLM Providers" figure (main added no provider; `docs/langchain.md`
+remains its source of truth) and `README.md:559`'s language-less code fence (pre-existing, nowhere
+near this edit).
+
+---
+
+
+## 🏷️ docs(release): the release guide told you to push a tag that triggers nothing (2026-08-11)
+
+**Repo:** EDDI (`chore/eddi-version-6-3-0`)
+
+`ci.yml` triggers on `tags: ["[0-9]*"]` — a release tag must start with a digit. `docs/release-
+versioning.md` instructed `git tag v6.0.0` in eight places, and `docs/release-signing.md` in three
+more. A `v`-prefixed tag matches that filter nowhere, and **GitHub reports no error for a tag that
+matches no workflow**: the push succeeds, and nothing runs. No build, no image, no `latest`, no
+cosign signature, no SLSA attestation, no GitHub release. Following the release guide verbatim
+produced a silent non-release — the worst failure shape available, since there is nothing red to
+notice.
+
+AGENTS.md §1 already documented the digit-prefixed rule, so the two release docs were the artefacts
+disagreeing with both the workflow and the rest of the documentation. Fixed in favour of the
+workflow, which is the executable truth.
+
+Three further claims were checked against `ci.yml` while in there, rather than assumed:
+
+1. **The tag→image table was wrong twice over.** It mapped "Git tag `v6.0.0`" → `labsai/eddi:6.0.0`,
+   but CI uses the tag name *verbatim* (`PRIMARY_TAG="${GITHUB_REF#refs/tags/}"`), so the `v` would
+   not be stripped even if the tag did fire. Both halves corrected.
+2. **The `6.3` and `6` moving aliases were undocumented.** CI publishes them for stable releases
+   only, gated on `^([0-9]+)\.([0-9]+)\.([0-9]+)$` so an RC never claims them. They are user-facing
+   — `helm/eddi/values.yaml` warns against deploying from the mutable major tag — yet the tag
+   strategy table listed neither. Added, with the "pin the patch version" guidance the k8s and Helm
+   manifests already follow.
+3. **The job table said docker runs on tag `v*`.** Same defect in a second spelling; now `[0-9]*`,
+   and it records that `[skip docker]` is ignored on tags.
+
+Also: the canonical-version line quoted `<version>6.0.0</version>` and had sat three releases stale,
+so it now names the `<version>` element and the `grep` CI actually uses instead of a number that
+rots. The running example moved to 6.3.0 throughout, the lifecycle diagram was realigned (its
+columns were already off by four before this change), and a pointer was added that `pom.xml` is not
+the only artefact carrying the release number.
+
+Verified no `v`-prefixed tag **command** survives anywhere in tracked files. Overclaimed the rest,
+though: `release-signing.md:7` and `:15` still say "Starting with v6.0.0" and "Images published before
+v6.0.0" — historical feature-enablement facts, not tag instructions, so deliberately left alone (same
+reasoning as `security.md`'s `**Version: >=6.0.0**`) — but that makes them a second kind of remaining
+`v6.x` string, not covered by "the warnings about the prefix itself."
+
+**Review follow-up (CodeRabbit on #671).** Three findings, all on this change; the one flagged Major
+("the release guide still contains a `v`-prefixed tag") was raised against the first push and the
+bot itself closed it as addressed once the fix landed. The two real ones were markdownlint
+regressions introduced by the new warning blocks: **MD028** in both files, where the added blockquote
+sat directly beside an existing one separated by a blank line (fixed with a `>` continuation, so each
+pair is one quote with two paragraphs rather than two quotes sharing a gap), and **MD040** on a fence
+inside the edited region. For MD040 the flagged fence was fixed along with the other five plain-text
+fences in `release-versioning.md` — tagging one and leaving five would trade a lint warning for an
+inconsistency in the same file. `release-signing.md`'s two bare fences (lines 30, 93) are deliberately
+left: pre-existing, outside this change, and not worth churning a file touched by two lines.
+
+---
+
+
+
+## 🔖 chore(release): bump EDDI version 6.2.0 → 6.3.0 (2026-08-11)
+
+**Repo:** EDDI (`chore/eddi-version-6-3-0`)
+
+Straight version bump across every artefact that carries the release number. The file set was taken
+from the two previous bumps (`c0835c98d` 6.1.0 → 6.2.0, `036faa32a` 6.0.2 → 6.1.0) rather than from
+a grep, so nothing that those touched is silently skipped:
+
+- **Build/runtime:** `pom.xml` `<version>`, `application.properties`
+  (`systemRuntime.projectVersion` — the value `BaseRuntime` and the `HttpClientWrapper` User-Agent
+  read at runtime — plus `smallrye-openapi.info-version` and `container-image.additional-tags`),
+  `OpenApiConfig` `@Info(version)`, and the `EDDI_VERSION` build arg backing the Red Hat
+  certification `version` label in the Dockerfile.
+- **Deployment:** `helm/eddi/Chart.yaml` `appVersion` (and the chart's own `version`, see below)
+  and `helm/eddi/values.yaml` `eddi.image.tag`,
+  `k8s/base/eddi-deployment.yaml` and `k8s/quickstart.yaml` (both the `app.kubernetes.io/version`
+  labels and the pinned `labsai/eddi:` tag, including the cosign/crane comment examples), and the
+  `redhat-certify.yml` workflow input default.
+- **Bundled agent (superseded, see below):** at the time this entry was written, the plan was
+  `Agent+Father-6.2.0.zip` → `Agent+Father-6.3.0.zip` with the matching line in `available_agents.txt`,
+  which `RestImportService` read to seed initial agents. That rename did land and was verified — but a
+  later merge of `main` into this branch (documented further down) brought in `chore: remove the Agent
+  Father`, which deletes the zip, `available_agents.txt`, and the `importInitialAgents` machinery
+  entirely. **In the final PR neither file exists**, and `RestImportService` only handles explicit
+  imports. `docs/getting-started.md` now says EDDI starts with no agents deployed. Left the original
+  wording above rather than editing it away, since it accurately describes what this specific commit
+  did — the bundled agent it renamed was still real at that point in the branch's history.
+- **Docs:** only the two pages using the current tag in copy-pasteable commands
+  (`build-reproducibility.md`, `redhat-openshift.md`). The per-page `**Version:**` headers did not
+  need touching — the previous docs refresh replaced all twelve with a dynamic shields.io release
+  badge precisely so a bump would stop having to sweep them.
+
+**Deliberately left at 6.2.0:** `@since 6.2.0` Javadoc, the "pre-6.2.0"/"before 6.2.0"
+compatibility comments in `AgentOrchestrator`/`VertexGeminiLanguageModelBuilder`/
+`ConversationMemorySnapshot`, `*Since 6.2.0.*` in `httpcalls.md`, and the changelog. Those are
+historical minimum-version facts, not statements about the current release; rewriting them would
+assert that features shipped in 6.3.0 when they did not. Same reasoning the docs refresh used to
+keep `**Version: ≥6.0.0**` in `security.md` out of the dynamic-badge conversion.
+
+`docs/hitl.md` already referred to "the pre-6.3.0 behavior" for the
+`eddi.hitl.tool.task-approvals.mode` default flip, so 6.3.0 was already the assumed next release —
+that page is now consistent with the version the build actually reports.
+
+**The Helm chart's own `version` moved for the first time: 1.0.0 → 1.0.1.** It is not the app
+version — `appVersion` is — but Helm requires it to change whenever anything under `helm/` changes,
+and chart repositories key on it: two different chart contents published under `1.0.0` are
+indistinguishable to any cache or mirror. It had sat at 1.0.0 since the chart was created, through
+the 6.1.0 and 6.2.0 bumps, because nothing enforces it and nothing packages the chart today — which
+is the only reason the drift was harmless rather than a stale-chart bug waiting for the first
+`helm package`. A comment on the field now states the rule so it stops depending on someone
+remembering.
+
+**Verified rather than assumed**, since a bump that misses one artefact fails at release time:
+CI's own extractor (`grep -m1 '<version>' pom.xml`) returns 6.3.0; all five edited YAML files parse;
+and `target/classes` confirms `available_agents.txt` still names a zip that exists, which is the one
+way the rename could have broken startup without breaking the build. `./mvnw compile` green, no
+formatter drift.
+
+**Not introduced here, but found while checking and left alone:** `docs/release-versioning.md`
+instructs `git tag v6.0.0` in eight places, while `ci.yml` triggers on `tags: ["[0-9]*"]` — a
+`v`-prefixed tag matches nothing, so following that guide produces no build, no image, no signature
+and no release, silently. AGENTS.md already documents the digit-prefixed rule; the release guide is
+the artefact that is wrong. Tracked separately rather than folded into a version bump.
 
 ---
 

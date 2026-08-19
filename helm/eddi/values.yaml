@@ -16,7 +16,7 @@ eddi:
     repository: labsai/eddi
     # Immutable patch version — never the mutable major tag "6", which lets the
     # running bits drift away from the digest CI signed and attested.
-    tag: "6.2.0"
+    tag: "6.3.0"
     # Strongest form: also pin the digest, so the kubelet verifies exactly what
     # cosign signed. Resolve it once per release with `crane digest`:
     #   digest: "sha256:<64 hex chars>"

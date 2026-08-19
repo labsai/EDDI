@@ -11,7 +11,7 @@ This document describes what is and is not guaranteed about EDDI builds.
 | **Verifiable provenance** — you can prove a published image came from a specific commit of this repository | ✅ Guaranteed |
 | **Bit-for-bit reproducible artifacts** — two builds of the same commit produce byte-identical JARs | ❌ Not yet — see [Bit-for-bit reproducibility](#bit-for-bit-reproducibility) |
 
-The distinction matters. Deterministic dependency resolution means nobody can slip a different library into your build; it does **not** mean you can rebuild `eddi-6.2.0.jar` and compare its SHA-256 against ours. Verify published artifacts via the [signature and attestation](#verify-a-published-image), not by rebuilding.
+The distinction matters. Deterministic dependency resolution means nobody can slip a different library into your build; it does **not** mean you can rebuild `eddi-6.3.0.jar` and compare its SHA-256 against ours. Verify published artifacts via the [signature and attestation](#verify-a-published-image), not by rebuilding.
 
 ## Build System
 
@@ -78,7 +78,7 @@ Published Docker images are signed with [Sigstore Cosign](https://docs.sigstore.
 cosign verify \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   --certificate-identity-regexp '^https://github\.com/labsai/EDDI/\.github/workflows/ci\.yml@refs/(heads/main|tags/.+)$' \
-  labsai/eddi:6.2.0
+  labsai/eddi:6.3.0
 ```
 
 The identity regexp is the load-bearing part: it pins the signature to the `ci.yml` workflow on `main` or a tag, so a signature produced by any other workflow, branch, or repository fails verification.
@@ -86,13 +86,13 @@ The identity regexp is the load-bearing part: it pins the signature to the `ci.y
 Once verified, resolve and pin the digest in your deployment manifests (`k8s/base/eddi-deployment.yaml`, or `eddi.image.digest` in the Helm chart) so the kubelet can never pull different bits under the same tag:
 
 ```bash
-crane digest labsai/eddi:6.2.0
+crane digest labsai/eddi:6.3.0
 ```
 
 ### Verify the build provenance
 
 ```bash
-gh attestation verify oci://docker.io/labsai/eddi:6.2.0 --repo labsai/EDDI
+gh attestation verify oci://docker.io/labsai/eddi:6.3.0 --repo labsai/EDDI
 ```
 
 ### SBOM

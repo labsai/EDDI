@@ -26,7 +26,7 @@ import java.util.Map;
  * @author ginccc
  */
 @Path("/groupstore/templates")
-@Tag(name = "13. Agent Groups", description = "Org/team preset templates")
+@Tag(name = "Agents / Groups", description = "Org/team preset templates")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @RolesAllowed({"eddi-admin", "eddi-editor"})
