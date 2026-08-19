@@ -7,6 +7,36 @@
 
 
 
+## 🔎 fix(docs): four unresolved review findings on #671, all confirmed (2026-08-19)
+
+**Repo:** EDDI (`chore/eddi-version-6-3-0`)
+
+Checked every open review thread on the PR against current source rather than assuming they were
+stale from an earlier push. All four were real.
+
+**Two overclaimed the streaming feature.** `README.md` and `docs/README.md` both stated, unqualified,
+that tool-enabled turns stream token-by-token. `LlmTask`'s own Javadoc lists the single-chunk fallback
+conditions it still uses: the kill-switch off, no event sink, output-suppressed tasks, providers with
+no streaming builder, and the whole cascade-agent path (`LlmTask.java` around lines 1360 and 1433).
+Both lines now say "most tool-enabled turns" and name the fallback cases, rather than promising a
+guarantee the code does not keep.
+
+**Two were inaccuracies in this changelog's own prose**, not in the shipped docs:
+
+- The version-bump entry's "Bundled agent" bullet described renaming `Agent+Father-6.2.0.zip` to
+  `Agent+Father-6.3.0.zip`. Accurate when written, but a later merge of `main` into this branch brought
+  in the Agent Father's removal, and neither file exists in the final tree. Corrected in place with a
+  note explaining why the original text is not simply wrong, since it describes what that commit
+  actually did at that point in the branch's history, just not what the branch ends at.
+- The tag-fix entry claimed the only remaining `v6.x` strings in the two release docs were the new
+  prefix warnings. `release-signing.md` still says "Starting with v6.0.0" and "Images published before
+  v6.0.0" in two places, historical feature-enablement facts that were deliberately left alone for the
+  same reason `security.md`'s `**Version: >=6.0.0**` was, but that makes them a second kind of
+  remaining `v6.x` string the earlier sentence did not account for.
+
+---
+
+
 ## 🏷️ fix(docs): two REST tags leaked an internal work-item number into Swagger UI (2026-08-19)
 
 **Repo:** EDDI (`chore/eddi-version-6-3-0`)
@@ -2481,8 +2511,11 @@ rots. The running example moved to 6.3.0 throughout, the lifecycle diagram was r
 columns were already off by four before this change), and a pointer was added that `pom.xml` is not
 the only artefact carrying the release number.
 
-Verified no `v`-prefixed tag command survives anywhere in tracked files; the only remaining `v6.x`
-strings in these two pages are the warnings about the prefix itself.
+Verified no `v`-prefixed tag **command** survives anywhere in tracked files. Overclaimed the rest,
+though: `release-signing.md:7` and `:15` still say "Starting with v6.0.0" and "Images published before
+v6.0.0" — historical feature-enablement facts, not tag instructions, so deliberately left alone (same
+reasoning as `security.md`'s `**Version: >=6.0.0**`) — but that makes them a second kind of remaining
+`v6.x` string, not covered by "the warnings about the prefix itself."
 
 **Review follow-up (CodeRabbit on #671).** Three findings, all on this change; the one flagged Major
 ("the release guide still contains a `v`-prefixed tag") was raised against the first push and the
@@ -2517,10 +2550,15 @@ a grep, so nothing that those touched is silently skipped:
   `k8s/base/eddi-deployment.yaml` and `k8s/quickstart.yaml` (both the `app.kubernetes.io/version`
   labels and the pinned `labsai/eddi:` tag, including the cosign/crane comment examples), and the
   `redhat-certify.yml` workflow input default.
-- **Bundled agent:** `Agent+Father-6.2.0.zip` → `Agent+Father-6.3.0.zip` with the matching line in
-  `available_agents.txt`, which `RestImportService` reads to seed initial agents. Verified in
-  `target/classes` that the manifest still names a file that exists — a rename that desynchronises
-  those two fails at first startup, not at compile time.
+- **Bundled agent (superseded, see below):** at the time this entry was written, the plan was
+  `Agent+Father-6.2.0.zip` → `Agent+Father-6.3.0.zip` with the matching line in `available_agents.txt`,
+  which `RestImportService` read to seed initial agents. That rename did land and was verified — but a
+  later merge of `main` into this branch (documented further down) brought in `chore: remove the Agent
+  Father`, which deletes the zip, `available_agents.txt`, and the `importInitialAgents` machinery
+  entirely. **In the final PR neither file exists**, and `RestImportService` only handles explicit
+  imports. `docs/getting-started.md` now says EDDI starts with no agents deployed. Left the original
+  wording above rather than editing it away, since it accurately describes what this specific commit
+  did — the bundled agent it renamed was still real at that point in the branch's history.
 - **Docs:** only the two pages using the current tag in copy-pasteable commands
   (`build-reproducibility.md`, `redhat-openshift.md`). The per-page `**Version:**` headers did not
   need touching — the previous docs refresh replaced all twelve with a dynamic shields.io release
