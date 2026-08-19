@@ -256,9 +256,12 @@ public class CreateSubAgentTool {
                     null, // mcpServerUrls
                     true, // deploy
                     null, // environment
-                    null // hitlConfig — dynamic sub-agents are not gated; see the
-                         // dynamicAgents.allowCreation escalation flag on the group
-                         // that provisioned this one
+                    null, // hitlConfig — dynamic sub-agents are not gated; see the
+                          // dynamicAgents.allowCreation escalation flag on the group
+                          // that provisioned this one
+                    null // vaultKeyName — a sub-agent inherits the parent's ${vault:...}
+                         // reference through inheritedApiKey above, which is already the
+                         // shared-key case this field exists for
             );
 
             SetupResult result = agentSetupService.setupAgent(request);

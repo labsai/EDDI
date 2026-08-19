@@ -863,7 +863,7 @@ class McpSetupToolsTest {
         hitl.setToolApprovals(toolApprovals);
 
         service.createApiAgent(new CreateApiAgentRequest("Agent", "prompt", SIMPLE_SPEC, null, null, "key",
-                null, null, null, null, null, false, null, null, hitl, null, null));
+                null, null, null, null, null, false, null, null, hitl, null, null, null));
 
         var agentCaptor = ArgumentCaptor.forClass(AgentConfiguration.class);
         verify(AgentStore).createAgent(agentCaptor.capture());
@@ -879,7 +879,7 @@ class McpSetupToolsTest {
         stubApiAgentStores();
 
         service.createApiAgent(new CreateApiAgentRequest("Agent", "prompt", SIMPLE_SPEC, null, null, "key",
-                null, null, null, null, null, false, null, null, null, null, null));
+                null, null, null, null, null, false, null, null, null, null, null, null));
 
         var agentCaptor = ArgumentCaptor.forClass(AgentConfiguration.class);
         verify(AgentStore).createAgent(agentCaptor.capture());
@@ -899,7 +899,7 @@ class McpSetupToolsTest {
         stubApiAgentStores();
 
         service.createApiAgent(new CreateApiAgentRequest("Agent", "prompt", SIMPLE_SPEC, null, null, "key",
-                null, null, null, null, null, false, null, null, null, null, 30));
+                null, null, null, null, null, false, null, null, null, null, 30, null));
 
         var llmCaptor = ArgumentCaptor.forClass(LlmConfiguration.class);
         verify(langchainStore).createLlm(llmCaptor.capture());
@@ -911,7 +911,7 @@ class McpSetupToolsTest {
         stubApiAgentStores();
 
         service.createApiAgent(new CreateApiAgentRequest("Agent", "prompt", SIMPLE_SPEC, null, null, "key",
-                null, null, null, null, null, false, null, null, null, null, null));
+                null, null, null, null, null, false, null, null, null, null, null, null));
 
         var llmCaptor = ArgumentCaptor.forClass(LlmConfiguration.class);
         verify(langchainStore).createLlm(llmCaptor.capture());
@@ -929,7 +929,7 @@ class McpSetupToolsTest {
                 .thenReturn(Response.created(URI.create("/mcpcallstore/mcpcalls/mcp-1?version=1")).build());
 
         service.createApiAgent(new CreateApiAgentRequest("Agent", "prompt", SIMPLE_SPEC, null, null, "key",
-                null, null, null, null, null, false, null, null, null, "https://mcp.example.com/sse", null));
+                null, null, null, null, null, false, null, null, null, "https://mcp.example.com/sse", null, null));
 
         var packageCaptor = ArgumentCaptor.forClass(WorkflowConfiguration.class);
         verify(WorkflowStore).createWorkflow(packageCaptor.capture());
