@@ -271,7 +271,10 @@ eight minutes, also zero**. Discovered inputs are kept as regression seeds under
 `SecretRedactionFilterInvariantsTestInputs/`, and failure messages spell out control characters.
 
 The invariant matrix grew again — 11 keys × 33 shapes × 8 placements, plus every key × shape through
-four carriers and every key × shape truncated: **4 882 cases across both suites**, plus 18 fuzz seeds.
+four carriers and every key × shape truncated, plus 18 fuzz seeds and the adversarial-input,
+negative-control and free-text cases. Counted from surefire rather than derived by hand, because a
+derived total drifts the moment a shape is added: **6 819 invariant cases and 70 example cases,
+6 889 in all.**
 
 **CodeRabbit's third review refused a leak I had documented, and was right to.** I had pinned "an
 apostrophe-quoted value ends at the first double quote" as a deliberate limit, with the reasoning
@@ -312,7 +315,7 @@ shape cannot argue with: **a blank value is never redacted.** Whitespace is not 
 redacting it can only ever destroy structure. It joins the under-floor branch, so its text stays live
 and a credential field starting inside it is still found.
 
-**Verified:** `SecretRedactionFilterTest` grows from 14 to 66 cases — three new nested classes
+**Verified:** `SecretRedactionFilterTest` grows from 14 to 70 cases — three new nested classes
 (`RedactedJsonStaysJson`, which parses every redacted result with Jackson; `ASecretIsRedactedInFull`,
 parameterised over all six delimiters; `AlreadyRedactedValuesKeepTheirPrefix`) plus idempotency, the
 8-char floor, and a neighbouring-field-not-swallowed case. `RequestRedactorTest`, `ResolvedRequestTest`,

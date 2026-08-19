@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.secrets.sanitize;
 
+import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -18,10 +19,25 @@ class SecretRedactionFilterTest {
     private static final String REDACTED_MARKER = "<REDACTED>";
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
-    /** Redaction must never turn a JSON document into something that is not one. */
+    /**
+     * Redaction must never turn a JSON document into something that is not one.
+     * <p>
+     * "One document" means exactly one ROOT VALUE, the same thing
+     * {@code JSON.parse} means by it and so the same thing the Manager means.
+     * {@code readTree} alone stops at the end of the first value and ignores
+     * whatever follows, which would call {@code {"a":1}"junk"} intact — precisely
+     * the torn carrier this asserts against. The filter draws the line in the same
+     * place; an oracle that drew it anywhere else would disagree with the code it
+     * is checking.
+     */
     private static void assertValidJson(String value) {
-        assertDoesNotThrow(() -> MAPPER.readTree(value),
-                () -> "redaction produced something that is no longer JSON: " + value);
+        assertDoesNotThrow(() -> {
+            try (JsonParser parser = MAPPER.createParser(value)) {
+                assertNotNull(parser.nextToken(), "no JSON value at all");
+                parser.skipChildren();
+                assertNull(parser.nextToken(), "trailing content after the root value");
+            }
+        }, () -> "redaction produced something that is no longer JSON: " + value);
     }
 
     @Test
@@ -282,8 +298,11 @@ class SecretRedactionFilterTest {
             // structure — it never protects a secret — so a blank value is left
             // alone whatever the shape around it.
             String input = "\"----------------token:\"" + "\t".repeat(36);
-            assertEquals(input, SecretRedactionFilter.redact(input));
-            assertValidJson(input);
+
+            String result = SecretRedactionFilter.redact(input);
+
+            assertEquals(input, result);
+            assertValidJson(result);
         }
 
         @Test
