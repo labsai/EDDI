@@ -7,6 +7,38 @@
 
 
 
+## ⬆️ chore(deps): Quarkus 3.38.3, and every safe patch/minor ahead of the 6.3.0 release (2026-08-19)
+
+**Repo:** EDDI (`chore/eddi-version-6-3-0`)
+
+Quarkus platform `3.38.2` → **`3.38.3`**, plus the patch and minor updates that `versions:display-dependency-updates`
+reported for the artefacts **we pin ourselves**. The report is dominated by transitives the Quarkus BOM manages
+(dozens of `wildfly-elytron` entries offering `3.0.0.Alpha1`); those are the platform's to move, not ours, and were
+filtered out rather than followed.
+
+Taken: `jackson-core`/`jackson-databind` 2.22.1 → 2.22.2, `classgraph` 4.8.184 → 4.8.192, `jinjava` 2.8.3 → 2.8.4,
+`jnats` 2.26.0 → 2.26.2, `swagger-annotations` 2.2.52 → 2.2.54, `swagger-parser` 2.1.45 → 2.1.47, `bcprov-lts8on`
+2.73.12 → 2.73.12.1.
+
+**`langchain4j-community` 1.18.0-beta28 → 1.19.0-beta29** is the one judgement call. It is a minor bump on a
+beta-tagged artefact, which the "patch only" rule would exclude, but it removes a real version skew: core,
+`langchain4j-libs` and `langchain4j-beta` all sit at 1.19.0 while community alone lagged a minor behind. Aligning the
+stack is lower risk than shipping it split.
+
+**Deliberately not taken**, because this release is meant to be a stable state: `jsonschema-generator` 5.0.0,
+`json-path` 3.0.0, `json-schema-validator` 3.0.6, `bson4jackson` 3.2.0, `testcontainers` 2.0.5, `wiremock` 4.0.0-beta,
+`quarkus-mcp-server` 2.0.0.CR2, and Quarkus 3.39.0.CR1. Every one is a major jump or a pre-release.
+
+**Verified, and the verification mattered.** `mvnw clean compile` is green. A targeted run over the areas these bumps
+touch is **6,943 tests, 0 failures, 10 errors** — every error `Unable to establish loopback connection` or `failed to
+create a child event loop` in `LanguageModelBuildersTest`'s streaming cases. Because `langchain4j-community` feeds the
+model builders, "environmental" could not simply be assumed: the same class was re-run with the pre-bump `pom.xml`
+stashed in, and produced the **identical 10 errors on the same test methods**. The cause is the local JVM's inability
+to bind a loopback socket, which is a known limitation of this environment; CI is the gate for those.
+
+---
+
+
 ## 🔒 fix(secrets): redaction preserves the JSON it redacts, and stops cutting secrets short (2026-08-19)
 
 **Repo:** EDDI (`fix/redaction-json-safe`)
