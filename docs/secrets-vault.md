@@ -192,6 +192,11 @@ eddi.vault.cache-max-size=1000
 # Whether an agent referencing a secret it is not granted may deploy:
 # off | warn | enforce (default). See "Agent Grants" above.
 eddi.vault.grant-enforcement=enforce
+
+# Whether agent setup reuses a vault entry that already holds the same
+# plaintext key: checksum (default) | never.
+# See "Reusing one key across agents" below.
+eddi.setup.vault-key-reuse=checksum
 ```
 
 > **⚠️ Important:** The vault master key encrypts all stored API keys. If the master key is lost, all encrypted secrets become **permanently unrecoverable**. Back up your `~/.eddi/.env` file.
@@ -279,17 +284,61 @@ When creating agents through the Manager's agent wizard, the Platform Operator, 
 ### How It Works
 
 1. User provides an API key during agent setup
-2. `AgentSetupService.vaultApiKey()` stores the key in the vault
-3. A vault reference (`${vault:setup.<agent-name>.<timestamp>.apiKey}`) is written to the LLM configuration
+2. `AgentSetupService.vaultApiKey()` resolves it against the vault (see *Reusing one key across agents* below)
+3. A vault reference (`${vault:setup.<agent-name>.<timestamp>.apiKey}`, or the name you chose) is written to the LLM configuration
 4. When the vault is enabled, the plaintext key is never persisted in MongoDB — only the vault reference is stored
+
+### Reusing one key across agents
+
+One provider key usually serves many agents, so setup avoids storing it many times. Three ways to say "use this key", in the order setup considers them:
+
+| What you pass | What setup does |
+| ------------- | --------------- |
+| `vaultKeyName: "openai-prod"` (with or without `apiKey`) | Uses that entry. With `apiKey` it **creates** the entry under exactly that name; without one, the entry must already exist. Never overwrites an entry holding a different value — the request is rejected instead, because other agents may already point at it. Accepts the `${vault:openai-prod}` form too. |
+| `apiKey: "${vault:openai-prod}"` | Used as-is, never re-vaulted. Surrounding whitespace is trimmed first, so a pasted reference still counts as one. If the key does not exist the setup still succeeds (you may vault it afterwards) but a warning is logged — the agent cannot resolve its credential until it does. |
+| `apiKey: "sk-…"` (plaintext) | Reused if the vault already holds that exact value, otherwise stored under a generated name. |
+
+Plaintext reuse is matched on the SHA-256 checksum the vault already stores per entry — nothing is decrypted to make the decision — and only entries with `allowedAgents` unset or `["*"]` are candidates, since referencing a narrowed grant from a new agent produces a config that [grant enforcement](#agent-grants-allowedagents) rejects at deploy time. When several entries match, the oldest wins, so repeated setups converge on one entry rather than depending on listing order.
+
+Set `eddi.setup.vault-key-reuse=never` to switch plaintext reuse off and give every agent its own entry again — appropriate when two agents hold the same-valued key today but must be able to rotate independently. Neither setting affects the first two rows above: those are explicit caller decisions. Any other value fails startup, as `eddi.vault.grant-enforcement` does — a typo must not silently switch de-duplication off.
+
+Every setup response carries **`apiKeyVaultReference`** — the reference the created agent's LLM config actually points at, whether this call vaulted the key or reused an entry that already held it. Pass it straight back as `vaultKeyName` (or as `apiKey`) on the next setup to put another agent on the same credential.
+
+It is `null` in two cases: the provider needs no key at all (`ollama`, `jlama`, `bedrock`, `oracle-genai`, …), and the vault is disabled so the key was stored in plaintext — a plaintext key is a secret and is never echoed back in a response body.
+
+A setup can also return **`resources.vaultWarning`**: the chosen key does not exist, or it is granted only to other agents. Neither fails the setup — see *Reusing one key across agents* above — but both end in an agent that was created and cannot use its credential, so both are reported rather than only logged.
+
+`vaultKeyName` accepts three shapes:
+
+| Shape | Parsed as |
+| --- | --- |
+| `openai-prod` | key `openai-prod` in the `default` tenant |
+| `${vault:openai-prod}` | the same — the wrapper is unwrapped, not stored |
+| `${vault:acme/openai-prod}` | key `openai-prod` in tenant `acme` |
+
+The **tenant and key components** must each match `[a-zA-Z0-9._-]{1,128}` — the same charset the secrets REST API enforces on create. (The `${vault:…}` wrapper itself is of course not expected to match; it is stripped first.) The constraint is not cosmetic: the components are re-embedded into `${vault:<tenant>/<key>}`, where a `/` inside a *bare* name would re-parse as a tenant separator and a `}` would truncate the reference, leaving the agent pointing at a different secret or none.
+
+Naming one key in `vaultKeyName` and a *different* one in `apiKey` is rejected rather than silently resolved in favour of either.
+
+`vaultKeyName` is a REST-only field (`eddi-admin`). The MCP `setup_agent` / `create_api_agent` tools do not carry it — not to prevent reuse, which their `apiKey` already supports as a `${vault:...}` reference, but because the two things it *adds* (choosing the name of a newly created entry, and a value-must-match check on an existing one) are not needed to provision an agent and do not belong on the `eddi-editor` tier those tools are open to: name-squatting an entry an operator intends to create, and a per-request "does key X hold value V" oracle.
+
+Naming, or pasting a reference to, a secret whose `allowedAgents` is narrowed is accepted — the legitimate flow is setup without deploy, widen the grant to the new agent's ID, deploy — but a brand-new agent cannot be on any existing grant list, so under `enforce` a `deploy: true` setup will end as `deployed: false`. The response says so up front in `resources.vaultWarning`. (Plaintext reuse simply skips such entries.)
+
+### What rollback does with the vault
+
+A setup that fails part-way rolls back the documents it created. It also removes the secret it vaulted — but only when nothing else can be referencing it: under `never` (unique per-agent names) it does; under `checksum` a freshly stored entry is a shared resource the moment a second setup with the same key runs, so it is left in place — a retry finds it by value and reuses it, and at worst it is one orphan. A caller-named entry is never rolled back for the same reason.
 
 ### Collision Prevention
 
-Each vault key includes an epoch-millisecond timestamp suffix. This prevents key collisions when two agents share the same name — each gets a unique vault entry.
+A generated vault key is named `setup.<agent>.<timestamp>-<random>.apiKey`. The timestamp alone was not sufficient: two setups for agents with the same name landing in the same millisecond produced the same name, and `store` is an upsert, so one silently overwrote the other's credential. The random suffix is what makes the name unique; the timestamp is kept because it tells you when the entry was made.
+
+A **caller-chosen** `vaultKeyName` has no such suffix, by design — that is the point of naming it. Creating one is read-then-write rather than a conditional insert, so two setups naming the same new key with different values can race; the loser is detected on read-back and fails before anything is created, but a write landing after that read is not caught (an atomic create-if-absent for the vault SPI is tracked in [issue #700](https://github.com/labsai/EDDI/issues/700)). Prefer creating a shared key through the secrets REST API first, then naming it.
 
 ### Graceful Degradation
 
 When the vault is disabled (no `EDDI_VAULT_MASTER_KEY`), the setup service logs a warning and falls back to plaintext storage. This ensures agent setup works in local development without requiring vault configuration.
+
+A request carrying `vaultKeyName` is the exception: it fails with a clear error instead. Naming a vault entry is a request for one specific shared secret, and quietly writing the key in plaintext is not a smaller version of that.
 
 > **Production recommendation:** Always set `EDDI_VAULT_MASTER_KEY` in production. The installer does this automatically.
 

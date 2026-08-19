@@ -90,7 +90,7 @@ class AgentSetupHardeningTest {
     }
 
     private static SetupAgentRequest request(String name, String prompt) {
-        return new SetupAgentRequest(name, prompt, "ollama", "llama3", null, null, null, null, null, null, null, null, false, null, null);
+        return new SetupAgentRequest(name, prompt, "ollama", "llama3", null, null, null, null, null, null, null, null, false, null, null, null);
     }
 
     @Nested

@@ -7,6 +7,243 @@
 
 
 
+## 🔑 fix(setup): stop agent setup minting a new vault key per agent (2026-08-18)
+
+**Repo:** EDDI (`fix/setup-vault-key-reuse`)
+
+Provisioning several agents against one provider key left one vault entry **per agent**
+(`setup.<agent>.<timestamp>.apiKey`), and pasting a `${vault:...}` reference into the wizard's API-key
+field did not reliably avoid it. Rotating that provider key then meant hunting down N unguessably named
+entries.
+
+**Root cause of the reference case.** `vaultApiKey()` recognised an existing reference with a
+**full-string** regex match, but never trimmed its input. A reference copied out of a UI list or a
+config carries surrounding whitespace, so `"${vault:openai-prod}\n"` failed the match, fell through to
+the "plaintext" branch, and was vaulted *as a secret whose value is a reference* — a brand-new, useless
+key on every setup. One `trim()`, applied before the check and to the stored value, closes it.
+
+**Three ways to share one key**, in the order `AgentSetupService.vaultApiKey()` considers them:
+
+1. **`vaultKeyName`** (new, REST-only field on `SetupAgentRequest` / `CreateApiAgentRequest`) — names
+   the entry. With `apiKey` it creates it under exactly that name; without one, the entry must already
+   exist, so a second agent needs no plaintext at all. Accepts `openai-prod` or `${vault:openai-prod}`.
+   Refuses to overwrite an entry holding a different value: other agents may already point at it, and
+   silently rewriting it rotates their credential. Also refuses (rather than degrading to plaintext)
+   when the vault is off — naming an entry is a request for one specific shared secret, and writing the
+   key in plaintext instead is not a smaller version of that request.
+2. **`apiKey` already a reference** — used as-is, now whitespace-tolerant.
+3. **`apiKey` plaintext the vault already holds** — reused instead of duplicated.
+
+**Plaintext reuse is checksum-based.** `SecretMetadata` already carries `sha256Hex(plaintext)` per
+entry, so a match needs no decryption and compares a digest of a value the caller just supplied — it
+reveals nothing they did not already know. Only entries with `allowedAgents` unset or `["*"]` qualify:
+referencing a deliberately narrowed grant from a new agent yields a config that `VaultGrantGate`
+rejects at deploy time, i.e. a reuse that "works" until it matters. Ties break oldest-first by
+`createdAt` then key name, so repeated setups converge on one entry instead of depending on listing
+order. A vault that cannot be listed falls through to storing a new entry — reuse is an optimisation,
+never a gate.
+
+**Configurable**, per §4.1 rule 1: `eddi.setup.vault-key-reuse=checksum|never`. `never` restores the
+pre-change per-agent behaviour, for deployments where two agents hold the same-valued key today but
+must be able to rotate independently. Neither value touches cases 1 and 2 — those are explicit caller
+decisions, not defaults. Field-injected like the neighbouring
+`eddi.setup.llm.log-conversation-content`, so directly constructed instances get the default.
+
+**Two correctness details worth naming:**
+
+- **A reused entry is never recorded under `VAULTED_SECRET_KEY`.** Rollback deletes whatever it finds
+  there; recording a shared entry would let a *later* agent's failed setup delete a key an earlier
+  agent is still referencing. Only `storeSecret()` — the single place that writes — records.
+- **Key resolution moved to "step 0"**, ahead of every store call in both `setupAgent` and
+  `createApiAgent`, matching the existing reasoning for up-front `hitlConfig` validation: an unusable
+  `vaultKeyName` must fail while rollback still has nothing to undo, not after a parser, ruleset, LLM
+  config and workflow already exist.
+
+`vaultKeyName` is deliberately **not** exposed on the MCP `setup_agent` / `create_api_agent` tools. *(Rationale
+corrected in the third review pass below — an earlier version of this paragraph claimed it stopped a model
+pointing an agent at an arbitrary secret, which `apiKey: "${vault:...}"` already allows.)* The MCP path
+still de-duplicates by checksum wherever the deployment leaves that enabled and the matching entry is granted to all agents, so it does not grow the vault either.
+
+**Files:** `AgentSetupService.java` (trim, `useNamedVaultKey`, `findReusableSecret`, `storeSecret`,
+step-0 move, validation now accepts `vaultKeyName` in place of `apiKey` for cloud providers),
+`SetupAgentRequest.java`, `CreateApiAgentRequest.java`, `McpSetupTools.java`, `CreateSubAgentTool.java`
+(both pass `null`), `application.properties`, `docs/secrets-vault.md`.
+
+**Tests:** new `AgentSetupVaultKeyReuseTest` — 17 tests over the trim regression, checksum reuse,
+grant-scoped skip, deterministic winner, the `never` switch, list-failure degradation, and all six
+`vaultKeyName` outcomes. Mutation-checked: reverting the `trim()` and the reuse lookup fails 5 of them,
+so they are not passing for the wrong reason. Full local run of `AgentSetup*Test`, `McpSetupToolsTest`,
+`CreateSubAgentTool*Test`, `SetupWizardConfigsPassStrictBoundaryTest` (261 tests) plus the repo-wide
+guards (`ImportStyleTest`, `DocumentationLinksTest`, `StrictBoundaryShippedConfigsTest`,
+`RuleSetStoreShippedRulesetsTest`) — all green.
+
+### Review pass — findings addressed
+
+A second read of the change turned up six things, all fixed on this branch:
+
+1. **The reused key was invisible.** The whole complaint is "I can't reuse the key because I can't find
+   its name", and the first cut made that *worse*: a newly created key showed up in
+   `resources.vaultedSecretKeyName`, but a reused one appeared nowhere. `SetupResult` now carries
+   **`apiKeyVaultReference`** on every setup — created or reused — to hand straight back as
+   `vaultKeyName` next time. It is null when the vault is off and the key went in as plaintext:
+   `vaultReferenceOrNull()` gates it, because the "effective api key" is the caller's secret in that
+   case and echoing it in a response body would put it through every proxy log on the way out.
+2. **A named key was rollback fodder, and that was a cross-agent delete.** Agent A creates
+   `${vault:openai-prod}`, agent B reuses it, A then fails → A's rollback deleted the key B now points
+   at. Fixed by not registering caller-named creations at all: rollback exists to stop a retry loop
+   growing the vault, and a chosen name cannot grow it (a retry reuses the same name), so deleting was
+   the riskier of the two options rather than the safer one.
+3. **`vaultKeyName` was not validated.** The value gets embedded in `${vault:<tenant>/<key>}`, where a
+   bare name containing `/` silently re-parses as a tenant separator and a `}` truncates the reference —
+   the agent then resolves a *different* secret, or none. Now checked against `[a-zA-Z0-9._-]{1,128}`,
+   the same charset `RestSecretStore` enforces on create.
+4. **Contradictory input resolved silently.** `vaultKeyName: "a"` with `apiKey: "${vault:b}"` honoured
+   `a` and dropped `b` on the floor — deploying the agent against a credential the caller did not pick.
+   Rejected now.
+5. **The rollback record was written before the store succeeded**, so a failed write left a name for a
+   secret that never existed and rollback logged a "could not remove" warning chasing it. Recorded after.
+6. **Key resolution moved out of the `try`.** It was already at "step 0", but inside the block, so a
+   clean `vaultKeyName 'x' does not exist` came back wrapped in `Failed to set up agent:`. Outside, the
+   400 says what is actually wrong. Also dropped the now-dead two-arg `vaultApiKey` overload.
+
+`AgentSetupVaultKeyReuseTest` grew to 25 tests covering each of these; `DynamicAgentToolsTest` picked up
+the extra `SetupResult` component. 356 tests across the setup suites and repo-wide guards, green,
+Checkstyle clean.
+
+### Second review pass (different reviewer)
+
+One real bug and three smaller items, all fixed:
+
+- **`vaultKeyName: "${vault:acme/openai}"` created the secret in the `default` tenant.** `useNamedVaultKey` parsed
+  the tenant for the *lookup* but `storeSecret` rebuilt the reference with `DEFAULT_TENANT` for the *create* — so a
+  missing tenant-qualified key produced a setup that "worked" and an agent whose reference pointed at nothing.
+  `storeSecret` now takes the full `SecretReference`. Mutation-checked: reverting it fails the new test.
+- **`eddi.setup.vault-key-reuse` silently degraded on a typo.** `checksumm` behaved as `never` — dedup off, which is
+  the original bug back with every visible sign saying it is on. Now strict-parsed in a `@PostConstruct`, failing
+  startup, matching the `eddi.vault.grant-enforcement` convention. Directly constructed instances (tests) are unaffected.
+- **A dangling `apiKey: "${vault:typo}"` was accepted in silence.** Pass-through stays accepted (a caller may vault the
+  key after setup) but the entry is now looked up and a WARN logged if absent — the alternative was an agent that
+  deploys clean and fails on its first turn. The `verifyNoInteractions` assertions on the old pass-through tests became
+  `never().store(...)`, which is what they actually meant.
+- Two error messages tightened (`already holds a different value` was wrong when the stored checksum is null;
+  `no apiKey was supplied` was wrong when a *reference* was supplied), and both MCP `apiKey` tool descriptions now
+  say that `apiKeyVaultReference` from an earlier call can be passed back to share the key.
+
+Not changed after consideration: `group-wizard.tsx` builds every member slot from a template up front, so
+seeding-on-add would not reach them; the backend checksum dedup covers the vault-growth half regardless.
+
+360 backend tests green (`AgentSetupVaultKeyReuseTest` at 29), Checkstyle clean.
+
+### Third review pass (max effort)
+
+Read the final file state end-to-end and reasoned about the system around it — rollback, the deploy-time
+grant gate, tenants, concurrency, and what the lower-privileged MCP tier can do with the new surface. Four
+findings, all fixed:
+
+1. **Rollback could delete a secret other agents already shared.** Under `checksum` reuse, agent A stores
+   `setup.a.T.apiKey`, agents B..N (parallel bulk provisioning, same key) reuse it, A fails at step 6 → A's
+   rollback deleted the entry B..N point at; they deployed fine and would break on their first turn. The
+   growth that rollback exists to prevent cannot happen under `checksum` (a retry finds A's entry by value), so
+   a generated entry is now registered for rollback **only under `never`**, where nobody else can find it.
+2. **Restricted grants were handled inconsistently.** The checksum path skipped narrowed entries (correctly),
+   but naming one via `vaultKeyName`, or pasting its reference, sailed through and ended as `deployed: false`
+   with the reason only in the server log — a brand-new agent's ID cannot be on any existing grant list, so
+   under `enforce` that outcome is certain. Both paths now WARN and put `resources.vaultWarning` in the
+   response. Not refused: setup-without-deploy → widen grant → deploy is the legitimate flow.
+3. **The MCP rationale was false.** "A model that could choose the name could point a new agent at any
+   unrestricted secret" — the tool already advertises `apiKey: "${vault:name}"`, so it already can. The real
+   reason: MCP setup tools are reachable by `eddi-editor` while REST setup is `eddi-admin`, and what
+   `vaultKeyName` uniquely adds (naming a new entry; a value-must-match check) is a name-squatting and
+   value-oracle surface an editor does not need. Corrected in the two `McpSetupTools` comments, the docs, and
+   the paragraph above.
+4. `SetupResult.apiKeyVaultReference` javadoc now also names the keyless-provider null case.
+
+Verified against the real `VaultSecretProvider` rather than the mocks: `getMetadata` and `listKeys` both
+return the checksum (so the mismatch check and the reuse scan actually see it), `getMetadata` has no
+access-timestamp side effect, and `store` runs `getOrCreateDek`, so a tenant-qualified `vaultKeyName` can
+create the first secret in a new tenant.
+
+Considered and left: the checksum scan lists all default-tenant metadata per setup (setup is rare); an admin
+who can already read checksums via the secrets list gains no new oracle from checksum reuse; two concurrent
+first-time setups with the same key can create two entries, and later setups converge on the older one.
+
+365 backend tests green (`AgentSetupVaultKeyReuseTest` at 34), Checkstyle clean. Manager: the wizard success screen
+now renders `resources.vaultWarning` verbatim (backend-authored, no new i18n keys) — its picker lists every
+vault key including narrowly granted ones, and this is where the user learns why such an agent will not deploy.
+
+### PR review — CodeRabbit and Copilot (#699)
+
+Both bots reviewed; every finding was valid. Two were real bugs this branch had introduced:
+
+- **Generated key names could collide** (CodeRabbit). `setup.<agent>.<timestamp>.apiKey` is not unique for two
+  same-named agents in the same millisecond, and `store` is an upsert — so one silently overwrote the other's
+  credential. Now carries a random suffix; the timestamp stays only because it dates the entry for an operator.
+- **An unparseable OpenAPI spec left an orphaned vault entry** (Copilot). Moving key resolution to "step 0" put it ahead
+  of the spec parse, and `createApiAgent`'s pre-existing `catch (AgentSetupException) { throw e; }` rethrows
+  without rolling back — so under `vault-key-reuse=never` every invalid request left an orphaned secret behind. Fixed at
+  both ends: the parse now runs first (it creates nothing, so a bad spec never reaches the vault at all), and
+  that catch arm now rolls back, which also closes the pre-existing document leak on the same path.
+
+Two more were correct and are now handled:
+
+- **A direct vault write did not invalidate the resolver cache** (Copilot). `RestSecretStore` invalidates even on
+  creation, precisely because a model may be cached holding an unresolved `${vault:...}` literal — and this
+  service is the one that deliberately allows such dangling references and later fills them in. `storeSecret`
+  now invalidates, matching that path.
+- **The dangling-reference warning only reached the log** (CodeRabbit), while the restricted-grant warning
+  reached the caller. Both end in an agent that cannot use its credential, and only one vault key is resolved
+  per setup, so they were merged into one `resources.vaultWarning` (renamed from `vaultGrantWarning`).
+
+Two concurrency findings were partly addressed and honestly bounded rather than claimed fixed. Creating a
+caller-named key is read-then-write, and the checksum scan is separate from the write that follows it, so
+concurrent setups can still race — the named path now reads back and fails loudly before anything is created,
+and both javadocs state exactly what remains open. Closing them needs a create-if-absent (and a checksum
+reservation) in the persistence layer for Mongo and Postgres both — an SPI change shared with the three other
+`store` callers, all of which upsert today, and deliberately not designed around this one caller. Tracked in
+[issue #700](https://github.com/labsai/EDDI/issues/700), which carries the caller inventory and the per-backend
+sketch; the mitigation's javadoc links it so it does not read as a finished job. See also the
+[thread](https://github.com/labsai/EDDI/pull/699#discussion_r3805688054).
+
+Doc claims that overstated the feature were made conditional: MCP checksum de-duplication depends on
+`eddi.setup.vault-key-reuse` and on an unrestricted grant; `apiKeyVaultReference` is also null for keyless
+providers; and the `vaultKeyName` charset applies to the parsed tenant/key components, not the `${vault:…}`
+wrapper — it now ships as a table of the three accepted shapes. `ImportStyleTest` caught an inline
+`java.util.HashSet` in the new test (AGENTS.md 4.7).
+
+369 backend tests green; every fix above is mutation-checked.
+
+### EDDI-Manager — `feat/setup-vault-key-reuse`
+
+The earlier note in this entry said the wizard and team builder "still render the API key as a bare text
+input". That was wrong — both already use `SecretKeyPicker`, which lists vault keys and can create one
+inline. What was actually missing was everything *around* the pick:
+
+- **`SecretKeyPicker` trims before deciding a value is a reference**, and normalises a pasted one. This
+  is the frontend half of the backend trim bug: a reference pasted with whitespace failed
+  `startsWith("${vault:")`, so the field stayed a masked password and the user had no way to tell the
+  paste had registered as a reference at all.
+- **The success screen shows `apiKeyVaultReference`** with a copy button — the answer to "which key did
+  this agent end up on".
+- **"Create Another" carries provider, model and the credential forward**, but only when it came back as
+  a reference. A plaintext key must not survive an explicit form reset, and with the vault off there is
+  nothing to reuse anyway.
+- **The Workforce team builder seeds a new advisor from the previous one.** A board is one provider and
+  one key across every member; without this the vault key had to be picked once per advisor — the exact
+  repetition that motivated this work.
+- Types: `vaultKeyName` on both requests, `apiKeyVaultReference` on `SetupResult`. `vaultKeyName`
+  deliberately gets **no form field**: the picker on `apiKey` already produces `${vault:<name>}` and can
+  create a named entry inline, so a second field would only be a second way to say the same thing.
+- Eleven locales updated (the `i18n-drift` gate covers all of them, not just `en`).
+
+Manager: 5,383 tests green, `tsc -b` clean, `eslint --max-warnings 0` clean. The two behavioural
+frontend changes are mutation-checked — reverting the trim and the seeding fails four of them.
+
+**What's next:** nothing outstanding for this feature. The Manager change is a separate PR and needs
+this backend merged first; against an older backend `apiKeyVaultReference` is simply absent and the
+success-screen block does not render.
+
+---
+
 ## 🔒 fix(docker): bump UBI9 base digest for CVE-2026-11940 (python3 tarfile filter bypass) (2026-08-17)
 
 **Repo:** EDDI (`fix/trivy-cve-2026-11940-base-image`)
