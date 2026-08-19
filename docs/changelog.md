@@ -102,6 +102,33 @@ same probe before touching anything:
   value (`\s*[,}\]]` or end of input). That picks correctly in both readings: the escaped body closes
   at its `\"` because `}` follows, the plain one carries on past `\"x\"` because a letter does.
 
+**A 1 692-case invariant suite then found a stack overflow in the fix itself.**
+`SecretRedactionFilterInvariantsTest` generates every combination of 11 credential key spellings ×
+21 value shapes × 7 placements (top level, first/middle/last, nested, inside an array, three deep),
+builds each document with Jackson so escaping is correct by construction, and asserts four things
+per case: a planted canary never survives, the output still parses as JSON, an unrelated sibling
+field is untouched, and redaction is idempotent. A negative control runs the same shapes under a
+key with no credential name and asserts the document comes back byte-identical — without it the
+whole suite is satisfied by a filter that redacts everything.
+
+Its adversarial-input case failed immediately: the quoted rule's `(?:A|B){8,}?` overflowed the
+stack. Java matches a quantified GROUP by recursion, one frame per repetition, so it died at ~500
+escaped quotes — and, far worse, on a **200 000-character value with no escapes in it at all**. A
+long credential would have thrown instead of being redacted. That is a regression the lazy
+quantifier introduced, and it is exactly what the file's possessive quantifiers exist to prevent.
+
+**So the quoted rule is no longer a regex.** `QUOTED_VALUE_START` matches only up to the value's
+opening quote — nothing quantified over a value-length run — and `redactQuotedValues` scans forward
+for the closing quote in a plain loop. The three constraints that made the pattern unexpressible
+become readable code: `findClosingQuote` takes the first quote matching the opening one that is
+followed by something ending a JSON value, and `shouldRedact` states the length floor, the vault
+carve-out and the already-redacted check outright. Same semantics, no recursion, and the
+adversarial cases now run in single-digit milliseconds.
+
+A Jazzer `@FuzzTest` asserts crash-freedom and idempotency over arbitrary input, following the
+`PathNavigatorFuzzTest` pattern. It needs no ClusterFuzzLite wiring — `.clusterfuzzlite/build.sh`
+names its targets explicitly rather than globbing.
+
 **Verified:** `SecretRedactionFilterTest` grows from 14 to 46 cases — three new nested classes
 (`RedactedJsonStaysJson`, which parses every redacted result with Jackson; `ASecretIsRedactedInFull`,
 parameterised over all six delimiters; `AlreadyRedactedValuesKeepTheirPrefix`) plus idempotency, the

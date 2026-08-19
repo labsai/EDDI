@@ -5,6 +5,7 @@
 package ai.labs.eddi.secrets.sanitize;
 
 import java.util.List;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
@@ -64,12 +65,16 @@ public final class SecretRedactionFilter {
     // the possessive form yields identical results while running in linear time on
     // adversarial inputs (e.g. long repetitions of "${vault:").
     //
-    // Two exceptions, both documented where they are: the optional prefix inside
-    // notAlreadyRedacted(), and the quoted rule's LAZY value, which has to be free
-    // to try each candidate closing quote. That one is bounded by the next
-    // UNESCAPED quote, so the candidates it tries are the escaped quotes inside one
-    // field — a handful, not a combinatorial space.
-    private static final List<RedactionRule> RULES = List.of(
+    // The one exception is the optional prefix inside notAlreadyRedacted(),
+    // documented there.
+    //
+    // Nothing here quantifies a GROUP. Java matches `(?:A|B){n,}` by recursion —
+    // one stack frame per repetition — so a group quantifier over a value-length
+    // run overflows the stack on input a user can send. An earlier draft of the
+    // quoted-value rule did exactly that and died on a 200 000-character value
+    // with no escapes in it at all. That rule is now a linear scan; see
+    // redactQuotedValues.
+    private static final List<RedactionRule> SHAPE_RULES = List.of(
             // Anthropic API keys: sk-ant-... — underscores INCLUDED. Real keys carry
             // them, and a class without '_' stopped matching at the first one: a full
             // key inside a gated tool call's arguments sailed through "redacted" and
@@ -85,56 +90,14 @@ public final class SecretRedactionFilter {
             // class (no mandatory '.') so 'Bearer <opaque>' is redacted too, not only
             // dotted JWTs; min length 20 avoids redacting short benign words.
             new RedactionRule(Pattern.compile("Bearer\\s++[A-Za-z0-9\\-_.+/=]{20,}+"),
-                    "Bearer " + REDACTED),
+                    "Bearer " + REDACTED));
 
-            // A credential named by its key, with a QUOTED value — the JSON shape,
-            // including JSON nested as an ESCAPED string ("apiKey\": \"..."), which
-            // is what a tool call whose requestBody argument is itself a JSON
-            // document looks like. The backslash-tolerant quote groups are what see
-            // through that escaping; without them the separator never matches inside
-            // escaped bodies.
-            //
-            // Only the VALUE is replaced. The rule this one replaces matched the
-            // key's closing quote, the colon and the value's opening quote and threw
-            // all three away ("$1=" + REDACTED), so `{"apiKey":"sk-…"}` came back as
-            // `{"apiKey=<REDACTED>"}` — a bare string where a key/value pair was, and
-            // not parseable JSON. Both readers of a redacted body then failed
-            // silently on it: the Manager's approval diff fell back to comparing raw
-            // text and reported the whole stored document as deleted, and its
-            // capability-grant checks sit behind a JSON.parse, so a request that
-            // embedded a credential AND granted dynamic agent creation warned about
-            // the credential alone.
-            //
-            // The value runs to its closing quote rather than to the first
-            // delimiter, which also closes a leak: the loose rule's class stops at
-            // ',', whitespace, ';', '{', '}' and ']', so a secret containing any of
-            // those was only redacted up to that character and the tail survived.
-            //
-            // The closing quote is a BACKREFERENCE to the opening one (\4), not
-            // "any quote". Accepting either let the wrong quote end the value:
-            // `"password":"abcdefgh'xyz"` terminated at the apostrophe and published
-            // the rest, and `"password":"it's-a-secret"` fell under the 8-character
-            // floor at that same apostrophe and was not redacted at all. Tying the
-            // pair together also lets the value class admit the OTHER quote
-            // character, which is what makes both of those whole again.
-            //
-            // `\"` is genuinely ambiguous — a terminator in an escaped-JSON body, an
-            // escaped quote INSIDE the value in a plain one — and the filter cannot
-            // tell which document it is reading. Stopping at the first one leaked
-            // the rest of the value (`"he said \"x\" SECRET"` kept `x\" SECRET`);
-            // running to the last one ate the document. So the value is LAZY and may
-            // cross an escape, and the closing quote must be followed by something
-            // that actually ends a JSON value. The first candidate satisfying that
-            // is the right one in both readings: the escaped body closes at its `\"`
-            // because `}` follows, the plain one carries on past `\"x\"` because a
-            // letter does and closes at the real quote before the comma.
-            new RedactionRule(Pattern.compile(
-                    "(?i)(api[_-]?key|token|secret|password|authorization)((?:\\\\*+[\"'])?+\\s*+[=:]\\s*+)(\\\\*+)([\"'])"
-                            + "(?!\\$\\{(?:vault|eddivault):)" + notAlreadyRedacted("(?=\\\\*+\\4)")
-                            + "(?:(?!\\4)[^\\\\]|\\\\.){8,}?(\\\\*+)\\4(?=\\s*[,}\\]]|$)"),
-                    "$1$2$3$4" + REDACTED + "$5$4"),
-
-            // The same, for a JSON value that carries no quotes of its own — a
+    /**
+     * Rules applied after {@link #redactQuotedValues}, for values that are not a
+     * quoted string.
+     */
+    private static final List<RedactionRule> RULES = List.of(
+            // A JSON value that carries no quotes of its own — a
             // number, or a bare literal. The marker is a string, so it is given the
             // key's own quote style (group 2 and 3, escaped or not) to keep the
             // document parseable: `{"token":12345678}` → `{"token":"<REDACTED>"}`.
@@ -171,16 +134,157 @@ public final class SecretRedactionFilter {
     // caught by the rules above), so nothing is weakened by leaving the pointer
     // legible.
     //
-    // Two of the rules above are kept off it by their value class, which excludes
-    // `{`/`}` so `apiKey: "${vault:x}"` never reaches the 8-char minimum. The
-    // quoted-value rule runs to the closing quote instead and would happily consume
-    // a reference, so it carries an explicit `(?!\$\{(?:vault|eddivault):)` — the
-    // carve-out is a stated rule there rather than a side effect of a character
-    // class, which is also what keeps it from being lost the next time that class
-    // is tuned.
+    // The rules above are kept off it by their value class, which excludes `{`/`}`
+    // so `apiKey: "${vault:x}"` never reaches the 8-char minimum. The quoted-value
+    // scan runs to the closing quote instead and would happily consume a reference,
+    // so shouldRedact() states the carve-out outright — a rule of its own rather
+    // than a side effect of a character class, which is what keeps it from being
+    // lost the next time that class is tuned.
+
+    /**
+     * A credential named by its key, up to and including its value's opening quote.
+     * <p>
+     * Everything after that is found by {@link #redactQuotedValues} rather than by
+     * the regex, so nothing here is quantified over a value-length run.
+     * <p>
+     * The backslash-tolerant quote groups are what see an ESCAPED JSON body
+     * ({@code "apiKey\": \"…"}), which is what a tool call whose requestBody
+     * argument is itself a JSON document looks like; without them the separator
+     * never matches inside one.
+     */
+    private static final Pattern QUOTED_VALUE_START = Pattern.compile(
+            "(?i)(api[_-]?key|token|secret|password|authorization)"
+                    + "(?:\\\\*+[\"'])?+\\s*+[=:]\\s*+\\\\*+[\"']");
+
+    /**
+     * Below this many characters a value is left legible — benign values, mostly.
+     */
+    private static final int MINIMUM_SECRET_LENGTH = 8;
+
+    /**
+     * Exactly what an earlier rule leaves behind when it redacted a WHOLE value.
+     */
+    private static final Pattern FULLY_REDACTED_VALUE = Pattern.compile(
+            "(?:sk-ant-|sk-|Bearer\\s)?" + Pattern.quote(REDACTED));
 
     private SecretRedactionFilter() {
         // Utility class
+    }
+
+    /**
+     * Replace the VALUE of every quoted credential field, keeping both quotes.
+     * <p>
+     * The rule this replaces matched the key's closing quote, the colon and the
+     * value's opening quote and threw all three away, so {@code {"apiKey":"sk-…"}}
+     * came back as {@code {"apiKey=<REDACTED>"}} — a bare string where a key/value
+     * pair was, and not parseable JSON. Both readers of a redacted body then failed
+     * silently on it: the Manager's approval diff fell back to comparing raw text
+     * and reported the whole stored document as deleted, and its capability-grant
+     * checks sit behind a {@code JSON.parse}, so a request that embedded a
+     * credential AND granted dynamic agent creation warned about the credential
+     * alone.
+     * <p>
+     * Written as a scan rather than a pattern because the value cannot safely be
+     * expressed as one. It has to run to the closing quote (stopping at the first
+     * delimiter left the tail of any secret containing one in the output), that
+     * quote has to be the one that opened it (accepting either let an apostrophe
+     * close a double-quoted value and publish the rest), and an escaped quote
+     * inside the value must not end it. Every regex for that quantifies a GROUP,
+     * and Java matches those by recursion — the draft that did overflowed the stack
+     * on a 200 000-character value with no escapes in it at all. A scan has none of
+     * that.
+     */
+    private static String redactQuotedValues(String message) {
+        Matcher matcher = QUOTED_VALUE_START.matcher(message);
+        StringBuilder out = new StringBuilder(message.length());
+        int copiedUpTo = 0;
+        int searchFrom = 0;
+
+        while (searchFrom <= message.length() && matcher.find(searchFrom)) {
+            char quote = message.charAt(matcher.end() - 1);
+            int valueStart = matcher.end();
+            int closingQuote = findClosingQuote(message, valueStart, quote);
+            if (closingQuote < 0) {
+                // No terminator — a truncated body. Left to the loose rule, which
+                // needs no closing quote and still redacts what it can see.
+                break;
+            }
+            searchFrom = closingQuote + 1;
+
+            // Backslashes immediately before the closing quote belong to the closing
+            // token (`\"` in an escaped body), not to the value.
+            int valueEnd = closingQuote;
+            while (valueEnd > valueStart && message.charAt(valueEnd - 1) == '\\') {
+                valueEnd--;
+            }
+            String value = message.substring(valueStart, valueEnd);
+            if (!shouldRedact(value)) {
+                continue;
+            }
+
+            out.append(message, copiedUpTo, valueStart).append(REDACTED);
+            copiedUpTo = valueEnd;
+        }
+
+        return copiedUpTo == 0
+                ? message
+                : out.append(message, copiedUpTo, message.length()).toString();
+    }
+
+    /**
+     * The first quote that both matches the opening one and actually ends a JSON
+     * value, or -1 when the value never closes.
+     * <p>
+     * {@code \"} is genuinely ambiguous — a terminator in an escaped-JSON body, an
+     * escaped quote INSIDE the value in a plain one — and this class cannot know
+     * which document it is reading. What separates them is what FOLLOWS. Closing at
+     * the first candidate leaks the rest of the value
+     * ({@code "he said \"x\" SECRET"} kept {@code x\" SECRET}); closing at the last
+     * runs past the real end of the field and eats the document. Requiring the
+     * candidate to be followed by something that ends a JSON value picks correctly
+     * in both readings: the escaped body closes at its {@code \"} because a brace
+     * follows, the plain one carries on past {@code \"x\"} because a letter does.
+     */
+    private static int findClosingQuote(String text, int from, char quote) {
+        for (int i = from; i < text.length(); i++) {
+            if (text.charAt(i) == quote && endsAValue(text, i + 1)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /** Whether {@code i} is where a JSON value legitimately ends. */
+    private static boolean endsAValue(String text, int i) {
+        int j = i;
+        while (j < text.length() && Character.isWhitespace(text.charAt(j))) {
+            j++;
+        }
+        if (j == text.length()) {
+            return true;
+        }
+        char c = text.charAt(j);
+        return c == ',' || c == '}' || c == ']';
+    }
+
+    /**
+     * Whether a quoted value is one this filter should replace.
+     * <p>
+     * The length floor keeps benign values legible. A {@code ${vault:…}} reference
+     * is a POINTER to a secret and stays legible on purpose — see the note above.
+     * And a value an earlier rule has ALREADY redacted is left alone so its
+     * {@code sk-ant-} / {@code Bearer } prefix survives — but only when that rule
+     * consumed the WHOLE value. {@code sk-ant-}'s own class stops at a delimiter,
+     * so {@code sk-ant-<REDACTED>,SECRET-TAIL} is a half-finished job this has to
+     * complete, losing the prefix. That is the right trade against publishing the
+     * tail, and treating a redacted PREFIX as a redacted value is how the tail got
+     * published in the first place.
+     */
+    private static boolean shouldRedact(String value) {
+        return value.length() >= MINIMUM_SECRET_LENGTH
+                && !value.startsWith("${vault:")
+                && !value.startsWith("${eddivault:")
+                && !FULLY_REDACTED_VALUE.matcher(value).matches();
     }
 
     /**
@@ -196,6 +300,10 @@ public final class SecretRedactionFilter {
         }
 
         String result = message;
+        for (RedactionRule rule : SHAPE_RULES) {
+            result = rule.pattern.matcher(result).replaceAll(rule.replacement);
+        }
+        result = redactQuotedValues(result);
         for (RedactionRule rule : RULES) {
             result = rule.pattern.matcher(result).replaceAll(rule.replacement);
         }
