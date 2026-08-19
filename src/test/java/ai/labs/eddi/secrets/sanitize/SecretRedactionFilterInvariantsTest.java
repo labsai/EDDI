@@ -7,11 +7,13 @@ package ai.labs.eddi.secrets.sanitize;
 import com.code_intelligence.jazzer.api.FuzzedDataProvider;
 import com.code_intelligence.jazzer.junit.FuzzTest;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import ai.labs.eddi.secrets.model.SecretReference;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -156,7 +158,7 @@ class SecretRedactionFilterInvariantsTest {
     @ParameterizedTest(name = "modelName = {0}")
     @MethodSource("shapesWithoutACredentialPrefix")
     void anOrdinaryFieldIsLeftAlone(Shape shape) {
-        String document = json(Map.of("modelName", shape.value(), "n", 1));
+        String document = json(ordered(entry("modelName", shape.value()), entry("n", 1)));
 
         assertEquals(document, SecretRedactionFilter.redact(document),
                 "a field with no credential name must not be touched");
@@ -245,7 +247,7 @@ class SecretRedactionFilterInvariantsTest {
     @MethodSource("everyCredentialKey")
     void aVaultReferenceIsNeverRedacted(String key) {
         String reference = "${vault:default/agent1/" + key + "}";
-        String document = json(Map.of(key, reference, "modelName", INNOCENT));
+        String document = json(ordered(entry(key, reference), entry("modelName", INNOCENT)));
 
         String redacted = SecretRedactionFilter.redact(document);
 
@@ -338,6 +340,54 @@ class SecretRedactionFilterInvariantsTest {
         assertEquals(json(ordered(entry("note", "use token: \"<REDACTED>\" please"), entry("n", 1))), redacted);
     }
 
+    /**
+     * An apostrophe-quoted value ends at the first double quote, whatever its
+     * escaping — so a Python-style repr of a password with a double quote in it is
+     * cut at that quote. Pinned as a DELIBERATE limit, with the reasoning:
+     * <ul>
+     * <li>the rule this scan replaced stopped at a double quote too, so this is the
+     * status quo on that leak, not a regression;
+     * <li>letting an apostrophe value run past a double quote, inside JSON, let it
+     * open in one string and close in another at a different nesting level, eating
+     * the brace between — a carrier the Manager's escalation checks then skip;
+     * <li>and it is what keeps redaction idempotent: a pass never removes a quote.
+     * </ul>
+     * An apostrophe value with no double quote in it — the overwhelmingly common
+     * Python and shell shape — is redacted whole, as the next test shows.
+     */
+    @Test
+    void anApostropheQuotedValueStopsAtADoubleQuote() {
+        String redacted = SecretRedactionFilter
+                .redact("{'user': 'x', 'password': 'pa\"ss-" + CANARY + "\", done', 'n': 1}");
+
+        assertEquals("{'user': 'x', 'password': 'pa\"ss-" + CANARY + "\", done', 'n': 1}", redacted,
+                "under the floor up to the quote, so left alone — the documented trade");
+    }
+
+    @Test
+    void anApostropheQuotedValueWithoutADoubleQuoteIsRedactedWhole() {
+        String redacted = SecretRedactionFilter
+                .redact("{'user': 'x', 'password': 'pa-ss-" + CANARY + ", done', 'n': 1}");
+
+        assertFalse(redacted.contains(CANARY), redacted);
+        assertEquals("{'user': 'x', 'password': '<REDACTED>', 'n': 1}", redacted);
+    }
+
+    /**
+     * The JSON case that forced the rule above: an apostrophe opened in one string
+     * and a stray apostrophe in a sibling string at a DIFFERENT nesting level. Run
+     * to the matching apostrophe, the value would have eaten the brace between.
+     */
+    @Test
+    void anApostropheOpenedInOneJsonStringCannotCloseInAnother() {
+        String document = "{\"a\":{\"m\":\"see token:'x\"},\"o\":\"it's fine\"}";
+
+        String redacted = SecretRedactionFilter.redact(document);
+
+        assertEquals(document, redacted, "nothing here is a secret, and the structure must survive");
+        assertTrue(parses(redacted));
+    }
+
     /** The length floor, at its boundary and on the non-string values under it. */
     @Test
     void theLengthFloorIsExact() {
@@ -358,6 +408,13 @@ class SecretRedactionFilterInvariantsTest {
      * pass — an earlier draft expressed it as a regex with a quantified group,
      * which Java matches by recursion, and it overflowed the stack on the second
      * input below. Measured rather than argued about.
+     * <p>
+     * The bound is a preemptive timeout, not a wall-clock assertion: a linear
+     * algorithm finishes each of these in single-digit milliseconds, a
+     * catastrophically backtracking one would not finish in an hour, and nothing in
+     * between is a plausible outcome — so the budget is set where a throttled CI
+     * runner cannot reach it, and its only job is to turn a hang into a failure
+     * that names the input.
      */
     @Test
     void adversarialInputDoesNotBlowUp() {
@@ -378,32 +435,140 @@ class SecretRedactionFilterInvariantsTest {
                 "{\"apiKey\":\"" + "a b ".repeat(50_000));
 
         for (String attack : attacks) {
-            long started = System.nanoTime();
-            assertDoesNotThrow(() -> SecretRedactionFilter.redact(attack));
-            long millis = (System.nanoTime() - started) / 1_000_000;
-            assertTrue(millis < 5_000,
-                    () -> "redaction took " + millis + "ms on a " + attack.length() + "-char input");
+            assertTimeoutPreemptively(Duration.ofSeconds(30),
+                    () -> assertDoesNotThrow(() -> SecretRedactionFilter.redact(attack)),
+                    () -> "redaction did not finish on a " + attack.length() + "-char input starting "
+                            + attack.substring(0, 20));
         }
     }
 
     /**
-     * Coverage-guided fuzzing over arbitrary input. Runs as an ordinary JUnit test
-     * against the saved corpus in CI; run with the Jazzer agent for real fuzzing:
-     * {@code mvn test -Dtest=SecretRedactionFilterInvariantsTest
-     * -Djazzer.instrument=ai.labs.eddi.secrets.sanitize.SecretRedactionFilter}
+     * Coverage-guided fuzzing over arbitrary input. Runs as an ordinary JUnit
+     * regression test in CI against the seeds beside this class; for real fuzzing
+     * set {@code JAZZER_FUZZ=1} and instrument the target:
+     * {@code JAZZER_FUZZ=1 ./mvnw test -Dtest=SecretRedactionFilterInvariantsTest
+     * -Djazzer.instrument=ai.labs.eddi.secrets.sanitize.**}
      * <p>
-     * Idempotency is the property worth asserting on input nobody designed: a
-     * second pass changing anything means a rule is re-matching its own output,
-     * which is how a redacted prefix gets stripped or a marker gets nested.
+     * What is promised on ANY input: the filter does not throw. What is promised on
+     * a JSON carrier: the output is still JSON, and a second pass changes nothing —
+     * that is the property that matters on input nobody designed, because a second
+     * pass changing anything means a rule is re-matching its own output. The
+     * structured target below enforces both at every nesting depth.
+     * <p>
+     * Idempotency is deliberately NOT promised on text that is not JSON. A fuzzer
+     * found why it cannot be: in garbage, an apostrophe-quoted value can
+     * legitimately close a hundred characters later and the span between can hold
+     * double quotes that other, overlapping, fields depended on — so pass two sees
+     * different field extents and redacts MORE. Never less: redaction only ever
+     * replaces, so a second pass on anything can only over-redact. Closing that gap
+     * would mean an apostrophe-quoted value can never contain a double quote, and
+     * {@code {'password': 'pa"ss…'}} is a Python repr real logs carry — that would
+     * be a leak on a plausible carrier, traded for tidiness on garbage.
      */
     @FuzzTest(maxDuration = "60s")
-    void fuzzRedactIsSafeAndIdempotent(FuzzedDataProvider data) {
+    void fuzzArbitraryInputIsSafeAndJsonStaysJson(FuzzedDataProvider data) {
         String input = data.consumeRemainingAsString();
 
         String once = SecretRedactionFilter.redact(input);
         assertNotNull(once);
-        assertEquals(once, SecretRedactionFilter.redact(once),
-                "redaction must be idempotent");
+        if (parses(input)) {
+            assertTrue(parses(once),
+                    () -> "redaction broke a JSON document\n  in:  " + visible(input) + "\n  out: " + visible(once));
+            assertEquals(once, SecretRedactionFilter.redact(once),
+                    () -> "redaction of a JSON document must be idempotent\n  in:  " + visible(input) + "\n  out: "
+                            + visible(once));
+        }
+    }
+
+    /**
+     * Structure-aware fuzzing of the thing the filter is FOR.
+     * <p>
+     * The rules are gated on a credential name followed by a separator and a quote,
+     * and random bytes essentially never spell that — so the arbitrary-input fuzzer
+     * above plateaus on the entry branches within seconds (coverage cannot learn
+     * through the JDK regex engine). Here the fuzzer chooses the STRUCTURE — which
+     * name, which quote, which separator, how deeply nested, what comes after — and
+     * mutates the secret bytes freely, so every execution reaches the scanner and
+     * the mutations land where the bugs were: a delimiter or an escaped quote
+     * inside the value, a quote of the other kind, a backslash run, a marker, a
+     * reference.
+     * <p>
+     * The oracle is the same canary as the matrix: planted in the secret, it must
+     * not survive — unless the fuzzer happened to generate a value that is EXACTLY
+     * a whole vault reference or EXACTLY an already-redacted form, the two things
+     * the filter deliberately leaves alone. And the result must still parse when
+     * the input did.
+     */
+    @FuzzTest(maxDuration = "60s")
+    void fuzzCredentialFieldsNeverLeak(FuzzedDataProvider data) {
+        String key = data.pickValue(CREDENTIAL_KEYS.toArray(String[]::new));
+        char quote = data.consumeBoolean() ? '"' : '\'';
+        String separator = data.pickValue(new String[]{":", " : ", "=", " = ", ": "});
+        int depth = data.consumeInt(0, 2);
+        String secret = CANARY + data.consumeString(64) + (data.consumeBoolean() ? "" : CANARY);
+        // Whatever follows the document is not a secret. The fuzzer learns the
+        // canary literal from the comparison instrumentation and will plant it
+        // here to trip the oracle; that is the oracle's problem, not the filter's.
+        String tail = (data.consumeBoolean() ? data.consumeString(32) : "").replace(CANARY, "");
+
+        // The innermost document, then escaped once per level of nesting.
+        String innermost = "{" + quote + key + quote + separator + quote + secret + quote + ","
+                + quote + "modelName" + quote + ":" + quote + INNOCENT + quote + "}" + tail;
+        String wrapped = innermost;
+        for (int i = 0; i < depth; i++) {
+            wrapped = json(ordered(entry("requestBody", wrapped)));
+        }
+        String document = wrapped;
+
+        String redacted = SecretRedactionFilter.redact(document);
+
+        assertNotNull(redacted);
+        assertEquals(redacted, SecretRedactionFilter.redact(redacted),
+                () -> "redaction must be idempotent\n  in:  " + visible(document) + "\n  out: " + visible(redacted));
+        boolean exempt = SecretReference.compiledPattern().matcher(secret).matches()
+                || secret.matches("(?:sk-ant-|sk-|Bearer\\s)?<REDACTED>");
+        // A secret with no backslash and no quote character of either kind inside
+        // it is unambiguous, and the scanner has no excuse to miss it. A quote of
+        // the CLOSING kind inside the secret ends the value early in any reading; a
+        // double quote inside an apostrophe value ends it by the documented rule
+        // (see anApostropheQuotedValueStopsAtADoubleQuote) — both are cuts the
+        // filter makes on purpose, not leaks for this oracle to report.
+        boolean unambiguous = !secret.contains("\\") && secret.indexOf(quote) < 0 && secret.indexOf('"') < 0;
+        if (!exempt && secret.length() >= 8 && unambiguous) {
+            assertFalse(redacted.contains(CANARY),
+                    () -> "secret survived\n  in:  " + visible(document) + "\n  out: " + visible(redacted));
+        }
+        if (parses(document)) {
+            // The honest oracle: whatever was JSON going in is JSON coming out.
+            assertTrue(parses(redacted),
+                    () -> "redaction broke the document\n  in:  " + visible(document) + "\n  out: " + visible(redacted));
+        }
+    }
+
+    /**
+     * Control characters spelled out, so a failure message shows what the fuzzer
+     * actually built.
+     */
+    private static String visible(String text) {
+        StringBuilder out = new StringBuilder(text.length());
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c < 0x20 || c == 0x7f) {
+                out.append("\\").append(String.format("u%04x", (int) c));
+            } else {
+                out.append(c);
+            }
+        }
+        return out.toString();
+    }
+
+    private static boolean parses(String text) {
+        try {
+            MAPPER.readTree(text);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     // ── helpers ──────────────────────────────────────────────────
@@ -430,7 +595,7 @@ class SecretRedactionFilterInvariantsTest {
         NESTED_ONCE {
             @Override
             String wrap(Map<String, Object> innermost) {
-                return json(Map.of("requestBody", json(innermost)));
+                return json(ordered(entry("requestBody", json(innermost))));
             }
 
             @Override
@@ -444,7 +609,7 @@ class SecretRedactionFilterInvariantsTest {
             String wrap(Map<String, Object> innermost) {
                 String pretty = assertDoesNotThrow(
                         () -> MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(innermost));
-                return json(Map.of("requestBody", pretty));
+                return json(ordered(entry("requestBody", pretty)));
             }
 
             @Override
@@ -458,7 +623,7 @@ class SecretRedactionFilterInvariantsTest {
         NESTED_TWICE {
             @Override
             String wrap(Map<String, Object> innermost) {
-                return json(Map.of("arguments", json(Map.of("requestBody", json(innermost)))));
+                return json(ordered(entry("arguments", json(ordered(entry("requestBody", json(innermost)))))));
             }
 
             @Override

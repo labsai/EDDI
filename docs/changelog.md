@@ -184,6 +184,95 @@ inside it — and `A2AToolProviderManager.warnIfRawKey` uses a `startsWith` vaul
 decides whether to log a warning. Both pre-date this change and neither produces a leak of the kind
 this branch fixes.
 
+**CodeRabbit's re-review, four findings, three taken.** `assertTimeoutPreemptively(30s)` replaces
+the 5-second wall-clock assertion (a linear algorithm finishes in milliseconds, a catastrophically
+backtracking one would not finish in an hour, nothing in between is plausible — so the budget sits
+where a throttled runner cannot reach it and its only job is turning a hang into a failure that
+names the input); `SecretRedactionFilterTest` shares one `ObjectMapper`; every document in the
+invariant suite is built with `ordered(...)`. **Not taken: a dedicated CI fuzzing job.** The
+ClusterFuzzLite sync guard and `build.sh` both hard-code `src/main/java/ai/labs/eddi/utils/` and the
+filter lives in `secrets/sanitize` with a new dependency on `secrets/model`; generalising a CI
+workflow and a Docker build script I cannot exercise locally is its own change. What I did instead
+is below, and it found more than a CI job would have in its first week.
+
+**Real coverage-guided fuzzing, locally, with the filter instrumented — and it found five more.**
+The in-repo `@FuzzTest` runs in regression mode under `./mvnw test`; run with `JAZZER_FUZZ=1` and
+`-Djazzer.instrument=ai.labs.eddi.secrets.sanitize.**`, the arbitrary-input target plateaued at 24
+coverage edges within seconds: the rules are gated on a credential name followed by a separator and
+a quote, random bytes essentially never spell that, and coverage cannot learn through the JDK regex
+engine. So a **structure-aware** target was added — the fuzzer chooses the key, the quote style, the
+separator, the nesting depth and what follows the document, and mutates the secret bytes freely —
+and every execution reaches the scanner. Its oracle is the same canary as the matrix plus "whatever
+was JSON going in is JSON coming out", checked empirically. Coverage went to 129 edges; the first
+finding arrived in one second. In order:
+
+1. *Test oracle, not filter:* Jazzer learns string constants from comparison instrumentation and
+   planted the canary in the post-document tail. The tail is not a secret; it is now stripped of
+   the canary before use.
+2. **An unterminated apostrophe-quoted value inside a JSON string ran "redact to the end" through
+   the enclosing string's closing quote** — `"message":"… token:'abc"}` left the carrier unparseable.
+   Bounded at the enclosing string's end; see 4 and 5 for what "the end" had to mean.
+3. **A value opened three backslashes deep that closed on the enclosing string's bare quote had
+   three backslashes stripped from in front of that quote** — turning a run of six escaped
+   backslashes into five and the bare quote into an escaped one. The closing token's escaping is
+   read off the closing quote itself (`escapingOf`: the lowest set bit of `b + 1`, minus one), not
+   assumed equal to the opening's.
+4. **`SECRET:'SECRET:'<long>'` — the first field's value `SECRET:` is under the floor and left
+   alone, and its closing apostrophe is the second field's opening one.** Resuming the search past
+   that close skipped the second field; a second pass then redacted it. An untouched value's text is
+   still live, so the search resumes just inside its opening quote. Linear: each untouched value is
+   read at most once more.
+5. **Three idempotency failures in the apostrophe bound, each a "what follows the quote" test:**
+   first "followed by `,` `}` `]` or end of input" (a redaction after the quote changed what
+   followed it), then "…but not end of input" (the `]` that followed was the first character of an
+   inner value, redacted by pass one), then "the first bare quote" (which swallowed an *escaped*
+   quote that was a deeper field's terminator). The stable rule is the one that preserves the
+   invariant every pass already keeps — **never remove or re-escape a quote**: the bound is the
+   first double quote of any escaping, less that quote's own backslashes. Alongside it, the opening
+   quote's depth is `escapingOf(count)` rather than the raw count (four backslashes are two escaped
+   backslashes of content and a bare quote, not depth five), and the unquoted JSON rule admits only
+   a genuine escaping depth — none, one, three or seven backslashes — in front of a key's quote, so
+   it never mirrors content backslashes onto the marker it emits.
+
+**Then the arbitrary-input fuzzer, given a seed corpus so it reaches the scanner, found four more
+— and forced one decision to be reversed.** Its oracle is now scoped honestly: no exception on any
+input; on a JSON carrier, the output parses and a second pass changes nothing.
+
+6. `{"a":{"m":"token:'x"},"o":"it's"}` — an apostrophe opened in one string and closed in another
+   at a different nesting level **ate the brace between**, in strictly valid JSON. I had decided
+   twenty minutes earlier that an apostrophe value may contain a double quote (for
+   `{'password': 'pa"ss'}`, a Python repr). Reversed: **an apostrophe value ends at the first
+   double quote of any escaping**. The rule it replaced stopped at a double quote too, so that is
+   the status quo on the Python-repr-with-a-quote leak — and it is what makes the scan JSON-safe at
+   every depth and idempotent everywhere, because a pass then never removes a quote. Both decisions
+   are pinned as tests with the reasoning; the reversal is recorded here so nobody relitigates it
+   from the first one.
+7. A vault reference whose key name happened to contain `token:'` was exempted whole — correctly —
+   and then **searched inside**, because the not-redacted path resumed just inside the value. Part
+   of the reference's interior was redacted, closing brace and all, and a second pass saw no
+   reference. An exempt value is a token, not live text; the search now resumes AFTER an exempt
+   value and INSIDE only an under-floor one (which can legitimately hide a field's opening).
+8. `{"token:":12378901}` — a key NAMED `token:`, colon included, in valid JSON. Both the scan and
+   the loose rule read the colon inside the name as the separator and the key's closing quote as a
+   value's opening quote, and left a bare marker. The loose rule's trailing optional quote is gone
+   (every quoted value has already been decided by the scan before it runs, so that group could
+   only ever misread), and the scan skips the one shape where the key-close group is empty, the
+   name sits directly inside a quoted key, and the supposed opening quote is followed by a
+   separator — three things true together of that shape and of nothing legitimate. A value that
+   starts with a colon and a credential embedded at the start of a string value are both pinned
+   as still redacting.
+9. Two more were oracle defects, not filter defects — Jazzer plants the canary literal in the
+   post-document tail, and `Map.of` documents tripped a `Character.isWhitespace` surprise — and
+   are noted only because they cost time.
+
+After all of that: **the arbitrary-input fuzzer ran 4.2 million executions in eight minutes with
+zero findings** (every earlier one arrived inside two), and the structured fuzzer **11 million in
+eight minutes, also zero**. Discovered inputs are kept as regression seeds under
+`SecretRedactionFilterInvariantsTestInputs/`, and failure messages spell out control characters.
+
+The invariant matrix grew again — 11 keys × 33 shapes × 8 placements, plus every key × shape through
+four carriers and every key × shape truncated: **6 336 cases across both suites.**
+
 **Verified:** `SecretRedactionFilterTest` grows from 14 to 64 cases — three new nested classes
 (`RedactedJsonStaysJson`, which parses every redacted result with Jackson; `ASecretIsRedactedInFull`,
 parameterised over all six delimiters; `AlreadyRedactedValuesKeepTheirPrefix`) plus idempotency, the

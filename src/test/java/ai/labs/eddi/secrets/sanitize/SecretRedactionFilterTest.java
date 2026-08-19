@@ -16,10 +16,11 @@ class SecretRedactionFilterTest {
 
     private static final String ANTHROPIC_KEY = "sk-ant-api03-CeIJ4onq59Mf_oN4mICgfgScyJO5bfxFSS3Sdvo1Zgo2F7zUfEvx";
     private static final String REDACTED_MARKER = "<REDACTED>";
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     /** Redaction must never turn a JSON document into something that is not one. */
     private static void assertValidJson(String value) {
-        assertDoesNotThrow(() -> new ObjectMapper().readTree(value),
+        assertDoesNotThrow(() -> MAPPER.readTree(value),
                 () -> "redaction produced something that is no longer JSON: " + value);
     }
 
@@ -257,6 +258,39 @@ class SecretRedactionFilterTest {
             assertEquals("password: <REDACTED>", SecretRedactionFilter.redact("password: hunter2butlonger"));
         }
 
+        @Test
+        void aKeyWhoseNameEndsInAColonIsNotMisreadAsASeparator() {
+            // Found by a fuzzer, in valid JSON: a key NAMED `token:`. The loose rule
+            // read the colon inside the name as the separator and the key's closing
+            // quote as the value's opening quote, then consumed the real separator
+            // and the number — leaving a bare marker where the pair had been. The
+            // rule before this branch broke it the same way. The value is not under
+            // a recognised credential key, so it is left alone — and the document
+            // stays JSON, which is the promise.
+            String input = "{\"token:\":12378901,\"password\":\"${vaut:G\",\"secret\":\"<REDACTED>\"}";
+            String result = SecretRedactionFilter.redact(input);
+
+            assertEquals("{\"token:\":12378901,\"password\":\"<REDACTED>\",\"secret\":\"<REDACTED>\"}", result);
+            assertValidJson(result);
+        }
+
+        @Test
+        void theKeyWithASeparatorGuardDoesNotCatchAValueStartingWithAColon() {
+            // Distinguished from the case above by the key-close quote being present.
+            String result = SecretRedactionFilter.redact("{\"password\": \":starts-with-colon\",\"n\":1}");
+
+            assertEquals("{\"password\": \"<REDACTED>\",\"n\":1}", result);
+        }
+
+        @Test
+        void theKeyWithASeparatorGuardDoesNotCatchACredentialAtTheStartOfAStringValue() {
+            // Distinguished from the case above by no separator following the quote.
+            String result = SecretRedactionFilter.redact("{\"error\":\"password:\\\"hunter2butlonger\\\" is invalid\"}");
+
+            assertFalse(result.contains("hunter2butlonger"), result);
+            assertEquals("{\"error\":\"password:\\\"<REDACTED>\\\" is invalid\"}", result);
+            assertValidJson(result);
+        }
     }
 
     /**
@@ -317,9 +351,23 @@ class SecretRedactionFilterTest {
         }
 
         @Test
-        void aSingleQuotedValueMayContainDoubleQuotes() {
-            // The mirror image, which the backreference gets for free.
+        void aSingleQuotedValueStopsAtADoubleQuote() {
+            // NOT the mirror image, deliberately. An apostrophe value ends at the
+            // first double quote of any escaping: JSON has no apostrophe quoting, so
+            // an apostrophe value may be sitting inside a JSON string at any depth,
+            // and one that ran on to its matching apostrophe could open in one
+            // string and close in another at a different nesting level, eating the
+            // brace between. The rule this scan replaced stopped at a double quote
+            // too, so this is the status quo on the tail here, not a regression —
+            // and the shape it protects is the one the Manager's checks depend on.
             String result = SecretRedactionFilter.redact("password='abcdefgh\"SURVIVING-TAIL'");
+
+            assertEquals("password='<REDACTED>\"SURVIVING-TAIL'", result);
+        }
+
+        @Test
+        void aSingleQuotedValueWithoutADoubleQuoteIsRedactedWhole() {
+            String result = SecretRedactionFilter.redact("password='abcdefgh SURVIVING-TAIL, and more'");
 
             assertFalse(result.contains("SURVIVING-TAIL"), result);
             assertEquals("password='<REDACTED>'", result);

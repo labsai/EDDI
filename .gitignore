@@ -93,3 +93,8 @@ eddi-audit-deadletter.jsonl
 licenses/third-party/
 licenses/licenses.xml
 licenses/THIRD-PARTY.txt
+
+# Jazzer working corpus, written next to the repo root while a @FuzzTest runs in
+# fuzzing mode (JAZZER_FUZZ=1). Thousands of small files, regenerated every run.
+# The inputs worth keeping are checked in under src/test/resources/**/*Inputs/.
+.cifuzz-corpus/
