@@ -3005,7 +3005,9 @@
     "importing": "Importing agent...",
     "contentIdentical": "Content identical",
     "targetContent": "Target",
-    "sourceContent": "Source"
+    "sourceContent": "Source",
+    "diffHiddenLines": "Show {{lines}} unchanged lines",
+    "diffRawComparison": "Not valid JSON — compared as plain text, so a difference of formatting alone also shows up as a change."
   },
   "sync": {
     "actionCreate": "New",
@@ -4049,6 +4051,8 @@
       "diffFailed": "Couldn't load the stored version to compare against — the full proposed document is below.",
       "diffForbidden": "Comparing against the stored version needs editor access — the full proposed document is below.",
       "diffRedactionNote": "Credential values are redacted in the proposed version, so they appear as changes here even when unchanged.",
+      "diffStored": "Stored v{{version}}",
+      "diffProposed": "Proposed",
       "showFullRequest": "Show the full proposed document",
       "hideFullRequest": "Hide the full proposed document",
       "expandBody": "Expand",

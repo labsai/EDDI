@@ -178,6 +178,10 @@ export function RequestPreview({ preview, pinned, callId }: RequestPreviewProps)
           <ResourceDiffViewer
             sourceContent={preview.body ?? ""}
             targetContent={JSON.stringify(currentDocument.data)}
+            labels={{
+              target: t("operator.approval.diffStored", "Stored v{{version}}", { version: writeTarget!.version }),
+              source: t("operator.approval.diffProposed", "Proposed"),
+            }}
           />
           {bodyHasRedactions(preview.body) && (
             <p

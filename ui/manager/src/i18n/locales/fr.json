@@ -2813,7 +2813,9 @@
     "importing": "Import de l'agent en cours…",
     "contentIdentical": "Contenu identique",
     "targetContent": "Cible",
-    "sourceContent": "Source"
+    "sourceContent": "Source",
+    "diffHiddenLines": "Afficher {{lines}} lignes inchangées",
+    "diffRawComparison": "JSON non valide — comparaison en texte brut : une simple différence de mise en forme apparaît donc aussi comme une modification."
   },
   "syncPage": {
     "title": "Synchronisation d'agents",
@@ -4079,6 +4081,8 @@
       "diffFailed": "Impossible de charger la version enregistrée pour comparaison — le document proposé complet figure ci-dessous.",
       "diffForbidden": "La comparaison avec la version enregistrée nécessite un accès éditeur — le document proposé complet figure ci-dessous.",
       "diffRedactionNote": "Les identifiants sont masqués dans la version proposée : ils apparaissent donc ici comme des modifications même s'ils sont inchangés.",
+      "diffStored": "Enregistré v{{version}}",
+      "diffProposed": "Proposé",
       "showFullRequest": "Afficher le document proposé complet",
       "hideFullRequest": "Masquer le document proposé complet",
       "expandBody": "Développer",

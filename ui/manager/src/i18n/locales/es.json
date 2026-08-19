@@ -2813,7 +2813,9 @@
     "importing": "Importando agente…",
     "contentIdentical": "Contenido idéntico",
     "targetContent": "Destino",
-    "sourceContent": "Origen"
+    "sourceContent": "Origen",
+    "diffHiddenLines": "Mostrar {{lines}} líneas sin cambios",
+    "diffRawComparison": "JSON no válido: se compara como texto plano, así que una diferencia solo de formato también aparece como un cambio."
   },
   "syncPage": {
     "title": "Sincronización de agentes",
@@ -4079,6 +4081,8 @@
       "diffFailed": "No se pudo cargar la versión almacenada para comparar: el documento propuesto completo está abajo.",
       "diffForbidden": "Comparar con la versión almacenada requiere acceso de editor: el documento propuesto completo está abajo.",
       "diffRedactionNote": "Las credenciales están ocultas en la versión propuesta, por lo que aparecen aquí como cambios aunque no hayan cambiado.",
+      "diffStored": "Almacenado v{{version}}",
+      "diffProposed": "Propuesto",
       "showFullRequest": "Mostrar el documento propuesto completo",
       "hideFullRequest": "Ocultar el documento propuesto completo",
       "expandBody": "Expandir",

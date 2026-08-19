@@ -2952,7 +2952,9 @@
     "importing": "Agent wird importiert…",
     "contentIdentical": "Inhalt identisch",
     "targetContent": "Ziel",
-    "sourceContent": "Quelle"
+    "sourceContent": "Quelle",
+    "diffHiddenLines": "{{lines}} unveränderte Zeilen anzeigen",
+    "diffRawComparison": "Kein gültiges JSON – Vergleich als reiner Text, daher erscheint auch ein reiner Formatierungsunterschied als Änderung."
   },
   "syncPage": {
     "title": "Agenten-Synchronisierung",
@@ -4049,6 +4051,8 @@
       "diffFailed": "Die gespeicherte Version konnte nicht zum Vergleich geladen werden — das vollständige vorgeschlagene Dokument steht unten.",
       "diffForbidden": "Der Vergleich mit der gespeicherten Version erfordert Bearbeitungsrechte — das vollständige vorgeschlagene Dokument steht unten.",
       "diffRedactionNote": "Zugangsdaten sind in der vorgeschlagenen Version geschwärzt und erscheinen hier daher als Änderungen, auch wenn sie unverändert sind.",
+      "diffStored": "Gespeichert v{{version}}",
+      "diffProposed": "Vorgeschlagen",
       "showFullRequest": "Vollständiges vorgeschlagenes Dokument anzeigen",
       "hideFullRequest": "Vollständiges vorgeschlagenes Dokument ausblenden",
       "expandBody": "Ausklappen",

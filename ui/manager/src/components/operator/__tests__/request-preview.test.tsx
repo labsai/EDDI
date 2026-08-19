@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
 import { http, HttpResponse } from "msw";
 import { server } from "@/test/mocks/server";
@@ -228,6 +228,14 @@ describe("RequestPreview", () => {
 
 /* ─── Whole-document PUT diff ─── */
 
+/** Diff rows inside a rendered preview, optionally narrowed to one kind. */
+function diffRows(diff: HTMLElement, kind?: "added" | "removed" | "context"): string[] {
+  return within(diff)
+    .getAllByTestId("diff-line")
+    .filter((row) => !kind || row.getAttribute("data-diff-kind") === kind)
+    .map((row) => row.lastElementChild?.textContent ?? "");
+}
+
 const STORED = { id: "r1", name: "Greeting rules", threshold: 5, description: "unchanged" };
 const PROPOSED = { ...STORED, threshold: 9 };
 
@@ -266,6 +274,50 @@ describe("RequestPreview — whole-document PUT diff", () => {
 
     const diff = await screen.findByTestId("request-preview-diff-c1");
     expect(diff).toHaveTextContent(/threshold/);
+    // The legend speaks the approver's language, not the import dialog's.
+    expect(diff).toHaveTextContent("Stored v3");
+    expect(diff).toHaveTextContent("Proposed");
+    expect(diff).not.toHaveTextContent(/Target/);
+  });
+
+  it("survives the redaction filter's mangled credential field — the shape from the report", async () => {
+    // SecretRedactionFilter rewrites `"apiKey":"sk-…"` as `"apiKey=<REDACTED>"`,
+    // which no longer parses. Before the repair this put the proposed body on
+    // one raw line and every stored line in red.
+    serveStored({ ...STORED, apiKey: "sk-ant-stored" });
+    renderWithProviders(
+      <RequestPreview
+        preview={putPreview({
+          body: '{"id":"r1","name":"Greeting rules","threshold":9,"description":"unchanged","apiKey=<REDACTED>"}',
+        })}
+        pinned
+        callId="c1"
+      />,
+    );
+
+    const diff = await screen.findByTestId("request-preview-diff-c1");
+    expect(within(diff).queryByTestId("diff-raw-comparison")).not.toBeInTheDocument();
+    expect(diffRows(diff, "added")).toContain('  "threshold": 9');
+    // Unchanged, so one shared context row — not one on each side.
+    expect(diffRows(diff).filter((line) => line.includes("unchanged"))).toHaveLength(1);
+    // The redaction note still explains why apiKey shows as changed.
+    expect(screen.getByTestId("request-preview-diff-redaction-note-c1")).toBeInTheDocument();
+  });
+
+  it("diffs a compact request body against the stored document without reporting a rewrite", async () => {
+    // EDDI sends the resolved body as the operator built it — compact, one
+    // line. Compared against the stored document as-is that reads as "every
+    // line deleted, one line added", which is the opposite of a review aid.
+    serveStored();
+    renderWithProviders(
+      <RequestPreview preview={putPreview({ body: JSON.stringify(PROPOSED) })} pinned callId="c1" />,
+    );
+
+    const diff = await screen.findByTestId("request-preview-diff-c1");
+    expect(diffRows(diff, "added")).toContain('  "threshold": 9');
+    expect(diffRows(diff, "removed")).toContain('  "threshold": 5');
+    // The fields that did not change are rendered once, as shared context.
+    expect(diffRows(diff).filter((line) => line.includes("unchanged"))).toHaveLength(1);
   });
 
   it("keeps the full proposed document reachable behind a toggle", async () => {

@@ -2786,7 +2786,9 @@
     "importing": "エージェントをインポート中...",
     "contentIdentical": "同一コンテンツ",
     "targetContent": "ターゲット",
-    "sourceContent": "ソース"
+    "sourceContent": "ソース",
+    "diffHiddenLines": "変更のない {{lines}} 行を表示",
+    "diffRawComparison": "有効な JSON ではないため、プレーンテキストとして比較します。書式だけの違いも変更として表示されます。"
   },
   "syncPage": {
     "title": "エージェントの同期",
@@ -4049,6 +4051,8 @@
       "diffFailed": "比較用の保存済みバージョンを読み込めませんでした — 提案されたドキュメント全体は下に表示されます。",
       "diffForbidden": "保存済みバージョンとの比較には編集者権限が必要です — 提案されたドキュメント全体は下に表示されます。",
       "diffRedactionNote": "提案版では認証情報がマスクされているため、変更されていなくてもここでは変更として表示されます。",
+      "diffStored": "保存済み v{{version}}",
+      "diffProposed": "提案",
       "showFullRequest": "提案されたドキュメント全体を表示",
       "hideFullRequest": "提案されたドキュメント全体を非表示",
       "expandBody": "展開",

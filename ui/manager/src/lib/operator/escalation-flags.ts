@@ -1,4 +1,5 @@
 import { gateLooksInstalled } from "@/lib/api/operator";
+import { parseRedactedJson } from "@/lib/redacted-json";
 import type { Agent } from "@/lib/api/agents";
 
 /**
@@ -264,6 +265,16 @@ function findInlineCredential(body: string): string | null {
  * JSON object — silently, because a non-JSON body is ordinary (a form post,
  * plain text) and not something to warn about. The inline-credential scan runs
  * regardless of shape: it is a string-level find.
+ *
+ * That silence had a hole in it, and it opened on exactly the request this
+ * function most needs to read. `SecretRedactionFilter`'s last rule swallows the
+ * quotes around a credential VALUE (`"apiKey":"…"` → `"apiKey=<REDACTED>"`, see
+ * `redacted-json.ts`), so any body carrying a credential-named field arrived
+ * unparseable — and every setting check below was skipped without a word. A
+ * request that both embedded a credential AND granted dynamic agent creation
+ * warned about the credential alone, and an approver reads "no second warning"
+ * as "no capability grant". `parseRedactedJson` repairs that one shape, so the
+ * checks now run on the request class they were written for.
  */
 export function detectEscalationFlags(body: string | null | undefined): EscalationFlag[] {
   if (!body) return [];
@@ -274,12 +285,9 @@ export function detectEscalationFlags(body: string | null | undefined): Escalati
     flags.push({ id: "inlineCredential", path: credential });
   }
 
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(body);
-  } catch {
-    return flags;
-  }
+  const result = parseRedactedJson(body);
+  if (!result.ok) return flags;
+  const parsed = result.value;
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return flags;
 
   return [

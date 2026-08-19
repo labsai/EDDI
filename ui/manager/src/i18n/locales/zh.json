@@ -2786,7 +2786,9 @@
     "importing": "正在导入智能体...",
     "contentIdentical": "内容一致",
     "targetContent": "目标",
-    "sourceContent": "源"
+    "sourceContent": "源",
+    "diffHiddenLines": "显示 {{lines}} 行未更改内容",
+    "diffRawComparison": "不是有效的 JSON——按纯文本比较，因此仅格式上的差异也会显示为更改。"
   },
   "syncPage": {
     "title": "智能体同步",
@@ -4049,6 +4051,8 @@
       "diffFailed": "无法加载用于比较的已存储版本——完整的拟议文档见下方。",
       "diffForbidden": "与已存储版本比较需要编辑者权限——完整的拟议文档见下方。",
       "diffRedactionNote": "拟议版本中的凭据值已被隐去，因此即使未更改也会在此显示为变更。",
+      "diffStored": "已存储 v{{version}}",
+      "diffProposed": "提议",
       "showFullRequest": "显示完整的拟议文档",
       "hideFullRequest": "隐藏完整的拟议文档",
       "expandBody": "展开",

@@ -2786,7 +2786,9 @@
     "importing": "에이전트 가져오는 중...",
     "contentIdentical": "내용 동일함",
     "targetContent": "대상 (Target)",
-    "sourceContent": "원본 (Source)"
+    "sourceContent": "원본 (Source)",
+    "diffHiddenLines": "변경되지 않은 {{lines}}줄 표시",
+    "diffRawComparison": "유효한 JSON이 아니므로 일반 텍스트로 비교합니다. 서식만 다른 경우에도 변경으로 표시됩니다."
   },
   "syncPage": {
     "title": "에이전트 동기화",
@@ -4049,6 +4051,8 @@
       "diffFailed": "비교할 저장된 버전을 불러오지 못했습니다 — 제안된 전체 문서는 아래에 있습니다.",
       "diffForbidden": "저장된 버전과 비교하려면 편집자 권한이 필요합니다 — 제안된 전체 문서는 아래에 있습니다.",
       "diffRedactionNote": "제안된 버전에서는 자격 증명 값이 가려져 있어, 변경되지 않았더라도 여기서는 변경으로 표시됩니다.",
+      "diffStored": "저장됨 v{{version}}",
+      "diffProposed": "제안됨",
       "showFullRequest": "제안된 전체 문서 보기",
       "hideFullRequest": "제안된 전체 문서 숨기기",
       "expandBody": "펼치기",
