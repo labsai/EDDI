@@ -119,7 +119,7 @@ export function WorkforceLayout() {
   // ─── Mobile ──────────────────────────────────────────────────
   if (viewport === "mobile") {
     return (
-      <div className="Workforce flex h-screen flex-col overflow-hidden">
+      <div className="Workforce relative flex h-screen flex-col overflow-hidden">
         <WorkforceShortcuts />
         <ShortcutsDialog />
         <a
@@ -144,7 +144,7 @@ export function WorkforceLayout() {
   // ─── Tablet ──────────────────────────────────────────────────
   if (viewport === "tablet") {
     return (
-      <div className="Workforce flex h-screen flex-col overflow-hidden">
+      <div className="Workforce relative flex h-screen flex-col overflow-hidden">
         <WorkforceShortcuts />
         <ShortcutsDialog />
         <a
@@ -201,7 +201,7 @@ export function WorkforceLayout() {
 
   // ─── Desktop ─────────────────────────────────────────────────
   return (
-    <div className="Workforce flex h-screen overflow-hidden">
+    <div className="Workforce relative flex h-screen overflow-hidden">
       <WorkforceShortcuts />
       <ShortcutsDialog />
       <a

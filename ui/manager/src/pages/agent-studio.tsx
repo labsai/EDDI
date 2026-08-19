@@ -159,7 +159,12 @@ export function AgentStudioPage() {
   const selectedStep = selectedStageIndex !== null ? workflowSteps[selectedStageIndex] : null;
 
   return (
-    <div className="flex h-screen flex-col bg-background" data-testid="agent-studio">
+    // `relative`: same contract as AppLayout — a fixed-height shell that scrolls
+    // only in its inner panes. Without a positioned root, an `absolute`
+    // descendant (Tailwind's `sr-only`, for one) resolves against the initial
+    // containing block, slips past the `overflow-hidden` body row below, and
+    // scrolls the whole studio.
+    <div className="relative flex h-screen flex-col bg-background" data-testid="agent-studio">
       {/* Header */}
       <div className="flex items-center gap-3 border-b border-border px-4 py-2.5 shrink-0">
         <Link

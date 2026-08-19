@@ -45,7 +45,13 @@ export function AppLayout() {
   }, [mobileSidebarOpen]);
 
   return (
-    <div className="flex h-screen overflow-hidden" data-testid="app-layout">
+    // `relative`: makes the shell a containing block for absolutely positioned
+    // descendants. Without it an `absolute` element deep inside a page (Tailwind's
+    // `sr-only` is `position: absolute`) resolves against the initial containing
+    // block, so no `overflow-hidden`/`overflow-y-auto` ancestor can clip it, it
+    // extends the document's scroll height, and focusing it scrolls the WHOLE
+    // layout. The shell must never scroll — only <main> does.
+    <div className="relative flex h-screen overflow-hidden" data-testid="app-layout">
       {/* Skip to main content — keyboard accessibility */}
       <a href="#main-content" className="skip-to-main">
         {t("common.skipToMain", "Skip to main content")}

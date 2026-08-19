@@ -110,7 +110,11 @@ function ToggleRow({
   return (
     <label
       className={cn(
-        "flex items-center gap-3 rounded-lg px-3 py-2 transition-colors",
+        // `relative`: the checkbox below is `sr-only`, which is
+        // `position: absolute`. Without a positioned ancestor it resolves
+        // against the initial containing block, escapes every scroll
+        // container, and stretches the document so the whole layout scrolls.
+        "relative flex items-center gap-3 rounded-lg px-3 py-2 transition-colors",
         !readOnly && "cursor-pointer hover:bg-muted/30",
         checked && "bg-primary/5",
       )}

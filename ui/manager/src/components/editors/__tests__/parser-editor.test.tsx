@@ -656,4 +656,27 @@ describe("ParserEditor", () => {
     expect(row).toHaveTextContent("eddi://ai.labs.rules/rulestore/rulesets/beh1?version=1");
     expect(screen.queryByTestId("open-regular-dict-0")).not.toBeInTheDocument();
   });
+
+  // ── Layout ──
+
+  it("keeps every hidden checkbox inside a positioned label", () => {
+    renderEditor();
+
+    // `sr-only` is `position: absolute`. With no positioned ancestor the input
+    // resolves against the initial containing block, so it escapes <main>'s
+    // scroll container, stretches the document, and focusing it scrolls the
+    // entire app shell instead of the page. jsdom computes no Tailwind styles,
+    // so the class is the thing to pin. See e2e/layout-scroll.spec.ts for the
+    // behavioural counterpart.
+    const inputs = Array.from(
+      screen.getByTestId("parser-editor").querySelectorAll("input.sr-only"),
+    );
+    expect(inputs.length).toBeGreaterThan(0);
+
+    for (const input of inputs) {
+      const label = input.closest("label");
+      expect(label).not.toBeNull();
+      expect(label?.className).toContain("relative");
+    }
+  });
 });
