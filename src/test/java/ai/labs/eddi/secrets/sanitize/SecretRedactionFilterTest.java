@@ -281,7 +281,7 @@ class SecretRedactionFilterTest {
             // reads as a 36-character value. Redacting whitespace can only destroy
             // structure — it never protects a secret — so a blank value is left
             // alone whatever the shape around it.
-            String input = "\"----------------token:\"" + "	".repeat(36);
+            String input = "\"----------------token:\"" + "\t".repeat(36);
             assertEquals(input, SecretRedactionFilter.redact(input));
             assertValidJson(input);
         }
@@ -375,6 +375,14 @@ class SecretRedactionFilterTest {
             // is content. (Opened INSIDE a double-quoted string it could not cross
             // that string's end; the invariant suite pins both.)
             String result = SecretRedactionFilter.redact("password='abcdefgh\"SURVIVING-TAIL'");
+
+            assertFalse(result.contains("SURVIVING-TAIL"), result);
+            assertEquals("password='<REDACTED>'", result);
+        }
+
+        @Test
+        void aSingleQuotedValueWithoutADoubleQuoteIsRedactedWhole() {
+            String result = SecretRedactionFilter.redact("password='abcdefgh SURVIVING-TAIL, and more'");
 
             assertFalse(result.contains("SURVIVING-TAIL"), result);
             assertEquals("password='<REDACTED>'", result);
