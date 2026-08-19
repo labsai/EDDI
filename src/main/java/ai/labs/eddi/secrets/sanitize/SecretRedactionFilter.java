@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.secrets.sanitize;
 
+import ai.labs.eddi.secrets.model.SecretReference;
+
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -93,6 +95,20 @@ public final class SecretRedactionFilter {
                     "Bearer " + REDACTED));
 
     /**
+     * A whole vault reference, as an OPTIONAL, possessive prefix on an unquoted
+     * value.
+     * <p>
+     * The unquoted rules stop their value at {@code {}, which is what keeps them
+     * off a reference — and is also a bypass: {@code password: ${vault:key}SECRET}
+     * matched nothing, because the value was one character long at the brace.
+     * Letting the value BEGIN with a reference means reference-plus-tail is matched
+     * and replaced as a whole, while a bare reference still falls short of the
+     * length floor that follows it and survives. Possessive on both counts, so a
+     * reference is never given back to be re-read as value material.
+     */
+    private static final String OPTIONAL_VAULT_REFERENCE = "(?:\\$\\{(?:vault|eddivault):[^}]*+\\})?+";
+
+    /**
      * Rules applied after {@link #redactQuotedValues}, for values that are not a
      * quoted string.
      */
@@ -104,7 +120,7 @@ public final class SecretRedactionFilter {
             new RedactionRule(Pattern.compile(
                     "(?i)(api[_-]?key|token|secret|password|authorization)(\\\\*+)([\"'])(\\s*+:\\s*+)"
                             + "(?!\\\\*+[\"'])" + notAlreadyRedacted("(?=[\\s,;}{\\]\"']|$)")
-                            + "[^\\s,;}{\\]\"'\\\\]{8,}+"),
+                            + OPTIONAL_VAULT_REFERENCE + "[^\\s,;}{\\]\"'\\\\]{8,}+"),
                     "$1$2$3$4$2$3" + REDACTED + "$2$3"),
 
             // Everything that is not JSON: query strings (?api_key=…), log lines
@@ -113,7 +129,7 @@ public final class SecretRedactionFilter {
             new RedactionRule(Pattern.compile(
                     "(?i)(api[_-]?key|token|secret|password|authorization)((?:\\\\*+[\"'])?+\\s*+[=:]\\s*+(?:\\\\*+[\"'])?+)"
                             + notAlreadyRedacted("(?=['\"\\\\\\s,;}{\\]]|$)")
-                            + "[^'\"\\\\\\s,;}{\\]]{8,}+"),
+                            + OPTIONAL_VAULT_REFERENCE + "[^'\"\\\\\\s,;}{\\]]{8,}+"),
                     "$1$2" + REDACTED));
 
     // A `${vault:...}` reference is DELIBERATELY NOT redacted. It is a pointer to
@@ -134,12 +150,13 @@ public final class SecretRedactionFilter {
     // caught by the rules above), so nothing is weakened by leaving the pointer
     // legible.
     //
-    // The rules above are kept off it by their value class, which excludes `{`/`}`
-    // so `apiKey: "${vault:x}"` never reaches the 8-char minimum. The quoted-value
-    // scan runs to the closing quote instead and would happily consume a reference,
-    // so shouldRedact() states the carve-out outright — a rule of its own rather
-    // than a side effect of a character class, which is what keeps it from being
-    // lost the next time that class is tuned.
+    // Every exemption for it is a WHOLE-REFERENCE match, never a prefix check. A
+    // prefix check is a bypass — `${vault:key}SECRET-TAIL` is a secret wearing a
+    // pointer as a hat — and AgentSetupService moved off the contains-style
+    // isVaultReference for the same reason. shouldRedact() uses the repository's
+    // canonical SecretReference pattern, and the two unquoted rules carry
+    // OPTIONAL_VAULT_REFERENCE so that reference-plus-tail is redacted as a whole
+    // while a bare reference still falls short of the length floor and survives.
 
     /**
      * A credential named by its key, up to and including its value's opening quote.
@@ -150,11 +167,12 @@ public final class SecretRedactionFilter {
      * The backslash-tolerant quote groups are what see an ESCAPED JSON body
      * ({@code "apiKey\": \"…"}), which is what a tool call whose requestBody
      * argument is itself a JSON document looks like; without them the separator
-     * never matches inside one.
+     * never matches inside one. Group 2 — the backslashes in front of the value's
+     * opening quote — is how deep that nesting goes, and the scan needs it.
      */
     private static final Pattern QUOTED_VALUE_START = Pattern.compile(
             "(?i)(api[_-]?key|token|secret|password|authorization)"
-                    + "(?:\\\\*+[\"'])?+\\s*+[=:]\\s*+\\\\*+[\"']");
+                    + "(?:\\\\*+[\"'])?+\\s*+[=:]\\s*+(\\\\*+)([\"'])");
 
     /**
      * Below this many characters a value is left legible — benign values, mostly.
@@ -193,6 +211,10 @@ public final class SecretRedactionFilter {
      * and Java matches those by recursion — the draft that did overflowed the stack
      * on a 200 000-character value with no escapes in it at all. A scan has none of
      * that.
+     * <p>
+     * A value that never closes — a body cut short by the preview cap — is redacted
+     * to the end of the input. Everything after its opening quote IS the secret,
+     * and a truncated body is exactly where a leak goes unnoticed.
      */
     private static String redactQuotedValues(String message) {
         Matcher matcher = QUOTED_VALUE_START.matcher(message);
@@ -201,27 +223,27 @@ public final class SecretRedactionFilter {
         int searchFrom = 0;
 
         while (searchFrom <= message.length() && matcher.find(searchFrom)) {
-            char quote = message.charAt(matcher.end() - 1);
+            int openingBackslashes = matcher.group(2).length();
+            char quote = matcher.group(3).charAt(0);
             int valueStart = matcher.end();
-            int closingQuote = findClosingQuote(message, valueStart, quote);
-            if (closingQuote < 0) {
-                // No terminator — a truncated body. Left to the loose rule, which
-                // needs no closing quote and still redacts what it can see.
-                break;
-            }
-            searchFrom = closingQuote + 1;
 
-            // Backslashes immediately before the closing quote belong to the closing
-            // token (`\"` in an escaped body), not to the value.
-            int valueEnd = closingQuote;
-            while (valueEnd > valueStart && message.charAt(valueEnd - 1) == '\\') {
-                valueEnd--;
+            int closingQuote = findClosingQuote(message, valueStart, quote, openingBackslashes);
+            int valueEnd;
+            if (closingQuote < 0) {
+                valueEnd = message.length();
+                searchFrom = message.length() + 1;
+            } else {
+                // The closing token is the quote plus the backslashes that escape
+                // it at this depth; any further backslashes belong to the value.
+                int escaping = Math.min(openingBackslashes, backslashesBefore(message, closingQuote));
+                valueEnd = closingQuote - escaping;
+                searchFrom = closingQuote + 1;
             }
+
             String value = message.substring(valueStart, valueEnd);
             if (!shouldRedact(value)) {
                 continue;
             }
-
             out.append(message, copiedUpTo, valueStart).append(REDACTED);
             copiedUpTo = valueEnd;
         }
@@ -232,58 +254,87 @@ public final class SecretRedactionFilter {
     }
 
     /**
-     * The first quote that both matches the opening one and actually ends a JSON
-     * value, or -1 when the value never closes.
+     * The quote that closes a value opened at a given nesting depth, or -1 when the
+     * value never closes.
      * <p>
-     * {@code \"} is genuinely ambiguous — a terminator in an escaped-JSON body, an
-     * escaped quote INSIDE the value in a plain one — and this class cannot know
-     * which document it is reading. What separates them is what FOLLOWS. Closing at
-     * the first candidate leaks the rest of the value
-     * ({@code "he said \"x\" SECRET"} kept {@code x\" SECRET}); closing at the last
-     * runs past the real end of the field and eats the document. Requiring the
-     * candidate to be followed by something that ends a JSON value picks correctly
-     * in both readings: the escaped body closes at its {@code \"} because a brace
-     * follows, the plain one carries on past {@code \"x\"} because a letter does.
+     * The depth is the number of backslashes in front of the opening quote: none
+     * for a plain document, one for a JSON body carried inside a string field,
+     * three for one carried inside THAT, and so on — each level of nesting escapes
+     * every backslash and quote once more. A quote with {@code b} backslashes in
+     * front of it is then:
+     * <ul>
+     * <li>an unescaped quote at this depth — the terminator — when
+     * {@code (b + 1) / (opening + 1)} is a whole ODD number. At depth 0 that is an
+     * even count of backslashes; at depth 1 it is 1, 5, 9, …;
+     * <li>an escaped quote INSIDE the value when that quotient is a whole EVEN
+     * number: {@code \"} at depth 0, {@code \\\"} at depth 1. Skipped, whatever
+     * follows it;
+     * <li>a quote from a SHALLOWER level when it does not divide — the enclosing
+     * string has closed before this value did, so the value ends here.
+     * </ul>
+     * Deciding by escaping rather than by what FOLLOWS the quote is what closes
+     * three leaks at once: an escaped quote followed by a comma
+     * ({@code "ab\",cd-SECRET"}) no longer ends the value early; a free-text value
+     * closes at its own quote rather than eating the rest of the line up to some
+     * later one ({@code apiKey: "x" to host "y"}); and a pretty-printed nested body
+     * closes at its {@code \"} even though what follows is {@code \r\n} rather than
+     * a brace.
      */
-    private static int findClosingQuote(String text, int from, char quote) {
+    private static int findClosingQuote(String text, int from, char quote, int openingBackslashes) {
+        int depthUnit = openingBackslashes + 1;
+        int backslashes = 0;
         for (int i = from; i < text.length(); i++) {
-            if (text.charAt(i) == quote && endsAValue(text, i + 1)) {
-                return i;
+            char c = text.charAt(i);
+            if (c == '\\') {
+                backslashes++;
+                continue;
             }
+            if (c == quote) {
+                boolean sameDepth = (backslashes + 1) % depthUnit == 0;
+                boolean escapedAtThisDepth = sameDepth && ((backslashes + 1) / depthUnit) % 2 == 0;
+                if (!escapedAtThisDepth) {
+                    return i;
+                }
+            }
+            backslashes = 0;
         }
         return -1;
     }
 
-    /** Whether {@code i} is where a JSON value legitimately ends. */
-    private static boolean endsAValue(String text, int i) {
-        int j = i;
-        while (j < text.length() && Character.isWhitespace(text.charAt(j))) {
-            j++;
+    /** How many backslashes sit immediately in front of position {@code i}. */
+    private static int backslashesBefore(String text, int i) {
+        int count = 0;
+        while (i - count - 1 >= 0 && text.charAt(i - count - 1) == '\\') {
+            count++;
         }
-        if (j == text.length()) {
-            return true;
-        }
-        char c = text.charAt(j);
-        return c == ',' || c == '}' || c == ']';
+        return count;
     }
 
     /**
      * Whether a quoted value is one this filter should replace.
      * <p>
-     * The length floor keeps benign values legible. A {@code ${vault:…}} reference
-     * is a POINTER to a secret and stays legible on purpose — see the note above.
-     * And a value an earlier rule has ALREADY redacted is left alone so its
+     * The length floor keeps benign values legible. The two exemptions both ask the
+     * same question — "is this value, IN FULL, something that is not a secret" —
+     * and both have to be whole-value matches, because a prefix check is a bypass:
+     * <ul>
+     * <li>A {@code ${vault:…}} reference is a POINTER to a secret and stays legible
+     * on purpose — see the note above. But {@code ${vault:key}SECRET-TAIL} is a
+     * secret wearing a pointer as a hat, and {@code startsWith} would have waved it
+     * through. {@link SecretReference#compiledPattern()} is the repository's
+     * canonical whole-reference match, adopted for exactly this reason in
+     * {@code AgentSetupService} over the contains-style {@code isVaultReference}.
+     * <li>A value an earlier rule has ALREADY redacted is left alone so its
      * {@code sk-ant-} / {@code Bearer } prefix survives — but only when that rule
      * consumed the WHOLE value. {@code sk-ant-}'s own class stops at a delimiter,
      * so {@code sk-ant-<REDACTED>,SECRET-TAIL} is a half-finished job this has to
      * complete, losing the prefix. That is the right trade against publishing the
-     * tail, and treating a redacted PREFIX as a redacted value is how the tail got
+     * tail; treating a redacted PREFIX as a redacted value is how the tail got
      * published in the first place.
+     * </ul>
      */
     private static boolean shouldRedact(String value) {
         return value.length() >= MINIMUM_SECRET_LENGTH
-                && !value.startsWith("${vault:")
-                && !value.startsWith("${eddivault:")
+                && !SecretReference.compiledPattern().matcher(value).matches()
                 && !FULLY_REDACTED_VALUE.matcher(value).matches();
     }
 

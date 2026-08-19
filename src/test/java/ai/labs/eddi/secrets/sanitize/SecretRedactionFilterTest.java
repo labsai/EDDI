@@ -339,11 +339,24 @@ class SecretRedactionFilterTest {
         @Test
         void anEscapedQuoteInsideAValueDoesNotEndItEarly() {
             // `\"` is a terminator in an escaped-JSON body and an escaped quote
-            // inside the value in a plain one. Closing at the first one left the
-            // rest of the secret in the output; closing at the last one ate the
-            // document. The closing quote now has to be followed by something that
-            // ends a JSON value, which picks the right one in both readings.
+            // inside the value in a plain one. The opening quote's own escaping says
+            // which document this is: it has none, so a quote wearing a backslash is
+            // inside the value, whatever follows it.
             String result = SecretRedactionFilter.redact("{\"password\":\"he said \\\"x\\\" SURVIVING-TAIL\",\"n\":1}");
+
+            assertFalse(result.contains("SURVIVING-TAIL"), result);
+            assertEquals("{\"password\":\"<REDACTED>\",\"n\":1}", result);
+            assertValidJson(result);
+        }
+
+        @ParameterizedTest(name = "an escaped quote followed by [{0}] is still inside the value")
+        @ValueSource(strings = {",", "}", "]", " ,", " }"})
+        void anEscapedQuoteFollowedByADelimiterIsStillInsideTheValue(String following) {
+            // Found in review. A draft that decided the terminator by what FOLLOWED
+            // the quote took `\",` for the end of the value and published the rest.
+            // Escaping, not context, decides — and here the escaping says "inside".
+            String result = SecretRedactionFilter
+                    .redact("{\"password\":\"abcdefgh\\\"" + following + "SURVIVING-TAIL\",\"n\":1}");
 
             assertFalse(result.contains("SURVIVING-TAIL"), result);
             assertEquals("{\"password\":\"<REDACTED>\",\"n\":1}", result);
@@ -352,15 +365,86 @@ class SecretRedactionFilterTest {
 
         @Test
         void anEscapedJsonValueStillClosesAtItsOwnQuote() {
-            // The other side of that ambiguity, and the reason the lazy value cannot
-            // simply run to the last quote: here `\"` really is the terminator, and
-            // consuming past it would swallow the rest of the enclosing document.
+            // The other side of that ambiguity: the opening quote here IS escaped, so
+            // the next quote with the same escaping is the terminator — and the one
+            // after it belongs to the enclosing document, which must stay intact.
             String input = "{\"requestBody\": \"{\\\"llm\\\": {\\\"apiKey\\\": \\\"abcdefghijklmno\\\"}}\"}";
             String result = SecretRedactionFilter.redact(input);
 
             assertFalse(result.contains("abcdefghijklmno"), result);
             assertEquals("{\"requestBody\": \"{\\\"llm\\\": {\\\"apiKey\\\": \\\"<REDACTED>\\\"}}\"}", result);
             assertValidJson(result);
+        }
+
+        @Test
+        void aPrettyPrintedNestedBodyKeepsItsStructureAndItsHint() {
+            // The original approval-card shape: the inner document is pretty-printed
+            // before being embedded, so its terminator is followed by an escaped
+            // newline rather than a brace. A draft that read "what follows" ran past
+            // it to the outer close, destroying the inner document and the sk-ant-
+            // hint with it.
+            String input = "{\"requestBody\": \"{\\n  \\\"llm\\\": {\\n    \\\"apiKey\\\": "
+                    + "\\\"" + ANTHROPIC_KEY + "\\\"\\n  }\\n}\"}";
+            String result = SecretRedactionFilter.redact(input);
+
+            assertFalse(result.contains("CeIJ4onq59Mf"), result);
+            assertEquals("{\"requestBody\": \"{\\n  \\\"llm\\\": {\\n    \\\"apiKey\\\": \\\"sk-ant-<REDACTED>\\\"\\n  }\\n}\"}",
+                    result);
+            assertValidJson(result);
+        }
+
+        @Test
+        void aFreeTextValueClosesAtItsOwnQuoteNotALaterOne() {
+            // A log line with two quoted strings. A draft that read "what follows"
+            // found no value-ending character after the first closing quote and ran
+            // on to the second, eating the host name in between.
+            assertEquals("apiKey: \"<REDACTED>\" to host \"example.com\"",
+                    SecretRedactionFilter.redact("apiKey: \"abcdefghij\" to host \"example.com\""));
+        }
+    }
+
+    /**
+     * A {@code ${vault:…}} reference is exempt because it is a pointer, not a
+     * secret. The exemption has to be a WHOLE-VALUE match: a prefix check waves
+     * through a secret wearing a pointer as a hat.
+     */
+    @Nested
+    class TheVaultExemptionIsAWholeValueMatch {
+
+        @ParameterizedTest(name = "{0}")
+        @ValueSource(strings = {
+                "{\"password\":\"${vault:key}SURVIVING-TAIL\",\"n\":1}",
+                "{\"password\":\"${vault:tenant/key}SURVIVING-TAIL\",\"n\":1}",
+                "{\"password\":\"${eddivault:key}SURVIVING-TAIL\",\"n\":1}",
+                "{\"password\":\"SURVIVING-TAIL${vault:key}\",\"n\":1}",
+                "{\"password\":\"${vault:keySURVIVING-TAIL\",\"n\":1}"})
+        void aReferenceWithATailIsASecret(String input) {
+            // Found in review: the quoted scan used startsWith, and the two unquoted
+            // rules stopped their value at the opening brace and so matched nothing.
+            String result = SecretRedactionFilter.redact(input);
+
+            assertFalse(result.contains("SURVIVING-TAIL"), result);
+            assertEquals("{\"password\":\"<REDACTED>\",\"n\":1}", result);
+        }
+
+        @Test
+        void aReferenceWithATailIsASecretInTheUnquotedRulesToo() {
+            assertEquals("password: <REDACTED>",
+                    SecretRedactionFilter.redact("password: ${vault:key}SURVIVING-TAIL"));
+            assertEquals("{\"password\":\"<REDACTED>\"}",
+                    SecretRedactionFilter.redact("{\"password\":${vault:key}SURVIVING-TAIL}"));
+        }
+
+        @ParameterizedTest(name = "{0}")
+        @ValueSource(strings = {
+                "{\"password\":\"${vault:key}\",\"n\":1}",
+                "{\"password\":\"${vault:default/agent1/apiKey}\",\"n\":1}",
+                "{\"password\":\"${eddivault:legacy-key}\",\"n\":1}",
+                "password: ${vault:key}",
+                "{\"password\":${vault:key}}"})
+        void aWholeReferenceIsStillLeftLegible(String input) {
+            assertEquals(input, SecretRedactionFilter.redact(input),
+                    "the approver needs to see WHICH credential is used");
         }
     }
 

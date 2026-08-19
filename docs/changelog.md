@@ -129,7 +129,62 @@ A Jazzer `@FuzzTest` asserts crash-freedom and idempotency over arbitrary input,
 `PathNavigatorFuzzTest` pattern. It needs no ClusterFuzzLite wiring — `.clusterfuzzlite/build.sh`
 names its targets explicitly rather than globbing.
 
-**Verified:** `SecretRedactionFilterTest` grows from 14 to 46 cases — three new nested classes
+**A second cold review of the branch, plus Copilot's review, found seven more defects — three of
+them leaks — all from one decision**, and the same probe that caught them confirmed two of Copilot's
+findings independently before I had read them.
+
+`findClosingQuote` decided by what **followed** a candidate quote (`,`, `}`, `]`, end of input).
+That is the wrong question. An escaped quote followed by a comma — `"password":"abcdefgh\",SECRET"`,
+valid JSON — read as the terminator and published the tail, at every nesting depth. In free text,
+`apiKey: "x" to host "y"` found no value-ending character after `x"` and ran on to `y"`, eating the
+host name (and the `sk-ant-` hint) in between. And the pretty-printed nested body — **the original
+approval-card regression shape** — has `\r\n` after its inner `\"`, which defeated the check, so the
+scan ran to the outer close and destroyed the inner document along with the hint. Separately, a
+truncated body with a space in the secret still fell to the loose rule and leaked the second word.
+
+**The right question is how the quote is escaped, not what follows it.** The opening quote's
+backslash count is the nesting depth — 0 for a plain document, 1 for a body carried in a string
+field, 3 for one carried in *that* — and the terminator is the next quote at the **same** depth.
+A quote with `b` backslashes is the terminator when `(b+1)/(opening+1)` is a whole odd number, an
+escaped quote inside the value when it is a whole even number, and a quote from a shallower level
+(the enclosing string closed first) when it does not divide. That one rule closes all seven at
+once, needs no knowledge of what follows, and handles depth two for free. `backslashesBefore` then
+strips exactly the closing token's own escaping so a value ending in a backslash is whole.
+
+An unterminated value is now redacted **to the end of the input** rather than handed to the loose
+rule: everything after its opening quote is the secret, and a truncated body is where a leak goes
+unnoticed.
+
+**Copilot's second finding: the `${vault:…}` exemption was a prefix check.** `${vault:key}SECRET-TAIL`
+passed through the quoted scan untouched — a secret wearing a pointer as a hat. And the probe showed
+the same bypass **pre-existing** in both unquoted rules, whose value class stops at `{` and so
+matched nothing at all for `password: ${vault:key}SECRET`. Every exemption is now a whole-reference
+match: `shouldRedact` uses `SecretReference.compiledPattern()` — the repository's canonical pattern,
+adopted in `AgentSetupService` over the contains-style `isVaultReference` for exactly this reason —
+and the unquoted rules carry an optional possessive `OPTIONAL_VAULT_REFERENCE` prefix, so
+reference-plus-tail is matched and replaced whole while a bare reference still falls short of the
+length floor behind it and survives.
+
+**The invariant suite grew to match what the probe found: 1 692 → 4 791 cases.** Twelve new value
+shapes (an escaped quote followed by each JSON delimiter, trailing backslashes, every vault-prefix
+and -suffix variant, an unterminated reference, non-ASCII); an `amongOtherCredentials` placement that
+puts the field between a numeric token and a multi-word password so one redaction cannot swallow or
+skip its neighbours; and a `Carrier` enum — plain, nested once, nested once **pretty-printed**, nested
+**twice** — that wraps every key × shape and digs the innermost document back out of the result,
+parsing every layer, so "still JSON at every depth" is asserted rather than assumed. Every key × shape
+is also truncated just before its closing quote and asserted redacted to the end. Free-text closure,
+in-place redaction inside another field's value, the exact length-floor boundary, `true`/`null`, and
+four more adversarial inputs (backslash runs, many-line documents, a long unterminated value) round it
+out. The example suite adds the delimiter-after-escaped-quote sweep, the pretty-printed nested body
+asserted byte-for-byte, free-text closure, and a `TheVaultExemptionIsAWholeValueMatch` class.
+
+Not addressed, noted for completeness: an array- or object-valued credential key
+(`"secret": ["…"]`) is not redacted by name — the prefix rules still catch `sk-…`/`Bearer …` shapes
+inside it — and `A2AToolProviderManager.warnIfRawKey` uses a `startsWith` vault check, which only
+decides whether to log a warning. Both pre-date this change and neither produces a leak of the kind
+this branch fixes.
+
+**Verified:** `SecretRedactionFilterTest` grows from 14 to 64 cases — three new nested classes
 (`RedactedJsonStaysJson`, which parses every redacted result with Jackson; `ASecretIsRedactedInFull`,
 parameterised over all six delimiters; `AlreadyRedactedValuesKeepTheirPrefix`) plus idempotency, the
 8-char floor, and a neighbouring-field-not-swallowed case. `RequestRedactorTest`, `ResolvedRequestTest`,

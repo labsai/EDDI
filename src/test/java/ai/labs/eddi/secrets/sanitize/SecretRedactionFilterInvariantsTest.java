@@ -24,12 +24,13 @@ import static org.junit.jupiter.api.Assertions.*;
  * Invariants {@link SecretRedactionFilter} must hold across a generated corpus,
  * rather than on the handful of shapes someone thought to write down.
  * <p>
- * The rule set is four regexes whose behaviour depends on the key's name, the
- * quote style, what the value contains and what follows it — a space of
+ * The filter's behaviour depends on the key's name, the quote style, what the
+ * value contains, how deeply it is nested and what carries it — a space of
  * combinations no example-based suite covers by hand. Every leak found while
  * building this fix was in a combination that looked covered: a delimiter
  * inside the value, the wrong quote closing it, an already-redacted prefix, an
- * escaped quote. Each was a cell in this matrix that nothing was checking.
+ * escaped quote, an escaped quote followed by a comma, a vault reference with a
+ * tail. Each was a cell in this matrix that nothing was checking.
  * <p>
  * The generated documents are built with Jackson and re-parsed after redaction,
  * so escaping is correct by construction and "still JSON" is a real assertion
@@ -80,6 +81,23 @@ class SecretRedactionFilterInvariantsTest {
                 new Shape("skAntLeading", "sk-ant-api03-abcdefghijklmnopqrst," + CANARY),
                 new Shape("skLeading", "sk-abcdefghijklmnopqrstuvwx " + CANARY),
                 new Shape("bearerLeading", "Bearer abcdefghij1234567890abcdef " + CANARY),
+                // An escaped quote followed by each JSON delimiter: the shape that
+                // fooled a "what follows the quote" terminator rule.
+                new Shape("quoteComma", "abcdefgh\"," + CANARY),
+                new Shape("quoteBrace", "abcdefgh\"}" + CANARY),
+                new Shape("quoteBracket", "abcdefgh\"]" + CANARY),
+                new Shape("quoteSpaceComma", "abcdefgh\" ," + CANARY),
+                // The value ends in a backslash, so its closing quote is preceded by
+                // an escaped one — even count, still the terminator.
+                new Shape("trailingBackslash", "abcdefgh" + CANARY + "\\"),
+                new Shape("trailingTwoBackslashes", "abcdefgh" + CANARY + "\\\\"),
+                // A vault reference with a tail is a secret wearing a pointer as a hat.
+                new Shape("vaultPrefixed", "${vault:key}" + CANARY),
+                new Shape("vaultTenantPrefixed", "${vault:tenant/key}" + CANARY),
+                new Shape("legacyVaultPrefixed", "${eddivault:key}" + CANARY),
+                new Shape("vaultSuffixed", CANARY + "${vault:key}"),
+                new Shape("unterminatedVaultRef", "${vault:key" + CANARY),
+                new Shape("unicode", "abcdefghüñí€" + CANARY),
                 new Shape("veryLong", "abcdefgh" + CANARY.repeat(20)));
     }
 
@@ -92,7 +110,8 @@ class SecretRedactionFilterInvariantsTest {
                 new Placement("last", Placement::last),
                 new Placement("nested", Placement::nested),
                 new Placement("inArray", Placement::inArray),
-                new Placement("deeplyNested", Placement::deeplyNested));
+                new Placement("deeplyNested", Placement::deeplyNested),
+                new Placement("amongOtherCredentials", Placement::amongOtherCredentials));
     }
 
     static Stream<Arguments> everyCombination() {
@@ -157,27 +176,68 @@ class SecretRedactionFilterInvariantsTest {
     /**
      * A JSON document nested inside a string field, which is how a tool call's
      * requestBody argument arrives: every quote backslash-escaped. The filter has
-     * to see through the escaping and put it back.
+     * to see through the escaping, redact, and put the escaping back — and the
+     * inner document has to come out of it still parseable, with its other fields
+     * intact.
+     * <p>
+     * Four carriers: the document itself, nested once compact, nested once
+     * pretty-printed (whose {@code \r\n} after the inner terminator is what broke a
+     * "what follows the quote" rule — the original approval-card shape), and nested
+     * TWICE, where every quote of the innermost document wears three backslashes.
      */
-    @ParameterizedTest(name = "escaped {0}")
-    @MethodSource("everyCredentialKey")
-    void anEscapedJsonBodySurvivesAsEscapedJson(String key) {
-        String inner = json(Map.of(key, "abcdefgh," + CANARY, "modelName", INNOCENT));
-        String document = json(Map.of("requestBody", inner));
+    @ParameterizedTest(name = "{0} = {1}, carried {2}")
+    @MethodSource("everyKeyShapeAndCarrier")
+    void aSecretNeverSurvivesInAnyCarrier(String key, Shape shape, Carrier carrier) {
+        String document = carrier.wrap(ordered(entry(key, shape.value()), entry("modelName", INNOCENT)));
 
         String redacted = SecretRedactionFilter.redact(document);
 
         assertFalse(redacted.contains(CANARY), () -> "secret survived: " + redacted);
-        assertDoesNotThrow(() -> MAPPER.readTree(redacted), () -> "outer document broken: " + redacted);
-        String innerAfter = assertDoesNotThrow(
-                () -> MAPPER.readTree(redacted).get("requestBody").asText());
-        assertDoesNotThrow(() -> MAPPER.readTree(innerAfter),
-                () -> "the nested document was broken: " + innerAfter);
-        assertTrue(innerAfter.contains(INNOCENT), () -> "nested sibling destroyed: " + innerAfter);
+        String innermost = carrier.unwrap(redacted);
+        assertTrue(innermost.contains(INNOCENT), () -> "nested sibling destroyed: " + innermost);
+        assertEquals(redacted, SecretRedactionFilter.redact(redacted),
+                () -> "redaction is not idempotent: " + redacted);
+    }
+
+    static Stream<Arguments> everyKeyShapeAndCarrier() {
+        List<Arguments> cases = new ArrayList<>();
+        for (String key : CREDENTIAL_KEYS) {
+            for (Shape shape : valueShapes()) {
+                for (Carrier carrier : Carrier.values()) {
+                    cases.add(Arguments.of(key, shape, carrier));
+                }
+            }
+        }
+        return cases.stream();
     }
 
     static Stream<Arguments> everyCredentialKey() {
         return CREDENTIAL_KEYS.stream().map(Arguments::of);
+    }
+
+    /**
+     * The {@code sk-ant-} hint an earlier rule leaves is information an approver
+     * uses, and it must survive the quoted scan in every carrier — not only at the
+     * top level. The pretty-printed nested body lost it in an earlier draft.
+     */
+    @ParameterizedTest(name = "sk-ant- hint survives when carried {0}")
+    @MethodSource("everyCarrier")
+    void anAlreadyRedactedPrefixSurvivesInEveryCarrier(Carrier carrier) {
+        String document = carrier.wrap(ordered(
+                entry("apiKey", "sk-ant-api03-CeIJ4onq59Mf_oN4mICgfgScyJO5bfxFSS3Sdvo1Zgo2F7zUfEvx"),
+                entry("modelName", INNOCENT)));
+
+        String redacted = SecretRedactionFilter.redact(document);
+        String innermost = carrier.unwrap(redacted);
+
+        assertFalse(innermost.contains("CeIJ4onq59Mf"), innermost);
+        assertTrue(innermost.contains("sk-ant-<REDACTED>"),
+                () -> "the kind-of-credential hint was lost: " + innermost);
+        assertTrue(innermost.contains(INNOCENT), innermost);
+    }
+
+    static Stream<Arguments> everyCarrier() {
+        return Stream.of(Carrier.values()).map(Arguments::of);
     }
 
     /** A vault reference is a pointer, not a secret, and must stay legible. */
@@ -216,22 +276,88 @@ class SecretRedactionFilterInvariantsTest {
 
     /**
      * A body cut short mid-value — the preview cap does this — has no closing
-     * quote, so the quoted rule cannot fire and the loose rule has to catch it. A
+     * quote. Everything after the opening quote IS the secret, and it is redacted
+     * to the end of the input: the earlier fallback to the loose rule stopped at
+     * the first space and left the rest of a multi-word secret in the output. A
      * truncated body is exactly when a leak goes unnoticed.
      */
-    @ParameterizedTest(name = "truncated after {0}")
-    @MethodSource("everyCredentialKey")
-    void aTruncatedBodyIsStillRedacted(String key) {
-        String redacted = SecretRedactionFilter.redact("{\"" + key + "\": \"abcdefgh" + CANARY);
+    @ParameterizedTest(name = "truncated {0} = {1}")
+    @MethodSource("everyKeyAndShape")
+    void aTruncatedBodyIsRedactedToTheEnd(String key, Shape shape) {
+        // Cut the serialised document off just before the value's closing quote.
+        String whole = json(ordered(entry("modelName", INNOCENT), entry(key, shape.value())));
+        String truncated = whole.substring(0, whole.lastIndexOf('"'));
+
+        String redacted = SecretRedactionFilter.redact(truncated);
+
+        assertFalse(redacted.contains(CANARY), () -> "secret survived truncation\n  in:  " + truncated + "\n  out: " + redacted);
+        assertTrue(redacted.contains(INNOCENT), redacted);
+    }
+
+    static Stream<Arguments> everyKeyAndShape() {
+        List<Arguments> cases = new ArrayList<>();
+        for (String key : CREDENTIAL_KEYS) {
+            for (Shape shape : valueShapes()) {
+                cases.add(Arguments.of(key, shape));
+            }
+        }
+        return cases.stream();
+    }
+
+    /**
+     * Free text — a log line — closes a quoted value at its own quote, not at some
+     * later quote on the line. An earlier draft decided the terminator by what
+     * FOLLOWED it, and in free text that ate everything up to the next quoted
+     * string: the response body, the host name, and the {@code sk-ant-} hint with
+     * them. Over-redaction is the safe failure, but it is still a failure when it
+     * is the log line someone is debugging from.
+     */
+    @Test
+    void aFreeTextValueClosesAtItsOwnQuoteNotALaterOne() {
+        assertEquals("apiKey: \"<REDACTED>\" to host \"example.com\"",
+                SecretRedactionFilter.redact("apiKey: \"abcdefgh" + CANARY + "\" to host \"example.com\""));
+
+        String logLine = "call failed with apiKey: \"sk-ant-api03-CeIJ4onq59Mf_oN4mICgfgScyJO5bfxFSS3Sdvo1Zgo2F7zUfEvx\""
+                + " -- response: \"401 Unauthorized\"";
+        assertEquals("call failed with apiKey: \"sk-ant-<REDACTED>\" -- response: \"401 Unauthorized\"",
+                SecretRedactionFilter.redact(logLine));
+    }
+
+    /**
+     * A credential name inside some OTHER field's value, itself quoting a secret —
+     * {@code "note":"use token: \"…\" please"} — is redacted without eating the
+     * words around it.
+     */
+    @Test
+    void aQuotedSecretInsideAnotherFieldsValueIsRedactedInPlace() {
+        String document = json(ordered(entry("note", "use token: \"abcdefgh" + CANARY + "\" please"), entry("n", 1)));
+
+        String redacted = SecretRedactionFilter.redact(document);
 
         assertFalse(redacted.contains(CANARY), redacted);
+        assertEquals(json(ordered(entry("note", "use token: \"<REDACTED>\" please"), entry("n", 1))), redacted);
+    }
+
+    /** The length floor, at its boundary and on the non-string values under it. */
+    @Test
+    void theLengthFloorIsExact() {
+        assertEquals("{\"password\":\"<REDACTED>\",\"n\":1}",
+                SecretRedactionFilter.redact("{\"password\":\"abcdefgh\",\"n\":1}"), "eight characters is a secret");
+        assertEquals("{\"password\":\"abcdefg\",\"n\":1}",
+                SecretRedactionFilter.redact("{\"password\":\"abcdefg\",\"n\":1}"), "seven is left legible");
+        assertEquals("{\"token\":true,\"n\":1}", SecretRedactionFilter.redact("{\"token\":true,\"n\":1}"));
+        assertEquals("{\"token\":null,\"n\":1}", SecretRedactionFilter.redact("{\"token\":null,\"n\":1}"));
+        assertEquals("{\"token\":\"<REDACTED>\",\"n\":1}",
+                SecretRedactionFilter.redact("{\"token\":123456789012,\"n\":1}"), "a long number is a secret");
     }
 
     /**
      * Adversarial input, bounded time. The filter runs on attacker-influenced
-     * request bodies, and the rule set carries possessive quantifiers precisely so
-     * that a crafted input cannot make it backtrack — one lazy quantifier is the
-     * exception, so it gets measured rather than argued about.
+     * request bodies. The regexes carry possessive quantifiers so a crafted input
+     * cannot make them backtrack, and the quoted-value scan is a single forward
+     * pass — an earlier draft expressed it as a regex with a quantified group,
+     * which Java matches by recursion, and it overflowed the stack on the second
+     * input below. Measured rather than argued about.
      */
     @Test
     void adversarialInputDoesNotBlowUp() {
@@ -241,7 +367,15 @@ class SecretRedactionFilterInvariantsTest {
                 "{\"apiKey\":\"" + "${vault:".repeat(20_000) + "\"}",
                 "\"apiKey\":\"".repeat(20_000),
                 "{\"apiKey\":" + "[".repeat(50_000),
-                "apiKey=" + "sk-ant-".repeat(20_000));
+                "apiKey=" + "sk-ant-".repeat(20_000),
+                // Backslash runs, which the depth arithmetic counts.
+                "{\"apiKey\":\"" + "\\".repeat(100_000) + "\"}",
+                "{\"apiKey\":\"" + "\\\\\"".repeat(30_000) + "\"}",
+                // A credential field per line, many lines: the scan must not go
+                // quadratic by re-reading earlier lines for each match.
+                ("{\"apiKey\":\"" + "a".repeat(10) + "\"}\n").repeat(20_000),
+                // Unterminated, so the scan runs to the end — once.
+                "{\"apiKey\":\"" + "a b ".repeat(50_000));
 
         for (String attack : attacks) {
             long started = System.nanoTime();
@@ -273,6 +407,83 @@ class SecretRedactionFilterInvariantsTest {
     }
 
     // ── helpers ──────────────────────────────────────────────────
+
+    /**
+     * How a document reaches the filter. Each wraps the same innermost object and
+     * knows how to dig it back out of the redacted result, parsing every layer — so
+     * "still JSON at every depth" is asserted, not assumed.
+     */
+    enum Carrier {
+        /** The document itself, compact. */
+        PLAIN {
+            @Override
+            String wrap(Map<String, Object> innermost) {
+                return json(innermost);
+            }
+
+            @Override
+            String unwrap(String redacted) {
+                return parseable(redacted, "document");
+            }
+        },
+        /** As a string field of an outer document — a tool call's requestBody. */
+        NESTED_ONCE {
+            @Override
+            String wrap(Map<String, Object> innermost) {
+                return json(Map.of("requestBody", json(innermost)));
+            }
+
+            @Override
+            String unwrap(String redacted) {
+                return parseable(textField(parseable(redacted, "outer"), "requestBody"), "inner");
+            }
+        },
+        /** The same, with the inner document pretty-printed before being embedded. */
+        NESTED_ONCE_PRETTY {
+            @Override
+            String wrap(Map<String, Object> innermost) {
+                String pretty = assertDoesNotThrow(
+                        () -> MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(innermost));
+                return json(Map.of("requestBody", pretty));
+            }
+
+            @Override
+            String unwrap(String redacted) {
+                return parseable(textField(parseable(redacted, "outer"), "requestBody"), "inner");
+            }
+        },
+        /**
+         * Nested twice: every quote of the innermost document wears three backslashes.
+         */
+        NESTED_TWICE {
+            @Override
+            String wrap(Map<String, Object> innermost) {
+                return json(Map.of("arguments", json(Map.of("requestBody", json(innermost)))));
+            }
+
+            @Override
+            String unwrap(String redacted) {
+                String middle = textField(parseable(redacted, "outer"), "arguments");
+                return parseable(textField(parseable(middle, "middle"), "requestBody"), "innermost");
+            }
+        };
+
+        abstract String wrap(Map<String, Object> innermost);
+
+        /** The innermost document as text, after asserting every layer parses. */
+        abstract String unwrap(String redacted);
+
+        static String parseable(String text, String layer) {
+            assertDoesNotThrow(() -> MAPPER.readTree(text),
+                    () -> "the " + layer + " document is no longer JSON: " + text);
+            return text;
+        }
+
+        static String textField(String document, String field) {
+            return assertDoesNotThrow(() -> MAPPER.readTree(document).get(field).asText(),
+                    () -> "field " + field + " missing from: " + document);
+        }
+    }
 
     /** A value shape, named so a failure says which one broke. */
     record Shape(String name, String value) {
@@ -326,6 +537,16 @@ class SecretRedactionFilterInvariantsTest {
         static Map<String, Object> deeplyNested(String key, String value) {
             return ordered(entry("a", ordered(entry("b", ordered(entry("c",
                     ordered(entry(key, value), entry("modelName", INNOCENT))))))));
+        }
+
+        /**
+         * Beside other credential fields of different kinds — a numeric token, a
+         * password with a space — so one field's redaction cannot swallow or skip its
+         * neighbours. The key under test goes in the middle.
+         */
+        static Map<String, Object> amongOtherCredentials(String key, String value) {
+            return ordered(entry("otherPassword", "klmnopqr stuv"), entry(key, value),
+                    entry("otherToken", 123456789012L), entry("modelName", INNOCENT));
         }
     }
 
