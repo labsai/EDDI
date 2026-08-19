@@ -7,6 +7,25 @@
 
 
 
+## 🏷️ fix(docs): two REST tags leaked an internal work-item number into Swagger UI (2026-08-19)
+
+**Repo:** EDDI (`chore/eddi-version-6-3-0`)
+
+`IRestGroupTemplates` and `IRestGroupWorkspace` both carried `@Tag(name = "13. Agent Groups", ...)` — the
+`13` is the internal I13 (standing teams) work-item number from planning, never cleaned up to the project's
+actual "Category / Subcategory" tag convention (`Agents / Groups`, `Conversations / Groups`, etc., see
+`OpenApiConfig`). It surfaced as a literal `13. AGENT GROUPS` heading in the Swagger UI, reported from the
+rendered docs.
+
+Renamed both to `Agents / Groups`, matching the sibling `IRestAgentGroupStore` (same `/groupstore/` path
+prefix, same tag already), so all three now merge into the one existing section instead of splitting off
+a stray fourth one. Descriptions were left as-is — each interface's description is accurate to what it
+does; only the tag name was wrong. Swept the rest of `src/main/java` for any other numeric-prefixed
+`@Tag` and found none.
+
+---
+
+
 ## ⬆️ chore(deps): Quarkus 3.38.3, and every safe patch/minor ahead of the 6.3.0 release (2026-08-19)
 
 **Repo:** EDDI (`chore/eddi-version-6-3-0`)
