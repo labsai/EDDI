@@ -7,6 +7,572 @@
 
 
 
+## 🔒 fix(secrets): redaction preserves the JSON it redacts, and stops cutting secrets short (2026-08-19)
+
+**Repo:** EDDI (`fix/redaction-json-safe`)
+
+`SecretRedactionFilter`'s generic rule ran over the raw request TEXT and matched the key's closing
+quote, the colon **and** the value's opening quote — then replaced all three along with the value
+(`"$1=" + REDACTED`). So an ordinary body came back malformed:
+
+```
+{"modelName":"x","apiKey":"sk-ant-…"}   →   {"modelName":"x","apiKey=<REDACTED>"}
+{"token":12345678,"n":1}                →   {"token=<REDACTED>,"n":1}
+```
+
+— a bare string where a key/value pair was. The `sk-…` and `Bearer …` rules replace only the value
+and leave the document valid; this one did not, and it runs **last**, so it re-mangled what those
+had already redacted correctly.
+
+**Every reader of a redacted body parses it, and both of the Manager's failed silently.** Reported
+from EDDI-Manager PR #173: the approval diff for a gated whole-document `PUT` fell back to comparing
+raw text and rendered every line of the stored config as deleted against the proposed body as one
+added line. Worse, `detectEscalationFlags` runs *every* capability-grant check behind a `JSON.parse`,
+so a request that embedded a credential **and** granted `dynamicAgents.allowCreation` warned about
+the credential alone — and an approver reads "no second warning" as "no capability grant", which is
+the exact false negative that check exists to prevent.
+
+**A second defect, found while fixing the first.** The value class stops at `,`, whitespace, `;`,
+`{`, `}` and `]`, so a secret *containing* one of those was redacted only up to that character and
+the tail survived into the "redacted" output: `"password":"abcdefgh,SURVIVING-TAIL"` became
+`"password=<REDACTED>,SURVIVING-TAIL"`. That is a leak, not a formatting problem.
+
+**The generic rule is now three rules**, replacing the value and nothing else:
+
+| Shape | Rule | Result |
+| --- | --- | --- |
+| `{"apiKey":"sk-…"}` — quoted value | runs to the **closing quote**, keeps both quotes | `{"apiKey":"sk-ant-<REDACTED>"}` |
+| `{"token":12345678}` — no quotes of its own | marker takes the **key's quote style** | `{"token":"<REDACTED>"}` |
+| `?api_key=…`, `password: …` — not JSON | separator put back, no quotes invented | `?api_key=<REDACTED>` |
+
+Design decisions:
+
+- **The quoted rule ends the value at its closing quote, not at the first delimiter.** That is what
+  closes the partial-redaction leak; a secret with a comma or a space in it is now redacted whole.
+- **`notAlreadyRedacted(endOfValue)` stops a later rule re-redacting an earlier rule's output**,
+  and it requires the redacted form to be the WHOLE value — each rule passes the lookahead that ends
+  its own. Both looser readings leak; see below.
+- **That marker guard also fixes a small regression the old rule had all along**: `sk-ant-` and
+  `Bearer ` prefixes say what KIND of credential was found, and the generic rule used to strip them
+  back off every named field. `{"apiKey":"sk-ant-…"}` now keeps `sk-ant-<REDACTED>`.
+- **The vault carve-out is explicit now.** `${vault:…}` survived only as a side effect of the value
+  class excluding `{`/`}`; the quoted rule runs past braces, so it carries
+  `(?!\$\{(?:vault|eddivault):)` as a stated rule instead — which is also what keeps the carve-out
+  from being lost the next time that class is tuned.
+- **`&` is still not a value delimiter, on purpose.** Adding it would make query-string redaction
+  tidier but would cut short every secret containing an `&` in every other context and leak the
+  tail. Over-redacting a raw URL that happens to sit in a log line is the safer trade, and real
+  request URIs never reach the filter whole — `RequestRedactor` scans each query parameter's value
+  on its own. Pinned as a test so the next person does not "fix" it.
+
+**A review pass before pushing found four more leaks in the first draft of this fix**, all in the
+same two decisions, all now pinned as regression tests:
+
+- **The closing quote was "any quote", not the opening one.** `"password":"abcdefgh'xyz"` terminated
+  at the apostrophe and published the tail; `"password":"it's-a-secret"` was cut to `it` at that same
+  apostrophe, fell under the 8-character floor, and was not redacted **at all**. The closing quote is
+  now a backreference to the opening one, which also lets the value class admit the *other* quote
+  character — that is what makes both cases whole.
+- **The "already redacted" guard asked whether the marker appeared ANYWHERE in the value.** It reads
+  as the more cautious rule and is the leakier one: it skipped
+  `"secret":"the key sk-ant-<REDACTED> is here"`, leaving the text around the marker unredacted under
+  a key that says it is a secret — and it handed anyone who knows the marker a **bypass**, since a
+  value of `my<REDACTED>pass` passed through untouched. The guard is now anchored to the START of the
+  value, which is the condition actually meant and the narrow one.
+
+Both were reasoned about while writing the first draft and dismissed as theoretical. They are not:
+a throwaway probe printing the filter's actual output for a dozen shapes found all four in one run.
+
+**A PR review round (CodeRabbit) then found two more, both Critical, both real** — verified with the
+same probe before touching anything:
+
+- **A redacted PREFIX is not a redacted value.** The guard had been anchored to the start of the
+  value, which is the mirror of the mistake above: the `sk-ant-` rule's *own* class stops at a
+  delimiter, so `"apiKey":"sk-ant-abcdefghijklmnopqrst,SECRET-TAIL"` becomes
+  `"apiKey":"sk-ant-<REDACTED>,SECRET-TAIL"` — and the guard then skipped it, publishing the tail.
+  The redacted form must now be the **whole** value, so a partly-redacted one is taken over and
+  replaced entirely. That loses the `sk-ant-` hint in exactly that case: intended, because the hint
+  is not worth a leak.
+- **The escaped-quote case was a leak, not an acceptable limit.** I had pinned
+  `"he said \"x\" SECRET"` → `"<REDACTED>\"x\" SECRET"` as a documented trade-off. It is a partial
+  publication of a secret and CodeRabbit was right to reject that framing. `\"` is a terminator in an
+  escaped-JSON body and an escaped quote inside the value in a plain one; closing at the first
+  candidate leaks, closing at the last eats the document. The value is now **lazy and may cross an
+  escape**, with the closing quote required to be followed by something that actually ends a JSON
+  value (`\s*[,}\]]` or end of input). That picks correctly in both readings: the escaped body closes
+  at its `\"` because `}` follows, the plain one carries on past `\"x\"` because a letter does.
+
+**A 1 692-case invariant suite then found a stack overflow in the fix itself.**
+`SecretRedactionFilterInvariantsTest` generates every combination of 11 credential key spellings ×
+21 value shapes × 7 placements (top level, first/middle/last, nested, inside an array, three deep),
+builds each document with Jackson so escaping is correct by construction, and asserts four things
+per case: a planted canary never survives, the output still parses as JSON, an unrelated sibling
+field is untouched, and redaction is idempotent. A negative control runs the same shapes under a
+key with no credential name and asserts the document comes back byte-identical — without it the
+whole suite is satisfied by a filter that redacts everything.
+
+Its adversarial-input case failed immediately: the quoted rule's `(?:A|B){8,}?` overflowed the
+stack. Java matches a quantified GROUP by recursion, one frame per repetition, so it died at ~500
+escaped quotes — and, far worse, on a **200 000-character value with no escapes in it at all**. A
+long credential would have thrown instead of being redacted. That is a regression the lazy
+quantifier introduced, and it is exactly what the file's possessive quantifiers exist to prevent.
+
+**So the quoted rule is no longer a regex.** `QUOTED_VALUE_START` matches only up to the value's
+opening quote — nothing quantified over a value-length run — and `redactQuotedValues` scans forward
+for the closing quote in a plain loop. The three constraints that made the pattern unexpressible
+become readable code: `findClosingQuote` takes the first quote matching the opening one that is
+followed by something ending a JSON value, and `shouldRedact` states the length floor, the vault
+carve-out and the already-redacted check outright. Same semantics, no recursion, and the
+adversarial cases now run in single-digit milliseconds.
+
+A Jazzer `@FuzzTest` asserts crash-freedom and idempotency over arbitrary input, following the
+`PathNavigatorFuzzTest` pattern. It needs no ClusterFuzzLite wiring — `.clusterfuzzlite/build.sh`
+names its targets explicitly rather than globbing.
+
+**A second cold review of the branch, plus Copilot's review, found seven more defects — three of
+them leaks — all from one decision**, and the same probe that caught them confirmed two of Copilot's
+findings independently before I had read them.
+
+`findClosingQuote` decided by what **followed** a candidate quote (`,`, `}`, `]`, end of input).
+That is the wrong question. An escaped quote followed by a comma — `"password":"abcdefgh\",SECRET"`,
+valid JSON — read as the terminator and published the tail, at every nesting depth. In free text,
+`apiKey: "x" to host "y"` found no value-ending character after `x"` and ran on to `y"`, eating the
+host name (and the `sk-ant-` hint) in between. And the pretty-printed nested body — **the original
+approval-card regression shape** — has `\r\n` after its inner `\"`, which defeated the check, so the
+scan ran to the outer close and destroyed the inner document along with the hint. Separately, a
+truncated body with a space in the secret still fell to the loose rule and leaked the second word.
+
+**The right question is how the quote is escaped, not what follows it.** The opening quote's
+backslash count is the nesting depth — 0 for a plain document, 1 for a body carried in a string
+field, 3 for one carried in *that* — and the terminator is the next quote at the **same** depth.
+A quote with `b` backslashes is the terminator when `(b+1)/(opening+1)` is a whole odd number, an
+escaped quote inside the value when it is a whole even number, and a quote from a shallower level
+(the enclosing string closed first) when it does not divide. That one rule closes all seven at
+once, needs no knowledge of what follows, and handles depth two for free. `backslashesBefore` then
+strips exactly the closing token's own escaping so a value ending in a backslash is whole.
+
+An unterminated value is now redacted **to the end of the input** rather than handed to the loose
+rule: everything after its opening quote is the secret, and a truncated body is where a leak goes
+unnoticed.
+
+**Copilot's second finding: the `${vault:…}` exemption was a prefix check.** `${vault:key}SECRET-TAIL`
+passed through the quoted scan untouched — a secret wearing a pointer as a hat. And the probe showed
+the same bypass **pre-existing** in both unquoted rules, whose value class stops at `{` and so
+matched nothing at all for `password: ${vault:key}SECRET`. Every exemption is now a whole-reference
+match: `shouldRedact` uses `SecretReference.compiledPattern()` — the repository's canonical pattern,
+adopted in `AgentSetupService` over the contains-style `isVaultReference` for exactly this reason —
+and the unquoted rules carry an optional possessive `OPTIONAL_VAULT_REFERENCE` prefix, so
+reference-plus-tail is matched and replaced whole while a bare reference still falls short of the
+length floor behind it and survives.
+
+**The invariant suite grew to match what the probe found: 1 692 → 4 791 cases.** Twelve new value
+shapes (an escaped quote followed by each JSON delimiter, trailing backslashes, every vault-prefix
+and -suffix variant, an unterminated reference, non-ASCII); an `amongOtherCredentials` placement that
+puts the field between a numeric token and a multi-word password so one redaction cannot swallow or
+skip its neighbours; and a `Carrier` enum — plain, nested once, nested once **pretty-printed**, nested
+**twice** — that wraps every key × shape and digs the innermost document back out of the result,
+parsing every layer, so "still JSON at every depth" is asserted rather than assumed. Every key × shape
+is also truncated just before its closing quote and asserted redacted to the end. Free-text closure,
+in-place redaction inside another field's value, the exact length-floor boundary, `true`/`null`, and
+four more adversarial inputs (backslash runs, many-line documents, a long unterminated value) round it
+out. The example suite adds the delimiter-after-escaped-quote sweep, the pretty-printed nested body
+asserted byte-for-byte, free-text closure, and a `TheVaultExemptionIsAWholeValueMatch` class.
+
+Not addressed, noted for completeness: an array- or object-valued credential key
+(`"secret": ["…"]`) is not redacted by name — the prefix rules still catch `sk-…`/`Bearer …` shapes
+inside it — and `A2AToolProviderManager.warnIfRawKey` uses a `startsWith` vault check, which only
+decides whether to log a warning. Both pre-date this change and neither produces a leak of the kind
+this branch fixes.
+
+**CodeRabbit's re-review, four findings, three taken.** `assertTimeoutPreemptively(30s)` replaces
+the 5-second wall-clock assertion (a linear algorithm finishes in milliseconds, a catastrophically
+backtracking one would not finish in an hour, nothing in between is plausible — so the budget sits
+where a throttled runner cannot reach it and its only job is turning a hang into a failure that
+names the input); `SecretRedactionFilterTest` shares one `ObjectMapper`; every document in the
+invariant suite is built with `ordered(...)`. **Not taken: a dedicated CI fuzzing job.** The
+ClusterFuzzLite sync guard and `build.sh` both hard-code `src/main/java/ai/labs/eddi/utils/` and the
+filter lives in `secrets/sanitize` with a new dependency on `secrets/model`; generalising a CI
+workflow and a Docker build script I cannot exercise locally is its own change. What I did instead
+is below, and it found more than a CI job would have in its first week.
+
+**Real coverage-guided fuzzing, locally, with the filter instrumented — and it found five more.**
+The in-repo `@FuzzTest` runs in regression mode under `./mvnw test`; run with `JAZZER_FUZZ=1` and
+`-Djazzer.instrument=ai.labs.eddi.secrets.sanitize.**`, the arbitrary-input target plateaued at 24
+coverage edges within seconds: the rules are gated on a credential name followed by a separator and
+a quote, random bytes essentially never spell that, and coverage cannot learn through the JDK regex
+engine. So a **structure-aware** target was added — the fuzzer chooses the key, the quote style, the
+separator, the nesting depth and what follows the document, and mutates the secret bytes freely —
+and every execution reaches the scanner. Its oracle is the same canary as the matrix plus "whatever
+was JSON going in is JSON coming out", checked empirically. Coverage went to 129 edges; the first
+finding arrived in one second. In order:
+
+1. *Test oracle, not filter:* Jazzer learns string constants from comparison instrumentation and
+   planted the canary in the post-document tail. The tail is not a secret; it is now stripped of
+   the canary before use.
+2. **An unterminated apostrophe-quoted value inside a JSON string ran "redact to the end" through
+   the enclosing string's closing quote** — `"message":"… token:'abc"}` left the carrier unparseable.
+   Bounded at the enclosing string's end; see 4 and 5 for what "the end" had to mean.
+3. **A value opened three backslashes deep that closed on the enclosing string's bare quote had
+   three backslashes stripped from in front of that quote** — turning a run of six escaped
+   backslashes into five and the bare quote into an escaped one. The closing token's escaping is
+   read off the closing quote itself (`escapingOf`: the lowest set bit of `b + 1`, minus one), not
+   assumed equal to the opening's.
+4. **`SECRET:'SECRET:'<long>'` — the first field's value `SECRET:` is under the floor and left
+   alone, and its closing apostrophe is the second field's opening one.** Resuming the search past
+   that close skipped the second field; a second pass then redacted it. An untouched value's text is
+   still live, so the search resumes just inside its opening quote. Linear: each untouched value is
+   read at most once more.
+5. **Three idempotency failures in the apostrophe bound, each a "what follows the quote" test:**
+   first "followed by `,` `}` `]` or end of input" (a redaction after the quote changed what
+   followed it), then "…but not end of input" (the `]` that followed was the first character of an
+   inner value, redacted by pass one), then "the first bare quote" (which swallowed an *escaped*
+   quote that was a deeper field's terminator). The stable rule is the one that preserves the
+   invariant every pass already keeps — **never remove or re-escape a quote**: the bound is the
+   first double quote of any escaping, less that quote's own backslashes. Alongside it, the opening
+   quote's depth is `escapingOf(count)` rather than the raw count (four backslashes are two escaped
+   backslashes of content and a bare quote, not depth five), and the unquoted JSON rule admits only
+   a genuine escaping depth — none, one, three or seven backslashes — in front of a key's quote, so
+   it never mirrors content backslashes onto the marker it emits.
+
+**Then the arbitrary-input fuzzer, given a seed corpus so it reaches the scanner, found four more
+— and forced one decision to be reversed.** Its oracle is now scoped honestly: no exception on any
+input; on a JSON carrier, the output parses and a second pass changes nothing.
+
+6. `{"a":{"m":"token:'x"},"o":"it's"}` — an apostrophe opened in one string and closed in another
+   at a different nesting level **ate the brace between**, in strictly valid JSON. I had decided
+   twenty minutes earlier that an apostrophe value may contain a double quote (for
+   `{'password': 'pa"ss'}`, a Python repr). Reversed: **an apostrophe value ends at the first
+   double quote of any escaping**. The rule it replaced stopped at a double quote too, so that is
+   the status quo on the Python-repr-with-a-quote leak — and it is what makes the scan JSON-safe at
+   every depth and idempotent everywhere, because a pass then never removes a quote. Both decisions
+   are pinned as tests with the reasoning; the reversal is recorded here so nobody relitigates it
+   from the first one.
+7. A vault reference whose key name happened to contain `token:'` was exempted whole — correctly —
+   and then **searched inside**, because the not-redacted path resumed just inside the value. Part
+   of the reference's interior was redacted, closing brace and all, and a second pass saw no
+   reference. An exempt value is a token, not live text; the search now resumes AFTER an exempt
+   value and INSIDE only an under-floor one (which can legitimately hide a field's opening).
+8. `{"token:":12378901}` — a key NAMED `token:`, colon included, in valid JSON. Both the scan and
+   the loose rule read the colon inside the name as the separator and the key's closing quote as a
+   value's opening quote, and left a bare marker. The loose rule's trailing optional quote is gone
+   (every quoted value has already been decided by the scan before it runs, so that group could
+   only ever misread), and the scan skips the one shape where the key-close group is empty, the
+   name sits directly inside a quoted key, and the supposed opening quote is followed by a
+   separator — three things true together of that shape and of nothing legitimate. A value that
+   starts with a colon and a credential embedded at the start of a string value are both pinned
+   as still redacting.
+9. Two more were oracle defects, not filter defects — Jazzer plants the canary literal in the
+   post-document tail, and `Map.of` documents tripped a `Character.isWhitespace` surprise — and
+   are noted only because they cost time.
+
+After all of that: **the arbitrary-input fuzzer ran 4.2 million executions in eight minutes with
+zero findings** (every earlier one arrived inside two), and the structured fuzzer **11 million in
+eight minutes, also zero**. Discovered inputs are kept as regression seeds under
+`SecretRedactionFilterInvariantsTestInputs/`, and failure messages spell out control characters.
+
+The invariant matrix grew again — 11 keys × 33 shapes × 8 placements, plus every key × shape through
+four carriers and every key × shape truncated, plus 18 fuzz seeds and the adversarial-input,
+negative-control and free-text cases. Counted from surefire rather than derived by hand, because a
+derived total drifts the moment a shape is added: **6 819 invariant cases and 70 example cases,
+6 889 in all.**
+
+**CodeRabbit's third review refused a leak I had documented, and was right to.** I had pinned "an
+apostrophe-quoted value ends at the first double quote" as a deliberate limit, with the reasoning
+that it matched the pre-branch behaviour. But `{'password': 'pa"ss…'}` is a Python repr real logs
+carry, and "the old rule leaked here too" is not a reason to keep leaking — especially not with a
+test asserting the canary survives under a `password` key.
+
+What the limit was actually protecting was narrower than the rule: an apostrophe value that opened
+**inside a double-quoted JSON string** must not cross that string's end (a fuzzer had shown one
+opening in one string and closing in another at a different nesting level, eating the brace
+between). An apostrophe that opened **outside** any double-quoted string — a Python repr, a shell
+`export` — has no such constraint. The discriminator is per MESSAGE and it is **JSON-ness**, because that is what redaction provably
+preserves: a JSON document redacts to a JSON document, so a second pass decides the same way and the
+filter stays idempotent. A per-POSITION decision — "is this apostrophe inside a double-quoted
+string" — reads as more precise and is not stable: a free apostrophe value may CONTAIN double
+quotes, redaction deletes them, and the next pass counts differently. I wrote that version first
+and a fuzzer broke it in seconds. Two further corrections came from the same fuzzer: "one JSON
+document" has to mean exactly one ROOT VALUE (Jackson's streaming parser accepts a root value
+sequence, so `{"a":1}"junk" 222` reads as a document otherwise), and the test's own JSON check had
+to be tightened the same way — `readTree` alone ignores trailing content, so the oracle and the
+filter disagreed about what a carrier is. Cost on the logging path is gated to nothing: a message
+with no apostrophe, or one that does not begin like a JSON document, is never parsed.
+
+So a free-standing Python or shell secret with a double quote in it is redacted whole, and a
+JSON carrier still cannot be torn. What remains is one genuinely narrow shape, pinned with its
+reason: a Python repr nested INSIDE a JSON string whose secret contains a double quote, cut at that
+quote — because stopping only at the bare terminator would let a depth-one string's `\"` be removed,
+which is what made nested carriers non-idempotent. Also taken: the backward key-name walk is bounded
+at 256 characters (it was already linear — no credential name is a suffix of another — but a bound
+needs no such argument).
+
+**And the blind fuzzer, re-run on the reworked scan, found one more — the last of this round.**
+`"----------------token:"` followed by 36 tabs. That is a whole JSON string whose CLOSING quote reads
+as a value's opening quote, and the whitespace after it reads as a 36-character value; out came
+`"----------------token:"<REDACTED>`, no longer parseable. `isKeyNameEndingInASeparator` cannot see
+this one — it looks for a separator AHEAD of the quote and there is none. The fix is a floor the
+shape cannot argue with: **a blank value is never redacted.** Whitespace is not a secret, so
+redacting it can only ever destroy structure. It joins the under-floor branch, so its text stays live
+and a credential field starting inside it is still found.
+
+**Verified:** `SecretRedactionFilterTest` grows from 14 to 70 cases — three new nested classes
+(`RedactedJsonStaysJson`, which parses every redacted result with Jackson; `ASecretIsRedactedInFull`,
+parameterised over all six delimiters; `AlreadyRedactedValuesKeepTheirPrefix`) plus idempotency, the
+8-char floor, and a neighbouring-field-not-swallowed case. `RequestRedactorTest`, `ResolvedRequestTest`,
+the three `ApiCallExecutor*` suites, `ConversationMemoryUtilitiesHitlTest`,
+`LifecycleManagerErrorClassificationTest`, `SlackToolPauseNotificationTest` and
+`RestAgentEngineToolPauseDetailsTest` all pass unchanged.
+
+Full `./mvnw test` locally reports failures in `WebSearchToolTest`, `SafeHttpClientTest`,
+`SlackWebApiClientTest` (loopback sockets — the documented sandbox limitation in AGENTS.md) and
+`DocumentationLinksTest` (scans an untracked local `.history/` folder). **Confirmed pre-existing**:
+the same classes fail identically with these changes stashed. CI is the source of truth for those.
+
+**Manager side:** EDDI-Manager PR #173 shipped a client-side repair (`src/lib/redacted-json.ts`) that
+reconstructs the mangled shape before parsing. It stays — it is the tolerance layer for bodies
+arriving from backends that predate this fix — and becomes a no-op against a backend with it, since
+a body that already parses is returned untouched.
+
+---
+
+
+## 🔑 fix(setup): stop agent setup minting a new vault key per agent (2026-08-18)
+
+**Repo:** EDDI (`fix/setup-vault-key-reuse`)
+
+Provisioning several agents against one provider key left one vault entry **per agent**
+(`setup.<agent>.<timestamp>.apiKey`), and pasting a `${vault:...}` reference into the wizard's API-key
+field did not reliably avoid it. Rotating that provider key then meant hunting down N unguessably named
+entries.
+
+**Root cause of the reference case.** `vaultApiKey()` recognised an existing reference with a
+**full-string** regex match, but never trimmed its input. A reference copied out of a UI list or a
+config carries surrounding whitespace, so `"${vault:openai-prod}\n"` failed the match, fell through to
+the "plaintext" branch, and was vaulted *as a secret whose value is a reference* — a brand-new, useless
+key on every setup. One `trim()`, applied before the check and to the stored value, closes it.
+
+**Three ways to share one key**, in the order `AgentSetupService.vaultApiKey()` considers them:
+
+1. **`vaultKeyName`** (new, REST-only field on `SetupAgentRequest` / `CreateApiAgentRequest`) — names
+   the entry. With `apiKey` it creates it under exactly that name; without one, the entry must already
+   exist, so a second agent needs no plaintext at all. Accepts `openai-prod` or `${vault:openai-prod}`.
+   Refuses to overwrite an entry holding a different value: other agents may already point at it, and
+   silently rewriting it rotates their credential. Also refuses (rather than degrading to plaintext)
+   when the vault is off — naming an entry is a request for one specific shared secret, and writing the
+   key in plaintext instead is not a smaller version of that request.
+2. **`apiKey` already a reference** — used as-is, now whitespace-tolerant.
+3. **`apiKey` plaintext the vault already holds** — reused instead of duplicated.
+
+**Plaintext reuse is checksum-based.** `SecretMetadata` already carries `sha256Hex(plaintext)` per
+entry, so a match needs no decryption and compares a digest of a value the caller just supplied — it
+reveals nothing they did not already know. Only entries with `allowedAgents` unset or `["*"]` qualify:
+referencing a deliberately narrowed grant from a new agent yields a config that `VaultGrantGate`
+rejects at deploy time, i.e. a reuse that "works" until it matters. Ties break oldest-first by
+`createdAt` then key name, so repeated setups converge on one entry instead of depending on listing
+order. A vault that cannot be listed falls through to storing a new entry — reuse is an optimisation,
+never a gate.
+
+**Configurable**, per §4.1 rule 1: `eddi.setup.vault-key-reuse=checksum|never`. `never` restores the
+pre-change per-agent behaviour, for deployments where two agents hold the same-valued key today but
+must be able to rotate independently. Neither value touches cases 1 and 2 — those are explicit caller
+decisions, not defaults. Field-injected like the neighbouring
+`eddi.setup.llm.log-conversation-content`, so directly constructed instances get the default.
+
+**Two correctness details worth naming:**
+
+- **A reused entry is never recorded under `VAULTED_SECRET_KEY`.** Rollback deletes whatever it finds
+  there; recording a shared entry would let a *later* agent's failed setup delete a key an earlier
+  agent is still referencing. Only `storeSecret()` — the single place that writes — records.
+- **Key resolution moved to "step 0"**, ahead of every store call in both `setupAgent` and
+  `createApiAgent`, matching the existing reasoning for up-front `hitlConfig` validation: an unusable
+  `vaultKeyName` must fail while rollback still has nothing to undo, not after a parser, ruleset, LLM
+  config and workflow already exist.
+
+`vaultKeyName` is deliberately **not** exposed on the MCP `setup_agent` / `create_api_agent` tools. *(Rationale
+corrected in the third review pass below — an earlier version of this paragraph claimed it stopped a model
+pointing an agent at an arbitrary secret, which `apiKey: "${vault:...}"` already allows.)* The MCP path
+still de-duplicates by checksum wherever the deployment leaves that enabled and the matching entry is granted to all agents, so it does not grow the vault either.
+
+**Files:** `AgentSetupService.java` (trim, `useNamedVaultKey`, `findReusableSecret`, `storeSecret`,
+step-0 move, validation now accepts `vaultKeyName` in place of `apiKey` for cloud providers),
+`SetupAgentRequest.java`, `CreateApiAgentRequest.java`, `McpSetupTools.java`, `CreateSubAgentTool.java`
+(both pass `null`), `application.properties`, `docs/secrets-vault.md`.
+
+**Tests:** new `AgentSetupVaultKeyReuseTest` — 17 tests over the trim regression, checksum reuse,
+grant-scoped skip, deterministic winner, the `never` switch, list-failure degradation, and all six
+`vaultKeyName` outcomes. Mutation-checked: reverting the `trim()` and the reuse lookup fails 5 of them,
+so they are not passing for the wrong reason. Full local run of `AgentSetup*Test`, `McpSetupToolsTest`,
+`CreateSubAgentTool*Test`, `SetupWizardConfigsPassStrictBoundaryTest` (261 tests) plus the repo-wide
+guards (`ImportStyleTest`, `DocumentationLinksTest`, `StrictBoundaryShippedConfigsTest`,
+`RuleSetStoreShippedRulesetsTest`) — all green.
+
+### Review pass — findings addressed
+
+A second read of the change turned up six things, all fixed on this branch:
+
+1. **The reused key was invisible.** The whole complaint is "I can't reuse the key because I can't find
+   its name", and the first cut made that *worse*: a newly created key showed up in
+   `resources.vaultedSecretKeyName`, but a reused one appeared nowhere. `SetupResult` now carries
+   **`apiKeyVaultReference`** on every setup — created or reused — to hand straight back as
+   `vaultKeyName` next time. It is null when the vault is off and the key went in as plaintext:
+   `vaultReferenceOrNull()` gates it, because the "effective api key" is the caller's secret in that
+   case and echoing it in a response body would put it through every proxy log on the way out.
+2. **A named key was rollback fodder, and that was a cross-agent delete.** Agent A creates
+   `${vault:openai-prod}`, agent B reuses it, A then fails → A's rollback deleted the key B now points
+   at. Fixed by not registering caller-named creations at all: rollback exists to stop a retry loop
+   growing the vault, and a chosen name cannot grow it (a retry reuses the same name), so deleting was
+   the riskier of the two options rather than the safer one.
+3. **`vaultKeyName` was not validated.** The value gets embedded in `${vault:<tenant>/<key>}`, where a
+   bare name containing `/` silently re-parses as a tenant separator and a `}` truncates the reference —
+   the agent then resolves a *different* secret, or none. Now checked against `[a-zA-Z0-9._-]{1,128}`,
+   the same charset `RestSecretStore` enforces on create.
+4. **Contradictory input resolved silently.** `vaultKeyName: "a"` with `apiKey: "${vault:b}"` honoured
+   `a` and dropped `b` on the floor — deploying the agent against a credential the caller did not pick.
+   Rejected now.
+5. **The rollback record was written before the store succeeded**, so a failed write left a name for a
+   secret that never existed and rollback logged a "could not remove" warning chasing it. Recorded after.
+6. **Key resolution moved out of the `try`.** It was already at "step 0", but inside the block, so a
+   clean `vaultKeyName 'x' does not exist` came back wrapped in `Failed to set up agent:`. Outside, the
+   400 says what is actually wrong. Also dropped the now-dead two-arg `vaultApiKey` overload.
+
+`AgentSetupVaultKeyReuseTest` grew to 25 tests covering each of these; `DynamicAgentToolsTest` picked up
+the extra `SetupResult` component. 356 tests across the setup suites and repo-wide guards, green,
+Checkstyle clean.
+
+### Second review pass (different reviewer)
+
+One real bug and three smaller items, all fixed:
+
+- **`vaultKeyName: "${vault:acme/openai}"` created the secret in the `default` tenant.** `useNamedVaultKey` parsed
+  the tenant for the *lookup* but `storeSecret` rebuilt the reference with `DEFAULT_TENANT` for the *create* — so a
+  missing tenant-qualified key produced a setup that "worked" and an agent whose reference pointed at nothing.
+  `storeSecret` now takes the full `SecretReference`. Mutation-checked: reverting it fails the new test.
+- **`eddi.setup.vault-key-reuse` silently degraded on a typo.** `checksumm` behaved as `never` — dedup off, which is
+  the original bug back with every visible sign saying it is on. Now strict-parsed in a `@PostConstruct`, failing
+  startup, matching the `eddi.vault.grant-enforcement` convention. Directly constructed instances (tests) are unaffected.
+- **A dangling `apiKey: "${vault:typo}"` was accepted in silence.** Pass-through stays accepted (a caller may vault the
+  key after setup) but the entry is now looked up and a WARN logged if absent — the alternative was an agent that
+  deploys clean and fails on its first turn. The `verifyNoInteractions` assertions on the old pass-through tests became
+  `never().store(...)`, which is what they actually meant.
+- Two error messages tightened (`already holds a different value` was wrong when the stored checksum is null;
+  `no apiKey was supplied` was wrong when a *reference* was supplied), and both MCP `apiKey` tool descriptions now
+  say that `apiKeyVaultReference` from an earlier call can be passed back to share the key.
+
+Not changed after consideration: `group-wizard.tsx` builds every member slot from a template up front, so
+seeding-on-add would not reach them; the backend checksum dedup covers the vault-growth half regardless.
+
+360 backend tests green (`AgentSetupVaultKeyReuseTest` at 29), Checkstyle clean.
+
+### Third review pass (max effort)
+
+Read the final file state end-to-end and reasoned about the system around it — rollback, the deploy-time
+grant gate, tenants, concurrency, and what the lower-privileged MCP tier can do with the new surface. Four
+findings, all fixed:
+
+1. **Rollback could delete a secret other agents already shared.** Under `checksum` reuse, agent A stores
+   `setup.a.T.apiKey`, agents B..N (parallel bulk provisioning, same key) reuse it, A fails at step 6 → A's
+   rollback deleted the entry B..N point at; they deployed fine and would break on their first turn. The
+   growth that rollback exists to prevent cannot happen under `checksum` (a retry finds A's entry by value), so
+   a generated entry is now registered for rollback **only under `never`**, where nobody else can find it.
+2. **Restricted grants were handled inconsistently.** The checksum path skipped narrowed entries (correctly),
+   but naming one via `vaultKeyName`, or pasting its reference, sailed through and ended as `deployed: false`
+   with the reason only in the server log — a brand-new agent's ID cannot be on any existing grant list, so
+   under `enforce` that outcome is certain. Both paths now WARN and put `resources.vaultWarning` in the
+   response. Not refused: setup-without-deploy → widen grant → deploy is the legitimate flow.
+3. **The MCP rationale was false.** "A model that could choose the name could point a new agent at any
+   unrestricted secret" — the tool already advertises `apiKey: "${vault:name}"`, so it already can. The real
+   reason: MCP setup tools are reachable by `eddi-editor` while REST setup is `eddi-admin`, and what
+   `vaultKeyName` uniquely adds (naming a new entry; a value-must-match check) is a name-squatting and
+   value-oracle surface an editor does not need. Corrected in the two `McpSetupTools` comments, the docs, and
+   the paragraph above.
+4. `SetupResult.apiKeyVaultReference` javadoc now also names the keyless-provider null case.
+
+Verified against the real `VaultSecretProvider` rather than the mocks: `getMetadata` and `listKeys` both
+return the checksum (so the mismatch check and the reuse scan actually see it), `getMetadata` has no
+access-timestamp side effect, and `store` runs `getOrCreateDek`, so a tenant-qualified `vaultKeyName` can
+create the first secret in a new tenant.
+
+Considered and left: the checksum scan lists all default-tenant metadata per setup (setup is rare); an admin
+who can already read checksums via the secrets list gains no new oracle from checksum reuse; two concurrent
+first-time setups with the same key can create two entries, and later setups converge on the older one.
+
+365 backend tests green (`AgentSetupVaultKeyReuseTest` at 34), Checkstyle clean. Manager: the wizard success screen
+now renders `resources.vaultWarning` verbatim (backend-authored, no new i18n keys) — its picker lists every
+vault key including narrowly granted ones, and this is where the user learns why such an agent will not deploy.
+
+### PR review — CodeRabbit and Copilot (#699)
+
+Both bots reviewed; every finding was valid. Two were real bugs this branch had introduced:
+
+- **Generated key names could collide** (CodeRabbit). `setup.<agent>.<timestamp>.apiKey` is not unique for two
+  same-named agents in the same millisecond, and `store` is an upsert — so one silently overwrote the other's
+  credential. Now carries a random suffix; the timestamp stays only because it dates the entry for an operator.
+- **An unparseable OpenAPI spec left an orphaned vault entry** (Copilot). Moving key resolution to "step 0" put it ahead
+  of the spec parse, and `createApiAgent`'s pre-existing `catch (AgentSetupException) { throw e; }` rethrows
+  without rolling back — so under `vault-key-reuse=never` every invalid request left an orphaned secret behind. Fixed at
+  both ends: the parse now runs first (it creates nothing, so a bad spec never reaches the vault at all), and
+  that catch arm now rolls back, which also closes the pre-existing document leak on the same path.
+
+Two more were correct and are now handled:
+
+- **A direct vault write did not invalidate the resolver cache** (Copilot). `RestSecretStore` invalidates even on
+  creation, precisely because a model may be cached holding an unresolved `${vault:...}` literal — and this
+  service is the one that deliberately allows such dangling references and later fills them in. `storeSecret`
+  now invalidates, matching that path.
+- **The dangling-reference warning only reached the log** (CodeRabbit), while the restricted-grant warning
+  reached the caller. Both end in an agent that cannot use its credential, and only one vault key is resolved
+  per setup, so they were merged into one `resources.vaultWarning` (renamed from `vaultGrantWarning`).
+
+Two concurrency findings were partly addressed and honestly bounded rather than claimed fixed. Creating a
+caller-named key is read-then-write, and the checksum scan is separate from the write that follows it, so
+concurrent setups can still race — the named path now reads back and fails loudly before anything is created,
+and both javadocs state exactly what remains open. Closing them needs a create-if-absent (and a checksum
+reservation) in the persistence layer for Mongo and Postgres both — an SPI change shared with the three other
+`store` callers, all of which upsert today, and deliberately not designed around this one caller. Tracked in
+[issue #700](https://github.com/labsai/EDDI/issues/700), which carries the caller inventory and the per-backend
+sketch; the mitigation's javadoc links it so it does not read as a finished job. See also the
+[thread](https://github.com/labsai/EDDI/pull/699#discussion_r3805688054).
+
+Doc claims that overstated the feature were made conditional: MCP checksum de-duplication depends on
+`eddi.setup.vault-key-reuse` and on an unrestricted grant; `apiKeyVaultReference` is also null for keyless
+providers; and the `vaultKeyName` charset applies to the parsed tenant/key components, not the `${vault:…}`
+wrapper — it now ships as a table of the three accepted shapes. `ImportStyleTest` caught an inline
+`java.util.HashSet` in the new test (AGENTS.md 4.7).
+
+369 backend tests green; every fix above is mutation-checked.
+
+### EDDI-Manager — `feat/setup-vault-key-reuse`
+
+The earlier note in this entry said the wizard and team builder "still render the API key as a bare text
+input". That was wrong — both already use `SecretKeyPicker`, which lists vault keys and can create one
+inline. What was actually missing was everything *around* the pick:
+
+- **`SecretKeyPicker` trims before deciding a value is a reference**, and normalises a pasted one. This
+  is the frontend half of the backend trim bug: a reference pasted with whitespace failed
+  `startsWith("${vault:")`, so the field stayed a masked password and the user had no way to tell the
+  paste had registered as a reference at all.
+- **The success screen shows `apiKeyVaultReference`** with a copy button — the answer to "which key did
+  this agent end up on".
+- **"Create Another" carries provider, model and the credential forward**, but only when it came back as
+  a reference. A plaintext key must not survive an explicit form reset, and with the vault off there is
+  nothing to reuse anyway.
+- **The Workforce team builder seeds a new advisor from the previous one.** A board is one provider and
+  one key across every member; without this the vault key had to be picked once per advisor — the exact
+  repetition that motivated this work.
+- Types: `vaultKeyName` on both requests, `apiKeyVaultReference` on `SetupResult`. `vaultKeyName`
+  deliberately gets **no form field**: the picker on `apiKey` already produces `${vault:<name>}` and can
+  create a named entry inline, so a second field would only be a second way to say the same thing.
+- Eleven locales updated (the `i18n-drift` gate covers all of them, not just `en`).
+
+Manager: 5,383 tests green, `tsc -b` clean, `eslint --max-warnings 0` clean. The two behavioural
+frontend changes are mutation-checked — reverting the trim and the seeding fails four of them.
+
+**What's next:** nothing outstanding for this feature. The Manager change is a separate PR and needs
+this backend merged first; against an older backend `apiKeyVaultReference` is simply absent and the
+success-screen block does not render.
+
+---
+
 ## 🔒 fix(docker): bump UBI9 base digest for CVE-2026-11940 (python3 tarfile filter bypass) (2026-08-17)
 
 **Repo:** EDDI (`fix/trivy-cve-2026-11940-base-image`)
