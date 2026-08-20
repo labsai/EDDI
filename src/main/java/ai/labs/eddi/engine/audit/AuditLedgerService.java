@@ -30,6 +30,9 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.nio.file.*;
 import java.time.Instant;
 import java.nio.charset.StandardCharsets;
+import com.fasterxml.jackson.core.type.TypeReference;
+import ai.labs.eddi.utils.LogSanitizer;
+import java.util.Map;
 
 /**
  * Async batch writer for the immutable audit ledger.
@@ -113,6 +116,10 @@ public class AuditLedgerService {
     private final String defaultTenantId;
     private final AgentSigningService agentSigningService;
     private final ObjectMapper objectMapper;
+
+    /** Target shape for {@link #normalizePayloadsForStorage}. */
+    private static final TypeReference<Map<String, Object>> MAP_OF_OBJECT = new TypeReference<>() {
+    };
     private final int maxQueueSize;
 
     private byte[] hmacKey;
@@ -291,6 +298,10 @@ public class AuditLedgerService {
             // part of the signed payload, which is what makes a deleted entry's gap
             // impossible to close by renumbering its neighbours.
             scrubbed = scrubbed.withSequence(nextSequence(scrubbed.conversationId()));
+
+            // Payload maps must be reduced to their STORED shape before signing, for
+            // exactly the same reason as the timestamp below: sign what is stored.
+            scrubbed = normalizePayloadsForStorage(scrubbed);
 
             // A null timestamp must be stamped BEFORE signing, not by the store. v4
             // signs the empty string for null, but PostgresAuditStore substitutes
@@ -668,6 +679,62 @@ public class AuditLedgerService {
      */
     public AuditRecoveryBudget newRecoveryBudget() {
         return recoverLegacyTimestamps ? new AuditRecoveryBudget(recoverLegacyMaxRows) : AuditRecoveryBudget.none();
+    }
+
+    /**
+     * Reduces an entry's payload maps to the JSON-native shape the stores persist.
+     * <p>
+     * The pipeline hands this service <em>live Java objects</em>: a turn's
+     * {@code output} is a list of {@code TextOutputItem} POJOs, not of Maps. The
+     * signature was computed over those objects while verification later ran over
+     * whatever JSON gave back — and the two canonicalize completely differently, a
+     * POJO as {@code s:<toString()>} and its round-tripped form as
+     * {@code m&#123;…&#125;}. Verified against a real PostgreSQL container, a
+     * single output item signed as {@code {output=[Hi there!]}} came back as
+     * {@code {output=[{text=Hi there!, type=text, delay=0}]}} and could never
+     * verify.
+     * <p>
+     * This is the same defect class as the nanosecond timestamp, and it takes the
+     * same cure: normalise first, then sign, so the row that lands in the database
+     * is byte-for-byte the row that was signed. Fixing only the timestamp left
+     * every entry carrying rendered output — on a rule-based turn, the majority of
+     * them — still reporting as tampered.
+     * <p>
+     * Deliberately non-fatal: an audit write must never break the turn it records.
+     * A value the mapper cannot convert keeps its original form, which verifies no
+     * worse than it did before and is visible in the ledger's own verify report.
+     */
+    private AuditEntry normalizePayloadsForStorage(AuditEntry entry) {
+        Map<String, Object> input = normalizeMap(entry.input(), entry.id());
+        Map<String, Object> output = normalizeMap(entry.output(), entry.id());
+        Map<String, Object> llmDetail = normalizeMap(entry.llmDetail(), entry.id());
+        Map<String, Object> toolCalls = normalizeMap(entry.toolCalls(), entry.id());
+
+        if (input == entry.input() && output == entry.output()
+                && llmDetail == entry.llmDetail() && toolCalls == entry.toolCalls()) {
+            return entry;
+        }
+        return new AuditEntry(entry.id(), entry.conversationId(), entry.agentId(), entry.agentVersion(),
+                entry.userId(), entry.environment(), entry.stepIndex(), entry.taskId(), entry.taskType(),
+                entry.taskIndex(), entry.durationMs(), input, output, llmDetail, toolCalls, entry.actions(),
+                entry.cost(), entry.timestamp(), entry.hmac(), entry.agentSignature(), entry.sequence());
+    }
+
+    /**
+     * @return the JSON-native form of {@code map}, or {@code map} itself if it
+     *         cannot be converted
+     */
+    private Map<String, Object> normalizeMap(Map<String, Object> map, String entryId) {
+        if (map == null || map.isEmpty()) {
+            return map;
+        }
+        try {
+            return objectMapper.convertValue(map, MAP_OF_OBJECT);
+        } catch (IllegalArgumentException e) {
+            LOGGER.warnf("Audit entry %s carries a payload value that cannot be normalised (%s); "
+                    + "it is stored as-is and will not verify.", LogSanitizer.sanitize(entryId), e.getMessage());
+            return map;
+        }
     }
 
     /**

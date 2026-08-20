@@ -7,6 +7,50 @@
 
 
 
+## 🔏 fix(audit): sign the payload the database actually stores (2026-08-21)
+
+**Repo:** EDDI (`fix/sweep-0820a-integrity-defects`)
+
+**The v4 timestamp fix was necessary but not sufficient, and the new end-to-end IT proved it in CI**
+before a human ever ran the branch: a plain rule-based turn reported `entriesChecked=5 valid=2`. Three
+of five entries still failed verification, on **both** backends.
+
+The sweep's own report suspected this — *"a row failing the search is either tampered or hit a second
+lossy field"* — and the cause is now identified. The ledger signs an entry whose payload maps hold
+**live Java objects**: a turn's `output` is a list of `TextOutputItem` POJOs, not of Maps.
+Verification later runs over what JSON gave back. The two canonicalize completely differently — a
+POJO as `s:<toString()>`, its round-tripped form as `m{…}`. Measured against a real PostgreSQL
+container:
+
+```text
+signed: {output=[Hi there!]}
+stored: {output=[{text=Hi there!, type=text, delay=0}]}   → verifies=false
+```
+
+That accounts for the 2/5 exactly: parser and behavior run before any output exists and verified;
+output, templating and property all had rendered output in scope and did not.
+
+**Same defect class as the nanosecond timestamp, same cure: normalise first, then sign.**
+`AuditLedgerService` now reduces `input`/`output`/`llmDetail`/`toolCalls` to their JSON-native shape
+before signing, so the row that lands in the database is byte-for-byte the row that was signed. It is
+deliberately non-fatal — an audit write must never break the turn it records, so a value the mapper
+cannot convert keeps its original form, logs a warning, and shows up in the ledger's own verify
+report rather than throwing.
+
+Pinned by `pojoPayloadSurvivesTheDatabase`, which drives the real submit path (normalise → floor →
+sign → queue → flush → store) against a live PostgreSQL container; removing the normalisation call
+fails it.
+
+**Note for legacy rows.** A pre-v4 row whose payload carried POJOs was signed over objects that no
+longer exist in that form; the timestamp-completion search cannot recover it, and nothing can. Those
+rows report INVALID permanently. That is a property of how they were written, not of this fix — but
+it means an operator sweeping an old ledger should expect them, and it is the honest reason the
+recovery path was never sold as universal.
+
+---
+
+
+
 ## 🧪 test(sweep): regression nets for every behavioural fix on the branch (2026-08-21)
 
 **Repo:** EDDI (`fix/sweep-0820a-integrity-defects`)

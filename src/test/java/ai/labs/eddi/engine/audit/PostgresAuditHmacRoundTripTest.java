@@ -17,6 +17,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import ai.labs.eddi.modules.output.model.types.TextOutputItem;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import java.util.Map;
 import javax.sql.DataSource;
 import java.sql.SQLException;
 import java.time.Instant;
@@ -133,6 +136,42 @@ class PostgresAuditHmacRoundTripTest extends PostgresTestBase {
         assertNotEquals(VerificationOutcome.MISMATCH,
                 AuditHmac.verify(stored, hmacKey, new AuditRecoveryBudget(1)),
                 "the completion search must find the signed timestamp on either side of what was stored");
+    }
+
+    /**
+     * The timestamp was not the only field that failed to round-trip.
+     * <p>
+     * The pipeline hands the ledger LIVE Java objects — a turn's {@code output} is
+     * a list of {@code TextOutputItem} POJOs, not of Maps — and the signature was
+     * computed over those while verification later ran over what JSON gave back.
+     * The two canonicalize completely differently: {@code s:<toString()>} against
+     * {@code m&#123;…&#125;}. Measured here before the fix, one output item signed
+     * as {@code {output=[Hi there!]}} came back as {@code {output=[{text=Hi there!,
+     * type=text, delay=0}]}}.
+     * <p>
+     * This is why fixing the timestamp alone was not enough: the end-to-end IT
+     * reported {@code entriesChecked=5 valid=2} on a plain rule-based turn, the
+     * three failures being every task with rendered output in scope. The cure is
+     * the one the timestamp got — normalise to the stored shape, THEN sign — which
+     * lives in {@code AuditLedgerService}, so this test drives the real submit path
+     * rather than hand-building the entry.
+     */
+    @Test
+    @DisplayName("an entry whose payload holds POJOs verifies after the real round-trip")
+    void pojoPayloadSurvivesTheDatabase() {
+        AuditEntry raw = new AuditEntry(UUID.randomUUID().toString(), "conv-pojo", "agent1", 1,
+                "user1", "test", 0, "t1", "output", 0, 42L,
+                null, Map.of("output", List.of(new TextOutputItem("Hi there!", 0))), null, null,
+                List.of("greet"), 0.0, Instant.now(), null, null, 1L);
+
+        var service = AuditLedgerService.createForTesting(store, true, 3600, "pg-roundtrip-test-key",
+                new SimpleMeterRegistry());
+        service.init();
+        service.submit(raw);
+        service.flush();
+
+        assertTrue(AuditHmac.verifyHmac(readBack("conv-pojo"), hmacKey),
+                "an entry carrying rendered output must verify — that is most of a real turn's entries");
     }
 
     @Test
