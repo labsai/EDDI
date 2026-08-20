@@ -591,6 +591,7 @@ jobs:
     outputs:
       primary-tag: ${{ steps.meta.outputs.primary-tag }}
       is-release: ${{ steps.meta.outputs.is-release }}
+      is-stable: ${{ steps.meta.outputs.is-stable }}
 
     permissions:
       contents: read       # checkout + build
@@ -1115,32 +1116,17 @@ jobs:
 
       - name: Preflight check (pushed image)
         env:
-          REDHAT_API_TOKEN: ${{ secrets.REDHAT_API_TOKEN }}
-          REDHAT_CERT_PROJECT_ID: ${{ secrets.REDHAT_CERT_PROJECT_ID }}
+          PRIMARY_TAG: ${{ needs.docker.outputs.primary-tag }}
         run: |
-          PRIMARY_TAG="${{ needs.docker.outputs.primary-tag }}"
-          IS_RELEASE="${{ needs.docker.outputs.is-release }}"
-
-          # On release tags, submit results to Red Hat Partner Connect
-          SUBMIT_FLAG=""
-          if [ "$IS_RELEASE" = "true" ]; then
-            if [ -n "$REDHAT_API_TOKEN" ] && [ -n "$REDHAT_CERT_PROJECT_ID" ]; then
-              # Pass credentials via preflight's native env vars (avoids process-listing exposure)
-              export PFLT_PYXIS_API_TOKEN="$REDHAT_API_TOKEN"
-              export PFLT_CERTIFICATION_COMPONENT_ID="$REDHAT_CERT_PROJECT_ID"
-              SUBMIT_FLAG="--submit"
-              echo "📤 Release tag detected — submitting to Red Hat Partner Connect"
-            else
-              echo "::warning::Release tag detected but REDHAT_API_TOKEN or REDHAT_CERT_PROJECT_ID secret is missing — running dry-run only"
-            fi
-          else
-            echo "🔍 Non-release push — running preflight in dry-run mode (no submit)"
-          fi
-
+          # Verification only - no submission. The certification project is a
+          # HOSTED-registry project, and Pyxis rejects submissions for a
+          # docker.io-hosted image ("The 'container.registry' field is
+          # immutable for projects with hosted registry"), which reddened
+          # every release tag. Submission happens exclusively in
+          # redhat-certify.yml, against the hosted-registry copy.
           preflight check container \
             docker.io/${DOCKER_IMAGE}:${PRIMARY_TAG} \
             --docker-config=${HOME}/.docker/config.json \
-            ${SUBMIT_FLAG} \
             2>&1 | tee preflight-push-results.txt
           PREFLIGHT_EXIT=${PIPESTATUS[0]}
           echo ""
@@ -1151,9 +1137,6 @@ jobs:
             exit 1
           else
             echo "✅ All preflight checks passed on pushed image"
-            if [ -n "$SUBMIT_FLAG" ]; then
-              echo "📤 Results submitted to Red Hat Partner Connect"
-            fi
           fi
 
       - name: Upload preflight results
@@ -1165,6 +1148,22 @@ jobs:
             preflight-push-results.txt
             artifacts/
           retention-days: 30
+
+  # ─── Red Hat Catalog Publish ───────────────────────────────────
+  # Stable release tags only (X.Y.Z, no pre-release suffix): publishes the
+  # just-released image to Red Hat's hosted certification registry and submits
+  # the preflight results. Reuses redhat-certify.yml, which is also manually
+  # dispatchable for re-submissions with a bumped release number.
+  redhat-publish:
+    name: Red Hat Catalog Publish
+    needs: [docker, smoke-test]
+    if: startsWith(github.ref, 'refs/tags/') && needs.docker.outputs.is-stable == 'true'
+    uses: ./.github/workflows/redhat-certify.yml
+    with:
+      version: ${{ needs.docker.outputs.primary-tag }}
+      release: "1"
+      submit: "true"
+    secrets: inherit
 
   # ─── Job 7: Slack Notification ─────────────────────────────────
   notify-slack:

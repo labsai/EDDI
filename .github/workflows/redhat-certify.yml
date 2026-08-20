@@ -20,6 +20,22 @@ name: Red Hat Certification Release
 #   REDHAT_API_TOKEN           - Pyxis API token, for --submit
 
 on:
+  # Called automatically by ci.yml on every stable release tag, and manually
+  # dispatchable for re-submissions (bump `release` to 2, 3, ... - the version
+  # itself never changes for a re-submission).
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+      release:
+        required: false
+        type: string
+        default: "1"
+      submit:
+        required: false
+        type: string
+        default: "true"
   workflow_dispatch:
     inputs:
       version:
