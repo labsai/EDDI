@@ -69,15 +69,15 @@ jobs:
       - name: Verify Red Hat labels
         run: |
           echo "=== Container Labels ==="
-          docker inspect ${{ steps.image.outputs.released }}             --format '{{json .Config.Labels}}' | python3 -m json.tool
+          docker inspect ${{ steps.image.outputs.released }} --format '{{json .Config.Labels}}' | python3 -m json.tool
 
       - name: Verify /licenses in container
         run: |
           echo "=== /licenses directory ==="
-          docker run --rm --entrypoint="" ${{ steps.image.outputs.released }}             ls -la /licenses/
+          docker run --rm --entrypoint="" ${{ steps.image.outputs.released }} ls -la /licenses/
           echo ""
           echo "=== THIRD-PARTY.txt in container ==="
-          docker run --rm --entrypoint="" ${{ steps.image.outputs.released }}             head -30 /licenses/THIRD-PARTY.txt || true
+          docker run --rm --entrypoint="" ${{ steps.image.outputs.released }} head -30 /licenses/THIRD-PARTY.txt || true
 
       # Red Hat's catalogue keys on a version-release coordinate. Retagging the
       # pulled image reuses its manifest, so this tag carries the SAME digest as
