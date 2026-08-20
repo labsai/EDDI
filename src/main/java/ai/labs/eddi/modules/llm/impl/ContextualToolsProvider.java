@@ -73,8 +73,9 @@ class ContextualToolsProvider implements ToolSourceProvider {
      * "the number of distinct agents" is not a fixed bound on this platform —
      * dynamic and ephemeral agents are created at runtime with fresh ids, so a
      * long-lived deployment with churn would otherwise accumulate entries for the
-     * JVM lifetime. Expiry also means a standing misconfiguration re-announces
-     * itself daily instead of exactly once per process.
+     * JVM lifetime. Expiry means a standing misconfiguration re-announces itself
+     * periodically instead of exactly once per process; suppression is therefore
+     * best-effort, holding only while the entry remains cached.
      */
     private static final Set<String> MEMORY_MISCONFIGURATION_WARNED = Collections.newSetFromMap(
             Caffeine.newBuilder().maximumSize(10_000).expireAfterWrite(Duration.ofHours(24))
@@ -155,22 +156,36 @@ class ContextualToolsProvider implements ToolSourceProvider {
      * a task-level statement that this task gets no built-in capability, and user
      * memory is a cross-conversation write), but it must be visible.
      */
+    /**
+     * Whether the memory-misconfiguration warning should be emitted for this agent.
+     * <p>
+     * A missing agent id maps to a stable fallback key rather than bypassing
+     * deduplication — the bypass meant the defensive null path was the one case
+     * that logged on every turn, the exact flood the cache exists to prevent.
+     * Suppression holds while the cache entry remains present (size- and
+     * TTL-bounded), so a repeat is possible after expiry or under heavy churn; that
+     * is the right trade for a log-hygiene cache, and it means a standing
+     * misconfiguration re-announces itself rather than going silent forever.
+     */
+    static boolean shouldWarnAboutMemoryMisconfiguration(String agentId) {
+        return MEMORY_MISCONFIGURATION_WARNED.add(agentId != null ? agentId : "<no-agent-id>");
+    }
+
     private void warnIfMemoryEnabledButBuiltInsAreOff(ToolAssemblyContext ctx) {
         if (ctx.memory().getUserMemoryConfig() == null || userMemoryStore == null) {
             return;
         }
-        // Once per agent, not per turn: this fires on every turn of a misconfigured
-        // agent, and a busy production agent would otherwise flood the log with the
-        // same sentence thousands of times — which trains operators to ignore it.
-        // Bounded by the number of distinct agents this instance serves; a redeploy
-        // that fixes the config makes the stale entry harmless.
+        // Suppressed per agent, not per turn: this fires on every turn of a
+        // misconfigured agent, and a busy production agent would otherwise flood the
+        // log with the same sentence thousands of times — which trains operators to
+        // ignore it.
         String agentId = ctx.memory().getAgentId();
-        if (agentId != null && !MEMORY_MISCONFIGURATION_WARNED.add(agentId)) {
+        if (!shouldWarnAboutMemoryMisconfiguration(agentId)) {
             return;
         }
         LOGGER.warnf("[MEMORY] Agent '%s' has persistent user memory enabled, but this LLM task has "
                 + "enableBuiltInTools=%s — UserMemoryTool is NOT attached and the agent cannot write memories. "
-                + "Set enableBuiltInTools: true on the task (conversation='%s'). Logged at most once per agent per day.",
+                + "Set enableBuiltInTools: true on the task (conversation='%s'). Repeats of this warning are suppressed.",
                 sanitize(agentId), ctx.task().getEnableBuiltInTools(),
                 sanitize(ctx.memory().getConversationId()));
     }

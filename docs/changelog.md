@@ -44,7 +44,11 @@ misconfigured agent would have flooded the log with the same sentence, which tra
 ignore it. The cache is static because `AgentOrchestrator` constructs the provider per call, and
 bounded/expiring (Caffeine, 10k / 24h) rather than a plain set — "the number of distinct agents" is
 not a fixed bound on a platform that creates dynamic and ephemeral agents at runtime, so a plain set
-would grow for the JVM lifetime under churn (review catch on the first version of this fix).
+would grow for the JVM lifetime under churn (review catch on the first version of this fix). A second
+review round tightened it further: a null agent id bypassed deduplication entirely — making the
+defensive path the one case that logged on every turn — and now maps to a stable fallback key; and
+the "once per day" claim was softened to what a bounded cache can honestly promise (suppression
+while the entry remains cached). Both mutation-checked.
 
 **Verified clean, for the record:** the D6 Qute strategy genuinely reaches production rendering
 (`TemplatingEngine` injects the CDI `Engine` that `EngineProducer` builds from config — not a
