@@ -15,6 +15,17 @@ public enum AuditVerificationStatus {
     VALID,
 
     /**
+     * A pre-v4 entry that verified only after the timestamp precision its backend
+     * could not store was reconstructed from the signature itself.
+     * <p>
+     * Integrity is proven exactly as strongly as {@link #VALID} — finding a
+     * completion that reproduces the digest without the key is as hard as forging
+     * it. Reported separately because it also says something operational: the row
+     * predates the v4 canonical form, and only rows written before it need this.
+     */
+    VALID_RECOVERED,
+
+    /**
      * The stored HMAC does not match — the entry was altered after it was written,
      * or it was signed with a different key.
      */

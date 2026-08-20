@@ -125,6 +125,18 @@ public record AuditEntry(String id, String conversationId, String agentId, Integ
     }
 
     /**
+     * Return a copy of this entry with a different timestamp. Used only by the v3
+     * legacy-recovery search in {@code AuditHmac}, which reconstructs the
+     * sub-precision digits a backend truncated away so that an old row can still
+     * prove it is the one that was written. Never used on the write path — an entry
+     * is timestamped once.
+     */
+    public AuditEntry withTimestamp(Instant newTimestamp) {
+        return new AuditEntry(id, conversationId, agentId, agentVersion, userId, environment, stepIndex, taskId, taskType, taskIndex, durationMs,
+                input, output, llmDetail, toolCalls, actions, cost, newTimestamp, hmac, agentSignature, sequence);
+    }
+
+    /**
      * Return a copy of this entry with the agent signature set. Used by
      * AuditLedgerService when agent signing is configured.
      */

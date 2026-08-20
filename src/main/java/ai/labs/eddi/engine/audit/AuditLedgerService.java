@@ -83,6 +83,16 @@ public class AuditLedgerService {
     static final int MAX_TRACKED_UNDELIVERED = 10_000;
 
     private final IAuditStore auditStore;
+
+    /**
+     * Whether verification reconstructs the timestamp precision pre-v4 rows lost in
+     * storage. On by default: without it every entry written before the v4
+     * canonical form reports INVALID, which is what made the ledger's
+     * tamper-evidence emit no usable signal at all. Set
+     * {@code eddi.audit.verify.recover-legacy=false} to hold legacy rows to their
+     * literal stored form.
+     */
+    private final boolean recoverLegacyTimestamps;
     private final boolean enabled;
     private final int flushIntervalSeconds;
     private final Optional<String> masterKeyConfig;
@@ -151,8 +161,10 @@ public class AuditLedgerService {
             @ConfigProperty(name = "eddi.audit.agent-signing-enabled", defaultValue = "true") boolean agentSigningEnabled,
             @ConfigProperty(name = "eddi.tenant.default-id", defaultValue = "default") String defaultTenantId,
             @ConfigProperty(name = "eddi.audit.max-queue-size", defaultValue = "100000") int maxQueueSize,
+            @ConfigProperty(name = "eddi.audit.verify.recover-legacy", defaultValue = "true") boolean recoverLegacyTimestamps,
             io.micrometer.core.instrument.MeterRegistry meterRegistry, Instance<Connection> natsConnectionInstance,
             AgentSigningService agentSigningService, ObjectMapper objectMapper) {
+        this.recoverLegacyTimestamps = recoverLegacyTimestamps;
         this.auditStore = auditStore;
         this.enabled = enabled;
         this.flushIntervalSeconds = flushIntervalSeconds;
@@ -182,7 +194,7 @@ public class AuditLedgerService {
     static AuditLedgerService createForTesting(IAuditStore auditStore, boolean enabled, int flushIntervalSeconds, String masterKeyConfig,
                                                io.micrometer.core.instrument.MeterRegistry meterRegistry, int maxQueueSize) {
         return new AuditLedgerService(auditStore, enabled, flushIntervalSeconds, Optional.ofNullable(masterKeyConfig), "eddi-audit-deadletter.jsonl",
-                false, "default", maxQueueSize, meterRegistry, null, null, new ObjectMapper());
+                false, "default", maxQueueSize, true, meterRegistry, null, null, new ObjectMapper());
     }
 
     @PostConstruct
@@ -601,7 +613,11 @@ public class AuditLedgerService {
         if (entry.hmac() == null || entry.hmac().isBlank()) {
             return AuditVerificationStatus.UNSIGNED;
         }
-        return AuditHmac.verifyHmac(entry, hmacKey) ? AuditVerificationStatus.VALID : AuditVerificationStatus.INVALID;
+        return switch (AuditHmac.verify(entry, hmacKey, recoverLegacyTimestamps)) {
+            case MATCH -> AuditVerificationStatus.VALID;
+            case MATCH_RECOVERED -> AuditVerificationStatus.VALID_RECOVERED;
+            case MISMATCH -> AuditVerificationStatus.INVALID;
+        };
     }
 
     /**

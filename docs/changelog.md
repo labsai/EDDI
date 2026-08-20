@@ -7,6 +7,56 @@
 
 
 
+## 🔐 fix(audit): the compliance ledger reported every entry as forged (2026-08-20)
+
+**Repo:** EDDI (`fix/sweep-0820a-integrity-defects`)
+
+From the run-0820a live sweep (D7, D7b). The audit ledger's tamper-evidence was non-functional on
+both supported backends:
+
+```text
+signingEnabled=true  entriesChecked=78  valid=0  invalid=78  unsigned=0  chainStatus=INTACT
+```
+
+Entries seconds old failed alongside everything else, so this was neither key rotation nor legacy
+data. `chainStatus: INTACT` ruled out the sequence, leaving one field.
+
+**The signed timestamp had a precision no backend can store.** `buildCanonicalStringV3` signed the
+raw `Instant`, which on a Linux container carries nanoseconds. PostgreSQL's `TIMESTAMPTZ` keeps
+microseconds; MongoDB's `Date` keeps milliseconds. The entry read back was therefore never the entry
+that was signed, and the digest could not match. An operator running verify could not distinguish a
+forged row from a healthy one — the control emitted no signal at all, in either direction.
+
+**Fixed forward with a v4 canonical form**, per the class's own "frozen once written" rule: identical
+to v3 except `ts` is the millisecond epoch value. Milliseconds is the coarsest backend floor, so a v4
+signature round-trips through either; signing the epoch rather than `Instant.toString()` also removes
+its trailing-zero variance from the digest.
+
+**Existing v3 rows are recovered, not re-signed.** The stored HMAC is intact — only the
+sub-storage-precision digits of the timestamp are gone, and the signature still identifies them.
+Verification completes a v3 row by trying each candidate: at most 999 for a microsecond-floored
+(PostgreSQL) row, and 999 more for a millisecond-floored (MongoDB) row from a microsecond clock — a
+couple of milliseconds per row. A match proves integrity as strongly as a direct one, since producing
+a completion without the key is as hard as forging the digest. Blind re-signing was rejected
+deliberately: resealing without verifying would launder any tampering that had already happened.
+Recovered rows report as `VALID_RECOVERED` and are counted in a new `recovered` field on
+`/auditstore/verify`, so the count also tells an operator how much of the ledger predates v4. Switch
+it off with `eddi.audit.verify.recover-legacy=false`.
+
+**D7b — Ed25519 signatures were separately discarded on PostgreSQL.**
+`eddi.audit.agent-signing-enabled` defaults to true and signatures were duly computed, but
+`audit_ledger` had no `agent_signature` column and the row-mapper hard-coded `null`. The
+non-repudiation half of the ledger was inert on one backend while the other had it. The column is
+added through the same `ADD COLUMN IF NOT EXISTS` upgrade pattern as `sequence`, and is written and
+read.
+
+Regression tests do what the ledger's own tests never did: sign an entry, apply each backend's
+truncation, and verify what comes back. Reverting the v4 form fails them.
+
+---
+
+
+
 ## 🧾 fix(memory): conversation turns that were destroyed while reporting success (2026-08-20)
 
 **Repo:** EDDI (`fix/sweep-0820a-integrity-defects`)

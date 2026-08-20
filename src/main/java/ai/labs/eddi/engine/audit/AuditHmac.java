@@ -12,6 +12,8 @@ import java.nio.charset.StandardCharsets;
 import java.security.InvalidKeyException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -61,6 +63,38 @@ public final class AuditHmac {
      * @see #buildCanonicalStringV3
      */
     static final String V3_PREFIX = "v3:";
+
+    /**
+     * Marker for the <strong>v4</strong> canonical form — the one
+     * {@link #computeHmac} writes today. v4 differs from v3 in exactly one place:
+     * the timestamp is signed as {@code epoch-millis}, not as the raw
+     * {@link Instant}.
+     * <p>
+     * That single field made tamper-evidence non-functional on both supported
+     * backends. v3 signed {@code Instant.toString()} at whatever precision the JVM
+     * clock produced — nanoseconds on a Linux container — but no backend stores
+     * that: PostgreSQL's {@code TIMESTAMPTZ} keeps microseconds and MongoDB's
+     * {@code Date} keeps milliseconds. The entry read back therefore never carried
+     * the value that was signed, so the recomputed digest never matched. A live
+     * ledger reported {@code valid=0 invalid=78} on entries written seconds
+     * earlier: an operator running verify could not tell a forged row from a
+     * healthy one, because the control emitted no signal at all.
+     * <p>
+     * Milliseconds is the coarsest floor of the two backends, so a v4 signature
+     * round-trips through either without loss. Signing the epoch value rather than
+     * the text also removes {@code Instant.toString()}'s trailing-zero variance
+     * ({@code …:00Z} vs {@code …:00.000Z}) from the digest.
+     *
+     * @see #buildCanonicalStringV4
+     */
+    static final String V4_PREFIX = "v4:";
+
+    /**
+     * The storage floor every supported backend can represent: PostgreSQL keeps
+     * microseconds, MongoDB milliseconds, so a signed timestamp must be truncated
+     * to the coarser of the two before it is signed.
+     */
+    static final ChronoUnit SIGNED_TIMESTAMP_PRECISION = ChronoUnit.MILLIS;
 
     /**
      * Prefix of a GDPR-pseudonymised user identifier. Shared with the erasure
@@ -156,7 +190,7 @@ public final class AuditHmac {
      * @return version-tagged, hex-encoded HMAC string ({@code v3:<64 hex chars>})
      */
     public static String computeHmac(AuditEntry entry, byte[] hmacKey) {
-        return V3_PREFIX + hmacSha256(buildCanonicalStringV3(entry), hmacKey);
+        return V4_PREFIX + hmacSha256(buildCanonicalStringV4(entry), hmacKey);
     }
 
     /**
@@ -188,15 +222,80 @@ public final class AuditHmac {
      * @return true if the HMAC is valid, false if tampered
      */
     public static boolean verifyHmac(AuditEntry entry, byte[] hmacKey) {
+        return verify(entry, hmacKey, false) != VerificationOutcome.MISMATCH;
+    }
+
+    /**
+     * The outcome of re-checking one entry, distinguishing a plain match from one
+     * that needed the v3 timestamp-completion search.
+     */
+    public enum VerificationOutcome {
+        /** The stored digest matched a straight recomputation. */
+        MATCH,
+
+        /**
+         * A v3 row that matched only once the timestamp digits its backend could not
+         * store were reconstructed. Proof of integrity, not a weaker result — see
+         * {@link #verify}.
+         */
+        MATCH_RECOVERED,
+
+        /** No recomputation matched. The entry was altered, or signed elsewhere. */
+        MISMATCH
+    }
+
+    /**
+     * Verify an entry, optionally recovering the timestamp precision v3 rows lost
+     * on the way into storage.
+     * <p>
+     * v3 signed the timestamp at the JVM clock's precision while the backends store
+     * less of it, so a v3 row's stored fields are not the fields that were signed
+     * and it can never verify as written. The <em>signature itself</em> still
+     * carries the missing digits, though: appending each candidate sub-precision
+     * completion to the stored timestamp and recomputing costs one HMAC per
+     * candidate, and a match identifies the original value. There are at most 999
+     * of them for a microsecond-floored row (PostgreSQL) and, for a
+     * millisecond-floored one (MongoDB) written by a microsecond-resolution clock,
+     * at most 999 more — a couple of milliseconds of work per row.
+     * <p>
+     * This is not a weakening. Producing a completion that matches without holding
+     * the key is exactly as hard as forging the digest outright; the search only
+     * re-derives a value the writer knew and storage discarded. It is also why
+     * legacy rows must never be re-signed in place: resealing without verifying
+     * would launder any tampering that already happened, whereas recovering proves
+     * the row is the one that was written.
+     * <p>
+     * About one v3 row in a thousand verifies with no search at all — its clock
+     * happened to land on a whole unit. That is expected, not a special case.
+     *
+     * @param entry
+     *            the audit entry with its hmac field populated
+     * @param hmacKey
+     *            the 32-byte HMAC key
+     * @param recoverLegacyTimestamps
+     *            run the completion search for v3 rows that do not match as stored
+     * @return whether, and how, the entry verified
+     */
+    public static VerificationOutcome verify(AuditEntry entry, byte[] hmacKey, boolean recoverLegacyTimestamps) {
         String stored = entry.hmac();
         if (stored == null)
-            return false;
+            return VerificationOutcome.MISMATCH;
 
         String expectedDigest;
         String storedDigest;
-        if (stored.startsWith(V3_PREFIX)) {
-            expectedDigest = hmacSha256(buildCanonicalStringV3(entry), hmacKey);
-            storedDigest = stored.substring(V3_PREFIX.length());
+        if (stored.startsWith(V4_PREFIX)) {
+            expectedDigest = hmacSha256(buildCanonicalStringV4(entry), hmacKey);
+            storedDigest = stored.substring(V4_PREFIX.length());
+        } else if (stored.startsWith(V3_PREFIX)) {
+            byte[] storedV3 = decodeHexOrNull(stored.substring(V3_PREFIX.length()));
+            if (storedV3 == null)
+                return VerificationOutcome.MISMATCH;
+            if (MessageDigest.isEqual(decodeHexOrNull(hmacSha256(buildCanonicalStringV3(entry), hmacKey)), storedV3)) {
+                return VerificationOutcome.MATCH;
+            }
+            return recoverLegacyTimestamps && recoverV3Timestamp(entry, hmacKey, storedV3)
+                    ? VerificationOutcome.MATCH_RECOVERED
+                    : VerificationOutcome.MISMATCH;
         } else if (stored.startsWith(V2_PREFIX)) {
             expectedDigest = hmacSha256(buildCanonicalStringV2(entry), hmacKey);
             storedDigest = stored.substring(V2_PREFIX.length());
@@ -208,9 +307,50 @@ public final class AuditHmac {
 
         byte[] storedBytes = decodeHexOrNull(storedDigest);
         if (storedBytes == null)
-            return false;
+            return VerificationOutcome.MISMATCH;
 
-        return MessageDigest.isEqual(decodeHexOrNull(expectedDigest), storedBytes);
+        return MessageDigest.isEqual(decodeHexOrNull(expectedDigest), storedBytes)
+                ? VerificationOutcome.MATCH
+                : VerificationOutcome.MISMATCH;
+    }
+
+    /**
+     * Candidate sub-precision completions for a v3 timestamp, in the order they are
+     * tried: first the nanoseconds a microsecond-floored row (PostgreSQL) dropped,
+     * then the microseconds a millisecond-floored row (MongoDB) dropped from a
+     * clock that ticked in microseconds.
+     * <p>
+     * A millisecond-floored row written by a nanosecond-resolution clock would need
+     * the full million and is deliberately not searched: that costs about a second
+     * per row on a bulk sweep, and such a row simply reports as it did before.
+     * Recovery is a courtesy to existing ledgers, not a load-bearing path — every
+     * row written from now on is v4 and verifies directly.
+     */
+    private static final int[] RECOVERY_NANO_STEPS = {1, 1_000};
+
+    /** Completions tried per step: a whole unit would be the next unit up. */
+    private static final int RECOVERY_CANDIDATES_PER_STEP = 999;
+
+    /**
+     * Searches for the sub-precision timestamp digits a v3 row lost in storage.
+     *
+     * @return true when the digits that reproduce the stored digest were found
+     */
+    private static boolean recoverV3Timestamp(AuditEntry entry, byte[] hmacKey, byte[] storedDigest) {
+        Instant storedTimestamp = entry.timestamp();
+        if (storedTimestamp == null) {
+            // Nothing was truncated, so there is nothing to complete.
+            return false;
+        }
+        for (int step : RECOVERY_NANO_STEPS) {
+            for (int k = 1; k <= RECOVERY_CANDIDATES_PER_STEP; k++) {
+                AuditEntry candidate = entry.withTimestamp(storedTimestamp.plusNanos((long) k * step));
+                if (MessageDigest.isEqual(decodeHexOrNull(hmacSha256(buildCanonicalStringV3(candidate), hmacKey)), storedDigest)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /**
@@ -244,6 +384,51 @@ public final class AuditHmac {
      * <strong>Frozen once written.</strong> Same rule as v1/v2: changing a byte
      * here makes every v3 row read as tampered. Add a v4 instead.
      */
+    /**
+     * Build the <strong>v4</strong> canonical string — the form new entries are
+     * signed with.
+     * <p>
+     * Byte-for-byte v3 apart from the version tag and {@code ts}, which is the
+     * millisecond epoch value of the timestamp rather than its
+     * {@link Instant#toString()}. See {@link #V4_PREFIX} for why that one field
+     * broke verification everywhere.
+     * <p>
+     * <strong>Frozen once written.</strong> Same rule as v1/v2/v3: changing a byte
+     * here makes every v4 row read as tampered. Add a v5 instead.
+     */
+    static String buildCanonicalStringV4(AuditEntry entry) {
+        StringBuilder sb = new StringBuilder(512);
+        sb.append("v4");
+        sb.append("|id=").append(escape(entry.id()));
+        sb.append("|cid=").append(escape(entry.conversationId()));
+        sb.append("|bid=").append(escape(entry.agentId()));
+        sb.append("|bv=").append(entry.agentVersion());
+        sb.append("|uid=").append(escape(identityToken(entry.userId())));
+        sb.append("|env=").append(escape(entry.environment()));
+        sb.append("|si=").append(entry.stepIndex());
+        sb.append("|tid=").append(escape(entry.taskId()));
+        sb.append("|tt=").append(escape(entry.taskType()));
+        sb.append("|ti=").append(entry.taskIndex());
+        sb.append("|seq=").append(entry.sequence());
+        sb.append("|dur=").append(entry.durationMs());
+        sb.append("|in=").append(canonicalValueV2(entry.input()));
+        sb.append("|out=").append(canonicalValueV2(entry.output()));
+        sb.append("|llm=").append(canonicalValueV2(entry.llmDetail()));
+        sb.append("|tools=").append(canonicalValueV2(entry.toolCalls()));
+        sb.append("|actions=").append(canonicalValueV2(entry.actions()));
+        sb.append("|cost=").append(entry.cost());
+        sb.append("|ts=").append(signedTimestamp(entry.timestamp()));
+        return sb.toString();
+    }
+
+    /**
+     * The timestamp as v4 signs it: epoch milliseconds, or the empty string when
+     * the entry carries no timestamp at all.
+     */
+    private static String signedTimestamp(Instant timestamp) {
+        return timestamp == null ? "" : Long.toString(timestamp.truncatedTo(SIGNED_TIMESTAMP_PRECISION).toEpochMilli());
+    }
+
     static String buildCanonicalStringV3(AuditEntry entry) {
         StringBuilder sb = new StringBuilder(512);
         sb.append("v3");

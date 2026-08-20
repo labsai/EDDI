@@ -45,7 +45,14 @@ import java.util.List;
  * @param entriesChecked
  *            number of entries examined
  * @param valid
- *            entries whose HMAC recomputed correctly
+ *            entries whose HMAC recomputed correctly, including the
+ *            {@code recovered} ones
+ * @param recovered
+ *            of those, entries written before the v4 canonical form that
+ *            verified only after the timestamp precision their backend could
+ *            not store was reconstructed from the signature. Integrity is
+ *            proven just as strongly; the count is reported separately because
+ *            it dates the rows
  * @param invalid
  *            entries whose HMAC did not match — tampering, or a key change
  * @param unsigned
@@ -71,9 +78,9 @@ import java.util.List;
  *            when the sweep ran
  * @since 6.2.0
  */
-public record AuditVerificationReport(String scope, String scopeId, boolean signingEnabled, int entriesChecked, int valid, int invalid, int unsigned,
-        ChainStatus chainStatus, List<Long> missingSequences, List<Long> undeliveredSequences, List<Long> duplicateSequences,
-        List<EntryProblem> problems, Instant verifiedAt) {
+public record AuditVerificationReport(String scope, String scopeId, boolean signingEnabled, int entriesChecked, int valid, int recovered,
+        int invalid, int unsigned, ChainStatus chainStatus, List<Long> missingSequences, List<Long> undeliveredSequences,
+        List<Long> duplicateSequences, List<EntryProblem> problems, Instant verifiedAt) {
 
     /**
      * Whether the sweep found nothing wrong. False whenever an entry failed

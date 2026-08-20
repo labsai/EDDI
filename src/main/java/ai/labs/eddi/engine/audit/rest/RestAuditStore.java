@@ -108,6 +108,7 @@ public class RestAuditStore implements IRestAuditStore {
                                            boolean expectRunFromOrigin) {
         boolean signingEnabled = auditLedgerService.isSigningEnabled();
         int valid = 0;
+        int recovered = 0;
         int invalid = 0;
         int unsigned = 0;
         var problems = new ArrayList<EntryProblem>();
@@ -116,13 +117,19 @@ public class RestAuditStore implements IRestAuditStore {
             AuditVerificationStatus status = auditLedgerService.verifyEntry(entry);
             switch (status) {
                 case VALID -> valid++;
+                // A recovered entry is intact — it counts as valid, and is also counted
+                // on its own so an operator can see how much of the ledger predates v4.
+                case VALID_RECOVERED -> {
+                    valid++;
+                    recovered++;
+                }
                 case INVALID -> invalid++;
                 case UNSIGNED -> unsigned++;
                 case SIGNING_DISABLED -> {
                     // counted only as a problem — nothing was actually checked
                 }
             }
-            if (status != AuditVerificationStatus.VALID) {
+            if (status != AuditVerificationStatus.VALID && status != AuditVerificationStatus.VALID_RECOVERED) {
                 problems.add(new EntryProblem(entry.id(), entry.conversationId(), entry.sequence(), entry.timestamp(), status));
             }
         }
@@ -134,8 +141,8 @@ public class RestAuditStore implements IRestAuditStore {
                 ? checkChain(entries, missing, undelivered, duplicates, expectRunFromOrigin, undeliveredFor(scopeId))
                 : ChainStatus.NOT_APPLICABLE;
 
-        return new AuditVerificationReport(scope, scopeId, signingEnabled, entries.size(), valid, invalid, unsigned, chainStatus, missing,
-                undelivered, duplicates, problems, Instant.now());
+        return new AuditVerificationReport(scope, scopeId, signingEnabled, entries.size(), valid, recovered, invalid, unsigned, chainStatus,
+                missing, undelivered, duplicates, problems, Instant.now());
     }
 
     /**
