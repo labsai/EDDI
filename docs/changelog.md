@@ -36,6 +36,13 @@ lands, and asserts `valid == entriesChecked`, `invalid == 0`, `unsigned == 0`, `
 `recoverySkipped == 0`, `chainStatus INTACT` — the sweep's own definition of done, failing on every
 pre-v4 EDDI.
 
+Its first CI run failed, usefully: the audit collector is attached in `ConversationService.say()`, so
+a conversation that has only been *started* produces no entries at all, and the test had asserted on
+one. It now drives a real user turn. The count assertion was also rewritten as an invariant
+(`valid == entriesChecked`) rather than a comparison against a count polled moments earlier — the
+flush is asynchronous, so entries can land between the two calls; the invariant is both stronger and
+race-free.
+
 **The D3 pin turned out to cover the wrong path — caught by its own mutation check.** The
 `skipSteps > 0` (rolling-summary) branch of `ConversationHistoryBuilder` has its *own* render loop,
 and my first caller-level test exercised only the generator branch: re-adding the removed

@@ -194,8 +194,13 @@ public class AuditAndSecurityIT extends BaseIntegrationIT {
         try {
             ResourceId conversationId = createConversation(agentId.id(), "audit-verify-user");
 
-            // Entries are queued and flushed on an interval — poll until the
-            // CONVERSATION_START turn's entries have landed.
+            // A user TURN, not just conversation creation: the audit collector is
+            // attached in ConversationService.say(), so a conversation that has only
+            // been started produces no entries at all.
+            sendUserInput(agentId.id(), conversationId.id(), "hello", false, false)
+                    .then().statusCode(200);
+
+            // Entries are queued and flushed on an interval — poll until they land.
             int entryCount = 0;
             for (int i = 0; i < 30 && entryCount == 0; i++) {
                 Thread.sleep(500);
@@ -205,17 +210,24 @@ public class AuditAndSecurityIT extends BaseIntegrationIT {
             }
             Assertions.assertTrue(entryCount > 0, "the conversation's turn must produce audit entries");
 
-            given().get(AUDIT_BASE + "verify/" + conversationId.id())
-                    .then().assertThat()
-                    .statusCode(200)
-                    .body("signingEnabled", equalTo(true))
-                    .body("entriesChecked", equalTo(entryCount))
-                    .body("valid", equalTo(entryCount))
-                    .body("invalid", equalTo(0))
-                    .body("unsigned", equalTo(0))
-                    .body("recovered", equalTo(0))
-                    .body("recoverySkipped", equalTo(0))
-                    .body("chainStatus", equalTo("INTACT"));
+            // Assert the INVARIANT (every checked entry is valid), not a count captured
+            // a moment earlier — the flush is asynchronous, so more entries may land
+            // between the poll above and this call. "valid == entriesChecked" is both
+            // the stronger claim and the race-free one.
+            var report = given().get(AUDIT_BASE + "verify/" + conversationId.id())
+                    .then().statusCode(200).extract().jsonPath();
+
+            int checked = report.getInt("entriesChecked");
+            Assertions.assertTrue(checked > 0, "the sweep must actually have checked something");
+            Assertions.assertTrue(report.getBoolean("signingEnabled"), "the vault key is configured in this profile");
+            Assertions.assertEquals(checked, report.getInt("valid"),
+                    "every entry the sweep checked must verify — this is what reported valid=0 invalid=78 in the wild");
+            Assertions.assertEquals(0, report.getInt("invalid"));
+            Assertions.assertEquals(0, report.getInt("unsigned"));
+            Assertions.assertEquals(0, report.getInt("recovered"),
+                    "freshly written entries are v4 and verify directly, with no legacy recovery");
+            Assertions.assertEquals(0, report.getInt("recoverySkipped"));
+            Assertions.assertEquals("INTACT", report.getString("chainStatus"));
         } finally {
             undeployAgentQuietly(agentId.id(), agentId.version());
         }
