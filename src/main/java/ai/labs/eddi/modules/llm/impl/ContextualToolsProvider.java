@@ -27,9 +27,11 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+import com.github.benmanes.caffeine.cache.Caffeine;
+import java.time.Duration;
+import java.util.Collections;
 
 /**
  * The three conversation-context-dependent tool sources — persistent user
@@ -64,12 +66,19 @@ class ContextualToolsProvider implements ToolSourceProvider {
     private final AttachmentTextExtractor attachmentTextExtractor;
 
     /**
-     * Agents already warned about the memory/built-ins conflict. Static because
+     * Agents already warned about the memory/built-ins conflict — see
+     * {@link #warnIfMemoryEnabledButBuiltInsAreOff}. Static because
      * {@code AgentOrchestrator} constructs this provider per call, so an instance
-     * field would debounce nothing; bounded by the number of distinct agents. — see
-     * {@link #warnIfMemoryEnabledButBuiltInsAreOff}.
+     * field would debounce nothing. Bounded and expiring rather than a plain set:
+     * "the number of distinct agents" is not a fixed bound on this platform —
+     * dynamic and ephemeral agents are created at runtime with fresh ids, so a
+     * long-lived deployment with churn would otherwise accumulate entries for the
+     * JVM lifetime. Expiry also means a standing misconfiguration re-announces
+     * itself daily instead of exactly once per process.
      */
-    private static final Set<String> MEMORY_MISCONFIGURATION_WARNED = ConcurrentHashMap.newKeySet();
+    private static final Set<String> MEMORY_MISCONFIGURATION_WARNED = Collections.newSetFromMap(
+            Caffeine.newBuilder().maximumSize(10_000).expireAfterWrite(Duration.ofHours(24))
+                    .<String, Boolean>build().asMap());
 
     ContextualToolsProvider(IUserMemoryStore userMemoryStore, IAttachmentStore attachmentStore,
             AttachmentTextExtractor attachmentTextExtractor) {
@@ -161,7 +170,7 @@ class ContextualToolsProvider implements ToolSourceProvider {
         }
         LOGGER.warnf("[MEMORY] Agent '%s' has persistent user memory enabled, but this LLM task has "
                 + "enableBuiltInTools=%s — UserMemoryTool is NOT attached and the agent cannot write memories. "
-                + "Set enableBuiltInTools: true on the task (conversation='%s'). Logged once per agent.",
+                + "Set enableBuiltInTools: true on the task (conversation='%s'). Logged at most once per agent per day.",
                 sanitize(agentId), ctx.task().getEnableBuiltInTools(),
                 sanitize(ctx.memory().getConversationId()));
     }

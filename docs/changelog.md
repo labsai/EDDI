@@ -39,9 +39,12 @@ lenient mapper, and its error path returned `e.getMessage()`, which for a respon
 `describe()`, so the known-fields message reaches the MCP caller. (`update_agent` takes only
 name/description parameters — checked, no gap.)
 
-**The memory/built-ins WARN is now once per agent**, not per turn — a busy misconfigured agent would
-have flooded the log with the same sentence, which trains operators to ignore it. The set is static
-because `AgentOrchestrator` constructs the provider per call.
+**The memory/built-ins WARN is now at most once per agent per day**, not per turn — a busy
+misconfigured agent would have flooded the log with the same sentence, which trains operators to
+ignore it. The cache is static because `AgentOrchestrator` constructs the provider per call, and
+bounded/expiring (Caffeine, 10k / 24h) rather than a plain set — "the number of distinct agents" is
+not a fixed bound on a platform that creates dynamic and ephemeral agents at runtime, so a plain set
+would grow for the JVM lifetime under churn (review catch on the first version of this fix).
 
 **Verified clean, for the record:** the D6 Qute strategy genuinely reaches production rendering
 (`TemplatingEngine` injects the CDI `Engine` that `EngineProducer` builds from config — not a
