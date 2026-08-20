@@ -7,6 +7,46 @@
 
 
 
+## 📮 feat(ci): publish releases to Red Hat's hosted registry, distributing on both registries (2026-08-20)
+
+**Repo:** EDDI (`feat/redhat-hosted-registry`)
+
+The first certification run after the preflight fixes cleared every check but died at submission:
+
+```text
+could not submit to pyxis: 400: "The 'container.registry' field is immutable
+for projects with hosted registry"
+```
+
+The certification project is a **hosted registry** project — Pyxis requires the certified image to
+live in `quay.io/redhat-isv-containers/<project-id>`, from where Red Hat serves customers via
+`registry.connect.redhat.com`. Nothing in this repo had ever pushed there: `ci.yml` publishes only
+`docker.io/labsai/eddi`, and the certify workflow's old `quay.io` option targeted the generic
+`quay.io/labsai/eddi`, which satisfies neither model. The decision is to distribute on **both**
+registries: Docker Hub stays the primary (published by `ci.yml` on the release tag, unchanged), and
+the certify workflow becomes the Red Hat publication path.
+
+`redhat-certify.yml` now pulls the released `docker.io/labsai/eddi:<version>`, retags it into the
+hosted repository as `<version>` (the customer-facing tag) and `<version>-<release>` (this attempt's
+coordinate), pushes only those two, asserts at the registry that the pushed digest equals the
+released digest, and runs preflight with `--submit` against the hosted coordinate. All the
+invariants from the previous rewrite carry over: no rebuild ever, inputs reach the shell only via
+`env:`, version/release format-validated, digests read via `buildx imagetools` (registry-side, not
+local cache), preflight pinned at 1.20.0 by version and SHA256. The `registry` dispatch input is
+gone — the source is always docker.io and the destination is always the hosted repo, so a choice
+there could only misdirect.
+
+**Two new secrets are required before the first run**, both from the certification project's
+"Registry key" page in Partner Connect: `REDHAT_REGISTRY_USERNAME` (the robot user) and
+`REDHAT_REGISTRY_KEY` (its password). `docs/redhat-openshift.md` rewritten to describe the
+two-registry model, the no-rebuild rationale, and the full secret set.
+
+6.3.0 still needs no re-release: once the secrets exist, `version=6.3.0`, `release=1` certifies the
+shipped digest `sha256:202c0412…` — the failed submission attempt consumed nothing.
+
+---
+
+
 ## 🛑 fix(ci): the Red Hat certify workflow would have overwritten the signed release (2026-08-20)
 
 **Repo:** EDDI (`fix/preflight-version-1-20-0`)

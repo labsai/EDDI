@@ -1,5 +1,24 @@
 name: Red Hat Certification Release
 
+# Publishes an already-released image to Red Hat's HOSTED certification
+# registry and submits the preflight results. EDDI distributes on two
+# registries: docker.io (published by ci.yml on the release tag) and Red Hat's
+# catalog (published here, per release, after the fact).
+#
+# The certification project is a "hosted registry" project: Pyxis requires the
+# certified image to live in quay.io/redhat-isv-containers/<project-id>, from
+# where Red Hat serves it to customers via registry.connect.redhat.com.
+# Submitting results for a docker.io-hosted image is rejected with
+# "The 'container.registry' field is immutable for projects with hosted
+# registry" - which is how this flow's predecessor failed.
+#
+# Required secrets, all from the certification project in Partner Connect:
+#   REDHAT_CERT_PROJECT_ID     - the project id (also the hosted repo name)
+#   REDHAT_REGISTRY_USERNAME   - the project's registry robot user
+#                                (shown with the key on the "Registry key" page)
+#   REDHAT_REGISTRY_KEY        - the project's registry key (the robot password)
+#   REDHAT_API_TOKEN           - Pyxis API token, for --submit
+
 on:
   workflow_dispatch:
     inputs:
@@ -17,38 +36,32 @@ on:
         default: "true"
         type: choice
         options: ["true", "false"]
-      registry:
-        description: "Target registry"
-        required: true
-        default: "docker.io"
-        type: choice
-        options: ["docker.io", "quay.io"]
 
 permissions:
   contents: read
 
 jobs:
   certify:
-    name: Certify Published Image
+    name: Publish to Red Hat Registry & Certify
     runs-on: ubuntu-latest
 
     steps:
-      # Certification runs against the image that was ALREADY published and signed
-      # by ci.yml on the release tag. It deliberately does NOT rebuild: a rebuild
-      # produces a different digest, is not covered by the release's cosign
-      # signature or SLSA attestation, and pushing it over :<version> and :latest
-      # would replace what users pull with unsigned bytes.
+      # Certification runs against the image that was ALREADY published and
+      # signed by ci.yml on the release tag. It deliberately does NOT rebuild:
+      # a rebuild produces a different digest, is not covered by the release's
+      # cosign signature or SLSA attestation, and would put bytes in Red Hat's
+      # catalog that differ from what docker.io users pull.
       #
-      # Inputs reach the shell through `env:`, never through ${{ }} interpolation.
-      # Interpolation splices the value into the script text before Bash parses
-      # it, so a crafted version/release could close the quoting and run commands
-      # with the registry credentials this job holds.
+      # Inputs reach the shell through `env:`, never through ${{ }}
+      # interpolation. Interpolation splices the value into the script text
+      # before Bash parses it, so a crafted version/release could close the
+      # quoting and run commands with the registry credentials this job holds.
       - name: Set image coordinates
         id: image
         env:
-          REGISTRY: ${{ inputs.registry }}
           VERSION: ${{ inputs.version }}
           RELEASE: ${{ inputs.release }}
+          PROJECT_ID: ${{ secrets.REDHAT_CERT_PROJECT_ID }}
         run: |
           set -euo pipefail
           case "${VERSION}" in
@@ -59,19 +72,15 @@ jobs:
             ''|*[!0-9]*|0|0*)
               echo "::error::release must be a positive integer without leading zeros (got: ${RELEASE})"; exit 1;;
           esac
+          if [ -z "${PROJECT_ID}" ]; then
+            echo "::error::REDHAT_CERT_PROJECT_ID secret is not set"; exit 1
+          fi
 
-          IMAGE="${REGISTRY}/labsai/eddi"
           {
-            echo "released=${IMAGE}:${VERSION}"
-            echo "certified=${IMAGE}:${VERSION}-${RELEASE}"
+            echo "released=docker.io/labsai/eddi:${VERSION}"
+            echo "hosted=quay.io/redhat-isv-containers/${PROJECT_ID}:${VERSION}"
+            echo "certified=quay.io/redhat-isv-containers/${PROJECT_ID}:${VERSION}-${RELEASE}"
           } >> "$GITHUB_OUTPUT"
-
-      - name: Login to registry
-        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4
-        with:
-          registry: ${{ inputs.registry }}
-          username: ${{ inputs.registry == 'quay.io' && secrets.QUAY_USERNAME || secrets.DOCKER_USERNAME }}
-          password: ${{ inputs.registry == 'quay.io' && secrets.QUAY_PASSWORD || secrets.DOCKER_PASSWORD }}
 
       - name: Pull the published release image
         id: pull
@@ -107,18 +116,29 @@ jobs:
           echo "=== THIRD-PARTY.txt in container ==="
           docker run --rm --entrypoint="" "${RELEASED}" head -30 /licenses/THIRD-PARTY.txt || true
 
-      # Red Hat's catalogue keys on a version-release coordinate. Retagging the
-      # pulled image reuses its manifest, so this tag carries the SAME digest as
-      # the released one - a rename, not a rebuild. :<version> and :latest are
-      # never pushed here.
-      - name: Publish the version-release coordinate
+      - name: Login to the Red Hat hosted registry
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4
+        with:
+          registry: quay.io
+          username: ${{ secrets.REDHAT_REGISTRY_USERNAME }}
+          password: ${{ secrets.REDHAT_REGISTRY_KEY }}
+
+      # Retagging the pulled image reuses its manifest, so the hosted tags
+      # carry the SAME digest as the docker.io release - a rename, not a
+      # rebuild. Two tags land in the hosted repo: <version> is what the
+      # catalog offers customers, <version>-<release> is the coordinate this
+      # certification attempt runs against. docker.io is never pushed here.
+      - name: Publish to the hosted repository
         env:
           RELEASED: ${{ steps.image.outputs.released }}
+          HOSTED: ${{ steps.image.outputs.hosted }}
           CERTIFIED: ${{ steps.image.outputs.certified }}
           EXPECTED: ${{ steps.pull.outputs.digest }}
         run: |
           set -euo pipefail
+          docker tag "${RELEASED}" "${HOSTED}"
           docker tag "${RELEASED}" "${CERTIFIED}"
+          docker push "${HOSTED}"
           docker push "${CERTIFIED}"
 
           PUSHED="$(docker buildx imagetools inspect "${CERTIFIED}" --format '{{.Manifest.Digest}}')"
