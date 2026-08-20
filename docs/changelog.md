@@ -7,6 +7,45 @@
 
 
 
+## 🛑 fix(ci): the Red Hat certify workflow would have overwritten the signed release (2026-08-20)
+
+**Repo:** EDDI (`fix/preflight-version-1-20-0`)
+
+Found while answering "can 6.3.0 still be certified, or does it need a new version?". The answer was
+yes, run `redhat-certify.yml` with `version=6.3.0` — but reading the workflow before recommending it
+showed that running it would have done real damage.
+
+It **rebuilt** the image from the checked-out ref and then pushed three tags:
+
+```text
+docker push labsai/eddi:6.3.0-1     # the version-release coordinate, fine
+docker push labsai/eddi:6.3.0       # replaces the released image
+docker push labsai/eddi:latest      # replaces latest
+```
+
+A rebuild has a different digest, and it is produced by `redhat-certify.yml`, not `ci.yml`. So the
+two clobbering pushes would have replaced the cosign-signed, SLSA-attested release that `ci.yml`
+published with **unsigned** bytes. Every user running the `cosign verify` command from the release
+notes — which pins `--certificate-identity-regexp` to `ci.yml` — would have started failing, and the
+SLSA attestation would no longer describe what `:6.3.0` actually is. Certifying a release would have
+silently de-certified it.
+
+**The workflow now certifies the already-published image instead of rebuilding one.** It pulls
+`:<version>`, records the digest, retags it to `<version>-<release>` for Red Hat's catalogue
+convention, and pushes **only** that coordinate. A retag reuses the manifest, so the certified tag
+carries the *same digest* as the release — the workflow asserts exactly that after pushing and fails
+if it does not hold, rather than trusting that a retag behaved. `:<version>` and `:latest` are never
+pushed.
+
+Dropped with the rebuild: the JDK setup, the Maven build, the local license-generation check and the
+`docker build`. None of them have a purpose once the image is pulled rather than produced, and the
+`/licenses` and label checks already run **inside** the container, which is the stronger assertion
+anyway. It also fails with an actionable message when the requested version is not published, since
+the whole premise is that certification follows a release.
+
+---
+
+
 ## 🔴 fix(ci): Red Hat rejects preflight 1.17.1, so certification submission failed on the 6.3.0 tag (2026-08-20)
 
 **Repo:** EDDI (`fix/preflight-version-1-20-0`)
