@@ -117,9 +117,28 @@ public record AuditVerificationReport(String scope, String scopeId, boolean sign
      * whose HMAC no longer recomputes, or a gap this deployment cannot account for.
      * An {@code INCOMPLETE} chain (the ledger dropped those entries itself) and a
      * missing signing key are explicitly not tampering.
+     * <p>
+     * Nor is {@link #recoverySkipped}. Those rows failed their direct check and
+     * were then <em>not searched</em>, because the sweep's recovery budget was
+     * spent — so nothing about them was established either way, and a pre-v4 row
+     * failing its direct check is the expected outcome rather than evidence.
+     * Counting them would make a large enough page raise a tampering alarm purely
+     * by exhausting a budget, which is the same "reports something as proven when
+     * it is not" failure this release exists to remove. They still defeat
+     * {@link #intact()}: a sweep that could not finish checking is not a clean bill
+     * of health.
      */
     public boolean tamperingSuspected() {
-        return invalid > 0 || chainStatus == ChainStatus.BROKEN;
+        return (invalid - Math.min(recoverySkipped, invalid)) > 0 || chainStatus == ChainStatus.BROKEN;
+    }
+
+    /**
+     * Entries whose HMAC was actually shown not to recompute — {@link #invalid}
+     * minus the rows that went unsearched. This is the number an alert should key
+     * on.
+     */
+    public int disproven() {
+        return invalid - Math.min(recoverySkipped, invalid);
     }
 
     /** Continuity of the per-conversation sequence chain. */

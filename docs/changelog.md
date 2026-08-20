@@ -49,6 +49,16 @@ are signed with".
 **`MeterRegistry`** was declared by fully-qualified name in three signatures (AGENTS.md §4.7).
 `ImportStyleTest` does not cover `io.micrometer`, so nothing failed — replaced with an import.
 
+**Second round, two more.** Rows left unsearched by the recovery budget were still counted by
+`tamperingSuspected()`, so a page large enough to exhaust the budget would have raised a compliance
+alarm without a single HMAC having been disproven — the same "reported as proven when it is not"
+shape as the defects this release fixes, pointed the other way. Those rows establish nothing either
+way (failing the direct check is the *expected* outcome for a pre-v4 row), so they no longer count as
+tampering, and a new `disproven()` gives alerting the number to key on. They still defeat `intact()`:
+a sweep that could not finish checking is not a clean bill of health. Also corrected two Javadocs
+left stale by the v4 switch — `V3_PREFIX` still called itself the form `computeHmac` writes, and the
+v1 canonicalizer still pointed new entries at v2.
+
 ---
 
 

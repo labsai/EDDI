@@ -55,10 +55,11 @@ public final class AuditHmac {
     static final String V2_PREFIX = "v2:";
 
     /**
-     * Marker for the <strong>v3</strong> canonical form — the one
-     * {@link #computeHmac} writes today. v3 differs from v2 in exactly two places:
-     * the user identifier is signed through {@link #identityToken} rather than
-     * verbatim, and the per-conversation {@code sequence} joins the signed payload.
+     * Marker for the <strong>v3</strong> canonical form. No longer produced — see
+     * {@link #V4_PREFIX} — but still selected by {@link #verify} for rows written
+     * while v3 was current. v3 differs from v2 in exactly two places: the user
+     * identifier is signed through {@link #identityToken} rather than verbatim, and
+     * the per-conversation {@code sequence} joins the signed payload.
      *
      * @see #buildCanonicalStringV3
      */
@@ -600,7 +601,7 @@ public final class AuditHmac {
      * existed carries a bare hex HMAC over exactly these bytes, and
      * {@link #verifyHmac} still recomputes it for those rows. Changing this method
      * by a single byte makes every historical ledger row read as tampered. New
-     * entries are signed with {@link #buildCanonicalStringV2}.
+     * entries are signed with {@link #buildCanonicalStringV4}.
      */
     static String buildCanonicalString(AuditEntry entry) {
         StringBuilder sb = new StringBuilder(512);
