@@ -7,6 +7,42 @@
 
 
 
+## 🔴 fix(ci): Red Hat rejects preflight 1.17.1, so certification submission failed on the 6.3.0 tag (2026-08-20)
+
+**Repo:** EDDI (`fix/preflight-version-1-20-0`)
+
+The 6.3.0 release pipeline went red on **Preflight Verify (Pushed Image)**, but not because the image
+failed certification. The check results were `"failed": []` and `"errors": []` — `RunAsNonRoot`,
+`BasedOnUbi`, `HasRequiredLabel`, `HasModifiedFiles`, `HasNoProhibitedPackages` and the rest all
+passed. What Red Hat rejected was the **submission**:
+
+```text
+Validation error: 'openshift-preflight' version '1.17.1' is not supported.
+Supported versions are: ['1.19.0', '1.19.1', '1.19.2', '1.20.0']
+```
+
+Pyxis (Red Hat's certification API) drops support for old preflight clients, and our pin had aged
+out. Nothing about 6.3.0 caused this; the same pin would have failed on any tag pushed after Red Hat
+retired 1.17.x.
+
+**Bumped to 1.20.0**, the latest supported version, in **both** places that install preflight:
+`ci.yml` (env, consumed by the two preflight jobs) and `redhat-certify.yml`, which carries its **own
+hardcoded copy** of the version and hash rather than sharing the `ci.yml` env. That duplication is
+the reason a single-file fix would have left the manual certification workflow broken; worth
+consolidating, but not in a fix this narrow.
+
+`PREFLIGHT_SHA256` recomputed for the new binary: `43a8c504…`. Verified by downloading
+`preflight-linux-amd64` for 1.20.0 twice and confirming the digests matched, so the pin is not
+recording a one-off transfer artefact.
+
+**6.3.0 does not need re-releasing.** `redhat-certify.yml` is a `workflow_dispatch` workflow taking
+`version` and an incrementing `release` number, which is exactly the mechanism for re-submitting an
+already-published version. Once this lands on `main`, running it with `version=6.3.0`, `release=1`
+certifies the shipped release.
+
+---
+
+
 ## 🔎 fix(docs): four unresolved review findings on #671, all confirmed (2026-08-19)
 
 **Repo:** EDDI (`chore/eddi-version-6-3-0`)

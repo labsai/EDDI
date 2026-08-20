@@ -110,8 +110,8 @@ jobs:
 
       - name: Install preflight
         env:
-          PREFLIGHT_VERSION: "1.17.1"
-          PREFLIGHT_SHA256: "15f58d0de7212ac948706515f824d0d2f42b94c11fa85cdb1bc08ad8993226ca"
+          PREFLIGHT_VERSION: "1.20.0"
+          PREFLIGHT_SHA256: "43a8c5046c800442e58a37f583a9523d79421e81aec3a741c53c9fcffc82955b"
         run: |
           echo "Installing preflight ${PREFLIGHT_VERSION}..."
           curl -sL "https://github.com/redhat-openshift-ecosystem/openshift-preflight/releases/download/${PREFLIGHT_VERSION}/preflight-linux-amd64" \
