@@ -7,6 +7,122 @@
 
 
 
+## 🛑 fix(ci): the Red Hat certify workflow would have overwritten the signed release (2026-08-20)
+
+**Repo:** EDDI (`fix/preflight-version-1-20-0`)
+
+Found while answering "can 6.3.0 still be certified, or does it need a new version?". The answer was
+yes, run `redhat-certify.yml` with `version=6.3.0` and `release=1` — but reading the workflow before recommending it
+showed that running it would have done real damage.
+
+It **rebuilt** the image from the checked-out ref and then pushed three tags:
+
+```text
+docker push labsai/eddi:6.3.0-1     # the version-release coordinate, fine
+docker push labsai/eddi:6.3.0       # replaces the released image
+docker push labsai/eddi:latest      # replaces latest
+```
+
+A rebuild has a different digest, and it is produced by `redhat-certify.yml`, not `ci.yml`. So the
+two clobbering pushes would have replaced the cosign-signed, SLSA-attested release that `ci.yml`
+published with **unsigned** bytes. Every user running the `cosign verify` command from the release
+notes — which pins `--certificate-identity-regexp` to `ci.yml` — would have started failing, and the
+SLSA attestation would no longer describe what `:6.3.0` actually is. Certifying a release would have
+silently de-certified it.
+
+**The workflow now certifies the already-published image instead of rebuilding one.** It pulls
+`:<version>`, records the digest, retags it to `<version>-<release>` for Red Hat's catalogue
+convention, and pushes **only** that coordinate. A retag reuses the manifest, so the certified tag
+carries the *same digest* as the release — the workflow asserts exactly that after pushing and fails
+if it does not hold, rather than trusting that a retag behaved. `:<version>` and `:latest` are never
+pushed.
+
+**Review hardening (CodeRabbit on #705).** Inputs no longer reach the shell through `${{ }}`
+interpolation. Interpolation splices the value into the script text *before* Bash parses it, so a
+crafted `version` could close the quoting and run commands with the registry credentials this job
+holds. Every input now arrives through step-level `env:` and is used as a quoted variable, with
+`version` and `release` format-validated up front. The digest comparison also moved from
+`docker inspect .RepoDigests` (local cache) to `docker buildx imagetools inspect` (the registry), so
+it asserts what a user pulling that tag actually receives.
+
+Dropped with the rebuild: the JDK setup, the Maven build, the local license-generation check and the
+`docker build`. None of them have a purpose once the image is pulled rather than produced, and the
+the `/licenses` check runs **inside** the container and the label check reads the image config
+with `docker inspect`, both of which assert against the real artefact rather than the build tree. It also fails with an actionable message when the requested version is not published, since
+the whole premise is that certification follows a release.
+
+---
+
+
+## 🩻 fix(ci): the Preflight Dry-Run PR gate has been a placebo since it was written (2026-08-20)
+
+**Repo:** EDDI (`fix/preflight-version-1-20-0`)
+
+Found in a final adversarial review of this branch, by reading the dry-run job's actual log instead
+of its green check. Preflight resolves images from a **registry**, never the local Docker daemon.
+The job fed it the daemon-only tag `eddi-preflight-check:test`, so preflight asked Docker Hub for
+`library/eddi-preflight-check`, got `UNAUTHORIZED`, and errored out before running a single check.
+The invocation ended in `|| true` and the verdict grep only looked for `FAILED` — an execution error
+says neither — so the job printed "✅ All preflight checks passed" over an error message.
+
+Confirmed against history: a 1.17.1-era run shows the **identical** UNAUTHORIZED error under the
+identical green summary. Every Preflight Dry-Run pass this repository has ever recorded validated
+nothing. It also means a green dry-run on this branch proved nothing about the 1.20.0 bump — which
+is why the flag surface was verified against the 1.20.0 *source* instead (`--docker-config` in
+`check.go:18`, `--submit` in `check_container.go:59`, `--insecure` in `check_container.go:62`,
+`PFLT_PYXIS_API_TOKEN` and `PFLT_CERTIFICATION_COMPONENT_ID` verbatim at `check_container.go:76-88`).
+
+**The job now runs preflight against a job-local registry.** A digest-pinned `registry:2` container
+on `localhost:5000` receives the PR-built image, and preflight pulls from there with `--insecure`
+(plain-HTTP localhost; the flag is mutually exclusive with `--submit`, which the dry-run never
+uses). Failure handling is now real: a non-zero preflight exit fails the job as an execution error,
+and a `FAILED` verdict fails it as a certification result — the old text treated `HasUniqueTag` as
+expected noise, which stops being true when the registry holds exactly one tag.
+
+One bash subtlety, called out in a comment because it *was* nearly reintroduced here: GitHub runs
+`run:` scripts under `bash -e`, and adding `pipefail` makes a failing `preflight | tee` pipeline
+kill the script before `PIPESTATUS` can be read. The capture is wrapped in `set +e` … `set -e` so
+the diagnostic actually prints.
+
+---
+
+
+## 🔴 fix(ci): Red Hat rejects preflight 1.17.1, so certification submission failed on the 6.3.0 tag (2026-08-20)
+
+**Repo:** EDDI (`fix/preflight-version-1-20-0`)
+
+The 6.3.0 release pipeline went red on **Preflight Verify (Pushed Image)**, but not because the image
+failed certification. The check results were `"failed": []` and `"errors": []` — `RunAsNonRoot`,
+`BasedOnUbi`, `HasRequiredLabel`, `HasModifiedFiles`, `HasNoProhibitedPackages` and the rest all
+passed. What Red Hat rejected was the **submission**:
+
+```text
+Validation error: 'openshift-preflight' version '1.17.1' is not supported.
+Supported versions are: ['1.19.0', '1.19.1', '1.19.2', '1.20.0']
+```
+
+Pyxis (Red Hat's certification API) drops support for old preflight clients, and our pin had aged
+out. Nothing about 6.3.0 caused this; the same pin would have failed on any tag pushed after Red Hat
+retired 1.17.x.
+
+**Bumped to 1.20.0**, the latest supported version, in **both** places that install preflight:
+`ci.yml` (env, consumed by the two preflight jobs) and `redhat-certify.yml`, which carries its **own
+hardcoded copy** of the version and hash rather than sharing the `ci.yml` env. That duplication is
+the reason a single-file fix would have left the manual certification workflow broken; worth
+consolidating, but not in a fix this narrow.
+
+`PREFLIGHT_SHA256` recomputed for the new binary: `43a8c504…`. Verified by downloading
+`preflight-linux-amd64` for 1.20.0 twice and confirming the digests matched, so the pin is not
+recording a one-off transfer artefact.
+
+**6.3.0 does not need re-releasing.** `redhat-certify.yml` is a `workflow_dispatch` workflow taking
+`version` and an incrementing `release` number, which is exactly the mechanism for re-submitting an
+already-published version. Once this lands on `main`, running it with `version=6.3.0`, `release=1`
+certifies the shipped release.
+
+---
+
+
 ## 🔎 fix(docs): four unresolved review findings on #671, all confirmed (2026-08-19)
 
 **Repo:** EDDI (`chore/eddi-version-6-3-0`)
