@@ -7,6 +7,61 @@
 
 
 
+## 🧪 test(sweep): regression nets for every behavioural fix on the branch (2026-08-21)
+
+**Repo:** EDDI (`fix/sweep-0820a-integrity-defects`)
+
+A coverage audit of the whole branch: for each behavioural change, does a test exist that fails if it
+regresses — and are the *wiring* paths pinned, not just the units? Eleven additions, three of them
+load-bearing.
+
+**The audit signature is now proven against a real PostgreSQL container**
+(`PostgresAuditHmacRoundTripTest`, Testcontainers). The original defect was a cross-layer mismatch no
+mock could see — a live ledger reported `valid=0 invalid=78` while every unit test was green — and
+the unit tests that cover the fix *simulate* storage truncation. The new class runs the shipped
+pipeline (floor → sign → store → read → verify) and the v3 recovery search against whatever the real
+server and JDBC driver actually do. Mutation against the live container settled the rounding question
+empirically: making the recovery search forward-only fails the legacy-row test, because **the real
+PostgreSQL pipeline rounds a 789ns remainder up** — the stored value sits above the signed one, where
+a forward search can never reach it. The deep-pass bidirectional fix is therefore load-bearing on
+real infrastructure, not just in simulation. The same exercise showed the layering honestly: a
+canonical-form regression alone passes this class (flooring makes even v3 round-trip) and is pinned
+instead by `AuditHmacTimestampPrecisionTest` (signs raw nanos) and `AuditLedgerServiceTest` (catches
+flooring removal) — now stated in the class javadoc so nobody mistakes one net for all three.
+
+**`/auditstore/verify` gets its end-to-end CI net** (`AuditAndSecurityIT`): every earlier test in that
+class read an *empty* conversation's trail — precisely why broken verification could ship. The new
+ordered test deploys the minimal rule-based agent, drives a real turn, polls until the async flush
+lands, and asserts `valid == entriesChecked`, `invalid == 0`, `unsigned == 0`, `recovered == 0`,
+`recoverySkipped == 0`, `chainStatus INTACT` — the sweep's own definition of done, failing on every
+pre-v4 EDDI.
+
+**The D3 pin turned out to cover the wrong path — caught by its own mutation check.** The
+`skipSteps > 0` (rolling-summary) branch of `ConversationHistoryBuilder` has its *own* render loop,
+and my first caller-level test exercised only the generator branch: re-adding the removed
+`instanceof List` guard passed it. A rolling summary is exactly where losing a turn hurts most — the
+summarized prefix is gone by design, so a dropped turn has no other copy in the prompt. Both branches
+are pinned now, and the mutation fails.
+
+**The rest:** multi-entry redo preserves order and outputs (a flipped cache would restore the *wrong*
+turn's answer); `VALID_RECOVERED` wiring (counts as valid + recovered, never a problem entry) and
+`recoverySkipped` read off the sweep's actual budget (a literal 0 would fail nothing else); the
+submit path floors a nano-precise timestamp deterministically (host-clock-independent);
+`create_resource` propagates the strict known-fields message to the MCP caller end-to-end; the
+user-memory tool's enablement conjunction pinned in both directions at `contribute()` level
+(assembles when both switches agree, and built-ins-off *wins* — the restrictive half is a security
+posture); runtime delegation pins for the rules and dictionary listings (the source sweep can't see a
+derivation bug); the rerun list restarts at a `langchain` task placed before `output`; plaintext
+channel secrets warn but must never reject (a "hardening" to 400 would brick every existing
+integration on update); and `/rerun` without a language proceeds.
+
+Full local suite after the additions: 19,648 tests (+48), failures at the exact environmental
+baseline (8/294 loopback/selector, none in touched code).
+
+---
+
+
+
 ## 🔬 fix(audit): deep-pass findings — recovery direction, precision caps, null timestamps (2026-08-20)
 
 **Repo:** EDDI (`fix/sweep-0820a-integrity-defects`)

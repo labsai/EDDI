@@ -172,6 +172,55 @@ public class AuditAndSecurityIT extends BaseIntegrationIT {
                 .statusCode(200);
     }
 
+    // ==================== D7 end-to-end: verify must say VALID for real turns
+    // ====================
+
+    /**
+     * The regression net the run-0820a sweep prescribed as its definition of done.
+     * <p>
+     * Every earlier test in this class reads an EMPTY conversation's trail — which
+     * is exactly why the ledger could ship reporting {@code valid=0 invalid=78} on
+     * every real conversation: writes were exercised, verification never was, and
+     * no test ever drove entries through the full pipeline (sign → queue → flush →
+     * store → read → verify) against a real backend. This one does. It would have
+     * failed on every EDDI version before the v4 canonical form, on either storage
+     * backend, and it fails again if any layer of the timestamp handling regresses.
+     */
+    @Test
+    @Order(12)
+    @DisplayName("a real conversation's audit entries all verify VALID with an INTACT chain")
+    void auditVerify_realConversationIsFullyValid() throws Exception {
+        ResourceId agentId = setupAndDeployMinimalAgent();
+        try {
+            ResourceId conversationId = createConversation(agentId.id(), "audit-verify-user");
+
+            // Entries are queued and flushed on an interval — poll until the
+            // CONVERSATION_START turn's entries have landed.
+            int entryCount = 0;
+            for (int i = 0; i < 30 && entryCount == 0; i++) {
+                Thread.sleep(500);
+                entryCount = given().get(AUDIT_BASE + conversationId.id())
+                        .then().statusCode(200)
+                        .extract().jsonPath().getList("$").size();
+            }
+            Assertions.assertTrue(entryCount > 0, "the conversation's turn must produce audit entries");
+
+            given().get(AUDIT_BASE + "verify/" + conversationId.id())
+                    .then().assertThat()
+                    .statusCode(200)
+                    .body("signingEnabled", equalTo(true))
+                    .body("entriesChecked", equalTo(entryCount))
+                    .body("valid", equalTo(entryCount))
+                    .body("invalid", equalTo(0))
+                    .body("unsigned", equalTo(0))
+                    .body("recovered", equalTo(0))
+                    .body("recoverySkipped", equalTo(0))
+                    .body("chainStatus", equalTo("INTACT"));
+        } finally {
+            undeployAgentQuietly(agentId.id(), agentId.version());
+        }
+    }
+
     // ==================== Helpers ====================
 
     private boolean isVaultAvailable() {

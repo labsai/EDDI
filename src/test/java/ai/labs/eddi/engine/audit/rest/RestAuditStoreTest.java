@@ -106,6 +106,56 @@ class RestAuditStoreTest {
     }
 
     /**
+     * A recovered legacy row is intact — it counts as valid, appears in the
+     * dedicated {@code recovered} tally so an operator can see how much of the
+     * ledger predates v4, and is NOT listed as a problem. Miswiring any of the
+     * three turns a healthy legacy ledger into a wall of alarms.
+     */
+    @Test
+    @DisplayName("a VALID_RECOVERED row counts as valid + recovered, and is no problem")
+    void recoveredRowCountsAsValid() {
+        var direct = entryAt("id-1", 0);
+        var recovered = entryAt("id-2", 1);
+        when(auditStore.getEntries("conv-1", 0, 1000)).thenReturn(List.of(direct, recovered));
+        when(auditLedgerService.verifyEntry(eq(direct), any())).thenReturn(AuditVerificationStatus.VALID);
+        when(auditLedgerService.verifyEntry(eq(recovered), any())).thenReturn(AuditVerificationStatus.VALID_RECOVERED);
+
+        var report = restAuditStore.verifyConversation("conv-1", 0, 1000);
+
+        assertEquals(2, report.valid(), "a recovered row is proven intact and belongs in valid");
+        assertEquals(1, report.recovered());
+        assertEquals(0, report.invalid());
+        assertTrue(report.problems().isEmpty(), "a recovered row is not a problem to escalate");
+    }
+
+    /**
+     * The sweep's budget lives on the service; the report's {@code recoverySkipped}
+     * must be read back off that same budget after the loop — wiring a literal 0
+     * here would make a budget-exhausted sweep look more thorough than it was, and
+     * nothing else fails.
+     */
+    @Test
+    @DisplayName("recoverySkipped is read off the sweep's own budget")
+    void recoverySkippedIsWiredFromTheBudget() {
+        var one = entryAt("id-1", 0);
+        var two = entryAt("id-2", 1);
+        when(auditStore.getEntries("conv-1", 0, 1000)).thenReturn(List.of(one, two));
+        // A real, already-exhausted budget: every consume attempt is a skip.
+        when(auditLedgerService.newRecoveryBudget()).thenReturn(new AuditRecoveryBudget(0));
+        when(auditLedgerService.verifyEntry(any(), any())).thenAnswer(invocation -> {
+            invocation.getArgument(1, AuditRecoveryBudget.class).tryConsume();
+            return AuditVerificationStatus.INVALID;
+        });
+
+        var report = restAuditStore.verifyConversation("conv-1", 0, 1000);
+
+        assertEquals(2, report.recoverySkipped(), "the count must come from the budget the sweep actually used");
+        assertEquals(2, report.invalid());
+        assertFalse(report.tamperingSuspected(), "nothing was disproven — a budget ran out");
+        assertFalse(report.intact(), "an unfinished sweep is still not a clean bill of health");
+    }
+
+    /**
      * The point of the endpoint: {@code AuditHmac.verifyHmac} previously had no
      * production caller at all, so a tampered row shipped undetected. A row whose
      * HMAC no longer recomputes must be named in the report.

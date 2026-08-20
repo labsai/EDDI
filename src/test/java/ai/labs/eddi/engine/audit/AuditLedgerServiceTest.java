@@ -12,6 +12,7 @@ import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -139,6 +140,36 @@ class AuditLedgerServiceTest {
         assertEquals(0, stored.timestamp().getNano() % 1_000_000, "stamped at the signed (millisecond) precision");
         assertEquals(AuditVerificationStatus.VALID, service.verifyEntry(stored),
                 "what was signed is what is stored, so it must verify as-is");
+    }
+
+    /**
+     * The submit path must floor the timestamp BEFORE signing — deterministically
+     * pinned with a nano-precise input, so this does not depend on the test host's
+     * clock resolution. Without the flooring, PostgreSQL's microsecond rounding can
+     * move a stored timestamp across the millisecond the v4 signature covers, and
+     * roughly one row in two thousand reports tampered for no reason.
+     */
+    @Test
+    @DisplayName("flush — a nano-precise timestamp is floored before signing, and verifies")
+    @SuppressWarnings("unchecked")
+    void nanoPreciseTimestampIsFlooredBeforeSigning() {
+        service = createService(true, "master-key");
+        Instant nanoPrecise = Instant.parse("2026-08-20T10:15:30Z").plusNanos(123_999_600L);
+        service.submit(new AuditEntry("floor-1", "conv1", "agent1", 1, "user1", "production",
+                0, "taskId", "LlmTask", 0, 100L,
+                Map.of("text", "hello"), Map.of("text", "response"),
+                null, null, List.of("action1"), 0.0, nanoPrecise, null, null));
+
+        service.flush();
+
+        var persisted = ArgumentCaptor.forClass(List.class);
+        verify(auditStore).appendBatch(persisted.capture());
+        AuditEntry stored = ((List<AuditEntry>) persisted.getValue()).getFirst();
+
+        assertEquals(0, stored.timestamp().getNano() % 1_000_000,
+                "the stored row must carry the millisecond value the signature covers — nothing left to round");
+        assertEquals(nanoPrecise.truncatedTo(ChronoUnit.MILLIS), stored.timestamp());
+        assertEquals(AuditVerificationStatus.VALID, service.verifyEntry(stored));
     }
 
     // ==================== sequence-table eviction ====================

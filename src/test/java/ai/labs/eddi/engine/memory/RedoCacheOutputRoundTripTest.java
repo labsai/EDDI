@@ -67,6 +67,39 @@ class RedoCacheOutputRoundTripTest {
                 "redo restored the step but blanked its answer");
     }
 
+    /**
+     * Two undone turns must redo in order, each with its own answer. If the cache's
+     * order flipped anywhere across the round-trip, redo would restore the WRONG
+     * turn's output — silently, since both steps and both outputs exist.
+     */
+    @Test
+    @DisplayName("two undone turns redo in order, each with its own output")
+    void multiEntryRedoPreservesOrderAndOutputs() {
+        var memory = new ConversationMemory("conv-multi", "agent-1", 1, "user-1");
+        memory.getCurrentStep().getConversationOutput().put("input", "start");
+
+        memory.startNextStep();
+        memory.getCurrentStep().getConversationOutput().put("output", List.of(Map.of("text", "FIRST.")));
+        memory.startNextStep();
+        memory.getCurrentStep().getConversationOutput().put("output", List.of(Map.of("text", "SECOND.")));
+
+        memory.undoLastStep();
+        memory.undoLastStep();
+
+        var roundTripped = ConversationMemoryUtilities.convertConversationMemorySnapshot(
+                ConversationMemoryUtilities.convertConversationMemory(memory));
+
+        roundTripped.redoLastStep();
+        assertEquals(List.of(Map.of("text", "FIRST.")),
+                roundTripped.getConversationOutputs().getLast().get("output"),
+                "the first redo must restore the FIRST undone turn's answer");
+
+        roundTripped.redoLastStep();
+        assertEquals(List.of(Map.of("text", "SECOND.")),
+                roundTripped.getConversationOutputs().getLast().get("output"),
+                "the second redo must restore the SECOND turn's answer");
+    }
+
     @Test
     @DisplayName("ordinary conversation steps carry no output — it lives in conversationOutputs")
     void ordinaryStepsAreUnchanged() {

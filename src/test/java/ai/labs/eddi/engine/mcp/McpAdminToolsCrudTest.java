@@ -565,4 +565,29 @@ class McpAdminToolsCrudTest {
         }
         return parser;
     }
+
+    // ==================== D12: strict rejection reaches the MCP caller
+    // ====================
+
+    /**
+     * End-to-end pin for the parity fix: the strict parser's rejection travels as a
+     * 4xx response entity, and {@code errorJson(prefix, cause)} must surface it —
+     * {@code getMessage()} on that exception is only "HTTP 400 Bad Request", which
+     * is what MCP callers used to see instead of the field-level diagnosis.
+     */
+    @Test
+    void createResource_unknownField_reportsTheKnownFieldsMessage() {
+        var strictTools = new McpAdminTools(mock(IRestInterfaceFactory.class), agentAdmin, jsonSerialization,
+                new StrictConfigurationParser(new com.fasterxml.jackson.databind.ObjectMapper()), scheduleStore,
+                scheduleFireExecutor, schedulePollerService,
+                mock(io.quarkus.security.identity.SecurityIdentity.class), false);
+
+        String result = strictTools.createResource("propertysetter",
+                "{\"setProperties\":[{\"name\":\"x\",\"valueString\":\"y\"}]}");
+
+        assertTrue(result.contains("error"));
+        assertTrue(result.contains("setProperties"), "the offending field must be named: " + result);
+        assertTrue(result.contains("setOnActions"), "the legal fields must be listed: " + result);
+        assertFalse(result.contains("HTTP 400"), "the status line is not a diagnosis: " + result);
+    }
 }
