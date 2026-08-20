@@ -56,13 +56,12 @@ jobs:
               echo "::error::version must contain only [0-9A-Za-z._-] (got: ${VERSION})"; exit 1;;
           esac
           case "${RELEASE}" in
-            ''|*[!0-9]*)
-              echo "::error::release must be a positive integer (got: ${RELEASE})"; exit 1;;
+            ''|*[!0-9]*|0|0*)
+              echo "::error::release must be a positive integer without leading zeros (got: ${RELEASE})"; exit 1;;
           esac
 
           IMAGE="${REGISTRY}/labsai/eddi"
           {
-            echo "image=${IMAGE}"
             echo "released=${IMAGE}:${VERSION}"
             echo "certified=${IMAGE}:${VERSION}-${RELEASE}"
           } >> "$GITHUB_OUTPUT"
