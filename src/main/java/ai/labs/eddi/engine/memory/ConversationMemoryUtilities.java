@@ -43,6 +43,9 @@ public class ConversationMemoryUtilities {
 
         for (var redoStep : conversationMemory.getRedoCache()) {
             var redoStepSnapshot = iterateConversationStep(redoStep);
+            // A redo entry's output is not in snapshot.conversationOutputs — undo popped
+            // it. Carry it on the step itself, or redo restores an empty turn.
+            redoStepSnapshot.setConversationOutput(redoStep.getConversationOutput());
             snapshot.getRedoCache().push(redoStepSnapshot);
         }
 
@@ -111,7 +114,10 @@ public class ConversationMemoryUtilities {
     private static List<IConversationStep> iterateRedoCache(List<ConversationStepSnapshot> redoSteps) {
         List<IConversationStep> conversationSteps = new LinkedList<>();
         for (var redoStep : redoSteps) {
-            IWritableConversationStep conversationStep = new ConversationStep(new ConversationOutput());
+            // Null for documents written before the output was carried here; an empty
+            // output then behaves exactly as it did before.
+            var storedOutput = redoStep.getConversationOutput();
+            IWritableConversationStep conversationStep = new ConversationStep(storedOutput != null ? storedOutput : new ConversationOutput());
             conversationSteps.add(conversationStep);
             for (var packageRunSnapshot : redoStep.getWorkflows()) {
                 for (var resultSnapshot : packageRunSnapshot.getLifecycleTasks()) {

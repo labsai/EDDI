@@ -254,17 +254,54 @@ public class Conversation implements IConversation {
         return this.conversationMemory.getConversationState();
     }
 
+    /**
+     * The step results a rerun discards before re-executing: the rendered answer
+     * and its quick replies.
+     */
+    private static final List<String> RERUN_CLEARED_RESULT_TYPES = List.of("output", "quickReplies");
+
+    /**
+     * Where a rerun restarts the pipeline — the earliest task type that can
+     * <em>produce</em> what {@link #RERUN_CLEARED_RESULT_TYPES} discards.
+     * <p>
+     * Selective execution runs the suffix of the pipeline from the first task
+     * matching any of these types, so this set and the cleared set have to agree: a
+     * rerun must never clear a result it will not regenerate. Restarting at
+     * {@code output} alone did exactly that on any LLM agent. The model's answer is
+     * stored under {@code output} but is written by the {@code langchain} task,
+     * which sits <em>before</em> the output task — so the answer was wiped,
+     * {@code ai.labs.llm} never re-ran, and the output task alone had nothing left
+     * to render. The turn came back 200 with {@code conversationOutputs[n].output}
+     * an empty array, destroying the reply instead of retrying it — and taking it
+     * out of the model's own history with it.
+     * <p>
+     * Restarting at {@code langchain} re-runs only the model and everything after
+     * it. Tasks before it — parser, behavior rules, property setters, HTTP calls —
+     * keep their results, so a retry does not re-fire external side effects. A
+     * rule-based agent has no {@code langchain} task, so it still restarts at
+     * {@code output} and behaves exactly as before.
+     */
+    private static final List<String> RERUN_RESTART_TASK_TYPES = List.of("langchain", "output", "quickReplies");
+
     @Override
     public void rerun(final Map<String, Context> contexts) throws ConversationNotReadyException, LifecycleException {
-        runStep("", contexts, false, Arrays.asList("output", "quickReplies"));
+        runStep("", contexts, false, RERUN_CLEARED_RESULT_TYPES, RERUN_RESTART_TASK_TYPES);
     }
 
     @Override
     public void say(final String message, final Map<String, Context> contexts) throws LifecycleException, ConversationNotReadyException {
-        runStep(message, contexts, true, new LinkedList<>());
+        runStep(message, contexts, true, new LinkedList<>(), new LinkedList<>());
     }
 
-    private void runStep(String message, Map<String, Context> contexts, boolean startNewStep, List<String> lifecycleTaskTypes)
+    /**
+     * @param clearedResultTypes
+     *            task-type results to drop from the current step before executing
+     * @param restartTaskTypes
+     *            the pipeline restarts at the first task matching one of these;
+     *            empty means "run every task"
+     */
+    private void runStep(String message, Map<String, Context> contexts, boolean startNewStep,
+                         List<String> clearedResultTypes, List<String> restartTaskTypes)
             throws ConversationNotReadyException, LifecycleException {
 
         // Auto-recover from transient interrupted state
@@ -283,8 +320,8 @@ public class Conversation implements IConversation {
                 startNextStep();
             }
 
-            var lifecycleData = prepareLifecycleData(message, contexts, lifecycleTaskTypes);
-            executeConversationStep(lifecycleData, lifecycleTaskTypes);
+            var lifecycleData = prepareLifecycleData(message, contexts, clearedResultTypes);
+            executeConversationStep(lifecycleData, restartTaskTypes);
 
         } catch (LifecycleException.LifecycleInterruptedException e) {
             setConversationState(ConversationState.EXECUTION_INTERRUPTED);

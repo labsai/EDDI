@@ -56,7 +56,7 @@ import java.util.concurrent.TimeUnit;
 
 import static ai.labs.eddi.engine.internal.RestAgentManagement.KEY_LANG;
 import static ai.labs.eddi.engine.model.Context.ContextType.string;
-import static ai.labs.eddi.utils.RuntimeUtilities.checkNotEmpty;
+import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
 import static jakarta.ws.rs.core.MediaType.TEXT_PLAIN;
 
@@ -172,11 +172,18 @@ public class RestAgentEngine implements IRestAgentEngine {
     public void rerunLastConversationStep(String conversationId, String language, Boolean returnDetailed, Boolean returnCurrentStepOnly,
                                           List<String> returningFields, final AsyncResponse response) {
         checkNotNull(conversationId, "conversationId");
-        checkNotEmpty(language, "language");
         validateConversationOwnership(conversationId);
 
+        // language is optional, as it is on say(). Requiring it here 400'd every
+        // rerun call that followed the endpoint's own description, which never
+        // mentioned it. Absent, the turn simply carries no language context —
+        // exactly what say() does.
+        var contexts = isNullOrEmpty(language)
+                ? Map.<String, Context>of()
+                : Map.of(KEY_LANG, new Context(string, language));
+
         sayInternal(conversationId, returnDetailed, returnCurrentStepOnly, returningFields,
-                new InputData("", Map.of(KEY_LANG, new Context(string, language))), true, response);
+                new InputData("", contexts), true, response);
     }
 
     @Override

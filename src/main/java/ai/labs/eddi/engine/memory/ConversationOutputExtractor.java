@@ -38,6 +38,9 @@ public final class ConversationOutputExtractor {
 
     private static final Logger LOGGER = Logger.getLogger(ConversationOutputExtractor.class);
 
+    /** The delimiter the snapshot-level extraction has always used. */
+    private static final String LINE_DELIMITER = "\n";
+
     private ConversationOutputExtractor() {
         // Utility class
     }
@@ -56,7 +59,45 @@ public final class ConversationOutputExtractor {
             return null;
         }
         List<ConversationOutput> outputs = snapshot.getConversationOutputs();
-        ConversationOutput lastOutput = outputs.get(outputs.size() - 1);
+        return extractText(outputs.get(outputs.size() - 1), LINE_DELIMITER);
+    }
+
+    /**
+     * Extracts the human-readable text from a single {@link ConversationOutput},
+     * joining multiple output items with a newline.
+     *
+     * @param output
+     *            the output to extract from (may be null)
+     * @return the extracted text, or {@code null} if no meaningful output is found
+     */
+    public static String extractText(ConversationOutput output) {
+        return extractText(output, LINE_DELIMITER);
+    }
+
+    /**
+     * Extracts the human-readable text from a single {@link ConversationOutput}.
+     * <p>
+     * Every item of the {@code output} list is inspected, whatever its runtime type
+     * — a turn's output list is heterogeneous. A turn gated by HITL, for instance,
+     * writes its pre-pause announcement through
+     * {@code addConversationOutputString(...)}, so its list reads
+     * {@code [String, String, Map]} where an ordinary turn's reads {@code [Map]}.
+     * Deciding the shape of the whole list from its first element — the bug this
+     * method replaces — discarded every such turn in full, which is why an approved
+     * HITL turn vanished from {@code GET /agents/&#123;id&#125;/log}, from the
+     * rolling summary, from the recall tool, and from the agent's own chat history:
+     * the Platform Operator went on to state that a group a human had approved "was
+     * never created".
+     *
+     * @param output
+     *            the output to extract from (may be null)
+     * @param delimiter
+     *            joins multiple output items; callers differ, see
+     *            {@code ConversationOutputUtils}
+     * @return the extracted text, or {@code null} if no meaningful output is found
+     */
+    public static String extractText(ConversationOutput output, String delimiter) {
+        ConversationOutput lastOutput = output;
         if (lastOutput == null) {
             return null;
         }
@@ -77,7 +118,7 @@ public final class ConversationOutputExtractor {
                 }
             }
             if (!texts.isEmpty()) {
-                return String.join("\n", texts);
+                return String.join(delimiter, texts);
             }
         } else if (outputValue instanceof String s && hasText(s)) {
             // Plain string written via addConversationOutputString("output", ...)
@@ -109,7 +150,7 @@ public final class ConversationOutputExtractor {
         }
 
         if (!texts.isEmpty()) {
-            return String.join("\n", texts);
+            return String.join(delimiter, texts);
         }
 
         // Format 3: "reply" key — used by some task extensions
@@ -122,7 +163,7 @@ public final class ConversationOutputExtractor {
                     texts.add(s);
             }
             if (!texts.isEmpty()) {
-                return String.join("\n", texts);
+                return String.join(delimiter, texts);
             }
         }
 

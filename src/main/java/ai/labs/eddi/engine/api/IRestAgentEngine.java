@@ -121,9 +121,14 @@ public interface IRestAgentEngine {
     @POST
     @Path("/{conversationId}/rerun")
     @Produces(MediaType.APPLICATION_JSON)
-    @Operation(summary = "Rerun last conversation step", description = "Re-executes the last conversation step, useful for retrying after errors.")
+    @Operation(summary = "Rerun last conversation step", description = "Re-executes the last conversation step, "
+            + "useful for retrying after errors. The step's rendered answer and quick replies are discarded and "
+            + "regenerated: on an LLM agent the model is called again, while the tasks that ran before it — parser, "
+            + "behavior rules, property setters, HTTP calls — keep their results, so external side effects are not "
+            + "repeated.")
     void rerunLastConversationStep(@PathParam("conversationId") String conversationId,
-                                   @Parameter(description = "Language code for NLP processing.")
+                                   @Parameter(description = "Optional language code for NLP processing. "
+                                           + "Omitted, the turn carries no language context, as with a normal message.")
                                    @QueryParam("language") String language,
                                    @QueryParam("returnDetailed")
                                    @DefaultValue("false") Boolean returnDetailed,

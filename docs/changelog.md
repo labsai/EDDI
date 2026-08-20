@@ -7,6 +7,62 @@
 
 
 
+## 🧾 fix(memory): conversation turns that were destroyed while reporting success (2026-08-20)
+
+**Repo:** EDDI (`fix/sweep-0820a-integrity-defects`)
+
+Three defects from the run-0820a sweep that share one shape: the API returns 200 and the turn's
+content is gone.
+
+**D3 — HITL-gated turns vanished from the log and from the agent's own history.** The Platform
+Operator was asked to create a group; it paused, a human approved, the group *was* created — and on
+the next turn it stated "the group was never created". `GET /agents/{id}/log` returned
+`user, assistant, user, user`.
+
+`ConversationOutputUtils.extractOutputText` decided the shape of the whole output list from
+`outputList.getFirst() instanceof Map`, and `ConversationLogGenerator` did the same. A HITL turn
+writes its pre-pause announcements through `addConversationOutputString(...)`, so its stored list
+reads `STRING, STRING, OBJECT` where an ordinary turn's reads `OBJECT`. The guard failed and the
+entire turn was discarded, later Maps included. Both now delegate to
+`ConversationOutputExtractor`, which already handled Strings, Maps, `TextOutputItem`s and mixed
+lists; it grew an `extractText(ConversationOutput, delimiter)` entry point so each caller keeps its
+own joining convention (space for LLM history, newline for the snapshot path). Fixing the extractor
+fixes `ConversationHistoryBuilder`, `ConversationSummarizer`, `ConversationRecallTool` and the REST
+log at once. Two existing tests had pinned the defect — a list of plain Strings asserted `null` —
+and now assert the text.
+
+**D2 — redo silently destroyed the turn it restored.** After undo → redo the step came back with
+`outputs[n] == {}`, and asking the agent what word it had just said returned its greeting, so the
+model lost the turn too. Undo/redo in live memory was always correct; serialisation was not.
+`iterateConversationStep` stored only `workflows/lifecycleTasks`, so `iterateRedoCache` rehydrated
+each entry as `new ConversationStep(new ConversationOutput())` and `redoLastStep()` pushed that empty
+output over the answer. Every request reloads memory from the store, so this fired on every real
+redo. `ConversationStepSnapshot` gained a nullable `conversationOutput`, populated only for redo
+entries (ordinary steps keep their output in `conversationOutputs` — duplicating it would double the
+document). Null-tolerant on read, so documents written before the field load unchanged.
+
+**D11 — rerun destroyed the answer and never regenerated it.** Root cause: a rerun cleared results
+it would not re-run. `Conversation.rerun` discarded the `output` and `quickReplies` results and then
+restarted selective execution at the first task matching those types — the *output* task. On an LLM
+agent the answer is stored under `output` but written by the `langchain` task, which sits earlier in
+the pipeline, so the answer was wiped, `ai.labs.llm` never re-ran, and the output task alone had
+nothing to render. The audit trail showed it exactly: a second `ai.labs.output` entry at 0ms with an
+empty result, and no second `ai.labs.llm`.
+
+The cleared set and the restart set are now separate and stated to agree: clear
+`{output, quickReplies}`, restart at `{langchain, output, quickReplies}`. Restarting at `langchain`
+re-runs the model and everything after it while parser, behavior rules, property setters and HTTP
+calls keep their results — a retry does not re-fire external side effects. A rule-based agent has no
+`langchain` task and still restarts at `output`, exactly as before. Separately, `/rerun` required an
+undocumented `?language=` or returned 400; it is now optional, matching `say()`, and the endpoint
+description says what a rerun actually does.
+
+Every fix here has a regression test that was confirmed to fail when the fix is reverted.
+
+---
+
+
+
 ## 🔎 fix(configs): three descriptor listings could never return anything (2026-08-20)
 
 **Repo:** EDDI (`fix/sweep-0820a-integrity-defects`)
