@@ -7,6 +7,40 @@
 
 
 
+## 🔎 fix(configs): three descriptor listings could never return anything (2026-08-20)
+
+**Repo:** EDDI (`fix/sweep-0820a-integrity-defects`)
+
+From the run-0820a live sweep (D1). `GET /rulestore/rulesets/descriptors` and
+`GET /apicallstore/apicalls/descriptors` returned `[]` on an instance holding 10 ruleset and 22
+apicall descriptors. Direct `GET` of a ruleset returned 200 with real content, so nothing was lost —
+only listing was blind. A third case, dictionaries, was found while fixing it.
+
+`DescriptorStore.readDescriptors` filters by regex-matching the stored resource URI against
+`"eddi://" + type + ".*"`, so `type` has to be the URI's namespace segment. Three stores restated it
+as a legacy literal that no URI has ever carried:
+
+```text
+?type=ai.labs.rules      → 10      ?type=ai.labs.behavior          → 0
+?type=ai.labs.apicalls   → 22      ?type=ai.labs.httpcalls         → 0
+?type=ai.labs.dictionary →  1      ?type=ai.labs.regulardictionary → 0
+```
+
+This is the legacy-file-name vs v6-URI-name split of AGENTS.md §5.5 leaking into a runtime query,
+and it fails *silently* — an empty list, never an error. Anything browsing behavior rules, HTTP
+calls or dictionaries, the Manager included, saw nothing.
+
+**Fixed structurally rather than by three string edits.** `RestUtilities.extractDescriptorType`
+derives the type from the store's own `resourceURI`, and a new
+`RestVersionInfo.readDescriptors(filter, index, limit)` overload uses it; all 14 REST stores now call
+that instead of naming a type. A store can no longer query a namespace it does not write to.
+`DescriptorTypeConsistencyTest` sweeps the sources and fails on any hard-coded type that disagrees
+with its store's `resourceURI` — verified by reverting the fix. Two existing tests had pinned the
+wrong value (`ai.labs.httpcalls`) and were corrected.
+
+---
+
+
 ## 🛑 fix(ci): the Red Hat certify workflow would have overwritten the signed release (2026-08-20)
 
 **Repo:** EDDI (`fix/preflight-version-1-20-0`)

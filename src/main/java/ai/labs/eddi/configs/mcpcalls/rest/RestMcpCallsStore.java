@@ -61,7 +61,7 @@ public class RestMcpCallsStore implements IRestMcpCallsStore {
 
     @Override
     public List<DocumentDescriptor> readMcpCallsDescriptors(String filter, Integer index, Integer limit) {
-        return restVersionInfo.readDescriptors("ai.labs.mcpcalls", filter, index, limit);
+        return restVersionInfo.readDescriptors(filter, index, limit);
     }
 
     @Override

@@ -106,7 +106,7 @@ public class RestAgentStore implements IRestAgentStore {
 
     @Override
     public List<DocumentDescriptor> readAgentDescriptors(String filter, Integer index, Integer limit) {
-        return restVersionInfo.readDescriptors("ai.labs.agent", filter, index, limit);
+        return restVersionInfo.readDescriptors(filter, index, limit);
     }
 
     @Override

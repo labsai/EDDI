@@ -74,7 +74,7 @@ class RestApiCallsStoreBranchTest {
         @DisplayName("returns descriptors list")
         void returnsDescriptors() throws Exception {
             var desc = new DocumentDescriptor();
-            when(documentDescriptorStore.readDescriptors(eq("ai.labs.httpcalls"), anyString(), anyInt(), anyInt(), eq(false)))
+            when(documentDescriptorStore.readDescriptors(eq("ai.labs.apicalls"), anyString(), anyInt(), anyInt(), eq(false)))
                     .thenReturn(List.of(desc));
 
             List<DocumentDescriptor> result = restApiCallsStore.readApiCallsDescriptors("", 0, 10);

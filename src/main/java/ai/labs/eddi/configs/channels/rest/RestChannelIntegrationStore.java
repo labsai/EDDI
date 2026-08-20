@@ -61,7 +61,7 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
 
     @Override
     public List<DocumentDescriptor> readChannelDescriptors(String filter, Integer index, Integer limit) {
-        return restVersionInfo.readDescriptors("ai.labs.channel", filter, index, limit);
+        return restVersionInfo.readDescriptors(filter, index, limit);
     }
 
     @Override

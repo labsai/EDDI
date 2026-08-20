@@ -47,7 +47,7 @@ public class RestLlmStore implements IRestLlmStore {
 
     @Override
     public List<DocumentDescriptor> readLlmDescriptors(String filter, Integer index, Integer limit) {
-        return restVersionInfo.readDescriptors("ai.labs.llm", filter, index, limit);
+        return restVersionInfo.readDescriptors(filter, index, limit);
     }
 
     @Override
