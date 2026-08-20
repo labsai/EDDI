@@ -38,14 +38,34 @@ jobs:
       # produces a different digest, is not covered by the release's cosign
       # signature or SLSA attestation, and pushing it over :<version> and :latest
       # would replace what users pull with unsigned bytes.
+      #
+      # Inputs reach the shell through `env:`, never through ${{ }} interpolation.
+      # Interpolation splices the value into the script text before Bash parses
+      # it, so a crafted version/release could close the quoting and run commands
+      # with the registry credentials this job holds.
       - name: Set image coordinates
         id: image
+        env:
+          REGISTRY: ${{ inputs.registry }}
+          VERSION: ${{ inputs.version }}
+          RELEASE: ${{ inputs.release }}
         run: |
-          REGISTRY="${{ inputs.registry }}"
+          set -euo pipefail
+          case "${VERSION}" in
+            ''|*[!0-9A-Za-z._-]*)
+              echo "::error::version must contain only [0-9A-Za-z._-] (got: ${VERSION})"; exit 1;;
+          esac
+          case "${RELEASE}" in
+            ''|*[!0-9]*)
+              echo "::error::release must be a positive integer (got: ${RELEASE})"; exit 1;;
+          esac
+
           IMAGE="${REGISTRY}/labsai/eddi"
-          echo "image=${IMAGE}" >> $GITHUB_OUTPUT
-          echo "released=${IMAGE}:${{ inputs.version }}" >> $GITHUB_OUTPUT
-          echo "certified=${IMAGE}:${{ inputs.version }}-${{ inputs.release }}" >> $GITHUB_OUTPUT
+          {
+            echo "image=${IMAGE}"
+            echo "released=${IMAGE}:${VERSION}"
+            echo "certified=${IMAGE}:${VERSION}-${RELEASE}"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Login to registry
         uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4
@@ -56,47 +76,58 @@ jobs:
 
       - name: Pull the published release image
         id: pull
+        env:
+          RELEASED: ${{ steps.image.outputs.released }}
         run: |
-          RELEASED="${{ steps.image.outputs.released }}"
+          set -euo pipefail
           if ! docker pull "${RELEASED}"; then
-            echo "::error::${RELEASED} is not published. This workflow certifies an already-released image — release the version first, then run this."
+            echo "::error::${RELEASED} is not published. This workflow certifies an already-released image - release the version first, then run this."
             exit 1
           fi
-          DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "${RELEASED}" | cut -d@ -f2)
-          echo "digest=${DIGEST}" >> $GITHUB_OUTPUT
+          # Ask the registry, not the local cache, so the digest is what a user pulling this tag receives.
+          DIGEST="$(docker buildx imagetools inspect "${RELEASED}" --format '{{.Manifest.Digest}}')"
+          echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
           echo "Certifying the released digest: ${DIGEST}"
 
       - name: Verify Red Hat labels
+        env:
+          RELEASED: ${{ steps.image.outputs.released }}
         run: |
+          set -euo pipefail
           echo "=== Container Labels ==="
-          docker inspect ${{ steps.image.outputs.released }} --format '{{json .Config.Labels}}' | python3 -m json.tool
+          docker inspect "${RELEASED}" --format '{{json .Config.Labels}}' | python3 -m json.tool
 
       - name: Verify /licenses in container
+        env:
+          RELEASED: ${{ steps.image.outputs.released }}
         run: |
+          set -euo pipefail
           echo "=== /licenses directory ==="
-          docker run --rm --entrypoint="" ${{ steps.image.outputs.released }} ls -la /licenses/
+          docker run --rm --entrypoint="" "${RELEASED}" ls -la /licenses/
           echo ""
           echo "=== THIRD-PARTY.txt in container ==="
-          docker run --rm --entrypoint="" ${{ steps.image.outputs.released }} head -30 /licenses/THIRD-PARTY.txt || true
+          docker run --rm --entrypoint="" "${RELEASED}" head -30 /licenses/THIRD-PARTY.txt || true
 
       # Red Hat's catalogue keys on a version-release coordinate. Retagging the
       # pulled image reuses its manifest, so this tag carries the SAME digest as
-      # the released one — a rename, not a rebuild. :<version> and :latest are
+      # the released one - a rename, not a rebuild. :<version> and :latest are
       # never pushed here.
       - name: Publish the version-release coordinate
+        env:
+          RELEASED: ${{ steps.image.outputs.released }}
+          CERTIFIED: ${{ steps.image.outputs.certified }}
+          EXPECTED: ${{ steps.pull.outputs.digest }}
         run: |
-          RELEASED="${{ steps.image.outputs.released }}"
-          CERTIFIED="${{ steps.image.outputs.certified }}"
+          set -euo pipefail
           docker tag "${RELEASED}" "${CERTIFIED}"
           docker push "${CERTIFIED}"
 
-          PUSHED=$(docker inspect --format='{{index .RepoDigests 0}}' "${CERTIFIED}" | cut -d@ -f2)
-          EXPECTED="${{ steps.pull.outputs.digest }}"
+          PUSHED="$(docker buildx imagetools inspect "${CERTIFIED}" --format '{{.Manifest.Digest}}')"
           if [ "${PUSHED}" != "${EXPECTED}" ]; then
             echo "::error::${CERTIFIED} resolved to ${PUSHED}, expected the released digest ${EXPECTED}. Refusing to certify an image that is not the released one."
             exit 1
           fi
-          echo "✅ ${CERTIFIED} is the released digest ${EXPECTED}"
+          echo "OK: ${CERTIFIED} is the released digest ${EXPECTED}"
 
       - name: Install preflight
         env:
@@ -114,6 +145,8 @@ jobs:
         env:
           REDHAT_API_TOKEN: ${{ secrets.REDHAT_API_TOKEN }}
           REDHAT_CERT_PROJECT_ID: ${{ secrets.REDHAT_CERT_PROJECT_ID }}
+          CERTIFIED: ${{ steps.image.outputs.certified }}
+          SUBMIT: ${{ inputs.submit }}
         run: |
           # Pass credentials via preflight's native env vars (avoids process-listing exposure)
           if [ -n "$REDHAT_API_TOKEN" ] && [ -n "$REDHAT_CERT_PROJECT_ID" ]; then
@@ -124,12 +157,12 @@ jobs:
           fi
 
           SUBMIT_FLAG=""
-          if [ "${{ inputs.submit }}" = "true" ]; then
+          if [ "${SUBMIT}" = "true" ]; then
             SUBMIT_FLAG="--submit"
           fi
 
           preflight check container \
-            ${{ steps.image.outputs.certified }} \
+            "${CERTIFIED}" \
             --docker-config=${HOME}/.docker/config.json \
             ${SUBMIT_FLAG} \
             2>&1 | tee preflight-results.txt

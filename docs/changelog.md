@@ -12,7 +12,7 @@
 **Repo:** EDDI (`fix/preflight-version-1-20-0`)
 
 Found while answering "can 6.3.0 still be certified, or does it need a new version?". The answer was
-yes, run `redhat-certify.yml` with `version=6.3.0` — but reading the workflow before recommending it
+yes, run `redhat-certify.yml` with `version=6.3.0` and `release=1` — but reading the workflow before recommending it
 showed that running it would have done real damage.
 
 It **rebuilt** the image from the checked-out ref and then pushed three tags:
@@ -37,10 +37,18 @@ carries the *same digest* as the release — the workflow asserts exactly that a
 if it does not hold, rather than trusting that a retag behaved. `:<version>` and `:latest` are never
 pushed.
 
+**Review hardening (CodeRabbit on #705).** Inputs no longer reach the shell through `${{ }}`
+interpolation. Interpolation splices the value into the script text *before* Bash parses it, so a
+crafted `version` could close the quoting and run commands with the registry credentials this job
+holds. Every input now arrives through step-level `env:` and is used as a quoted variable, with
+`version` and `release` format-validated up front. The digest comparison also moved from
+`docker inspect .RepoDigests` (local cache) to `docker buildx imagetools inspect` (the registry), so
+it asserts what a user pulling that tag actually receives.
+
 Dropped with the rebuild: the JDK setup, the Maven build, the local license-generation check and the
 `docker build`. None of them have a purpose once the image is pulled rather than produced, and the
-`/licenses` and label checks already run **inside** the container, which is the stronger assertion
-anyway. It also fails with an actionable message when the requested version is not published, since
+the `/licenses` check runs **inside** the container and the label check reads the image config
+with `docker inspect`, both of which assert against the real artefact rather than the build tree. It also fails with an actionable message when the requested version is not published, since
 the whole premise is that certification follows a release.
 
 ---
