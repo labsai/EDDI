@@ -358,37 +358,69 @@ class RestAgentEngineToolPauseDetailsTest {
             assertEquals(List.of("PAUSE_CONVERSATION", "notify_manager"), pauseDetails.get("actions"));
         }
 
+        /**
+         * {@code getConversationSteps()} is CHRONOLOGICAL — index 0 is the oldest step,
+         * which is always the CONVERSATION_START turn.
+         * <p>
+         * {@code convertConversationMemory} counts down from {@code size() - 1}, which
+         * reads like a reversal, but it indexes a {@code ConversationStepStack} whose
+         * own {@code get(i)} already counts back from the newest, so the two inversions
+         * cancel. This test previously asserted the opposite and passed only because
+         * the code under test shared the same wrong premise: it walked forward from
+         * index 0, so a live rule pause reported {@code ["CONVERSATION_START"]} as the
+         * cause every single time, whatever rule had actually fired. Verified against a
+         * real ConversationMemory round-trip, not read off the loop.
+         */
         @Test
         @DisplayName("with multiple steps, actions come from the MOST RECENT step "
-                + "(getConversationSteps() is reverse-chronological — index 0 is newest)")
+                + "(getConversationSteps() is chronological — index 0 is oldest)")
         void rulePauseUsesMostRecentStepAmongMultiple() throws Exception {
             var snapshot = snapshotInState(ConversationState.AWAITING_HUMAN);
             snapshot.setHitlPauseType("RULE");
             snapshot.setHitlPauseReason("needs manager sign-off");
 
-            // Index 0 = most recent step (matches
-            // ConversationMemoryUtilities.convertConversationMemory's reverse
-            // insertion order) — this is the one whose actions must win.
+            // Index 0 = the oldest step: on a real conversation, CONVERSATION_START.
+            var oldestStep = new ConversationMemorySnapshot.ConversationStepSnapshot();
+            var oldestWorkflow = new ConversationMemorySnapshot.WorkflowRunSnapshot();
+            oldestWorkflow.getLifecycleTasks().add(new ConversationMemorySnapshot.ResultSnapshot(
+                    "actions", List.of("CONVERSATION_START"), null, null, "wf-1", true));
+            oldestStep.getWorkflows().add(oldestWorkflow);
+
             var newestStep = new ConversationMemorySnapshot.ConversationStepSnapshot();
             var newestWorkflow = new ConversationMemorySnapshot.WorkflowRunSnapshot();
             newestWorkflow.getLifecycleTasks().add(new ConversationMemorySnapshot.ResultSnapshot(
                     "actions", List.of("PAUSE_CONVERSATION", "notify_manager"), null, null, "wf-2", true));
             newestStep.getWorkflows().add(newestWorkflow);
 
-            var olderStep = new ConversationMemorySnapshot.ConversationStepSnapshot();
-            var olderWorkflow = new ConversationMemorySnapshot.WorkflowRunSnapshot();
-            olderWorkflow.getLifecycleTasks().add(new ConversationMemorySnapshot.ResultSnapshot(
-                    "actions", List.of("some_older_action"), null, null, "wf-1", true));
-            olderStep.getWorkflows().add(olderWorkflow);
-
+            snapshot.getConversationSteps().add(oldestStep);
             snapshot.getConversationSteps().add(newestStep);
-            snapshot.getConversationSteps().add(olderStep);
 
             Response response = restAgentEngine.getApprovalStatus(CONVERSATION_ID, "summary");
 
             var pauseDetails = (Map<String, Object>) summaryOf(response).get("pauseDetails");
             assertEquals(List.of("PAUSE_CONVERSATION", "notify_manager"), pauseDetails.get("actions"),
-                    "must use the newest step's actions, not the oldest");
+                    "reporting step 0 means every rule pause blames CONVERSATION_START");
+        }
+
+        @Test
+        @DisplayName("steps without actions are skipped on the way back")
+        void skipsTrailingStepsWithoutActions() throws Exception {
+            var snapshot = snapshotInState(ConversationState.AWAITING_HUMAN);
+            snapshot.setHitlPauseType("RULE");
+
+            var step = new ConversationMemorySnapshot.ConversationStepSnapshot();
+            var workflow = new ConversationMemorySnapshot.WorkflowRunSnapshot();
+            workflow.getLifecycleTasks().add(new ConversationMemorySnapshot.ResultSnapshot(
+                    "actions", List.of("notify_manager"), null, null, "wf-1", true));
+            step.getWorkflows().add(workflow);
+
+            snapshot.getConversationSteps().add(step);
+            snapshot.getConversationSteps().add(new ConversationMemorySnapshot.ConversationStepSnapshot());
+
+            Response response = restAgentEngine.getApprovalStatus(CONVERSATION_ID, "summary");
+
+            var pauseDetails = (Map<String, Object>) summaryOf(response).get("pauseDetails");
+            assertEquals(List.of("notify_manager"), pauseDetails.get("actions"));
         }
 
         @Test

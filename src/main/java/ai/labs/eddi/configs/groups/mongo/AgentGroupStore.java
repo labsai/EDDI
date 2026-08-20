@@ -52,6 +52,7 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
         validateFacilitator(groupConfiguration);
         ArtifactValidators.requireValidSpecs(groupConfiguration.getArtifactConfig());
         normalizeNonPositiveCostCeiling(groupConfiguration);
+        warnCostCeilingNeedsPricedMembers(groupConfiguration);
         warnOnModeratorlessPhases(groupConfiguration);
         warnOnSummarizerlessWindow(groupConfiguration);
         return super.create(groupConfiguration);
@@ -68,6 +69,7 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
         validateFacilitator(groupConfiguration);
         ArtifactValidators.requireValidSpecs(groupConfiguration.getArtifactConfig());
         normalizeNonPositiveCostCeiling(groupConfiguration);
+        warnCostCeilingNeedsPricedMembers(groupConfiguration);
         warnOnModeratorlessPhases(groupConfiguration);
         warnOnSummarizerlessWindow(groupConfiguration);
         return super.update(id, version, groupConfiguration);
@@ -379,5 +381,33 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
         groupConfiguration.setProtocol(new AgentGroupConfiguration.ProtocolConfig(
                 protocol.agentTimeoutSeconds(), protocol.onAgentFailure(), protocol.maxRetries(),
                 protocol.onMemberUnavailable(), protocol.maxTurns(), null, protocol.onCostExceeded()));
+    }
+
+    /**
+     * A dollar ceiling only binds if something is priced.
+     * <p>
+     * {@code TokenPricing} ships no provider price table by design, so a member
+     * whose LLM task carries no {@code inputPricePer1M}/{@code outputPricePer1M}
+     * contributes exactly $0 and {@code totalCost} stays at 0 for the whole
+     * discussion — the ceiling can never fire. That is deliberate, but it is also
+     * invisible: the group reports {@code totalCost: 0}, {@code onCostExceeded}
+     * never runs, and a template advertising a "dollar ceiling" appears to be
+     * working. {@code setup_agent} exposes no pricing fields at all, so every agent
+     * it builds lands in exactly this state.
+     * <p>
+     * Whether the members are priced cannot be answered here without resolving each
+     * member agent's LLM configuration — a cross-resource read on the save path.
+     * The prerequisite is stated once, at the moment someone configures the
+     * ceiling, which is where it is actionable.
+     */
+    private void warnCostCeilingNeedsPricedMembers(AgentGroupConfiguration groupConfiguration) {
+        var protocol = groupConfiguration.getProtocol();
+        if (protocol == null || protocol.maxCostPerDiscussion() == null || protocol.maxCostPerDiscussion() <= 0) {
+            return;
+        }
+        LOGGER.infof("Group '%s' sets maxCostPerDiscussion=%s. This only takes effect for members whose LLM task "
+                + "defines inputPricePer1M/outputPricePer1M — EDDI ships no provider price table, so unpriced "
+                + "members contribute $0 and the ceiling never fires.",
+                groupConfiguration.getName(), protocol.maxCostPerDiscussion());
     }
 }

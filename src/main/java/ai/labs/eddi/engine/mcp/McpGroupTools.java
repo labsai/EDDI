@@ -244,7 +244,8 @@ public class McpGroupTools {
                                        + "(default) or GROUP for nested groups (optional)") String memberTypes,
                                @ToolArg(description = "Moderator agent ID (optional)") String moderatorAgentId,
                                @ToolArg(description = "Discussion style: ROUND_TABLE, PEER_REVIEW, "
-                                       + "DEVIL_ADVOCATE, DELPHI, DEBATE, TASK_FORCE (default ROUND_TABLE)") String style,
+                                       + "DEVIL_ADVOCATE, DELPHI, DEBATE, TASK_FORCE, NEGOTIATION, CUSTOM "
+                                       + "(default ROUND_TABLE). All eight work; see describe_discussion_styles") String style,
                                @ToolArg(description = "Max rounds (default 2)") String maxRounds,
                                @ToolArg(description = "Maximum total agent turns across all phases (default 50). "
                                        + "Safety cap to prevent runaway discussions.") String maxTurns,
@@ -300,7 +301,7 @@ public class McpGroupTools {
                     TaskDefinition[] taskArray = jsonSerialization.deserialize(tasks, TaskDefinition[].class);
                     config.setTasks(List.of(taskArray));
                 } catch (Exception ex) {
-                    return errorJson("Invalid tasks JSON: " + ex.getMessage());
+                    return errorJson("Invalid tasks JSON", ex);
                 }
             }
 
@@ -387,7 +388,8 @@ public class McpGroupTools {
     @Tool(description = "Read a group conversation including its full transcript, task list "
             + "(for TASK_FORCE discussions with per-task status, assignments, and results), "
             + "dynamic agent tracking (createdAgentIds, retainedAgentIds), synthesized answer, "
-            + "structured decision record (verdict/vote/agreement/award, if one was reached), "
+            + "the structured decision record in the 'decision' field "
+            + "(verdict/vote/agreement/award, if one was reached), "
             + "and conversation state. Use this to poll for completion after start_group_discussion, "
             + "or to inspect task-level results after a TASK_FORCE discussion.")
     public String read_group_conversation(
@@ -464,8 +466,9 @@ public class McpGroupTools {
         }
     }
 
-    @Tool(description = "Delete a group conversation and cascade-delete all member "
-            + "conversations created during the discussion.")
+    @Tool(description = "Delete a group conversation. Its shared artifacts and any ephemeral agents "
+            + "created for it are deleted; the members' own conversations are ENDED, not deleted, and "
+            + "remain readable afterwards.")
     public String delete_group_conversation(
                                             @ToolArg(description = "Group conversation ID to delete") String groupConversationId) {
         requireRole(identity, authEnabled, "eddi-editor");

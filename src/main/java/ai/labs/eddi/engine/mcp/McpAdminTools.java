@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.mcp;
 
+import ai.labs.eddi.configs.rest.StrictConfigurationParser;
 import ai.labs.eddi.configs.rules.IRestRuleSetStore;
 import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
 import ai.labs.eddi.engine.triggermanagement.IRestAgentTriggerStore;
@@ -80,6 +81,16 @@ public class McpAdminTools {
     private final IRestInterfaceFactory restInterfaceFactory;
     private final IRestAgentAdministration agentAdmin;
     private final IJsonSerialization jsonSerialization;
+
+    /**
+     * Deserialises resource configurations with the same strictness the REST
+     * surface applies. {@code StrictConfigurationBodyInterceptor} is a JAX-RS
+     * {@code ReaderInterceptor}, so it only fires on a real inbound HTTP body —
+     * these tools call the very same stores in-process and were therefore parsing
+     * leniently, accepting payloads REST rejects and storing the emptied result as
+     * a success.
+     */
+    private final StrictConfigurationParser configParser;
     private final IScheduleStore scheduleStore;
     private final ScheduleFireExecutor scheduleFireExecutor;
     private final SchedulePollerService schedulePollerService;
@@ -88,11 +99,13 @@ public class McpAdminTools {
 
     @Inject
     public McpAdminTools(IRestInterfaceFactory restInterfaceFactory, IRestAgentAdministration agentAdmin, IJsonSerialization jsonSerialization,
-            IScheduleStore scheduleStore, ScheduleFireExecutor scheduleFireExecutor, SchedulePollerService schedulePollerService,
-            SecurityIdentity identity, @ConfigProperty(name = "authorization.enabled", defaultValue = "false") boolean authEnabled) {
+            StrictConfigurationParser configParser, IScheduleStore scheduleStore, ScheduleFireExecutor scheduleFireExecutor,
+            SchedulePollerService schedulePollerService, SecurityIdentity identity,
+            @ConfigProperty(name = "authorization.enabled", defaultValue = "false") boolean authEnabled) {
         this.restInterfaceFactory = restInterfaceFactory;
         this.agentAdmin = agentAdmin;
         this.jsonSerialization = jsonSerialization;
+        this.configParser = configParser;
         this.scheduleStore = scheduleStore;
         this.scheduleFireExecutor = scheduleFireExecutor;
         this.schedulePollerService = schedulePollerService;
@@ -172,7 +185,7 @@ public class McpAdminTools {
                     "status", response.getStatus()));
         } catch (Exception e) {
             LOGGER.error("MCP undeploy_agent failed for Agent " + agentId, e);
-            return errorJson("Failed to undeploy agent: " + e.getMessage());
+            return errorJson("Failed to undeploy agent", e);
         }
     }
 
@@ -192,7 +205,7 @@ public class McpAdminTools {
             return jsonSerialization.serialize(entity);
         } catch (Exception e) {
             LOGGER.error("MCP get_deployment_status failed for Agent " + agentId, e);
-            return errorJson("Failed to get deployment status: " + e.getMessage());
+            return errorJson("Failed to get deployment status", e);
         }
     }
 
@@ -208,7 +221,7 @@ public class McpAdminTools {
             return jsonSerialization.serialize(descriptors);
         } catch (Exception e) {
             LOGGER.error("MCP list_workflows failed", e);
-            return errorJson("Failed to list workflows: " + e.getMessage());
+            return errorJson("Failed to list workflows", e);
         }
     }
 
@@ -262,7 +275,7 @@ public class McpAdminTools {
                     description != null ? description : "", "location", location != null ? location : "unknown", "status", response.getStatus()));
         } catch (Exception e) {
             LOGGER.error("MCP create_agent failed", e);
-            return errorJson("Failed to create agent: " + e.getMessage());
+            return errorJson("Failed to create agent", e);
         }
     }
 
@@ -281,7 +294,7 @@ public class McpAdminTools {
                     Map.of("agentId", agentId, "version", ver, "permanent", isPermanent, "cascade", isCascade, "status", response.getStatus()));
         } catch (Exception e) {
             LOGGER.error("MCP delete_agent failed for Agent " + agentId, e);
-            return errorJson("Failed to delete agent: " + e.getMessage());
+            return errorJson("Failed to delete agent", e);
         }
     }
 
@@ -336,7 +349,7 @@ public class McpAdminTools {
             return resultJson("updated", result);
         } catch (Exception e) {
             LOGGER.error("MCP update_agent failed for Agent " + agentId, e);
-            return errorJson("Failed to update agent: " + e.getMessage());
+            return errorJson("Failed to update agent", e);
         }
     }
 
@@ -363,7 +376,7 @@ public class McpAdminTools {
             return jsonSerialization.serialize(result);
         } catch (Exception e) {
             LOGGER.error("MCP read_workflow failed for workflow " + workflowId, e);
-            return errorJson("Failed to read workflow: " + e.getMessage());
+            return errorJson("Failed to read workflow", e);
         }
     }
 
@@ -395,7 +408,7 @@ public class McpAdminTools {
             return jsonSerialization.serialize(result);
         } catch (Exception e) {
             LOGGER.error("MCP read_resource failed for " + resourceType + "/" + resourceId, e);
-            return errorJson("Failed to read resource: " + e.getMessage());
+            return errorJson("Failed to read resource", e);
         }
     }
 
@@ -454,7 +467,7 @@ public class McpAdminTools {
             return resultJson("updated", result);
         } catch (Exception e) {
             LOGGER.error("MCP update_resource failed for " + resourceType + "/" + resourceId, e);
-            return errorJson("Failed to update resource: " + e.getMessage());
+            return errorJson("Failed to update resource", e);
         }
     }
 
@@ -487,7 +500,7 @@ public class McpAdminTools {
             return resultJson("created", result);
         } catch (Exception e) {
             LOGGER.error("MCP create_resource failed for " + resourceType, e);
-            return errorJson("Failed to create resource: " + e.getMessage());
+            return errorJson("Failed to create resource", e);
         }
     }
 
@@ -515,7 +528,7 @@ public class McpAdminTools {
                     Map.of("resourceType", type, "resourceId", resourceId, "version", ver, "permanent", isPermanent, "status", response.getStatus()));
         } catch (Exception e) {
             LOGGER.error("MCP delete_resource failed for " + resourceType + "/" + resourceId, e);
-            return errorJson("Failed to delete resource: " + e.getMessage());
+            return errorJson("Failed to delete resource", e);
         }
     }
 
@@ -642,7 +655,7 @@ public class McpAdminTools {
             return resultJson("cascaded", result);
         } catch (Exception e) {
             LOGGER.error("MCP apply_agent_changes failed for Agent " + agentId, e);
-            return errorJson("Failed to apply Agent changes: " + e.getMessage());
+            return errorJson("Failed to apply Agent changes", e);
         }
     }
 
@@ -729,7 +742,7 @@ public class McpAdminTools {
             return jsonSerialization.serialize(result);
         } catch (Exception e) {
             LOGGER.error("MCP list_agent_resources failed for Agent " + agentId, e);
-            return errorJson("Failed to list Agent resources: " + e.getMessage());
+            return errorJson("Failed to list Agent resources", e);
         }
     }
 
@@ -741,19 +754,19 @@ public class McpAdminTools {
     private Response updateResourceByType(String type, String id, int version, String configJson) throws IOException {
         return switch (type) {
             case "behavior" -> getRestStore(IRestRuleSetStore.class).updateRuleSet(id, version,
-                    jsonSerialization.deserialize(configJson, RuleSetConfiguration.class));
+                    configParser.parse(configJson, RuleSetConfiguration.class));
             case "langchain" ->
-                getRestStore(IRestLlmStore.class).updateLlm(id, version, jsonSerialization.deserialize(configJson, LlmConfiguration.class));
+                getRestStore(IRestLlmStore.class).updateLlm(id, version, configParser.parse(configJson, LlmConfiguration.class));
             case "httpcalls" -> getRestStore(IRestApiCallsStore.class).updateApiCalls(id, version,
-                    jsonSerialization.deserialize(configJson, ApiCallsConfiguration.class));
+                    configParser.parse(configJson, ApiCallsConfiguration.class));
             case "mcpcalls" -> getRestStore(IRestMcpCallsStore.class).updateMcpCalls(id, version,
-                    jsonSerialization.deserialize(configJson, McpCallsConfiguration.class));
+                    configParser.parse(configJson, McpCallsConfiguration.class));
             case "output" -> getRestStore(IRestOutputStore.class).updateOutputSet(id, version,
-                    jsonSerialization.deserialize(configJson, OutputConfigurationSet.class));
+                    configParser.parse(configJson, OutputConfigurationSet.class));
             case "propertysetter" -> getRestStore(IRestPropertySetterStore.class).updatePropertySetter(id, version,
-                    jsonSerialization.deserialize(configJson, PropertySetterConfiguration.class));
+                    configParser.parse(configJson, PropertySetterConfiguration.class));
             case "dictionaries" -> getRestStore(IRestDictionaryStore.class).updateRegularDictionary(id, version,
-                    jsonSerialization.deserialize(configJson, DictionaryConfiguration.class));
+                    configParser.parse(configJson, DictionaryConfiguration.class));
             default -> throw new IllegalArgumentException(
                     "Unknown resource type: " + type + ". Supported: behavior, langchain, httpcalls, mcpcalls, output, propertysetter, dictionaries");
         };
@@ -765,18 +778,18 @@ public class McpAdminTools {
     private Response createResourceByType(String type, String configJson) throws IOException {
         return switch (type) {
             case "behavior" ->
-                getRestStore(IRestRuleSetStore.class).createRuleSet(jsonSerialization.deserialize(configJson, RuleSetConfiguration.class));
-            case "langchain" -> getRestStore(IRestLlmStore.class).createLlm(jsonSerialization.deserialize(configJson, LlmConfiguration.class));
+                getRestStore(IRestRuleSetStore.class).createRuleSet(configParser.parse(configJson, RuleSetConfiguration.class));
+            case "langchain" -> getRestStore(IRestLlmStore.class).createLlm(configParser.parse(configJson, LlmConfiguration.class));
             case "httpcalls" ->
-                getRestStore(IRestApiCallsStore.class).createApiCalls(jsonSerialization.deserialize(configJson, ApiCallsConfiguration.class));
+                getRestStore(IRestApiCallsStore.class).createApiCalls(configParser.parse(configJson, ApiCallsConfiguration.class));
             case "mcpcalls" ->
-                getRestStore(IRestMcpCallsStore.class).createMcpCalls(jsonSerialization.deserialize(configJson, McpCallsConfiguration.class));
+                getRestStore(IRestMcpCallsStore.class).createMcpCalls(configParser.parse(configJson, McpCallsConfiguration.class));
             case "output" ->
-                getRestStore(IRestOutputStore.class).createOutputSet(jsonSerialization.deserialize(configJson, OutputConfigurationSet.class));
+                getRestStore(IRestOutputStore.class).createOutputSet(configParser.parse(configJson, OutputConfigurationSet.class));
             case "propertysetter" -> getRestStore(IRestPropertySetterStore.class)
-                    .createPropertySetter(jsonSerialization.deserialize(configJson, PropertySetterConfiguration.class));
+                    .createPropertySetter(configParser.parse(configJson, PropertySetterConfiguration.class));
             case "dictionaries" -> getRestStore(IRestDictionaryStore.class)
-                    .createRegularDictionary(jsonSerialization.deserialize(configJson, DictionaryConfiguration.class));
+                    .createRegularDictionary(configParser.parse(configJson, DictionaryConfiguration.class));
             default -> throw new IllegalArgumentException(
                     "Unknown resource type: " + type + ". Supported: behavior, langchain, httpcalls, mcpcalls, output, propertysetter, dictionaries");
         };
@@ -857,7 +870,7 @@ public class McpAdminTools {
             return jsonSerialization.serialize(result);
         } catch (Exception e) {
             LOGGER.error("MCP list_agent_triggers failed", e);
-            return errorJson("Failed to list Agent triggers: " + e.getMessage());
+            return errorJson("Failed to list Agent triggers", e);
         }
     }
 
@@ -885,7 +898,7 @@ public class McpAdminTools {
             return resultJson("created", result);
         } catch (Exception e) {
             LOGGER.error("MCP create_agent_trigger failed", e);
-            return errorJson("Failed to create Agent trigger: " + e.getMessage());
+            return errorJson("Failed to create Agent trigger", e);
         }
     }
 
@@ -911,7 +924,7 @@ public class McpAdminTools {
             return resultJson("updated", result);
         } catch (Exception e) {
             LOGGER.error("MCP update_agent_trigger failed for intent " + intent, e);
-            return errorJson("Failed to update Agent trigger: " + e.getMessage());
+            return errorJson("Failed to update Agent trigger", e);
         }
     }
 
@@ -930,7 +943,7 @@ public class McpAdminTools {
             return resultJson("deleted", result);
         } catch (Exception e) {
             LOGGER.error("MCP delete_agent_trigger failed for intent " + intent, e);
-            return errorJson("Failed to delete Agent trigger: " + e.getMessage());
+            return errorJson("Failed to delete Agent trigger", e);
         }
     }
 
@@ -1030,10 +1043,10 @@ public class McpAdminTools {
             result.put("environment", schedule.getEnvironment());
             return resultJson("schedule_created", result);
         } catch (IllegalArgumentException e) {
-            return errorJson("Invalid schedule: " + e.getMessage());
+            return errorJson("Invalid schedule", e);
         } catch (Exception e) {
             LOGGER.error("MCP create_schedule failed", e);
-            return errorJson("Failed to create schedule: " + e.getMessage());
+            return errorJson("Failed to create schedule", e);
         }
     }
 
@@ -1079,7 +1092,7 @@ public class McpAdminTools {
             return jsonSerialization.serialize(result);
         } catch (Exception e) {
             LOGGER.error("MCP list_schedules failed", e);
-            return errorJson("Failed to list schedules: " + e.getMessage());
+            return errorJson("Failed to list schedules", e);
         }
     }
 
@@ -1119,7 +1132,7 @@ public class McpAdminTools {
             return jsonSerialization.serialize(result);
         } catch (Exception e) {
             LOGGER.error("MCP read_schedule failed for " + scheduleId, e);
-            return errorJson("Failed to read schedule: " + e.getMessage());
+            return errorJson("Failed to read schedule", e);
         }
     }
 
@@ -1133,7 +1146,7 @@ public class McpAdminTools {
             return resultJson("schedule_deleted", Map.of("scheduleId", scheduleId));
         } catch (Exception e) {
             LOGGER.error("MCP delete_schedule failed for " + scheduleId, e);
-            return errorJson("Failed to delete schedule: " + e.getMessage());
+            return errorJson("Failed to delete schedule", e);
         }
     }
 
@@ -1162,7 +1175,7 @@ public class McpAdminTools {
             return resultJson("schedule_fired", result);
         } catch (Exception e) {
             LOGGER.error("MCP fire_schedule_now failed for " + scheduleId, e);
-            return errorJson("Failed to fire schedule: " + e.getMessage());
+            return errorJson("Failed to fire schedule", e);
         }
     }
 
@@ -1178,7 +1191,7 @@ public class McpAdminTools {
                     Map.of("scheduleId", scheduleId, "status", "PENDING", "message", "Schedule requeued for next poll cycle"));
         } catch (Exception e) {
             LOGGER.error("MCP retry_failed_schedule failed for " + scheduleId, e);
-            return errorJson("Failed to retry schedule: " + e.getMessage());
+            return errorJson("Failed to retry schedule", e);
         }
     }
 
@@ -1199,7 +1212,7 @@ public class McpAdminTools {
             return jsonSerialization.serialize(descriptors);
         } catch (Exception e) {
             LOGGER.error("MCP list_channel_integrations failed", e);
-            return errorJson("Failed to list channel integrations: " + e.getMessage());
+            return errorJson("Failed to list channel integrations", e);
         }
     }
 
@@ -1224,7 +1237,7 @@ public class McpAdminTools {
             return jsonSerialization.serialize(result);
         } catch (Exception e) {
             LOGGER.error("MCP read_channel_integration failed for " + resourceId, e);
-            return errorJson("Failed to read channel integration: " + e.getMessage());
+            return errorJson("Failed to read channel integration", e);
         }
     }
 
@@ -1254,7 +1267,7 @@ public class McpAdminTools {
                     "status", response.getStatus()));
         } catch (Exception e) {
             LOGGER.error("MCP create_channel_integration failed", e);
-            return errorJson("Failed to create channel integration: " + e.getMessage());
+            return errorJson("Failed to create channel integration", e);
         }
     }
 
@@ -1285,7 +1298,7 @@ public class McpAdminTools {
                     "status", response.getStatus()));
         } catch (Exception e) {
             LOGGER.error("MCP update_channel_integration failed for " + resourceId, e);
-            return errorJson("Failed to update channel integration: " + e.getMessage());
+            return errorJson("Failed to update channel integration", e);
         }
     }
 
@@ -1311,7 +1324,7 @@ public class McpAdminTools {
                     "status", response.getStatus()));
         } catch (Exception e) {
             LOGGER.error("MCP delete_channel_integration failed for " + resourceId, e);
-            return errorJson("Failed to delete channel integration: " + e.getMessage());
+            return errorJson("Failed to delete channel integration", e);
         }
     }
 }

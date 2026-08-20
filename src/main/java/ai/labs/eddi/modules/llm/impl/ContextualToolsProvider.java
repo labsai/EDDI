@@ -85,7 +85,9 @@ class ContextualToolsProvider implements ToolSourceProvider {
      * {@code readAttachment}. Null means disabled, and null is the default. User
      * memory is a persistent cross-conversation <em>write</em> capability, so
      * handing it to an agent with built-ins off would be a real privilege
-     * escalation, not a cosmetic difference.</li>
+     * escalation, not a cosmetic difference. An agent that enabled memory and lands
+     * here is warned about rather than skipped silently — see
+     * {@link #warnIfMemoryEnabledButBuiltInsAreOff}.</li>
      * <li>a whitelist is configured ⇒ user memory only on {@code "usermemory"},
      * recall only on {@code "conversationRecall"}.</li>
      * <li>no whitelist ⇒ both, as today.</li>
@@ -105,6 +107,8 @@ class ContextualToolsProvider implements ToolSourceProvider {
             if (ctx.hasNoWhitelist() || ctx.isWhitelisted("conversationRecall")) {
                 addConversationRecallToolIfEnabled(tools, ctx.task(), ctx.memory());
             }
+        } else {
+            warnIfMemoryEnabledButBuiltInsAreOff(ctx);
         }
         // readAttachment is NOT contributed here — see AttachmentToolsProvider. It
         // has to be assembled after the dynamic-agent tools to keep the pre-SPI spec
@@ -116,6 +120,31 @@ class ContextualToolsProvider implements ToolSourceProvider {
         var reflected = ToolObjectReflector.reflect(tools);
         return new ToolContribution(reflected.specs(), reflected.executors(), reflected.toolSources(), Map.of(),
                 List.of(), reflected.toolCanonicalNames());
+    }
+
+    /**
+     * Says out loud that an agent asked for persistent memory and this task will
+     * not give it any.
+     * <p>
+     * Attaching {@code UserMemoryTool} is a three-way conjunction across two
+     * configuration files — the agent's {@code enableMemoryTools}, its
+     * {@code userMemoryConfig}, and this task's {@code enableBuiltInTools} — and
+     * failing any part produced no output at all. An agent designer who enabled
+     * memory and got none had nothing to read: no error, no log line, and a model
+     * that cheerfully claimed to have saved things it had not. The conflict is
+     * resolved the restrictive way on purpose ({@code enableBuiltInTools: false} is
+     * a task-level statement that this task gets no built-in capability, and user
+     * memory is a cross-conversation write), but it must be visible.
+     */
+    private void warnIfMemoryEnabledButBuiltInsAreOff(ToolAssemblyContext ctx) {
+        if (ctx.memory().getUserMemoryConfig() == null || userMemoryStore == null) {
+            return;
+        }
+        LOGGER.warnf("[MEMORY] Agent '%s' has persistent user memory enabled, but this LLM task has "
+                + "enableBuiltInTools=%s — UserMemoryTool is NOT attached and the agent cannot write memories. "
+                + "Set enableBuiltInTools: true on the task (conversation='%s').",
+                sanitize(ctx.memory().getAgentId()), ctx.task().getEnableBuiltInTools(),
+                sanitize(ctx.memory().getConversationId()));
     }
 
     /**

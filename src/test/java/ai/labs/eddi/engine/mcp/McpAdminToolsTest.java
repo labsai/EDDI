@@ -31,6 +31,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
+import ai.labs.eddi.configs.rest.StrictConfigurationParser;
 
 /**
  * Unit tests for McpAdminTools — MCP tools for Agent administration.
@@ -66,7 +67,8 @@ class McpAdminToolsTest {
         lenient().when(jsonSerialization.serialize(any())).thenReturn("{}");
         var mockIdentity = mock(io.quarkus.security.identity.SecurityIdentity.class);
         lenient().when(mockIdentity.isAnonymous()).thenReturn(true);
-        tools = new McpAdminTools(restInterfaceFactory, agentAdmin, jsonSerialization, scheduleStore, scheduleFireExecutor, schedulePollerService,
+        tools = new McpAdminTools(restInterfaceFactory, agentAdmin, jsonSerialization, strictConfigurationParser(), scheduleStore,
+                scheduleFireExecutor, schedulePollerService,
                 mockIdentity, false);
     }
 
@@ -589,5 +591,23 @@ class McpAdminToolsTest {
     void createSchedule_blankName_returnsError() {
         String result = tools.createSchedule(AGENT_ID, null, null, null, null, null, null, null, null, null);
         assertTrue(result.contains("error"));
+    }
+
+    /**
+     * A parser that defers to this test's {@code jsonSerialization} mock, so the
+     * existing {@code when(jsonSerialization.deserialize(...))} stubs keep
+     * describing what these dispatch tests are actually about. Strictness itself is
+     * covered by {@code StrictConfigurationParserTest}; here the only thing that
+     * matters is that each resource type reaches the right store.
+     */
+    private StrictConfigurationParser strictConfigurationParser() {
+        var parser = mock(StrictConfigurationParser.class);
+        try {
+            lenient().when(parser.parse(anyString(), any()))
+                    .thenAnswer(invocation -> jsonSerialization.deserialize(invocation.getArgument(0), invocation.getArgument(1)));
+        } catch (java.io.IOException e) {
+            throw new IllegalStateException(e);
+        }
+        return parser;
     }
 }

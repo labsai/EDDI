@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.a2a;
 
+import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
@@ -22,13 +23,16 @@ import static org.mockito.Mockito.*;
 class AgentCardServiceTest {
 
     private IRestAgentStore restAgentStore;
+    private IDocumentDescriptorStore documentDescriptorStore;
     private AgentCardService service;
 
     @BeforeEach
     void setUp() {
         restAgentStore = mock(IRestAgentStore.class);
+        documentDescriptorStore = mock(IDocumentDescriptorStore.class);
         service = new AgentCardService(
                 restAgentStore,
+                documentDescriptorStore,
                 "http://localhost:7070",
                 false,
                 Optional.empty());
@@ -155,6 +159,7 @@ class AgentCardServiceTest {
         void withAuth_whenEnabled() {
             var authService = new AgentCardService(
                     restAgentStore,
+                    documentDescriptorStore,
                     "http://localhost:7070",
                     true,
                     Optional.of("http://keycloak:8080/realms/eddi"));

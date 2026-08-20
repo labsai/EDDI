@@ -7,6 +7,88 @@
 
 
 
+## 🧩 fix(engine): the rest of the run-0820a sweep — memory, validation parity, error hygiene (2026-08-20)
+
+**Repo:** EDDI (`fix/sweep-0820a-integrity-defects`)
+
+**D10 — agent-facing persistent memory never attached, and the model invented success.** With all
+three required conditions verified on a live agent (`enableMemoryTools: true`, a populated
+`userMemoryConfig`, the LLM task's `enableBuiltInTools: true`), `UserMemoryTool` was still never
+assembled: no `[MEMORY]` log line on any turn, memory count stayed 0. The calculator built-in ran on
+the same turn, so tool assembly worked — only memory was missing. Given no tool the model
+confabulated: *"I've saved that you're allergic to peanuts"*, and on a second attempt leaked raw
+`<invoke name="memory_write">` pseudo-XML into user-visible output.
+
+`ContextualToolsProvider` gates on `memory.getUserMemoryConfig()`, whose only assignment was
+`Conversation.init()`. The field is not part of the persisted snapshot and every request rebuilds
+memory from the store, so it was present for the CONVERSATION_START turn and null for every turn a
+user could actually talk to. Now applied in the `Conversation` constructor — the one point `say`,
+`resume` and `rerun` all pass through. Two related traps closed: `AgentStoreClientLibrary` required
+`userMemoryConfig` to be non-null alongside `enableMemoryTools`, though every field of that config
+has a working default, so an agent that enabled memory and tuned nothing got nothing — it now falls
+back to the defaults; and the remaining `enableBuiltInTools` conjunction, kept deliberately (a
+task-level "no built-in capability" should win over an agent-level opt-in for a cross-conversation
+*write*), now logs a WARN naming the missing switch instead of skipping in silence.
+
+**D12 — MCP resource writes bypassed the validation REST enforces.** The same payload:
+`create_resource(propertysetter, {"setProperties":[…]})` returned `201 created` and stored
+`{"setOnActions":[]}`, while the identical REST body returned `400 Unknown field 'setProperties' …
+Known fields: [setOnActions]`. `update_resource` then reported `newVersion: 2` for the hollow object.
+The strictness lived in a JAX-RS `ReaderInterceptor`, which only fires on a real inbound HTTP body —
+MCP calls the same stores in-process. Extracted to `StrictConfigurationParser`, used by both, so
+there is one implementation and one message. MCP errors also now surface a JAX-RS response entity
+rather than "HTTP 400 Bad Request".
+
+**D8 — validation messages never reached the client.** `throw new BadRequestException("…")` yields a
+400 with an empty body unless an ExceptionMapper attaches one; `POST /channelstore/channels` alone
+throws four distinct, well-written messages and delivered none of them. A `ClientErrorExceptionMapper`
+copies a 4xx message into the response entity — 4xx only, and never over an entity that already
+exists, so no 5xx internal ever leaks. This one defect caused four false findings during the sweep.
+
+**D4 / D5 — `PATCH /descriptorstore/descriptors/{id}`.** "Partial update" was a full replace: sending
+only `description` wiped `name` and returned 204, after which the agent rendered as unnamed in every
+listing. SET now merges non-null fields; DELETE clears exactly the fields the patch names (or both,
+as before, when it names none). A body that is not the `PatchInstruction` wrapper NPE'd into a 500 —
+now a 400 stating the expected shape.
+
+**D6 — missing properties rendered the literal `NOT_FOUND` to end users.**
+`quarkus.qute.strict-rendering=false` only stops the throw; the value still resolves to Qute's
+NotFound sentinel, whose default mapper writes `NOT_FOUND` into the output — reproduced live and
+through `POST /administration/preview/template`. Added
+`quarkus.qute.property-not-found-strategy=NOOP`, which renders nothing, in every profile (dev
+defaulted to throwing, so the two did not even agree). AGENTS.md §5.4 claimed the empty-string
+behaviour already held; corrected, with `{properties.x ?: ''}` documented as the in-template fallback
+since `.orEmpty` is for iterables and fails on NotFound.
+
+**D9 — "cascade-delete member conversations" only ends them.** `GroupLifecycleOps` calls
+`endConversation`, verified on both surfaces; artifacts and ephemeral agents *are* deleted. The
+promise is corrected on both the MCP tool and the REST operation rather than the behaviour changed:
+a member conversation holds an agent's own transcript and GDPR erasure is the path meant to destroy
+it. The inconsistency is now stated in the code. **Maintainer decision still open** — the report's
+Option A (truly delete) remains available for a minor release.
+
+**Minors.** `GET /backup/export/{unknown}` returned an unlogged 500 via `sneakyThrow`, now a 404 —
+easy to hit, since export and download share the path and differ only by method. `pauseDetails.actions`
+reported `["CONVERSATION_START"]` on every rule pause: the lookup walked forward from index 0 while
+believing `getConversationSteps()` was reverse-chronological. It is chronological — the countdown in
+`convertConversationMemory` indexes a `ConversationStepStack` whose own `get(i)` already counts back,
+so the inversions cancel. Verified against a real memory round-trip, not read off the loop; an
+existing test had encoded the same wrong premise and passed because the code shared it. MCP error
+paths rendered `"…: null"` for exceptions with no message (54 call sites). A2A Agent Cards announced
+"EDDI Agent &lt;uuid&gt;" instead of the descriptor's name. `create_group` omitted NEGOTIATION and
+CUSTOM; `read_group_conversation` said "decision record" without naming the `decision` field; team
+cadence cron is 5-field Unix, now documented.
+
+**O1/O2.** A `maxCostPerDiscussion` is inert unless members carry `inputPricePer1M`/`outputPricePer1M`
+— EDDI ships no price table by design — so the group store now says so when a ceiling is saved.
+Channel `platformConfig` credentials are stored and returned verbatim; `ChannelTargetRouter` already
+resolves `${vault:...}` at send time, so a write-time WARN points operators at the vault rather than
+rejecting configurations that work today.
+
+---
+
+
+
 ## 🔐 fix(audit): the compliance ledger reported every entry as forged (2026-08-20)
 
 **Repo:** EDDI (`fix/sweep-0820a-integrity-defects`)

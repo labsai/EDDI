@@ -51,6 +51,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 import static org.mockito.MockitoAnnotations.openMocks;
+import ai.labs.eddi.configs.rest.StrictConfigurationParser;
 
 /**
  * Covers ALL switch cases in readResourceByType, updateResourceByType,
@@ -106,6 +107,7 @@ class McpAdminToolsSwitchCoverageTest {
     void setUp() throws Exception {
         openMocks(this);
         tools = new McpAdminTools(restInterfaceFactory, agentAdmin, jsonSerialization,
+                strictConfigurationParser(),
                 scheduleStore, scheduleFireExecutor, schedulePollerService,
                 identity, false);
 
@@ -1142,5 +1144,23 @@ class McpAdminToolsSwitchCoverageTest {
             assertNotNull(result);
             verify(restAgentStore, never()).updateAgent(anyString(), anyInt(), any());
         }
+    }
+
+    /**
+     * A parser that defers to this test's {@code jsonSerialization} mock, so the
+     * existing {@code when(jsonSerialization.deserialize(...))} stubs keep
+     * describing what these dispatch tests are actually about. Strictness itself is
+     * covered by {@code StrictConfigurationParserTest}; here the only thing that
+     * matters is that each resource type reaches the right store.
+     */
+    private StrictConfigurationParser strictConfigurationParser() {
+        var parser = mock(StrictConfigurationParser.class);
+        try {
+            lenient().when(parser.parse(anyString(), any()))
+                    .thenAnswer(invocation -> jsonSerialization.deserialize(invocation.getArgument(0), invocation.getArgument(1)));
+        } catch (java.io.IOException e) {
+            throw new IllegalStateException(e);
+        }
+        return parser;
     }
 }
