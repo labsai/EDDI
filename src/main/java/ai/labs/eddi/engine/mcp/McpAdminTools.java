@@ -1250,8 +1250,11 @@ public class McpAdminTools {
         if (config == null || config.isBlank())
             return errorJson("config is required");
         try {
-            var channelConfig = jsonSerialization.deserialize(config,
-                    ChannelIntegrationConfiguration.class);
+            // Same strictness as POST/PUT /channelstore/channels —
+            // ChannelIntegrationConfiguration
+            // is a first-party config model, so a typo'd key must be rejected here too
+            // rather than dropped into a silently different integration.
+            var channelConfig = configParser.parse(config, ChannelIntegrationConfiguration.class);
             var channelStore = getRestStore(
                     IRestChannelIntegrationStore.class);
             Response response = channelStore.createChannel(channelConfig);
@@ -1283,8 +1286,11 @@ public class McpAdminTools {
             return errorJson("config is required");
         try {
             int ver = version != null ? version : 1;
-            var channelConfig = jsonSerialization.deserialize(config,
-                    ChannelIntegrationConfiguration.class);
+            // Same strictness as POST/PUT /channelstore/channels —
+            // ChannelIntegrationConfiguration
+            // is a first-party config model, so a typo'd key must be rejected here too
+            // rather than dropped into a silently different integration.
+            var channelConfig = configParser.parse(config, ChannelIntegrationConfiguration.class);
             var channelStore = getRestStore(
                     IRestChannelIntegrationStore.class);
             Response response = channelStore.updateChannel(resourceId, ver, channelConfig);

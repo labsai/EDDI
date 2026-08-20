@@ -280,6 +280,11 @@ public class AuditLedgerService {
             // impossible to close by renumbering its neighbours.
             scrubbed = scrubbed.withSequence(nextSequence(scrubbed.conversationId()));
 
+            // Floor the timestamp to what the signature covers and the backends can
+            // store, BEFORE signing — so the row that lands in the database is
+            // byte-for-byte the row that was signed and nothing downstream can round it.
+            scrubbed = AuditHmac.withStorablePrecision(scrubbed);
+
             // Compute HMAC if key is available
             AuditEntry signed;
             if (hmacKey != null) {

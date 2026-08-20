@@ -7,6 +7,47 @@
 
 
 
+## 🔍 fix(review): findings from reviewing the run-0820a sweep itself (2026-08-20)
+
+**Repo:** EDDI (`fix/sweep-0820a-integrity-defects`)
+
+A critical pass over the sweep's own fixes turned up four things worth their own note.
+
+**The audit timestamp fix was still one rounding away from failing.** Signing milliseconds is not
+sufficient on its own: PostgreSQL's `timestamp(6)` **rounds** to the nearest microsecond rather than
+truncating, so an instant whose nanoseconds land in the last half-microsecond of a millisecond rounds
+its microsecond count up across the millisecond boundary and reads back one millisecond later than it
+was signed — roughly one row in two thousand, reported as tampered for no reason. `AuditLedgerService`
+now floors the timestamp *before* signing (`AuditHmac.withStorablePrecision`), so the row that lands
+in the database is the row that was signed and there is nothing left to round. It also makes the two
+backends agree on the ledger's timestamp resolution instead of differing by a factor of a thousand.
+
+**The D3 fix did not reach the caller that mattered most.** `ConversationHistoryBuilder` pre-checked
+`output instanceof List && !isEmpty()` before calling the extractor — the same "decide the shape from
+the outside" mistake, one level up. A turn whose output was written with
+`addConversationOutputString("output", …)` holds a plain String, so it stayed missing from the
+model's own chat history while the rolling summary and the recall tool, which call the extractor
+directly, kept it. Guard removed; the extractor already returns null when there is nothing to say.
+
+**D12's parity sweep missed two call sites.** `create_channel_integration` and
+`update_channel_integration` deserialise `ChannelIntegrationConfiguration` — a first-party config
+model that REST *is* strict about — with the lenient mapper, so the same divergence existed there.
+Both now go through `StrictConfigurationParser`. Agent triggers were checked and deliberately left
+alone: `AgentTriggerConfiguration` lives outside `configs.*.model`, so REST is lenient about it too
+and making MCP stricter would create the asymmetry in the opposite direction.
+
+**An over-claim in the rerun fix.** The comment asserted that a rerun never re-fires external side
+effects. True for the standard workflow layout (http/mcp calls precede the LLM step) but not an
+invariant — a workflow that places `httpcalls` after its LLM step will re-run them. Reworded to say
+what actually holds.
+
+Also added: a 404 regression test for the missing-export-archive path, and tests proving A2A Agent
+Cards use the descriptor's name and fall back to the id form when there is none.
+
+---
+
+
+
 ## 🧩 fix(engine): the rest of the run-0820a sweep — memory, validation parity, error hygiene (2026-08-20)
 
 **Repo:** EDDI (`fix/sweep-0820a-integrity-defects`)
@@ -183,9 +224,12 @@ empty result, and no second `ai.labs.llm`.
 
 The cleared set and the restart set are now separate and stated to agree: clear
 `{output, quickReplies}`, restart at `{langchain, output, quickReplies}`. Restarting at `langchain`
-re-runs the model and everything after it while parser, behavior rules, property setters and HTTP
-calls keep their results — a retry does not re-fire external side effects. A rule-based agent has no
-`langchain` task and still restarts at `output`, exactly as before. Separately, `/rerun` required an
+re-runs the model and everything after it; whatever precedes it keeps its results, which in the
+standard workflow layout (parser → behavior → property → http/mcp calls → llm → output) means a retry
+does not re-fire those external calls. That is the layout rather than an invariant — a workflow that
+places `httpcalls` after its LLM step will re-run them, which is what "re-execute the last step" has
+always meant for anything after the restart point. A rule-based agent has no `langchain` task and
+still restarts at `output`, exactly as before. Separately, `/rerun` required an
 undocumented `?language=` or returned 400; it is now optional, matching `say()`, and the endpoint
 description says what a rerun actually does.
 

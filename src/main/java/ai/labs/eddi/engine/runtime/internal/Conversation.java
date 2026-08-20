@@ -297,10 +297,16 @@ public class Conversation implements IConversation {
      * an empty array, destroying the reply instead of retrying it — and taking it
      * out of the model's own history with it.
      * <p>
-     * Restarting at {@code langchain} re-runs only the model and everything after
-     * it. Tasks before it — parser, behavior rules, property setters, HTTP calls —
-     * keep their results, so a retry does not re-fire external side effects. A
-     * rule-based agent has no {@code langchain} task, so it still restarts at
+     * Restarting at {@code langchain} re-runs the model and every task after it.
+     * Whatever precedes it keeps its results — in the standard workflow layout
+     * ({@code AgentSetupService#createWorkflowConfig}) that is parser, behavior
+     * rules, property setters and HTTP/MCP calls, so a retry does not re-fire those
+     * external side effects. That is the layout, not an invariant: a workflow that
+     * deliberately places {@code httpcalls} <em>after</em> its LLM step will re-run
+     * those calls on a rerun, which is the same thing "re-execute the last step"
+     * has always meant for whatever follows the restart point.
+     * <p>
+     * A rule-based agent has no {@code langchain} task, so it still restarts at
      * {@code output} and behaves exactly as before.
      */
     private static final List<String> RERUN_RESTART_TASK_TYPES = List.of("langchain", "output", "quickReplies");

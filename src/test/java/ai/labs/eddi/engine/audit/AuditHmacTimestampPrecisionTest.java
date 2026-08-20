@@ -18,6 +18,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -93,6 +94,36 @@ class AuditHmacTimestampPrecisionTest {
 
             assertEquals(VerificationOutcome.MISMATCH, AuditHmac.verify(moved, hmacKey, true),
                     "tolerating sub-millisecond loss must not tolerate an actual edit");
+        }
+
+        /**
+         * Signing milliseconds is not enough on its own: {@code timestamp(6)} ROUNDS to
+         * the nearest microsecond, so an instant in the last half-microsecond of a
+         * millisecond rounds up across the boundary and reads back a millisecond late.
+         * Storing what was signed leaves nothing to round.
+         */
+        @Test
+        @DisplayName("the stored timestamp is floored first, so PostgreSQL rounding cannot move it")
+        void storedPrecisionDefeatsDatabaseRounding() {
+            Instant lastHalfMicrosecond = Instant.parse("2026-08-20T10:15:30Z").plusNanos(123_999_600L);
+            AuditEntry storable = AuditHmac.withStorablePrecision(entryAt(lastHalfMicrosecond));
+
+            assertEquals(0, storable.timestamp().getNano() % 1_000_000,
+                    "a millisecond-floored instant has no sub-millisecond digits for a database to round");
+
+            AuditEntry signed = storable.withHmac(AuditHmac.computeHmac(storable, hmacKey));
+            // PostgreSQL rounding this value is a no-op, because there is nothing below
+            // the millisecond left to round.
+            assertTrue(AuditHmac.verifyHmac(asStoredByPostgres(signed), hmacKey));
+            assertTrue(AuditHmac.verifyHmac(asStoredByMongo(signed), hmacKey));
+        }
+
+        @Test
+        @DisplayName("withStorablePrecision tolerates a null entry and a null timestamp")
+        void storablePrecisionIsNullTolerant() {
+            assertNull(AuditHmac.withStorablePrecision(null));
+            AuditEntry noTimestamp = entryAt(null);
+            assertEquals(noTimestamp, AuditHmac.withStorablePrecision(noTimestamp));
         }
 
         @Test

@@ -181,14 +181,44 @@ public final class AuditHmac {
 
     /**
      * Compute HMAC-SHA256 over all audit entry fields (excluding the hmac field
-     * itself), using the v3 canonical form.
+     * itself), using the v4 canonical form.
+     * <p>
+     * Pass the entry through {@link #withStorablePrecision} first: v4 signs the
+     * timestamp at millisecond precision, and the entry that is stored has to carry
+     * the same value, or the database's own rounding can move it.
      *
      * @param entry
      *            the audit entry (hmac field is ignored)
      * @param hmacKey
      *            the 32-byte HMAC key
-     * @return version-tagged, hex-encoded HMAC string ({@code v3:<64 hex chars>})
+     * @return version-tagged, hex-encoded HMAC string ({@code v4:<64 hex chars>})
      */
+    /**
+     * The entry as it should be <em>stored</em>: its timestamp floored to the
+     * precision {@link #SIGNED_TIMESTAMP_PRECISION} signs.
+     * <p>
+     * Signing a millisecond value is not enough on its own. PostgreSQL's
+     * {@code timestamp(6)} <em>rounds</em> to the nearest microsecond rather than
+     * truncating, so an instant whose nanoseconds fall in the last half-microsecond
+     * of a millisecond rounds its microsecond count up across the millisecond
+     * boundary and reads back one millisecond later than it was signed — about one
+     * row in two thousand, reported as tampered for no reason. Storing what was
+     * signed leaves the database nothing to round, and makes the two backends agree
+     * on the ledger's timestamp resolution instead of differing by a factor of a
+     * thousand.
+     *
+     * @param entry
+     *            the entry about to be signed and stored
+     * @return the same entry with a storage-safe timestamp, or unchanged when it
+     *         carries none
+     */
+    public static AuditEntry withStorablePrecision(AuditEntry entry) {
+        if (entry == null || entry.timestamp() == null) {
+            return entry;
+        }
+        return entry.withTimestamp(entry.timestamp().truncatedTo(SIGNED_TIMESTAMP_PRECISION));
+    }
+
     public static String computeHmac(AuditEntry entry, byte[] hmacKey) {
         return V4_PREFIX + hmacSha256(buildCanonicalStringV4(entry), hmacKey);
     }
