@@ -112,9 +112,12 @@ public class RestAuditStore implements IRestAuditStore {
         int invalid = 0;
         int unsigned = 0;
         var problems = new ArrayList<EntryProblem>();
+        // One budget for the whole sweep — see AuditRecoveryBudget. Spent only on
+        // rows whose direct check already failed.
+        var recoveryBudget = auditLedgerService.newRecoveryBudget();
 
         for (AuditEntry entry : entries) {
-            AuditVerificationStatus status = auditLedgerService.verifyEntry(entry);
+            AuditVerificationStatus status = auditLedgerService.verifyEntry(entry, recoveryBudget);
             switch (status) {
                 case VALID -> valid++;
                 // A recovered entry is intact — it counts as valid, and is also counted
@@ -141,8 +144,8 @@ public class RestAuditStore implements IRestAuditStore {
                 ? checkChain(entries, missing, undelivered, duplicates, expectRunFromOrigin, undeliveredFor(scopeId))
                 : ChainStatus.NOT_APPLICABLE;
 
-        return new AuditVerificationReport(scope, scopeId, signingEnabled, entries.size(), valid, recovered, invalid, unsigned, chainStatus,
-                missing, undelivered, duplicates, problems, Instant.now());
+        return new AuditVerificationReport(scope, scopeId, signingEnabled, entries.size(), valid, recovered,
+                recoveryBudget.searchesSkipped(), invalid, unsigned, chainStatus, missing, undelivered, duplicates, problems, Instant.now());
     }
 
     /**

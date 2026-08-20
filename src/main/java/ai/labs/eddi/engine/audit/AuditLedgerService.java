@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.audit;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import ai.labs.eddi.configs.agents.AgentSigningService;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
@@ -93,6 +94,15 @@ public class AuditLedgerService {
      * literal stored form.
      */
     private final boolean recoverLegacyTimestamps;
+
+    /**
+     * How many legacy rows one sweep may search before it stops trying. A search is
+     * only spent on a row whose direct check already failed, so a healthy ledger
+     * never touches this; a ledger verified with the wrong key would otherwise
+     * spend one on every row. 500 bounds the worst case at a second or two of HMAC
+     * work per request.
+     */
+    private final int recoverLegacyMaxRows;
     private final boolean enabled;
     private final int flushIntervalSeconds;
     private final Optional<String> masterKeyConfig;
@@ -162,9 +172,11 @@ public class AuditLedgerService {
             @ConfigProperty(name = "eddi.tenant.default-id", defaultValue = "default") String defaultTenantId,
             @ConfigProperty(name = "eddi.audit.max-queue-size", defaultValue = "100000") int maxQueueSize,
             @ConfigProperty(name = "eddi.audit.verify.recover-legacy", defaultValue = "true") boolean recoverLegacyTimestamps,
-            io.micrometer.core.instrument.MeterRegistry meterRegistry, Instance<Connection> natsConnectionInstance,
+            @ConfigProperty(name = "eddi.audit.verify.recover-legacy-max-rows", defaultValue = "500") int recoverLegacyMaxRows,
+            MeterRegistry meterRegistry, Instance<Connection> natsConnectionInstance,
             AgentSigningService agentSigningService, ObjectMapper objectMapper) {
         this.recoverLegacyTimestamps = recoverLegacyTimestamps;
+        this.recoverLegacyMaxRows = recoverLegacyMaxRows;
         this.auditStore = auditStore;
         this.enabled = enabled;
         this.flushIntervalSeconds = flushIntervalSeconds;
@@ -184,7 +196,7 @@ public class AuditLedgerService {
      * {@link #init()} after construction.
      */
     static AuditLedgerService createForTesting(IAuditStore auditStore, boolean enabled, int flushIntervalSeconds, String masterKeyConfig,
-                                               io.micrometer.core.instrument.MeterRegistry meterRegistry) {
+                                               MeterRegistry meterRegistry) {
         return createForTesting(auditStore, enabled, flushIntervalSeconds, masterKeyConfig, meterRegistry, DEFAULT_MAX_QUEUE_SIZE);
     }
 
@@ -192,9 +204,9 @@ public class AuditLedgerService {
      * Factory method for unit testing with an explicit queue bound.
      */
     static AuditLedgerService createForTesting(IAuditStore auditStore, boolean enabled, int flushIntervalSeconds, String masterKeyConfig,
-                                               io.micrometer.core.instrument.MeterRegistry meterRegistry, int maxQueueSize) {
+                                               MeterRegistry meterRegistry, int maxQueueSize) {
         return new AuditLedgerService(auditStore, enabled, flushIntervalSeconds, Optional.ofNullable(masterKeyConfig), "eddi-audit-deadletter.jsonl",
-                false, "default", maxQueueSize, true, meterRegistry, null, null, new ObjectMapper());
+                false, "default", maxQueueSize, true, 500, meterRegistry, null, null, new ObjectMapper());
     }
 
     @PostConstruct
@@ -609,6 +621,20 @@ public class AuditLedgerService {
      * @return the verification outcome for that entry
      */
     public AuditVerificationStatus verifyEntry(AuditEntry entry) {
+        return verifyEntry(entry, newRecoveryBudget());
+    }
+
+    /**
+     * Re-check a stored entry, spending legacy-recovery searches from a budget the
+     * caller's whole sweep shares.
+     *
+     * @param entry
+     *            a stored entry, as read back from {@link IAuditStore}
+     * @param recoveryBudget
+     *            from {@link #newRecoveryBudget()}, created once per sweep
+     * @return the verification outcome for that entry
+     */
+    public AuditVerificationStatus verifyEntry(AuditEntry entry, AuditRecoveryBudget recoveryBudget) {
         if (entry == null) {
             return AuditVerificationStatus.INVALID;
         }
@@ -618,11 +644,19 @@ public class AuditLedgerService {
         if (entry.hmac() == null || entry.hmac().isBlank()) {
             return AuditVerificationStatus.UNSIGNED;
         }
-        return switch (AuditHmac.verify(entry, hmacKey, recoverLegacyTimestamps)) {
+        return switch (AuditHmac.verify(entry, hmacKey, recoveryBudget)) {
             case MATCH -> AuditVerificationStatus.VALID;
             case MATCH_RECOVERED -> AuditVerificationStatus.VALID_RECOVERED;
             case MISMATCH -> AuditVerificationStatus.INVALID;
         };
+    }
+
+    /**
+     * A recovery budget for one verification sweep, sized by
+     * {@code eddi.audit.verify.recover-legacy-max-rows}.
+     */
+    public AuditRecoveryBudget newRecoveryBudget() {
+        return recoverLegacyTimestamps ? new AuditRecoveryBudget(recoverLegacyMaxRows) : AuditRecoveryBudget.none();
     }
 
     /**

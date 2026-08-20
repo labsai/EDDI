@@ -53,6 +53,13 @@ import java.util.List;
  *            not store was reconstructed from the signature. Integrity is
  *            proven just as strongly; the count is reported separately because
  *            it dates the rows
+ * @param recoverySkipped
+ *            pre-v4 entries that failed the direct check and were <em>not</em>
+ *            searched, because the sweep's recovery budget
+ *            ({@code eddi.audit.verify.recover-legacy-max-rows}) was spent.
+ *            They are counted in {@code invalid}; a non-zero value here says
+ *            that verdict is "not proven" rather than "disproven", and that a
+ *            narrower page or a larger budget would say more
  * @param invalid
  *            entries whose HMAC did not match — tampering, or a key change
  * @param unsigned
@@ -79,8 +86,8 @@ import java.util.List;
  * @since 6.2.0
  */
 public record AuditVerificationReport(String scope, String scopeId, boolean signingEnabled, int entriesChecked, int valid, int recovered,
-        int invalid, int unsigned, ChainStatus chainStatus, List<Long> missingSequences, List<Long> undeliveredSequences,
-        List<Long> duplicateSequences, List<EntryProblem> problems, Instant verifiedAt) {
+        int recoverySkipped, int invalid, int unsigned, ChainStatus chainStatus, List<Long> missingSequences,
+        List<Long> undeliveredSequences, List<Long> duplicateSequences, List<EntryProblem> problems, Instant verifiedAt) {
 
     /**
      * Whether the sweep found nothing wrong. False whenever an entry failed

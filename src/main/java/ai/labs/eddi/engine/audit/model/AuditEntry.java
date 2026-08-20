@@ -125,11 +125,18 @@ public record AuditEntry(String id, String conversationId, String agentId, Integ
     }
 
     /**
-     * Return a copy of this entry with a different timestamp. Used only by the v3
-     * legacy-recovery search in {@code AuditHmac}, which reconstructs the
-     * sub-precision digits a backend truncated away so that an old row can still
-     * prove it is the one that was written. Never used on the write path — an entry
-     * is timestamped once.
+     * Return a copy of this entry with a different timestamp.
+     * <p>
+     * Two callers, both in {@code AuditHmac}. On the write path,
+     * {@code withStorablePrecision} floors the timestamp to the precision the
+     * signature covers and the backends can store, so the row that is signed is the
+     * row that is stored. On the read path, the v3 legacy-recovery search
+     * reconstructs the sub-precision digits a backend truncated away, so an old row
+     * can still prove it is the one that was written.
+     * <p>
+     * Not a general-purpose setter: an entry's timestamp records when the event
+     * happened, and moving it after the fact is exactly what the signature exists
+     * to detect.
      */
     public AuditEntry withTimestamp(Instant newTimestamp) {
         return new AuditEntry(id, conversationId, agentId, agentVersion, userId, environment, stepIndex, taskId, taskType, taskIndex, durationMs,

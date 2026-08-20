@@ -23,6 +23,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
  * Generates A2A Agent Cards from deployed EDDI agent configurations.
@@ -139,7 +140,7 @@ public class AgentCardService {
                 return descriptor.getName();
             }
         } catch (Exception e) {
-            LOGGER.debugf("No descriptor name for A2A agent %s: %s", agentId, e.getMessage());
+            LOGGER.debugf("No descriptor name for A2A agent %s: %s", sanitize(agentId), e.getMessage());
         }
         return "EDDI Agent " + agentId;
     }

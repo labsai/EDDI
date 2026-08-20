@@ -12,7 +12,7 @@ import io.quarkus.security.identity.SecurityIdentity;
 
 import java.util.Collection;
 import java.util.Map;
-import jakarta.ws.rs.WebApplicationException;
+import jakarta.ws.rs.ClientErrorException;
 
 /**
  * Shared utility methods for MCP tool implementations.
@@ -177,19 +177,28 @@ final class McpToolUtils {
     /**
      * A throwable's message, or its class's simple name when it has none.
      * <p>
-     * A {@link WebApplicationException} is unwrapped to its response entity first.
-     * These tools call EDDI's own REST stores in-process, and a JAX-RS exception
-     * built from a {@code Response} carries the useful text in that entity while
-     * {@code getMessage()} returns only the status line — so a precise "Unknown
-     * field 'setProperties' … Known fields: [setOnActions]" would otherwise reach
-     * the MCP client as "HTTP 400 Bad Request".
+     * A <strong>client error</strong> ({@link ClientErrorException}, i.e. 4xx) is
+     * unwrapped to its response entity first. These tools call EDDI's own REST
+     * stores in-process, and a JAX-RS exception built from a {@code Response}
+     * carries the useful text in that entity while {@code getMessage()} returns
+     * only the status line — so a precise "Unknown field 'setProperties' … Known
+     * fields: [setOnActions]" would otherwise reach the MCP client as "HTTP 400 Bad
+     * Request", which is exactly the MCP/REST parity this exists to preserve.
+     * <p>
+     * Only 4xx. A 4xx entity is a message this codebase authored <em>for</em> the
+     * caller, describing what the caller got wrong. A 5xx entity is not written to
+     * that contract and can carry endpoint, datastore or configuration detail, so
+     * it falls through to the message below and is never lifted verbatim. Every MCP
+     * tool that reaches this point is already behind {@code requireRole}, but "the
+     * caller is an admin" is a reason to answer usefully, not a reason to stop
+     * distinguishing the two.
      */
     static String describe(Throwable cause) {
         if (cause == null) {
             return "unknown cause";
         }
-        if (cause instanceof WebApplicationException wae) {
-            var response = wae.getResponse();
+        if (cause instanceof ClientErrorException clientError) {
+            var response = clientError.getResponse();
             if (response != null && response.hasEntity() && response.getEntity() instanceof String entity && !entity.isBlank()) {
                 return entity;
             }

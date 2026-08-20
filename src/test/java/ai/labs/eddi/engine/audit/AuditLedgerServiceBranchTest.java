@@ -194,7 +194,7 @@ class AuditLedgerServiceBranchTest {
 
         var service = new AuditLedgerService(auditStore, true, 60,
                 Optional.of("master-key"), "deadletter.jsonl", true, "default", AuditLedgerService.DEFAULT_MAX_QUEUE_SIZE,
-                true, meterRegistry, natsInstance, signingService, new ObjectMapper());
+                true, 500, meterRegistry, natsInstance, signingService, new ObjectMapper());
         service.init();
 
         var entry = entry("id1", "conv1", "agent1");
@@ -230,7 +230,7 @@ class AuditLedgerServiceBranchTest {
 
         var service = new AuditLedgerService(auditStore, true, 60,
                 Optional.empty(), "deadletter.jsonl", true, "default", AuditLedgerService.DEFAULT_MAX_QUEUE_SIZE,
-                true, meterRegistry, natsInstance, signingService, new ObjectMapper());
+                true, 500, meterRegistry, natsInstance, signingService, new ObjectMapper());
         service.init();
 
         var entry = entry("id1", "conv1", "agent1");
@@ -263,7 +263,7 @@ class AuditLedgerServiceBranchTest {
         // No master key → no hmac
         var service = new AuditLedgerService(auditStore, true, 60,
                 Optional.empty(), "deadletter.jsonl", true, "default", AuditLedgerService.DEFAULT_MAX_QUEUE_SIZE,
-                true, meterRegistry, natsInstance, signingService, new ObjectMapper());
+                true, 500, meterRegistry, natsInstance, signingService, new ObjectMapper());
         service.init();
 
         var entry = entry("my-id", "conv1", "agent1");
@@ -313,7 +313,7 @@ class AuditLedgerServiceBranchTest {
 
         var service = new AuditLedgerService(auditStore, true, 60,
                 Optional.empty(), "deadletter.jsonl", false, "default", AuditLedgerService.DEFAULT_MAX_QUEUE_SIZE,
-                true, meterRegistry, natsInstance, null, new ObjectMapper());
+                true, 500, meterRegistry, natsInstance, null, new ObjectMapper());
         service.init();
 
         // Make flush fail 3 times to trigger dead letter
@@ -350,7 +350,7 @@ class AuditLedgerServiceBranchTest {
         // path)
         var service = new AuditLedgerService(auditStore, true, 60,
                 Optional.empty(), "Z:\\nonexistent\\path\\deadletter.jsonl", false, "default", AuditLedgerService.DEFAULT_MAX_QUEUE_SIZE,
-                true, meterRegistry, natsInstance, null, new ObjectMapper());
+                true, 500, meterRegistry, natsInstance, null, new ObjectMapper());
         service.init();
 
         doThrow(new RuntimeException("fail")).when(auditStore).appendBatch(any());
@@ -377,7 +377,7 @@ class AuditLedgerServiceBranchTest {
         // Use a nonexistent path to test error handling
         var service = new AuditLedgerService(auditStore, true, 60,
                 Optional.empty(), "Z:\\nonexistent\\deadletter.jsonl", false, "default", AuditLedgerService.DEFAULT_MAX_QUEUE_SIZE,
-                true, meterRegistry, natsInstance, null, new ObjectMapper());
+                true, 500, meterRegistry, natsInstance, null, new ObjectMapper());
         service.init();
 
         doThrow(new RuntimeException("fail")).when(auditStore).appendBatch(any());
@@ -406,7 +406,7 @@ class AuditLedgerServiceBranchTest {
 
         var service = new AuditLedgerService(auditStore, true, 60,
                 Optional.empty(), "deadletter.jsonl", false, "default", AuditLedgerService.DEFAULT_MAX_QUEUE_SIZE,
-                true, meterRegistry, natsInstance, null, failingMapper);
+                true, 500, meterRegistry, natsInstance, null, failingMapper);
         service.init();
 
         var e = entry("1", "conv1", "agent1");
@@ -455,7 +455,7 @@ class AuditLedgerServiceBranchTest {
 
         var service = new AuditLedgerService(auditStore, true, 60,
                 Optional.empty(), "Z:\\nonexistent\\deadletter.jsonl", false, "default", AuditLedgerService.DEFAULT_MAX_QUEUE_SIZE,
-                true, meterRegistry, natsInstance, null, new ObjectMapper());
+                true, 500, meterRegistry, natsInstance, null, new ObjectMapper());
         service.init();
 
         doThrow(new RuntimeException("fail")).when(auditStore).appendBatch(any());

@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.audit.rest;
 
 import ai.labs.eddi.engine.audit.AuditLedgerService;
+import ai.labs.eddi.engine.audit.AuditRecoveryBudget;
 import ai.labs.eddi.engine.audit.AuditVerificationStatus;
 import ai.labs.eddi.engine.audit.IAuditStore;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
@@ -22,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 /**
@@ -44,7 +46,9 @@ class RestAuditStoreTest {
         auditStore = mock(IAuditStore.class);
         auditLedgerService = mock(AuditLedgerService.class);
         when(auditLedgerService.isSigningEnabled()).thenReturn(true);
-        when(auditLedgerService.verifyEntry(any())).thenReturn(AuditVerificationStatus.VALID);
+        // The sweep asks the service for one budget and passes it to every entry.
+        when(auditLedgerService.newRecoveryBudget()).thenReturn(AuditRecoveryBudget.none());
+        when(auditLedgerService.verifyEntry(any(), any())).thenReturn(AuditVerificationStatus.VALID);
         restAuditStore = new RestAuditStore(auditStore, auditLedgerService);
     }
 
@@ -112,8 +116,8 @@ class RestAuditStoreTest {
         var good = entryAt("id-1", 0);
         var tampered = entryAt("id-2", 1);
         when(auditStore.getEntries("conv-1", 0, 1000)).thenReturn(List.of(good, tampered));
-        when(auditLedgerService.verifyEntry(good)).thenReturn(AuditVerificationStatus.VALID);
-        when(auditLedgerService.verifyEntry(tampered)).thenReturn(AuditVerificationStatus.INVALID);
+        when(auditLedgerService.verifyEntry(eq(good), any())).thenReturn(AuditVerificationStatus.VALID);
+        when(auditLedgerService.verifyEntry(eq(tampered), any())).thenReturn(AuditVerificationStatus.INVALID);
 
         var report = restAuditStore.verifyConversation("conv-1", 0, 1000);
 
@@ -311,7 +315,7 @@ class RestAuditStoreTest {
     @DisplayName("without a signing key the sweep proves nothing")
     void withoutSigningKeyNothingIsProven() {
         when(auditLedgerService.isSigningEnabled()).thenReturn(false);
-        when(auditLedgerService.verifyEntry(any())).thenReturn(AuditVerificationStatus.SIGNING_DISABLED);
+        when(auditLedgerService.verifyEntry(any(), any())).thenReturn(AuditVerificationStatus.SIGNING_DISABLED);
         when(auditStore.getEntries("conv-1", 0, 1000)).thenReturn(List.of(entryAt("id-1", 0)));
 
         var report = restAuditStore.verifyConversation("conv-1", 0, 1000);

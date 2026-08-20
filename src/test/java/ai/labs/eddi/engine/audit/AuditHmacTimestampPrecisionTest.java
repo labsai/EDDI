@@ -201,6 +201,44 @@ class AuditHmacTimestampPrecisionTest {
             assertEquals(VerificationOutcome.MISMATCH, AuditHmac.verify(tampered, hmacKey, true));
         }
 
+        /**
+         * The per-row search is bounded; the per-sweep work was not. A page of ten
+         * thousand rows that cannot be recovered — which is what a ledger verified with
+         * the wrong key looks like — would have spent about twenty million HMACs on one
+         * request thread before answering.
+         */
+        @Test
+        @DisplayName("a sweep stops searching once its budget is spent")
+        void budgetBoundsTheSweepNotJustTheRow() {
+            AuditEntry original = entryAt(NANO_PRECISE);
+            AuditEntry stored = asStoredByPostgres(original).withHmac(signV3(original));
+
+            var budget = new AuditRecoveryBudget(1);
+
+            assertEquals(VerificationOutcome.MATCH_RECOVERED, AuditHmac.verify(stored, hmacKey, budget),
+                    "the first row is within budget");
+            assertEquals(VerificationOutcome.MISMATCH, AuditHmac.verify(stored, hmacKey, budget),
+                    "the second is not searched, so it reports as it stands");
+            assertEquals(1, budget.searchesSkipped(),
+                    "an unsearched row must be counted, or the sweep looks more thorough than it was");
+        }
+
+        @Test
+        @DisplayName("a row that verifies directly spends none of the budget")
+        void healthyRowsDoNotConsumeBudget() {
+            AuditEntry original = entryAt(Instant.parse("2026-08-20T10:15:30Z"));
+            AuditEntry stored = asStoredByPostgres(original).withHmac(signV3(original));
+
+            var budget = new AuditRecoveryBudget(1);
+            assertEquals(VerificationOutcome.MATCH, AuditHmac.verify(stored, hmacKey, budget));
+
+            // The one search is still available for a row that actually needs it.
+            AuditEntry needsSearch = entryAt(NANO_PRECISE);
+            assertEquals(VerificationOutcome.MATCH_RECOVERED, AuditHmac.verify(
+                    asStoredByPostgres(needsSearch).withHmac(signV3(needsSearch)), hmacKey, budget));
+            assertEquals(0, budget.searchesSkipped());
+        }
+
         @Test
         @DisplayName("recovery can be switched off")
         void recoveryIsOptional() {

@@ -7,6 +7,52 @@
 
 
 
+## 🧹 fix(audit): review round on PR #707 (2026-08-20)
+
+**Repo:** EDDI (`fix/sweep-0820a-integrity-defects`)
+
+Six findings from CodeQL and CodeRabbit, five applied as reported and one applied in part.
+
+**Bounded the legacy-recovery work per sweep, not only per row (the substantive one).** Each pre-v4
+row that fails its direct check costs about 2,000 HMAC computations. Per row that is a couple of
+milliseconds; per *sweep* nothing bounded it, and `/auditstore/verify` accepts a limit of 10,000
+entries and verifies inline on the request thread — so a page where nothing can be recovered would
+spend roughly twenty million HMACs before answering. "Nothing can be recovered" is not exotic: it is
+what a ledger verified with the wrong key looks like, so the case where an operator most wants a
+prompt answer was the slowest. `AuditRecoveryBudget` is now created once per sweep
+(`eddi.audit.verify.recover-legacy-max-rows`, default 500) and spent only on rows whose direct check
+already failed. Rows past the budget report INVALID and are counted in a new `recoverySkipped` field
+— a non-zero value says that verdict is "not proven" rather than "disproven", which is the
+distinction this whole release is about.
+
+**MCP error detail: applied in part, with reasoning.** The suggestion was to return only the prefix
+and no exception detail. Returning only the prefix would undo two things this PR fixed — the
+`"Failed to chat with agent: null"` responses, and D12's parity, whose entire point is that the MCP
+client sees `Unknown field 'setProperties' … Known fields: [setOnActions]`. Message exposure is also
+not new: the pre-existing code already concatenated `e.getMessage()`. What *was* new is unwrapping
+JAX-RS response entities, so that is now scoped to `ClientErrorException` (4xx) only. A 4xx entity is
+a message this codebase authored *for* the caller; a 5xx entity is not written to that contract and
+may name endpoints or datastores, so it is never lifted verbatim.
+
+**Log injection (CodeQL alerts 498/499).** `agentId` in the A2A descriptor-lookup fallback and the
+group name in the cost-ceiling diagnostic now go through `LogSanitizer.sanitize`, as does the
+adjacent non-positive-ceiling warning that shared the defect.
+
+**Two orphaned Javadoc blocks** — inserting `withStorablePrecision` and `buildCanonicalStringV4`
+directly above existing methods left `computeHmac` and `buildCanonicalStringV3` documented by the
+block above their neighbour. Reattached; v3's text also no longer claims to be "the form new entries
+are signed with".
+
+**`AuditEntry.withTimestamp`'s Javadoc** said it is never used on the write path. Adding
+`withStorablePrecision` made that false on the same day it was written. Corrected.
+
+**`MeterRegistry`** was declared by fully-qualified name in three signatures (AGENTS.md §4.7).
+`ImportStyleTest` does not cover `io.micrometer`, so nothing failed — replaced with an import.
+
+---
+
+
+
 ## 🔍 fix(review): findings from reviewing the run-0820a sweep itself (2026-08-20)
 
 **Repo:** EDDI (`fix/sweep-0820a-integrity-defects`)

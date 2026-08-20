@@ -377,7 +377,7 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
             return;
         }
         LOGGER.warnf("Group '%s' has maxCostPerDiscussion=%s (not positive) — treating as unlimited",
-                groupConfiguration.getName(), protocol.maxCostPerDiscussion());
+                LogSanitizer.sanitize(groupConfiguration.getName()), protocol.maxCostPerDiscussion());
         groupConfiguration.setProtocol(new AgentGroupConfiguration.ProtocolConfig(
                 protocol.agentTimeoutSeconds(), protocol.onAgentFailure(), protocol.maxRetries(),
                 protocol.onMemberUnavailable(), protocol.maxTurns(), null, protocol.onCostExceeded()));
@@ -408,6 +408,6 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
         LOGGER.infof("Group '%s' sets maxCostPerDiscussion=%s. This only takes effect for members whose LLM task "
                 + "defines inputPricePer1M/outputPricePer1M — EDDI ships no provider price table, so unpriced "
                 + "members contribute $0 and the ceiling never fires.",
-                groupConfiguration.getName(), protocol.maxCostPerDiscussion());
+                LogSanitizer.sanitize(groupConfiguration.getName()), protocol.maxCostPerDiscussion());
     }
 }

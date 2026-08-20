@@ -180,20 +180,6 @@ public final class AuditHmac {
     }
 
     /**
-     * Compute HMAC-SHA256 over all audit entry fields (excluding the hmac field
-     * itself), using the v4 canonical form.
-     * <p>
-     * Pass the entry through {@link #withStorablePrecision} first: v4 signs the
-     * timestamp at millisecond precision, and the entry that is stored has to carry
-     * the same value, or the database's own rounding can move it.
-     *
-     * @param entry
-     *            the audit entry (hmac field is ignored)
-     * @param hmacKey
-     *            the 32-byte HMAC key
-     * @return version-tagged, hex-encoded HMAC string ({@code v4:<64 hex chars>})
-     */
-    /**
      * The entry as it should be <em>stored</em>: its timestamp floored to the
      * precision {@link #SIGNED_TIMESTAMP_PRECISION} signs.
      * <p>
@@ -219,6 +205,20 @@ public final class AuditHmac {
         return entry.withTimestamp(entry.timestamp().truncatedTo(SIGNED_TIMESTAMP_PRECISION));
     }
 
+    /**
+     * Compute HMAC-SHA256 over all audit entry fields (excluding the hmac field
+     * itself), using the v4 canonical form.
+     * <p>
+     * Pass the entry through {@link #withStorablePrecision} first: v4 signs the
+     * timestamp at millisecond precision, and the entry that is stored has to carry
+     * the same value, or the database's own rounding can move it.
+     *
+     * @param entry
+     *            the audit entry (hmac field is ignored)
+     * @param hmacKey
+     *            the 32-byte HMAC key
+     * @return version-tagged, hex-encoded HMAC string ({@code v4:<64 hex chars>})
+     */
     public static String computeHmac(AuditEntry entry, byte[] hmacKey) {
         return V4_PREFIX + hmacSha256(buildCanonicalStringV4(entry), hmacKey);
     }
@@ -307,6 +307,25 @@ public final class AuditHmac {
      * @return whether, and how, the entry verified
      */
     public static VerificationOutcome verify(AuditEntry entry, byte[] hmacKey, boolean recoverLegacyTimestamps) {
+        return verify(entry, hmacKey, recoverLegacyTimestamps ? new AuditRecoveryBudget(1) : AuditRecoveryBudget.none());
+    }
+
+    /**
+     * Verify an entry, spending recovery searches from a budget the whole sweep
+     * shares.
+     * <p>
+     * The per-row search is bounded; without this the per-<em>sweep</em> work is
+     * not. See {@link AuditRecoveryBudget}.
+     *
+     * @param entry
+     *            the audit entry with its hmac field populated
+     * @param hmacKey
+     *            the 32-byte HMAC key
+     * @param recoveryBudget
+     *            consumed once per legacy row that fails the direct check
+     * @return whether, and how, the entry verified
+     */
+    public static VerificationOutcome verify(AuditEntry entry, byte[] hmacKey, AuditRecoveryBudget recoveryBudget) {
         String stored = entry.hmac();
         if (stored == null)
             return VerificationOutcome.MISMATCH;
@@ -323,7 +342,9 @@ public final class AuditHmac {
             if (MessageDigest.isEqual(decodeHexOrNull(hmacSha256(buildCanonicalStringV3(entry), hmacKey)), storedV3)) {
                 return VerificationOutcome.MATCH;
             }
-            return recoverLegacyTimestamps && recoverV3Timestamp(entry, hmacKey, storedV3)
+            // tryConsume() is called only once the direct check has already failed, so a
+            // healthy legacy ledger spends none of the budget.
+            return recoveryBudget != null && recoveryBudget.tryConsume() && recoverV3Timestamp(entry, hmacKey, storedV3)
                     ? VerificationOutcome.MATCH_RECOVERED
                     : VerificationOutcome.MISMATCH;
         } else if (stored.startsWith(V2_PREFIX)) {
@@ -398,23 +419,6 @@ public final class AuditHmac {
     }
 
     /**
-     * Build the <strong>v3</strong> canonical string — the form new entries are
-     * signed with.
-     * <p>
-     * Same escaping and type-tagging as {@link #buildCanonicalStringV2}, with two
-     * changes:
-     * <ul>
-     * <li>{@code uid} is the {@link #identityToken}, not the raw identifier, so a
-     * GDPR pseudonymisation no longer invalidates the signature it had.</li>
-     * <li>{@code seq} — the entry's position in its conversation — is signed, so an
-     * entry cannot be renumbered and a deletion leaves a gap that verification can
-     * see. A per-entry HMAC on its own only detects in-place edits.</li>
-     * </ul>
-     * <p>
-     * <strong>Frozen once written.</strong> Same rule as v1/v2: changing a byte
-     * here makes every v3 row read as tampered. Add a v4 instead.
-     */
-    /**
      * Build the <strong>v4</strong> canonical string — the form new entries are
      * signed with.
      * <p>
@@ -459,6 +463,25 @@ public final class AuditHmac {
         return timestamp == null ? "" : Long.toString(timestamp.truncatedTo(SIGNED_TIMESTAMP_PRECISION).toEpochMilli());
     }
 
+    /**
+     * Build the <strong>v3</strong> canonical string — the form written before
+     * {@link #buildCanonicalStringV4}, still selected by {@link #verify} for rows
+     * signed while it was current.
+     * <p>
+     * Same escaping and type-tagging as {@link #buildCanonicalStringV2}, with two
+     * changes:
+     * <ul>
+     * <li>{@code uid} is the {@link #identityToken}, not the raw identifier, so a
+     * GDPR pseudonymisation no longer invalidates the signature it had.</li>
+     * <li>{@code seq} — the entry's position in its conversation — is signed, so an
+     * entry cannot be renumbered and a deletion leaves a gap that verification can
+     * see. A per-entry HMAC on its own only detects in-place edits.</li>
+     * </ul>
+     * <p>
+     * <strong>Frozen once written.</strong> Same rule as v1/v2: changing a byte
+     * here makes every v3 row read as tampered — which is why the timestamp defect
+     * became v4 rather than an edit to this method.
+     */
     static String buildCanonicalStringV3(AuditEntry entry) {
         StringBuilder sb = new StringBuilder(512);
         sb.append("v3");
