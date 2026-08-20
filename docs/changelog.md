@@ -7,6 +7,61 @@
 
 
 
+## 🔬 fix(audit): deep-pass findings — recovery direction, precision caps, null timestamps (2026-08-20)
+
+**Repo:** EDDI (`fix/sweep-0820a-integrity-defects`)
+
+A final adversarial pass over the whole branch. Four fixes and a set of verified-clean checks.
+
+**The v3 recovery search missed roughly half of all PostgreSQL legacy rows.** Storage does not only
+floor: Java's `truncatedTo`/`toEpochMilli` floor, but PostgreSQL's `timestamp(6)` — and the JDBC
+driver's nanos-to-micros conversion — round to *nearest*, so a value whose lost digits were in the
+upper half is stored **above** the signed one. The forward-only search could never reach it. The
+search now runs in both directions.
+
+**…and is capped to exactly the precision each row lost**, read off the stored value itself. The
+searched window is, unavoidably, also the window within which a *moved* stored timestamp is
+indistinguishable from a truncated one — recovery proves the signed instant exactly, and proves the
+stored value lies within the destroyed precision of it, never more. A row with sub-millisecond
+digits present came through a microsecond store, so only ±999ns is searched; only a
+millisecond-aligned row gets the ±999µs tier. Without the cap, going bidirectional would have turned
+a recovery aid into ±1ms timestamp tamper-tolerance. A test pins the cap with a whole-µs shift that
+the µs tier *would* absorb — the cap is the only thing between that edit and `VALID_RECOVERED`.
+
+**A null-timestamped entry could never verify on PostgreSQL.** v4 signs the empty string for a null
+timestamp, but `PostgresAuditStore` substitutes `now()` on write — so the row read back carried a
+timestamp the signature never covered, permanently INVALID, on that backend only (MongoDB stores the
+field as absent, which round-trips). The service now stamps a missing timestamp *before* signing.
+
+**`update_group` was a third D12 site.** It parsed `AgentGroupConfiguration` — REST-strict — with the
+lenient mapper, and its error path returned `e.getMessage()`, which for a response-built
+`BadRequestException` is just "HTTP 400 Bad Request". Now parses strictly and reports through
+`describe()`, so the known-fields message reaches the MCP caller. (`update_agent` takes only
+name/description parameters — checked, no gap.)
+
+**The memory/built-ins WARN is now once per agent**, not per turn — a busy misconfigured agent would
+have flooded the log with the same sentence, which trains operators to ignore it. The set is static
+because `AgentOrchestrator` constructs the provider per call.
+
+**Verified clean, for the record:** the D6 Qute strategy genuinely reaches production rendering
+(`TemplatingEngine` injects the CDI `Engine` that `EngineProducer` builds from config — not a
+hand-built one); `LlmTask` has no step-data idempotency guard that could defeat the rerun fix (its
+only gates are the actions data, which rerun preserves, and HITL resume mode, which requires a
+pending batch *and* a decision); every `PostgresAuditStore` row query selects `agent_signature`; and
+one worthwhile nuance of the D10 fallback — a memory-enabled agent with no `userMemoryConfig` now
+loads at the config default of 50 recall entries rather than the legacy no-config fallback of 1000,
+which is the documented default for agents that opted into memory.
+
+Tidy-ups: inline `java.io.IOException` FQNs in five test helpers replaced with imports (the
+ImportStyle sweep does not cover `java.io`, so nothing failed — AGENTS.md §4.7 applies anyway); a
+vestigial alias in `ConversationOutputExtractor`; the budget javadoc's cost figures updated for the
+bidirectional search. All three behavioural fixes mutation-checked: removing the minus branch, the
+precision cap, or the timestamp stamping each fails its test.
+
+---
+
+
+
 ## 🧹 fix(audit): review round on PR #707 (2026-08-20)
 
 **Repo:** EDDI (`fix/sweep-0820a-integrity-defects`)

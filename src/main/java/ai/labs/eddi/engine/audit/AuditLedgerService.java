@@ -292,6 +292,17 @@ public class AuditLedgerService {
             // impossible to close by renumbering its neighbours.
             scrubbed = scrubbed.withSequence(nextSequence(scrubbed.conversationId()));
 
+            // A null timestamp must be stamped BEFORE signing, not by the store. v4
+            // signs the empty string for null, but PostgresAuditStore substitutes
+            // now() on write — so a null-timestamped entry read back would carry a
+            // timestamp the signature never covered and report INVALID forever.
+            // (MongoDB stores the field as absent, which round-trips; only the
+            // Postgres fallback diverges.) Stamping here makes the two agree and the
+            // signature honest.
+            if (scrubbed.timestamp() == null) {
+                scrubbed = scrubbed.withTimestamp(Instant.now());
+            }
+
             // Floor the timestamp to what the signature covers and the backends can
             // store, BEFORE signing — so the row that lands in the database is
             // byte-for-byte the row that was signed and nothing downstream can round it.

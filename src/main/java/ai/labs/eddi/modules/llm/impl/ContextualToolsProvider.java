@@ -26,6 +26,8 @@ import org.jboss.logging.Logger;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -60,6 +62,14 @@ class ContextualToolsProvider implements ToolSourceProvider {
     private final IUserMemoryStore userMemoryStore;
     private final IAttachmentStore attachmentStore;
     private final AttachmentTextExtractor attachmentTextExtractor;
+
+    /**
+     * Agents already warned about the memory/built-ins conflict. Static because
+     * {@code AgentOrchestrator} constructs this provider per call, so an instance
+     * field would debounce nothing; bounded by the number of distinct agents. — see
+     * {@link #warnIfMemoryEnabledButBuiltInsAreOff}.
+     */
+    private static final Set<String> MEMORY_MISCONFIGURATION_WARNED = ConcurrentHashMap.newKeySet();
 
     ContextualToolsProvider(IUserMemoryStore userMemoryStore, IAttachmentStore attachmentStore,
             AttachmentTextExtractor attachmentTextExtractor) {
@@ -140,10 +150,19 @@ class ContextualToolsProvider implements ToolSourceProvider {
         if (ctx.memory().getUserMemoryConfig() == null || userMemoryStore == null) {
             return;
         }
+        // Once per agent, not per turn: this fires on every turn of a misconfigured
+        // agent, and a busy production agent would otherwise flood the log with the
+        // same sentence thousands of times — which trains operators to ignore it.
+        // Bounded by the number of distinct agents this instance serves; a redeploy
+        // that fixes the config makes the stale entry harmless.
+        String agentId = ctx.memory().getAgentId();
+        if (agentId != null && !MEMORY_MISCONFIGURATION_WARNED.add(agentId)) {
+            return;
+        }
         LOGGER.warnf("[MEMORY] Agent '%s' has persistent user memory enabled, but this LLM task has "
                 + "enableBuiltInTools=%s — UserMemoryTool is NOT attached and the agent cannot write memories. "
-                + "Set enableBuiltInTools: true on the task (conversation='%s').",
-                sanitize(ctx.memory().getAgentId()), ctx.task().getEnableBuiltInTools(),
+                + "Set enableBuiltInTools: true on the task (conversation='%s'). Logged once per agent.",
+                sanitize(agentId), ctx.task().getEnableBuiltInTools(),
                 sanitize(ctx.memory().getConversationId()));
     }
 

@@ -52,6 +52,7 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 import static org.mockito.MockitoAnnotations.openMocks;
 import ai.labs.eddi.configs.rest.StrictConfigurationParser;
+import java.io.IOException;
 
 /**
  * Covers ALL switch cases in readResourceByType, updateResourceByType,
@@ -1158,7 +1159,7 @@ class McpAdminToolsSwitchCoverageTest {
         try {
             lenient().when(parser.parse(anyString(), any()))
                     .thenAnswer(invocation -> jsonSerialization.deserialize(invocation.getArgument(0), invocation.getArgument(1)));
-        } catch (java.io.IOException e) {
+        } catch (IOException e) {
             throw new IllegalStateException(e);
         }
         return parser;

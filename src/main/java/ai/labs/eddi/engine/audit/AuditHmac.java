@@ -282,12 +282,13 @@ public final class AuditHmac {
      * v3 signed the timestamp at the JVM clock's precision while the backends store
      * less of it, so a v3 row's stored fields are not the fields that were signed
      * and it can never verify as written. The <em>signature itself</em> still
-     * carries the missing digits, though: appending each candidate sub-precision
-     * completion to the stored timestamp and recomputing costs one HMAC per
-     * candidate, and a match identifies the original value. There are at most 999
-     * of them for a microsecond-floored row (PostgreSQL) and, for a
-     * millisecond-floored one (MongoDB) written by a microsecond-resolution clock,
-     * at most 999 more — a couple of milliseconds of work per row.
+     * carries the missing digits, though: trying each candidate sub-precision
+     * completion of the stored timestamp and recomputing costs one HMAC per
+     * candidate, and a match identifies the original value. The search covers both
+     * directions (storage floors <em>or</em> rounds to nearest, depending on the
+     * backend) and is capped to the precision the row demonstrably lost — a few
+     * thousand candidates and a few milliseconds of work per row; see
+     * {@link #recoverV3Timestamp}.
      * <p>
      * This is not a weakening. Producing a completion that matches without holding
      * the key is exactly as hard as forging the digest outright; the search only
@@ -367,24 +368,38 @@ public final class AuditHmac {
     }
 
     /**
-     * Candidate sub-precision completions for a v3 timestamp, in the order they are
-     * tried: first the nanoseconds a microsecond-floored row (PostgreSQL) dropped,
-     * then the microseconds a millisecond-floored row (MongoDB) dropped from a
-     * clock that ticked in microseconds.
+     * Completions tried per tier and direction: a whole unit would be the next unit
+     * up.
+     */
+    private static final int RECOVERY_CANDIDATES_PER_STEP = 999;
+
+    /**
+     * Searches for the sub-precision timestamp digits a v3 row lost in storage.
+     * <p>
+     * <b>The search runs in both directions</b>, because storage does not only
+     * floor. Java's {@code truncatedTo}/{@code toEpochMilli} floor, but
+     * PostgreSQL's {@code timestamp(6)} — and the JDBC driver's nanos-to-micros
+     * conversion — round to <em>nearest</em>, so a value whose lost digits were in
+     * the upper half is stored <em>above</em> the signed one. A forward-only search
+     * missed every such row: roughly half of all PostgreSQL legacy rows.
+     * <p>
+     * <b>The search is capped to exactly the precision the row lost</b>, read off
+     * the stored value itself. A row with sub-millisecond digits present came
+     * through a microsecond-precision store, so only sub-microsecond digits are
+     * unknowable and only ±999ns is searched. A millisecond-aligned row may be a
+     * millisecond-floored (MongoDB) one, so the ±999µs tier applies as well. The
+     * cap matters because the searched window is, unavoidably, also the window
+     * within which a <em>moved</em> stored timestamp is indistinguishable from a
+     * truncated one: recovery proves the signed instant exactly, and proves the
+     * stored value lies within the destroyed precision of it — never more. Widening
+     * the window beyond what storage destroyed would turn a recovery aid into
+     * timestamp tamper-tolerance, so it is derived, not configured.
      * <p>
      * A millisecond-floored row written by a nanosecond-resolution clock would need
      * the full million and is deliberately not searched: that costs about a second
      * per row on a bulk sweep, and such a row simply reports as it did before.
      * Recovery is a courtesy to existing ledgers, not a load-bearing path — every
      * row written from now on is v4 and verifies directly.
-     */
-    private static final int[] RECOVERY_NANO_STEPS = {1, 1_000};
-
-    /** Completions tried per step: a whole unit would be the next unit up. */
-    private static final int RECOVERY_CANDIDATES_PER_STEP = 999;
-
-    /**
-     * Searches for the sub-precision timestamp digits a v3 row lost in storage.
      *
      * @return true when the digits that reproduce the stored digest were found
      */
@@ -394,15 +409,30 @@ public final class AuditHmac {
             // Nothing was truncated, so there is nothing to complete.
             return false;
         }
-        for (int step : RECOVERY_NANO_STEPS) {
+        // Sub-millisecond digits present ⇒ a µs-precision store wrote this row and
+        // only the nanosecond tier was lost. Only a ms-aligned row can be ms-floored.
+        boolean millisecondAligned = storedTimestamp.getNano() % 1_000_000 == 0;
+        int[] nanoSteps = millisecondAligned ? new int[]{1, 1_000} : new int[]{1};
+
+        for (int step : nanoSteps) {
             for (int k = 1; k <= RECOVERY_CANDIDATES_PER_STEP; k++) {
-                AuditEntry candidate = entry.withTimestamp(storedTimestamp.plusNanos((long) k * step));
-                if (MessageDigest.isEqual(decodeHexOrNull(hmacSha256(buildCanonicalStringV3(candidate), hmacKey)), storedDigest)) {
+                long offsetNanos = (long) k * step;
+                if (signedAt(entry, storedTimestamp.plusNanos(offsetNanos), hmacKey, storedDigest)
+                        || signedAt(entry, storedTimestamp.minusNanos(offsetNanos), hmacKey, storedDigest)) {
                     return true;
                 }
             }
         }
         return false;
+    }
+
+    /**
+     * True when the v3 digest over the entry at {@code candidate} matches the
+     * stored one.
+     */
+    private static boolean signedAt(AuditEntry entry, Instant candidate, byte[] hmacKey, byte[] storedDigest) {
+        String recomputed = hmacSha256(buildCanonicalStringV3(entry.withTimestamp(candidate)), hmacKey);
+        return MessageDigest.isEqual(decodeHexOrNull(recomputed), storedDigest);
     }
 
     /**

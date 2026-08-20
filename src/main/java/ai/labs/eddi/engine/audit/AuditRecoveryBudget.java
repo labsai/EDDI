@@ -7,13 +7,13 @@ package ai.labs.eddi.engine.audit;
 /**
  * How much legacy-timestamp recovery one verification sweep may spend.
  * <p>
- * A pre-v4 row that fails the direct check triggers a completion search worth
- * about two thousand HMAC computations. Per row that is a couple of
- * milliseconds and entirely reasonable. Per <em>sweep</em> it is not bounded at
- * all by the per-row limit: {@code /auditstore/verify} accepts a limit of ten
- * thousand entries and runs verification inline on the request thread, so a
- * page where nothing can be recovered would spend roughly twenty million HMACs
- * before answering.
+ * A pre-v4 row that fails the direct check triggers a completion search worth a
+ * few thousand HMAC computations. Per row that is a few milliseconds and
+ * entirely reasonable. Per <em>sweep</em> it is not bounded at all by the
+ * per-row limit: {@code /auditstore/verify} accepts a limit of ten thousand
+ * entries and runs verification inline on the request thread, so a page where
+ * nothing can be recovered would spend tens of millions of HMACs before
+ * answering.
  * <p>
  * "Nothing can be recovered" is not a rare case, either — it is what a ledger
  * verified with the wrong key looks like, and what genuinely tampered rows look

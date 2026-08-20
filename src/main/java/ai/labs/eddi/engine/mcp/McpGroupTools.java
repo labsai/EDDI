@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.mcp;
 
+import ai.labs.eddi.configs.rest.StrictConfigurationParser;
 import ai.labs.eddi.configs.groups.IGroupWorkspaceStore;
 import ai.labs.eddi.configs.groups.IRestAgentGroupStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
@@ -59,6 +60,13 @@ public class McpGroupTools {
     private final IRestAgentGroupStore groupStore;
     private final IGroupConversationService groupConversationService;
     private final IJsonSerialization jsonSerialization;
+
+    /**
+     * Strict deserialisation for the config bodies this surface accepts — the same
+     * check REST's {@code StrictConfigurationBodyInterceptor} applies, which never
+     * fires for these in-process calls. See {@code StrictConfigurationParser}.
+     */
+    private final StrictConfigurationParser configParser;
     private final SecurityIdentity identity;
     private final OwnershipValidator ownershipValidator;
     private final IGroupWorkspaceStore workspaceStore;
@@ -67,9 +75,10 @@ public class McpGroupTools {
 
     @Inject
     public McpGroupTools(IRestAgentGroupStore groupStore, IGroupConversationService groupConversationService, IJsonSerialization jsonSerialization,
-            SecurityIdentity identity, OwnershipValidator ownershipValidator, IGroupWorkspaceStore workspaceStore,
-            GroupTemplateService templateService,
+            StrictConfigurationParser configParser, SecurityIdentity identity, OwnershipValidator ownershipValidator,
+            IGroupWorkspaceStore workspaceStore, GroupTemplateService templateService,
             @ConfigProperty(name = "authorization.enabled", defaultValue = "false") boolean authEnabled) {
+        this.configParser = configParser;
         this.groupStore = groupStore;
         this.groupConversationService = groupConversationService;
         this.jsonSerialization = jsonSerialization;
@@ -336,12 +345,17 @@ public class McpGroupTools {
         requireRole(identity, authEnabled, "eddi-editor");
         try {
             int ver = parseIntOrDefault(version, 0);
-            AgentGroupConfiguration config = jsonSerialization.deserialize(configJson, AgentGroupConfiguration.class);
+            // Same strictness as PUT /groupstore/groups — AgentGroupConfiguration is a
+            // first-party config model, so a typo'd key must be rejected here too
+            // rather than dropped into a silently different group.
+            AgentGroupConfiguration config = configParser.parse(configJson, AgentGroupConfiguration.class);
             groupStore.updateGroup(groupId, ver, config);
             return "Updated group " + groupId;
         } catch (Exception e) {
             LOGGER.errorf("update_group failed: %s", e.getMessage());
-            return errorJson(e.getMessage());
+            // describe(), not getMessage(): the strict parser's rejection travels as a
+            // response entity, and getMessage() on that is just "HTTP 400 Bad Request".
+            return errorJson("Failed to update group", e);
         }
     }
 

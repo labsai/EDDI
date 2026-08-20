@@ -178,6 +178,48 @@ class AuditHmacTimestampPrecisionTest {
             assertEquals(VerificationOutcome.MATCH_RECOVERED, AuditHmac.verify(stored, hmacKey, true));
         }
 
+        /**
+         * Storage does not only floor. PostgreSQL's {@code timestamp(6)} — and the JDBC
+         * driver's nanos-to-micros conversion — round to NEAREST, so a value whose lost
+         * digits were in the upper half is stored ABOVE the signed one. A forward-only
+         * search missed every such row: roughly half of all PostgreSQL legacy rows.
+         */
+        @Test
+        @DisplayName("recovery also finds a timestamp PostgreSQL rounded UP")
+        void recoversRoundedUpRow() {
+            // 789ns remainder ≥ 500 → rounds up to the next microsecond: the stored
+            // value sits 211ns ABOVE the signed one.
+            AuditEntry original = entryAt(NANO_PRECISE);
+            Instant roundedUp = original.timestamp().truncatedTo(ChronoUnit.MICROS).plusNanos(1_000);
+            AuditEntry stored = original.withTimestamp(roundedUp).withHmac(signV3(original));
+
+            assertTrue(roundedUp.isAfter(original.timestamp()), "precondition: rounding moved the value up");
+            assertEquals(VerificationOutcome.MATCH_RECOVERED, AuditHmac.verify(stored, hmacKey, true),
+                    "a rounded-up stored value sits above the signed one, so the search must look down too");
+        }
+
+        /**
+         * The searched window is, unavoidably, also the window within which a MOVED
+         * stored timestamp is indistinguishable from a truncated one — so it must be
+         * capped to exactly the precision the row demonstrably lost. A row with
+         * sub-millisecond digits present came through a microsecond store: only
+         * sub-microsecond digits are unknowable, and a whole-microsecond shift is a
+         * real edit that recovery must NOT absorb.
+         */
+        @Test
+        @DisplayName("a microsecond-precision row shifted by whole microseconds is NOT recovered")
+        void microsecondShiftOnMicrosecondRowStaysInvalid() {
+            // µs-aligned signed value, so a whole-µs shift lands exactly on a
+            // candidate the µs tier WOULD try — the only thing standing between this
+            // edit and MATCH_RECOVERED is the precision cap.
+            AuditEntry original = entryAt(Instant.parse("2026-08-20T10:15:30Z").plusNanos(123_456_000L));
+            AuditEntry shifted = original.withTimestamp(original.timestamp().plusNanos(5_000))
+                    .withHmac(signV3(original));
+
+            assertEquals(VerificationOutcome.MISMATCH, AuditHmac.verify(shifted, hmacKey, true),
+                    "the ±µs tier must not run for a row whose sub-ms digits prove a µs-precision store");
+        }
+
         @Test
         @DisplayName("a v3 row whose clock landed on a whole millisecond verifies with no search")
         void exactRowNeedsNoRecovery() {

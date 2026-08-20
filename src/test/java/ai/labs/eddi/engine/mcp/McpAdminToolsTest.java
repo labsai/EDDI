@@ -605,7 +605,7 @@ class McpAdminToolsTest {
         try {
             lenient().when(parser.parse(anyString(), any()))
                     .thenAnswer(invocation -> jsonSerialization.deserialize(invocation.getArgument(0), invocation.getArgument(1)));
-        } catch (java.io.IOException e) {
+        } catch (IOException e) {
             throw new IllegalStateException(e);
         }
         return parser;

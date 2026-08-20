@@ -89,15 +89,14 @@ public final class ConversationOutputExtractor {
      * the Platform Operator went on to state that a group a human had approved "was
      * never created".
      *
-     * @param output
+     * @param lastOutput
      *            the output to extract from (may be null)
      * @param delimiter
      *            joins multiple output items; callers differ, see
      *            {@code ConversationOutputUtils}
      * @return the extracted text, or {@code null} if no meaningful output is found
      */
-    public static String extractText(ConversationOutput output, String delimiter) {
-        ConversationOutput lastOutput = output;
+    public static String extractText(ConversationOutput lastOutput, String delimiter) {
         if (lastOutput == null) {
             return null;
         }

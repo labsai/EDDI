@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.mcp;
 
+import ai.labs.eddi.configs.rest.StrictConfigurationParser;
 import ai.labs.eddi.configs.groups.IGroupWorkspaceStore;
 import ai.labs.eddi.configs.groups.IRestAgentGroupStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
@@ -23,6 +24,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.io.IOException;
 import java.net.URI;
 import java.util.List;
 import java.util.Map;
@@ -62,8 +64,8 @@ class McpGroupToolsTest {
         lenient().when(mockIdentity.isAnonymous()).thenReturn(true);
         // authorization disabled — OwnershipValidator's checks are no-ops, matching the
         // pre-existing tests. Ownership enforcement is covered separately below.
-        tools = new McpGroupTools(groupStore, groupConversationService, jsonSerialization, mockIdentity,
-                new OwnershipValidator(false), workspaceStore, templateService(), false);
+        tools = new McpGroupTools(groupStore, groupConversationService, jsonSerialization, strictConfigurationParser(),
+                mockIdentity, new OwnershipValidator(false), workspaceStore, templateService(), false);
     }
 
     // --- describe_discussion_styles ---
@@ -536,8 +538,8 @@ class McpGroupToolsTest {
         lenient().when(principal.getName()).thenReturn(callerId);
         lenient().when(identity.getPrincipal()).thenReturn(principal);
         lenient().when(identity.hasRole(role)).thenReturn(true);
-        return new McpGroupTools(groupStore, groupConversationService, jsonSerialization, identity,
-                new OwnershipValidator(true), workspaceStore, templateService(), true);
+        return new McpGroupTools(groupStore, groupConversationService, jsonSerialization, strictConfigurationParser(),
+                identity, new OwnershipValidator(true), workspaceStore, templateService(), true);
     }
 
     /**
@@ -551,8 +553,8 @@ class McpGroupToolsTest {
         lenient().when(principal.getName()).thenReturn(callerId);
         lenient().when(identity.getPrincipal()).thenReturn(principal);
         lenient().when(identity.hasRole(anyString())).thenReturn(true);
-        return new McpGroupTools(groupStore, groupConversationService, jsonSerialization, identity,
-                new OwnershipValidator(true), workspaceStore, templateService(), true);
+        return new McpGroupTools(groupStore, groupConversationService, jsonSerialization, strictConfigurationParser(),
+                identity, new OwnershipValidator(true), workspaceStore, templateService(), true);
     }
 
     @Test
@@ -874,5 +876,22 @@ class McpGroupToolsTest {
         when(workspaceStore.find("g1")).thenReturn(null);
         String result = tools.list_team_backlog("g1");
         assertFalse(result.contains("error"), "no workspace is an empty backlog, not an error: " + result);
+    }
+
+    /**
+     * A parser that defers to this test's {@code jsonSerialization} mock, so the
+     * existing {@code when(jsonSerialization.deserialize(...))} stubs keep
+     * describing what these dispatch tests are about. Strictness itself is covered
+     * by {@code StrictConfigurationParserTest}.
+     */
+    private StrictConfigurationParser strictConfigurationParser() {
+        var parser = mock(StrictConfigurationParser.class);
+        try {
+            lenient().when(parser.parse(anyString(), any()))
+                    .thenAnswer(invocation -> jsonSerialization.deserialize(invocation.getArgument(0), invocation.getArgument(1)));
+        } catch (IOException e) {
+            throw new IllegalStateException(e);
+        }
+        return parser;
     }
 }
