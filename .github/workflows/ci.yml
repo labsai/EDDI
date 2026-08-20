@@ -1000,19 +1000,49 @@ jobs:
           chmod +x /usr/local/bin/preflight
           preflight --version
 
-      - name: Preflight check (local, no submit)
+      # Preflight resolves images from a REGISTRY, never the local daemon. Fed a
+      # daemon-only tag, it tried docker.io/library/eddi-preflight-check, errored
+      # UNAUTHORIZED - and the old `|| true` plus grep-for-FAILED swallowed that,
+      # so this job was green on every PR while validating nothing. A registry:2
+      # container on localhost gives preflight something real to pull without
+      # touching any external repository.
+      - name: Push image to a job-local registry
         run: |
+          set -euo pipefail
+          docker run -d --name preflight-registry -p 5000:5000 \
+            registry:2@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373
+          docker tag eddi-preflight-check:test localhost:5000/eddi-preflight-check:test
+          for i in 1 2 3 4 5; do
+            docker push localhost:5000/eddi-preflight-check:test && break
+            [ "$i" = 5 ] && { echo "::error::local registry did not come up"; exit 1; }
+            sleep 2
+          done
+
+      - name: Preflight check (local registry, no submit)
+        run: |
+          set -uo pipefail
+          # --insecure: the job-local registry is plain HTTP; mutually exclusive
+          # with --submit, which this job never uses.
+          # set +e: the ambient bash -e plus pipefail would kill the script on a
+          # failing pipeline before PIPESTATUS is read; capture the exit instead.
+          set +e
           preflight check container \
-            eddi-preflight-check:test \
-            2>&1 | tee preflight-dryrun.txt || true
+            localhost:5000/eddi-preflight-check:test \
+            --insecure \
+            2>&1 | tee preflight-dryrun.txt
+          PREFLIGHT_EXIT=${PIPESTATUS[0]}
+          set -e
           echo ""
           echo "=== Preflight Summary ==="
-          if grep -q "FAILED" preflight-dryrun.txt; then
-            echo "::warning::Preflight check has failures — review output above."
-            echo "Note: Some checks (e.g. HasUniqueTag) require a pushed image and are expected to fail in dry-run."
-          else
-            echo "✅ All preflight checks passed"
+          if [ "$PREFLIGHT_EXIT" -ne 0 ]; then
+            echo "::error::preflight failed to execute (exit code: ${PREFLIGHT_EXIT})"
+            exit 1
           fi
+          if grep -q "FAILED" preflight-dryrun.txt; then
+            echo "::error::Preflight verdict is FAILED - this image would not pass Red Hat certification."
+            exit 1
+          fi
+          echo "All preflight checks passed"
 
       - name: Upload preflight dry-run results
         if: always()

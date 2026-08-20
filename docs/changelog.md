@@ -54,6 +54,39 @@ the whole premise is that certification follows a release.
 ---
 
 
+## 🩻 fix(ci): the Preflight Dry-Run PR gate has been a placebo since it was written (2026-08-20)
+
+**Repo:** EDDI (`fix/preflight-version-1-20-0`)
+
+Found in a final adversarial review of this branch, by reading the dry-run job's actual log instead
+of its green check. Preflight resolves images from a **registry**, never the local Docker daemon.
+The job fed it the daemon-only tag `eddi-preflight-check:test`, so preflight asked Docker Hub for
+`library/eddi-preflight-check`, got `UNAUTHORIZED`, and errored out before running a single check.
+The invocation ended in `|| true` and the verdict grep only looked for `FAILED` — an execution error
+says neither — so the job printed "✅ All preflight checks passed" over an error message.
+
+Confirmed against history: a 1.17.1-era run shows the **identical** UNAUTHORIZED error under the
+identical green summary. Every Preflight Dry-Run pass this repository has ever recorded validated
+nothing. It also means a green dry-run on this branch proved nothing about the 1.20.0 bump — which
+is why the flag surface was verified against the 1.20.0 *source* instead (`--docker-config` in
+`check.go:18`, `--submit` in `check_container.go:59`, `--insecure` in `check_container.go:62`,
+`PFLT_PYXIS_API_TOKEN` and `PFLT_CERTIFICATION_COMPONENT_ID` verbatim at `check_container.go:76-88`).
+
+**The job now runs preflight against a job-local registry.** A digest-pinned `registry:2` container
+on `localhost:5000` receives the PR-built image, and preflight pulls from there with `--insecure`
+(plain-HTTP localhost; the flag is mutually exclusive with `--submit`, which the dry-run never
+uses). Failure handling is now real: a non-zero preflight exit fails the job as an execution error,
+and a `FAILED` verdict fails it as a certification result — the old text treated `HasUniqueTag` as
+expected noise, which stops being true when the registry holds exactly one tag.
+
+One bash subtlety, called out in a comment because it *was* nearly reintroduced here: GitHub runs
+`run:` scripts under `bash -e`, and adding `pipefail` makes a failing `preflight | tee` pipeline
+kill the script before `PIPESTATUS` can be read. The capture is wrapped in `set +e` … `set -e` so
+the diagnostic actually prints.
+
+---
+
+
 ## 🔴 fix(ci): Red Hat rejects preflight 1.17.1, so certification submission failed on the 6.3.0 tag (2026-08-20)
 
 **Repo:** EDDI (`fix/preflight-version-1-20-0`)
