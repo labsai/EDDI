@@ -118,6 +118,22 @@ class ConnectionResolverTest {
         }
 
         @Test
+        @DisplayName("an unresolved GLOBAL VARIABLE is refused too, not only a vault key")
+        void refusesUnresolvedGlobalVariable() {
+            // Checking only ${vault:} left half the guard missing: an unresolved
+            // ${vars:} fails identically — the literal text goes out as the credential
+            // and the provider answers 401 with nothing naming the missing variable.
+            var connection = staticConnection();
+            connection.getStaticAuth().setValueTemplate("Bearer ${vars:jira-token}");
+            register(connection);
+
+            var error = assertThrows(ConnectionException.class, () -> resolver(false).resolve("${connection:jira}", ALLOWED_TARGET, null));
+
+            assertEquals(ConnectionException.Reason.INVALID_CONFIGURATION, error.getReason());
+            assertTrue(error.getMessage().contains("did not resolve"), error.getMessage());
+        }
+
+        @Test
         @DisplayName("an unresolved vault reference is refused, not sent as literal text")
         void refusesUnresolvedVaultReference() {
             var connection = staticConnection();
@@ -258,6 +274,22 @@ class ConnectionResolverTest {
 
         assertFalse(credential.toString().contains("live-token"),
                 "this record travels through debug logs and exception messages: " + credential);
+    }
+
+    @Test
+    @DisplayName("a missing connection is counted, not silently absent from the metrics")
+    void countsLookupFailures() {
+        var meterRegistry = new SimpleMeterRegistry();
+        when(registry.require(any(ConnectionReference.class)))
+                .thenThrow(new ConnectionException(ConnectionException.Reason.NOT_FOUND, "No connection named 'gone'"));
+        var resolver = new ConnectionResolver(registry, secretResolver, globalVariableResolver, callerIdentityContext, meterRegistry,
+                accessTokenSupplier, false);
+
+        assertThrows(ConnectionException.class, () -> resolver.resolve("${connection:gone}", ALLOWED_TARGET, null));
+
+        var counter = meterRegistry.find("connection.resolve.count").tag("outcome", "not_found").counter();
+        assertTrue(counter != null && counter.count() == 1,
+                "a deleted or misspelled connection fails every turn; a flat dashboard makes that invisible");
     }
 
     @Test

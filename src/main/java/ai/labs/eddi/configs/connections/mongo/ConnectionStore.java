@@ -61,6 +61,21 @@ public class ConnectionStore extends AbstractResourceStore<ConnectionConfigurati
 
     @Override
     public ConnectionConfiguration readByName(String tenantId, String name) throws ResourceStoreException {
+        Match match = findByName(tenantId, name);
+        return match == null ? null : match.connection();
+    }
+
+    @Override
+    public String idOfName(String tenantId, String name) throws ResourceStoreException {
+        Match match = findByName(tenantId, name);
+        return match == null ? null : match.id();
+    }
+
+    /** One connection and the resource id it lives under. */
+    private record Match(String id, ConnectionConfiguration connection) {
+    }
+
+    private Match findByName(String tenantId, String name) throws ResourceStoreException {
         if (name == null || name.isBlank()) {
             return null;
         }
@@ -77,7 +92,7 @@ public class ConnectionStore extends AbstractResourceStore<ConnectionConfigurati
                 }
                 String candidateTenant = candidate.getTenantId() == null ? "default" : candidate.getTenantId();
                 if (name.equals(candidate.getName()) && effectiveTenant.equals(candidateTenant)) {
-                    return candidate;
+                    return new Match(idOf(descriptor.getResource()), candidate);
                 }
             }
             return null;

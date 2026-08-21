@@ -253,7 +253,8 @@ public class ConnectionConfiguration {
     private static void requireCredentialEndpoint(String url, String field, boolean required) {
         if (url == null || url.isBlank()) {
             if (required) {
-                throw new IllegalArgumentException(field + " is required for authType " + "OAuth.");
+                throw new IllegalArgumentException(field + " is required for an OAuth connection (OAUTH2_CLIENT_CREDENTIALS or "
+                        + "OAUTH2_AUTHORIZATION_CODE).");
             }
             return;
         }

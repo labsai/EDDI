@@ -229,7 +229,11 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
         requireEnabled();
         String principal = requirePrincipal();
         var results = new ArrayList<Map<String, Object>>();
-        for (ConnectionGrant grant : grantStore.findByPrincipal("default", principal)) {
+        // The same tenant resolution disconnect uses. Hardcoding "default" here made
+        // a grant under any other tenant invisible on the linked-accounts page while
+        // the agent resolved it happily and disconnect deleted it — three views of
+        // one grant that did not agree.
+        for (ConnectionGrant grant : grantStore.findByPrincipal(callerTenant(), principal)) {
             // Explicitly enumerated, not serialized from the entity. A field list is
             // a decision; serializing an object that happens to hold ciphertext is an
             // accident waiting for someone to add a getter.
@@ -302,9 +306,24 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
         return resolved;
     }
 
-    private static Response redirect(String returnTo, String key, String value) {
-        String separator = returnTo.contains("?") ? "&" : "?";
-        return Response.seeOther(URI.create(returnTo + separator + encode(key) + "=" + encode(value))).build();
+    /**
+     * Redirects the browser, tolerating a state row that carries no destination.
+     * <p>
+     * {@code authorize} always stores one, but a row written by an earlier version
+     * or by a direct database write would not — and by the time the callback gets
+     * here it has already claimed the state and may have stored the grant, so
+     * throwing would leave the user with a 500 and no way to retry (their state is
+     * consumed). A fragment is dropped rather than appended past, since a query
+     * appended after a fragment is not a query.
+     */
+    private Response redirect(String returnTo, String key, String value) {
+        String destination = (returnTo == null || returnTo.isBlank()) ? connectionsConfig.defaultReturnTo() : returnTo;
+        int fragment = destination.indexOf('#');
+        if (fragment >= 0) {
+            destination = destination.substring(0, fragment);
+        }
+        String separator = destination.contains("?") ? "&" : "?";
+        return Response.seeOther(URI.create(destination + separator + encode(key) + "=" + encode(value))).build();
     }
 
     private void count(String metric, String tagName, String tagValue, ConnectionConfiguration connection) {
@@ -317,6 +336,17 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
         } else {
             meterRegistry.counter(metric, tagName, tagValue).increment();
         }
+    }
+
+    /**
+     * The tenant a listing is scoped to.
+     * <p>
+     * A single method rather than a literal at each call site, so the multi-tenancy
+     * work has one place to change. Until {@code TenantContext} lands this is the
+     * default tenant, which is also what every connection document defaults to.
+     */
+    private static String callerTenant() {
+        return ConnectionReference.DEFAULT_TENANT;
     }
 
     private static String tenantOf(ConnectionConfiguration connection) {

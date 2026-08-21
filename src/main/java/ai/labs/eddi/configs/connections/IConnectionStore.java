@@ -28,4 +28,16 @@ public interface IConnectionStore extends IResourceStore<ConnectionConfiguration
      * @return the newest version of the named connection, or {@code null}
      */
     ConnectionConfiguration readByName(String tenantId, String name) throws ResourceStoreException;
+
+    /**
+     * The resource id of the connection currently holding {@code name}, or
+     * {@code null}.
+     * <p>
+     * Exists so a write can refuse a duplicate name. Names are the reference
+     * vocabulary — {@code ${connection:jira}} names one connection and must keep
+     * naming the same one — and without this check a second connection called
+     * "jira" resolves or does not depending on descriptor scan order, which changes
+     * after a delete or a re-index.
+     */
+    String idOfName(String tenantId, String name) throws ResourceStoreException;
 }

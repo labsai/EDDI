@@ -205,6 +205,55 @@ the reason the claim exists. `InMemoryConnectionGrantStore` holds its monitor ac
 read-decide-write, because a double that merely reads and then writes would let those tests pass
 while the property under test was absent.
 
+### Review fixes (max-effort pass, same day)
+
+A max-effort review of this branch surfaced nine defects; all are fixed here.
+
+* **The refresh lease was validated against the wrong number.** The constructor asserted
+  `REFRESH_LEASE > OAuthTokenClient.DEFAULT_TIMEOUT`, but the client uses the per-connection
+  `timeoutMs` — which a config can set above the 60-second lease. A connection with
+  `timeoutMs: 120000` and a slow provider frees the lease mid-flight and a second replica performs
+  exactly the second token request the claim protocol exists to prevent. There is now a
+  `MAX_TIMEOUT` ceiling that a connection's timeout is clamped to, and the constructor checks
+  against **that** — the ceiling is what the slowest configurable connection uses, and it is the
+  slow one that decides whether the lease can expire early.
+* **A grant deleted mid-refresh spun to the deadline.** `awaitAnotherRefresh` returned "empty" both
+  for "not ready yet" and for "the row is gone", so a disconnect landing mid-refresh looped
+  claim→await→claim for the full 60 seconds and then reported `TOKEN_ENDPOINT_UNAVAILABLE`. The two
+  are now distinguished and a removed grant fails immediately as `NOT_CONNECTED`.
+* **An unresolved `${vars:…}` was sent as a literal credential.** The guard checked only for a
+  surviving `${vault:}`. Both forms fail identically — the literal text goes out as the header and
+  the provider answers 401 with nothing naming the missing variable — so the check now covers every
+  reference form the method resolves.
+* **Connection names were not unique.** `readByName` returns the first descriptor that matches, and
+  nothing refused a second connection called `jira`. Resolution then depended on scan order, which
+  changes after a delete or a re-index — one system's credential going to another's allowlisted
+  origin, silently and intermittently. Create and update now refuse a taken name, and duplicate
+  suffixes rather than colliding.
+* **Three views of one grant disagreed on the tenant.** `listMine` hardcoded `"default"` while
+  `disconnect` and the delete-cleanup resolved it from the connection. A grant under any other
+  tenant was invisible on the linked-accounts page while the agent resolved it and disconnect
+  deleted it.
+* **A connection header could silently displace another.** The connection's `headerName` replaced
+  the configured one, so `{"X-Jira-Auth": "${connection:jira}"}` sent `Authorization` instead, and
+  two references resolving to one header name overwrote each other with no signal. Both are now
+  refused with a message naming the mismatch.
+* **A missing connection was never counted.** `require()` throws before the timer starts and outside
+  the try block, so a deleted or misspelled connection failed every turn while
+  `connection.resolve.count` stayed flat — a healthy-looking dashboard over a completely broken
+  connector.
+* **`redirect` could NPE on a state row with no `returnTo`**, after the state was already claimed and
+  the code already exchanged — leaving the user a 500 and no way to retry. It now falls back, and
+  drops a fragment rather than appending a query after one.
+* **`claimRefresh` used `modifiedCount`.** Mongo reports zero modified when an update writes the
+  values already present, which a same-millisecond re-claim by the same claimant does — read as a
+  lost claim, sending the caller to wait for a refresh only it was going to perform. Matching the
+  filter *is* winning the claim, so both conditional writes now use `matchedCount`.
+
+Plus one nitpick: `requireCredentialEndpoint` built its message from two adjacent literals and told
+the author the authType was "OAuth", which is not one of the values.
+
+
 
 ---
 

@@ -71,6 +71,7 @@ public class RestConnectionStore implements IRestConnectionStore {
     @Override
     public Response updateConnection(String id, Integer version, ConnectionConfiguration connectionConfiguration) {
         validateForWrite(connectionConfiguration);
+        requireNameIsFree(connectionConfiguration, id);
         Response response = restVersionInfo.update(id, version, connectionConfiguration);
         connectionRegistry.invalidate();
         return response;
@@ -79,6 +80,7 @@ public class RestConnectionStore implements IRestConnectionStore {
     @Override
     public Response createConnection(ConnectionConfiguration connectionConfiguration) {
         validateForWrite(connectionConfiguration);
+        requireNameIsFree(connectionConfiguration, null);
         Response response = restVersionInfo.create(connectionConfiguration);
         connectionRegistry.invalidate();
         return response;
@@ -88,6 +90,11 @@ public class RestConnectionStore implements IRestConnectionStore {
     public Response duplicateConnection(String id, Integer version) {
         restVersionInfo.validateParameters(id, version);
         ConnectionConfiguration config = restVersionInfo.read(id, version);
+        // A duplicate cannot keep the original's name: names are the reference
+        // vocabulary, so two connections called "jira" make ${connection:jira}
+        // resolve by scan order. Suffixed rather than refused, because refusing to
+        // duplicate is a worse answer than producing an obviously-renamed copy.
+        config.setName(nextFreeName(config));
         Response response = restVersionInfo.create(config);
         connectionRegistry.invalidate();
         return response;
@@ -146,6 +153,57 @@ public class RestConnectionStore implements IRestConnectionStore {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    /**
+     * Refuses a name another connection already holds in the same tenant.
+     * <p>
+     * {@code ${connection:jira}} names ONE connection and has to keep naming the
+     * same one. Without this, a second connection called "jira" — a duplicate, or a
+     * staging variant someone forgot to rename — makes resolution depend on
+     * descriptor scan order, which changes after a delete or a re-index. The
+     * failure that produces is one system's credential going to another's
+     * allowlisted origin, silently and intermittently.
+     *
+     * @param currentId
+     *            the resource being updated, so a connection does not collide with
+     *            itself; null on create
+     */
+    private void requireNameIsFree(ConnectionConfiguration connectionConfiguration, String currentId) {
+        if (connectionConfiguration == null || connectionConfiguration.getName() == null) {
+            return;
+        }
+        try {
+            String holder = connectionStore.idOfName(connectionConfiguration.getTenantId(), connectionConfiguration.getName());
+            if (holder != null && !holder.equals(currentId)) {
+                throw new BadRequestException("A connection named '" + connectionConfiguration.getName() + "' already exists in this tenant. "
+                        + "Names are what ${connection:…} refers to, so they must be unique — rename one of them.");
+            }
+        } catch (IResourceStore.ResourceStoreException e) {
+            // A store that cannot be read must not silently permit a duplicate: the
+            // damage from an ambiguous name is a credential sent to the wrong host.
+            throw new BadRequestException("Could not verify that the connection name is unique (" + e.getClass().getSimpleName()
+                    + "). Retry once the configuration store is reachable.", e);
+        }
+    }
+
+    /** {@code jira} → {@code jira-copy}, {@code jira-copy-2}, … */
+    private String nextFreeName(ConnectionConfiguration config) {
+        String base = config.getName() + "-copy";
+        try {
+            if (connectionStore.idOfName(config.getTenantId(), base) == null) {
+                return base;
+            }
+            for (int suffix = 2; suffix < 100; suffix++) {
+                String candidate = base + "-" + suffix;
+                if (connectionStore.idOfName(config.getTenantId(), candidate) == null) {
+                    return candidate;
+                }
+            }
+        } catch (IResourceStore.ResourceStoreException e) {
+            throw new BadRequestException("Could not pick a free name for the duplicate (" + e.getClass().getSimpleName() + ").", e);
+        }
+        throw new BadRequestException("Too many copies of '" + config.getName() + "' already exist — rename some of them first.");
     }
 
     /**

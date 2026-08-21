@@ -25,6 +25,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.List;
 import java.util.Locale;
+import java.util.regex.Pattern;
 
 /**
  * Turns a {@code ${connection:name}} reference into a credential for
@@ -58,6 +59,12 @@ public class ConnectionResolver {
 
     /** Principal under which a {@link Binding#SERVICE} grant is stored. */
     public static final String SERVICE_PRINCIPAL = "__service__";
+
+    /**
+     * A reference that survived resolution — meaning the key or variable behind it
+     * does not exist.
+     */
+    private static final Pattern UNRESOLVED_REFERENCE = Pattern.compile("\\$\\{(vault|eddivault|vars):[^}]*}");
 
     private final ConnectionRegistry connectionRegistry;
     private final SecretResolver secretResolver;
@@ -111,7 +118,17 @@ public class ConnectionResolver {
      */
     public ResolvedCredential resolve(String reference, URI targetUrl, String principalOverride) {
         ConnectionReference parsed = ConnectionReference.parse(reference);
-        ConnectionConfiguration connection = connectionRegistry.require(parsed);
+        ConnectionConfiguration connection;
+        try {
+            connection = connectionRegistry.require(parsed);
+        } catch (ConnectionException e) {
+            // Counted here rather than in the block below, because the lookup happens
+            // before there is a connection to read authType and binding from — and
+            // leaving it uncounted meant a deleted or misspelled connection failed
+            // every turn while every dashboard stayed flat.
+            countLookupFailure(e);
+            throw e;
+        }
         Timer.Sample sample = meterRegistry == null ? null : Timer.start(meterRegistry);
         try {
             requireTargetAllowed(connection, targetUrl);
@@ -251,15 +268,29 @@ public class ConnectionResolver {
             throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION,
                     "Connection '" + connection.getName() + "' resolved to an empty credential. Check that the referenced vault key exists.");
         }
-        if (resolved.contains("${vault:") || resolved.contains("${eddivault:")) {
-            // An unresolved reference means the key is missing. Sending it as literal
-            // text would present the reference itself as the credential and produce a
-            // 401 whose cause is invisible.
+        // Every reference form this method resolves is checked, not just the vault
+        // one. A ${vars:} that did not resolve fails identically — the literal text is
+        // sent as the credential and the provider answers 401 with nothing naming the
+        // missing variable — so checking only ${vault:} left half the guard missing.
+        if (UNRESOLVED_REFERENCE.matcher(resolved).find()) {
             throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION,
-                    "Connection '" + connection.getName() + "' has a vault reference that did not resolve. The key is missing from the vault, "
-                            + "or the vault is inactive.");
+                    "Connection '" + connection.getName() + "' has a reference that did not resolve. The vault key or global variable is "
+                            + "missing, or the vault is inactive.");
         }
         return resolved;
+    }
+
+    /**
+     * Counts a failure that happened before the connection could be read, so its
+     * {@code authType} and {@code binding} are genuinely unknown rather than
+     * omitted.
+     */
+    private void countLookupFailure(ConnectionException failure) {
+        if (meterRegistry == null) {
+            return;
+        }
+        meterRegistry.counter("connection.resolve.count", "authType", "unknown", "binding", "unknown", "outcome",
+                failure.getReason().name().toLowerCase(Locale.ROOT)).increment();
     }
 
     private void record(ConnectionConfiguration connection, String outcome, Timer.Sample sample) {

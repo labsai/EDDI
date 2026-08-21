@@ -276,11 +276,47 @@ class OAuthTokenServiceRefreshTest {
     }
 
     @Test
-    @DisplayName("the refresh lease must outlast the token-endpoint timeout")
-    void leaseOutlastsEndpointTimeout() {
-        // Asserted rather than left to a comment: if the lease is shorter, a slow
-        // provider frees it while the claimant is still in flight and the double
-        // refresh this whole protocol prevents comes straight back.
-        assertTrue(OAuthTokenService.REFRESH_LEASE.compareTo(OAuthTokenClient.DEFAULT_TIMEOUT) > 0);
+    @DisplayName("the refresh lease outlasts the LONGEST timeout a connection can configure")
+    void leaseOutlastsEveryConfigurableTimeout() {
+        // Against the ceiling, not the default. Checking the default left the hole
+        // open to any connection that set a longer timeoutMs — which is exactly the
+        // config an operator writes after a provider has been slow once — and a
+        // lease that expires mid-flight brings the double refresh straight back.
+        assertTrue(OAuthTokenService.REFRESH_LEASE.compareTo(OAuthTokenClient.MAX_TIMEOUT) > 0);
+        assertTrue(OAuthTokenClient.MAX_TIMEOUT.compareTo(OAuthTokenClient.DEFAULT_TIMEOUT) >= 0);
+    }
+
+    @Test
+    @DisplayName("a connection's timeout is clamped to the ceiling the lease depends on")
+    void clampsOverlongConnectionTimeout() {
+        var connection = connection();
+        connection.setTimeoutMs((int) OAuthTokenClient.MAX_TIMEOUT.plusSeconds(60).toMillis());
+
+        assertEquals(OAuthTokenClient.MAX_TIMEOUT, OAuthTokenClient.effectiveTimeout(connection));
+
+        connection.setTimeoutMs(5_000);
+        assertEquals(Duration.ofSeconds(5), OAuthTokenClient.effectiveTimeout(connection));
+
+        connection.setTimeoutMs(null);
+        assertEquals(OAuthTokenClient.DEFAULT_TIMEOUT, OAuthTokenClient.effectiveTimeout(connection));
+    }
+
+    @Test
+    @DisplayName("a grant deleted mid-refresh fails fast as NOT_CONNECTED, not after the deadline")
+    void deletedGrantFailsFast() throws Exception {
+        seedExpiredGrant();
+        // Claim the lease as somebody else, so this caller takes the await path, and
+        // delete the row underneath it — a disconnect landing mid-refresh.
+        grantStore.claimRefresh(TENANT, CONNECTION, PRINCIPAL, "another-replica", Instant.now().plus(Duration.ofSeconds(60)));
+        grantStore.delete(TENANT, CONNECTION, PRINCIPAL);
+
+        long start = System.nanoTime();
+        var error = assertThrows(ConnectionException.class, () -> service().accessToken(connection(), PRINCIPAL));
+        long elapsedMillis = (System.nanoTime() - start) / 1_000_000;
+
+        assertEquals(ConnectionException.Reason.NOT_CONNECTED, error.getReason(),
+                "waiting cannot bring a deleted grant back, and TOKEN_ENDPOINT_UNAVAILABLE names the wrong cause");
+        assertTrue(elapsedMillis < OAuthTokenService.AWAIT_TIMEOUT.toMillis() / 2,
+                "must not spin to the deadline: took " + elapsedMillis + "ms");
     }
 }

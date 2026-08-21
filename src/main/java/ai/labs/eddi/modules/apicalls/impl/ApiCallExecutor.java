@@ -33,6 +33,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -777,6 +778,10 @@ public class ApiCallExecutor implements IApiCallExecutor {
         rejectConnectionReference(requestBody, "a request body");
 
         Map<String, String> headers = requestConfig.getHeaders();
+        // Header names already claimed by a connection, lower-cased because HTTP
+        // header names are case-insensitive and two configs differing only in case
+        // would otherwise both "win".
+        var connectionHeaders = new HashSet<String>();
         for (String headerName : headers.keySet()) {
             String headerValue = prePostUtils.templateValues(headers.get(headerName), templateDataObjects);
             // Resolve global variable references, then vault references in headers
@@ -792,6 +797,21 @@ public class ApiCallExecutor implements IApiCallExecutor {
             // being interpolated into one.
             if (ConnectionResolver.containsReference(headerValue)) {
                 var credential = connectionResolver.resolve(headerValue, targetUri, principalFrom(templateDataObjects));
+                // The connection owns the header NAME — that is the point of storing
+                // one, since Authorization and X-Api-Key are the same connection model
+                // — but a silent displacement is not acceptable in either direction.
+                // Two references resolving to one header name used to overwrite each
+                // other with no signal, and the request went out carrying whichever
+                // won.
+                if (!headerName.equalsIgnoreCase(credential.headerName())) {
+                    throw new IllegalArgumentException("Header '" + headerName + "' references a connection whose header is '"
+                            + credential.headerName() + "'. Name the header the same as the connection's, so what the config says and what "
+                            + "is sent cannot disagree.");
+                }
+                if (!connectionHeaders.add(credential.headerName().toLowerCase(Locale.ROOT))) {
+                    throw new IllegalArgumentException("More than one header resolves to '" + credential.headerName()
+                            + "' through a connection. Only one credential can occupy a header; the others would be silently dropped.");
+                }
                 request.setHttpHeader(credential.headerName(), credential.headerValue());
                 continue;
             }

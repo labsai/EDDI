@@ -51,6 +51,19 @@ public class OAuthTokenClient {
     static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(15);
 
     /**
+     * Ceiling on a connection's configured {@code timeoutMs}.
+     * <p>
+     * Not arbitrary, and not a politeness limit: the refresh lease
+     * ({@code OAuthTokenService.REFRESH_LEASE}) has to outlast this, or a slow
+     * provider frees the lease while the claimant is still in flight and a second
+     * replica performs the very second token request the claim protocol exists to
+     * prevent. Validating the default alone left that hole open to any config that
+     * set a longer timeout, which is exactly the config an operator writes after a
+     * provider has been slow once.
+     */
+    static final Duration MAX_TIMEOUT = Duration.ofSeconds(45);
+
+    /**
      * OAuth errors that mean the grant is dead and the user must reconnect. Every
      * other error — and every transport failure — is treated as transient.
      * <p>
@@ -110,7 +123,7 @@ public class OAuthTokenClient {
         endpointAllowlist.require(oauth.getTokenUrl(), "oauth.tokenUrl");
 
         HttpRequest.Builder request = HttpRequest.newBuilder().uri(URI.create(oauth.getTokenUrl()))
-                .timeout(connection.getTimeoutMs() == null ? DEFAULT_TIMEOUT : Duration.ofMillis(connection.getTimeoutMs()))
+                .timeout(effectiveTimeout(connection))
                 .header("Content-Type", "application/x-www-form-urlencoded").header("Accept", "application/json");
 
         Map<String, String> body = new LinkedHashMap<>(form);
@@ -203,6 +216,24 @@ public class OAuthTokenClient {
             throw new ConnectionException(ConnectionException.Reason.GRANT_UNUSABLE,
                     "Token endpoint for connection '" + connection.getName() + "' returned a body that is not a token response.", e);
         }
+    }
+
+    /**
+     * The connection's timeout, bounded by {@link #MAX_TIMEOUT}. Clamped rather
+     * than rejected at write time so an existing config keeps working; the bound is
+     * what keeps the refresh lease meaningful either way.
+     */
+    static Duration effectiveTimeout(ConnectionConfiguration connection) {
+        if (connection.getTimeoutMs() == null || connection.getTimeoutMs() <= 0) {
+            return DEFAULT_TIMEOUT;
+        }
+        Duration configured = Duration.ofMillis(connection.getTimeoutMs());
+        if (configured.compareTo(MAX_TIMEOUT) > 0) {
+            LOGGER.warnf("Connection '%s' sets timeoutMs=%d, above the %ds ceiling that keeps the refresh lease meaningful — clamping.",
+                    connection.getName(), connection.getTimeoutMs(), MAX_TIMEOUT.toSeconds());
+            return MAX_TIMEOUT;
+        }
+        return configured;
     }
 
     private static String encodeForm(Map<String, String> form) {

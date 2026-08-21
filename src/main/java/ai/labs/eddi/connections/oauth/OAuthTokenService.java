@@ -105,9 +105,13 @@ public class OAuthTokenService implements AccessTokenSupplier {
         this.secretResolver = secretResolver;
         this.globalVariableResolver = globalVariableResolver;
         this.meterRegistry = meterRegistry;
-        if (REFRESH_LEASE.compareTo(OAuthTokenClient.DEFAULT_TIMEOUT) <= 0) {
-            throw new IllegalStateException("The refresh lease must outlast the token-endpoint timeout, or a slow provider frees the lease "
-                    + "while the claimant is still in flight and two replicas refresh the same grant.");
+        // Checked against the CEILING a connection can configure, not against the
+        // default. The default is what an unconfigured connection uses; the ceiling
+        // is what the slowest configurable one uses, and it is the slow one that
+        // decides whether the lease can expire mid-flight.
+        if (REFRESH_LEASE.compareTo(OAuthTokenClient.MAX_TIMEOUT) <= 0) {
+            throw new IllegalStateException("The refresh lease must outlast the longest configurable token-endpoint timeout, or a slow "
+                    + "provider frees the lease while the claimant is still in flight and two replicas refresh the same grant.");
         }
     }
 
@@ -196,10 +200,18 @@ public class OAuthTokenService implements AccessTokenSupplier {
             // Somebody else is refreshing. Poll for their result rather than making a
             // second token request: with rotating refresh tokens, the second request
             // is what kills the first one's token.
-            Optional<String> adopted = awaitAnotherRefresh(connection, tenantId, principal, deadline);
-            if (adopted.isPresent()) {
+            AwaitOutcome awaited = awaitAnotherRefresh(connection, tenantId, principal, deadline);
+            if (awaited.token() != null) {
                 count("connection.token.refresh.claim.count", "outcome", "awaited");
-                return adopted.get();
+                return awaited.token();
+            }
+            if (awaited.grantGone()) {
+                // The grant was deleted mid-refresh — a disconnect, or the connection
+                // itself being removed. Retrying the claim can never succeed (the
+                // claim is not an upsert), so looping until the deadline would stall
+                // the turn for a minute and then report the wrong reason.
+                throw new ConnectionException(ConnectionException.Reason.NOT_CONNECTED, "The grant for connection '" + connection.getName()
+                        + "' was removed while a token refresh was in progress. Connect the account again.");
             }
             if (Instant.now().isAfter(deadline)) {
                 // The lease outlived its holder — a crashed replica, or one that hung.
@@ -215,8 +227,32 @@ public class OAuthTokenService implements AccessTokenSupplier {
         }
     }
 
+    /**
+     * The result of waiting for another replica's refresh.
+     *
+     * @param token
+     *            the adopted access token, or null if none arrived
+     * @param grantGone
+     *            the grant row disappeared, which no amount of further waiting can
+     *            fix — distinguished from "not ready yet" so the caller can fail
+     *            fast with the right reason instead of spinning to the deadline
+     */
+    private record AwaitOutcome(String token, boolean grantGone) {
+        static AwaitOutcome adopted(String token) {
+            return new AwaitOutcome(token, false);
+        }
+
+        static AwaitOutcome timedOut() {
+            return new AwaitOutcome(null, false);
+        }
+
+        static AwaitOutcome grantRemoved() {
+            return new AwaitOutcome(null, true);
+        }
+    }
+
     /** Polls for a token another replica wrote. */
-    private Optional<String> awaitAnotherRefresh(ConnectionConfiguration connection, String tenantId, String principal, Instant deadline) {
+    private AwaitOutcome awaitAnotherRefresh(ConnectionConfiguration connection, String tenantId, String principal, Instant deadline) {
         while (Instant.now().isBefore(deadline)) {
             try {
                 Thread.sleep(AWAIT_POLL_INTERVAL.toMillis());
@@ -227,7 +263,7 @@ public class OAuthTokenService implements AccessTokenSupplier {
             }
             Optional<ConnectionGrant> reread = grantStore.find(tenantId, connection.getName(), principal);
             if (reread.isEmpty()) {
-                return Optional.empty();
+                return AwaitOutcome.grantRemoved();
             }
             ConnectionGrant current = reread.get();
             if (current.getStatus() == ConnectionGrant.Status.REFRESH_FAILED || current.getStatus() == ConnectionGrant.Status.REVOKED) {
@@ -235,10 +271,10 @@ public class OAuthTokenService implements AccessTokenSupplier {
                         + "' became unusable during a refresh. The user must reconnect the account.");
             }
             if (current.getRefreshInProgress() == null && current.isAccessTokenUsable(Instant.now(), EXPIRY_MARGIN)) {
-                return Optional.of(unseal(tenantId, current.getEncryptedAccessToken(), current.getAccessTokenIv(), connection));
+                return AwaitOutcome.adopted(unseal(tenantId, current.getEncryptedAccessToken(), current.getAccessTokenIv(), connection));
             }
         }
-        return Optional.empty();
+        return AwaitOutcome.timedOut();
     }
 
     private String refreshAsClaimant(ConnectionConfiguration connection, String tenantId, String principal) {

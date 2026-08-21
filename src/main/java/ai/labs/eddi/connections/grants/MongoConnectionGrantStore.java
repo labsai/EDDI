@@ -104,7 +104,14 @@ public class MongoConnectionGrantStore implements IConnectionGrantStore {
         // Deliberately NOT an upsert: claiming a refresh on a grant that does not
         // exist would create an empty row and make "not connected" look like
         // "connected but unusable".
-        return grants.updateOne(filter, update).getModifiedCount() == 1;
+        //
+        // matchedCount, not modifiedCount: Mongo reports zero MODIFIED when an update
+        // would write the values already there, which is what a re-claim by the same
+        // claimant within the same millisecond does. That reads as a lost claim, and
+        // the caller then waits for a refresh only it was going to perform. Matching
+        // the filter IS winning the claim — the filter is what encodes "the lease was
+        // free".
+        return grants.updateOne(filter, update).getMatchedCount() == 1;
     }
 
     @Override
@@ -119,7 +126,10 @@ public class MongoConnectionGrantStore implements IConnectionGrantStore {
                 Updates.set(FIELD_STATUS, grant.getStatus().name()), Updates.set(FIELD_UPDATED, Date.from(now)),
                 Updates.set(FIELD_LAST_REFRESH, Date.from(now)), Updates.unset(FIELD_REFRESH_IN_PROGRESS), Updates.unset(FIELD_LEASE_EXPIRES),
                 Updates.inc(FIELD_VERSION, 1L));
-        return grants.updateOne(filter, update).getModifiedCount() == 1;
+        // matchedCount for the same reason as the claim above: a CAS that rewrites
+        // identical values still won its version, and reporting a loss would send the
+        // caller down the "another writer was ahead" path when nobody was.
+        return grants.updateOne(filter, update).getMatchedCount() == 1;
     }
 
     @Override
