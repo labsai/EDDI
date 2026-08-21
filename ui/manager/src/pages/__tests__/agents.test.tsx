@@ -180,23 +180,26 @@ describe("AgentsPage", () => {
     const nameButton = screen.getByLabelText("Sort by name");
     await user.click(nameButton);
 
-    // Verify ascending order: first agent should come before last alphabetically
-    const listContainer = screen.getByTestId("agent-list");
-    const rows = within(listContainer).getAllByRole("row");
-    // rows[0] is the header, data rows start at 1
-    const firstDataRow = rows[1]!;
-    const lastDataRow = rows[rows.length - 1]!;
-    const firstName = firstDataRow.querySelector("td")?.textContent ?? "";
-    const lastName = lastDataRow.querySelector("td")?.textContent ?? "";
-    expect(firstName.localeCompare(lastName)).toBeLessThanOrEqual(0);
+    // Compare the WHOLE rendered column against a sorted copy of itself.
+    // Comparing only the first and last row (what this used to do) passes on a
+    // list whose middle is shuffled, and the descending half asserted
+    // `localeCompare(...) >= 0`, which also passes when the two are equal —
+    // i.e. when the sort did nothing at all.
+    const namesInOrder = () =>
+      within(screen.getByTestId("agent-list"))
+        .getAllByRole("row")
+        .slice(1) // row 0 is the header
+        .map((r) => r.querySelector("td")?.textContent ?? "");
+
+    const ascending = namesInOrder();
+    expect(ascending.length).toBeGreaterThan(1);
+    expect(ascending).toEqual([...ascending].sort((a, b) => a.localeCompare(b)));
 
     // Click again to reverse (desc)
     await user.click(nameButton);
 
-    const rowsDesc = within(screen.getByTestId("agent-list")).getAllByRole("row");
-    const firstDesc = rowsDesc[1]!.querySelector("td")?.textContent ?? "";
-    const lastDesc = rowsDesc[rowsDesc.length - 1]!.querySelector("td")?.textContent ?? "";
-    expect(firstDesc.localeCompare(lastDesc)).toBeGreaterThanOrEqual(0);
+    const descending = namesInOrder();
+    expect(descending).toEqual([...ascending].reverse());
   });
 
   it("sorts by version", async () => {

@@ -1127,6 +1127,18 @@ export const handlers = [
   }),
 
   // Read conversation (v6: GET /agents/:conversationId)
+  // Conversation snapshot — what `readConversation` reads on load and on the
+  // GET that follows starting a conversation.
+  //
+  // The shape here is load-bearing and was wrong: this used to return
+  // `conversationSteps: [{ output, actions, quickReplies }]` and no
+  // `conversationOutputs` at all — an invented flat shape that
+  // `snapshotToMessages` cannot read (it wants keyed `conversationStep`
+  // entries plus a positionally-matching `conversationOutputs` entry, which is
+  // what the backend and the conversation-detail mock both use). Every load
+  // against this handler therefore produced ZERO messages, and the two tests
+  // that should have caught it asserted `length >= 0`, which is true of any
+  // array. Keep this aligned with `extractInput` / `extractOutputParts`.
   http.get("*/agents/:conversationId", () => {
     return HttpResponse.json({
       agentId: "agent1",
@@ -1136,8 +1148,16 @@ export const handlers = [
       environment: "production",
       conversationSteps: [
         {
-          output: "Welcome to EDDI Support! I can help with orders, returns, billing, or product questions. How can I assist you today?",
-          actions: ["welcome"],
+          conversationStep: [
+            { key: "input:initial", value: "Can I change the delivery address?", timestamp: Date.now() - 180000, originWorkflowId: null },
+            { key: "actions", value: ["welcome"], timestamp: Date.now() - 179500, originWorkflowId: "wf1" },
+          ],
+          timestamp: Date.now() - 180000,
+        },
+      ],
+      conversationOutputs: [
+        {
+          "output:text:welcome": "Welcome to EDDI Support! I can help with orders, returns, billing, or product questions. How can I assist you today?",
           quickReplies: ["Order help", "Returns", "Billing question", "Something else"],
         },
       ],

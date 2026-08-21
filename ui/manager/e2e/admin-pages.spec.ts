@@ -167,23 +167,29 @@ test.describe("Variables Page", () => {
     ).toBeVisible();
   });
 
+  // Rows are addressed by `variable-row-${key}` rather than by their visible
+  // text. `getByText("default-model")` also matches the row's copy-reference
+  // string (`${eddivar:default-model}`), which trips Playwright strict mode —
+  // and the old probes hid that inside `.isVisible().catch(() => false)`, so a
+  // strict-mode violation came back as `false` and skipped the test. A testid
+  // resolves to exactly one node, which is what AGENTS.md §247 asks for anyway.
+  const variableRow = (key: string) => `variable-row-${key}`;
+
   test("shows variables from MSW mock data", async ({ page }) => {
-    // Wait for data to fully load — MSW browser worker can be slow
-    const dataLoaded = page.getByText("default-model");
-    // Skip if MSW data takes too long — this is a browser worker timing issue
-    test.skip(
-      !(await dataLoaded.isVisible({ timeout: 5000 }).catch(() => false)),
-      "MSW browser worker too slow for this page"
-    );
+    // This used to be a bare `test.skip(!visible, "MSW browser worker too
+    // slow")` and nothing else, so it could not fail in either direction: data
+    // present meant an empty body, data absent meant a skip that reports green.
+    // Slow mock data is the bug this page-load test exists to catch, so it is
+    // now an assertion with a generous timeout instead of an escape hatch.
+    await expect(page.getByTestId(variableRow("default-model"))).toBeVisible({
+      timeout: 15_000,
+    });
   });
 
   test("shows variable values", async ({ page }) => {
-    const dataLoaded = page.getByText("default-model");
-    test.skip(
-      !(await dataLoaded.isVisible({ timeout: 5000 }).catch(() => false)),
-      "MSW browser worker too slow for this page"
-    );
-    await expect(page.getByText("gpt-4.1").first()).toBeVisible({ timeout: 5000 });
+    const row = page.getByTestId(variableRow("default-model"));
+    await expect(row).toBeVisible({ timeout: 15_000 });
+    await expect(row).toContainText("gpt-4.1");
   });
 
   test("shows search/filter input", async ({ page }) => {
@@ -191,13 +197,16 @@ test.describe("Variables Page", () => {
   });
 
   test("search filters variables", async ({ page }) => {
-    const dataLoaded = page.getByText("default-model");
-    test.skip(
-      !(await dataLoaded.isVisible({ timeout: 5000 }).catch(() => false)),
-      "MSW browser worker too slow for this page"
-    );
+    await expect(page.getByTestId(variableRow("default-model"))).toBeVisible({
+      timeout: 15_000,
+    });
+
     await page.getByTestId("variables-search").fill("rag");
-    await expect(page.getByText("rag.chunk-size")).toBeVisible({ timeout: 5000 });
+
+    // Both halves matter: the match appears AND the non-match goes away. Only
+    // asserting the match passes against a search box that filters nothing.
+    await expect(page.getByTestId(variableRow("rag.chunk-size"))).toBeVisible();
+    await expect(page.getByTestId(variableRow("default-model"))).toBeHidden();
   });
 
   test("create dialog opens on button click", async ({ page }) => {

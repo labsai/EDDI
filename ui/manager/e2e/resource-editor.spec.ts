@@ -35,13 +35,15 @@ test.describe("Resource Editor — Rules", () => {
     await expect(jsonTab).toBeVisible({ timeout: 10000 });
     await jsonTab.click();
 
-    // Monaco editor may crash in headless CI, triggering the error boundary
-    // which unmounts the editor (and the tabs). Skip gracefully if that happens.
-    const tabStillExists = await page
-      .getByTestId("tab-json")
-      .isVisible({ timeout: 5000 })
-      .catch(() => false);
-    test.skip(!tabStillExists, "Monaco editor crashed in CI — error boundary replaced the editor");
+    // A Monaco crash used to be skipped here ("error boundary replaced the
+    // editor"), which reported the one failure this test exists to catch as a
+    // pass. An editor that dies on the JSON tab is a bug in every environment,
+    // headless CI included, so it now fails — and the error-boundary assertion
+    // below makes the failure say *why* instead of leaving a bare missing tab.
+    await expect(
+      page.getByTestId("error-boundary-fallback"),
+      "Monaco crashed and the error boundary replaced the editor",
+    ).toHaveCount(0);
 
     await expect(page.getByTestId("tab-json")).toHaveAttribute(
       "aria-selected",
@@ -101,12 +103,11 @@ test.describe("Resource Editor — API Calls", () => {
   });
 
   test("shows API call entries from mock data", async ({ page }) => {
-    // MSW returns httpCalls with "get_weather", "lookup_order", etc.
-    const content = page.getByText(/weather/i).first();
-    test.skip(
-      !(await content.isVisible({ timeout: 5000 }).catch(() => false)),
-      "MSW browser worker too slow for API calls data"
-    );
+    // Was a bare `test.skip(!visible, "MSW browser worker too slow")` with no
+    // assertion after it, so neither branch could fail. MSW returns httpCalls
+    // named "get_weather", "lookup_order" and friends; not rendering them is
+    // the failure, not a reason to opt out.
+    await expect(page.getByText(/weather/i).first()).toBeVisible({ timeout: 15_000 });
   });
 });
 

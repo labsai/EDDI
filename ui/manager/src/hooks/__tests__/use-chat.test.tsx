@@ -308,9 +308,16 @@ describe("useStartConversation", () => {
     result.current.mutate({ agentId: "agent-1", environment: "production" });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
-    // The MSW handler returns conversationOutputs with welcome text
+    // `expect(messages.length).toBeGreaterThanOrEqual(0)` stood here, which is
+    // true of every array that has ever existed — so the welcome-message
+    // pickup this test is named for was asserted by nothing.
     const messages = useChatStore.getState().messages;
-    expect(messages.length).toBeGreaterThanOrEqual(0); // May have welcome messages
+    expect(messages.length).toBeGreaterThan(0);
+    expect(
+      messages.some(
+        (m) => m.role === "agent" && m.content.includes("Welcome to EDDI Support"),
+      ),
+    ).toBe(true);
   });
 });
 
@@ -381,8 +388,18 @@ describe("useLoadConversation", () => {
 
     const state = useChatStore.getState();
     expect(state.conversationId).toBe("conv1");
-    // Should have loaded messages from snapshot
-    expect(state.messages.length).toBeGreaterThanOrEqual(0);
+    // "Should have loaded messages from snapshot" was asserted with
+    // `toBeGreaterThanOrEqual(0)`, so snapshot loading — the whole point of
+    // this hook — was verified by a tautology. Assert the snapshot's own
+    // content instead, so a hook that loads nothing fails here.
+    expect(state.messages.length).toBeGreaterThan(0);
+    expect(
+      state.messages.some(
+        (m) =>
+          m.role === "user" &&
+          m.content.includes("Can I change the delivery address?"),
+      ),
+    ).toBe(true);
   });
 
   it("sets undo/redo availability from snapshot", async () => {

@@ -20,8 +20,30 @@ test.describe("Workflows — Full Stack", () => {
 
   const createdPackages: { id: string; version: number }[] = [];
 
+  /**
+   * The package every test below needs, created once.
+   *
+   * This used to be created inside the first test, so three later tests opened
+   * with `if (!pkgId) { test.skip(); return; }` — meaning a broken create flow
+   * silently skipped the tests that would have shown its blast radius, and the
+   * run still reported green. Creating it here makes a create failure fail the
+   * whole describe at setup, where it is legible.
+   */
   test.beforeAll(async ({ request }) => {
     await waitForBackend(request);
+
+    const createRes = await request.post(`${API_BASE}/packagestore/packages`, {
+      data: { packageExtensions: [] },
+    });
+    expect(
+      createRes.status(),
+      "could not create the fixture package the Workflows full-stack suite needs",
+    ).toBe(201);
+
+    const { id, version } = extractIdFromLocation(
+      createRes.headers()["location"]!,
+    );
+    createdPackages.push({ id, version });
   });
 
   test.afterAll(async ({ request }) => {
@@ -36,16 +58,6 @@ test.describe("Workflows — Full Stack", () => {
   });
 
   test("workflows page renders with real data", async ({ page, request }) => {
-    // Create a package so there's something to show
-    const createRes = await request.post(`${API_BASE}/packagestore/packages`, {
-      data: { packageExtensions: [] },
-    });
-    expect(createRes.status()).toBe(201);
-    const { id, version } = extractIdFromLocation(
-      createRes.headers()["location"]!
-    );
-    createdPackages.push({ id, version });
-
     await waitForFullStack(page, request, "/manage/workflows", {
       skipHealthCheck: true,
     });
@@ -84,11 +96,7 @@ test.describe("Workflows — Full Stack", () => {
   });
 
   test("workflow detail shows version selector", async ({ page }) => {
-    const pkgId = createdPackages[0]?.id;
-    if (!pkgId) {
-      test.skip();
-      return;
-    }
+    const pkgId = createdPackages[0]!.id;
 
     await navigateTo(page, `/manage/workflowview/${pkgId}`);
 
@@ -100,11 +108,7 @@ test.describe("Workflows — Full Stack", () => {
   });
 
   test("workflow detail shows back link", async ({ page }) => {
-    const pkgId = createdPackages[0]?.id;
-    if (!pkgId) {
-      test.skip();
-      return;
-    }
+    const pkgId = createdPackages[0]!.id;
 
     await navigateTo(page, `/manage/workflowview/${pkgId}`);
 
@@ -112,11 +116,7 @@ test.describe("Workflows — Full Stack", () => {
   });
 
   test("back link navigates to workflows list", async ({ page }) => {
-    const pkgId = createdPackages[0]?.id;
-    if (!pkgId) {
-      test.skip();
-      return;
-    }
+    const pkgId = createdPackages[0]!.id;
 
     await navigateTo(page, `/manage/workflowview/${pkgId}`);
     await page.getByText(/back to/i).click();

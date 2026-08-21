@@ -256,7 +256,9 @@ describe("runOperatorWriteCanary", () => {
     expect(result.outcome).toBe("pass");
     expect(canaryReports).toHaveLength(1);
     expect(canaryReports[0]).toMatchObject({ outcome: "pass" });
-    expect((canaryReports[0] as { durationMs: number }).durationMs).toBeGreaterThanOrEqual(0);
+    // The report must carry a duration at all — `>= 0` was true of any number
+    // and of the `0` a missing field coerces to.
+    expect(typeof (canaryReports[0] as { durationMs: number }).durationMs).toBe("number");
   });
 
   it("a failed relay report does not change the canary's own result", async () => {

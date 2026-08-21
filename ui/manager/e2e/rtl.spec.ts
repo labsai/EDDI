@@ -172,6 +172,10 @@ test.describe("RTL horizontal overflow", () => {
 
     // Hidden but never parked off-canvas — that is what inflated scrollWidth.
     const hidden = await boundingBoxOf(skip, "the hidden skip link");
+    // Not a tautology: `x` is a viewport coordinate, and the bug this test
+    // pins (`left: -9999px`) made it large and NEGATIVE. `>= 0` is the whole
+    // assertion. The lint rule targets lengths and counts, which cannot be.
+    // eslint-disable-next-line no-restricted-syntax
     expect(hidden.x).toBeGreaterThanOrEqual(0);
     expect(hidden.x + hidden.width).toBeLessThanOrEqual(DESKTOP.width);
 

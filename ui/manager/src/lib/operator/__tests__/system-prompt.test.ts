@@ -308,9 +308,12 @@ describe("the app-context section — what screen the admin is on", () => {
     // interpolations inside it. Assert the guard wraps the paragraph, not
     // just individual fields.
     const body = buildOperatorPromptBody(READ_ENDPOINTS);
+    // `toContain` rather than `indexOf(...) >= 0`: same check, but it survives
+    // the lint rule that bans `toBeGreaterThanOrEqual(0)` — which is a
+    // tautology on a length and only ever meant "found" on an indexOf.
+    expect(body).toContain("{#if context.screen}");
     const start = body.indexOf("{#if context.screen}");
     const viewing = body.indexOf("currently viewing");
-    expect(start).toBeGreaterThanOrEqual(0);
     expect(viewing).toBeGreaterThan(start);
   });
 });
