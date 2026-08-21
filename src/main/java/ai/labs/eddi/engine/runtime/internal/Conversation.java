@@ -83,7 +83,32 @@ public class Conversation implements IConversation {
         this.conversationMemory = conversationMemory;
         this.propertiesHandler = propertiesHandler;
         this.outputProvider = outputProvider;
+        applyUserMemoryConfig();
         captureRestoredLongTermBaseline();
+    }
+
+    /**
+     * Carries the agent's user-memory configuration onto this turn's memory object.
+     * <p>
+     * This has to happen per turn, not per conversation. The field is not part of
+     * the persisted snapshot, and every request rebuilds memory from the store — so
+     * setting it only in {@link #init()} meant it was present for the
+     * CONVERSATION_START turn and null for every turn after it. The gate in
+     * {@code ContextualToolsProvider.addUserMemoryToolIfEnabled} reads exactly that
+     * field, so the {@code UserMemoryTool} was never assembled on a turn a user
+     * could actually talk to. An agent with memory fully enabled could not write a
+     * single memory, silently: no error, no log line, the store simply stayed at
+     * zero — and the model, handed no tool, went on to state that it had saved
+     * things it had not, once leaking raw tool-call syntax into user-visible
+     * output. The constructor is the one point every path goes through
+     * ({@code Agent#continueConversation} builds a Conversation for say, resume and
+     * rerun alike).
+     */
+    private void applyUserMemoryConfig() {
+        AgentConfiguration.UserMemoryConfig memoryConfig = propertiesHandler.getUserMemoryConfig();
+        if (memoryConfig != null) {
+            conversationMemory.setUserMemoryConfig(memoryConfig);
+        }
     }
 
     /**
@@ -170,11 +195,8 @@ public class Conversation implements IConversation {
 
         addConversationStartAction(conversationMemory.getCurrentStep());
 
-        // Set UserMemoryConfig on the memory (if advanced tools are enabled)
-        AgentConfiguration.UserMemoryConfig memoryConfig = propertiesHandler.getUserMemoryConfig();
-        if (memoryConfig != null) {
-            conversationMemory.setUserMemoryConfig(memoryConfig);
-        }
+        // The config is applied in the constructor, which every turn goes through —
+        // init() is only the first of them. Re-applying is harmless but pointless.
 
         // Load all user properties from usermemories (always, regardless of
         // enableMemoryTools)
@@ -254,17 +276,60 @@ public class Conversation implements IConversation {
         return this.conversationMemory.getConversationState();
     }
 
+    /**
+     * The step results a rerun discards before re-executing: the rendered answer
+     * and its quick replies.
+     */
+    private static final List<String> RERUN_CLEARED_RESULT_TYPES = List.of("output", "quickReplies");
+
+    /**
+     * Where a rerun restarts the pipeline — the earliest task type that can
+     * <em>produce</em> what {@link #RERUN_CLEARED_RESULT_TYPES} discards.
+     * <p>
+     * Selective execution runs the suffix of the pipeline from the first task
+     * matching any of these types, so this set and the cleared set have to agree: a
+     * rerun must never clear a result it will not regenerate. Restarting at
+     * {@code output} alone did exactly that on any LLM agent. The model's answer is
+     * stored under {@code output} but is written by the {@code langchain} task,
+     * which sits <em>before</em> the output task — so the answer was wiped,
+     * {@code ai.labs.llm} never re-ran, and the output task alone had nothing left
+     * to render. The turn came back 200 with {@code conversationOutputs[n].output}
+     * an empty array, destroying the reply instead of retrying it — and taking it
+     * out of the model's own history with it.
+     * <p>
+     * Restarting at {@code langchain} re-runs the model and every task after it.
+     * Whatever precedes it keeps its results — in the standard workflow layout
+     * ({@code AgentSetupService#createWorkflowConfig}) that is parser, behavior
+     * rules, property setters and HTTP/MCP calls, so a retry does not re-fire those
+     * external side effects. That is the layout, not an invariant: a workflow that
+     * deliberately places {@code httpcalls} <em>after</em> its LLM step will re-run
+     * those calls on a rerun, which is the same thing "re-execute the last step"
+     * has always meant for whatever follows the restart point.
+     * <p>
+     * A rule-based agent has no {@code langchain} task, so it still restarts at
+     * {@code output} and behaves exactly as before.
+     */
+    private static final List<String> RERUN_RESTART_TASK_TYPES = List.of("langchain", "output", "quickReplies");
+
     @Override
     public void rerun(final Map<String, Context> contexts) throws ConversationNotReadyException, LifecycleException {
-        runStep("", contexts, false, Arrays.asList("output", "quickReplies"));
+        runStep("", contexts, false, RERUN_CLEARED_RESULT_TYPES, RERUN_RESTART_TASK_TYPES);
     }
 
     @Override
     public void say(final String message, final Map<String, Context> contexts) throws LifecycleException, ConversationNotReadyException {
-        runStep(message, contexts, true, new LinkedList<>());
+        runStep(message, contexts, true, new LinkedList<>(), new LinkedList<>());
     }
 
-    private void runStep(String message, Map<String, Context> contexts, boolean startNewStep, List<String> lifecycleTaskTypes)
+    /**
+     * @param clearedResultTypes
+     *            task-type results to drop from the current step before executing
+     * @param restartTaskTypes
+     *            the pipeline restarts at the first task matching one of these;
+     *            empty means "run every task"
+     */
+    private void runStep(String message, Map<String, Context> contexts, boolean startNewStep,
+                         List<String> clearedResultTypes, List<String> restartTaskTypes)
             throws ConversationNotReadyException, LifecycleException {
 
         // Auto-recover from transient interrupted state
@@ -283,8 +348,8 @@ public class Conversation implements IConversation {
                 startNextStep();
             }
 
-            var lifecycleData = prepareLifecycleData(message, contexts, lifecycleTaskTypes);
-            executeConversationStep(lifecycleData, lifecycleTaskTypes);
+            var lifecycleData = prepareLifecycleData(message, contexts, clearedResultTypes);
+            executeConversationStep(lifecycleData, restartTaskTypes);
 
         } catch (LifecycleException.LifecycleInterruptedException e) {
             setConversationState(ConversationState.EXECUTION_INTERRUPTED);

@@ -380,12 +380,16 @@ class ConversationHistoryBuilder {
                 result.add(UserMessage.from(ConversationLogGenerator.withAttachmentExtracts(allSteps, i, input)));
             }
 
-            Object outputObj = output.get("output");
-            if (outputObj instanceof List<?> outputList && !outputList.isEmpty()) {
-                String text = ConversationOutputUtils.extractOutputText(output);
-                if (text != null && !text.isEmpty()) {
-                    result.add(AiMessage.from(text));
-                }
+            // No pre-check on the shape of "output": deciding here that a turn is only
+            // renderable when that value is a non-empty List is the same mistake the
+            // extractor was just fixed for, one level up. A turn whose output was
+            // written with addConversationOutputString("output", …) holds a plain
+            // String, and this guard dropped it from the model's own history while the
+            // rolling summary and the recall tool — which call the extractor directly —
+            // kept it. The extractor already returns null when there is nothing to say.
+            String text = ConversationOutputUtils.extractOutputText(output);
+            if (text != null && !text.isEmpty()) {
+                result.add(AiMessage.from(text));
             }
         }
 

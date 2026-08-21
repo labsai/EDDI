@@ -65,7 +65,7 @@ public class RestWorkflowStore implements IRestWorkflowStore {
 
     @Override
     public List<DocumentDescriptor> readWorkflowDescriptors(String filter, Integer index, Integer limit) {
-        return restVersionInfo.readDescriptors("ai.labs.workflow", filter, index, limit);
+        return restVersionInfo.readDescriptors(filter, index, limit);
     }
 
     @Override

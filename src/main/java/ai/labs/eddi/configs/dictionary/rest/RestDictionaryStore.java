@@ -51,7 +51,7 @@ public class RestDictionaryStore implements IRestDictionaryStore {
 
     @Override
     public List<DocumentDescriptor> readRegularDictionaryDescriptors(String filter, Integer index, Integer limit) {
-        return restVersionInfo.readDescriptors("ai.labs.regulardictionary", filter, index, limit);
+        return restVersionInfo.readDescriptors(filter, index, limit);
     }
 
     @Override

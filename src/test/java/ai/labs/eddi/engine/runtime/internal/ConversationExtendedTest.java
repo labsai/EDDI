@@ -24,6 +24,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.time.Instant;
 import java.util.*;
@@ -208,6 +209,47 @@ class ConversationExtendedTest {
             verify(currentStep).removeData("quickReplies");
             verify(currentStep).resetConversationOutput("output");
             verify(currentStep).resetConversationOutput("quickReplies");
+        }
+
+        /**
+         * A rerun must not clear a result it will not regenerate. The answer lives
+         * under {@code output} but is written by the {@code langchain} task, which runs
+         * before the output task — so restarting at {@code output} wiped the reply and
+         * never re-ran the model. The turn returned 200 with an empty output array,
+         * which is destruction, not a retry.
+         */
+        @Test
+        @DisplayName("rerun restarts the pipeline at the langchain task, not at output")
+        void rerunRestartsAtTheTaskThatProducesTheOutput() throws Exception {
+            when(memory.getConversationState()).thenReturn(ConversationState.READY);
+            when(propertiesHandler.getUserMemoryStore()).thenReturn(null);
+
+            var conv = createConversation();
+            conv.rerun(Map.of());
+
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<List<String>> types = ArgumentCaptor.forClass(List.class);
+            verify(lifecycleManager).executeLifecycle(eq(memory), types.capture());
+
+            assertTrue(types.getValue().contains("langchain"),
+                    "without langchain the model never re-runs and the cleared answer is gone for good");
+            assertTrue(types.getValue().contains("output"),
+                    "a rule-based agent has no langchain task and must still restart at output");
+        }
+
+        @Test
+        @DisplayName("rerun does not reset a langchain output key it never wrote")
+        void rerunDoesNotClearLangchainOutput() throws Exception {
+            when(memory.getConversationState()).thenReturn(ConversationState.READY);
+            when(propertiesHandler.getUserMemoryStore()).thenReturn(null);
+
+            var conv = createConversation();
+            conv.rerun(Map.of());
+
+            // resetConversationOutput(key) creates the key as an empty list, so
+            // clearing "langchain" would add a spurious entry to every rerun's output.
+            verify(currentStep, never()).resetConversationOutput("langchain");
+            verify(currentStep, never()).removeData("langchain");
         }
     }
 

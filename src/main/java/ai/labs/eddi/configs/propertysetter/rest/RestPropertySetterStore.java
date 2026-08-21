@@ -48,7 +48,7 @@ public class RestPropertySetterStore implements IRestPropertySetterStore {
 
     @Override
     public List<DocumentDescriptor> readPropertySetterDescriptors(String filter, Integer index, Integer limit) {
-        return restVersionInfo.readDescriptors("ai.labs.property", filter, index, limit);
+        return restVersionInfo.readDescriptors(filter, index, limit);
     }
 
     @Override

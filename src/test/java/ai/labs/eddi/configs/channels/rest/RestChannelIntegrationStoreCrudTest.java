@@ -425,4 +425,37 @@ class RestChannelIntegrationStoreCrudTest {
             assertDoesNotThrow(() -> sut.createChannel(config));
         }
     }
+
+    // ==================== O2: plaintext secrets warn, never reject
+    // ====================
+
+    /**
+     * A plaintext {@code botToken} produces a WARN pointing at the vault — it must
+     * never become a rejection. Every existing integration stores its credentials
+     * this way; a well-meaning "hardening" that turns the warning into a 400 would
+     * brick them all on their next update, which is why the non-throwing half of
+     * this behaviour is pinned and not just the log line.
+     */
+    @Nested
+    @DisplayName("plaintext platformConfig secrets")
+    class PlaintextSecretWarning {
+
+        @Test
+        @DisplayName("a plaintext botToken passes validation — warn, don't reject")
+        void plaintextTokenIsNotRejected() {
+            var config = validConfig();
+            config.setPlatformConfig(Map.of("botToken", "xoxb-plaintext-not-a-vault-ref"));
+
+            assertDoesNotThrow(() -> sut.validateConfiguration(config));
+        }
+
+        @Test
+        @DisplayName("a vault reference passes validation too")
+        void vaultReferencePasses() {
+            var config = validConfig();
+            config.setPlatformConfig(Map.of("botToken", "${vault:slack-bot-token}"));
+
+            assertDoesNotThrow(() -> sut.validateConfiguration(config));
+        }
+    }
 }

@@ -127,6 +127,25 @@ public class ConversationMemorySnapshot {
     public static class ConversationStepSnapshot {
         private List<WorkflowRunSnapshot> packages = new LinkedList<>();
 
+        /**
+         * The step's rendered output — populated only for redo-cache entries, and
+         * {@code null} for the ordinary {@code conversationSteps}, whose outputs are
+         * stored once in {@link ConversationMemorySnapshot#conversationOutputs}.
+         * <p>
+         * Undo/redo in live memory always kept the output, because the step object
+         * carries it. Serialisation did not: a redo entry rehydrated as
+         * {@code new ConversationStep(new ConversationOutput())}, so
+         * {@code redoLastStep()} pushed an <em>empty</em> output over the answer it was
+         * supposed to restore. Since every request reloads memory from the store, that
+         * always fired in practice — redo returned 200 while destroying the turn, and
+         * the model lost it too, because {@code conversationOutputs} is what
+         * {@code ConversationHistoryBuilder} reads.
+         * <p>
+         * Absent in documents written before this field existed; those deserialize to
+         * {@code null} and load exactly as they did before.
+         */
+        private ConversationOutput conversationOutput;
+
         @Override
         public boolean equals(Object o) {
             if (this == o)
@@ -136,12 +155,13 @@ public class ConversationMemorySnapshot {
 
             ConversationStepSnapshot that = (ConversationStepSnapshot) o;
 
-            return Objects.equals(packages, that.packages);
+            return Objects.equals(packages, that.packages)
+                    && Objects.equals(conversationOutput, that.conversationOutput);
         }
 
         @Override
         public int hashCode() {
-            return packages != null ? packages.hashCode() : 0;
+            return Objects.hash(packages, conversationOutput);
         }
 
         public List<WorkflowRunSnapshot> getWorkflows() {
@@ -150,6 +170,14 @@ public class ConversationMemorySnapshot {
 
         public void setWorkflows(List<WorkflowRunSnapshot> packages) {
             this.packages = packages;
+        }
+
+        public ConversationOutput getConversationOutput() {
+            return conversationOutput;
+        }
+
+        public void setConversationOutput(ConversationOutput conversationOutput) {
+            this.conversationOutput = conversationOutput;
         }
 
     }
