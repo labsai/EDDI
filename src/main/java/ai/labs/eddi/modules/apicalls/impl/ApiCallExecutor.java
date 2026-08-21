@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.apicalls.model.*;
 import ai.labs.eddi.configs.apicalls.model.HttpPostResponse;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
+import ai.labs.eddi.connections.ConnectionResolver;
 import ai.labs.eddi.engine.security.CallerIdentityResolver;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.httpclient.IHttpClient;
@@ -121,6 +122,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
     private final CallerIdentityResolver callerIdentityResolver;
     private final CallerIdentityContext callerIdentityContext;
     private final RequestRedactor requestRedactor;
+    private final ConnectionResolver connectionResolver;
     private final boolean ssrfProtectionEnabled;
     private final long defaultTimeoutInMillis;
     private final int defaultMaxResponseSizeInBytes;
@@ -128,7 +130,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
     @Inject
     public ApiCallExecutor(IHttpClient httpClient, IJsonSerialization jsonSerialization, IRuntime runtime, PrePostUtils prePostUtils,
             GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver, CallerIdentityResolver callerIdentityResolver,
-            CallerIdentityContext callerIdentityContext, RequestRedactor requestRedactor,
+            CallerIdentityContext callerIdentityContext, RequestRedactor requestRedactor, ConnectionResolver connectionResolver,
             @ConfigProperty(name = "eddi.security.ssrf-protection.enabled", defaultValue = "false") boolean ssrfProtectionEnabled,
             @ConfigProperty(name = "eddi.httpcalls.default-timeout-millis", defaultValue = "30000") long defaultTimeoutInMillis,
             @ConfigProperty(name = "eddi.httpcalls.default-max-response-size-bytes", defaultValue = "2000000") int defaultMaxResponseSizeInBytes) {
@@ -141,6 +143,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
         this.callerIdentityResolver = callerIdentityResolver;
         this.callerIdentityContext = callerIdentityContext;
         this.requestRedactor = requestRedactor;
+        this.connectionResolver = connectionResolver;
         this.ssrfProtectionEnabled = ssrfProtectionEnabled;
         this.defaultTimeoutInMillis = defaultTimeoutInMillis;
         this.defaultMaxResponseSizeInBytes = defaultMaxResponseSizeInBytes;
@@ -733,6 +736,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
         // reach URI.create() to fail as "Illegal character in path" — an error that
         // names the symptom and not the cause.
         callerIdentityResolver.rejectAnyReference(targetUriStr, "the request path");
+        rejectConnectionReference(targetUriStr, "the request path");
         var targetUri = URI.create(targetUriStr);
         var requestBody = prePostUtils.templateValues(requestConfig.getBody(), templateDataObjects);
         // Resolve global variable references, then vault references in request body
@@ -770,6 +774,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
         // a literal placeholder — not just a token one. Reject the lot instead of
         // shipping nonsense to the API.
         callerIdentityResolver.rejectAnyReference(requestBody, "a request body");
+        rejectConnectionReference(requestBody, "a request body");
 
         Map<String, String> headers = requestConfig.getHeaders();
         for (String headerName : headers.keySet()) {
@@ -780,6 +785,16 @@ public class ApiCallExecutor implements IApiCallExecutor {
             // Caller identity resolves last and needs the target URI: the token is
             // only released when the call goes back to the caller's own origin.
             headerValue = callerIdentityResolver.resolveValue(headerValue, targetUri);
+            // Connections resolve last, and only in a header. A ${connection:name}
+            // resolves to a credential bound to THIS caller and THIS moment, so
+            // unlike a vault reference it cannot be substituted into a cached
+            // string — which is also why it replaces the whole header rather than
+            // being interpolated into one.
+            if (ConnectionResolver.containsReference(headerValue)) {
+                var credential = connectionResolver.resolve(headerValue, targetUri, principalFrom(templateDataObjects));
+                request.setHttpHeader(credential.headerName(), credential.headerValue());
+                continue;
+            }
             request.setHttpHeader(headerName, headerValue);
         }
 
@@ -791,10 +806,47 @@ public class ApiCallExecutor implements IApiCallExecutor {
             qpValue = secretResolver.resolveValue(qpValue);
             // A token in a query string leaks via access logs and proxies.
             callerIdentityResolver.rejectTokenReference(qpValue, "a query parameter");
+            rejectConnectionReference(qpValue, "a query parameter");
             qpValue = callerIdentityResolver.resolveValue(qpValue, targetUri);
             request.setQueryParam(queryParam, qpValue);
         }
         return request;
+    }
+
+    /**
+     * The conversation's user id, from the same template data every other value in
+     * this method is built from.
+     * <p>
+     * A fallback, not the primary source: {@code ConnectionResolver} prefers the
+     * bound {@code CallerIdentityContext} and only consults this when the pipeline
+     * is running on a worker thread that lost the binding. It is safe as a fallback
+     * because the resolver refuses {@code PER_USER} outright unless
+     * {@code authorization.enabled=true}, and with authorization on this id came
+     * from a verified identity at conversation creation.
+     */
+    private static String principalFrom(Map<String, Object> templateDataObjects) {
+        if (templateDataObjects != null && templateDataObjects.get("userInfo") instanceof Map<?, ?> userInfo) {
+            Object userId = userInfo.get("userId");
+            return userId == null ? null : userId.toString();
+        }
+        return null;
+    }
+
+    /**
+     * Refuses a {@code ${connection:…}} anywhere other than a header.
+     * <p>
+     * Same restriction set as {@code ${caller:token}}, for the same reasons. A
+     * credential in a URL or a query string is written to ingress logs, proxy logs
+     * and browser history before it reaches the provider; a credential in a body is
+     * not a credential the provider will read. Rejecting at build time turns all
+     * three into an actionable configuration error rather than a placeholder sent
+     * as literal text and a 401 with no explanation.
+     */
+    private static void rejectConnectionReference(String value, String where) {
+        if (ConnectionResolver.containsReference(value)) {
+            throw new IllegalArgumentException("A ${connection:…} reference may only appear in a header, not in " + where
+                    + ". A credential in a URL or query string is recorded by every hop before the provider sees it.");
+        }
     }
 
     /**

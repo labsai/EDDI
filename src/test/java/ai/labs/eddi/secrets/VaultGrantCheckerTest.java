@@ -15,6 +15,7 @@ import ai.labs.eddi.configs.rag.IRagStore;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
+import ai.labs.eddi.configs.connections.IConnectionStore;
 import ai.labs.eddi.secrets.model.SecretMetadata;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -58,6 +59,7 @@ class VaultGrantCheckerTest {
     private IApiCallsStore apiCallsStore;
     private IMcpCallsStore mcpCallsStore;
     private IAgentStore agentStore;
+    private IConnectionStore connectionStore;
     private VaultGrantChecker checker;
 
     @BeforeEach
@@ -71,8 +73,9 @@ class VaultGrantCheckerTest {
         mcpCallsStore = mock(IMcpCallsStore.class);
 
         agentStore = mock(IAgentStore.class);
+        connectionStore = mock(IConnectionStore.class);
         checker = new VaultGrantChecker(secretProvider, agentStore, workflowStore, llmStore, apiCallsStore, mcpCallsStore,
-                mock(IRagStore.class));
+                mock(IRagStore.class), connectionStore);
     }
 
     /**

@@ -1,0 +1,272 @@
+/*
+ * Copyright EDDI contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+package ai.labs.eddi.connections;
+
+import ai.labs.eddi.configs.connections.model.AuthType;
+import ai.labs.eddi.configs.connections.model.Binding;
+import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
+import ai.labs.eddi.configs.connections.model.OAuthConfig;
+import ai.labs.eddi.configs.connections.model.StaticAuth;
+import ai.labs.eddi.configs.variables.GlobalVariableResolver;
+import ai.labs.eddi.connections.model.ConnectionReference;
+import ai.labs.eddi.engine.security.CallerIdentity;
+import ai.labs.eddi.engine.security.CallerIdentityContext;
+import ai.labs.eddi.secrets.SecretResolver;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Test;
+
+import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
+import java.util.List;
+import java.util.Optional;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+
+/**
+ * Every rule in here is a refusal, and every refusal exists because the
+ * alternative — sending no credential, or sending the wrong one — fails in a
+ * way that is either invisible or actively harmful.
+ */
+class ConnectionResolverTest {
+
+    private static final URI ALLOWED_TARGET = URI.create("https://api.atlassian.com/ex/jira/issue/1");
+
+    private ConnectionRegistry registry;
+    private SecretResolver secretResolver;
+    private GlobalVariableResolver globalVariableResolver;
+    private CallerIdentityContext callerIdentityContext;
+    private AccessTokenSupplier accessTokenSupplier;
+
+    @BeforeEach
+    void setUp() {
+        registry = mock(ConnectionRegistry.class);
+        secretResolver = mock(SecretResolver.class);
+        globalVariableResolver = mock(GlobalVariableResolver.class);
+        callerIdentityContext = mock(CallerIdentityContext.class);
+        accessTokenSupplier = mock(AccessTokenSupplier.class);
+
+        lenient().when(globalVariableResolver.resolveValue(anyString())).thenAnswer(i -> i.getArgument(0));
+        lenient().when(secretResolver.resolveValue(anyString()))
+                .thenAnswer(i -> i.<String>getArgument(0).replace("${vault:jira-token}", "live-token").replace("${vault:jira-password}", "hunter2"));
+    }
+
+    private ConnectionResolver resolver(boolean authorizationEnabled) {
+        return new ConnectionResolver(registry, secretResolver, globalVariableResolver, callerIdentityContext, new SimpleMeterRegistry(),
+                accessTokenSupplier, authorizationEnabled);
+    }
+
+    private void register(ConnectionConfiguration connection) {
+        when(registry.require(any(ConnectionReference.class))).thenReturn(connection);
+        lenient().when(registry.find(any(ConnectionReference.class))).thenReturn(Optional.of(connection));
+    }
+
+    private static ConnectionConfiguration staticConnection() {
+        var connection = new ConnectionConfiguration();
+        connection.setName("jira");
+        connection.setAuthType(AuthType.STATIC);
+        connection.setBinding(Binding.SERVICE);
+        connection.setBaseUrlAllowlist(List.of("https://api.atlassian.com"));
+        var auth = new StaticAuth();
+        auth.setHeaderName("Authorization");
+        auth.setValueTemplate("Bearer ${vault:jira-token}");
+        connection.setStaticAuth(auth);
+        return connection;
+    }
+
+    @Nested
+    @DisplayName("static and basic")
+    class StaticAndBasic {
+
+        @Test
+        @DisplayName("a static connection resolves to its configured header")
+        void resolvesStaticHeader() {
+            register(staticConnection());
+
+            var credential = resolver(false).resolve("${connection:jira}", ALLOWED_TARGET, null);
+
+            assertEquals("Authorization", credential.headerName());
+            assertEquals("Bearer live-token", credential.headerValue());
+        }
+
+        @Test
+        @DisplayName("BASIC is base64-encoded here, so nobody has to vault a pre-encoded blob")
+        void encodesBasic() {
+            var connection = staticConnection();
+            connection.setAuthType(AuthType.BASIC);
+            connection.getStaticAuth().setUsername("svc-eddi");
+            connection.getStaticAuth().setPasswordRef("${vault:jira-password}");
+            register(connection);
+
+            var credential = resolver(false).resolve("${connection:jira}", ALLOWED_TARGET, null);
+
+            assertEquals("Basic " + Base64.getEncoder().encodeToString("svc-eddi:hunter2".getBytes(StandardCharsets.UTF_8)),
+                    credential.headerValue());
+        }
+
+        @Test
+        @DisplayName("an unresolved vault reference is refused, not sent as literal text")
+        void refusesUnresolvedVaultReference() {
+            var connection = staticConnection();
+            connection.getStaticAuth().setValueTemplate("Bearer ${vault:missing-key}");
+            register(connection);
+
+            var error = assertThrows(ConnectionException.class, () -> resolver(false).resolve("${connection:jira}", ALLOWED_TARGET, null));
+
+            assertEquals(ConnectionException.Reason.INVALID_CONFIGURATION, error.getReason());
+            assertTrue(error.getMessage().contains("did not resolve"), error.getMessage());
+        }
+    }
+
+    @Nested
+    @DisplayName("the target allowlist")
+    class TargetAllowlist {
+
+        @Test
+        @DisplayName("a target outside the allowlist is refused — a config edit cannot redirect a credential")
+        void refusesUnlistedTarget() {
+            register(staticConnection());
+
+            var error = assertThrows(ConnectionException.class,
+                    () -> resolver(false).resolve("${connection:jira}", URI.create("https://evil.example.com/collect"), null));
+
+            assertEquals(ConnectionException.Reason.TARGET_NOT_ALLOWED, error.getReason());
+        }
+
+        @Test
+        @DisplayName("origins are compared canonically, not as strings")
+        void comparesOriginsCanonically() {
+            var connection = staticConnection();
+            connection.setBaseUrlAllowlist(List.of("HTTPS://API.Atlassian.com"));
+            register(connection);
+
+            // A case-sensitive comparison here produces an allowlist that looks
+            // configured and blocks everything.
+            assertEquals("Bearer live-token", resolver(false).resolve("${connection:jira}", ALLOWED_TARGET, null).headerValue());
+        }
+
+        @Test
+        @DisplayName("a malformed allowlist entry is a configuration error, never a silent match-all")
+        void refusesMalformedAllowlistEntry() {
+            var connection = staticConnection();
+            // Reachable by import or a direct database write, which bypass the
+            // write-time validator.
+            connection.setBaseUrlAllowlist(List.of("api.atlassian.com"));
+            register(connection);
+
+            var error = assertThrows(ConnectionException.class, () -> resolver(false).resolve("${connection:jira}", ALLOWED_TARGET, null));
+
+            assertEquals(ConnectionException.Reason.INVALID_CONFIGURATION, error.getReason());
+        }
+
+        @Test
+        @DisplayName("a resolve with no target is refused rather than skipping the check")
+        void refusesMissingTarget() {
+            register(staticConnection());
+
+            assertThrows(ConnectionException.class, () -> resolver(false).resolve("${connection:jira}", null, null));
+        }
+    }
+
+    @Nested
+    @DisplayName("PER_USER needs a verified principal")
+    class PerUser {
+
+        private ConnectionConfiguration perUserConnection() {
+            var connection = new ConnectionConfiguration();
+            connection.setName("drive");
+            connection.setAuthType(AuthType.OAUTH2_AUTHORIZATION_CODE);
+            connection.setBinding(Binding.PER_USER);
+            connection.setBaseUrlAllowlist(List.of("https://api.atlassian.com"));
+            var oauth = new OAuthConfig();
+            oauth.setTokenUrl("https://auth.atlassian.com/oauth/token");
+            oauth.setAuthorizationUrl("https://auth.atlassian.com/authorize");
+            oauth.setClientId("client");
+            oauth.setClientSecret("${vault:client-secret}");
+            connection.setOauth(oauth);
+            return connection;
+        }
+
+        @Test
+        @DisplayName("with authorization disabled it refuses outright — a self-asserted userId is not an identity")
+        void refusesWithoutAuthorization() {
+            register(perUserConnection());
+            when(callerIdentityContext.current()).thenReturn(new CallerIdentity(null, "alice", "https://eddi.example"));
+
+            var error = assertThrows(ConnectionException.class, () -> resolver(false).resolve("${connection:drive}", ALLOWED_TARGET, "alice"));
+
+            assertEquals(ConnectionException.Reason.NO_VERIFIED_PRINCIPAL, error.getReason());
+            assertTrue(error.getMessage().contains("verified"), error.getMessage());
+        }
+
+        @Test
+        @DisplayName("with no resolvable user it refuses rather than falling back to the service grant")
+        void refusesWithoutPrincipal() {
+            register(perUserConnection());
+            when(callerIdentityContext.current()).thenReturn(null);
+
+            var error = assertThrows(ConnectionException.class, () -> resolver(true).resolve("${connection:drive}", ALLOWED_TARGET, null));
+
+            assertEquals(ConnectionException.Reason.NO_VERIFIED_PRINCIPAL, error.getReason());
+            assertFalse(error.getMessage().contains("__service__"), "falling back to the service grant is the failure mode, not the fix");
+        }
+
+        @Test
+        @DisplayName("the verified caller's own grant is used")
+        void resolvesForVerifiedCaller() {
+            register(perUserConnection());
+            when(callerIdentityContext.current()).thenReturn(new CallerIdentity("jwt", "alice", "https://eddi.example"));
+            when(accessTokenSupplier.accessToken(any(), any())).thenReturn("ya29.token");
+
+            var credential = resolver(true).resolve("${connection:drive}", ALLOWED_TARGET, "not-alice");
+
+            assertEquals("Bearer ya29.token", credential.headerValue());
+        }
+
+        @Test
+        @DisplayName("a SERVICE connection resolves under the service principal")
+        void serviceBindingUsesServicePrincipal() {
+            var connection = perUserConnection();
+            connection.setAuthType(AuthType.OAUTH2_CLIENT_CREDENTIALS);
+            connection.setBinding(Binding.SERVICE);
+            register(connection);
+            when(accessTokenSupplier.accessToken(any(), any())).thenReturn("service-token");
+
+            assertEquals("Bearer service-token", resolver(false).resolve("${connection:drive}", ALLOWED_TARGET, null).headerValue());
+        }
+    }
+
+    @Test
+    @DisplayName("a resolved credential never prints its value")
+    void resolvedCredentialIsNotPrintable() {
+        register(staticConnection());
+
+        var credential = resolver(false).resolve("${connection:jira}", ALLOWED_TARGET, null);
+
+        assertFalse(credential.toString().contains("live-token"),
+                "this record travels through debug logs and exception messages: " + credential);
+    }
+
+    @Test
+    @DisplayName("a reference is recognised, and an ordinary value is not")
+    void recognisesReferences() {
+        assertTrue(ConnectionResolver.containsReference("${connection:jira}"));
+        assertTrue(ConnectionResolver.containsReference("${connection:tenant-b/jira}"));
+        assertFalse(ConnectionResolver.containsReference("${vault:jira}"));
+        assertFalse(ConnectionResolver.containsReference("Bearer abc"));
+        assertFalse(ConnectionResolver.containsReference(null));
+    }
+}

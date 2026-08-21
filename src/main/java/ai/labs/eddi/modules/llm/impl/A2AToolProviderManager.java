@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
+import ai.labs.eddi.connections.ConnectionResolver;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.A2AAgentConfig;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import ai.labs.eddi.secrets.SecretResolver;
@@ -46,6 +47,12 @@ public class A2AToolProviderManager {
     private final HttpClient httpClient;
     private final boolean ssrfProtectionEnabled;
 
+    /**
+     * Resolves a {@code ${connection:name}} apiKey per call. Nullable, because two
+     * back-compat constructors build this manager without a container.
+     */
+    private final ConnectionResolver connectionResolver;
+
     /** Cached Agent Card data per URL to avoid re-fetching on every request. */
     private final Map<String, CachedAgentInfo> agentCache = new ConcurrentHashMap<>();
 
@@ -67,13 +74,27 @@ public class A2AToolProviderManager {
 
     @Inject
     public A2AToolProviderManager(GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver,
-            @ConfigProperty(name = "eddi.security.ssrf-protection.enabled", defaultValue = "false") boolean ssrfProtectionEnabled) {
+            @ConfigProperty(name = "eddi.security.ssrf-protection.enabled", defaultValue = "false") boolean ssrfProtectionEnabled,
+            ConnectionResolver connectionResolver) {
+        this.connectionResolver = connectionResolver;
         this.globalVariableResolver = globalVariableResolver;
         this.secretResolver = secretResolver;
         this.ssrfProtectionEnabled = ssrfProtectionEnabled;
         // JDK HttpClient defaults to Redirect.NEVER, so validating the target URL
         // is sufficient — there is no redirect hop to re-validate.
         this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+    }
+
+    /**
+     * Constructor for tests and for callers with no connection-backed peers.
+     * <p>
+     * The resolver is nullable rather than defaulted to a no-op: a no-op would make
+     * a {@code ${connection:…}} apiKey resolve to nothing and be sent as literal
+     * text, which the peer answers with an opaque 401. Null produces a message that
+     * names the cause.
+     */
+    A2AToolProviderManager(GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver, boolean ssrfProtectionEnabled) {
+        this(globalVariableResolver, secretResolver, ssrfProtectionEnabled, null);
     }
 
     /**
@@ -200,9 +221,21 @@ public class A2AToolProviderManager {
 
         String apiKey = config.getApiKey();
         if (!isNullOrEmpty(apiKey)) {
-            apiKey = globalVariableResolver.resolveValue(apiKey);
-            apiKey = secretResolver.resolveValue(apiKey);
-            requestBuilder.header("Authorization", "Bearer " + apiKey);
+            // A connection resolves per CALL — it may be refreshed between two calls a
+            // second apart — so it is checked before the static resolution chain
+            // rather than after it, which would first mangle the reference.
+            if (ConnectionResolver.containsReference(apiKey)) {
+                if (connectionResolver == null) {
+                    throw new IllegalStateException("A2A agent at " + agentUrl + " uses a ${connection:…} apiKey, but this manager was "
+                            + "constructed without a ConnectionResolver.");
+                }
+                var credential = connectionResolver.resolve(apiKey, URI.create(agentUrl), null);
+                requestBuilder.header(credential.headerName(), credential.headerValue());
+            } else {
+                apiKey = globalVariableResolver.resolveValue(apiKey);
+                apiKey = secretResolver.resolveValue(apiKey);
+                requestBuilder.header("Authorization", "Bearer " + apiKey);
+            }
         }
 
         HttpResponse<String> response = httpClient.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString());

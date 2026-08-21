@@ -419,6 +419,38 @@ public class VaultSecretProvider implements ISecretProvider {
         }
     }
 
+    @Override
+    public SealedValue seal(String tenantId, String plaintext) throws SecretProviderException {
+        ensureAvailable();
+        if (plaintext == null) {
+            return null;
+        }
+        try {
+            EnvelopeCrypto.EncryptionResult result = EnvelopeCrypto.encrypt(plaintext, getOrCreateDek(tenantId));
+            return new SealedValue(result.ciphertext(), result.iv());
+        } catch (EnvelopeCrypto.CryptoException e) {
+            errorCounter.increment();
+            throw new SecretProviderException("Encryption failure while sealing data for tenant " + sanitize(tenantId), e);
+        }
+    }
+
+    @Override
+    public String unseal(String tenantId, SealedValue sealed) throws SecretProviderException {
+        ensureAvailable();
+        if (sealed == null || sealed.ciphertext() == null) {
+            return null;
+        }
+        try {
+            return EnvelopeCrypto.decrypt(sealed.ciphertext(), sealed.iv(), getOrCreateDek(tenantId));
+        } catch (EnvelopeCrypto.CryptoException e) {
+            errorCounter.increment();
+            // The message deliberately says nothing about the ciphertext. A failed
+            // authentication tag means either a changed master key or tampering, and
+            // both are answered the same way: refuse and say which tenant.
+            throw new SecretProviderException("Decryption failure while unsealing data for tenant " + sanitize(tenantId), e);
+        }
+    }
+
     // === Private helpers ===
 
     private byte[] getOrCreateDek(String tenantId) throws SecretProviderException {

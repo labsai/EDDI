@@ -134,6 +134,47 @@ public interface ISecretProvider {
      */
     boolean isAvailable();
 
+    /**
+     * Encrypt arbitrary runtime data with a tenant's data-encryption key, without
+     * storing it as a named secret.
+     * <p>
+     * Exists for OAuth grants. A grant is not a secret in the vault's sense — it is
+     * not author-managed, not referenced by name, not subject to
+     * {@code allowedAgents}, and must never appear in an export — so it does not
+     * belong in the secret collection. What it DOES need is exactly the vault's
+     * envelope encryption and exactly the vault's per-tenant DEK: a second key
+     * hierarchy for refresh tokens would mean a second key to rotate, a second
+     * master key to lose, and a second place for the crypto to be subtly wrong.
+     *
+     * @param tenantId
+     *            whose DEK to seal with; created on first use, as for a secret
+     * @throws SecretProviderException
+     *             when the vault is inactive or the DEK cannot be obtained
+     */
+    SealedValue seal(String tenantId, String plaintext) throws SecretProviderException;
+
+    /**
+     * Reverse of {@link #seal}.
+     *
+     * @throws SecretProviderException
+     *             when the vault is inactive, the DEK cannot be obtained, or the
+     *             ciphertext fails its authentication tag
+     */
+    String unseal(String tenantId, SealedValue sealed) throws SecretProviderException;
+
+    /**
+     * Ciphertext plus its initialization vector.
+     * <p>
+     * {@code toString} is overridden because this travels through log statements
+     * and debugger views on the token-refresh path.
+     */
+    record SealedValue(String ciphertext, String iv) {
+        @Override
+        public String toString() {
+            return "SealedValue[<REDACTED>]";
+        }
+    }
+
     // === Exception types ===
 
     class SecretNotFoundException extends Exception {
