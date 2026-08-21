@@ -13,6 +13,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.util.ArrayList;
+import java.util.Locale;
 import java.util.List;
 
 /**
@@ -126,7 +127,10 @@ public class HighValueSurfaceGuard {
         message.append("Fix by one of:\n")
                 .append("  * set QUARKUS_OIDC_TENANT_ENABLED=true and configure your Keycloak realm (recommended), or\n");
         for (Surface surface : unprotected) {
-            message.append("  * set ").append(surface.optOutProperty().toUpperCase().replace('.', '_').replace('-', '_')).append("=true")
+            // Locale.ROOT: under a Turkish default locale "eddi" uppercases to "EDDİ"
+            // with a dotted capital I, and an operator copying the name out of a boot
+            // failure would set a variable that does not exist.
+            message.append("  * set ").append(surface.optOutProperty().toUpperCase(Locale.ROOT).replace('.', '_').replace('-', '_')).append("=true")
                     .append(" to knowingly expose ").append(surface.path()).append('\n');
         }
         return message.toString();

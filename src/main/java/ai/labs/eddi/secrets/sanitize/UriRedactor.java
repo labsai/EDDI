@@ -48,7 +48,13 @@ public final class UriRedactor {
             return false;
         }
         String name = headerName.toLowerCase(Locale.ROOT);
-        return name.contains("authorization") || name.contains("api-key") || name.contains("api_key") || name.contains("apikey")
+        // "auth" is here, not just "authorization". The superseded discovery endpoint
+        // took its credential as ?apiAuth=, which normalises to "apiauth" and matched
+        // none of the longer words — so the migration guard that is supposed to
+        // reject a stray credential parameter silently ignored the very parameter it
+        // exists for. "auth" subsumes "authorization", and the short form is what
+        // real field names use ("apiAuth", "authValue", "x-auth").
+        return name.contains("auth") || name.contains("api-key") || name.contains("api_key") || name.contains("apikey")
                 || name.contains("x-api-key") || name.contains("token") || name.contains("secret") || name.contains("credential")
                 || name.contains("password");
     }

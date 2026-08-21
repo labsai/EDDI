@@ -123,6 +123,76 @@ class ToolLoopRunnerGuardrailWiringTest {
     }
 
     @Test
+    @DisplayName("the envelope fits INSIDE the configured response ceiling")
+    void envelopeIsReservedFromTheTruncationBudget() {
+        // The regression: the truncator cut to the configured limit and the envelope
+        // was then added on top, so every result exceeded the ceiling by ~200 chars —
+        // small once, kilobytes across a long tool loop, and exactly the drift the
+        // ceiling exists to stop.
+        var limits = new LlmConfiguration.ToolResponseLimits();
+        limits.setDefaultMaxChars(2_000);
+        task.setToolResponseLimits(limits);
+
+        var budgets = new ArrayList<Integer>();
+        var truncator = mock(ToolResponseTruncator.class);
+        when(truncator.truncateIfNeeded(anyString(), anyString(), any(), any(), any())).thenAnswer(invocation -> {
+            LlmConfiguration.ToolResponseLimits applied = invocation.getArgument(2);
+            budgets.add(applied == null ? null : applied.getDefaultMaxChars());
+            String result = invocation.getArgument(1);
+            int cap = applied == null ? Integer.MAX_VALUE : applied.getDefaultMaxChars();
+            return result.length() <= cap ? result : result.substring(0, cap);
+        });
+        runner = new ToolLoopRunner(toolExecutionService, truncator, null, null, null, null, null,
+                new ToolResultGuardrail(new SimpleMeterRegistry()));
+
+        String governed = execute("x".repeat(10_000), Map.of("get_order", "mcp"), new ArrayList<>());
+
+        assertEquals(1, budgets.size());
+        assertTrue(budgets.get(0) < 2_000, "the truncator must be given a reduced budget, got " + budgets.get(0));
+        assertTrue(governed.length() <= 2_000, "what reaches the model must respect the configured ceiling, got " + governed.length());
+    }
+
+    @Test
+    @DisplayName("with provenance marking off, the operator's ceiling is left exactly as configured")
+    void doesNotReserveWhenNothingWraps() {
+        var limits = new LlmConfiguration.ToolResponseLimits();
+        limits.setDefaultMaxChars(2_000);
+        task.setToolResponseLimits(limits);
+        var guardrails = new ToolResultGuardrailConfig();
+        guardrails.setMarkProvenance(false);
+        task.setToolResultGuardrails(guardrails);
+
+        var budgets = new ArrayList<Integer>();
+        var truncator = mock(ToolResponseTruncator.class);
+        when(truncator.truncateIfNeeded(anyString(), anyString(), any(), any(), any())).thenAnswer(invocation -> {
+            LlmConfiguration.ToolResponseLimits applied = invocation.getArgument(2);
+            budgets.add(applied == null ? null : applied.getDefaultMaxChars());
+            return invocation.getArgument(1);
+        });
+        runner = new ToolLoopRunner(toolExecutionService, truncator, null, null, null, null, null,
+                new ToolResultGuardrail(new SimpleMeterRegistry()));
+
+        execute("short", Map.of("get_order", "mcp"), new ArrayList<>());
+
+        assertEquals(2_000, budgets.get(0), "reserving room for an envelope that is never added would shrink the ceiling for nothing");
+    }
+
+    @Test
+    @DisplayName("reserving the envelope does not mutate the shared task configuration")
+    void doesNotMutateSharedTaskConfig() {
+        // Task is shared configuration read by every concurrent conversation on this
+        // agent. Shrinking it in place would shrink it again next turn, and the next.
+        var limits = new LlmConfiguration.ToolResponseLimits();
+        limits.setDefaultMaxChars(2_000);
+        task.setToolResponseLimits(limits);
+
+        execute("short", Map.of("get_order", "mcp"), new ArrayList<>());
+        execute("short", Map.of("get_order", "mcp"), new ArrayList<>());
+
+        assertEquals(2_000, task.getToolResponseLimits().getDefaultMaxChars());
+    }
+
+    @Test
     @DisplayName("the trace records what the TOOL returned, not EDDI's envelope")
     void traceShowsTheToolsOwnOutput() {
         var trace = new ArrayList<Map<String, Object>>();

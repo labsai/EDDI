@@ -33,6 +33,27 @@ public final class ToolResultProvenance {
     /** Closing delimiter; the opening one names the tool and its source. */
     static final String END = "[end of tool result]";
 
+    /**
+     * Worst-case characters the envelope adds, so a caller can subtract it from a
+     * configured ceiling BEFORE truncating.
+     * <p>
+     * Without that, an operator's {@code toolResponseLimits} became advisory: the
+     * truncator cut to the limit and the envelope then pushed every result past it,
+     * which across a twenty-call tool loop is kilobytes of context the ceiling was
+     * added to bound. Derived from the fixed text plus both labels at their capped
+     * length, so it is an upper bound rather than an estimate that drifts when the
+     * wording changes.
+     */
+    public static final int MAX_ENVELOPE_CHARS = headerTemplateLength() + END.length() + 2;
+
+    private static int headerTemplateLength() {
+        // The header with both labels at their maximum length.
+        return header("x".repeat(MAX_LABEL_CHARS), "x".repeat(MAX_LABEL_CHARS)).length();
+    }
+
+    /** Ceiling on each label inside the header. */
+    private static final int MAX_LABEL_CHARS = 64;
+
     private ToolResultProvenance() {
     }
 
@@ -79,6 +100,6 @@ public final class ToolResultProvenance {
         if (cleaned.isEmpty()) {
             return "unknown";
         }
-        return cleaned.length() > 64 ? cleaned.substring(0, 64) : cleaned;
+        return cleaned.length() > MAX_LABEL_CHARS ? cleaned.substring(0, MAX_LABEL_CHARS) : cleaned;
     }
 }

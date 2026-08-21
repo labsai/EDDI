@@ -147,6 +147,35 @@ the EDDI process user, driven by a configuration document.
   already long; the alternative was resolving provenance somewhere other than the one shared pipeline,
   which is exactly the split this phase exists to avoid.
 
+### Review fixes (max-effort pass, same day)
+
+A max-effort review of this branch surfaced four defects; all are fixed here.
+
+* **The deprecated `GET /discover-endpoints` did not reject its own credential parameter.** The
+  stray-parameter guard used `isSensitiveHeaderName`, whose word list starts at `authorization` —
+  and `apiAuth` normalises to `apiauth`, which matches none of the longer words. So the migration
+  signal for the *exact* parameter 0.2 removes was silently absent, and a client that had not
+  migrated kept putting a live secret in a URL on every attempt with no indication. The rule now
+  matches `auth`, which subsumes `authorization` and covers the short form real field names use
+  (`apiAuth`, `authValue`, `x-auth`). This also widens header and query redaction slightly, in the
+  safe direction; the 6,156 tests across the redaction, approval and httpcall paths are unchanged.
+* **The provenance envelope was added after the truncation ceiling**, so an operator's
+  `toolResponseLimits` became advisory — every result arrived ~200 characters over, which across a
+  twenty-call tool loop is kilobytes of unaccounted context. The truncator is now given a budget
+  reduced by `ToolResultProvenance.MAX_ENVELOPE_CHARS`, on a **copy** of the limits (the task is
+  shared configuration read by every concurrent conversation; shrinking it in place would shrink it
+  again next turn), and only when governance will actually wrap — an agent with provenance marking
+  off keeps exactly the ceiling it configured. A floor stops a tiny configured ceiling truncating to
+  nothing.
+* **`HighValueSurfaceGuard` uppercased the env-var name without `Locale.ROOT`.** Under a Turkish
+  locale it prints `EDDİ_MCP_ALLOW_UNAUTHENTICATED` with a dotted capital I — an operator copying it
+  out of the boot failure sets a variable that does not exist and the boot keeps failing. The repo
+  already documents this exact trap in `RequestRedactor`.
+* Plus the label cap inside the envelope, which was a bare `64` in two places, now derives from one
+  constant that `MAX_ENVELOPE_CHARS` is computed from — so the reserved budget cannot drift from the
+  wording it is supposed to cover.
+
+
 
 ---
 

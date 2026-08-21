@@ -22,6 +22,7 @@ import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.modules.llm.capability.JsonResponseFormatPolicy;
 import ai.labs.eddi.modules.llm.impl.orchestration.ToolApprovalGateSupport;
 import ai.labs.eddi.modules.llm.impl.orchestration.ToolContextBudget;
+import ai.labs.eddi.modules.llm.governance.ToolResultProvenance;
 import ai.labs.eddi.modules.llm.guardrails.ToolResultGuardrail;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.tools.ToolCacheService;
@@ -644,9 +645,14 @@ class ToolLoopRunner {
             toolResult = "Error: Tool '" + toolRequest.name() + "' not found";
         }
 
-        // Apply response truncation (MCP governance)
+        // Apply response truncation (MCP governance).
+        //
+        // The provenance envelope is added AFTER this, so the budget handed to the
+        // truncator is reduced by the envelope's worst case. Otherwise a configured
+        // ceiling is exceeded by every single result — small individually, kilobytes
+        // across a long tool loop, and exactly the drift the ceiling exists to stop.
         toolResult = toolResponseTruncator.truncateIfNeeded(
-                toolRequest.name(), toolResult, task.getToolResponseLimits(),
+                toolRequest.name(), toolResult, reserveEnvelopeBudget(task.getToolResponseLimits(), task),
                 task.getType(), task.getParameters());
 
         Map<String, Object> resultStep = new HashMap<>();
@@ -696,6 +702,52 @@ class ToolLoopRunner {
 
         return outcome.result();
     }
+
+    /**
+     * A copy of the task's response limits with room left for the provenance
+     * envelope.
+     * <p>
+     * A copy, not a mutation: {@code LlmConfiguration.Task} is shared configuration
+     * read by every concurrent conversation on this agent, and shrinking its limits
+     * in place would shrink them again on the next turn, and the next.
+     * <p>
+     * Returns the original when governance will not wrap anything, so an agent that
+     * turned provenance marking off keeps exactly the ceiling it configured.
+     */
+    private static LlmConfiguration.ToolResponseLimits reserveEnvelopeBudget(LlmConfiguration.ToolResponseLimits limits,
+                                                                             LlmConfiguration.Task task) {
+        var guardrails = task.getToolResultGuardrails();
+        boolean willWrap = guardrails == null
+                || (!Boolean.FALSE.equals(guardrails.getEnabled()) && !Boolean.FALSE.equals(guardrails.getMarkProvenance()));
+        if (limits == null || !willWrap) {
+            return limits;
+        }
+        var reserved = new LlmConfiguration.ToolResponseLimits();
+        reserved.setDefaultMaxChars(reduce(limits.getDefaultMaxChars()));
+        reserved.setTruncationStrategy(limits.getTruncationStrategy());
+        reserved.setSummarizerModel(limits.getSummarizerModel());
+        if (limits.getPerToolLimits() != null) {
+            var perTool = new HashMap<String, Integer>();
+            limits.getPerToolLimits().forEach((tool, limit) -> perTool.put(tool, limit == null ? null : reduce(limit)));
+            reserved.setPerToolLimits(perTool);
+        }
+        return reserved;
+    }
+
+    /**
+     * Never below a floor: a ceiling smaller than the envelope would truncate to
+     * nothing.
+     */
+    private static int reduce(int limit) {
+        return Math.max(limit - ToolResultProvenance.MAX_ENVELOPE_CHARS, MINIMUM_TOOL_RESULT_CHARS);
+    }
+
+    /**
+     * Smallest useful tool result after the envelope is reserved. Below this the
+     * result is no longer an answer, so an operator who configured a tiny ceiling
+     * gets a tiny answer rather than an empty one.
+     */
+    private static final int MINIMUM_TOOL_RESULT_CHARS = 256;
 
     /**
      * Resolves the per-minute rate limit for one call: an entry keyed on the
