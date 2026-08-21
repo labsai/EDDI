@@ -106,6 +106,30 @@ class RestAuditStoreTest {
     }
 
     /**
+     * The triage field: a verify sweep reports both a tampered v4 row and an
+     * unrecoverable legacy row as INVALID, and those demand opposite reactions —
+     * one is an alarm, the other is the expected residue of rows signed over live
+     * Java objects that nothing can reconstruct. The problem entry must say which
+     * one the operator is looking at.
+     */
+    @Test
+    @DisplayName("a problem entry names the canonical form its HMAC was written with")
+    void problemEntriesCarryTheHmacVersion() {
+        var legacy = entryAt("id-legacy", 0); // "v3:deadbeef"
+        var current = entryAt("id-current", 1).withHmac("v4:" + "0".repeat(64));
+        when(auditStore.getEntries("conv-1", 0, 1000)).thenReturn(List.of(legacy, current));
+        when(auditLedgerService.verifyEntry(any(), any())).thenReturn(AuditVerificationStatus.INVALID);
+
+        var report = restAuditStore.verifyConversation("conv-1", 0, 1000);
+
+        assertEquals(2, report.problems().size());
+        assertEquals("v3", report.problems().get(0).hmacVersion(),
+                "a pre-v4 INVALID is usually unrecoverable legacy payload, not tampering");
+        assertEquals("v4", report.problems().get(1).hmacVersion(),
+                "a v4 INVALID is the alarm — something touched a row this release wrote");
+    }
+
+    /**
      * A recovered legacy row is intact — it counts as valid, appears in the
      * dedicated {@code recovered} tally so an operator can see how much of the
      * ledger predates v4, and is NOT listed as a problem. Miswiring any of the

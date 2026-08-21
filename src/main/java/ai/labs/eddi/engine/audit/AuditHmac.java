@@ -252,6 +252,36 @@ public final class AuditHmac {
      *            the 32-byte HMAC key
      * @return true if the HMAC is valid, false if tampered
      */
+    /**
+     * The canonical-form version a stored HMAC names: {@code "v4"}, {@code "v3"},
+     * {@code "v2"}, {@code "v1"} for a bare pre-tag digest, or {@code null} for an
+     * unsigned value.
+     * <p>
+     * Exists for triage, not verification. A verify sweep reports both a freshly
+     * tampered v4 row and an unrecoverable legacy row as INVALID, and those demand
+     * opposite reactions: a v4 failure means something touched a row this release
+     * wrote and is an alarm, while a pre-v4 failure is usually a row whose payload
+     * held live Java objects when it was signed — a form nothing can reconstruct,
+     * so no recovery search will ever clear it. Without the version on the problem
+     * entry, an operator sweeping an old ledger cannot tell the expected residue
+     * from the emergency.
+     */
+    public static String versionOf(String storedHmac) {
+        if (storedHmac == null || storedHmac.isBlank()) {
+            return null;
+        }
+        if (storedHmac.startsWith(V4_PREFIX)) {
+            return "v4";
+        }
+        if (storedHmac.startsWith(V3_PREFIX)) {
+            return "v3";
+        }
+        if (storedHmac.startsWith(V2_PREFIX)) {
+            return "v2";
+        }
+        return "v1";
+    }
+
     public static boolean verifyHmac(AuditEntry entry, byte[] hmacKey) {
         return verify(entry, hmacKey, false) != VerificationOutcome.MISMATCH;
     }

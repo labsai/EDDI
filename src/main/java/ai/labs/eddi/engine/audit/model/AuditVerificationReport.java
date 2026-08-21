@@ -183,6 +183,20 @@ public record AuditVerificationReport(String scope, String scopeId, boolean sign
      * @param status
      *            why it is listed here
      */
-    public record EntryProblem(String entryId, String conversationId, long sequence, Instant timestamp, AuditVerificationStatus status) {
+    /**
+     * One entry the sweep could not mark VALID.
+     *
+     * @param hmacVersion
+     *            which canonical form the stored HMAC names ({@code v1}–{@code v4},
+     *            or {@code null} for UNSIGNED). This is the triage field: an
+     *            INVALID on {@code v4} means something touched a row this release
+     *            wrote — an alarm — while an INVALID on a pre-v4 version is usually
+     *            a legacy row whose payload held live Java objects when it was
+     *            signed, a form nothing can reconstruct and no recovery search will
+     *            ever clear. The two deserve opposite reactions, and without this
+     *            field they are indistinguishable in the report.
+     */
+    public record EntryProblem(String entryId, String conversationId, long sequence, Instant timestamp, AuditVerificationStatus status,
+            String hmacVersion) {
     }
 }

@@ -139,6 +139,22 @@ class AuditHmacTimestampPrecisionTest {
     }
 
     @Nested
+    @DisplayName("versionOf — the triage field")
+    class VersionOf {
+
+        @Test
+        @DisplayName("names each canonical form, bare digests as v1, unsigned as null")
+        void namesEveryForm() {
+            assertEquals("v4", AuditHmac.versionOf("v4:" + "0".repeat(64)));
+            assertEquals("v3", AuditHmac.versionOf("v3:" + "0".repeat(64)));
+            assertEquals("v2", AuditHmac.versionOf("v2:" + "0".repeat(64)));
+            assertEquals("v1", AuditHmac.versionOf("0".repeat(64)));
+            assertNull(AuditHmac.versionOf(null));
+            assertNull(AuditHmac.versionOf(""));
+        }
+    }
+
+    @Nested
     @DisplayName("v3 rows already in the ledger")
     class V3Recovery {
 

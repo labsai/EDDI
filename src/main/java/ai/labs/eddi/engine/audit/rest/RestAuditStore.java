@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.audit.rest;
 
 import ai.labs.eddi.engine.audit.AuditLedgerService;
+import ai.labs.eddi.engine.audit.AuditHmac;
 import ai.labs.eddi.engine.audit.AuditVerificationStatus;
 import ai.labs.eddi.engine.audit.IAuditStore;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
@@ -133,7 +134,8 @@ public class RestAuditStore implements IRestAuditStore {
                 }
             }
             if (status != AuditVerificationStatus.VALID && status != AuditVerificationStatus.VALID_RECOVERED) {
-                problems.add(new EntryProblem(entry.id(), entry.conversationId(), entry.sequence(), entry.timestamp(), status));
+                problems.add(new EntryProblem(entry.id(), entry.conversationId(), entry.sequence(), entry.timestamp(), status,
+                        AuditHmac.versionOf(entry.hmac())));
             }
         }
 

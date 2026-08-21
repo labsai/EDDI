@@ -7,6 +7,43 @@
 
 
 
+## 🎯 test(sweep): close the two verdict caveats — legacy triage + stubbed-LLM validation (2026-08-21)
+
+**Repo:** EDDI (`fix/sweep-0820a-integrity-defects`)
+
+The final double-check ended with two stated caveats. Both are now addressed with fixes rather than
+disclaimers.
+
+**Caveat 1 — legacy INVALIDs were indistinguishable from real tampering.** A verify sweep reports
+both a freshly tampered v4 row and an unrecoverable legacy row (payload signed over live Java
+objects; nothing can reconstruct it) as INVALID — and those demand opposite reactions. Each
+`EntryProblem` now carries `hmacVersion` (`v1`–`v4`, from the stored HMAC's own prefix via
+`AuditHmac.versionOf`), so an operator sweeping an old ledger can separate the expected pre-v4
+residue from the alarm: an INVALID on `v4` means something touched a row this release wrote. Additive
+JSON field; wiring pinned in `RestAuditStoreTest`.
+
+**Caveat 2 — the LLM-involving fixes had never run against a model.** `LlmAgentEngineIT` already had
+a WireMock-backed fake OpenAI endpoint (the sweep's Tier-3 recommendation, shipped and forgotten);
+two tests now ride it:
+
+- **D11 end to end:** say → scripted "ALPHA.", then `POST /rerun` (deliberately without
+  `?language=`, pinning that fix live) → the body must contain "BRAVO." and must NOT contain
+  "ALPHA.", and WireMock must have been called exactly twice. Only a genuinely re-executed model can
+  produce the second answer; a rerun that merely cleared (the defect) or a cached answer both fail.
+- **D10 end to end:** an agent with `enableMemoryTools: true` and deliberately NO `userMemoryConfig`
+  (the defaults fallback carries it) receives a scripted `rememberFact` tool call on a *say* turn —
+  the turn on which the tool used to be silently absent — and
+  `GET /usermemorystore/memories/{userId}` must show the fact landed. This exercises the whole
+  broken conjunction: config survives past init, defaults fall back, the tool assembles, executes,
+  and writes.
+
+Both are ITs and gate in CI, where the audit-verify IT has already proven this class of test earns
+its keep — it caught the POJO-payload defect that every mock-based test had been green through.
+
+---
+
+
+
 ## 🔏 fix(audit): sign the payload the database actually stores (2026-08-21)
 
 **Repo:** EDDI (`fix/sweep-0820a-integrity-defects`)
