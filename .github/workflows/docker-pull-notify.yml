@@ -681,14 +681,30 @@ jobs:
             brief visitors or long-term followers.
           - **Retention:** kept for the life of the branch. Snapshots are not
             pruned, because the history *is* the dataset.
-          - **Removal:** to erase an individual, rewrite the branch (it has no
-            dependants and nothing builds from it):
-            `git filter-repo --path data/stargazers.csv --invert-paths` on a
-            clone of `metrics`, then force-push that branch only. To stop
-            collection entirely, delete the roster block from the
-            `Persist metrics history` step in
-            `.github/workflows/docker-pull-notify.yml`; `data/metrics.csv` is
-            aggregate-only and unaffected.
+          - **Removal:** to erase one person from the whole history while
+            keeping the file and everyone else's rows, run a row-level
+            rewrite on a fresh clone. Nothing builds from this branch, so
+            force-pushing it is safe — but force-push `metrics` only.
+
+                git clone --single-branch -b metrics <repo-url> erase
+                cd erase
+                git filter-repo --force --refs metrics --blob-callback '
+                lines = blob.data.split(b"\n")
+                if lines and lines[0].startswith(b"login,starred_at"):
+                    blob.data = b"\n".join(
+                        l for l in lines if not l.startswith(b"\"THE_LOGIN\","))
+                '
+                git push --force origin metrics
+
+            `data/metrics.csv` is aggregate-only and is not touched by the
+            callback above. To stop collection entirely, delete the roster
+            block from the `Persist metrics history` step in
+            `.github/workflows/docker-pull-notify.yml`.
+
+            As with any history rewrite, the pre-rewrite commits survive in
+            existing clones and stay reachable on GitHub until it garbage
+            collects them — ask GitHub Support to expire them if the removal
+            has to be complete.
           MD
           fi
 
