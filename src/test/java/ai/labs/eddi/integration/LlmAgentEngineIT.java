@@ -136,7 +136,7 @@ public class LlmAgentEngineIT extends BaseIntegrationIT {
                     "type": "function",
                     "function": {
                       "name": "rememberFact",
-                      "arguments": "{\"key\":\"favorite_color\",\"value\":\"blue\",\"category\":\"preference\",\"visibility\":\"self\"}"
+                      "arguments": "{\\"key\\":\\"favorite_color\\",\\"value\\":\\"blue\\",\\"category\\":\\"preference\\",\\"visibility\\":\\"self\\"}"
                     }
                   }]
                 },
