@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.apicalls.rest;
 
+import ai.labs.eddi.configs.apicalls.model.ApiEndpointDiscoveryRequest;
 import ai.labs.eddi.configs.apicalls.IApiCallsStore;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
@@ -48,28 +49,28 @@ class RestApiCallsStoreTest {
         @Test
         @DisplayName("null specUrl — returns 400")
         void nullSpecUrl() {
-            Response response = store.discoverEndpoints(null, null, null);
+            Response response = store.discoverEndpoints(null);
             assertEquals(400, response.getStatus());
         }
 
         @Test
         @DisplayName("blank specUrl — returns 400")
         void blankSpecUrl() {
-            Response response = store.discoverEndpoints("  ", null, null);
+            Response response = store.discoverEndpoints(new ApiEndpointDiscoveryRequest("  ", null, null));
             assertEquals(400, response.getStatus());
         }
 
         @Test
         @DisplayName("empty specUrl — returns 400")
         void emptySpecUrl() {
-            Response response = store.discoverEndpoints("", null, null);
+            Response response = store.discoverEndpoints(new ApiEndpointDiscoveryRequest("", null, null));
             assertEquals(400, response.getStatus());
         }
 
         @Test
         @DisplayName("invalid specUrl — returns error response")
         void invalidSpecUrl() {
-            Response response = store.discoverEndpoints("not-a-valid-url", null, null);
+            Response response = store.discoverEndpoints(new ApiEndpointDiscoveryRequest("not-a-valid-url", null, null));
             // McpApiToolBuilder.parseAndBuild will throw an exception
             assertTrue(response.getStatus() == 400 || response.getStatus() == 500);
         }
@@ -77,15 +78,15 @@ class RestApiCallsStoreTest {
         @Test
         @DisplayName("specUrl with blank apiBaseUrl — handled gracefully")
         void blankApiBaseUrl() {
-            Response response = store.discoverEndpoints("file:///nonexistent/spec.yaml", "  ", null);
+            Response response = store.discoverEndpoints(new ApiEndpointDiscoveryRequest("file:///nonexistent/spec.yaml", "  ", null));
             // Will fail at URL fetch — blank is treated as null
             assertTrue(response.getStatus() >= 400);
         }
 
         @Test
-        @DisplayName("specUrl with blank apiAuth — handled gracefully")
-        void blankApiAuth() {
-            Response response = store.discoverEndpoints("file:///nonexistent/spec.yaml", null, "  ");
+        @DisplayName("specUrl with blank authHeaderRef — handled gracefully")
+        void blankAuthHeaderRef() {
+            Response response = store.discoverEndpoints(new ApiEndpointDiscoveryRequest("file:///nonexistent/spec.yaml", null, "  "));
             assertTrue(response.getStatus() >= 400);
         }
     }

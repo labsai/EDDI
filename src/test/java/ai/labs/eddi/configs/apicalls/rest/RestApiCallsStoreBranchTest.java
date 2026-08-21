@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.apicalls.rest;
 
+import ai.labs.eddi.configs.apicalls.model.ApiEndpointDiscoveryRequest;
 import ai.labs.eddi.configs.apicalls.IApiCallsStore;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
@@ -185,23 +186,24 @@ class RestApiCallsStoreBranchTest {
         @Test
         @DisplayName("null specUrl returns 400")
         void nullSpecUrl() {
-            Response response = restApiCallsStore.discoverEndpoints(null, null, null);
+            Response response = restApiCallsStore.discoverEndpoints(null);
             assertEquals(400, response.getStatus());
         }
 
         @Test
         @DisplayName("blank specUrl returns 400")
         void blankSpecUrl() {
-            Response response = restApiCallsStore.discoverEndpoints("   ", null, null);
+            Response response = restApiCallsStore.discoverEndpoints(new ApiEndpointDiscoveryRequest("   ", null, null));
             assertEquals(400, response.getStatus());
         }
 
         @Test
-        @DisplayName("blank apiBaseUrl and apiAuth are treated as null")
-        void blankApiBaseUrlAndAuth() {
+        @DisplayName("blank apiBaseUrl and authHeaderRef are treated as null")
+        void blankApiBaseUrlAndAuthRef() {
             // This will fail on parseAndBuild since the URL is invalid, but tests the
             // effectiveBaseUrl/effectiveAuth branches
-            Response response = restApiCallsStore.discoverEndpoints("http://invalid-spec-url.test/nonexistent", "   ", "   ");
+            Response response = restApiCallsStore
+                    .discoverEndpoints(new ApiEndpointDiscoveryRequest("http://invalid-spec-url.test/nonexistent", "   ", "   "));
             // Will return either 400 or 500 depending on the exception type
             assertTrue(response.getStatus() >= 400);
         }

@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
+import ai.labs.eddi.modules.llm.governance.RemoteTextGovernor;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.A2AAgentConfig;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import ai.labs.eddi.secrets.SecretResolver;
@@ -43,8 +44,19 @@ public class A2AToolProviderManager {
 
     private final GlobalVariableResolver globalVariableResolver;
     private final SecretResolver secretResolver;
-    private final HttpClient httpClient;
+
+    /**
+     * Built on first use, not in the constructor.
+     * <p>
+     * This bean is {@code @ApplicationScoped}, so an eager client meant every EDDI
+     * boot created an HTTP client and its selector thread whether or not a single
+     * A2A peer was configured — and made the class impossible to construct at all
+     * where a selector cannot be opened, which is every unit test in a sandboxed
+     * environment. Deferring it costs one volatile read per call and buys both.
+     */
+    private volatile HttpClient httpClient;
     private final boolean ssrfProtectionEnabled;
+    private final int maxDescriptionChars;
 
     /** Cached Agent Card data per URL to avoid re-fetching on every request. */
     private final Map<String, CachedAgentInfo> agentCache = new ConcurrentHashMap<>();
@@ -60,6 +72,14 @@ public class A2AToolProviderManager {
     private static final long CIRCUIT_BREAKER_COOLDOWN_MS = 60_000;
     private static final int MAX_RESPONSE_SIZE_BYTES = 1_048_576; // 1MB
 
+    /**
+     * Default cap for a remote-authored description before it reaches the model.
+     * Same value as the MCP manager's: the two read the same kind of text off the
+     * same kind of channel, and a peer that is too verbose for one is too verbose
+     * for the other.
+     */
+    static final int DEFAULT_MAX_DESCRIPTION_CHARS = 1024;
+
     private final Map<String, CircuitState> circuitBreakers = new ConcurrentHashMap<>();
 
     record A2AToolsResult(List<ToolSpecification> toolSpecs, Map<String, ToolExecutor> executors) {
@@ -67,13 +87,45 @@ public class A2AToolProviderManager {
 
     @Inject
     public A2AToolProviderManager(GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver,
-            @ConfigProperty(name = "eddi.security.ssrf-protection.enabled", defaultValue = "false") boolean ssrfProtectionEnabled) {
+            @ConfigProperty(name = "eddi.security.ssrf-protection.enabled", defaultValue = "false") boolean ssrfProtectionEnabled,
+            @ConfigProperty(name = "eddi.a2a.tool-description.max-chars", defaultValue = "1024") int maxDescriptionChars) {
         this.globalVariableResolver = globalVariableResolver;
         this.secretResolver = secretResolver;
         this.ssrfProtectionEnabled = ssrfProtectionEnabled;
-        // JDK HttpClient defaults to Redirect.NEVER, so validating the target URL
-        // is sufficient — there is no redirect hop to re-validate.
-        this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+        this.maxDescriptionChars = maxDescriptionChars > 0 ? maxDescriptionChars : DEFAULT_MAX_DESCRIPTION_CHARS;
+    }
+
+    /**
+     * The shared outbound client, created on first use.
+     * <p>
+     * Double-checked locking on a volatile field: two concurrent first calls must
+     * not each build a client, because the loser's would be dropped with its
+     * selector thread still running.
+     */
+    private HttpClient httpClient() {
+        HttpClient client = httpClient;
+        if (client == null) {
+            synchronized (this) {
+                client = httpClient;
+                if (client == null) {
+                    // JDK HttpClient defaults to Redirect.NEVER, so validating the
+                    // target URL is sufficient — there is no redirect hop to
+                    // re-validate.
+                    client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+                    httpClient = client;
+                }
+            }
+        }
+        return client;
+    }
+
+    /**
+     * Convenience constructor for tests and for callers that do not configure the
+     * description cap. Mirrors the MCP manager's, so the two are configured and
+     * constructed the same way.
+     */
+    A2AToolProviderManager(GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver, boolean ssrfProtectionEnabled) {
+        this(globalVariableResolver, secretResolver, ssrfProtectionEnabled, DEFAULT_MAX_DESCRIPTION_CHARS);
     }
 
     /**
@@ -151,7 +203,9 @@ public class A2AToolProviderManager {
             String toolName = sanitizeToolName(agentName);
             String desc = (String) agentCard.getOrDefault("description", "Remote A2A agent: " + agentName);
 
-            ToolSpecification spec = ToolSpecification.builder().name(toolName).description(desc).parameters(paramSchema).build();
+            ToolSpecification spec = ToolSpecification.builder().name(toolName).description(governDescription(desc, agentName))
+                    .parameters(paramSchema)
+                    .build();
             toolSpecs.add(spec);
             executors.put(toolName, createA2AToolExecutor(agentUrl, config));
             return;
@@ -172,12 +226,46 @@ public class A2AToolProviderManager {
 
             String toolName = sanitizeToolName(agentName + "_" + skillId);
 
-            ToolSpecification spec = ToolSpecification.builder().name(toolName).description(skillDesc + " (via A2A agent: " + agentName + ")")
-                    .parameters(paramSchema).build();
+            // The provenance suffix is appended AFTER governance so a remote card
+            // cannot forge it: sanitizing the concatenation would let a skill whose
+            // description ends in "(via A2A agent: trusted-peer)" claim to come from
+            // somewhere it does not. The agent name inside it is governed on its own.
+            String description = governDescription(skillDesc, agentName) + " (via A2A agent: " + governDescription(agentName, agentName) + ")";
+
+            ToolSpecification spec = ToolSpecification.builder().name(toolName).description(description).parameters(paramSchema).build();
 
             toolSpecs.add(spec);
             executors.put(toolName, createA2AToolExecutor(agentUrl, config));
         }
+    }
+
+    /**
+     * Bounds and de-fangs a description read out of a remote Agent Card.
+     * <p>
+     * An Agent Card is authored by the remote peer and its {@code description} and
+     * per-skill descriptions land verbatim in the model's tool definitions —
+     * exactly the channel {@code McpToolProviderManager.governDescription} closes
+     * for MCP. The asymmetry was not a decision: A2A simply never got the guard, so
+     * a peer could ship a skill whose description was an instruction and reach the
+     * model with it, while the identical text from an MCP server was redacted.
+     */
+    private String governDescription(String description, String agentName) {
+        if (RemoteTextGovernor.containsDirective(description)) {
+            LOGGER.warnf("A2A agent '%s' had directive-shaped content in a description — redacted before prompting", sanitizeForLog(agentName));
+        }
+        if (description != null && description.length() > maxDescriptionChars) {
+            LOGGER.warnf("A2A agent '%s' supplied a %d-char description — truncated to %d", sanitizeForLog(agentName), description.length(),
+                    maxDescriptionChars);
+        }
+        return RemoteTextGovernor.govern(description, maxDescriptionChars);
+    }
+
+    /**
+     * Strips CR/LF from a remote-supplied value before it reaches a log line, so a
+     * peer cannot forge additional log entries.
+     */
+    private static String sanitizeForLog(String value) {
+        return value == null ? "null" : value.replaceAll("[\r\n]", "_");
     }
 
     @SuppressWarnings("unchecked")
@@ -205,7 +293,7 @@ public class A2AToolProviderManager {
             requestBuilder.header("Authorization", "Bearer " + apiKey);
         }
 
-        HttpResponse<String> response = httpClient.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString());
+        HttpResponse<String> response = httpClient().send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString());
 
         if (response.statusCode() != 200) {
             LOGGER.warnf("Agent Card fetch returned %d from %s", response.statusCode(), cardUrl);
@@ -275,7 +363,7 @@ public class A2AToolProviderManager {
             requestBuilder.header("Authorization", "Bearer " + apiKey);
         }
 
-        HttpResponse<String> response = httpClient.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString());
+        HttpResponse<String> response = httpClient().send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString());
 
         if (response.statusCode() != 200) {
             return "A2A agent returned HTTP " + response.statusCode();

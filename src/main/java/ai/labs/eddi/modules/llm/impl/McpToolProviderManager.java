@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.llm.impl;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.CallerIdentityResolver;
+import ai.labs.eddi.modules.llm.governance.RemoteTextGovernor;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import ai.labs.eddi.secrets.SecretResolver;
@@ -100,21 +101,6 @@ public class McpToolProviderManager {
 
     /** Default cap for a remote tool description before it reaches the model. */
     static final int DEFAULT_MAX_DESCRIPTION_CHARS = 1024;
-
-    /**
-     * Directive-shaped content that a remote MCP server must not be able to inject
-     * into the model's tool definitions (finding F16). Matched case-insensitively
-     * and replaced with {@code [redacted]} — the tool stays usable, the instruction
-     * does not survive.
-     */
-    private static final Pattern DIRECTIVE_PATTERN = Pattern.compile(
-            "(?i)(ignore\\s+(all\\s+|any\\s+)?(previous|prior|above|earlier)\\s+instructions?"
-                    + "|disregard\\s+(all\\s+|any\\s+)?(previous|prior|above|earlier)\\s+instructions?"
-                    + "|you\\s+are\\s+now\\s+"
-                    + "|system\\s*(prompt|message)\\s*[:=]"
-                    + "|</?(system|assistant|user)>"
-                    + "|\\[/?(INST|SYSTEM)\\]"
-                    + "|<\\|im_(start|end)\\|>)");
 
     // ----- Circuit breaker state -----
     /** Maximum failures within the window before the circuit opens. */
@@ -548,14 +534,7 @@ public class McpToolProviderManager {
      * resource bridge the easy way around a guard the tool path already has.
      */
     private static String governRemoteText(String text, int maxChars) {
-        if (text == null || text.isBlank()) {
-            return "";
-        }
-        String sanitized = DIRECTIVE_PATTERN.matcher(text).replaceAll("[redacted]");
-        if (sanitized.length() > maxChars) {
-            sanitized = sanitized.substring(0, maxChars) + " [\u2026truncated]";
-        }
-        return sanitized;
+        return RemoteTextGovernor.govern(text, maxChars);
     }
 
     /**
@@ -889,17 +868,16 @@ public class McpToolProviderManager {
             return spec;
         }
 
-        String sanitized = DIRECTIVE_PATTERN.matcher(description).replaceAll("[redacted]");
-        if (!sanitized.equals(description)) {
+        if (RemoteTextGovernor.containsDirective(description)) {
             LOGGER.warnf("MCP tool '%s' from server '%s' had directive-shaped content in its description — redacted before prompting",
                     sanitize(spec.name()), sanitize(serverName));
         }
-
-        if (sanitized.length() > maxDescriptionChars) {
+        if (description.length() > maxDescriptionChars) {
             LOGGER.warnf("MCP tool '%s' from server '%s' description is %d chars — truncated to %d",
-                    sanitize(spec.name()), sanitize(serverName), sanitized.length(), maxDescriptionChars);
-            sanitized = sanitized.substring(0, maxDescriptionChars) + " […truncated]";
+                    sanitize(spec.name()), sanitize(serverName), description.length(), maxDescriptionChars);
         }
+
+        String sanitized = RemoteTextGovernor.govern(description, maxDescriptionChars);
 
         if (sanitized.equals(description)) {
             return spec;

@@ -15,9 +15,10 @@ import java.util.logging.LogRecord;
  * buffer.
  *
  * <p>
- * This filter always returns {@code true} (it never suppresses logs). Its only
- * purpose is to tap into the logging workflow as a side effect, pushing each
- * record to the {@link BoundedLogStore#capture(LogRecord)} method for
+ * This filter always returns {@code true} (it never suppresses logs). It has
+ * two side effects: it redacts the record in place via
+ * {@link LogRecordRedactor}, so console output matches the ring buffer, and it
+ * pushes each record to {@link BoundedLogStore#capture(LogRecord)} for
  * ring-buffer storage and SSE streaming.
  * </p>
  *
@@ -65,6 +66,19 @@ public final class LogCaptureFilter implements Filter {
 
     @Override
     public boolean isLoggable(LogRecord record) {
+        // Redact BEFORE the console handler formats the record, not on a copy
+        // afterwards. Redacting on a copy is what left container stdout — the one
+        // destination an operator cannot revoke after the fact — carrying the
+        // credentials the ring buffer, the database and the SSE stream were all
+        // already stripped of.
+        try {
+            LogRecordRedactor.redactInPlace(record);
+        } catch (Exception _) {
+            // A redaction failure must never suppress or break a log line. The
+            // record is published unredacted rather than lost; BoundedLogStore
+            // still redacts its own copy below, so the ring buffer stays clean.
+        }
+
         BoundedLogStore store = staticStore;
         if (store != null) {
             try {

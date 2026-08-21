@@ -7,6 +7,163 @@
 
 
 
+## feat(security): close the outbound exposure gap — Phase 0 of the SaaS connectors plan (2026-08-21)
+
+**Repo:** EDDI (`feat/outbound-hardening`)
+
+Phase 0 of [`planning/saas-connectors-plan.md`](../planning/saas-connectors-plan.md). Nothing here is
+connector work: these are the eight preconditions the plan lists, and the reason it sequences them
+first is that connectors multiply the blast radius of defects that already exist. Storing per-user
+Google refresh tokens behind an admin API that ships unauthenticated is the outcome this ordering
+exists to prevent.
+
+### 0.1 + 0.8 — `HighValueSurfaceGuard`
+
+`AuthStartupGuard` already refuses an unauthenticated production boot, but its escape hatch
+(`EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true`) is set by **every** shipped compose file, the k8s
+manifests and the CI smoke test — so in practice it never fires. That is tolerable for the
+conversation API and not for the two surfaces that matter most:
+
+* `/mcp` exposes agent CRUD, conversation history, user memories and audit trails as tools;
+* `/secretstore` writes the vault, rotates the DEK and offers a reset.
+
+Both are `@RolesAllowed`-protected and both of those checks are **no-ops** when
+`DisabledAuthController.isAuthorizationEnabled()` returns false — which is the shipped default. So
+each surface now needs its own, narrower opt-in: `eddi.mcp.allow-unauthenticated` and
+`eddi.secretstore.allow-unauthenticated`. Production boot fails while either is false and
+`authorization.enabled` is false. Dev and test are exempt, matching `AuthStartupGuard`.
+
+Named `HighValueSurfaceGuard`, not `McpStartupGuard` as the plan drafted it: 0.8 folds
+`/secretstore` into the same guard, and a class called "Mcp…" that also refuses to boot over the
+credential store is a name that lies. Both surfaces additionally get an explicit
+`quarkus.http.auth.permission.*` policy, so their protection no longer depends on the catch-all.
+
+The shipped compose files, `.env.example`, the CI smoke test and the two container ITs set the new
+flags, so nothing that boots today stops booting. An operator upgrading a hand-rolled deployment
+gets a startup failure naming the exact env var — which is the point.
+
+### 0.2 — credentials out of query strings
+
+`GET /mcpcallsstore/mcpcalls/discover-tools?apiKey=` and
+`GET /apicallstore/apicalls/discover-endpoints?apiAuth=` both took a live credential in the URL, where
+ingress, any reverse proxy, access logs, browser history and APM traces all record it *before* any
+EDDI code runs. The second additionally **echoed it back**: `apiAuth` was written into the
+`Authorization` header of every generated ApiCall, and those calls are the response body.
+
+Both are now `POST`. They are deliberately **not** symmetric, because the two need the credential for
+different reasons:
+
+* MCP discovery genuinely dials the server, so the key travels in an `X-Mcp-Authorization` header —
+  the `X-Source-Authorization` pattern `IRestImportService` already uses — and never appears in the
+  response.
+* OpenAPI discovery never authenticates anything; the pasted value existed only to be templated into
+  the generated configs. So it is replaced by `authHeaderRef`, which is validated to be a
+  `${vault:…}`, `${vars:…}` or `${caller:…}` **reference**. A literal is rejected with a 400 that
+  names `POST /secretstore/secrets`. No credential is transmitted at all, and none can be echoed.
+
+The `GET` forms survive for genuinely public specs and servers, deprecated, with the credential
+parameter **removed from the contract** — and they now 400 when one is present anyway. The plan's
+first draft kept the parameter for one release "rejecting a non-empty value", which does not remove
+the leak: by the time a handler rejects it, the value has already been through every hop. Rejecting a
+*stray* parameter is a migration signal, not the fix.
+
+### 0.3 — console output is redacted, not just the ring buffer
+
+Redaction happened on a **copy**, inside `BoundedLogStore.capture()`. The ring buffer, the database
+and the SSE stream were clean; container stdout — the one destination an operator cannot revoke after
+the fact, and the one a log shipper forwards verbatim — was not.
+
+`LogCaptureFilter` now redacts the record **in place**, before the console handler formats it. Two
+details are load-bearing:
+
+* Parameters are resolved first. A secret is far more often a `%s` argument
+  (`LOGGER.warnf("connecting to %s", url)`) than part of a format string, so redacting
+  `getMessage()` alone would miss the case that matters. The formatted text replaces the message and
+  the parameters are dropped, with `FormatStyle.NO_FORMAT` so a stray `%` in the redacted text is not
+  re-read as a conversion.
+* A throwable's message is `final`, so redacting it means substituting the object. `RedactedThrowable`
+  reports the **original** type name from `toString()` and carries the original stack trace, so the
+  printed line still reads `java.net.ConnectException: …` without the credential the URL in it
+  carried. Cause chains are walked with an identity set, so a cyclic chain cannot turn one log line
+  into a stack overflow. A clean throwable is not substituted at all.
+
+### 0.4 — outbound failures report a type, not a message
+
+`RestMcpCallsStore` returned `e.getMessage()` to the HTTP caller. The message from a failed outbound
+connection routinely contains the resolved URL, and a URL with a templated credential in it *is* the
+credential. The caller now learns the exception class; the full throwable still reaches the log, which
+is where an operator debugging a bad URL should be looking. Same discipline `HttpCallToolsProvider`
+already applies.
+
+### 0.5 — three export holes in `SecretScrubber`
+
+Each had a separate cause, so each has its own test:
+
+1. **Arrays were never examined.** `scrubNode` recursed into an array and handed each element back to
+   itself with the *parent's* field name — into a branch that handles only objects and arrays. Every
+   string inside every array was exported verbatim. Plurals are now folded too, or `apiKeys` (which
+   is in no name set and matches no suffix) would still have slipped through the fix aimed at it.
+2. **Unconventional header names.** `X-Api-Token` normalizes to `xapitoken`, in no set, so it fell to
+   the entropy heuristic — which requires a *whole-string* match, so `Bearer abc…` with its space
+   never matched either. Now: a name ending in token/secret/password/credential(s)/authorization is a
+   credential anywhere, and inside a header map an `x-`-prefixed name or one ending in `key` is too.
+   The `key` rule is scoped to header maps on purpose; applied globally it would redact `publicKey`
+   and break the export → import round trip.
+3. **URL-embedded credentials.** `https://user:pass@host` and `?api_key=…` defeat a whole-string
+   pattern by construction. These now go through the URI rules, which redact the credential **segment**
+   and leave the host and path legible — an exported config whose target host has become a
+   placeholder is neither reviewable nor importable.
+
+Hole 3 needed `RequestRedactor.redactUri`, and `RequestRedactor` already imports from `secrets` — so
+having `secrets` import it back would have made the two packages mutually dependent. The URI rules
+moved to `secrets.sanitize.UriRedactor` and `RequestRedactor` delegates, keeping the single definition
+its own class comment insists on. While there: the **password half of a userinfo component is now
+replaced outright** rather than shape-scanned. A shape scan only catches credentials that look like
+one, so `https://svc:hunter2@host` survived a scan doing exactly what it was asked. In `user:pass@host`
+the second half is a credential by definition, so there is no false positive to trade away; a bare
+`user@host` is only a username and stays legible.
+
+### 0.6 — A2A descriptions are governed like MCP ones
+
+An Agent Card is authored by the remote peer, and its `description` and per-skill descriptions landed
+verbatim in the model's tool definitions. `governDescription` — the guard that closes exactly this on
+the MCP side — was private to `McpToolProviderManager`, which is why A2A never got it: adding it meant
+duplicating a regex that will be amended over time.
+
+`RemoteTextGovernor` now owns the rule; both managers use it. The provenance suffix
+(`(via A2A agent: …)`) is appended **after** governance, so a peer cannot ship a skill description
+ending in that string and claim to come from somewhere it does not.
+
+`A2AToolProviderManager` also builds its `HttpClient` lazily now. It is `@ApplicationScoped`, so an
+eager client meant every boot created an HTTP client and its selector thread whether or not a single
+A2A peer was configured — and it made the class impossible to construct where a selector cannot be
+opened, which is every unit test in a sandboxed environment. That was blocking a behavioural test for
+this very fix; deferring it fixed twenty pre-existing local test errors as a side effect.
+
+### 0.7 — deferred, deliberately
+
+The SSRF-protection default stays `false`. The plan is explicit that this needs a product decision
+rather than a silent flip — the comment at `application.properties` documents the `false` as intent
+("preserve calls to internal/private APIs in self-hosted deployments"), and flipping it breaks every
+self-hosted agent that calls an internal API. The proposed resolution — have
+`eddi.connections.enabled=true` force it on, since a connection targets a third party by definition —
+lands with the connections work, where that flag exists. **Sign-off still required.**
+
+### Tests
+
+`HighValueSurfaceGuardTest` asserts each opt-out individually; a guard that only passes because both
+were set together would let the realistic single-surface misconfiguration boot silently.
+`LogRecordRedactorTest` asserts on the text a console handler would print, because "the console saw
+something the ring buffer did not" is precisely the defect. `SecretScrubberTest` gains one test per
+hole plus two negative tests pinning that the aggressive rules do not leak outside their scope.
+`A2ADescriptionGovernanceTest` plants a card in the manager's own cache, so it exercises governance
+with no socket, no fixture server and no timing.
+
+
+---
+
+
+
 ## chore(ci): persist the project metrics series instead of letting it expire (2026-08-21)
 
 **Repo:** EDDI (`chore/persist-repo-metrics-history`)

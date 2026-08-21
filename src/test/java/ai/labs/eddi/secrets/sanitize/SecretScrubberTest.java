@@ -252,4 +252,83 @@ class SecretScrubberTest {
         assertTrue(scrubbed.contains("\"someConfig\":\"" + credential + "\""),
                 "redaction must be driven by the field name, not applied blanket: " + scrubbed);
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // The three documented export holes. Each is asserted separately: they have
+    // separate causes, and one fix passing does not imply the others.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("hole 1 — a credential inside a JSON array is scrubbed")
+    void scrubJson_secretInsideAnArray() {
+        // Arrays used to be walked with the PARENT's field name into a branch that
+        // handles only objects and arrays, so no string element was ever examined.
+        String credential = "aaaaaaaaaaaaaaaaaaaa";
+        String json = String.format("{\"apiKeys\": [\"%s\"], \"actions\": [\"greet\"]}", credential);
+
+        String scrubbed = scrubber.scrubJson(json);
+
+        assertFalse(scrubbed.contains(credential), "a secret inside an array must not survive export: " + scrubbed);
+        assertTrue(scrubbed.contains("greet"), "a structural array must stay intact: " + scrubbed);
+    }
+
+    @Test
+    @DisplayName("hole 1b — a nested object inside an array is still walked")
+    void scrubJson_objectInsideAnArrayStillWalked() {
+        String json = "{\"servers\": [{\"name\": \"jira\", \"apiKey\": \"aaaaaaaaaaaaaaaaaaaa\"}]}";
+
+        String scrubbed = scrubber.scrubJson(json);
+
+        assertFalse(scrubbed.contains("aaaaaaaaaaaaaaaaaaaa"));
+        assertTrue(scrubbed.contains("jira"));
+    }
+
+    @Test
+    @DisplayName("hole 2 — an unconventionally named header is scrubbed")
+    void scrubJson_unconventionalHeaderName() {
+        // "X-Api-Token" normalizes to xapitoken, which is in no name set, and
+        // "Bearer <value>" contains a space so the whole-string entropy pattern
+        // never matched it either.
+        String json = "{\"headers\": {\"X-Api-Token\": \"Bearer aaaaaaaaaaaaaaaaaaaa\", \"Accept\": \"application/json\"}}";
+
+        String scrubbed = scrubber.scrubJson(json);
+
+        assertFalse(scrubbed.contains("aaaaaaaaaaaaaaaaaaaa"), "an Authorization-equivalent header must be redacted: " + scrubbed);
+        assertTrue(scrubbed.contains("application/json"), "a benign header must survive: " + scrubbed);
+    }
+
+    @Test
+    @DisplayName("hole 2b — the header rule does not leak into ordinary config fields")
+    void scrubJson_headerRuleIsScopedToHeaderMaps() {
+        // endsWith("key") is aggressive on purpose and is therefore confined to
+        // header maps. Outside one it must not fire, or export stops round-tripping.
+        // Deliberately zero-entropy, so the pre-existing entropy heuristic cannot
+        // decide the outcome and the header-scoping rule is what is under test.
+        String json = "{\"config\": {\"publicKey\": \"aaaaaaaaaaaaaaaaaaaa\"}}";
+
+        String scrubbed = scrubber.scrubJson(json);
+
+        assertTrue(scrubbed.contains("aaaaaaaaaaaaaaaaaaaa"), "a structural identifier outside a header map must survive: " + scrubbed);
+    }
+
+    @Test
+    @DisplayName("hole 3 — credentials embedded in a URL are scrubbed, the host is not")
+    void scrubJson_credentialsInsideAUrl() {
+        String json = "{\"targetServerUrl\": \"https://user:aaaaaaaaaaaaaaaaaaaa@api.example.com/v1\","
+                + " \"specUrl\": \"https://api.example.com/v1?api_key=aaaaaaaaaaaaaaaaaaaa\"}";
+
+        String scrubbed = scrubber.scrubJson(json);
+
+        assertFalse(scrubbed.contains("aaaaaaaaaaaaaaaaaaaa"), "neither userinfo nor a query credential may survive: " + scrubbed);
+        assertTrue(scrubbed.contains("api.example.com"), "the target host must stay legible — a config whose host is a placeholder is "
+                + "neither reviewable nor importable: " + scrubbed);
+    }
+
+    @Test
+    @DisplayName("a clean URL is left exactly as it was")
+    void scrubJson_cleanUrlUntouched() {
+        String json = "{\"targetServerUrl\": \"https://api.example.com/v1/pets\"}";
+
+        assertTrue(scrubber.scrubJson(json).contains("https://api.example.com/v1/pets"));
+    }
 }

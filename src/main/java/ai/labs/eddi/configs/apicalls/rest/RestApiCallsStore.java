@@ -8,14 +8,17 @@ import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.apicalls.IApiCallsStore;
 import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
+import ai.labs.eddi.configs.apicalls.model.ApiEndpointDiscoveryRequest;
 import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.engine.mcp.McpApiToolBuilder;
+import ai.labs.eddi.modules.apicalls.impl.RequestRedactor;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.UriInfo;
 import org.jboss.logging.Logger;
 
 import java.util.LinkedHashMap;
@@ -83,18 +86,48 @@ public class RestApiCallsStore implements IRestApiCallsStore {
         return restVersionInfo.create(httpCallsConfiguration);
     }
 
+    /**
+     * Values accepted in {@code authHeaderRef} — every one of them a reference the
+     * engine resolves at call time, never a credential at rest.
+     */
+    private static final List<String> ALLOWED_AUTH_REFERENCE_PREFIXES = List.of("${vault:", "${eddivault:", "${vars:", "${caller:");
+
     @Override
-    public Response discoverEndpoints(String specUrl, String apiBaseUrl, String apiAuth) {
+    public Response discoverEndpoints(ApiEndpointDiscoveryRequest request) {
+        if (request == null) {
+            return badRequest("a request body with a 'specUrl' is required");
+        }
+
+        String authHeaderRef = trimToNull(request.authHeaderRef());
+        if (authHeaderRef != null && !isReference(authHeaderRef)) {
+            return badRequest("authHeaderRef must be a ${vault:…}, ${vars:…} or ${caller:…} reference, not a literal credential. "
+                    + "Store the key with POST /secretstore/secrets and reference it here.");
+        }
+
+        return discover(request.specUrl(), request.apiBaseUrl(), authHeaderRef);
+    }
+
+    @Override
+    public Response discoverEndpointsUnauthenticated(String specUrl, String apiBaseUrl, UriInfo uriInfo) {
+        String strayCredential = findCredentialQueryParam(uriInfo);
+        if (strayCredential != null) {
+            return badRequest("'" + strayCredential + "' is no longer accepted as a query parameter — a credential in a URL is logged by every "
+                    + "hop before EDDI sees it, and was previously echoed back inside every generated call. Use "
+                    + "POST /apicallstore/apicalls/discover-endpoints with a vault reference in authHeaderRef instead.");
+        }
+        return discover(specUrl, apiBaseUrl, null);
+    }
+
+    private Response discover(String specUrl, String apiBaseUrl, String authHeaderRef) {
         if (specUrl == null || specUrl.isBlank()) {
-            return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", "specUrl query parameter is required")).build();
+            return badRequest("specUrl is required");
         }
         try {
             LOGGER.infof("Discovering API endpoints from OpenAPI spec at '%s'", specUrl);
 
-            String effectiveBaseUrl = (apiBaseUrl != null && !apiBaseUrl.isBlank()) ? apiBaseUrl : null;
-            String effectiveAuth = (apiAuth != null && !apiAuth.isBlank()) ? apiAuth : null;
+            String effectiveBaseUrl = trimToNull(apiBaseUrl);
 
-            McpApiToolBuilder.ApiBuildResult result = McpApiToolBuilder.parseAndBuild(specUrl, null, effectiveBaseUrl, effectiveAuth);
+            McpApiToolBuilder.ApiBuildResult result = McpApiToolBuilder.parseAndBuild(specUrl, null, effectiveBaseUrl, authHeaderRef);
 
             if (result.configsByGroup().isEmpty()) {
                 return Response.ok(Map.of("title", "API", "baseUrl", "", "endpointCount", 0, "groups", Map.of())).build();
@@ -112,12 +145,38 @@ public class RestApiCallsStore implements IRestApiCallsStore {
             return Response.ok(response).build();
         } catch (IllegalArgumentException e) {
             LOGGER.warnf(e, "Failed to parse OpenAPI spec from '%s'", specUrl);
-            return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", e.getMessage())).build();
+            return badRequest(e.getMessage());
         } catch (Exception e) {
             LOGGER.errorf(e, "Unexpected error discovering endpoints from '%s'", specUrl);
-            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(Map.of("error", "Failed to discover endpoints: " + e.getMessage()))
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
+                    .entity(Map.of("error", "Failed to discover endpoints (" + e.getClass().getSimpleName() + ") — see server logs for details"))
                     .build();
         }
+    }
+
+    private static boolean isReference(String value) {
+        return ALLOWED_AUTH_REFERENCE_PREFIXES.stream().anyMatch(value::startsWith);
+    }
+
+    private static String trimToNull(String value) {
+        return (value == null || value.isBlank()) ? null : value.trim();
+    }
+
+    /** Names a credential-bearing query parameter if the caller sent one. */
+    private static String findCredentialQueryParam(UriInfo uriInfo) {
+        if (uriInfo == null) {
+            return null;
+        }
+        for (String name : uriInfo.getQueryParameters().keySet()) {
+            if (RequestRedactor.isSensitiveHeaderName(name)) {
+                return name;
+            }
+        }
+        return null;
+    }
+
+    private static Response badRequest(String message) {
+        return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", message)).build();
     }
 
     @Override
