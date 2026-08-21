@@ -21,9 +21,11 @@ traffic, pushes them to GA4 and Umami, and posts digests to Slack. Everything it
 current totals plus digest baselines. The workflow uploads no artifact. So the only historical record
 was the incidental one — every run echoes its numbers into the job log — and job logs expire.
 
-Confirmed the horizon empirically rather than trusting the documented default: runs from 2026-05-22
-back return `HTTP 410 Gone`, 2026-05-23 forward return `200`. Exactly 90 days. Recovered what was
-still reachable (2,295 of 2,400 retained runs, 2026-05-22 → 08-20) before it ages out.
+Confirmed the horizon empirically rather than trusting the documented default. The boundary fell
+*mid-day* on 2026-05-22: runs up to 22:56 UTC that day return `HTTP 410 Gone`, every run after it
+returns `200` — exactly 90 days, rolling, to the hour. Recovered what was still reachable (2,295 of
+2,400 retained runs, 2026-05-22 22:56 → 08-20) before it ages out. The per-day series derived from it
+starts 2026-05-23, since 05-22 survives only as a partial day.
 
 ### What changed
 

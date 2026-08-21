@@ -569,12 +569,21 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Never commit a half-empty row: without pulls and stars the entry
-          # is worse than absent, because a gap is visible and a blank is not.
-          if [ -z "${PULLS:-}" ] || [ -z "${STARS:-}" ]; then
-            echo "::warning::Incomplete metrics (pulls='${PULLS:-}' stars='${STARS:-}') — skipping persist"
-            exit 0
-          fi
+          # Never commit a malformed row: a gap is visible, a bad value is not.
+          # Must test for digits, not just non-emptiness — the upstream steps
+          # read these with `jq '.pull_count'` etc., and jq prints the literal
+          # `null` when a field is missing from an otherwise-200 response.
+          # `null` is non-empty, so an emptiness check would let it through and
+          # the roster arithmetic below would then abort on it.
+          for name in PULLS STARS FORKS VIEWS UNIQUES CLONES; do
+            value="${!name:-}"
+            case "$value" in
+              ''|*[!0-9]*)
+                echo "::warning::Metric ${name} is not a number ('${value}') — skipping persist"
+                exit 0
+                ;;
+            esac
+          done
 
           rm -rf hist && mkdir hist && cd hist
           git init -q
@@ -597,6 +606,15 @@ jobs:
           mkdir -p data
           HEADER="date,docker_pulls,stars,forks,views_14d,uniques_14d,clones_14d"
           [ -f data/metrics.csv ] || echo "$HEADER" > data/metrics.csv
+
+          # `>>` writes at the current end of file, so a missing trailing
+          # newline would splice today's row onto the previous one and corrupt
+          # both. Only reachable after a hand edit or a truncated push, but
+          # this branch is the only durable copy — cheap to prevent, costly to
+          # repair.
+          if [ -s data/metrics.csv ] && [ -n "$(tail -c1 data/metrics.csv)" ]; then
+            echo >> data/metrics.csv
+          fi
 
           TODAY=$(date -u +%F)
           if grep -q "^${TODAY}," data/metrics.csv; then
@@ -650,6 +668,27 @@ jobs:
             file is the only record of who unstarred and when:
 
                 git log -p metrics -- data/stargazers.csv
+
+          ## Data retention
+
+          `data/stargazers.csv` contains GitHub logins and star timestamps.
+          Both are public — the same values the stargazers API returns to any
+          caller — but the commit history of this file is not: it reconstructs
+          *departures*, which GitHub deliberately does not publish. Treat it as
+          a per-person record, not as incidental public data.
+
+          - **Purpose:** understanding project health — whether lost stars are
+            brief visitors or long-term followers.
+          - **Retention:** kept for the life of the branch. Snapshots are not
+            pruned, because the history *is* the dataset.
+          - **Removal:** to erase an individual, rewrite the branch (it has no
+            dependants and nothing builds from it):
+            `git filter-repo --path data/stargazers.csv --invert-paths` on a
+            clone of `metrics`, then force-push that branch only. To stop
+            collection entirely, delete the roster block from the
+            `Persist metrics history` step in
+            `.github/workflows/docker-pull-notify.yml`; `data/metrics.csv` is
+            aggregate-only and unaffected.
           MD
           fi
 
