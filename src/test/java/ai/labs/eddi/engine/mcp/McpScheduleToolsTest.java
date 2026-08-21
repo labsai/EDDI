@@ -27,6 +27,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
+import ai.labs.eddi.configs.rest.StrictConfigurationParser;
 
 /**
  * Unit tests for MCP schedule tools (create, list, read, fire, delete, retry).
@@ -57,7 +58,8 @@ class McpScheduleToolsTest {
         });
         when(pollerService.getInstanceId()).thenReturn("test-instance");
 
-        tools = new McpAdminTools(restInterfaceFactory, mock(IRestAgentAdministration.class), jsonSerialization, scheduleStore, fireExecutor,
+        tools = new McpAdminTools(restInterfaceFactory, mock(IRestAgentAdministration.class), jsonSerialization,
+                mock(StrictConfigurationParser.class), scheduleStore, fireExecutor,
                 pollerService, mock(SecurityIdentity.class), false);
     }
 

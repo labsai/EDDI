@@ -135,7 +135,7 @@ public class McpConversationTools {
             return jsonSerialization.serialize(statuses);
         } catch (Exception e) {
             LOGGER.error("MCP list_agents failed", e);
-            return errorJson("Failed to list agents: " + e.getMessage());
+            return errorJson("Failed to list agents", e);
         }
     }
 
@@ -151,7 +151,7 @@ public class McpConversationTools {
             return jsonSerialization.serialize(descriptors);
         } catch (Exception e) {
             LOGGER.error("MCP list_agent_configs failed", e);
-            return errorJson("Failed to list Agent configs: " + e.getMessage());
+            return errorJson("Failed to list Agent configs", e);
         }
     }
 
@@ -175,7 +175,7 @@ public class McpConversationTools {
                     result.conversationUri().toString(), "agentId", agentId, "environment", env.name()));
         } catch (Exception e) {
             LOGGER.error("MCP create_conversation failed for Agent " + agentId, e);
-            return errorJson("Failed to create conversation: " + e.getMessage());
+            return errorJson("Failed to create conversation", e);
         }
     }
 
@@ -225,7 +225,7 @@ public class McpConversationTools {
             return skippedResultJson(conversationId, e.state());
         } catch (Exception e) {
             LOGGER.error("MCP talk_to_agent failed for Agent " + agentId + " conversation " + conversationId, e);
-            return errorJson("Failed to talk to agent: " + e.getMessage());
+            return errorJson("Failed to talk to agent", e);
         }
     }
 
@@ -292,7 +292,7 @@ public class McpConversationTools {
             return skippedResultJson(convId, e.state());
         } catch (Exception e) {
             LOGGER.error("MCP chat_with_agent failed for Agent " + agentId, e);
-            return errorJson("Failed to chat with agent: " + e.getMessage());
+            return errorJson("Failed to chat with agent", e);
         }
     }
 
@@ -352,7 +352,7 @@ public class McpConversationTools {
             return accessDenied("read_conversation", conversationId);
         } catch (Exception e) {
             LOGGER.error("MCP read_conversation failed for conversation " + conversationId, e);
-            return errorJson("Failed to read conversation: " + e.getMessage());
+            return errorJson("Failed to read conversation", e);
         }
     }
 
@@ -371,7 +371,7 @@ public class McpConversationTools {
             return accessDenied("read_conversation_log", conversationId);
         } catch (Exception e) {
             LOGGER.error("MCP read_conversation_log failed for conversation " + conversationId, e);
-            return errorJson("Failed to read conversation log: " + e.getMessage());
+            return errorJson("Failed to read conversation log", e);
         }
     }
 
@@ -404,7 +404,7 @@ public class McpConversationTools {
             try {
                 convStore = restInterfaceFactory.get(IRestConversationStore.class);
             } catch (RestInterfaceFactory.RestInterfaceFactoryException e) {
-                return errorJson("Failed to get conversation store: " + e.getMessage());
+                return errorJson("Failed to get conversation store", e);
             }
 
             // Ownership filtering is enforced by the conversation store itself:
@@ -424,7 +424,7 @@ public class McpConversationTools {
             return jsonSerialization.serialize(result);
         } catch (Exception e) {
             LOGGER.error("MCP list_conversations failed for Agent " + agentId, e);
-            return errorJson("Failed to list conversations: " + e.getMessage());
+            return errorJson("Failed to list conversations", e);
         }
     }
 
@@ -460,7 +460,7 @@ public class McpConversationTools {
             return jsonSerialization.serialize(result);
         } catch (Exception e) {
             LOGGER.error("MCP get_agent failed for Agent " + agentId, e);
-            return errorJson("Failed to get agent: " + e.getMessage());
+            return errorJson("Failed to get agent", e);
         }
     }
 
@@ -518,7 +518,7 @@ public class McpConversationTools {
             return accessDenied("read_agent_logs", conversationId);
         } catch (Exception e) {
             LOGGER.error("MCP read_agent_logs failed", e);
-            return errorJson("Failed to read Agent logs: " + e.getMessage());
+            return errorJson("Failed to read Agent logs", e);
         }
     }
 
@@ -548,7 +548,7 @@ public class McpConversationTools {
             return accessDenied("read_audit_trail", conversationId);
         } catch (Exception e) {
             LOGGER.error("MCP read_audit_trail failed for conversation " + conversationId, e);
-            return errorJson("Failed to read audit trail: " + e.getMessage());
+            return errorJson("Failed to read audit trail", e);
         }
     }
 
@@ -613,7 +613,7 @@ public class McpConversationTools {
             return jsonSerialization.serialize(result);
         } catch (Exception e) {
             LOGGER.error("MCP discover_agents failed", e);
-            return errorJson("Failed to discover agents: " + e.getMessage());
+            return errorJson("Failed to discover agents", e);
         }
     }
 
@@ -692,7 +692,7 @@ public class McpConversationTools {
             return errorJson("Access denied: you do not own this managed conversation");
         } catch (Exception e) {
             LOGGER.errorv("MCP chat_managed failed for intent={0}, userId={1}: {2}", intent, userId, e.getMessage());
-            return errorJson("Failed to chat via managed agent: " + e.getMessage());
+            return errorJson("Failed to chat via managed agent", e);
         }
     }
 

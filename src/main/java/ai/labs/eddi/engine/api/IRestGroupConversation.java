@@ -119,7 +119,9 @@ public interface IRestGroupConversation {
 
     @DELETE
     @Path("/{groupId}/conversations/{groupConversationId}")
-    @Operation(summary = "Delete a group conversation", description = "Deletes a group conversation and its member conversations.")
+    @Operation(summary = "Delete a group conversation", description = "Deletes the group conversation, its shared "
+            + "artifacts and any ephemeral agents created for it. The members' own conversations are ENDED, not "
+            + "deleted, and stay readable afterwards.")
     @APIResponse(responseCode = "200", description = "Group conversation deleted.")
     @APIResponse(responseCode = "404", description = "Group conversation not found.")
     @APIResponse(responseCode = "409", description = "Another operation (follow-up / continue / close) is in progress — retry.")

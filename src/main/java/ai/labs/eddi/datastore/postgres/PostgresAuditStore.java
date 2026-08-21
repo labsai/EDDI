@@ -49,6 +49,7 @@ public class PostgresAuditStore implements IAuditStore {
                 duration_ms BIGINT NOT NULL,
                 cost DOUBLE PRECISION NOT NULL DEFAULT 0,
                 hmac TEXT,
+                agent_signature TEXT,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 sequence BIGINT NOT NULL DEFAULT -1,
                 data JSONB NOT NULL
@@ -65,6 +66,19 @@ public class PostgresAuditStore implements IAuditStore {
      */
     private static final String ADD_SEQUENCE_COLUMN = "ALTER TABLE audit_ledger ADD COLUMN IF NOT EXISTS sequence BIGINT NOT NULL DEFAULT -1";
 
+    /**
+     * Adds {@code agent_signature} to ledgers created before it existed.
+     * <p>
+     * {@code eddi.audit.agent-signing-enabled} defaults to true and the Ed25519
+     * signature was duly computed for every entry — but this backend had no column
+     * to put it in and its row-mapper hard-coded {@code null}, so the signature was
+     * discarded on write and read back absent. The second, non-repudiation half of
+     * the ledger's integrity story was silently inert on PostgreSQL while MongoDB
+     * deployments had it. Nullable, because rows written before this column existed
+     * genuinely have no signature to record.
+     */
+    private static final String ADD_AGENT_SIGNATURE_COLUMN = "ALTER TABLE audit_ledger ADD COLUMN IF NOT EXISTS agent_signature TEXT";
+
     private static final String CREATE_INDEX_CONV = "CREATE INDEX IF NOT EXISTS idx_audit_conv ON audit_ledger (conversation_id)";
     /** Chain verification reads a conversation's entries in sequence order. */
     private static final String CREATE_INDEX_CONV_SEQ = "CREATE INDEX IF NOT EXISTS idx_audit_conv_seq ON audit_ledger (conversation_id, sequence)";
@@ -75,14 +89,15 @@ public class PostgresAuditStore implements IAuditStore {
     private static final String INSERT_SQL = """
             INSERT INTO audit_ledger
                 (id, conversation_id, AGENT_ID, AGENT_VERSION, user_id, environment,
-                 step_index, task_id, task_type, task_index, duration_ms, cost, hmac, created_at, data, sequence)
-            VALUES (?::uuid, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?)
+                 step_index, task_id, task_type, task_index, duration_ms, cost, hmac, created_at, data, sequence,
+                 agent_signature)
+            VALUES (?::uuid, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?)
             """;
 
     private static final String SELECT_ALL = """
             id, conversation_id, AGENT_ID, AGENT_VERSION, user_id, environment,
             step_index, task_id, task_type, task_index, duration_ms, cost, hmac, created_at, data,
-            sequence
+            sequence, agent_signature
             """;
 
     private final Instance<DataSource> dataSourceInstance;
@@ -100,7 +115,8 @@ public class PostgresAuditStore implements IAuditStore {
             return;
         try (Connection conn = dataSourceInstance.get().getConnection(); Statement stmt = conn.createStatement()) {
             stmt.execute(CREATE_TABLE);
-            stmt.execute(ADD_SEQUENCE_COLUMN); // idempotent upgrade for pre-existing ledgers
+            stmt.execute(ADD_SEQUENCE_COLUMN); // idempotent upgrades for pre-existing ledgers
+            stmt.execute(ADD_AGENT_SIGNATURE_COLUMN);
             stmt.execute(CREATE_INDEX_CONV);
             stmt.execute(CREATE_INDEX_CONV_SEQ);
             stmt.execute(CREATE_INDEX_AGENT);
@@ -221,6 +237,7 @@ public class PostgresAuditStore implements IAuditStore {
         ps.setTimestamp(14, entry.timestamp() != null ? Timestamp.from(entry.timestamp()) : Timestamp.from(Instant.now()));
         ps.setString(15, jsonSerialization.serialize(data));
         ps.setLong(16, entry.sequence());
+        ps.setString(17, entry.agentSignature());
     }
 
     private List<AuditEntry> queryEntries(String sql, String param, int limit, int skip) {
@@ -254,7 +271,7 @@ public class PostgresAuditStore implements IAuditStore {
                 rs.getInt("task_index"), rs.getLong("duration_ms"), (Map<String, Object>) data.get("input"), (Map<String, Object>) data.get("output"),
                 (Map<String, Object>) data.get("llmDetail"), (Map<String, Object>) data.get("toolCalls"),
                 data.get("actions") instanceof List<?> list ? (List<String>) list : null, rs.getDouble("cost"), ts != null ? ts.toInstant() : null,
-                rs.getString("hmac"), null, rs.getLong("sequence"));
+                rs.getString("hmac"), rs.getString("agent_signature"), rs.getLong("sequence"));
     }
     /**
      * PostgreSQL persists the per-conversation sequence, so the chain continuity

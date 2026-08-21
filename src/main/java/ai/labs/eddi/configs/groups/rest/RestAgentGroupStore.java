@@ -96,7 +96,7 @@ public class RestAgentGroupStore implements IRestAgentGroupStore {
 
     @Override
     public List<DocumentDescriptor> readGroupDescriptors(String filter, Integer index, Integer limit) {
-        return restVersionInfo.readDescriptors("ai.labs.group", filter, index, limit);
+        return restVersionInfo.readDescriptors(filter, index, limit);
     }
 
     @Override

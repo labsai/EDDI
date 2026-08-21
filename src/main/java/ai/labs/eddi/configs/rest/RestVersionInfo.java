@@ -31,6 +31,17 @@ public class RestVersionInfo<T> implements IRestVersionInfo {
         this.documentDescriptorStore = documentDescriptorStore;
     }
 
+    /**
+     * The descriptors of the resources <em>this</em> store owns.
+     * <p>
+     * Prefer this over {@link #readDescriptors(String, String, Integer, Integer)}:
+     * the descriptor type is derived from the store's own {@code resourceURI}, so a
+     * listing can never silently query a namespace the store does not write to.
+     */
+    public List<DocumentDescriptor> readDescriptors(String filter, Integer index, Integer limit) {
+        return readDescriptors(RestUtilities.extractDescriptorType(resourceURI), filter, index, limit);
+    }
+
     public List<DocumentDescriptor> readDescriptors(String type, String filter, Integer index, Integer limit) {
         try {
             return documentDescriptorStore.readDescriptors(type, filter, index, limit, false);

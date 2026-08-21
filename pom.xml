@@ -164,6 +164,18 @@
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-cache</artifactId>
         </dependency>
+        <!-- Caffeine is used DIRECTLY (Caffeine.newBuilder()) by ten classes — the
+             cache factory, the prompt-snippet and global-variable caches, the model
+             registries, and the tool-assembly warning cache. It arrives transitively
+             via quarkus-cache -> quarkus-caffeine, so the build works today by
+             accident: a Quarkus upgrade that reshapes that extension's own
+             dependencies would break compilation in classes that never mention
+             Quarkus. Declared explicitly, version left to the Quarkus BOM so it
+             cannot drift from the one the extension expects. -->
+        <dependency>
+            <groupId>com.github.ben-manes.caffeine</groupId>
+            <artifactId>caffeine</artifactId>
+        </dependency>
         <!-- Bean Validation (Jakarta Validation / Hibernate Validator). Enables
              declarative constraints on JAX-RS request bodies so an invalid body is
              rejected at the boundary with a field-level 400 instead of being carried

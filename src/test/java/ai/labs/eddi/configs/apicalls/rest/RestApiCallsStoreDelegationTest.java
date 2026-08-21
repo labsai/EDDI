@@ -73,7 +73,7 @@ class RestApiCallsStoreDelegationTest {
         void delegatesCorrectly() throws Exception {
             List<DocumentDescriptor> expected = List.of(new DocumentDescriptor());
             doReturn(expected).when(documentDescriptorStore)
-                    .readDescriptors("ai.labs.httpcalls", "myFilter", 0, 10, false);
+                    .readDescriptors("ai.labs.apicalls", "myFilter", 0, 10, false);
 
             List<DocumentDescriptor> result = store.readApiCallsDescriptors("myFilter", 0, 10);
 
@@ -85,7 +85,7 @@ class RestApiCallsStoreDelegationTest {
         void emptyFilter() throws Exception {
             List<DocumentDescriptor> expected = List.of();
             doReturn(expected).when(documentDescriptorStore)
-                    .readDescriptors("ai.labs.httpcalls", "", 0, 20, false);
+                    .readDescriptors("ai.labs.apicalls", "", 0, 20, false);
 
             List<DocumentDescriptor> result = store.readApiCallsDescriptors("", 0, 20);
 

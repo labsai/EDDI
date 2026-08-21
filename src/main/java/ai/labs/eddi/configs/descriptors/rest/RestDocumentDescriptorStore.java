@@ -15,6 +15,7 @@ import org.jboss.logging.Logger;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.NotFoundException;
 import java.util.List;
@@ -64,18 +65,54 @@ public class RestDocumentDescriptorStore implements IRestDocumentDescriptorStore
         return new SimpleDocumentDescriptor(documentDescriptor.getName(), documentDescriptor.getDescription());
     }
 
+    /**
+     * Applies a partial update to a descriptor.
+     * <p>
+     * <b>SET merges.</b> Only the fields the patch actually carries are written;
+     * everything else is left alone. This endpoint calls itself "Partial update"
+     * and used to assign both fields unconditionally, so a caller sending just
+     * {@code description} — exactly what the documentation describes — wiped the
+     * descriptor's {@code name} and got a 204 for it. The agent then rendered as
+     * unnamed everywhere it was listed, and recovering it meant knowing to re-send
+     * both fields.
+     * <p>
+     * <b>DELETE clears.</b> With no document, or one naming no fields, it clears
+     * both, as before; when the document names fields, it clears exactly those.
+     */
     @Override
     public void patchDescriptor(String id, Integer version, PatchInstruction<DocumentDescriptor> patchInstruction) {
+        // A body that is not the PatchInstruction wrapper deserialises to an
+        // instruction
+        // with a null operation, which used to be dereferenced — a client-side shape
+        // error surfaced as a 500 error page naming a line of Java. Say what was
+        // expected instead.
+        if (patchInstruction == null || patchInstruction.getOperation() == null) {
+            throw new BadRequestException("A patch body must be a PatchInstruction: "
+                    + "{\"operation\":\"SET|DELETE\",\"document\":{\"name\":\"…\",\"description\":\"…\"}}");
+        }
+
         try {
             DocumentDescriptor documentDescriptor = documentDescriptorStore.readDescriptor(id, version);
-            DocumentDescriptor simpleDescriptor = patchInstruction.getDocument();
+            DocumentDescriptor patch = patchInstruction.getDocument();
 
-            if (patchInstruction.getOperation().equals(PatchInstruction.PatchOperation.SET)) {
-                documentDescriptor.setName(simpleDescriptor.getName());
-                documentDescriptor.setDescription(simpleDescriptor.getDescription());
+            if (patchInstruction.getOperation() == PatchInstruction.PatchOperation.SET) {
+                if (patch == null) {
+                    throw new BadRequestException("A SET patch must carry a 'document' with the fields to update.");
+                }
+                if (patch.getName() != null) {
+                    documentDescriptor.setName(patch.getName());
+                }
+                if (patch.getDescription() != null) {
+                    documentDescriptor.setDescription(patch.getDescription());
+                }
             } else {
-                documentDescriptor.setName("");
-                documentDescriptor.setDescription("");
+                boolean namesFields = patch != null && (patch.getName() != null || patch.getDescription() != null);
+                if (!namesFields || patch.getName() != null) {
+                    documentDescriptor.setName("");
+                }
+                if (!namesFields || patch.getDescription() != null) {
+                    documentDescriptor.setDescription("");
+                }
             }
 
             documentDescriptorStore.setDescriptor(id, version, documentDescriptor);

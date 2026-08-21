@@ -85,6 +85,36 @@ class PostgresAuditStoreUnitTest {
         verify(preparedStatement).setLong(16, 7L);
     }
 
+    /**
+     * {@code eddi.audit.agent-signing-enabled} defaults to true and the Ed25519
+     * signature was computed for every entry — but this backend had no column for
+     * it and its row-mapper hard-coded null, so the signature was discarded on
+     * write and read back absent. The non-repudiation half of the ledger was
+     * silently inert on PostgreSQL while MongoDB deployments had it.
+     */
+    @Test
+    void appendEntry_persistsTheAgentSignature() throws Exception {
+        AuditEntry entry = new AuditEntry("id-1", "conv-1", "agent-1", 1, "user-1", "production",
+                0, "task-1", "langchain", 0, 100L, null, null, null, null, null, 0.0, Instant.now(), "hmac", "ed25519-signature", 7L);
+        when(jsonSerialization.serialize(any())).thenReturn("{}");
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+
+        store.appendEntry(entry);
+
+        verify(preparedStatement).setString(17, "ed25519-signature");
+    }
+
+    @Test
+    void ensureSchema_addsTheAgentSignatureColumnToExistingLedgers() throws Exception {
+        AuditEntry entry = createEntry();
+        when(jsonSerialization.serialize(any())).thenReturn("{}");
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+
+        store.appendEntry(entry);
+
+        verify(statement).execute("ALTER TABLE audit_ledger ADD COLUMN IF NOT EXISTS agent_signature TEXT");
+    }
+
     @Test
     void supportsSequence_isTrueSoTheChainIsActuallyChecked() {
         assertTrue(store.supportsSequence(),

@@ -55,7 +55,7 @@ class StrictConfigurationBodyInterceptorTest {
     @BeforeEach
     void setUp() {
         restMapper = SerializationCustomizer.configureObjectMapper(new ObjectMapper(), false);
-        interceptor = new StrictConfigurationBodyInterceptor(restMapper);
+        interceptor = new StrictConfigurationBodyInterceptor(new StrictConfigurationParser(restMapper));
     }
 
     private static ReaderInterceptorContext context(Class<?> type, String body) {

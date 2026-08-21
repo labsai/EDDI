@@ -47,7 +47,7 @@ public class RestRuleSetStore implements IRestRuleSetStore {
 
     @Override
     public List<DocumentDescriptor> readBehaviorDescriptors(String filter, Integer index, Integer limit) {
-        return restVersionInfo.readDescriptors("ai.labs.behavior", filter, index, limit);
+        return restVersionInfo.readDescriptors(filter, index, limit);
     }
 
     @Override

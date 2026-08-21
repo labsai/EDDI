@@ -813,8 +813,10 @@ Matcher:      "actions" : "ask_for_model"
 #### Qute template safety in HTTP call bodies
 
 When embedding `{properties.x}` in HTTP call body templates, be aware:
-- `quarkus.qute.strict-rendering=false` renders missing properties as empty strings (no error). This is set once in `application.properties` and applies to **every profile** — there is deliberately no `%prod` override, so dev, test and production all render leniently and fail identically. (Earlier releases turned strict rendering **on** in prod only, which meant a missing property rendered blank in dev but leaked the raw `{properties.x}` literal to the end user in production.)
-- Do NOT use `.orEmpty` on properties — it's for Qute iterables, not strings, and fails on `NOT_FOUND`
+- A missing property renders as an **empty string**, in every profile. This takes *two* settings in `application.properties`, and both are deliberate:
+  - `quarkus.qute.strict-rendering=false` stops the render from throwing. There is no `%prod` override — dev, test and production must fail identically. (Earlier releases turned strict rendering **on** in prod only, which meant a missing property rendered blank in dev but leaked the raw `{properties.x}` literal to the end user in production.)
+  - `quarkus.qute.property-not-found-strategy=NOOP` decides what is written instead. Without it a missing value resolves to Qute's NotFound sentinel and the **literal string `NOT_FOUND`** reaches the output — system prompts, HTTP call bodies and user-visible replies alike ("Your favourite programming language is: NOT_FOUND."). Dev mode defaults to throwing instead, so the two did not even agree. This was a live defect, not a hypothetical.
+- Do NOT use `.orEmpty` on properties — it's for Qute iterables, not strings, and fails on `NOT_FOUND`. If you want an explicit fallback in the template itself, the Qute idiom is the elvis operator: `{properties.x ?: 'unknown'}`
 - User-entered text containing `{` or `}` will be interpreted as Qute expressions, potentially eating content
 
 #### Calling an API as the signed-in user

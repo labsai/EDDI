@@ -36,6 +36,7 @@ import ai.labs.eddi.utils.RestUtilities;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
@@ -138,7 +139,12 @@ public class RestExportService extends AbstractBackupService implements IRestExp
 
             return Response.ok(new BufferedInputStream(new FileInputStream(zipFilePath.toFile()))).build();
         } catch (FileNotFoundException e) {
-            throw sneakyThrow(e);
+            // An archive that is not there is a 404, not a 500. sneakyThrow'ing the
+            // FileNotFoundException produced an unlogged 500 error page — easy to hit,
+            // since export and download share this path and differ only by method, so
+            // a mistyped or expired filename looked like a server fault.
+            throw new NotFoundException("No exported archive named '" + agentFilename
+                    + "'. Archives are produced by POST on this path and are not kept indefinitely.");
         }
     }
 

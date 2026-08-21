@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.audit.rest;
 
 import ai.labs.eddi.engine.audit.AuditLedgerService;
+import ai.labs.eddi.engine.audit.AuditRecoveryBudget;
 import ai.labs.eddi.engine.audit.AuditVerificationStatus;
 import ai.labs.eddi.engine.audit.IAuditStore;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
@@ -22,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 /**
@@ -44,7 +46,9 @@ class RestAuditStoreTest {
         auditStore = mock(IAuditStore.class);
         auditLedgerService = mock(AuditLedgerService.class);
         when(auditLedgerService.isSigningEnabled()).thenReturn(true);
-        when(auditLedgerService.verifyEntry(any())).thenReturn(AuditVerificationStatus.VALID);
+        // The sweep asks the service for one budget and passes it to every entry.
+        when(auditLedgerService.newRecoveryBudget()).thenReturn(AuditRecoveryBudget.none());
+        when(auditLedgerService.verifyEntry(any(), any())).thenReturn(AuditVerificationStatus.VALID);
         restAuditStore = new RestAuditStore(auditStore, auditLedgerService);
     }
 
@@ -102,6 +106,80 @@ class RestAuditStoreTest {
     }
 
     /**
+     * The triage field: a verify sweep reports both a tampered v4 row and an
+     * unrecoverable legacy row as INVALID, and those demand opposite reactions —
+     * one is an alarm, the other is the expected residue of rows signed over live
+     * Java objects that nothing can reconstruct. The problem entry must say which
+     * one the operator is looking at.
+     */
+    @Test
+    @DisplayName("a problem entry names the canonical form its HMAC was written with")
+    void problemEntriesCarryTheHmacVersion() {
+        var legacy = entryAt("id-legacy", 0); // "v3:deadbeef"
+        var current = entryAt("id-current", 1).withHmac("v4:" + "0".repeat(64));
+        when(auditStore.getEntries("conv-1", 0, 1000)).thenReturn(List.of(legacy, current));
+        when(auditLedgerService.verifyEntry(any(), any())).thenReturn(AuditVerificationStatus.INVALID);
+
+        var report = restAuditStore.verifyConversation("conv-1", 0, 1000);
+
+        assertEquals(2, report.problems().size());
+        assertEquals("v3", report.problems().get(0).hmacVersion(),
+                "a pre-v4 INVALID is usually unrecoverable legacy payload, not tampering");
+        assertEquals("v4", report.problems().get(1).hmacVersion(),
+                "a v4 INVALID is the alarm — something touched a row this release wrote");
+    }
+
+    /**
+     * A recovered legacy row is intact — it counts as valid, appears in the
+     * dedicated {@code recovered} tally so an operator can see how much of the
+     * ledger predates v4, and is NOT listed as a problem. Miswiring any of the
+     * three turns a healthy legacy ledger into a wall of alarms.
+     */
+    @Test
+    @DisplayName("a VALID_RECOVERED row counts as valid + recovered, and is no problem")
+    void recoveredRowCountsAsValid() {
+        var direct = entryAt("id-1", 0);
+        var recovered = entryAt("id-2", 1);
+        when(auditStore.getEntries("conv-1", 0, 1000)).thenReturn(List.of(direct, recovered));
+        when(auditLedgerService.verifyEntry(eq(direct), any())).thenReturn(AuditVerificationStatus.VALID);
+        when(auditLedgerService.verifyEntry(eq(recovered), any())).thenReturn(AuditVerificationStatus.VALID_RECOVERED);
+
+        var report = restAuditStore.verifyConversation("conv-1", 0, 1000);
+
+        assertEquals(2, report.valid(), "a recovered row is proven intact and belongs in valid");
+        assertEquals(1, report.recovered());
+        assertEquals(0, report.invalid());
+        assertTrue(report.problems().isEmpty(), "a recovered row is not a problem to escalate");
+    }
+
+    /**
+     * The sweep's budget lives on the service; the report's {@code recoverySkipped}
+     * must be read back off that same budget after the loop — wiring a literal 0
+     * here would make a budget-exhausted sweep look more thorough than it was, and
+     * nothing else fails.
+     */
+    @Test
+    @DisplayName("recoverySkipped is read off the sweep's own budget")
+    void recoverySkippedIsWiredFromTheBudget() {
+        var one = entryAt("id-1", 0);
+        var two = entryAt("id-2", 1);
+        when(auditStore.getEntries("conv-1", 0, 1000)).thenReturn(List.of(one, two));
+        // A real, already-exhausted budget: every consume attempt is a skip.
+        when(auditLedgerService.newRecoveryBudget()).thenReturn(new AuditRecoveryBudget(0));
+        when(auditLedgerService.verifyEntry(any(), any())).thenAnswer(invocation -> {
+            invocation.getArgument(1, AuditRecoveryBudget.class).tryConsume();
+            return AuditVerificationStatus.INVALID;
+        });
+
+        var report = restAuditStore.verifyConversation("conv-1", 0, 1000);
+
+        assertEquals(2, report.recoverySkipped(), "the count must come from the budget the sweep actually used");
+        assertEquals(2, report.invalid());
+        assertFalse(report.tamperingSuspected(), "nothing was disproven — a budget ran out");
+        assertFalse(report.intact(), "an unfinished sweep is still not a clean bill of health");
+    }
+
+    /**
      * The point of the endpoint: {@code AuditHmac.verifyHmac} previously had no
      * production caller at all, so a tampered row shipped undetected. A row whose
      * HMAC no longer recomputes must be named in the report.
@@ -112,8 +190,8 @@ class RestAuditStoreTest {
         var good = entryAt("id-1", 0);
         var tampered = entryAt("id-2", 1);
         when(auditStore.getEntries("conv-1", 0, 1000)).thenReturn(List.of(good, tampered));
-        when(auditLedgerService.verifyEntry(good)).thenReturn(AuditVerificationStatus.VALID);
-        when(auditLedgerService.verifyEntry(tampered)).thenReturn(AuditVerificationStatus.INVALID);
+        when(auditLedgerService.verifyEntry(eq(good), any())).thenReturn(AuditVerificationStatus.VALID);
+        when(auditLedgerService.verifyEntry(eq(tampered), any())).thenReturn(AuditVerificationStatus.INVALID);
 
         var report = restAuditStore.verifyConversation("conv-1", 0, 1000);
 
@@ -311,7 +389,7 @@ class RestAuditStoreTest {
     @DisplayName("without a signing key the sweep proves nothing")
     void withoutSigningKeyNothingIsProven() {
         when(auditLedgerService.isSigningEnabled()).thenReturn(false);
-        when(auditLedgerService.verifyEntry(any())).thenReturn(AuditVerificationStatus.SIGNING_DISABLED);
+        when(auditLedgerService.verifyEntry(any(), any())).thenReturn(AuditVerificationStatus.SIGNING_DISABLED);
         when(auditStore.getEntries("conv-1", 0, 1000)).thenReturn(List.of(entryAt("id-1", 0)));
 
         var report = restAuditStore.verifyConversation("conv-1", 0, 1000);

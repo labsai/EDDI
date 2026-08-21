@@ -23,5 +23,18 @@ jobs:
         uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4.9.0
         with:
           fail-on-severity: high
+          # deny-licenses is deprecated upstream (dependency-review-action#997) in
+          # favour of allow-lists, but migrating means enumerating every licence
+          # this project accepts — a repo-wide policy decision, not a mechanical
+          # swap. Kept deliberately until the maintainers make that call; the
+          # pinned v4 keeps honouring it, and removal would arrive with a major
+          # bump that gets reviewed here anyway.
           deny-licenses: GPL-3.0, AGPL-3.0
+          # BOM-managed dependencies carry no <version> in the pom, so the action
+          # cannot resolve their metadata and reports "unknown licence" on every
+          # PR that touches the manifest. Caffeine is Apache-2.0 — verified against
+          # its own POM on Maven Central (3.2.4, the version the Quarkus BOM
+          # resolves) — and already shipped transitively via quarkus-caffeine
+          # before it was ever declared, so nothing new is being licensed here.
+          allow-dependencies-licenses: pkg:maven/com.github.ben-manes.caffeine/caffeine
           comment-summary-in-pr: always
