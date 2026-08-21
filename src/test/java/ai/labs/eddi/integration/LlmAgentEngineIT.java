@@ -339,13 +339,22 @@ public class LlmAgentEngineIT extends BaseIntegrationIT {
             ResourceId conversationId = createConversation(memoryAgentId.id(), memoryUserId);
             waitForConversationReady(memoryAgentId.id(), conversationId.id());
 
-            sendUserInput(memoryAgentId.id(), conversationId.id(), "remember", false, false)
-                    .then().statusCode(200);
+            String sayBody = sendUserInput(memoryAgentId.id(), conversationId.id(), "remember", false, false)
+                    .then().statusCode(200).extract().asString();
 
-            given().get("/usermemorystore/memories/" + memoryUserId)
-                    .then().statusCode(200)
-                    .body("size()", greaterThanOrEqualTo(1))
-                    .body("key", hasItem("favorite_color"));
+            // Discriminators, most-specific first, each carrying the evidence a CI-only
+            // failure needs: two upstream calls prove the tool-call loop executed the
+            // tool and went back for the final answer; the final scripted text proves
+            // the loop completed into output; only then is the store consulted.
+            wireMock.verify(2, postRequestedFor(urlPathEqualTo("/v1/chat/completions")));
+            Assertions.assertTrue(sayBody.contains("Noted"),
+                    "the final scripted answer must reach the turn's output; say body was: " + sayBody);
+
+            String memories = given().get("/usermemorystore/memories/" + memoryUserId)
+                    .then().statusCode(200).extract().asString();
+            Assertions.assertTrue(memories.contains("favorite_color"),
+                    "the rememberFact write must land in the store for user '" + memoryUserId
+                            + "'; store returned: " + memories);
         } finally {
             undeployAgentQuietly(memoryAgentId.id(), memoryAgentId.version());
         }
