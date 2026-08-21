@@ -350,6 +350,16 @@ public class LlmAgentEngineIT extends BaseIntegrationIT {
             Assertions.assertTrue(sayBody.contains("Noted"),
                     "the final scripted answer must reach the turn's output; say body was: " + sayBody);
 
+            // The second upstream request carries the tool's OWN return message back
+            // to the model — the one place the tool says in its own words whether it
+            // wrote, refused, or errored. rememberFact returns "✅ Remembered: …" on
+            // success and a named refusal on every guardrail path, so this assertion
+            // either passes or puts the exact cause verbatim into the CI log.
+            var upstreamRequests = wireMock.getAllServeEvents();
+            String toolResultRequest = upstreamRequests.get(0).getRequest().getBodyAsString();
+            Assertions.assertTrue(toolResultRequest.contains("Remembered"),
+                    "the tool result sent back upstream was: " + toolResultRequest);
+
             String memories = given().get("/usermemorystore/memories/" + memoryUserId)
                     .then().statusCode(200).extract().asString();
             Assertions.assertTrue(memories.contains("favorite_color"),
