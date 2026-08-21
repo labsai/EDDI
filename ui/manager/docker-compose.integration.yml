@@ -5,12 +5,25 @@ services:
   eddi:
     image: labsai/eddi:latest
     ports:
-      - "7070:7070"
+      # Loopback only. The opt-out below runs this backend with NO
+      # authentication, and `7070:7070` binds every interface — which would
+      # put an unauthenticated EDDI on whatever network the machine is on.
+      # Tests and CI both reach it at localhost, so this costs nothing.
+      - "127.0.0.1:7070:7070"
     depends_on:
       mongodb:
         condition: service_healthy
     environment:
       QUARKUS_HTTP_CORS_ORIGINS: "http://localhost:3000,http://localhost:5173"
+      # EDDI refuses to boot in production mode without either OIDC configured
+      # or an explicit opt-out. Without this the container exits(1) during
+      # `docker compose up --wait`, before a single test runs — which is exactly
+      # what had been happening: every Backend E2E run on main failed at
+      # "Start backend infrastructure" for days, and the failure was invisible
+      # because the log-collection step comes after the health check that never
+      # ran. An unauthenticated throwaway backend is the entire point of these
+      # compose files, so opting out is correct here and nowhere near production.
+      EDDI_SECURITY_ALLOW_UNAUTHENTICATED: "true"
 
   mongodb:
     image: mongo:6.0

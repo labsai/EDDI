@@ -14,15 +14,15 @@ import {
  */
 const RESOURCE_TYPES = [
   {
-    name: "Behavior Rules",
-    store: "behaviorstore",
-    plural: "behaviorsets",
+    name: "Rules",
+    store: "rulestore",
+    plural: "rulesets",
     createPayload: { behaviorGroups: [] },
   },
   {
-    name: "HTTP Calls",
-    store: "httpcallsstore",
-    plural: "httpcalls",
+    name: "API Calls",
+    store: "apicallstore",
+    plural: "apicalls",
     createPayload: { targetServerUrl: "", httpCalls: [] },
   },
   {
@@ -32,15 +32,15 @@ const RESOURCE_TYPES = [
     createPayload: { outputSet: [] },
   },
   {
-    name: "Regular Dictionaries",
-    store: "regulardictionarystore",
-    plural: "regulardictionaries",
+    name: "Dictionaries",
+    store: "dictionarystore",
+    plural: "dictionaries",
     createPayload: { words: [], phrases: [], regExs: [] },
   },
   {
-    name: "LangChain",
-    store: "langchainstore",
-    plural: "langchains",
+    name: "LLM",
+    store: "llmstore",
+    plural: "llms",
     createPayload: { tasks: [] },
   },
   {

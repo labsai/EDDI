@@ -28,8 +28,8 @@ test.describe("Deployment — Real Backend", () => {
     await waitForBackend(request);
 
     // Create a package for our test agent
-    const pkgRes = await request.post(`${API_BASE}/packagestore/packages`, {
-      data: { packageExtensions: [] },
+    const pkgRes = await request.post(`${API_BASE}/workflowstore/workflows`, {
+      data: { workflowSteps: [] },
     });
     expect(pkgRes.status()).toBe(201);
     const pkgLoc = pkgRes.headers()["location"]!;
@@ -39,7 +39,7 @@ test.describe("Deployment — Real Backend", () => {
 
     // Create a agent referencing the package
     const agentRes = await request.post(`${API_BASE}/agentstore/agents`, {
-      data: { packages: [pkgLoc] },
+      data: { workflows: [pkgLoc] },
     });
     expect(agentRes.status()).toBe(201);
     const agentLoc = agentRes.headers()["location"]!;
@@ -65,7 +65,7 @@ test.describe("Deployment — Real Backend", () => {
     );
     await cleanupResource(
       request,
-      "packagestore/packages",
+      "workflowstore/workflows",
       testWorkflowId,
       testWorkflowVersion
     );

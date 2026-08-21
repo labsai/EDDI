@@ -2,7 +2,7 @@ import { type APIRequestContext, expect } from "@playwright/test";
 
 /**
  * Base URL for API calls through the Vite dev server proxy.
- * The Vite dev server proxies all /agentstore, /packagestore, etc. paths to
+ * The Vite dev server proxies all /agentstore, /workflowstore, etc. paths to
  * EDDI on localhost:7070.
  *
  * Honours `PORT` for the same reason `playwright.config.ts` and
@@ -92,11 +92,11 @@ export async function createAndDeployAgent(
   agentId: string;
   agentVersion: number;
   workflowId: string;
-  packageVersion: number;
+  workflowVersion: number;
 }> {
   // Create package
-  const pkgRes = await request.post(`${API_BASE}/packagestore/packages`, {
-    data: { packageExtensions: [] },
+  const pkgRes = await request.post(`${API_BASE}/workflowstore/workflows`, {
+    data: { workflowSteps: [] },
   });
   expect(pkgRes.status()).toBe(201);
   const pkgLoc = pkgRes.headers()["location"]!;
@@ -104,7 +104,7 @@ export async function createAndDeployAgent(
 
   // Create agent referencing the package
   const agentRes = await request.post(`${API_BASE}/agentstore/agents`, {
-    data: { packages: [pkgLoc] },
+    data: { workflows: [pkgLoc] },
   });
   expect(agentRes.status()).toBe(201);
   const agentLoc = agentRes.headers()["location"]!;
@@ -116,23 +116,38 @@ export async function createAndDeployAgent(
   );
   expect([200, 202]).toContain(deployRes.status());
 
-  // Wait for deployment to complete
+  // Wait for deployment to complete.
+  //
+  // The assertion at the end is the point. This loop used to fall out of its
+  // 15s budget and return anyway, so an agent that never deployed was handed
+  // back as if it had — and the failure surfaced much later as a bare `404`
+  // from `POST /agents/{id}/start` in whichever test used it, naming
+  // neither deployment nor this helper. Every caller depends on READY, so not
+  // reaching it is this function's failure to report.
+  const DEPLOY_TIMEOUT_MS = 30_000;
   const start = Date.now();
-  while (Date.now() - start < 15_000) {
+  let status = "UNKNOWN";
+  while (Date.now() - start < DEPLOY_TIMEOUT_MS) {
     const statusRes = await request.get(
       `${API_BASE}/administration/production/deploymentstatus/${agent.id}?version=${agent.version}`
     );
     if (statusRes.ok()) {
       const body = await statusRes.json();
-      if (body.status === "READY") break;
+      status = body.status ?? "UNKNOWN";
+      if (status === "READY") break;
     }
     await new Promise((r) => setTimeout(r, 1000));
   }
+  expect(
+    status,
+    `agent ${agent.id} v${agent.version} did not reach READY within ${DEPLOY_TIMEOUT_MS / 1000}s ` +
+      `(last status: ${status}) — everything downstream of this helper depends on it`,
+  ).toBe("READY");
 
   return {
     agentId: agent.id,
     agentVersion: agent.version,
     workflowId: pkg.id,
-    packageVersion: pkg.version,
+    workflowVersion: pkg.version,
   };
 }

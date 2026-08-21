@@ -18,18 +18,18 @@ test.describe("Workflows CRUD — Real Backend", () => {
     for (const pkg of createdWorkflows) {
       await cleanupResource(
         request,
-        "packagestore/packages",
+        "workflowstore/workflows",
         pkg.id,
         pkg.version
       );
     }
   });
 
-  test("GET /packagestore/packages/descriptors returns array", async ({
+  test("GET /workflowstore/workflows/descriptors returns array", async ({
     request,
   }) => {
     const res = await request.get(
-      `${API_BASE}/packagestore/packages/descriptors?limit=100`
+      `${API_BASE}/workflowstore/workflows/descriptors?limit=100`
     );
     expect(res.ok()).toBeTruthy();
     const body = await res.json();
@@ -38,8 +38,8 @@ test.describe("Workflows CRUD — Real Backend", () => {
 
   test("POST → GET → PUT → GET round-trip", async ({ request }) => {
     // CREATE empty package
-    const createRes = await request.post(`${API_BASE}/packagestore/packages`, {
-      data: { packageExtensions: [] },
+    const createRes = await request.post(`${API_BASE}/workflowstore/workflows`, {
+      data: { workflowSteps: [] },
     });
     expect(createRes.status()).toBe(201);
     const location = createRes.headers()["location"];
@@ -50,17 +50,17 @@ test.describe("Workflows CRUD — Real Backend", () => {
 
     // READ
     const getRes = await request.get(
-      `${API_BASE}/packagestore/packages/${id}?version=${version}`
+      `${API_BASE}/workflowstore/workflows/${id}?version=${version}`
     );
     expect(getRes.ok()).toBeTruthy();
     const pkg = await getRes.json();
-    expect(pkg).toHaveProperty("packageExtensions");
-    expect(Array.isArray(pkg.packageExtensions)).toBeTruthy();
+    expect(pkg).toHaveProperty("workflowSteps");
+    expect(Array.isArray(pkg.workflowSteps)).toBeTruthy();
 
     // UPDATE
     const updateRes = await request.put(
-      `${API_BASE}/packagestore/packages/${id}?version=${version}`,
-      { data: { packageExtensions: [] } }
+      `${API_BASE}/workflowstore/workflows/${id}?version=${version}`,
+      { data: { workflowSteps: [] } }
     );
     expect(updateRes.ok()).toBeTruthy();
     const updateLocation = updateRes.headers()["location"];
@@ -72,30 +72,30 @@ test.describe("Workflows CRUD — Real Backend", () => {
 
     // READ updated
     const getUpdatedRes = await request.get(
-      `${API_BASE}/packagestore/packages/${updated.id}?version=${updated.version}`
+      `${API_BASE}/workflowstore/workflows/${updated.id}?version=${updated.version}`
     );
     expect(getUpdatedRes.ok()).toBeTruthy();
   });
 
   test("DELETE package returns 200 or 204", async ({ request }) => {
-    const createRes = await request.post(`${API_BASE}/packagestore/packages`, {
-      data: { packageExtensions: [] },
+    const createRes = await request.post(`${API_BASE}/workflowstore/workflows`, {
+      data: { workflowSteps: [] },
     });
     const { id, version } = extractIdFromLocation(
       createRes.headers()["location"]!
     );
 
     const deleteRes = await request.delete(
-      `${API_BASE}/packagestore/packages/${id}?version=${version}`
+      `${API_BASE}/workflowstore/workflows/${id}?version=${version}`
     );
     expect([200, 204]).toContain(deleteRes.status());
   });
 
-  test("GET /packagestore/packages/jsonSchema returns valid schema", async ({
+  test("GET /workflowstore/workflows/jsonSchema returns valid schema", async ({
     request,
   }) => {
     const res = await request.get(
-      `${API_BASE}/packagestore/packages/jsonSchema`
+      `${API_BASE}/workflowstore/workflows/jsonSchema`
     );
     expect(res.ok()).toBeTruthy();
     const schema = await res.json();

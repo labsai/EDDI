@@ -32,8 +32,8 @@ test.describe("Workflows — Full Stack", () => {
   test.beforeAll(async ({ request }) => {
     await waitForBackend(request);
 
-    const createRes = await request.post(`${API_BASE}/packagestore/packages`, {
-      data: { packageExtensions: [] },
+    const createRes = await request.post(`${API_BASE}/workflowstore/workflows`, {
+      data: { workflowSteps: [] },
     });
     expect(
       createRes.status(),
@@ -50,7 +50,7 @@ test.describe("Workflows — Full Stack", () => {
     for (const pkg of createdPackages) {
       await cleanupResource(
         request,
-        "packagestore/packages",
+        "workflowstore/workflows",
         pkg.id,
         pkg.version
       );

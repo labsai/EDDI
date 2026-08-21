@@ -20,7 +20,7 @@ test.describe("Conversations — Full Stack", () => {
   let agentId: string;
   let agentVersion: number;
   let workflowId: string;
-  let packageVersion: number;
+  let workflowVersion: number;
   const conversationsToCleanup: string[] = [];
 
   test.beforeAll(async ({ request }) => {
@@ -28,12 +28,12 @@ test.describe("Conversations — Full Stack", () => {
     agentId = deployed.agentId;
     agentVersion = deployed.agentVersion;
     workflowId = deployed.workflowId;
-    packageVersion = deployed.packageVersion;
+    workflowVersion = deployed.workflowVersion;
 
     // Create 2 conversations for testing
     for (let i = 0; i < 2; i++) {
       const res = await request.post(
-        `${API_BASE}/agents/production/${agentId}`
+        `${API_BASE}/agents/${agentId}/start`
       );
       expect(res.status()).toBe(201);
       const location = res.headers()["location"]!;
@@ -72,9 +72,9 @@ test.describe("Conversations — Full Stack", () => {
     );
     await cleanupResource(
       request,
-      "packagestore/packages",
+      "workflowstore/workflows",
       workflowId,
-      packageVersion
+      workflowVersion
     );
   });
 

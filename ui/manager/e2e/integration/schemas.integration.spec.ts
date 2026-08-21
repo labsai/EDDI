@@ -8,15 +8,15 @@ import { API_BASE, waitForBackend } from "./integration-helpers";
 
 const SCHEMA_ENDPOINTS = [
   { name: "Agents", path: "/agentstore/agents/jsonSchema" },
-  { name: "Workflows", path: "/packagestore/packages/jsonSchema" },
-  { name: "Behavior Rules", path: "/behaviorstore/behaviorsets/jsonSchema" },
-  { name: "HTTP Calls", path: "/httpcallsstore/httpcalls/jsonSchema" },
+  { name: "Workflows", path: "/workflowstore/workflows/jsonSchema" },
+  { name: "Rules", path: "/rulestore/rulesets/jsonSchema" },
+  { name: "API Calls", path: "/apicallstore/apicalls/jsonSchema" },
   { name: "Output Sets", path: "/outputstore/outputsets/jsonSchema" },
   {
-    name: "Regular Dictionaries",
-    path: "/regulardictionarystore/regulardictionaries/jsonSchema",
+    name: "Dictionaries",
+    path: "/dictionarystore/dictionaries/jsonSchema",
   },
-  { name: "LangChain", path: "/langchainstore/langchains/jsonSchema" },
+  { name: "LLM", path: "/llmstore/llms/jsonSchema" },
   {
     name: "Property Setter",
     path: "/propertysetterstore/propertysetters/jsonSchema",

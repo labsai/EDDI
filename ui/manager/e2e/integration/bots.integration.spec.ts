@@ -32,7 +32,7 @@ test.describe("Agents CRUD — Real Backend", () => {
   test("POST → GET → PUT → GET round-trip", async ({ request }) => {
     // CREATE
     const createRes = await request.post(`${API_BASE}/agentstore/agents`, {
-      data: { packages: [], channels: [] },
+      data: { workflows: [], channels: [] },
     });
     expect(createRes.status()).toBe(201);
     const location = createRes.headers()["location"];
@@ -47,12 +47,12 @@ test.describe("Agents CRUD — Real Backend", () => {
     );
     expect(getRes.ok()).toBeTruthy();
     const agent = await getRes.json();
-    expect(agent).toHaveProperty("packages");
+    expect(agent).toHaveProperty("workflows");
 
     // UPDATE
     const updateRes = await request.put(
       `${API_BASE}/agentstore/agents/${id}?version=${version}`,
-      { data: { packages: [], channels: [] } }
+      { data: { workflows: [], channels: [] } }
     );
     expect(updateRes.ok()).toBeTruthy();
     const updateLocation = updateRes.headers()["location"];
@@ -73,7 +73,7 @@ test.describe("Agents CRUD — Real Backend", () => {
     request,
   }) => {
     const createRes = await request.post(`${API_BASE}/agentstore/agents`, {
-      data: { packages: [] },
+      data: { workflows: [] },
     });
     const { id, version } = extractIdFromLocation(
       createRes.headers()["location"]!
@@ -96,7 +96,7 @@ test.describe("Agents CRUD — Real Backend", () => {
 
   test("DELETE agent returns 200 or 204", async ({ request }) => {
     const createRes = await request.post(`${API_BASE}/agentstore/agents`, {
-      data: { packages: [] },
+      data: { workflows: [] },
     });
     const { id, version } = extractIdFromLocation(
       createRes.headers()["location"]!

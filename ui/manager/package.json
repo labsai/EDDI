@@ -11,6 +11,7 @@
     "audit:prod": "node .github/scripts/audit-prod.mjs",
     "typecheck": "tsc -b",
     "i18n:check": "node .github/scripts/check-i18n.mjs",
+    "openapi:refresh": "node .github/scripts/refresh-openapi-operations.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",

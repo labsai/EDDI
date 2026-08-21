@@ -20,7 +20,7 @@ test.describe("Conversations — Real Backend", () => {
   let agentId: string;
   let agentVersion: number;
   let workflowId: string;
-  let packageVersion: number;
+  let workflowVersion: number;
   const conversationsToCleanup: string[] = [];
 
   test.beforeAll(async ({ request }) => {
@@ -31,7 +31,7 @@ test.describe("Conversations — Real Backend", () => {
     agentId = deployed.agentId;
     agentVersion = deployed.agentVersion;
     workflowId = deployed.workflowId;
-    packageVersion = deployed.packageVersion;
+    workflowVersion = deployed.workflowVersion;
   });
 
   test.afterAll(async ({ request }) => {
@@ -57,9 +57,9 @@ test.describe("Conversations — Real Backend", () => {
     await cleanupResource(request, "agentstore/agents", agentId, agentVersion);
     await cleanupResource(
       request,
-      "packagestore/packages",
+      "workflowstore/workflows",
       workflowId,
-      packageVersion
+      workflowVersion
     );
   });
 
@@ -78,7 +78,7 @@ test.describe("Conversations — Real Backend", () => {
     request,
   }) => {
     const res = await request.post(
-      `${API_BASE}/agents/production/${agentId}`
+      `${API_BASE}/agents/${agentId}/start`
     );
     expect(res.status()).toBe(201);
     const location = res.headers()["location"];
@@ -95,7 +95,7 @@ test.describe("Conversations — Real Backend", () => {
   }) => {
     // Create conversation
     const createRes = await request.post(
-      `${API_BASE}/agents/production/${agentId}`
+      `${API_BASE}/agents/${agentId}/start`
     );
     expect(createRes.status()).toBe(201);
     const location = createRes.headers()["location"]!;
@@ -108,7 +108,7 @@ test.describe("Conversations — Real Backend", () => {
 
     // Send message — returns 200 with full conversation snapshot
     const sayRes = await request.post(
-      `${API_BASE}/agents/production/${agentId}/${conversationId}`,
+      `${API_BASE}/agents/${conversationId}`,
       {
         headers: { "Content-Type": "text/plain" },
         data: "Hello from integration test!",
@@ -126,7 +126,7 @@ test.describe("Conversations — Real Backend", () => {
   test("Read conversation state via simple endpoint", async ({ request }) => {
     // Create conversation
     const createRes = await request.post(
-      `${API_BASE}/agents/production/${agentId}`
+      `${API_BASE}/agents/${agentId}/start`
     );
     const location = createRes.headers()["location"]!;
     const convId = location.split("/").filter(Boolean).pop()!;
@@ -151,9 +151,19 @@ test.describe("Conversations — Real Backend", () => {
     expect(res.ok()).toBeTruthy();
     const conversations = await res.json();
     expect(Array.isArray(conversations)).toBeTruthy();
-    // All returned conversations should belong to this agent
+
+    // A descriptor carries `agentResource` — an `eddi://…/agentstore/agents/{id}`
+    // URI — not a bare `agentId`. This asserted `conv.agentId`, which is
+    // `undefined` on every descriptor the backend has ever returned, so the
+    // filter it is named for went unchecked while the test failed for the wrong
+    // reason. `parseAgentResource` in `lib/api/conversations.ts` is the app's
+    // own reader of the same field.
     for (const conv of conversations) {
-      expect(conv.agentId).toBe(agentId);
+      expect(
+        conv.agentResource,
+        "descriptor should carry agentResource; if this is undefined the response shape has changed",
+      ).toBeTruthy();
+      expect(String(conv.agentResource)).toContain(agentId);
     }
   });
 });

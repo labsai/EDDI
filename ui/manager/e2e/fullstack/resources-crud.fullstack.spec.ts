@@ -16,17 +16,17 @@ import {
  */
 const RESOURCE_TYPES = [
   {
-    name: "Behavior Rules",
-    urlType: "behavior",
-    store: "behaviorstore",
-    plural: "behaviorsets",
+    name: "Rules",
+    urlType: "rules",
+    store: "rulestore",
+    plural: "rulesets",
     createPayload: { behaviorGroups: [] },
   },
   {
-    name: "HTTP Calls",
-    urlType: "httpcalls",
-    store: "httpcallsstore",
-    plural: "httpcalls",
+    name: "API Calls",
+    urlType: "apicalls",
+    store: "apicallstore",
+    plural: "apicalls",
     createPayload: { targetServerUrl: "", httpCalls: [] },
   },
   {
@@ -38,16 +38,16 @@ const RESOURCE_TYPES = [
   },
   {
     name: "Dictionaries",
-    urlType: "dictionaries",
-    store: "regulardictionarystore",
-    plural: "regulardictionaries",
+    urlType: "dictionary",
+    store: "dictionarystore",
+    plural: "dictionaries",
     createPayload: { words: [], phrases: [], regExs: [] },
   },
   {
-    name: "LangChain",
-    urlType: "langchain",
-    store: "langchainstore",
-    plural: "langchains",
+    name: "LLM",
+    urlType: "llm",
+    store: "llmstore",
+    plural: "llms",
     createPayload: { tasks: [] },
   },
   {
@@ -123,7 +123,7 @@ test.describe("Resources — Full Stack", () => {
   test("resource detail page renders content", async ({ page, request }) => {
     // Create a behavior resource to view in detail
     const createRes = await request.post(
-      `${API_BASE}/behaviorstore/behaviorsets`,
+      `${API_BASE}/rulestore/rulesets`,
       { data: { behaviorGroups: [] } }
     );
     expect(createRes.status()).toBe(201);
@@ -131,12 +131,16 @@ test.describe("Resources — Full Stack", () => {
       createRes.headers()["location"]!
     );
     cleanup.push({
-      storePath: "behaviorstore/behaviorsets",
+      storePath: "rulestore/rulesets",
       id,
       version,
     });
 
-    await navigateTo(page, `/manage/resources/behavior/${id}`);
+    // `rules`, not `behavior`: the resource is created through
+    // `rulestore/rulesets`, so opening the legacy slug would route to a
+    // different (non-existent) type and render the "unknown type" error state
+    // while the two assertions below still passed.
+    await navigateTo(page, `/manage/resources/rules/${id}`);
 
     // Back link should be visible
     await expect(page.getByTestId("back-to-list")).toBeVisible();

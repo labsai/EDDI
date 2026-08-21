@@ -75,7 +75,7 @@ test.describe("Dashboard — Full Stack", () => {
 
     // Create a new agent
     const createRes = await request.post(`${API_BASE}/agentstore/agents`, {
-      data: { packages: [], channels: [] },
+      data: { workflows: [], channels: [] },
     });
     expect(createRes.status()).toBe(201);
     const { id, version } = extractIdFromLocation(

@@ -21,7 +21,7 @@ test.describe("Agent Lifecycle — Full Stack", () => {
   let agentId: string;
   let agentVersion: number;
   let workflowId: string;
-  let packageVersion: number;
+  let workflowVersion: number;
   const conversationsToCleanup: string[] = [];
 
   test.beforeAll(async ({ request }) => {
@@ -31,7 +31,7 @@ test.describe("Agent Lifecycle — Full Stack", () => {
     agentId = deployed.agentId;
     agentVersion = deployed.agentVersion;
     workflowId = deployed.workflowId;
-    packageVersion = deployed.packageVersion;
+    workflowVersion = deployed.workflowVersion;
   });
 
   test.afterAll(async ({ request }) => {
@@ -62,9 +62,9 @@ test.describe("Agent Lifecycle — Full Stack", () => {
     );
     await cleanupResource(
       request,
-      "packagestore/packages",
+      "workflowstore/workflows",
       workflowId,
-      packageVersion
+      workflowVersion
     );
   });
 
@@ -121,7 +121,7 @@ test.describe("Agent Lifecycle — Full Stack", () => {
   }) => {
     // Create conversation via API first so we can track the ID for cleanup
     const createRes = await request.post(
-      `${API_BASE}/agents/production/${agentId}`
+      `${API_BASE}/agents/${agentId}/start`
     );
     expect(createRes.status()).toBe(201);
     const location = createRes.headers()["location"]!;
@@ -158,7 +158,7 @@ test.describe("Agent Lifecycle — Full Stack", () => {
   }) => {
     // Create a conversation via API so we have a known one to find
     const createRes = await request.post(
-      `${API_BASE}/agents/production/${agentId}`
+      `${API_BASE}/agents/${agentId}/start`
     );
     expect(createRes.status()).toBe(201);
     const location = createRes.headers()["location"]!;
@@ -179,7 +179,7 @@ test.describe("Agent Lifecycle — Full Stack", () => {
     // path, or a reordering, turned into a green skip. It now creates the
     // conversation it needs, which is both deterministic and order-independent.
     const createRes = await request.post(
-      `${API_BASE}/agents/production/${agentId}`
+      `${API_BASE}/agents/${agentId}/start`
     );
     expect(
       createRes.status(),
