@@ -30,6 +30,7 @@ import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
 import dev.langchain4j.service.tool.ToolExecutor;
 import dev.langchain4j.service.tool.ToolProviderResult;
 import io.micrometer.core.instrument.MeterRegistry;
+import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -145,6 +146,55 @@ public class McpToolProviderManager {
         this.ssrfProtectionEnabled = ssrfProtectionEnabled;
         this.maxDescriptionChars = maxDescriptionChars > 0 ? maxDescriptionChars : DEFAULT_MAX_DESCRIPTION_CHARS;
         this.toolCacheTtlMillis = toolCacheTtlMillis >= 0 ? toolCacheTtlMillis : DEFAULT_TOOL_CACHE_TTL_MILLIS;
+    }
+
+    /**
+     * Rebuild cached clients when a vault secret is written or rotated.
+     * <p>
+     * The MCP manager was the one credential-holding cache that did NOT register
+     * for this, while {@code ChatModelRegistry}, {@code EmbeddingModelFactory} and
+     * {@code EmbeddingStoreFactory} all did. Its client cache is keyed on a hash of
+     * the <em>unresolved</em> apiKey — the {@code ${vault:…}} reference string —
+     * and the credential is resolved once, when the transport is built. So a
+     * rotated secret produced no new cache key, and the cached client went on
+     * presenting the old credential until it happened to be evicted. In practice
+     * that is until restart: the client cache has no TTL.
+     * <p>
+     * Eviction is total rather than surgical. The cache key is a digest, so it
+     * cannot say which vault reference a given entry used, and the alternative —
+     * carrying every entry's reference alongside it purely to narrow an eviction —
+     * buys nothing: secret rotation is rare, and reconnecting an MCP client is one
+     * handshake on the next call, not a user-visible failure.
+     */
+    @PostConstruct
+    void registerSecretInvalidation() {
+        secretResolver.registerInvalidationListener(reference -> {
+            int clients = clientCache.size();
+            if (clients == 0 && toolCache.isEmpty()) {
+                return;
+            }
+            closeAllClients();
+            LOGGER.infof("Invalidated %d cached MCP client(s) after a vault secret change", clients);
+        });
+    }
+
+    /**
+     * Closes and drops every cached client and its discovered tools.
+     * <p>
+     * Shared by shutdown and secret invalidation, because dropping a client without
+     * closing it leaks its connection, and dropping it without dropping the tool
+     * cache leaves executors bound to a closed client.
+     */
+    private void closeAllClients() {
+        for (var entry : clientCache.entrySet()) {
+            try {
+                entry.getValue().close();
+            } catch (Exception e) {
+                LOGGER.warnf(e, "Error closing MCP client for '%s'", sanitize(entry.getKey()));
+            }
+        }
+        clientCache.clear();
+        toolCache.clear();
     }
 
     /**
@@ -1035,15 +1085,7 @@ public class McpToolProviderManager {
     @PreDestroy
     void shutdown() {
         LOGGER.infof("Shutting down %d MCP client connection(s)", clientCache.size());
-        for (var entry : clientCache.entrySet()) {
-            try {
-                entry.getValue().close();
-            } catch (Exception e) {
-                LOGGER.warnf(e, "Error closing MCP client for '%s'", sanitize(entry.getKey()));
-            }
-        }
-        clientCache.clear();
-        toolCache.clear();
+        closeAllClients();
     }
 
     /**

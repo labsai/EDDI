@@ -22,6 +22,7 @@ import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.modules.llm.capability.JsonResponseFormatPolicy;
 import ai.labs.eddi.modules.llm.impl.orchestration.ToolApprovalGateSupport;
 import ai.labs.eddi.modules.llm.impl.orchestration.ToolContextBudget;
+import ai.labs.eddi.modules.llm.guardrails.ToolResultGuardrail;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.tools.ToolCacheService;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
@@ -87,11 +88,12 @@ class ToolLoopRunner {
     private final ToolApprovalGate toolApprovalGate;
     private final ToolApprovalGateSupport gateSupport;
     private final ToolContextBudget toolContextBudgetGuard;
+    private final ToolResultGuardrail toolResultGuardrail;
 
     ToolLoopRunner(ToolExecutionService toolExecutionService, ToolResponseTruncator toolResponseTruncator,
             TenantQuotaService tenantQuotaService, MemorySnapshotService memorySnapshotService,
             ToolApprovalGate toolApprovalGate, ToolApprovalGateSupport gateSupport,
-            ToolContextBudget toolContextBudgetGuard) {
+            ToolContextBudget toolContextBudgetGuard, ToolResultGuardrail toolResultGuardrail) {
         this.toolExecutionService = toolExecutionService;
         this.toolResponseTruncator = toolResponseTruncator;
         this.tenantQuotaService = tenantQuotaService;
@@ -99,6 +101,7 @@ class ToolLoopRunner {
         this.toolApprovalGate = toolApprovalGate;
         this.gateSupport = gateSupport;
         this.toolContextBudgetGuard = toolContextBudgetGuard;
+        this.toolResultGuardrail = toolResultGuardrail;
     }
 
     /**
@@ -384,7 +387,7 @@ class ToolLoopRunner {
                                     continue;
                                 }
                                 executeSingleToolCall(allowedReq, memory, currentMessages, trace, toolExecutors,
-                                        toolRateLimits, toolCanonicalNames, defaultRateLimit, maxBudget, conversationId,
+                                        toolRateLimits, toolCanonicalNames, toolSources, defaultRateLimit, maxBudget, conversationId,
                                         enableRateLimiting, enableCaching, enableCostTracking, task, isLazy, builtInSpecs, activeSpecs);
                             }
                             // Abandoned-thread guard: a cascade step that timed out (or
@@ -455,7 +458,7 @@ class ToolLoopRunner {
                         }
 
                         executeSingleToolCall(toolRequest, memory, currentMessages, trace, toolExecutors,
-                                toolRateLimits, toolCanonicalNames, defaultRateLimit, maxBudget, conversationId,
+                                toolRateLimits, toolCanonicalNames, toolSources, defaultRateLimit, maxBudget, conversationId,
                                 enableRateLimiting, enableCaching, enableCostTracking, task, isLazy, builtInSpecs, activeSpecs);
                     }
                 } else {
@@ -510,14 +513,15 @@ class ToolLoopRunner {
     void executeSingleToolCall(ToolExecutionRequest toolRequest, IConversationMemory memory,
                                List<ChatMessage> currentMessages, List<Map<String, Object>> trace,
                                Map<String, ToolExecutor> toolExecutors, Map<String, Integer> toolRateLimits,
-                               Map<String, String> toolCanonicalNames,
+                               Map<String, String> toolCanonicalNames, Map<String, String> toolSources,
                                int defaultRateLimit, Double maxBudget, String conversationId,
                                boolean enableRateLimiting, boolean enableCaching, boolean enableCostTracking,
                                LlmConfiguration.Task task, boolean isLazy,
                                List<ToolSpecification> builtInSpecs, List<ToolSpecification> activeSpecs) {
-        // Live path: run the full pipeline, then append the raw result verbatim.
+        // Live path: run the full pipeline, then append the governed result. It is
+        // no longer appended verbatim — see executeSingleToolCallResult.
         String toolResult = executeSingleToolCallResult(toolRequest, memory, trace, toolExecutors, toolRateLimits,
-                toolCanonicalNames, defaultRateLimit, maxBudget, conversationId, enableRateLimiting, enableCaching,
+                toolCanonicalNames, toolSources, defaultRateLimit, maxBudget, conversationId, enableRateLimiting, enableCaching,
                 enableCostTracking, task, isLazy, builtInSpecs, activeSpecs);
         currentMessages.add(ToolExecutionResultMessage.from(toolRequest, toolResult));
     }
@@ -536,7 +540,7 @@ class ToolLoopRunner {
     String executeSingleToolCallResult(ToolExecutionRequest toolRequest, IConversationMemory memory,
                                        List<Map<String, Object>> trace,
                                        Map<String, ToolExecutor> toolExecutors, Map<String, Integer> toolRateLimits,
-                                       Map<String, String> toolCanonicalNames,
+                                       Map<String, String> toolCanonicalNames, Map<String, String> toolSources,
                                        int defaultRateLimit, Double maxBudget, String conversationId,
                                        boolean enableRateLimiting, boolean enableCaching, boolean enableCostTracking,
                                        LlmConfiguration.Task task, boolean isLazy,
@@ -655,12 +659,42 @@ class ToolLoopRunner {
         resultStep.put("result", SecretRedactionFilter.redact(toolResult));
         trace.add(resultStep);
 
-        // LAZY mode: after discover_tools returns, activate the matching built-in specs
+        // LAZY mode: after discover_tools returns, activate the matching built-in
+        // specs.
+        //
+        // Deliberately BEFORE the guardrail: discover_tools' output is an
+        // EDDI-authored control message this loop parses itself, and wrapping it in
+        // a provenance envelope first would make that parse fail. The envelope is
+        // for the model's benefit, and the model still gets one.
         if (isLazy && "discover_tools".equals(toolRequest.name())) {
             activateDiscoveredTools(toolResult, builtInSpecs, activeSpecs);
         }
 
-        return toolResult;
+        // Govern what comes back. Until now the comment on the live loop's caller
+        // read "append the raw result verbatim", which made every tool a
+        // prompt-injection channel: third-party bulk text arrived in the same
+        // position as a system instruction with nothing to distinguish it.
+        //
+        // This is the single shared per-request pipeline, so one call here covers
+        // every tool source, both the live loop and the resume path, and — because
+        // the MCP resource bridge's executors return ordinary tool results —
+        // resource content and listings for free.
+        //
+        // Applied AFTER the trace entry above on purpose: the trace is a display
+        // record of what the TOOL returned, and showing an operator EDDI's own
+        // envelope back would obscure that.
+        String source = toolSources == null ? null : toolSources.get(toolRequest.name());
+        var outcome = toolResultGuardrail.inspect(toolRequest.name(), source, toolResult,
+                task.getToolResultGuardrails());
+        if (!ToolResultGuardrail.ACTION_ALLOW.equals(outcome.action())) {
+            Map<String, Object> guardrailStep = new HashMap<>();
+            guardrailStep.put("type", "tool_result_guardrail");
+            guardrailStep.put("tool", toolRequest.name());
+            guardrailStep.put("action", outcome.action());
+            trace.add(guardrailStep);
+        }
+
+        return outcome.result();
     }
 
     /**

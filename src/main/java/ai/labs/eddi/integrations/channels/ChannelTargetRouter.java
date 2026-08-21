@@ -18,6 +18,7 @@ import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.model.AgentDeploymentStatus;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.secrets.SecretResolver;
+import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -419,6 +420,29 @@ public class ChannelTargetRouter {
     }
 
     // ─── Refresh ───────────────────────────────────────────────────────────────
+
+    /**
+     * Drop the resolved-secret cache the moment a vault secret changes, instead of
+     * waiting out the poll interval.
+     * <p>
+     * This cache holds bot tokens and signing secrets already RESOLVED to their
+     * plaintext values, so after a rotation it keeps presenting the revoked
+     * credential — for up to a minute of inbound webhooks, every one of which fails
+     * against the platform. Every other credential-holding cache in the codebase
+     * registers for this; the poll made the gap look bounded rather than absent,
+     * which is why it went unnoticed.
+     * <p>
+     * Zeroing the timestamp rather than refreshing inline: refreshing here would
+     * run store reads on whatever thread happened to write a secret, and the next
+     * inbound message rebuilds the maps anyway.
+     */
+    @PostConstruct
+    void registerSecretInvalidation() {
+        secretResolver.registerInvalidationListener(reference -> {
+            lastRefreshTime = 0;
+            LOGGER.info("Channel integration cache marked stale after a vault secret change");
+        });
+    }
 
     private void refreshIfNeeded() {
         long now = System.currentTimeMillis();

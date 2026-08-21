@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.modules.llm.governance.RemoteTextGovernor;
+import ai.labs.eddi.modules.llm.tools.spi.ToolRequestResolver;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.A2AAgentConfig;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import ai.labs.eddi.secrets.SecretResolver;
@@ -82,7 +83,19 @@ public class A2AToolProviderManager {
 
     private final Map<String, CircuitState> circuitBreakers = new ConcurrentHashMap<>();
 
-    record A2AToolsResult(List<ToolSpecification> toolSpecs, Map<String, ToolExecutor> executors) {
+    /**
+     * @param requestResolvers
+     *            dispatch name → what the call would send, so a gated A2A call can
+     *            show its approver a target and be pinned to a fingerprint. Empty,
+     *            not absent, for callers that construct a result directly.
+     */
+    record A2AToolsResult(List<ToolSpecification> toolSpecs, Map<String, ToolExecutor> executors,
+            Map<String, ToolRequestResolver> requestResolvers) {
+
+        /** Two-component form, for tests and for callers with nothing to pin. */
+        A2AToolsResult(List<ToolSpecification> toolSpecs, Map<String, ToolExecutor> executors) {
+            this(toolSpecs, executors, Map.of());
+        }
     }
 
     @Inject
@@ -134,9 +147,10 @@ public class A2AToolProviderManager {
     public A2AToolsResult discoverTools(List<A2AAgentConfig> a2aAgents) {
         List<ToolSpecification> toolSpecs = new ArrayList<>();
         Map<String, ToolExecutor> executors = new HashMap<>();
+        Map<String, ToolRequestResolver> requestResolvers = new HashMap<>();
 
         if (a2aAgents == null || a2aAgents.isEmpty()) {
-            return new A2AToolsResult(toolSpecs, executors);
+            return new A2AToolsResult(toolSpecs, executors, requestResolvers);
         }
 
         for (A2AAgentConfig config : a2aAgents) {
@@ -152,7 +166,7 @@ public class A2AToolProviderManager {
                     continue;
                 }
 
-                discoverAgentTools(config, toolSpecs, executors);
+                discoverAgentTools(config, toolSpecs, executors, requestResolvers);
                 // Reset circuit on success
                 circuitBreakers.remove(config.getUrl());
             } catch (Exception e) {
@@ -161,7 +175,7 @@ public class A2AToolProviderManager {
             }
         }
 
-        return new A2AToolsResult(toolSpecs, executors);
+        return new A2AToolsResult(toolSpecs, executors, requestResolvers);
     }
 
     /** Number of cached agent connections. */
@@ -177,7 +191,9 @@ public class A2AToolProviderManager {
     // === Internal ===
 
     @SuppressWarnings("unchecked")
-    private void discoverAgentTools(A2AAgentConfig config, List<ToolSpecification> toolSpecs, Map<String, ToolExecutor> executors) throws Exception {
+    private void discoverAgentTools(A2AAgentConfig config, List<ToolSpecification> toolSpecs, Map<String, ToolExecutor> executors,
+                                    Map<String, ToolRequestResolver> requestResolvers)
+            throws Exception {
 
         // Warn once at discovery time if raw key is used
         if (!isNullOrEmpty(config.getApiKey())) {
@@ -208,6 +224,7 @@ public class A2AToolProviderManager {
                     .build();
             toolSpecs.add(spec);
             executors.put(toolName, createA2AToolExecutor(agentUrl, config));
+            requestResolvers.put(toolName, RemoteToolRequestResolvers.forA2A(agentUrl, !isNullOrEmpty(config.getApiKey())));
             return;
         }
 
@@ -236,6 +253,7 @@ public class A2AToolProviderManager {
 
             toolSpecs.add(spec);
             executors.put(toolName, createA2AToolExecutor(agentUrl, config));
+            requestResolvers.put(toolName, RemoteToolRequestResolvers.forA2A(agentUrl, !isNullOrEmpty(config.getApiKey())));
         }
     }
 
