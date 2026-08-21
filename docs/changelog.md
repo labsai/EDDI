@@ -7,6 +7,77 @@
 
 
 
+## chore(ci): persist the project metrics series instead of letting it expire (2026-08-21)
+
+**Repo:** EDDI (`chore/persist-repo-metrics-history`)
+
+Started from "can we still fetch the repo analytics the CI posts to Slack?". The answer was *only for
+90 days*, and only by scraping job logs — which is worth writing down, because the workflow looks like
+it stores its data and does not.
+
+`docker-pull-notify.yml` ("Project Metrics Tracker") collects Docker pulls, stars, forks and GitHub
+traffic, pushes them to GA4 and Umami, and posts digests to Slack. Everything it keeps locally is a
+**rolling snapshot**: `metrics.json` in the Actions cache is overwritten on every run and holds only
+current totals plus digest baselines. The workflow uploads no artifact. So the only historical record
+was the incidental one — every run echoes its numbers into the job log — and job logs expire.
+
+Confirmed the horizon empirically rather than trusting the documented default. The boundary fell
+*mid-day* on 2026-05-22: runs up to 22:56 UTC that day return `HTTP 410 Gone`, every run after it
+returns `200` — exactly 90 days, rolling, to the hour. Recovered what was still reachable (2,295 of
+2,400 retained runs, 2026-05-22 22:56 → 08-20) before it ages out. The per-day series derived from it
+starts 2026-05-23, since 05-22 survives only as a partial day.
+
+### What changed
+
+One step appended to the `track` job, plus `contents: read` → `write` on that job.
+
+It writes one row per UTC day to an orphan `metrics` branch. `main` was considered and is not usable:
+it requires a PR plus one approving review, requires the `CodeQL Analysis` and `Build & Test` checks,
+and sets `enforce_admins: true` — a CI push there is impossible without weakening branch protection,
+which would also cost OpenSSF Scorecard points. A push to `main` would additionally fire
+`scorecard.yml` on every commit. The orphan branch triggers nothing, and `GITHUB_TOKEN` pushes do not
+start workflows anyway.
+
+### Design decisions
+
+**Not gated on the 07:00 `daily` schedule.** GitHub drops scheduled runs under load — measured ~48 min
+median spacing against a 15 min cron, with one 9.6 h gap. A dropped 07:00 run would lose that day
+permanently, since the values cannot be reconstructed after the fact. Instead the first run of each UTC
+day writes the row and every later run that day sees it and exits, which also makes a failed push
+self-healing: the next run retries.
+
+**The stargazer roster is snapshotted too.** This is the part that is not just convenience. GitHub
+publishes no unstar event through any API — the stargazers endpoint returns only current stars, the
+repo events endpoint is capped at 300 events (~1 day here, and saturated by PR traffic), and GH
+Archive's `WatchEvent` coverage for this period is broken (verified against three known stars with
+exact timestamps; none appear, and hourly global counts of 16–217 are far below a complete firehose).
+So diffing consecutive rosters is the *only* way to ever learn who unstarred. Sorted by login so the
+diff shows membership changes rather than reordering.
+
+**Failure modes preferred to fail open.** The roster fetch is non-fatal and the count row is written
+first — losing a reliable row to an optional API call would be the wrong trade. A truncated page set
+is rejected by comparing the roster size against the star count just fetched, so a partial response
+cannot read as a mass unstar. A row with empty pulls or stars is skipped entirely: a visible gap is
+better than a blank that looks like data.
+
+### What this enables
+
+`git log -p metrics -- data/stargazers.csv` will give, for every future unstar: who, when they starred,
+and exactly how long they held it. None of that is recoverable today.
+
+For reference, the 90 days that *were* recoverable showed 11 unstars — not the 9 a naive reading of the
+count gives, because two were masked by same-day arrivals. At most 4 were drive-bys; at least 7 had
+held the star longer than the observation window. Caveat for whoever reads this later: a deleted or
+spam-purged account is indistinguishable from a deliberate unstar, and 59.5% of the star base is older
+than three years.
+
+### Not done
+
+The recovered 2026-05-22 → 08-20 series is **not** seeded into the branch — the series starts from the
+first workflow run after merge. Seeding it is a separate call.
+
+---
+
 ## 🎯 test(sweep): close the two verdict caveats — legacy triage + stubbed-LLM validation (2026-08-21)
 
 **Repo:** EDDI (`fix/sweep-0820a-integrity-defects`)

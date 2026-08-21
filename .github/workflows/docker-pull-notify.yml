@@ -25,7 +25,10 @@ jobs:
   track:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      # write: the daily run commits the metrics history to the `metrics` branch.
+      # `main` cannot be used — it requires a PR + review and enforces admins,
+      # so a CI push there is impossible without weakening branch protection.
+      contents: write
     steps:
       # ── Restore cached metrics ──────────────────────────────
       # Uses run_id-based key rotation to avoid needing actions:write for cache delete.
@@ -532,3 +535,184 @@ jobs:
         with:
           path: metrics.json
           key: project-metrics-${{ github.run_id }}
+
+      # ── Persist history to the `metrics` branch ──────────────
+      # Why this exists: the Actions cache above holds only a rolling snapshot,
+      # and job logs expire after 90 days — so the series was unrecoverable
+      # past that horizon. This writes one row per UTC day to an orphan branch
+      # that no workflow builds from (`main` is not an option: it requires a PR
+      # plus review and enforces admins, and every push there would also fire
+      # scorecard.yml).
+      #
+      # It also re-snapshots the stargazer roster. GitHub publishes no unstar
+      # event to any API, so diffing consecutive rosters is the only way to
+      # learn *who* unstarred and how long they had held it.
+      #
+      # Deliberately NOT gated on the 07:00 'daily' schedule: GitHub drops
+      # scheduled runs under load (observed: ~48 min median spacing against a
+      # 15 min cron, and one 9.6 h gap), and a dropped 07:00 run would lose
+      # that day permanently — the values cannot be backfilled. Instead the
+      # first run of each UTC day writes the row; every later run that day
+      # sees it and exits. That also makes a failed push self-healing, since
+      # the next run simply retries.
+      - name: Persist metrics history
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: metrics
+          PULLS: ${{ steps.docker.outputs.pulls }}
+          STARS: ${{ steps.github.outputs.stars }}
+          FORKS: ${{ steps.github.outputs.forks }}
+          VIEWS: ${{ steps.traffic.outputs.views }}
+          UNIQUES: ${{ steps.traffic.outputs.uniques }}
+          CLONES: ${{ steps.traffic.outputs.clones }}
+        run: |
+          set -euo pipefail
+
+          # Never commit a malformed row: a gap is visible, a bad value is not.
+          # Must test for digits, not just non-emptiness — the upstream steps
+          # read these with `jq '.pull_count'` etc., and jq prints the literal
+          # `null` when a field is missing from an otherwise-200 response.
+          # `null` is non-empty, so an emptiness check would let it through and
+          # the roster arithmetic below would then abort on it.
+          for name in PULLS STARS FORKS VIEWS UNIQUES CLONES; do
+            value="${!name:-}"
+            case "$value" in
+              ''|*[!0-9]*)
+                echo "::warning::Metric ${name} is not a number ('${value}') — skipping persist"
+                exit 0
+                ;;
+            esac
+          done
+
+          rm -rf hist && mkdir hist && cd hist
+          git init -q
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add origin \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+
+          # Reuse the branch if it exists; otherwise start it empty (orphan).
+          # --depth=1 keeps the fetch O(1) as the series grows; the remote
+          # still retains full history because the pushed commit's ancestors
+          # are already there.
+          if git fetch -q --depth=1 origin "$BRANCH" 2>/dev/null; then
+            git checkout -q -B "$BRANCH" FETCH_HEAD
+          else
+            echo "Branch '$BRANCH' not found — creating it"
+            git checkout -q -b "$BRANCH"
+          fi
+
+          mkdir -p data
+          HEADER="date,docker_pulls,stars,forks,views_14d,uniques_14d,clones_14d"
+          [ -f data/metrics.csv ] || echo "$HEADER" > data/metrics.csv
+
+          # `>>` writes at the current end of file, so a missing trailing
+          # newline would splice today's row onto the previous one and corrupt
+          # both. Only reachable after a hand edit or a truncated push, but
+          # this branch is the only durable copy — cheap to prevent, costly to
+          # repair.
+          if [ -s data/metrics.csv ] && [ -n "$(tail -c1 data/metrics.csv)" ]; then
+            echo >> data/metrics.csv
+          fi
+
+          TODAY=$(date -u +%F)
+          if grep -q "^${TODAY}," data/metrics.csv; then
+            echo "Row for ${TODAY} already present — nothing to do"
+            exit 0
+          fi
+
+          echo "${TODAY},${PULLS},${STARS},${FORKS},${VIEWS},${UNIQUES},${CLONES}" >> data/metrics.csv
+          echo "Appended row for ${TODAY}"
+
+          # Roster sorted by login so a diff shows membership changes only,
+          # never reordering. Git history then *is* the churn record:
+          #   git log -p metrics -- data/stargazers.csv
+          #
+          # Kept non-fatal on purpose: the count row above is already written,
+          # and losing it to a stargazer API hiccup would trade the reliable
+          # data for the optional data.
+          if gh api -H "Accept: application/vnd.github.star+json" \
+                    --paginate "repos/${GITHUB_REPOSITORY}/stargazers?per_page=100" \
+                    --jq '.[] | [.user.login, .starred_at] | @csv' \
+               | sort -f > data/stargazers.new; then
+            # Guard against a truncated page set silently reading as a mass
+            # unstar. Allow drift (stars move between the two API calls) but
+            # reject a roster that is nowhere near the count we just fetched.
+            ROSTER_N=$(wc -l < data/stargazers.new)
+            if [ "$ROSTER_N" -gt 0 ] && [ "$ROSTER_N" -ge $(( STARS * 9 / 10 )) ]; then
+              { echo "login,starred_at"; cat data/stargazers.new; } > data/stargazers.csv
+              echo "Roster snapshot: ${ROSTER_N} entries"
+            else
+              echo "::warning::Roster looks truncated (${ROSTER_N} rows vs ${STARS} stars) — keeping previous"
+            fi
+          else
+            echo "::warning::Stargazer API call failed — keeping previous roster"
+          fi
+          rm -f data/stargazers.new
+
+          # Orient anyone who lands on the branch; it is machine-written and
+          # has no source tree, which is otherwise confusing.
+          if [ ! -f README.md ]; then
+            cat > README.md <<'MD'
+          # EDDI project metrics history
+
+          Machine-generated by the `Project Metrics Tracker` workflow. Do not
+          edit by hand and do not merge into `main` — this is an orphan branch
+          with no source tree.
+
+          - `data/metrics.csv` — one row per UTC day: Docker pulls, stars,
+            forks, and GitHub's rolling 14-day views/clones.
+          - `data/stargazers.csv` — the stargazer roster, sorted by login.
+            GitHub publishes no unstar event, so the commit history of this
+            file is the only record of who unstarred and when:
+
+                git log -p metrics -- data/stargazers.csv
+
+          ## Data retention
+
+          `data/stargazers.csv` contains GitHub logins and star timestamps.
+          Both are public — the same values the stargazers API returns to any
+          caller — but the commit history of this file is not: it reconstructs
+          *departures*, which GitHub deliberately does not publish. Treat it as
+          a per-person record, not as incidental public data.
+
+          - **Purpose:** understanding project health — whether lost stars are
+            brief visitors or long-term followers.
+          - **Retention:** kept for the life of the branch. Snapshots are not
+            pruned, because the history *is* the dataset.
+          - **Removal:** to erase one person from the whole history while
+            keeping the file and everyone else's rows, run a row-level
+            rewrite on a fresh clone. Nothing builds from this branch, so
+            force-pushing it is safe — but force-push `metrics` only.
+
+                git clone --single-branch -b metrics <repo-url> erase
+                cd erase
+                git filter-repo --force --refs metrics --blob-callback '
+                lines = blob.data.split(b"\n")
+                if lines and lines[0].startswith(b"login,starred_at"):
+                    blob.data = b"\n".join(
+                        l for l in lines if not l.startswith(b"\"THE_LOGIN\","))
+                '
+                git push --force origin metrics
+
+            `data/metrics.csv` is aggregate-only and is not touched by the
+            callback above. To stop collection entirely, delete the roster
+            block from the `Persist metrics history` step in
+            `.github/workflows/docker-pull-notify.yml`.
+
+            As with any history rewrite, the pre-rewrite commits survive in
+            existing clones and stay reachable on GitHub until it garbage
+            collects them — ask GitHub Support to expire them if the removal
+            has to be complete.
+          MD
+          fi
+
+          git add data README.md
+          if git diff --quiet --cached; then
+            echo "Nothing changed"
+          else
+            git commit -q -m "chore(metrics): ${TODAY} — ${PULLS} pulls, ${STARS} stars"
+            git push -q origin "$BRANCH"
+            echo "Pushed to '$BRANCH'"
+          fi
