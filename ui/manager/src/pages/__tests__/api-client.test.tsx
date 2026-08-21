@@ -12,6 +12,23 @@ afterEach(() => {
 });
 
 describe("ApiClient", () => {
+  it("labels a network failure as one, and reports status 0 rather than an HTTP code", async () => {
+    // A dead network, DNS failure or CORS rejection is not an HTTP error and
+    // must not read like one. Nothing asserted either half, so the `Network
+    // error:` prefix could be dropped and all 645 tests across the API layer
+    // stayed green — leaving "Failed to fetch" to reach a toast on its own,
+    // indistinguishable from a message the backend sent.
+    vi.spyOn(global, "fetch").mockRejectedValue(new TypeError("Failed to fetch"));
+
+    const error = await api.get("/agentstore/agents/descriptors").catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(ApiClientError);
+    expect((error as Error).message).toBe("Network error: Failed to fetch");
+    // 0, not 500: there was no response, so there is no status to report, and
+    // anything in the HTTP range would claim the server answered.
+    expect((error as ApiClientError).status).toBe(0);
+  });
+
   it("throws a real Error, so `err instanceof Error ? err.message : String(err)` reads the backend text", async () => {
     // Dozens of call sites unwrap failures exactly that way. When the client
     // threw a plain object literal, the instanceof branch never matched and

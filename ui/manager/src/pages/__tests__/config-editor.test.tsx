@@ -145,6 +145,118 @@ describe("ConfigEditorLayout", () => {
     expect(screen.getByTestId("discard-btn")).toBeDisabled();
   });
 
+  /**
+   * The dirty lifecycle — the half of this component nothing asserted.
+   *
+   * The two tests above pin the *clean* state (save disabled, discard
+   * disabled), which is exactly the state an editor that never registers an
+   * edit is permanently in. Mutation-checked against the audit's surviving
+   * mutants: with `const isDirty = false` in `config-editor-layout.tsx`, all
+   * 36 tests in this file and `resource-detail-rules` passed. Each case below
+   * fails against that mutant, and against the narrower one that removes only
+   * the dirty badge.
+   */
+  describe("once an edit is made", () => {
+    const EDITED = '{"type":"behavior","config":{"edited":true}}';
+
+    /**
+     * Edit the mocked Monaco textarea, which is the JSON view.
+     *
+     * `paste` rather than `type`: userEvent reads `{` as the opening of a key
+     * descriptor (`{Enter}`, `{Shift}`), so typing raw JSON throws on the first
+     * brace.
+     */
+    async function editJson(user: ReturnType<typeof userEvent.setup>) {
+      const editor = screen.getByLabelText("JSON editor");
+      await user.clear(editor);
+      await user.click(editor);
+      await user.paste(EDITED);
+    }
+
+    it("enables Save", async () => {
+      const user = userEvent.setup();
+      renderWithProviders(<ConfigEditorLayout {...defaultProps} />);
+      expect(screen.getByTestId("save-btn")).toBeDisabled();
+
+      await editJson(user);
+
+      expect(screen.getByTestId("save-btn")).toBeEnabled();
+    });
+
+    it("enables Discard", async () => {
+      const user = userEvent.setup();
+      renderWithProviders(<ConfigEditorLayout {...defaultProps} />);
+      expect(screen.getByTestId("discard-btn")).toBeDisabled();
+
+      await editJson(user);
+
+      expect(screen.getByTestId("discard-btn")).toBeEnabled();
+    });
+
+    it("shows the unsaved-changes indicator", async () => {
+      const user = userEvent.setup();
+      renderWithProviders(<ConfigEditorLayout {...defaultProps} />);
+      expect(screen.queryByTestId("dirty-indicator")).not.toBeInTheDocument();
+
+      await editJson(user);
+
+      expect(screen.getByTestId("dirty-indicator")).toBeInTheDocument();
+    });
+
+    it("locks the version picker, so switching version cannot silently drop the edit", async () => {
+      const user = userEvent.setup();
+      renderWithProviders(
+        <ConfigEditorLayout
+          {...defaultProps}
+          versions={[{ version: 1 }, { version: 2 }]}
+        />
+      );
+      expect(screen.getByTestId("version-picker")).toBeEnabled();
+
+      await editJson(user);
+
+      // This is a data-loss guard, not decoration: the picker refetches and
+      // replaces `data`, so an enabled picker over unsaved edits discards them
+      // with no prompt.
+      expect(screen.getByTestId("version-picker")).toBeDisabled();
+    });
+
+    it("passes the edited document to onSave, not the original", async () => {
+      const user = userEvent.setup();
+      const onSave = vi.fn();
+      renderWithProviders(
+        <ConfigEditorLayout {...defaultProps} onSave={onSave} />
+      );
+
+      await editJson(user);
+      await user.click(screen.getByTestId("save-btn"));
+
+      expect(onSave).toHaveBeenCalledTimes(1);
+      const saved = onSave.mock.calls[0]![0] as string;
+      expect(JSON.parse(saved)).toMatchObject({ config: { edited: true } });
+    });
+
+    it("Discard restores the original and clears the dirty state", async () => {
+      const user = userEvent.setup();
+      renderWithProviders(<ConfigEditorLayout {...defaultProps} />);
+
+      await editJson(user);
+      expect(screen.getByTestId("dirty-indicator")).toBeInTheDocument();
+
+      await user.click(screen.getByTestId("discard-btn"));
+      // Discard is guarded by a confirmation dialog. Addressed by testid, not
+      // by role+name: the toolbar button and the dialog's confirm button both
+      // read "Discard", so a name query resolves to two elements.
+      await user.click(screen.getByTestId("unsaved-confirm"));
+
+      await waitFor(() => {
+        expect(screen.queryByTestId("dirty-indicator")).not.toBeInTheDocument();
+      });
+      expect(screen.getByTestId("save-btn")).toBeDisabled();
+      expect(screen.getByLabelText("JSON editor")).toHaveValue(defaultProps.data);
+    });
+  });
+
   it("shows success message when saveSuccess is true", () => {
     renderWithProviders(
       <ConfigEditorLayout {...defaultProps} saveSuccess={true} />

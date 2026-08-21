@@ -139,6 +139,22 @@ describe("updates", () => {
       expect(markdown).not.toContain("| a |");
     });
 
+    it("backs off past a fence the cut point lands inside", () => {
+      // The case the test below does NOT reach. There the paragraph break
+      // happens to fall on balanced fences, so the repair branch never runs —
+      // deleting `if (countFences(cut) % 2 !== 0)` outright left both green.
+      // Here the cut lands *between* an opening fence and its close, which is
+      // the only input the repair exists for.
+      const notes = "Intro.\n\n```bash\nsome command\n\nmore lines here\n```\n\nTail.";
+      const { markdown } = previewReleaseNotes(notes, 40);
+
+      // Without the repair this keeps "```bash\nsome command" — one fence —
+      // and everything after it in the panel renders as a code block.
+      expect(markdown.split("```").length - 1).toBe(0);
+      expect(markdown).not.toContain("```bash");
+      expect(markdown).toBe("Intro.\n\n…");
+    });
+
     it("backs off past an unclosed code fence", () => {
       const notes = ["Intro.", "```bash\neddi update\n```", "```bash\nsomething long here", "Tail."].join(
         "\n\n",

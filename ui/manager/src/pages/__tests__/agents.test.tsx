@@ -160,6 +160,57 @@ describe("AgentsPage", () => {
     expect(searchInput).toHaveValue("support");
   });
 
+  /**
+   * The search box actually narrowing the list.
+   *
+   * The test above asserts the DOM input holds what was typed — a property of
+   * `<input>`, not of this page. Nothing asserted the term reached the query,
+   * so replacing `useInfiniteAgentDescriptors(search)` with
+   * `useInfiniteAgentDescriptors("")` left all 28 tests here green. Verified
+   * against a live EDDI 6.3.0 first: `filter` is a real query parameter and
+   * genuinely narrows, so the handler now honours it too.
+   */
+  it("filters the list down to the matching agent", async () => {
+    renderAgents();
+    const user = userEvent.setup();
+
+    await waitFor(() => {
+      expect(screen.getByText("Support Agent")).toBeInTheDocument();
+    });
+    expect(screen.getByText("FAQ Agent")).toBeInTheDocument();
+
+    await user.type(screen.getByTestId("agent-search"), "FAQ");
+
+    // Both halves: the match stays, the non-match goes. Asserting only the
+    // first passes against a search box wired to nothing.
+    await waitFor(() => {
+      expect(screen.queryByText("Support Agent")).not.toBeInTheDocument();
+    });
+    expect(screen.getByText("FAQ Agent")).toBeInTheDocument();
+  });
+
+  it("shows the no-results empty state rather than the first-run one", async () => {
+    renderAgents();
+    const user = userEvent.setup();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("agent-grid")).toBeInTheDocument();
+    });
+
+    await user.type(screen.getByTestId("agent-search"), "zzzznomatch");
+
+    // A search with no hits is not a first run: offering "create your first
+    // agent" to someone whose query simply missed is the wrong instruction,
+    // and the action button must not be there to be clicked.
+    await waitFor(() => {
+      expect(screen.getByTestId("empty-state")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("empty-state")).toHaveTextContent(/no results/i);
+    expect(
+      within(screen.getByTestId("empty-state")).queryByRole("button"),
+    ).not.toBeInTheDocument();
+  });
+
   // --- Sorting in list view ---
 
   it("sorts by name when clicking Name header and verifies order", async () => {
