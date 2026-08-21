@@ -205,7 +205,7 @@ context. Three layers apply, none of which you configure to get:
   "enabled": true,
   "markProvenance": true,
   "directiveAction": "redact",
-  "appliesToSources": ["mcp", "a2a", "http"],
+  "directiveAppliesToSources": ["mcp", "a2a", "http"],
   "exemptTools": []
 }
 ```

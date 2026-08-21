@@ -122,34 +122,68 @@ class ToolLoopRunnerGuardrailWiringTest {
         assertTrue(result.contains("source 'unknown'"), result);
     }
 
+    /**
+     * The REAL truncator, not a mock.
+     * <p>
+     * An earlier version of these tests used a mock that returned a plain
+     * {@code substring} — and so asserted a property production does not have. The
+     * real {@code truncateResponse} appends a {@code [TRUNCATED: …]} note, so its
+     * output has always exceeded {@code maxChars} by that note's length. A mock
+     * without it let the test claim "the total respects the configured ceiling",
+     * which is false, and would have started failing the moment anyone made the
+     * double faithful. The property that IS true — and the one worth pinning — is
+     * that the envelope adds nothing on top of that pre-existing overshoot.
+     */
+    private ToolLoopRunner runnerWithRealTruncator() {
+        // chatModelRegistry is only reached by the summarize strategy, and
+        // paginatedResponseStore only by paginate; neither is exercised here.
+        return new ToolLoopRunner(toolExecutionService, new ToolResponseTruncator(new SimpleMeterRegistry(), null), null, null, null, null, null,
+                new ToolResultGuardrail(new SimpleMeterRegistry()));
+    }
+
     @Test
-    @DisplayName("the envelope fits INSIDE the configured response ceiling")
+    @DisplayName("the envelope costs nothing against the configured ceiling")
     void envelopeIsReservedFromTheTruncationBudget() {
         // The regression: the truncator cut to the configured limit and the envelope
-        // was then added on top, so every result exceeded the ceiling by ~200 chars —
+        // was added on top, so every result exceeded the ceiling by the envelope —
         // small once, kilobytes across a long tool loop, and exactly the drift the
         // ceiling exists to stop.
         var limits = new LlmConfiguration.ToolResponseLimits();
         limits.setDefaultMaxChars(2_000);
         task.setToolResponseLimits(limits);
-
-        var budgets = new ArrayList<Integer>();
-        var truncator = mock(ToolResponseTruncator.class);
-        when(truncator.truncateIfNeeded(anyString(), anyString(), any(), any(), any())).thenAnswer(invocation -> {
-            LlmConfiguration.ToolResponseLimits applied = invocation.getArgument(2);
-            budgets.add(applied == null ? null : applied.getDefaultMaxChars());
-            String result = invocation.getArgument(1);
-            int cap = applied == null ? Integer.MAX_VALUE : applied.getDefaultMaxChars();
-            return result.length() <= cap ? result : result.substring(0, cap);
-        });
-        runner = new ToolLoopRunner(toolExecutionService, truncator, null, null, null, null, null,
-                new ToolResultGuardrail(new SimpleMeterRegistry()));
+        runner = runnerWithRealTruncator();
 
         String governed = execute("x".repeat(10_000), Map.of("get_order", "mcp"), new ArrayList<>());
 
-        assertEquals(1, budgets.size());
-        assertTrue(budgets.get(0) < 2_000, "the truncator must be given a reduced budget, got " + budgets.get(0));
-        assertTrue(governed.length() <= 2_000, "what reaches the model must respect the configured ceiling, got " + governed.length());
+        // Measured against the SAME agent with marking off — the only honest
+        // baseline, because it is what this feature is allowed to cost.
+        var withoutMarking = new ToolResultGuardrailConfig();
+        withoutMarking.setMarkProvenance(false);
+        task.setToolResultGuardrails(withoutMarking);
+        String unmarked = execute("x".repeat(10_000), Map.of("get_order", "mcp"), new ArrayList<>());
+
+        assertTrue(governed.contains("source 'mcp'"), "the marked run must actually be marked");
+        assertTrue(governed.length() <= unmarked.length(),
+                "provenance marking must not push the result past what the same ceiling produced without it: " + governed.length() + " vs "
+                        + unmarked.length());
+    }
+
+    @Test
+    @DisplayName("a disabled limit (0) stays disabled — it must not become the envelope floor")
+    void doesNotTurnADisabledLimitIntoACeiling() {
+        // 0 is the documented "no limit" sentinel, and ToolResponseTruncator returns
+        // early on it. Subtracting the envelope made it negative, the floor clamped
+        // it to 256, and an agent that had deliberately turned truncation OFF had
+        // every tool result cut to 256 characters.
+        var limits = new LlmConfiguration.ToolResponseLimits();
+        limits.setDefaultMaxChars(0);
+        task.setToolResponseLimits(limits);
+        runner = runnerWithRealTruncator();
+
+        String governed = execute("y".repeat(10_000), Map.of("get_order", "mcp"), new ArrayList<>());
+
+        assertTrue(governed.contains("y".repeat(10_000)), "the whole result must survive, got " + governed.length() + " chars");
+        assertFalse(governed.contains("TRUNCATED"), governed.substring(0, Math.min(400, governed.length())));
     }
 
     @Test

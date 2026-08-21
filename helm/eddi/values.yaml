@@ -50,6 +50,17 @@ eddi:
   # CORS origins
   corsOrigins: "http://localhost:3000,http://localhost:7070"
 
+  # Authentication escape hatches.
+  #
+  # Left empty they follow oidc.enabled — OIDC off means the guards would refuse
+  # to boot, so the chart opts out for you and the quickstart works. Set them
+  # explicitly only for a deployment that runs without OIDC on purpose (air-gapped,
+  # or a demo) and wants /mcp or /secretstore closed anyway.
+  security:
+    allowUnauthenticated: ""
+    allowUnauthenticatedMcp: ""
+    allowUnauthenticatedSecretStore: ""
+
   # OIDC / Keycloak authentication
   oidc:
     enabled: false

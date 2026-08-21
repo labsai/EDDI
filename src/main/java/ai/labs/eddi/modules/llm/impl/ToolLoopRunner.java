@@ -735,10 +735,23 @@ class ToolLoopRunner {
     }
 
     /**
-     * Never below a floor: a ceiling smaller than the envelope would truncate to
-     * nothing.
+     * Makes room for the envelope inside one configured ceiling.
+     * <p>
+     * A NON-POSITIVE limit means "no limit" and must pass through untouched:
+     * {@code ToolResponseTruncator.truncateIfNeeded} returns early on
+     * {@code maxChars <= 0}, and {@code 0 = disabled} is the documented idiom.
+     * Subtracting from it produced a negative number, the floor below then clamped
+     * it to 256, and an agent that had deliberately turned truncation OFF had every
+     * tool result cut to 256 characters. That omission is why this is the first
+     * statement and not a footnote.
+     * <p>
+     * Otherwise never below a floor: a ceiling smaller than the envelope would
+     * truncate to nothing.
      */
     private static int reduce(int limit) {
+        if (limit <= 0) {
+            return limit;
+        }
         return Math.max(limit - ToolResultProvenance.MAX_ENVELOPE_CHARS, MINIMUM_TOOL_RESULT_CHARS);
     }
 

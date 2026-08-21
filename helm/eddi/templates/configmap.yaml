@@ -19,6 +19,16 @@ data:
   {{- end }}
   QUARKUS_HTTP_CORS_ORIGINS: {{ .Values.eddi.corsOrigins | quote }}
   QUARKUS_OIDC_TENANT_ENABLED: {{ .Values.eddi.oidc.enabled | quote }}
+  {{- /*
+    With OIDC off, AuthStartupGuard refuses a production boot unless the escape
+    hatch is set, and HighValueSurfaceGuard additionally refuses to expose /mcp
+    and /secretstore without their own opt-in. Derived from oidc.enabled so an
+    authenticated install never ships permissive flags, and overridable for the
+    air-gapped case where OIDC is off deliberately.
+  */}}
+  EDDI_SECURITY_ALLOW_UNAUTHENTICATED: {{ .Values.eddi.security.allowUnauthenticated | default (not .Values.eddi.oidc.enabled) | quote }}
+  EDDI_MCP_ALLOW_UNAUTHENTICATED: {{ .Values.eddi.security.allowUnauthenticatedMcp | default (not .Values.eddi.oidc.enabled) | quote }}
+  EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED: {{ .Values.eddi.security.allowUnauthenticatedSecretStore | default (not .Values.eddi.oidc.enabled) | quote }}
   {{- if .Values.eddi.oidc.enabled }}
   {{- if .Values.keycloak.enabled }}
   QUARKUS_OIDC_AUTH_SERVER_URL: "http://{{ include "eddi.fullname" . }}-keycloak:8080/realms/eddi"

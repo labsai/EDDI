@@ -153,13 +153,17 @@ class ToolResultGuardrailTest {
     class Scoping {
 
         @Test
-        @DisplayName("appliesToSources narrows which sources are governed")
-        void narrowsBySource() {
+        @DisplayName("directiveAppliesToSources narrows DIRECTIVE handling — and nothing else")
+        void narrowsDirectiveHandlingOnly() {
             var config = new ToolResultGuardrailConfig();
-            config.setAppliesToSources(List.of("mcp"));
+            config.setDirectiveAppliesToSources(List.of("mcp"));
 
-            assertSame(INJECTION, guardrail.inspect("t", "http", INJECTION, config).result(),
-                    "an out-of-scope source is passed through untouched, envelope included");
+            var outOfScope = guardrail.inspect("t", "http", INJECTION, config);
+            assertTrue(outOfScope.result().contains("Ignore all previous instructions"), "an out-of-scope source keeps its text");
+            assertTrue(outOfScope.result().contains("source 'http'"),
+                    "but it must STILL be marked: an unmarked result reads to the model as authoritative, which is the gap this "
+                            + "whole feature exists to close");
+
             assertFalse(guardrail.inspect("t", "mcp", INJECTION, config).result().contains("Ignore all previous"));
         }
 
@@ -167,7 +171,7 @@ class ToolResultGuardrailTest {
         @DisplayName("an empty source list means every source, including ones added later")
         void emptyListMeansEverything() {
             var config = new ToolResultGuardrailConfig();
-            config.setAppliesToSources(List.of());
+            config.setDirectiveAppliesToSources(List.of());
 
             assertFalse(guardrail.inspect("t", "some-future-source", INJECTION, config).result().contains("Ignore all previous"));
         }

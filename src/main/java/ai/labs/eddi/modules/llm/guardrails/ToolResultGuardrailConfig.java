@@ -49,12 +49,21 @@ public class ToolResultGuardrailConfig {
     private String directiveAction = ACTION_REDACT;
 
     /**
-     * Tool sources this applies to, by provenance tag ({@code builtin},
-     * {@code http}, {@code mcp}, {@code a2a}, {@code dynamic}, {@code memory},
-     * {@code recall}). Empty or null means every source — the safe reading, and the
-     * one that does not silently stop covering a source added later.
+     * Tool sources {@link #directiveAction} applies to, by provenance tag
+     * ({@code builtin}, {@code http}, {@code mcp}, {@code a2a}, {@code dynamic},
+     * {@code memory}, {@code recall}). Empty or null means every source — the safe
+     * reading, and the one that does not silently stop covering a source added
+     * later.
+     * <p>
+     * Named for what it narrows. As {@code appliesToSources} it read as "this whole
+     * config applies to these sources", and the implementation obliged by skipping
+     * PROVENANCE MARKING too — so narrowing to {@code ["mcp","a2a","http"]}, the
+     * example printed in the docs, left every {@code websearch} and memory result
+     * arriving unmarked in the same transcript position a system instruction
+     * occupies. Marking is deliberately not narrowable; use {@link #exemptTools} to
+     * exclude one tool's content from directive handling.
      */
-    private List<String> appliesToSources;
+    private List<String> directiveAppliesToSources;
 
     /**
      * Dispatch names exempt from directive handling. Provenance marking still
@@ -87,12 +96,12 @@ public class ToolResultGuardrailConfig {
         this.directiveAction = directiveAction;
     }
 
-    public List<String> getAppliesToSources() {
-        return appliesToSources;
+    public List<String> getDirectiveAppliesToSources() {
+        return directiveAppliesToSources;
     }
 
-    public void setAppliesToSources(List<String> appliesToSources) {
-        this.appliesToSources = appliesToSources;
+    public void setDirectiveAppliesToSources(List<String> directiveAppliesToSources) {
+        this.directiveAppliesToSources = directiveAppliesToSources;
     }
 
     public List<String> getExemptTools() {

@@ -86,14 +86,21 @@ public class ToolResultGuardrail {
         }
 
         ToolResultGuardrailConfig effective = config != null ? config : new ToolResultGuardrailConfig();
-        if (!isTrue(effective.getEnabled(), true) || !appliesTo(effective, source)) {
+        if (!isTrue(effective.getEnabled(), true)) {
             return new Outcome(ACTION_ALLOW, result);
         }
 
         String action = ACTION_ALLOW;
         String governed = result;
 
-        if (!isExempt(effective, toolName) && RemoteTextGovernor.containsDirective(result)) {
+        // The source filter gates the DIRECTIVE handling only — provenance marking
+        // below is unconditional. Gating both is what an earlier version did, and it
+        // produced precisely the gap the design forbids: narrowing to
+        // ["mcp","a2a","http"] left a websearch result arriving BARE, in the same
+        // transcript position a system instruction occupies, teaching the model that
+        // an unmarked result is authoritative. The narrowing example is in the
+        // shipped docs, so it was one copy-paste away.
+        if (appliesToDirectives(effective, source) && !isExempt(effective, toolName) && RemoteTextGovernor.containsDirective(result)) {
             action = normalizeAction(effective.getDirectiveAction());
             LOGGER.warnf("Tool '%s' (source '%s') returned directive-shaped content — action '%s'", sanitize(toolName), sanitize(source), action);
             governed = switch (action) {
@@ -131,8 +138,12 @@ public class ToolResultGuardrail {
         };
     }
 
-    private static boolean appliesTo(ToolResultGuardrailConfig config, String source) {
-        List<String> sources = config.getAppliesToSources();
+    /**
+     * Whether DIRECTIVE handling applies to this source. Provenance marking is not
+     * gated by it — see the comment at the call site.
+     */
+    private static boolean appliesToDirectives(ToolResultGuardrailConfig config, String source) {
+        List<String> sources = config.getDirectiveAppliesToSources();
         if (sources == null || sources.isEmpty()) {
             return true;
         }
