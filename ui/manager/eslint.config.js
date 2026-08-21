@@ -75,10 +75,36 @@ export default tseslint.config(
       // loudly; if an editor might crash, that crash is the bug. Genuinely
       // unrunnable cases can disable this rule with a comment saying why — the
       // friction is the point.
-      selector:
-        "CallExpression[callee.object.name='test'][callee.property.name='skip']",
+      //
+      // Covers `test.skip`, `test.fixme` and `test.slow` (all three silence a
+      // failure) and the `test.describe.skip` / `test.describe.fixme` forms,
+      // where the callee's object is itself a MemberExpression — a selector
+      // matching only `[callee.object.name='test']` misses those entirely,
+      // leaving three equally effective escape hatches open.
+      selector: [
+        ":matches(",
+        "CallExpression[callee.object.name='test'],",
+        "CallExpression[callee.object.object.name='test']",
+        ")",
+        ":matches(",
+        "[callee.property.name='skip'],",
+        "[callee.property.name='fixme'],",
+        "[callee.property.name='slow']",
+        ")",
+      ].join(""),
       message:
-        "test.skip() in E2E hides the failure it guards against. Create missing fixtures in beforeAll and let real failures fail. If a skip is genuinely correct, disable this rule on the line with a reason.",
+        "test.skip()/fixme()/slow() in E2E hides the failure it guards against. Create missing fixtures in beforeAll and let real failures fail. If a skip is genuinely correct, disable this rule on the line with a reason.",
+    };
+
+    const IMPORT_THE_FIXTURE = {
+      // A ui spec that imports `test` from `@playwright/test` silently opts out
+      // of the auto fixture that fails a test on an unhandled API call — the
+      // guard would simply not be there, and nothing would say so. The
+      // integration and fullstack tiers run without MSW and are excluded below.
+      name: "@playwright/test",
+      importNames: ["test"],
+      message:
+        "UI specs must import `test` from ./fixtures so the unhandled-API-call guard applies. Type-only imports and the integration/fullstack tiers are exempt.",
     };
 
     return [
@@ -94,6 +120,14 @@ export default tseslint.config(
             ...NO_TAUTOLOGY,
             NO_CONDITIONAL_SKIP,
           ],
+        },
+      },
+      {
+        // UI tier only — the tiers that run against a real backend have no MSW
+        // and so nothing for the fixture to check.
+        files: ["e2e/*.spec.ts"],
+        rules: {
+          "no-restricted-imports": ["error", { paths: [IMPORT_THE_FIXTURE] }],
         },
       },
     ];

@@ -17,7 +17,14 @@ export function EmptyState({
   onAction,
 }: EmptyStateProps) {
   return (
-    <div className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-border py-16">
+    // An empty state is a real rendered state, not the absence of one — on the
+    // conversation-monitoring screen it is what "the page loaded" *looks like*
+    // until an agent is picked. Without a testid there was nothing to assert on
+    // there, which is what AGENTS.md §247 asks for.
+    <div
+      data-testid="empty-state"
+      className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-border py-16"
+    >
       <Icon className="h-12 w-12 text-muted-foreground/50" />
       <p className="mt-4 text-lg font-medium text-muted-foreground">{title}</p>
       {description && (

@@ -1,4 +1,5 @@
-import { type Page, type APIRequestContext } from "@playwright/test";
+import { type Page, type APIRequestContext, expect } from "@playwright/test";
+import { STILL_LOADING } from "../e2e-helpers";
 import { waitForBackend, API_BASE } from "../integration/integration-helpers";
 
 /**
@@ -6,20 +7,23 @@ import { waitForBackend, API_BASE } from "../integration/integration-helpers";
  *
  * Unlike the MSW-based UI E2E tier, full-stack tests require a live EDDI
  * backend.  The Vite dev server auto-detects the backend and skips MSW
- * (see main.tsx:55-68), so no special MSW bypass is needed.
+ * (see `mocksForced` / the probe in main.tsx), so no special MSW bypass is needed.
  */
 
 /**
- * Wait for skeleton loaders to disappear, indicating real data has loaded.
+ * Wait for loading placeholders to disappear, indicating real data has loaded.
+ *
+ * This carried the same defect the ui tier's `waitForApp` did — waiting on
+ * `[class*="animate-pulse"]`, which the never-hiding PlatformStatus dot always
+ * matches first, then swallowing the inevitable timeout. It burned the full 15s
+ * on every call while waiting for nothing. It now shares the ui tier's
+ * placeholder list so the two cannot drift apart, and does not swallow.
  */
 async function waitForDataLoad(page: Page) {
-  await page
-    .locator('[class*="animate-pulse"]')
-    .first()
-    .waitFor({ state: "hidden", timeout: 15_000 })
-    .catch(() => {
-      /* no skeletons — page loaded instantly */
-    });
+  await expect(
+    page.locator(STILL_LOADING),
+    "the page was still showing loading placeholders — its data never arrived",
+  ).toHaveCount(0, { timeout: 15_000 });
 }
 
 /**

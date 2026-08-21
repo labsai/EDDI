@@ -2,10 +2,17 @@ import { type APIRequestContext, expect } from "@playwright/test";
 
 /**
  * Base URL for API calls through the Vite dev server proxy.
- * The Vite dev server on port 3000 proxies all /agentstore, /packagestore, etc.
- * paths to EDDI on localhost:7070.
+ * The Vite dev server proxies all /agentstore, /packagestore, etc. paths to
+ * EDDI on localhost:7070.
+ *
+ * Honours `PORT` for the same reason `playwright.config.ts` and
+ * `vite.config.ts` do. Hardcoding 3000 here while the config had moved would
+ * have been the worse half of the bug it fixed: the run would drive a dev
+ * server on one port and send its API calls to whatever happened to be on
+ * 3000 — another worktree's server, most likely — and the mismatch would
+ * surface as unexplained data, not as a connection error.
  */
-export const API_BASE = "http://localhost:3000";
+export const API_BASE = `http://localhost:${Number(process.env.PORT) || 3000}`;
 
 /**
  * Poll the EDDI liveness endpoint until the backend is ready.

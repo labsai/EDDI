@@ -35,19 +35,58 @@ const queryClient = new QueryClient({
   },
 });
 
+/**
+ * Force the mock API on regardless of whether a backend answers.
+ *
+ * Set by the Playwright `ui` project through `storageState`, which lands in
+ * localStorage before any page script runs. That tier is documented as "browser
+ * + MSW mocks, no backend", but the probe below decides that at runtime — so on
+ * any machine with EDDI running (a normal state for this repo: the compose files
+ * and the full-stack tier both want one) the "no backend" tier silently drove the
+ * real API instead. Every assertion written against a fixture value then failed
+ * for a reason that has nothing to do with the branch under test, and any that
+ * passed were validating real data while claiming to validate mocks.
+ */
+function mocksForced(): boolean {
+  try {
+    return localStorage.getItem("eddi-force-mocks") === "true";
+  } catch {
+    // Storage can be unavailable (private mode, blocked cookies) — that is not
+    // a reason to fail startup, and the probe below still decides correctly.
+    return false;
+  }
+}
+
 async function startApp() {
   // In development, start MSW browser worker if the backend is unreachable
   if (import.meta.env.DEV) {
+    const forced = mocksForced();
     try {
+      if (forced) throw new Error("Mocks forced");
       const res = await fetch("/agentstore/agents/descriptors?limit=1", {
         signal: AbortSignal.timeout(1500),
       });
       if (!res.ok) throw new Error("Backend not OK");
       console.log("[EDDI] Backend detected — using real API");
     } catch {
-      console.log("[EDDI] Backend not reachable — starting mock API (MSW)");
-      const { worker } = await import("@/test/mocks/browser");
-      await worker.start({ onUnhandledRequest: "bypass" });
+      // Say which of the two reasons it was. Logging "backend not reachable"
+      // when the backend is fine and mocks were merely pinned sends whoever is
+      // debugging a UI failure chasing a phantom connectivity problem.
+      console.log(
+        forced
+          ? "[EDDI] eddi-force-mocks is set — starting mock API (MSW), backend not probed"
+          : "[EDDI] Backend not reachable — starting mock API (MSW)",
+      );
+      const { worker, recordUnhandledApiRequest } = await import("@/test/mocks/browser");
+      await worker.start({
+        // NOT "bypass". An API call with no handler used to fall through to the
+        // dev server silently, so a page could fail to load all of its data and
+        // the E2E tier would not notice — which is where the "MSW browser worker
+        // too slow" skips came from. Unhandled API calls are now recorded on
+        // `window` so a Playwright fixture can fail the test that caused them,
+        // and still bypassed so dev-server behaviour is unchanged.
+        onUnhandledRequest: recordUnhandledApiRequest,
+      });
       // Signal to UI components that mock data is active
       (window as unknown as Record<string, unknown>).__EDDI_MOCK_ACTIVE__ = true;
     }

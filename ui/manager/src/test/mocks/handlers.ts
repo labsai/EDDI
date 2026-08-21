@@ -1126,9 +1126,9 @@ export const handlers = [
     ]);
   }),
 
-  // Read conversation (v6: GET /agents/:conversationId)
-  // Conversation snapshot — what `readConversation` reads on load and on the
-  // GET that follows starting a conversation.
+  // Read conversation (v6: GET /agents/:conversationId) — the snapshot
+  // `readConversation` reads on load and on the GET that follows starting a
+  // conversation.
   //
   // The shape here is load-bearing and was wrong: this used to return
   // `conversationSteps: [{ output, actions, quickReplies }]` and no
@@ -1139,28 +1139,48 @@ export const handlers = [
   // against this handler therefore produced ZERO messages, and the two tests
   // that should have caught it asserted `length >= 0`, which is true of any
   // array. Keep this aligned with `extractInput` / `extractOutputParts`.
-  http.get("*/agents/:conversationId", () => {
+  http.get("*/agents/:conversationId", ({ params }) => {
+    // One handler serves two different situations, and they do not look alike.
+    //
+    // A conversation *just started* has no user turn yet — only the agent's
+    // welcome. Returning a user message there put words in the user's mouth: a
+    // freshly opened chat rendered "Can I change the delivery address?" as
+    // something they had supposedly typed. It made the assertion pass; it was
+    // not the contract. Only an *existing* conversation being reopened has a
+    // transcript, so only `conv1` gets one.
+    const isExisting = params.conversationId === "conv1";
+
+    const welcome = {
+      "output:text:welcome":
+        "Welcome to EDDI Support! I can help with orders, returns, billing, or product questions. How can I assist you today?",
+      quickReplies: ["Order help", "Returns", "Billing question", "Something else"],
+    };
+
     return HttpResponse.json({
       agentId: "agent1",
       agentVersion: 3,
-      conversationId: "conv-mock",
+      conversationId: params.conversationId ?? "conv-mock",
       conversationState: "READY",
       environment: "production",
-      conversationSteps: [
-        {
-          conversationStep: [
-            { key: "input:initial", value: "Can I change the delivery address?", timestamp: Date.now() - 180000, originWorkflowId: null },
-            { key: "actions", value: ["welcome"], timestamp: Date.now() - 179500, originWorkflowId: "wf1" },
+      conversationSteps: isExisting
+        ? [
+            {
+              conversationStep: [
+                { key: "input:initial", value: "Can I change the delivery address?", timestamp: Date.now() - 180000, originWorkflowId: null },
+                { key: "actions", value: ["welcome"], timestamp: Date.now() - 179500, originWorkflowId: "wf1" },
+              ],
+              timestamp: Date.now() - 180000,
+            },
+          ]
+        : [
+            {
+              conversationStep: [
+                { key: "actions", value: ["welcome"], timestamp: Date.now() - 1000, originWorkflowId: "wf1" },
+              ],
+              timestamp: Date.now() - 1000,
+            },
           ],
-          timestamp: Date.now() - 180000,
-        },
-      ],
-      conversationOutputs: [
-        {
-          "output:text:welcome": "Welcome to EDDI Support! I can help with orders, returns, billing, or product questions. How can I assist you today?",
-          quickReplies: ["Order help", "Returns", "Billing question", "Something else"],
-        },
-      ],
+      conversationOutputs: [welcome],
       conversationProperties: {
         agentName: "Support Agent",
         userId: "user-42",

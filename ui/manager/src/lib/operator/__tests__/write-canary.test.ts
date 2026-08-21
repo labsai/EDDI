@@ -256,9 +256,15 @@ describe("runOperatorWriteCanary", () => {
     expect(result.outcome).toBe("pass");
     expect(canaryReports).toHaveLength(1);
     expect(canaryReports[0]).toMatchObject({ outcome: "pass" });
-    // The report must carry a duration at all — `>= 0` was true of any number
-    // and of the `0` a missing field coerces to.
-    expect(typeof (canaryReports[0] as { durationMs: number }).durationMs).toBe("number");
+    // `toBeGreaterThanOrEqual(0)` here was not a tautology and the lint rule's
+    // exception exists for exactly this: a duration can be negative or NaN if
+    // the clock arithmetic is wrong. A bare `typeof === "number"` — the first
+    // replacement — was *weaker*, since it accepts NaN, -1 and Infinity.
+    // eslint-disable-next-line no-restricted-syntax
+    expect((canaryReports[0] as { durationMs: number }).durationMs).toBeGreaterThanOrEqual(0);
+    expect(
+      Number.isFinite((canaryReports[0] as { durationMs: number }).durationMs),
+    ).toBe(true);
   });
 
   it("a failed relay report does not change the canary's own result", async () => {

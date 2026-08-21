@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import { waitForApp, expectHeading } from "./e2e-helpers";
 
 test.describe("Conversations Page", () => {

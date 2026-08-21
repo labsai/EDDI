@@ -103,6 +103,40 @@ npm run test:e2e
 npm run build
 ```
 
+### Running E2E on a busy machine
+
+`PORT` isolates a run, exactly as it does for `npm run dev`:
+
+```bash
+PORT=3100 npm run test:e2e
+```
+
+Without it, Playwright's `reuseExistingServer` will happily drive whatever dev
+server is already on port 3000 — another worktree's, most likely — and every
+test fails for reasons that have nothing to do with your branch.
+
+### The `ui` tier always uses mock data
+
+`src/main.tsx` normally decides between the real API and MSW by probing the
+backend at startup. That makes the "no backend" tier depend on whether you
+happen to have EDDI running: with a backend up it silently drove the real API,
+and any assertion written against a fixture value failed for an unrelated
+reason — or worse, passed while validating real data.
+
+So the Playwright `ui` project seeds `eddi-force-mocks=true` into localStorage
+via `storageState`, and `main.tsx` honours that ahead of the probe. It is
+development-only (`import.meta.env.DEV`), so it cannot reach a production build.
+
+If you ever set it by hand in your own browser, the mock-data banner is your
+clue; clear the key to go back to probing:
+
+```js
+localStorage.removeItem("eddi-force-mocks")
+```
+
+The `integration` and `fullstack` tiers deliberately do **not** set it — they
+want the real backend.
+
 ## Code Style
 
 ### General Rules
