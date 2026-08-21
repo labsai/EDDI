@@ -51,20 +51,21 @@ The EDDI container image is certified by Red Hat / IBM for use on OpenShift. Cer
 
 ### Automated Certification Workflow
 
-The certification release process is fully automated:
+EDDI is distributed on **two registries**: Docker Hub (`labsai/eddi`, published by `ci.yml` when a release tag is pushed) and Red Hat's catalog (published by this workflow, per release, after the fact). The certification project uses Red Hat's **hosted registry**: the certified image lives in `quay.io/redhat-isv-containers/<project-id>` and Red Hat serves it to customers via `registry.connect.redhat.com`.
 
-1. **Build** — `mvnw clean package -Plicense-gen` builds the application and auto-generates license files via the [MojoHaus license-maven-plugin](https://www.mojohaus.org/license-maven-plugin/)
-2. **Docker build** — Builds the image with Red Hat certification labels (parameterized via `--build-arg`)
-3. **Push** — Pushes to Docker Hub (or Quay.io when configured)
-4. **Preflight** — Runs the [Red Hat preflight tool](https://github.com/redhat-openshift-ecosystem/openshift-preflight) to validate certification requirements
+The workflow certifies the image that was **already released** — it never rebuilds. A rebuild would have a different digest, would not be covered by the release's cosign signature or SLSA attestation, and would put bytes in Red Hat's catalog that differ from what Docker Hub users pull. Instead it:
+
+1. **Pull** — Pulls the released `docker.io/labsai/eddi:<version>` and records its registry digest
+2. **Verify** — Checks the Red Hat labels and the `/licenses` directory inside the pulled image
+3. **Publish** — Retags to `quay.io/redhat-isv-containers/<project-id>` as `<version>` and `<version>-<release>` (a retag reuses the manifest, so the hosted tags carry the *same digest* as the release — asserted after pushing) 
+4. **Preflight** — Runs the [Red Hat preflight tool](https://github.com/redhat-openshift-ecosystem/openshift-preflight) against the hosted `<version>-<release>` coordinate
 5. **Submit** — Optionally submits results to Red Hat Partner Connect for review
 
 To trigger a certification release, go to **Actions → Red Hat Certification Release → Run workflow** and provide:
 
-- `version` — EDDI version (e.g., `6.3.0`)
-- `release` — Incremental release number (e.g., `1`, `2`, `3`)
+- `version` — EDDI version (e.g., `6.3.0`) — must already be released on Docker Hub
+- `release` — Incremental release number (e.g., `1`, `2`, `3`) — lets the same version be re-submitted
 - `submit` — Whether to submit results to Red Hat (`true`/`false`)
-- `registry` — Target registry (`docker.io` or `quay.io`)
 
 ### Preflight Quality Gate
 
@@ -72,12 +73,14 @@ Every push to `main` or release tag that produces a Docker image is validated by
 
 ### Required GitHub Secrets
 
-| Secret                   | Purpose                                                  |
-| ------------------------ | -------------------------------------------------------- |
-| `REDHAT_API_TOKEN`       | Pyxis API token from Red Hat Partner Connect             |
-| `REDHAT_CERT_PROJECT_ID` | Certification project ID                                 |
-| `DOCKER_USERNAME`        | Docker Hub username                                      |
-| `DOCKER_PASSWORD`        | Docker Hub password                                      |
+| Secret                     | Purpose                                                                                     |
+| -------------------------- | ------------------------------------------------------------------------------------------- |
+| `REDHAT_API_TOKEN`         | Pyxis API token from Red Hat Partner Connect                                                 |
+| `REDHAT_CERT_PROJECT_ID`   | Certification project ID (also names the hosted repository)                                  |
+| `REDHAT_REGISTRY_USERNAME` | The project's registry robot user — shown with the key on the project's **Registry key** page |
+| `REDHAT_REGISTRY_KEY`      | The project's registry key (the robot account's password)                                    |
+| `DOCKER_USERNAME`          | Docker Hub username (used by `ci.yml`, not by certification)                                 |
+| `DOCKER_PASSWORD`          | Docker Hub password (used by `ci.yml`, not by certification)                                 |
 | `QUAY_USERNAME`          | Quay.io robot account (optional, for Quay.io publishing) |
 | `QUAY_PASSWORD`          | Quay.io password (optional)                              |
 
