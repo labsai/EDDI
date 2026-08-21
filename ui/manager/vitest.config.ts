@@ -13,7 +13,15 @@ export default mergeConfig(
       // `.claude/worktrees/**` holds checkouts of other branches. Their test
       // files resolve `@/` through this config, so without excluding them a
       // local run executes another branch's tests against this branch's mocks.
-      exclude: ["e2e/**", "node_modules/**", ".claude/**"],
+      //
+      // `.stryker-tmp/**` is the same trap with a different source: Stryker
+      // copies the whole repo into a sandbox per test runner, and only cleans
+      // up after a run that finishes. Interrupt one — Ctrl-C, a timeout, a
+      // failed threshold — and the next `npm run test` collects every sandbox
+      // as well, which measured 2,320 files and 28,223 tests against a real
+      // 358 and 5,543, with 261 files failing because a mutated copy of the
+      // source was still in place.
+      exclude: ["e2e/**", "node_modules/**", ".claude/**", ".stryker-tmp/**"],
       server: {
         deps: {
           // monaco-editor is ~40 MB; tests mock @monaco-editor/react so

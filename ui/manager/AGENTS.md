@@ -100,6 +100,23 @@ npm run build        # Production build succeeds (includes tsc -b)
 `npm run typecheck` (`tsc -b`) now includes `tsconfig.e2e.json`, so a type error
 in a Playwright spec fails the build instead of surfacing at run time.
 
+One gate is deliberately **not** in that list: mutation testing. It asks the
+question the others cannot — whether the suite would have *complained* — but a
+full run is 20-odd minutes on CI and longer on a busy laptop, so it is not
+to run before every push. CI runs it on a PR that touches the guarded scope,
+weekly on a schedule, and on demand via `workflow_dispatch`.
+
+The scope is `src/lib/operator/**`, `src/lib/api/updates.ts` and
+`src/lib/hitl-tool-approvals.ts`. Two exclusions are argued in
+`stryker.config.json`, each with the measurement behind it: `api-client.ts` (75
+importers, so each of its mutants replays most of the suite) and static mutants
+— module-level constants, which cost a full runner restart each. A constant you
+need guarded needs a unit test asserting its contents; this gate will not do it.
+(Tests themselves are excluded too, for the obvious reason.)
+
+If you change a file in scope, expect the job and read its survivors: a survivor
+is a line that was broken while every test still passed. See CONTRIBUTING.md.
+
 ### i18n — MANDATORY
 
 > **⚠️ Every time you add or modify keys in `en.json`, you MUST propagate those changes to ALL 10 other locale files before committing.**

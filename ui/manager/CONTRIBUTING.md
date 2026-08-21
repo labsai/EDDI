@@ -103,6 +103,97 @@ npm run test:e2e
 npm run build
 ```
 
+### Mutation testing — does the suite notice when code breaks?
+
+Coverage says which lines *ran*. It cannot say whether anything would have
+*complained*. Those are different questions, and an audit of this repo found
+the gap was real: tests that asserted an element existed rather than that a
+behaviour happened, and eleven that could not fail at all.
+
+```bash
+# The guarded scope — operator security guards, approval logic, version compare
+npm run test:mutation
+```
+
+```bash
+# Just the file you are working on (much faster)
+npm run test:mutation:file -- src/lib/operator/gate-guard.ts
+```
+
+Three things about that second command, all of which will bite otherwise:
+it inherits `thresholds.break`, so pointing it at a file that is *already*
+below the floor exits 1 without you having broken anything (`write-canary.ts`
+is at 75%); `--mutate` **replaces** the config's list rather than narrowing it,
+so the `__tests__` exclusion does not apply; and multiple files must be
+comma-separated, because a second space-separated path is parsed as the
+config-file argument instead.
+
+A **survived** mutant is one the suite did not notice: the code was changed and
+every test still passed. Usually that means the line is unverified, whatever the
+coverage report says. Sometimes it means the mutant was *equivalent* — the
+change did not alter behaviour, so no test could have caught it and none should
+try. The audit that started this work hit one: dropping `204` from
+`status === 202 || status === 204` changes nothing, because a spec-compliant 204
+has an empty body and falls through to the same early return. Read a survivor as
+a question rather than a verdict, and check which kind it is before writing a
+test for it. The HTML report lands in `reports/mutation/`.
+
+Budget about **25 minutes**: three CI runs of the full scope took 19, 23 and 24
+minutes. Roughly 2m30s of each is a single instrumented replay of the suite
+before the first mutant runs, so Stryker can learn which tests reach which code.
+Locally it depends entirely on what else your machine is doing — the same work
+has taken 51 minutes here. That first step is why the scope is kept small: it
+grows with how widely the mutated files are imported, not with how many of them
+there are.
+
+Two things are deliberately **not** measured, each argued in
+`stryker.config.json` with the measurement that decided it:
+
+- **static mutants** — module-level constants. Stryker cannot swap one in
+  without reloading the module, so each costs a full suite restart; measured,
+  they were 14% of the mutants and 98% of the runtime.
+- **`api-client.ts`** — 75 importers, so virtually every component test
+  executes it and each of its mutants replays most of the suite.
+
+(Tests themselves — `src/**/__tests__/**` — are excluded for the obvious
+reason.) Neither is unimportant; both are guarded by ordinary unit tests
+instead.
+
+There was a third. `system-prompt.ts` was excluded on the argument that it is
+mostly English prose in template literals, and that the only test able to kill
+such a mutant is one pinning the exact wording. Measuring it disproved that:
+it scores **76.60%**, because `system-prompt.test.ts` already asserts on
+substrings and on structure — that the rules are numbered 1..4 contiguously,
+for one — and those kill a blanked literal without pinning a sentence. It is in
+scope now, for about a minute of runtime. Worth remembering when you reach for
+the next exclusion: that was the one arrived at by reasoning rather than
+measurement, and it was the one that turned out to be wrong.
+tests instead.
+
+CI runs this three ways: on a PR that touches the guarded scope, the tests that
+cover it, or the config that decides what it measures; weekly on a schedule;
+and on demand via `workflow_dispatch`.
+
+`package.json` and `package-lock.json` are deliberately **not** triggers.
+`renovate.json` pins devDependencies, so every bump edits both, and minor and
+patch bumps automerge — listing either would put ~20 minutes in front of nearly
+every Renovate PR. A dependency bump changing behaviour is exactly the drift the
+weekly run exists to catch, and an hour on every dependency PR is how a job like
+this gets switched off instead.
+
+Do **not** make this job a required status check. A path-filtered workflow that
+does not run reports neither success nor failure, so every PR that leaves the
+guarded scope alone — which is most of them — would sit blocked on a check that
+is never going to arrive.
+
+`thresholds.break` is a ratchet: raise it when the score rises, never lower it
+to make a build pass. A drop means a test stopped noticing something it used
+to notice.
+
+It works. Its first run found `blocked-calls.ts` — the single place deciding
+which tool calls the Manager refuses, used by all three approval surfaces —
+scoring **0%**, with two thirds of its mutants never executed by any test.
+
 ### Running E2E on a busy machine
 
 `PORT` isolates a run, exactly as it does for `npm run dev`:

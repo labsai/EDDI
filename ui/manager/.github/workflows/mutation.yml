@@ -1,0 +1,132 @@
+name: Mutation Testing
+
+# Does the suite NOTICE when working code is broken?
+#
+# Coverage says which lines ran; it cannot say whether anything would have
+# complained. An audit measured that gap by hand — 20 semantic mutations, 12
+# initially killed — and this is what stops the answer depending on someone
+# remembering to ask. Its first full run found two operator files scoring 0%.
+#
+# Runs on three triggers: a PR that touches the guarded scope, a weekly full
+# run, and manually via workflow_dispatch.
+#
+# ## Why this is not a normal PR gate
+#
+# Measured on this runner across three runs: 19 to 24 minutes end to end, of
+# which about 2m30s replays the instrumented suite once (1,574 tests) so Stryker
+# learns which tests reach which code; the rest is ~1,400 mutants.
+#
+# That first step is not a fixed cost — it tracks how widely the mutated files
+# are imported. Keeping api-client.ts in scope pulled 4,349 tests into it instead
+# of 1,574, which is half of why that file is out of scope (see
+# stryker.config.json).
+#
+# Twenty minutes is still too much in front of every PR, and a job like that
+# gets switched off within a fortnight. So it runs only when a PR touches the
+# guarded scope — see `paths:` below. Most PRs skip it entirely and pay nothing.
+#
+# ## Why the whole scope, and not just the changed files
+#
+# Two reasons, in order of how much they cost to learn.
+#
+# Stryker has no `--since`. It was removed in favour of `--incremental`, and
+# `stryker run --since=origin/main` exits 1 with "unknown option" — so the
+# obvious shape for this job does not exist.
+#
+# The better reason is that a changed-files score is not comparable to the
+# threshold it would be checked against. `thresholds.break` is a ratchet over
+# the whole scope; a subset score is a different quantity that happens to share
+# a scale. A PR touching a file with pre-existing debt would fail on that
+# file's history rather than on anything the PR did, and the first person to
+# meet that failure would quite reasonably delete the job. Running the whole
+# scope keeps the number meaning one thing.
+#
+# The weekly run is not redundant: it catches drift no PR caused — a dependency
+# bump changing behaviour, or a merge whose parts each passed.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      # The guarded sources, mirroring `mutate` in stryker.config.json. (It does
+      # not mirror the `!src/**/__tests__/**` entry: not mutating tests is no
+      # reason to skip the job when they change — quite the opposite, see below.)
+      - "src/lib/operator/**"
+      - "src/lib/api/updates.ts"
+      - "src/lib/hitl-tool-approvals.ts"
+      # The tests that kill those mutants. `src/lib/operator/**` already covers
+      # its own `__tests__`, but the other two scope roots keep their tests
+      # elsewhere, and weakening one drops the score without touching a guarded
+      # source file.
+      - "src/lib/api/__tests__/updates.test.ts"
+      - "src/lib/__tests__/hitl-tool-approvals.test.ts"
+      # And the files that decide what is measured at all.
+      - "stryker.config.json"
+      - ".github/workflows/mutation.yml"
+      - ".github/scripts/assert-mutants-tested.mjs"
+      - "vitest.config.ts"
+      - "vite.config.ts"
+      #
+      # package.json and package-lock.json are deliberately NOT here, and the
+      # reason is the same for both: renovate.json pins devDependencies
+      # (`rangeStrategy: pin`), so every bump edits package.json too, and minor
+      # and patch bumps automerge. Listing either would put ~20 minutes in
+      # front of nearly every Renovate PR — which is both the "drift no PR
+      # caused" case the weekly run below exists for, and the surest way to
+      # get this job switched off. A deliberate change to what the gate does
+      # goes through stryker.config.json, which IS listed.
+  schedule:
+    # Sundays 03:00 UTC — off the critical path.
+    - cron: "0 3 * * 0"
+  workflow_dispatch:
+
+# `npm ci` runs dependency lifecycle scripts and `stryker run` executes the
+# suite against mutated source. Neither needs to write anything back, so the
+# job gets read-only contents and checkout is told not to leave a credential
+# in .git/config for that code to find.
+permissions:
+  contents: read
+
+concurrency:
+  group: mutation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mutation:
+    name: Guarded scope
+    runs-on: ubuntu-latest
+    # 19-24 minutes observed. Loose by an order of magnitude on purpose: this
+    # catch a hang, not to police the runtime, and the same work has taken 51
+    # minutes on a loaded laptop. (Stryker's default concurrency is cpuCount - 1,
+    # except at 4 or fewer, where it uses all of them.)
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run mutation testing
+        # The same command CONTRIBUTING tells you to run, so the two cannot
+        # drift apart.
+        run: npm run test:mutation
+
+      - name: Fail if the run tested nothing
+        # Stryker scores an empty run NaN, and `NaN < break` is false — so a
+        # `mutate` glob that stops matching passes green having verified
+        # nothing. See the script for why that is one rename away.
+        run: node .github/scripts/assert-mutants-tested.mjs
+
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
+        with:
+          name: mutation-report
+          path: reports/mutation/
+          retention-days: 14

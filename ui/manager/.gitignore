@@ -24,6 +24,10 @@ vitest-results.json
 out.txt
 test_output.txt
 
+# Mutation testing (Stryker) — sandbox and generated report
+.stryker-tmp/
+reports/mutation/
+
 # Local API spec dumps
 openapi.json
 openapi_paths.txt

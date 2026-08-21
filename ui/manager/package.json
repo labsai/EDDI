@@ -15,6 +15,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "test:mutation": "stryker run",
+    "test:mutation:file": "stryker run --mutate",
     "test:e2e": "playwright test --project=ui",
     "test:e2e:ui": "playwright test --project=ui --ui",
     "test:e2e:integration": "playwright test --project=integration",
@@ -77,6 +79,8 @@
   "devDependencies": {
     "@eslint/js": "^9.39.3",
     "@playwright/test": "^1.62.0",
+    "@stryker-mutator/core": "9.2.0",
+    "@stryker-mutator/vitest-runner": "9.2.0",
     "@tailwindcss/typography": "^0.5.20",
     "@tailwindcss/vite": "^4.2.1",
     "@testing-library/jest-dom": "^6.6.3",
