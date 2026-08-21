@@ -420,6 +420,10 @@ POST /groupstore/groups/{groupId}/workspace/cadences  {"cronExpression": "0 9 * 
 GET  /groupstore/groups/{groupId}/workspace
 ```
 
+`cronExpression` is a **5-field Unix cron** (`min hour day month weekday`), not
+6-field Quartz — `"0 0 3 * * ?"` is rejected. The error message says so, but the
+example above is the one to copy.
+
 MCP: `add_team_task`, `list_team_backlog`. The backlog caps at 200 with an
 actionable error — it is a working set, not an archive.
 
@@ -963,7 +967,7 @@ summarizer's.
 | `POST` | `/groups/{groupId}/conversations` | Start discussion |
 | `GET` | `/groups/{groupId}/conversations/{id}` | Read transcript |
 | `GET` | `/groups/{groupId}/conversations` | List conversations |
-| `DELETE` | `/groups/{groupId}/conversations/{id}` | Delete + cascade |
+| `DELETE` | `/groups/{groupId}/conversations/{id}` | Delete (artifacts + ephemeral agents; members **ended**) |
 | `GET` | `/groupstore/groups/jsonSchema` | JSON schema for the group config |
 | `POST` | `/groups/{groupId}/conversations/stream` | Start discussion, stream events over SSE |
 | `POST` | `/groups/{groupId}/conversations/{id}/followup` | Ask one member a follow-up |
@@ -1032,7 +1036,7 @@ split is internal.
 | `read_group_conversation` | Read conversation transcript |
 | `list_group_conversations`  | List past discussions for a group, with state and timestamps                                                                         |
 | `start_group_discussion`    | Start a discussion asynchronously (returns immediately). Poll with `read_group_conversation`                                         |
-| `delete_group_conversation` | Delete a group conversation and cascade-delete all member conversations                                                              |
+| `delete_group_conversation` | Delete a group conversation. Artifacts and ephemeral agents are deleted; member conversations are **ended**, not deleted |
 | `followup_with_member` | Ask a single member a follow-up on a finished discussion |
 | `continue_group_discussion` | Continue a discussion with a new question |
 | `close_group_conversation` | Close a conversation to further rounds |

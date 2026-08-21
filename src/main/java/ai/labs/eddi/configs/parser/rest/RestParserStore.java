@@ -33,7 +33,7 @@ public class RestParserStore implements IRestParserStore {
 
     @Override
     public List<DocumentDescriptor> readParserDescriptors(String filter, Integer index, Integer limit) {
-        return restVersionInfo.readDescriptors("ai.labs.parser", filter, index, limit);
+        return restVersionInfo.readDescriptors(filter, index, limit);
     }
 
     @Override

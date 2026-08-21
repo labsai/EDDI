@@ -53,7 +53,7 @@ public class RestApiCallsStore implements IRestApiCallsStore {
 
     @Override
     public List<DocumentDescriptor> readApiCallsDescriptors(String filter, Integer index, Integer limit) {
-        return restVersionInfo.readDescriptors("ai.labs.httpcalls", filter, index, limit);
+        return restVersionInfo.readDescriptors(filter, index, limit);
     }
 
     @Override

@@ -53,7 +53,7 @@ public class RestRagStore implements IRestRagStore {
 
     @Override
     public List<DocumentDescriptor> readRagDescriptors(String filter, Integer index, Integer limit) {
-        return restVersionInfo.readDescriptors("ai.labs.rag", filter, index, limit);
+        return restVersionInfo.readDescriptors(filter, index, limit);
     }
 
     @Override

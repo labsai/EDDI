@@ -12,6 +12,7 @@ import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -110,6 +111,65 @@ class AuditLedgerServiceTest {
 
         verify(auditStore).appendBatch(argThat(batch -> batch.size() == 2));
         assertEquals(0, service.getQueueSize());
+    }
+
+    /**
+     * A null timestamp must be stamped before signing, not by the store. v4 signs
+     * the empty string for a null timestamp, but PostgresAuditStore substitutes
+     * now() on write — so a null-timestamped entry would read back carrying a
+     * timestamp the signature never covered and report INVALID forever, on that
+     * backend only. Stamping in the service makes the stored row the signed row.
+     */
+    @Test
+    @DisplayName("flush — a null timestamp is stamped before signing, and verifies")
+    @SuppressWarnings("unchecked")
+    void nullTimestampIsStampedBeforeSigning() {
+        service = createService(true, "master-key");
+        service.submit(new AuditEntry("nts-1", "conv1", "agent1", 1, "user1", "production",
+                0, "taskId", "LlmTask", 0, 100L,
+                Map.of("text", "hello"), Map.of("text", "response"),
+                null, null, List.of("action1"), 0.0, null, null, null));
+
+        service.flush();
+
+        var persisted = ArgumentCaptor.forClass(List.class);
+        verify(auditStore).appendBatch(persisted.capture());
+        AuditEntry stored = ((List<AuditEntry>) persisted.getValue()).getFirst();
+
+        assertNotNull(stored.timestamp(), "the store's now()-fallback must never be what stamps a signed entry");
+        assertEquals(0, stored.timestamp().getNano() % 1_000_000, "stamped at the signed (millisecond) precision");
+        assertEquals(AuditVerificationStatus.VALID, service.verifyEntry(stored),
+                "what was signed is what is stored, so it must verify as-is");
+    }
+
+    /**
+     * The submit path must floor the timestamp BEFORE signing — deterministically
+     * pinned with a nano-precise input, so this does not depend on the test host's
+     * clock resolution. Without the flooring, PostgreSQL's microsecond rounding can
+     * move a stored timestamp across the millisecond the v4 signature covers, and
+     * roughly one row in two thousand reports tampered for no reason.
+     */
+    @Test
+    @DisplayName("flush — a nano-precise timestamp is floored before signing, and verifies")
+    @SuppressWarnings("unchecked")
+    void nanoPreciseTimestampIsFlooredBeforeSigning() {
+        service = createService(true, "master-key");
+        Instant nanoPrecise = Instant.parse("2026-08-20T10:15:30Z").plusNanos(123_999_600L);
+        service.submit(new AuditEntry("floor-1", "conv1", "agent1", 1, "user1", "production",
+                0, "taskId", "LlmTask", 0, 100L,
+                Map.of("text", "hello"), Map.of("text", "response"),
+                null, null, List.of("action1"), 0.0, nanoPrecise, null, null));
+
+        service.flush();
+
+        var persisted = ArgumentCaptor.forClass(List.class);
+        verify(auditStore).appendBatch(persisted.capture());
+        AuditEntry stored = ((List<AuditEntry>) persisted.getValue()).getFirst();
+
+        assertEquals(0, stored.timestamp().getNano() % 1_000_000,
+                "the stored row must carry the millisecond value the signature covers — nothing left to round");
+        assertEquals(nanoPrecise.truncatedTo(ChronoUnit.MILLIS), stored.timestamp());
+        assertEquals(AuditVerificationStatus.VALID, service.verifyEntry(stored));
     }
 
     // ==================== sequence-table eviction ====================

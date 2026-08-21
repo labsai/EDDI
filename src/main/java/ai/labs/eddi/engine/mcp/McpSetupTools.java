@@ -112,7 +112,7 @@ public class McpSetupTools {
             return errorJson(e.getMessage());
         } catch (Exception e) {
             LOGGER.error("MCP setup_agent failed", e);
-            return errorJson("Failed to set up agent: " + e.getMessage());
+            return errorJson("Failed to set up agent", e);
         }
     }
 
@@ -164,7 +164,7 @@ public class McpSetupTools {
             return errorJson(e.getMessage());
         } catch (Exception e) {
             LOGGER.error("MCP create_api_agent failed", e);
-            return errorJson("Failed to create API agent: " + e.getMessage());
+            return errorJson("Failed to create API agent", e);
         }
     }
 

@@ -43,7 +43,7 @@ public class RestPromptSnippetStore implements IRestPromptSnippetStore {
 
     @Override
     public List<DocumentDescriptor> readSnippetDescriptors(String filter, Integer index, Integer limit) {
-        return restVersionInfo.readDescriptors("ai.labs.snippet", filter, index, limit);
+        return restVersionInfo.readDescriptors(filter, index, limit);
     }
 
     @Override

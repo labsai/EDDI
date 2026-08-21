@@ -50,7 +50,7 @@ public class RestOutputStore implements IRestOutputStore {
 
     @Override
     public List<DocumentDescriptor> readOutputDescriptors(String filter, Integer index, Integer limit) {
-        return restVersionInfo.readDescriptors("ai.labs.output", filter, index, limit);
+        return restVersionInfo.readDescriptors(filter, index, limit);
     }
 
     @Override

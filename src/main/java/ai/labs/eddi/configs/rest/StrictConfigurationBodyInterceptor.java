@@ -4,24 +4,16 @@
  */
 package ai.labs.eddi.configs.rest;
 
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.exc.UnrecognizedPropertyException;
-
 import jakarta.inject.Inject;
-import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.MediaType;
-import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.ext.Provider;
 import jakarta.ws.rs.ext.ReaderInterceptor;
 import jakarta.ws.rs.ext.ReaderInterceptorContext;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.util.Collection;
 import java.util.Locale;
-import java.util.stream.Collectors;
 
 /**
  * Rejects a configuration document that carries a field the model does not
@@ -67,9 +59,17 @@ import java.util.stream.Collectors;
  * </p>
  *
  * <p>
- * Only {@link UnrecognizedPropertyException} is translated. Every other parse
- * failure is left to the regular message-body reader, so no existing error
- * response changes shape.
+ * Only an unrecognised property is translated. Every other parse failure is
+ * left to the regular message-body reader, so no existing error response
+ * changes shape.
+ * </p>
+ *
+ * <p>
+ * The check itself lives in {@link StrictConfigurationParser}, because it
+ * belongs to <em>writing a configuration</em> rather than to reading an HTTP
+ * body: a {@code ReaderInterceptor} never fires for MCP's {@code
+ * create_resource}, which calls the same stores in-process, so that surface has
+ * to invoke the parser directly to get the same answer.
  * </p>
  */
 @Provider
@@ -86,13 +86,11 @@ public class StrictConfigurationBodyInterceptor implements ReaderInterceptor {
 
     private static final String JSON_SUBTYPE = "json";
 
-    private final ObjectMapper strictMapper;
+    private final StrictConfigurationParser parser;
 
     @Inject
-    public StrictConfigurationBodyInterceptor(ObjectMapper restMapper) {
-        // copy() so the injected mapper — shared with the REST client and with every
-        // service that parses third-party JSON — keeps its lenient behaviour.
-        this.strictMapper = restMapper.copy().enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
+    public StrictConfigurationBodyInterceptor(StrictConfigurationParser parser) {
+        this.parser = parser;
     }
 
     @Override
@@ -114,42 +112,9 @@ public class StrictConfigurationBodyInterceptor implements ReaderInterceptor {
         }
 
         context.setInputStream(new ByteArrayInputStream(body));
-        rejectUnknownFields(context.getType(), body);
+        parser.rejectUnknownFields(body, context.getType());
 
         return context.proceed();
-    }
-
-    private void rejectUnknownFields(Class<?> type, byte[] body) {
-        try {
-            strictMapper.readValue(body, type);
-        } catch (UnrecognizedPropertyException e) {
-            throw badRequest(describe(e, type));
-        } catch (IOException e) {
-            // Malformed JSON, wrong value type, etc. — not this interceptor's business.
-            // Proceeding lets the regular reader produce the response it always has.
-        }
-    }
-
-    private static BadRequestException badRequest(String message) {
-        return new BadRequestException(Response.status(Response.Status.BAD_REQUEST).entity(message).type(MediaType.TEXT_PLAIN_TYPE).build());
-    }
-
-    private static String describe(UnrecognizedPropertyException e, Class<?> type) {
-        var message = new StringBuilder("Unknown field '").append(e.getPropertyName()).append("' in ").append(type.getSimpleName());
-
-        String path = e.getPathReference();
-        if (path != null && !path.isBlank()) {
-            message.append(" at ").append(path);
-        }
-
-        Collection<Object> known = e.getKnownPropertyIds();
-        if (known != null && !known.isEmpty()) {
-            message.append(". Known fields: ")
-                    .append(known.stream().map(String::valueOf).sorted().collect(Collectors.joining(", ", "[", "]")));
-        }
-
-        return message.append(". The field was rejected instead of being silently discarded — "
-                + "a dropped key looks like a successful save but changes nothing.").toString();
     }
 
     static boolean isConfigurationModel(Class<?> type) {

@@ -489,6 +489,27 @@ class RestAgentEngineTest {
             assertTrue(capturedInput.getContext().containsKey("lang"));
         }
 
+        /**
+         * {@code language} used to be mandatory ({@code checkNotEmpty}) and 400'd every
+         * caller who followed the endpoint's own description, which never mentioned it.
+         * It is optional now, like on {@code say()} — a rerun without it simply carries
+         * no language context.
+         */
+        @Test
+        @DisplayName("a rerun without a language proceeds, with no language context")
+        void nullLanguageIsOptional() throws Exception {
+            var asyncResponse = mock(AsyncResponse.class);
+
+            restAgentEngine.rerunLastConversationStep("conv-1", null, false, false,
+                    List.of(), asyncResponse);
+
+            var captor = ArgumentCaptor.forClass(InputData.class);
+            verify(conversationService).say(eq("conv-1"), eq(false), eq(false),
+                    eq(List.of()), captor.capture(), eq(true), any());
+            assertTrue(captor.getValue().getContext().isEmpty(),
+                    "absent language means no context entry, exactly as on say()");
+        }
+
         @Test
         @DisplayName("should resume with 503 while draining (rerun shares sayInternal)")
         void rejectedWhileShuttingDown() throws Exception {

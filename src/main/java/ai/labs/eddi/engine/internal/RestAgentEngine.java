@@ -56,7 +56,7 @@ import java.util.concurrent.TimeUnit;
 
 import static ai.labs.eddi.engine.internal.RestAgentManagement.KEY_LANG;
 import static ai.labs.eddi.engine.model.Context.ContextType.string;
-import static ai.labs.eddi.utils.RuntimeUtilities.checkNotEmpty;
+import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
 import static jakarta.ws.rs.core.MediaType.TEXT_PLAIN;
 
@@ -172,11 +172,18 @@ public class RestAgentEngine implements IRestAgentEngine {
     public void rerunLastConversationStep(String conversationId, String language, Boolean returnDetailed, Boolean returnCurrentStepOnly,
                                           List<String> returningFields, final AsyncResponse response) {
         checkNotNull(conversationId, "conversationId");
-        checkNotEmpty(language, "language");
         validateConversationOwnership(conversationId);
 
+        // language is optional, as it is on say(). Requiring it here 400'd every
+        // rerun call that followed the endpoint's own description, which never
+        // mentioned it. Absent, the turn simply carries no language context —
+        // exactly what say() does.
+        var contexts = isNullOrEmpty(language)
+                ? Map.<String, Context>of()
+                : Map.of(KEY_LANG, new Context(string, language));
+
         sayInternal(conversationId, returnDetailed, returnCurrentStepOnly, returningFields,
-                new InputData("", Map.of(KEY_LANG, new Context(string, language))), true, response);
+                new InputData("", contexts), true, response);
     }
 
     @Override
@@ -590,12 +597,21 @@ public class RestAgentEngine implements IRestAgentEngine {
      * The ACTIONS data of the most recent (paused) conversation step — read-time
      * lookup over the snapshot's step history, no new persistence.
      * <p>
-     * {@code ConversationMemorySnapshot.getConversationSteps()} is built by
-     * {@code ConversationMemoryUtilities.convertConversationMemory} in
-     * REVERSE-chronological order (index 0 = most recent step), each holding a
-     * single {@code WorkflowRunSnapshot} whose {@code lifecycleTasks} preserve the
-     * original insertion order — so within that step, the LAST matching "actions"
-     * entry is the most recent one (same semantics as
+     * {@code ConversationMemorySnapshot.getConversationSteps()} is CHRONOLOGICAL,
+     * index 0 being the oldest step. {@code convertConversationMemory} does count
+     * down from {@code size() - 1}, which reads as a reversal — but it indexes a
+     * {@code ConversationStepStack}, whose own {@code get(i)} already counts from
+     * the most recent, so the two inversions cancel. {@code
+     * convertConversationMemorySnapshot} relies on that too, pairing steps with the
+     * chronological {@code conversationOutputs} by index.
+     * <p>
+     * Walking forward from index 0 therefore returned the FIRST step's actions, and
+     * step 0 is the CONVERSATION_START turn — so a paused conversation reported
+     * {@code ["CONVERSATION_START"]} as the actions that caused the pause, on every
+     * rule pause, no matter which rule fired.
+     * <p>
+     * Within a step, {@code lifecycleTasks} preserve insertion order, so the LAST
+     * matching "actions" entry is the most recent one (same semantics as
      * {@code IConversationStep.getLatestData}).
      */
     private List<String> findPausedStepActions(ConversationMemorySnapshot snapshot) {
@@ -603,9 +619,9 @@ public class RestAgentEngine implements IRestAgentEngine {
         if (steps == null || steps.isEmpty()) {
             return List.of();
         }
-        for (ConversationStepSnapshot step : steps) {
+        for (int i = steps.size() - 1; i >= 0; i--) {
             List<String> latestActionsInStep = null;
-            for (WorkflowRunSnapshot workflow : step.getWorkflows()) {
+            for (WorkflowRunSnapshot workflow : steps.get(i).getWorkflows()) {
                 for (ResultSnapshot data : workflow.getLifecycleTasks()) {
                     if ("actions".equals(data.getKey()) && data.getResult() instanceof List<?> actions) {
                         @SuppressWarnings("unchecked")

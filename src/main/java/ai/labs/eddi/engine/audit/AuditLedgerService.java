@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.audit;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import ai.labs.eddi.configs.agents.AgentSigningService;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
@@ -29,6 +30,9 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.nio.file.*;
 import java.time.Instant;
 import java.nio.charset.StandardCharsets;
+import com.fasterxml.jackson.core.type.TypeReference;
+import ai.labs.eddi.utils.LogSanitizer;
+import java.util.Map;
 
 /**
  * Async batch writer for the immutable audit ledger.
@@ -83,6 +87,25 @@ public class AuditLedgerService {
     static final int MAX_TRACKED_UNDELIVERED = 10_000;
 
     private final IAuditStore auditStore;
+
+    /**
+     * Whether verification reconstructs the timestamp precision pre-v4 rows lost in
+     * storage. On by default: without it every entry written before the v4
+     * canonical form reports INVALID, which is what made the ledger's
+     * tamper-evidence emit no usable signal at all. Set
+     * {@code eddi.audit.verify.recover-legacy=false} to hold legacy rows to their
+     * literal stored form.
+     */
+    private final boolean recoverLegacyTimestamps;
+
+    /**
+     * How many legacy rows one sweep may search before it stops trying. A search is
+     * only spent on a row whose direct check already failed, so a healthy ledger
+     * never touches this; a ledger verified with the wrong key would otherwise
+     * spend one on every row. 500 bounds the worst case at a second or two of HMAC
+     * work per request.
+     */
+    private final int recoverLegacyMaxRows;
     private final boolean enabled;
     private final int flushIntervalSeconds;
     private final Optional<String> masterKeyConfig;
@@ -93,6 +116,10 @@ public class AuditLedgerService {
     private final String defaultTenantId;
     private final AgentSigningService agentSigningService;
     private final ObjectMapper objectMapper;
+
+    /** Target shape for {@link #normalizePayloadsForStorage}. */
+    private static final TypeReference<Map<String, Object>> MAP_OF_OBJECT = new TypeReference<>() {
+    };
     private final int maxQueueSize;
 
     private byte[] hmacKey;
@@ -151,8 +178,12 @@ public class AuditLedgerService {
             @ConfigProperty(name = "eddi.audit.agent-signing-enabled", defaultValue = "true") boolean agentSigningEnabled,
             @ConfigProperty(name = "eddi.tenant.default-id", defaultValue = "default") String defaultTenantId,
             @ConfigProperty(name = "eddi.audit.max-queue-size", defaultValue = "100000") int maxQueueSize,
-            io.micrometer.core.instrument.MeterRegistry meterRegistry, Instance<Connection> natsConnectionInstance,
+            @ConfigProperty(name = "eddi.audit.verify.recover-legacy", defaultValue = "true") boolean recoverLegacyTimestamps,
+            @ConfigProperty(name = "eddi.audit.verify.recover-legacy-max-rows", defaultValue = "500") int recoverLegacyMaxRows,
+            MeterRegistry meterRegistry, Instance<Connection> natsConnectionInstance,
             AgentSigningService agentSigningService, ObjectMapper objectMapper) {
+        this.recoverLegacyTimestamps = recoverLegacyTimestamps;
+        this.recoverLegacyMaxRows = recoverLegacyMaxRows;
         this.auditStore = auditStore;
         this.enabled = enabled;
         this.flushIntervalSeconds = flushIntervalSeconds;
@@ -172,7 +203,7 @@ public class AuditLedgerService {
      * {@link #init()} after construction.
      */
     static AuditLedgerService createForTesting(IAuditStore auditStore, boolean enabled, int flushIntervalSeconds, String masterKeyConfig,
-                                               io.micrometer.core.instrument.MeterRegistry meterRegistry) {
+                                               MeterRegistry meterRegistry) {
         return createForTesting(auditStore, enabled, flushIntervalSeconds, masterKeyConfig, meterRegistry, DEFAULT_MAX_QUEUE_SIZE);
     }
 
@@ -180,9 +211,9 @@ public class AuditLedgerService {
      * Factory method for unit testing with an explicit queue bound.
      */
     static AuditLedgerService createForTesting(IAuditStore auditStore, boolean enabled, int flushIntervalSeconds, String masterKeyConfig,
-                                               io.micrometer.core.instrument.MeterRegistry meterRegistry, int maxQueueSize) {
+                                               MeterRegistry meterRegistry, int maxQueueSize) {
         return new AuditLedgerService(auditStore, enabled, flushIntervalSeconds, Optional.ofNullable(masterKeyConfig), "eddi-audit-deadletter.jsonl",
-                false, "default", maxQueueSize, meterRegistry, null, null, new ObjectMapper());
+                false, "default", maxQueueSize, true, 500, meterRegistry, null, null, new ObjectMapper());
     }
 
     @PostConstruct
@@ -267,6 +298,26 @@ public class AuditLedgerService {
             // part of the signed payload, which is what makes a deleted entry's gap
             // impossible to close by renumbering its neighbours.
             scrubbed = scrubbed.withSequence(nextSequence(scrubbed.conversationId()));
+
+            // Payload maps must be reduced to their STORED shape before signing, for
+            // exactly the same reason as the timestamp below: sign what is stored.
+            scrubbed = normalizePayloadsForStorage(scrubbed);
+
+            // A null timestamp must be stamped BEFORE signing, not by the store. v4
+            // signs the empty string for null, but PostgresAuditStore substitutes
+            // now() on write — so a null-timestamped entry read back would carry a
+            // timestamp the signature never covered and report INVALID forever.
+            // (MongoDB stores the field as absent, which round-trips; only the
+            // Postgres fallback diverges.) Stamping here makes the two agree and the
+            // signature honest.
+            if (scrubbed.timestamp() == null) {
+                scrubbed = scrubbed.withTimestamp(Instant.now());
+            }
+
+            // Floor the timestamp to what the signature covers and the backends can
+            // store, BEFORE signing — so the row that lands in the database is
+            // byte-for-byte the row that was signed and nothing downstream can round it.
+            scrubbed = AuditHmac.withStorablePrecision(scrubbed);
 
             // Compute HMAC if key is available
             AuditEntry signed;
@@ -592,6 +643,20 @@ public class AuditLedgerService {
      * @return the verification outcome for that entry
      */
     public AuditVerificationStatus verifyEntry(AuditEntry entry) {
+        return verifyEntry(entry, newRecoveryBudget());
+    }
+
+    /**
+     * Re-check a stored entry, spending legacy-recovery searches from a budget the
+     * caller's whole sweep shares.
+     *
+     * @param entry
+     *            a stored entry, as read back from {@link IAuditStore}
+     * @param recoveryBudget
+     *            from {@link #newRecoveryBudget()}, created once per sweep
+     * @return the verification outcome for that entry
+     */
+    public AuditVerificationStatus verifyEntry(AuditEntry entry, AuditRecoveryBudget recoveryBudget) {
         if (entry == null) {
             return AuditVerificationStatus.INVALID;
         }
@@ -601,7 +666,75 @@ public class AuditLedgerService {
         if (entry.hmac() == null || entry.hmac().isBlank()) {
             return AuditVerificationStatus.UNSIGNED;
         }
-        return AuditHmac.verifyHmac(entry, hmacKey) ? AuditVerificationStatus.VALID : AuditVerificationStatus.INVALID;
+        return switch (AuditHmac.verify(entry, hmacKey, recoveryBudget)) {
+            case MATCH -> AuditVerificationStatus.VALID;
+            case MATCH_RECOVERED -> AuditVerificationStatus.VALID_RECOVERED;
+            case MISMATCH -> AuditVerificationStatus.INVALID;
+        };
+    }
+
+    /**
+     * A recovery budget for one verification sweep, sized by
+     * {@code eddi.audit.verify.recover-legacy-max-rows}.
+     */
+    public AuditRecoveryBudget newRecoveryBudget() {
+        return recoverLegacyTimestamps ? new AuditRecoveryBudget(recoverLegacyMaxRows) : AuditRecoveryBudget.none();
+    }
+
+    /**
+     * Reduces an entry's payload maps to the JSON-native shape the stores persist.
+     * <p>
+     * The pipeline hands this service <em>live Java objects</em>: a turn's
+     * {@code output} is a list of {@code TextOutputItem} POJOs, not of Maps. The
+     * signature was computed over those objects while verification later ran over
+     * whatever JSON gave back — and the two canonicalize completely differently, a
+     * POJO as {@code s:<toString()>} and its round-tripped form as
+     * {@code m&#123;…&#125;}. Verified against a real PostgreSQL container, a
+     * single output item signed as {@code {output=[Hi there!]}} came back as
+     * {@code {output=[{text=Hi there!, type=text, delay=0}]}} and could never
+     * verify.
+     * <p>
+     * This is the same defect class as the nanosecond timestamp, and it takes the
+     * same cure: normalise first, then sign, so the row that lands in the database
+     * is byte-for-byte the row that was signed. Fixing only the timestamp left
+     * every entry carrying rendered output — on a rule-based turn, the majority of
+     * them — still reporting as tampered.
+     * <p>
+     * Deliberately non-fatal: an audit write must never break the turn it records.
+     * A value the mapper cannot convert keeps its original form, which verifies no
+     * worse than it did before and is visible in the ledger's own verify report.
+     */
+    private AuditEntry normalizePayloadsForStorage(AuditEntry entry) {
+        Map<String, Object> input = normalizeMap(entry.input(), entry.id());
+        Map<String, Object> output = normalizeMap(entry.output(), entry.id());
+        Map<String, Object> llmDetail = normalizeMap(entry.llmDetail(), entry.id());
+        Map<String, Object> toolCalls = normalizeMap(entry.toolCalls(), entry.id());
+
+        if (input == entry.input() && output == entry.output()
+                && llmDetail == entry.llmDetail() && toolCalls == entry.toolCalls()) {
+            return entry;
+        }
+        return new AuditEntry(entry.id(), entry.conversationId(), entry.agentId(), entry.agentVersion(),
+                entry.userId(), entry.environment(), entry.stepIndex(), entry.taskId(), entry.taskType(),
+                entry.taskIndex(), entry.durationMs(), input, output, llmDetail, toolCalls, entry.actions(),
+                entry.cost(), entry.timestamp(), entry.hmac(), entry.agentSignature(), entry.sequence());
+    }
+
+    /**
+     * @return the JSON-native form of {@code map}, or {@code map} itself if it
+     *         cannot be converted
+     */
+    private Map<String, Object> normalizeMap(Map<String, Object> map, String entryId) {
+        if (map == null || map.isEmpty()) {
+            return map;
+        }
+        try {
+            return objectMapper.convertValue(map, MAP_OF_OBJECT);
+        } catch (IllegalArgumentException e) {
+            LOGGER.warnf("Audit entry %s carries a payload value that cannot be normalised (%s); "
+                    + "it is stored as-is and will not verify.", LogSanitizer.sanitize(entryId), e.getMessage());
+            return map;
+        }
     }
 
     /**

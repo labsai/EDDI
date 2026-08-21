@@ -45,7 +45,21 @@ import java.util.List;
  * @param entriesChecked
  *            number of entries examined
  * @param valid
- *            entries whose HMAC recomputed correctly
+ *            entries whose HMAC recomputed correctly, including the
+ *            {@code recovered} ones
+ * @param recovered
+ *            of those, entries written before the v4 canonical form that
+ *            verified only after the timestamp precision their backend could
+ *            not store was reconstructed from the signature. Integrity is
+ *            proven just as strongly; the count is reported separately because
+ *            it dates the rows
+ * @param recoverySkipped
+ *            pre-v4 entries that failed the direct check and were <em>not</em>
+ *            searched, because the sweep's recovery budget
+ *            ({@code eddi.audit.verify.recover-legacy-max-rows}) was spent.
+ *            They are counted in {@code invalid}; a non-zero value here says
+ *            that verdict is "not proven" rather than "disproven", and that a
+ *            narrower page or a larger budget would say more
  * @param invalid
  *            entries whose HMAC did not match — tampering, or a key change
  * @param unsigned
@@ -71,9 +85,9 @@ import java.util.List;
  *            when the sweep ran
  * @since 6.2.0
  */
-public record AuditVerificationReport(String scope, String scopeId, boolean signingEnabled, int entriesChecked, int valid, int invalid, int unsigned,
-        ChainStatus chainStatus, List<Long> missingSequences, List<Long> undeliveredSequences, List<Long> duplicateSequences,
-        List<EntryProblem> problems, Instant verifiedAt) {
+public record AuditVerificationReport(String scope, String scopeId, boolean signingEnabled, int entriesChecked, int valid, int recovered,
+        int recoverySkipped, int invalid, int unsigned, ChainStatus chainStatus, List<Long> missingSequences,
+        List<Long> undeliveredSequences, List<Long> duplicateSequences, List<EntryProblem> problems, Instant verifiedAt) {
 
     /**
      * Whether the sweep found nothing wrong. False whenever an entry failed
@@ -103,9 +117,28 @@ public record AuditVerificationReport(String scope, String scopeId, boolean sign
      * whose HMAC no longer recomputes, or a gap this deployment cannot account for.
      * An {@code INCOMPLETE} chain (the ledger dropped those entries itself) and a
      * missing signing key are explicitly not tampering.
+     * <p>
+     * Nor is {@link #recoverySkipped}. Those rows failed their direct check and
+     * were then <em>not searched</em>, because the sweep's recovery budget was
+     * spent — so nothing about them was established either way, and a pre-v4 row
+     * failing its direct check is the expected outcome rather than evidence.
+     * Counting them would make a large enough page raise a tampering alarm purely
+     * by exhausting a budget, which is the same "reports something as proven when
+     * it is not" failure this release exists to remove. They still defeat
+     * {@link #intact()}: a sweep that could not finish checking is not a clean bill
+     * of health.
      */
     public boolean tamperingSuspected() {
-        return invalid > 0 || chainStatus == ChainStatus.BROKEN;
+        return (invalid - Math.min(recoverySkipped, invalid)) > 0 || chainStatus == ChainStatus.BROKEN;
+    }
+
+    /**
+     * Entries whose HMAC was actually shown not to recompute — {@link #invalid}
+     * minus the rows that went unsearched. This is the number an alert should key
+     * on.
+     */
+    public int disproven() {
+        return invalid - Math.min(recoverySkipped, invalid);
     }
 
     /** Continuity of the per-conversation sequence chain. */
@@ -150,6 +183,20 @@ public record AuditVerificationReport(String scope, String scopeId, boolean sign
      * @param status
      *            why it is listed here
      */
-    public record EntryProblem(String entryId, String conversationId, long sequence, Instant timestamp, AuditVerificationStatus status) {
+    /**
+     * One entry the sweep could not mark VALID.
+     *
+     * @param hmacVersion
+     *            which canonical form the stored HMAC names ({@code v1}–{@code v4},
+     *            or {@code null} for UNSIGNED). This is the triage field: an
+     *            INVALID on {@code v4} means something touched a row this release
+     *            wrote — an alarm — while an INVALID on a pre-v4 version is usually
+     *            a legacy row whose payload held live Java objects when it was
+     *            signed, a form nothing can reconstruct and no recovery search will
+     *            ever clear. The two deserve opposite reactions, and without this
+     *            field they are indistinguishable in the report.
+     */
+    public record EntryProblem(String entryId, String conversationId, long sequence, Instant timestamp, AuditVerificationStatus status,
+            String hmacVersion) {
     }
 }

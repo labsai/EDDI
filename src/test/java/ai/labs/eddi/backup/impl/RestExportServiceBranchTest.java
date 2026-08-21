@@ -25,6 +25,7 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.secrets.sanitize.SecretScrubber;
 import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.NotFoundException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -373,6 +374,22 @@ class RestExportServiceBranchTest {
         void emptyFilename() {
             assertThrows(BadRequestException.class,
                     () -> exportService.getAgentZipArchive(""));
+        }
+
+        /**
+         * A well-formed name for an archive that is not there used to sneakyThrow the
+         * FileNotFoundException, which surfaced as an unlogged 500 error page. Easy to
+         * hit: export and download share this path and differ only by method, so a
+         * mistyped or expired filename read as a server fault.
+         */
+        @Test
+        @DisplayName("a well-formed name for a missing archive is a 404, not a 500")
+        void missingArchiveIsNotFound() {
+            var notFound = assertThrows(NotFoundException.class,
+                    () -> exportService.getAgentZipArchive("no-such-export.zip"));
+
+            assertTrue(notFound.getMessage().contains("no-such-export.zip"),
+                    "the message must name the archive the caller asked for");
         }
     }
 

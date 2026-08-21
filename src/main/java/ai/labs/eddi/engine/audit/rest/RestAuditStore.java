@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.audit.rest;
 
 import ai.labs.eddi.engine.audit.AuditLedgerService;
+import ai.labs.eddi.engine.audit.AuditHmac;
 import ai.labs.eddi.engine.audit.AuditVerificationStatus;
 import ai.labs.eddi.engine.audit.IAuditStore;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
@@ -108,22 +109,33 @@ public class RestAuditStore implements IRestAuditStore {
                                            boolean expectRunFromOrigin) {
         boolean signingEnabled = auditLedgerService.isSigningEnabled();
         int valid = 0;
+        int recovered = 0;
         int invalid = 0;
         int unsigned = 0;
         var problems = new ArrayList<EntryProblem>();
+        // One budget for the whole sweep — see AuditRecoveryBudget. Spent only on
+        // rows whose direct check already failed.
+        var recoveryBudget = auditLedgerService.newRecoveryBudget();
 
         for (AuditEntry entry : entries) {
-            AuditVerificationStatus status = auditLedgerService.verifyEntry(entry);
+            AuditVerificationStatus status = auditLedgerService.verifyEntry(entry, recoveryBudget);
             switch (status) {
                 case VALID -> valid++;
+                // A recovered entry is intact — it counts as valid, and is also counted
+                // on its own so an operator can see how much of the ledger predates v4.
+                case VALID_RECOVERED -> {
+                    valid++;
+                    recovered++;
+                }
                 case INVALID -> invalid++;
                 case UNSIGNED -> unsigned++;
                 case SIGNING_DISABLED -> {
                     // counted only as a problem — nothing was actually checked
                 }
             }
-            if (status != AuditVerificationStatus.VALID) {
-                problems.add(new EntryProblem(entry.id(), entry.conversationId(), entry.sequence(), entry.timestamp(), status));
+            if (status != AuditVerificationStatus.VALID && status != AuditVerificationStatus.VALID_RECOVERED) {
+                problems.add(new EntryProblem(entry.id(), entry.conversationId(), entry.sequence(), entry.timestamp(), status,
+                        AuditHmac.versionOf(entry.hmac())));
             }
         }
 
@@ -134,8 +146,8 @@ public class RestAuditStore implements IRestAuditStore {
                 ? checkChain(entries, missing, undelivered, duplicates, expectRunFromOrigin, undeliveredFor(scopeId))
                 : ChainStatus.NOT_APPLICABLE;
 
-        return new AuditVerificationReport(scope, scopeId, signingEnabled, entries.size(), valid, invalid, unsigned, chainStatus, missing,
-                undelivered, duplicates, problems, Instant.now());
+        return new AuditVerificationReport(scope, scopeId, signingEnabled, entries.size(), valid, recovered,
+                recoveryBudget.searchesSkipped(), invalid, unsigned, chainStatus, missing, undelivered, duplicates, problems, Instant.now());
     }
 
     /**
