@@ -429,10 +429,8 @@ public class PostgresSecretPersistence implements ISecretPersistence {
     private static EncryptedDek resultSetToDek(ResultSet rs) throws SQLException {
         Timestamp createdTs = rs.getTimestamp("created_at");
         // A row written before the column existed reads as 0 until the default takes
-        // effect; that row is generation 1, by the same rule that governs dekIds.
-        int generation = rs.getInt("generation");
-        return new EncryptedDek(rs.getString("id"), rs.getString("tenant_id"),
-                generation < EncryptedDek.FIRST_GENERATION ? EncryptedDek.FIRST_GENERATION : generation, rs.getString("encrypted_dek"),
+        // effect; that row is generation 1, and EncryptedDek maps it there.
+        return new EncryptedDek(rs.getString("id"), rs.getString("tenant_id"), rs.getInt("generation"), rs.getString("encrypted_dek"),
                 rs.getString("iv"), createdTs != null ? createdTs.toInstant() : null);
     }
 

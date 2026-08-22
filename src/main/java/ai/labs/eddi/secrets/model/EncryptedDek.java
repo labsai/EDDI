@@ -17,7 +17,9 @@ import java.time.Instant;
  * decrypting until it has been swept onto the newest one. Ciphertext names its
  * generation through {@link #dekId(String, int)}; {@link #generationOf} reads
  * that name back, treating everything written before generations existed as
- * generation 1.
+ * generation 1. A generation below 1 never reaches a field of this class — see
+ * {@link #setGeneration(int)} — so the name a row writes and the generation
+ * that name reads back as are always the same one.
  */
 public class EncryptedDek {
 
@@ -54,10 +56,14 @@ public class EncryptedDek {
     public EncryptedDek(String id, String tenantId, int generation, String encryptedDek, String iv, Instant createdAt) {
         this.id = id;
         this.tenantId = tenantId;
-        this.generation = generation;
+        this.generation = normalize(generation);
         this.encryptedDek = encryptedDek;
         this.iv = iv;
         this.createdAt = createdAt;
+    }
+
+    private static int normalize(int generation) {
+        return Math.max(generation, FIRST_GENERATION);
     }
 
     /**
@@ -110,8 +116,18 @@ public class EncryptedDek {
         return generation;
     }
 
+    /**
+     * Keeps the two halves of the dekId round trip agreeing.
+     * <p>
+     * {@link #generationOf} reads anything below {@link #FIRST_GENERATION} back as
+     * generation 1, so a row allowed to hold 0 would seal ciphertext under the name
+     * {@code tenant#g0} and later have it opened with generation 1's key — a
+     * different key than sealed it. Every source of a below-1 generation means the
+     * same thing (a row that predates generations), so it becomes 1 here, once, at
+     * the model boundary rather than at each store that reads a row back.
+     */
     public void setGeneration(int generation) {
-        this.generation = generation;
+        this.generation = normalize(generation);
     }
 
     /** This row's identity as ciphertext names it. */
