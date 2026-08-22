@@ -11,10 +11,32 @@ import java.time.Instant;
  * encryption. The DEK itself is encrypted with the Master Key (KEK) from the
  * environment variable. Each tenant gets its own DEK for cryptographic
  * isolation.
+ * <p>
+ * A tenant holds one row per <b>generation</b>. Rotation adds a generation
+ * rather than replacing a key, so a row sealed under any generation keeps
+ * decrypting until it has been swept onto the newest one. Ciphertext names its
+ * generation through {@link #dekId(String, int)}; {@link #generationOf} reads
+ * that name back, treating everything written before generations existed as
+ * generation 1.
  */
 public class EncryptedDek {
+
+    /** The generation every pre-generation row is understood to be sealed under. */
+    public static final int FIRST_GENERATION = 1;
+
+    /**
+     * Separates the tenant from the generation in a dekId. Tenant ids are
+     * restricted to {@code [a-zA-Z0-9._-]} so it cannot collide, and the parse
+     * takes the last occurrence anyway, so a laxer tenant id would still round
+     * trip. Readable on purpose: {@code default#g3} tells an operator looking at a
+     * database row exactly what it means.
+     */
+    private static final String GENERATION_MARKER = "#g";
+
     private String id;
     private String tenantId;
+    /** Which generation of the tenant's DEK this row holds. */
+    private int generation = FIRST_GENERATION;
     /** Base64-encoded AES-256-GCM ciphertext of the DEK */
     private String encryptedDek;
     /** Base64-encoded 12-byte initialization vector used to encrypt the DEK */
@@ -24,12 +46,50 @@ public class EncryptedDek {
     public EncryptedDek() {
     }
 
+    /** Generation 1, for callers that predate generations. */
     public EncryptedDek(String id, String tenantId, String encryptedDek, String iv, Instant createdAt) {
+        this(id, tenantId, FIRST_GENERATION, encryptedDek, iv, createdAt);
+    }
+
+    public EncryptedDek(String id, String tenantId, int generation, String encryptedDek, String iv, Instant createdAt) {
         this.id = id;
         this.tenantId = tenantId;
+        this.generation = generation;
         this.encryptedDek = encryptedDek;
         this.iv = iv;
         this.createdAt = createdAt;
+    }
+
+    /**
+     * The name ciphertext carries to say which key sealed it. Every dekId written
+     * anywhere in the system comes from here.
+     */
+    public static String dekId(String tenantId, int generation) {
+        return tenantId + GENERATION_MARKER + generation;
+    }
+
+    /**
+     * The generation a stored dekId names.
+     * <p>
+     * Anything that is not a generation name — null, blank, or the bare tenant id
+     * that rows carried before generations existed — reads as generation 1. That
+     * rule is what lets every already-stored row keep working with no migration of
+     * ciphertext.
+     */
+    public static int generationOf(String tenantId, String dekId) {
+        if (dekId == null || dekId.isBlank() || dekId.equals(tenantId)) {
+            return FIRST_GENERATION;
+        }
+        int marker = dekId.lastIndexOf(GENERATION_MARKER);
+        if (marker < 0) {
+            return FIRST_GENERATION;
+        }
+        try {
+            int generation = Integer.parseInt(dekId.substring(marker + GENERATION_MARKER.length()));
+            return generation < FIRST_GENERATION ? FIRST_GENERATION : generation;
+        } catch (NumberFormatException e) {
+            return FIRST_GENERATION;
+        }
     }
 
     public String getId() {
@@ -44,6 +104,19 @@ public class EncryptedDek {
     }
     public void setTenantId(String tenantId) {
         this.tenantId = tenantId;
+    }
+
+    public int getGeneration() {
+        return generation;
+    }
+
+    public void setGeneration(int generation) {
+        this.generation = generation;
+    }
+
+    /** This row's identity as ciphertext names it. */
+    public String dekId() {
+        return dekId(tenantId, generation);
     }
 
     public String getEncryptedDek() {
