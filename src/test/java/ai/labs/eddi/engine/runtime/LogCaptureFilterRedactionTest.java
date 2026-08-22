@@ -18,6 +18,7 @@ import java.util.logging.LogRecord;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -119,6 +120,25 @@ class LogCaptureFilterRedactionTest {
         assertTrue(stored.contains("sk-ant-<REDACTED>"), "the fallback must redact, not merely drop the record: " + stored);
         assertTrue(stored.contains("calling https://api.example.com/v1?token="),
                 "and the store must have formatted the record itself: " + stored);
+    }
+
+    @Test
+    @DisplayName("when in-place redaction throws, the record the CONSOLE formats carries nothing")
+    void failsClosedForTheConsoleWhenRedactionThrows() {
+        // The store's own fallback protected only the copy it keeps. The console
+        // handler formats this same record moments later, and a record left
+        // exactly as it arrived is a record that prints the credential — so a
+        // redaction failure and a leak were the same event.
+        var record = new UnformattableRecord("token=" + KEY + " while calling %s");
+        record.setParameters(new Object[]{CREDENTIALLED_URL});
+        record.setThrown(new IllegalStateException("connect failed for " + CREDENTIALLED_URL));
+
+        assertTrue(filter.isLoggable(record), "a redaction failure must never suppress a log line");
+
+        assertFalse(record.getMessage().contains(KEY), "the console must not see the key: " + record.getMessage());
+        assertNull(record.getParameters(), "and must not be able to substitute it back in");
+        assertFalse(String.valueOf(record.getThrown()).contains(KEY),
+                "the throwable is printed with the line and must be redacted too: " + record.getThrown());
     }
 
     /**

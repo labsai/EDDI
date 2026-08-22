@@ -16,6 +16,7 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.modules.apicalls.impl.RequestRedactor;
 import ai.labs.eddi.modules.llm.impl.McpToolProviderManager;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
+import ai.labs.eddi.secrets.sanitize.UriRedactor;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -169,6 +170,19 @@ public class RestMcpCallsStore implements IRestMcpCallsStore {
     }
 
     /**
+     * The caller's server URL, safe to write to a log.
+     * <p>
+     * {@code LogSanitizer.sanitize} answers a different question — it stops a
+     * forged log line — and leaves credential material alone, so
+     * {@code https://user:token@mcp.example.com/rpc} was logged with the token in
+     * it. The URL is caller-supplied and reaches the log on every probe, including
+     * the failures, where a credentialled URL is most likely.
+     */
+    private static String forLog(String url) {
+        return sanitize(UriRedactor.redactUri(url));
+    }
+
+    /**
      * Connects to an MCP server and lists its tools.
      * <p>
      * The failure branch reports the exception TYPE and not its message. The
@@ -185,7 +199,7 @@ public class RestMcpCallsStore implements IRestMcpCallsStore {
         }
 
         try {
-            LOGGER.infof("Discovering tools from MCP server at '%s'", sanitize(url));
+            LOGGER.infof("Discovering tools from MCP server at '%s'", forLog(url));
 
             // Build a temporary McpServerConfig for probing
             McpServerConfig tempConfig = new McpServerConfig();
@@ -213,7 +227,7 @@ public class RestMcpCallsStore implements IRestMcpCallsStore {
             return Response.ok(Map.of("tools", tools, "count", tools.size())).build();
 
         } catch (Exception e) {
-            LOGGER.warnf(e, "Failed to discover tools from MCP server at '%s'", sanitize(url));
+            LOGGER.warnf(e, "Failed to discover tools from MCP server at '%s'", forLog(url));
             return Response.status(Response.Status.BAD_GATEWAY)
                     .entity(Map.of("error", "Failed to connect to MCP server (" + e.getClass().getSimpleName() + ") — see server logs for details"))
                     .build();

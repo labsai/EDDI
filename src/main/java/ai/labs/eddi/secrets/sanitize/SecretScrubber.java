@@ -182,8 +182,17 @@ public class SecretScrubber {
      *            the value as stored
      */
     private String scrubTextValue(String fieldName, String parentFieldName, String textValue) {
-        // Skip existing vault references (both new and legacy prefix)
-        if (textValue.contains("${vault:") || textValue.contains("${eddivault:")) {
+        // A vault reference is a pointer to a secret, not a secret, and is left
+        // legible so an operator can still see WHICH key the config used.
+        //
+        // The exemption speaks for one value, and a URL is not one value: it is a
+        // host, a path and a set of independent query parameters. Read over a whole
+        // URL, "carries a reference somewhere" exempted the LIVE credential sitting
+        // in the next parameter —
+        // `?api_key=${vault:k}&access_token=<plaintext>` was exported intact. A URL
+        // is therefore always handed to the part-by-part pass below, which judges
+        // each parameter on its own.
+        if (!looksLikeUrl(textValue) && (textValue.contains("${vault:") || textValue.contains("${eddivault:"))) {
             return null;
         }
 

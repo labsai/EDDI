@@ -8,6 +8,7 @@ import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import org.jboss.logmanager.ExtLogRecord;
 
 import java.text.MessageFormat;
+import java.util.ArrayDeque;
 import java.util.IdentityHashMap;
 import java.util.logging.LogRecord;
 
@@ -35,6 +36,9 @@ import java.util.logging.LogRecord;
  * than twice.
  */
 final class LogRecordRedactor {
+
+    /** Stands in for a message that could not even be scanned. */
+    private static final String REDACTION_FAILED = "<REDACTED: log redaction failed>";
 
     private LogRecordRedactor() {
     }
@@ -87,19 +91,80 @@ final class LogRecordRedactor {
         String redacted = formatted == null || formatted.isEmpty() ? formatted : SecretRedactionFilter.redact(formatted);
         boolean messageModified = redacted != null && !redacted.equals(formatted);
         if (messageModified) {
-            if (record instanceof ExtLogRecord extRecord) {
-                // NO_FORMAT, because the text is already substituted: leaving the
-                // style as PRINTF would have the console handler read a stray '%'
-                // in the redacted text as a conversion and either mangle or drop
-                // the line.
-                extRecord.setMessage(redacted, ExtLogRecord.FormatStyle.NO_FORMAT);
-            } else {
-                record.setMessage(redacted);
-            }
+            setMessage(record, redacted);
             record.setParameters(null);
         }
         boolean modified = redactThrown(record) || messageModified;
         return new Redaction(reusableMessage(record, redacted, messageModified), modified);
+    }
+
+    /**
+     * Strips a record whose redaction did not complete, so the console handler
+     * formatting it next cannot print what the failed pass never removed.
+     * <p>
+     * A pass that threw leaves the record exactly as it arrived. Only the STORED
+     * copy was protected — {@link BoundedLogStore#capture} redacts its own text
+     * when it is handed none — while the console, the one destination an operator
+     * cannot revoke after the fact, printed the record itself. So "redaction threw"
+     * and "the credential printed" were the same event.
+     * <p>
+     * The line is worth keeping and the credential is not. The message is scanned
+     * in its RAW form (its parameters unresolved — resolving them is the step most
+     * likely to have thrown), the parameters are dropped so no formatter can
+     * substitute them back in, and the throwable is replaced by a redacted copy, or
+     * removed outright when even that cannot be produced.
+     */
+    static void failClosed(LogRecord record) {
+        if (record == null) {
+            return;
+        }
+        String message = safeMessage(record);
+        if (message != null) {
+            setMessage(record, message);
+        }
+        record.setParameters(null);
+        record.setThrown(safeThrowable(record.getThrown()));
+    }
+
+    /**
+     * What a failed record may still say: its raw message, redacted, or a marker
+     * when that scan fails too.
+     */
+    private static String safeMessage(LogRecord record) {
+        try {
+            String raw = record.getMessage();
+            return raw == null ? null : SecretRedactionFilter.redact(raw);
+        } catch (Exception _) {
+            return REDACTION_FAILED;
+        }
+    }
+
+    /** A printable stand-in for a throwable nothing has vouched for. */
+    private static Throwable safeThrowable(Throwable thrown) {
+        if (thrown == null) {
+            return null;
+        }
+        try {
+            return RedactedThrowable.of(thrown);
+        } catch (Exception _) {
+            // No copy could be produced, so nothing about this throwable is known
+            // to be safe to print. A dropped stack trace costs diagnostics; a
+            // printed credential cannot be taken back.
+            return null;
+        }
+    }
+
+    /** Replaces a record's message in whichever form the record understands. */
+    private static void setMessage(LogRecord record, String message) {
+        if (record instanceof ExtLogRecord extRecord) {
+            // NO_FORMAT, because the text is already substituted: leaving the
+            // style as PRINTF would have the console handler read a stray '%'
+            // in the redacted text as a conversion and either mangle or drop
+            // the line.
+            extRecord.setMessage(message, ExtLogRecord.FormatStyle.NO_FORMAT);
+        } else {
+            record.setMessage(message);
+        }
     }
 
     /**
@@ -157,16 +222,37 @@ final class LogRecordRedactor {
         return true;
     }
 
-    /** Whether any message in the cause chain changes under redaction. */
+    /**
+     * Whether any message in the throwable's graph changes under redaction.
+     * <p>
+     * The graph, not the cause chain: {@link Throwable#getSuppressed()} is printed
+     * by {@code printStackTrace} exactly like a cause, so a secret in a suppressed
+     * exception reached the console whenever the chain itself happened to be clean
+     * — and try-with-resources on a failed outbound call is precisely where a
+     * suppressed exception carrying the resolved URL comes from.
+     */
     private static boolean carriesSecret(Throwable thrown) {
-        // Bounded: a self-referential or pathologically deep cause chain must not
-        // turn a log line into a hang. Java's own printStackTrace bounds itself the
-        // same way, by tracking what it has already seen.
+        // Bounded: a self-referential or pathologically deep graph must not turn a
+        // log line into a hang. Java's own printStackTrace bounds itself the same
+        // way, by tracking what it has already seen.
         var seen = new IdentityHashMap<Throwable, Boolean>();
-        for (Throwable current = thrown; current != null && seen.put(current, Boolean.TRUE) == null; current = current.getCause()) {
+        // ArrayDeque rejects null, so nothing null is ever offered to it.
+        var pending = new ArrayDeque<Throwable>();
+        pending.push(thrown);
+        while (!pending.isEmpty()) {
+            Throwable current = pending.pop();
+            if (seen.put(current, Boolean.TRUE) != null) {
+                continue;
+            }
             String message = current.getMessage();
             if (message != null && !SecretRedactionFilter.redact(message).equals(message)) {
                 return true;
+            }
+            if (current.getCause() != null) {
+                pending.push(current.getCause());
+            }
+            for (Throwable suppressed : current.getSuppressed()) {
+                pending.push(suppressed);
             }
         }
         return false;

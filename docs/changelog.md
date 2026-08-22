@@ -7,6 +7,63 @@
 
 
 
+## 🛡️ fix(security): review findings — a forgeable approval preview and three ways a secret still reached the console (2026-08-22)
+
+**Repo:** EDDI (`feat/outbound-hardening`)
+
+Review pass over the hardening work on this branch. Four of the findings were live leaks and one was an
+integrity hole in the human-approval gate.
+
+### The approval preview could be forged by the model whose call is being approved
+
+`RemoteToolRequestResolvers` built the HITL preview by **string concatenation**, splicing the model's own
+tool arguments into a JSON-RPC envelope. Those arguments are model-produced text, so they were free to
+close the object they sat in and open fields of their own — a crafted argument could render a preview
+naming a different tool, a different method or an extra parameter, and the human is being asked to
+approve exactly what that preview says.
+
+The envelope is now built with Jackson (`ObjectNode`), so EDDI-authored fields cannot be displaced.
+Arguments are parsed when they are a JSON value and quoted as a single string when they are not, which
+keeps a well-formed argument object readable while denying a malformed one any way out of its quotes.
+The mapper enables `FAIL_ON_TRAILING_TOKENS`: without it Jackson reads `{"a":1} "and the rest"` as the
+object alone and silently drops the remainder, which is the same forgery in a quieter form.
+
+### A redaction failure and a leaked credential were the same event
+
+`LogCaptureFilter` caught exceptions from in-place redaction and published the record anyway. Only the
+*stored* copy was protected — `BoundedLogStore` re-redacts when handed no text — while the console, the
+one destination an operator cannot revoke after the fact, printed the record exactly as it arrived.
+`LogRecordRedactor.failClosed` now strips the record after the store has taken its copy: the raw message
+is scanned, parameters are dropped so no formatter can substitute them back, and the throwable is
+replaced by a redacted copy or removed outright. The line survives; the credential does not.
+
+### Suppressed exceptions were never scanned
+
+`printStackTrace` prints `getSuppressed()` exactly like a cause, but redaction walked the cause chain
+only — so a secret in a suppressed exception reached the console whenever the chain itself was clean.
+try-with-resources around a failed outbound call is precisely where a suppressed exception carrying the
+resolved URL comes from. The walk is now over the whole graph (cycle-safe, via an explicit stack), and
+`RedactedThrowable` copies suppressed exceptions rather than dropping them.
+
+### A vault reference in one query parameter vouched for the credential in the next
+
+`SecretScrubber` exempts vault references from scrubbing — a reference is a pointer, not a secret, and
+blanking it makes an export unimportable. But the exemption speaks for *one value*, and a URL is
+several. Read over a whole URL, "carries a reference somewhere" exempted the live credential beside it:
+`?api_key=${vault:k}&access_token=<plaintext>` was exported intact. URLs now always go to the
+part-by-part pass, which judges each parameter on its own.
+
+### Discovery endpoints logged credentialled URLs
+
+`LogSanitizer.sanitize` answers a different question — it stops a forged log line — and leaves
+credential material alone, so `https://user:token@host/spec.json` was logged with the token in it, on
+every discovery attempt including the failures where a credentialled URL is most likely. Both discovery
+endpoints now run the URL through `UriRedactor` first.
+
+---
+
+
+
 ## fix(llm): directive detection is split by surface — strict for descriptions, conservative for results (2026-08-22)
 
 **Repo:** EDDI (`feat/outbound-hardening`)

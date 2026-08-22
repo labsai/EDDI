@@ -477,4 +477,21 @@ class SecretScrubberTest {
                 "a placeholder is a pointer, not a secret, and an export that blanks it is not importable: " + scrubbed);
         assertTrue(scrubbed.contains("&lang=en"), scrubbed);
     }
+
+    @Test
+    @DisplayName("a vault reference in one query parameter does not exempt a live credential in the next")
+    void scrubJson_urlMixingVaultReferenceAndPlaintext() {
+        // The vault-reference exemption is about ONE value. A URL is several:
+        // reading it over the whole string let a reference in the first parameter
+        // speak for the plaintext credential in the second, and the credential was
+        // exported verbatim.
+        String json = "{\"targetServerUrl\": \"https://api.example.com/v1?api_key=${vault:prodKey}"
+                + "&access_token=abcdefghijklmnop&lang=en\"}";
+
+        String scrubbed = scrubber.scrubJson(json);
+
+        assertFalse(scrubbed.contains("abcdefghijklmnop"),
+                "the live credential beside the reference must not survive export: " + scrubbed);
+        assertTrue(scrubbed.contains("&lang=en"), "the benign parameter still survives: " + scrubbed);
+    }
 }

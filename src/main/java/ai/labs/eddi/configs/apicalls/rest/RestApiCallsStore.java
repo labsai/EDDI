@@ -15,6 +15,7 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.engine.mcp.McpApiToolBuilder;
 import ai.labs.eddi.modules.apicalls.impl.RequestRedactor;
+import ai.labs.eddi.secrets.sanitize.UriRedactor;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -119,12 +120,25 @@ public class RestApiCallsStore implements IRestApiCallsStore {
         return discover(specUrl, apiBaseUrl, null);
     }
 
+    /**
+     * The caller's spec URL, safe to write to a log.
+     * <p>
+     * {@code LogSanitizer.sanitize} answers a different question — it stops a
+     * forged log line — and leaves credential material alone, so
+     * {@code https://user:token@host/spec.json} was logged with the token in it.
+     * The URL is caller-supplied and reaches the log on every discovery attempt,
+     * including the failures, where a credentialled spec URL is most likely.
+     */
+    private static String forLog(String url) {
+        return sanitize(UriRedactor.redactUri(url));
+    }
+
     private Response discover(String specUrl, String apiBaseUrl, String authHeaderRef) {
         if (specUrl == null || specUrl.isBlank()) {
             return badRequest("specUrl is required");
         }
         try {
-            LOGGER.infof("Discovering API endpoints from OpenAPI spec at '%s'", sanitize(specUrl));
+            LOGGER.infof("Discovering API endpoints from OpenAPI spec at '%s'", forLog(specUrl));
 
             String effectiveBaseUrl = trimToNull(apiBaseUrl);
 
@@ -145,10 +159,10 @@ public class RestApiCallsStore implements IRestApiCallsStore {
 
             return Response.ok(response).build();
         } catch (IllegalArgumentException e) {
-            LOGGER.warnf(e, "Failed to parse OpenAPI spec from '%s'", sanitize(specUrl));
+            LOGGER.warnf(e, "Failed to parse OpenAPI spec from '%s'", forLog(specUrl));
             return badRequest(e.getMessage());
         } catch (Exception e) {
-            LOGGER.errorf(e, "Unexpected error discovering endpoints from '%s'", sanitize(specUrl));
+            LOGGER.errorf(e, "Unexpected error discovering endpoints from '%s'", forLog(specUrl));
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
                     .entity(Map.of("error", "Failed to discover endpoints (" + e.getClass().getSimpleName() + ") — see server logs for details"))
                     .build();
