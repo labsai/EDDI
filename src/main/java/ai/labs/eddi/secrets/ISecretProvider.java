@@ -155,17 +155,34 @@ public interface ISecretProvider {
      *
      * @param tenantId
      *            whose DEK to seal with; created on first use, as for a secret
+     * @param plaintext
+     *            the value to seal; {@code null} passes through as {@code null}
+     *            rather than sealing an empty value, so a grant that simply has no
+     *            refresh token stays distinguishable from one whose refresh token
+     *            sealed to nothing
+     * @return the ciphertext and the name of the key that sealed it, or
+     *         {@code null} when {@code plaintext} was null
      * @throws SecretProviderException
-     *             when the vault is inactive or the DEK cannot be obtained
+     *             when the vault is inactive or the DEK cannot be obtained. Note
+     *             the availability check comes first: a null plaintext against an
+     *             inactive vault still throws, it does not return null
      */
     SealedValue seal(String tenantId, String plaintext) throws SecretProviderException;
 
     /**
      * Reverse of {@link #seal}.
      *
+     * @param tenantId
+     *            whose DEK the value was sealed with
+     * @param sealed
+     *            the ciphertext to open, as {@link #seal} returned it
+     * @return the plaintext, or {@code null} when {@code sealed} is null or carries
+     *         no ciphertext — the mirror of {@code seal}, so a value that was never
+     *         sealed round-trips as absent rather than as an error
      * @throws SecretProviderException
      *             when the vault is inactive, the DEK cannot be obtained, or the
-     *             ciphertext fails its authentication tag
+     *             ciphertext fails its authentication tag. As with {@code seal},
+     *             the availability check precedes the null check
      */
     String unseal(String tenantId, SealedValue sealed) throws SecretProviderException;
 

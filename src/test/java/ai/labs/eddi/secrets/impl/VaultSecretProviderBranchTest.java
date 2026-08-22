@@ -169,7 +169,14 @@ class VaultSecretProviderBranchTest {
             verify(persistence, never()).deleteDek(TENANT_ID);
             // The sweep writes through the guarded update, and guards on the dekId
             // the row was read with.
-            verify(persistence).updateSecretSealing(any(EncryptedSecret.class), eq(TENANT_ID));
+            var swept = ArgumentCaptor.forClass(EncryptedSecret.class);
+            verify(persistence).updateSecretSealing(swept.capture(), eq(TENANT_ID));
+            // The post-condition that actually matters. Re-encrypting with the new
+            // key while still naming the old generation is the one outcome worse
+            // than not sweeping at all: the row is then openable by neither key,
+            // and nothing above would have noticed.
+            assertEquals(EncryptedDek.dekId(TENANT_ID, encDek.getGeneration() + 1), swept.getValue().getDekId(),
+                    "the swept row must name the generation it was just re-sealed with");
         }
 
         @Test

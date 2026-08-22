@@ -47,6 +47,19 @@ newline in either would forge log records (CWE-117). Routed the tenant/key pair 
 helper and sanitized the remaining standalone tenant ids — the point of the single helper being that it
 stays true of the next message somebody adds.
 
+### Review nitpicks
+
+The rotation test verified that the sweep called `updateSecretSealing`, but never that the swept row
+came out naming the NEW generation. A regression that re-encrypted with the new key while writing the
+old `dekId` would have passed — and that row is then openable by neither key, which is worse than not
+sweeping at all. The assertion is now on the captured row; reverting `setDekId` fails it with
+`expected: <test-tenant#g2> but was: <test-tenant>`.
+
+`ISecretProvider.seal`/`unseal` also gained their missing `@param`/`@return` tags, including the null
+contract they actually implement: null passes through in both directions, so a grant with no refresh
+token stays distinguishable from one that sealed to nothing — but the availability check comes first,
+so a null against an inactive vault still throws rather than returning null.
+
 ### Corrected an over-claiming Javadoc
 
 `onStartup`'s `@Priority` comment implied it ordered the vault ahead of anything that asks
