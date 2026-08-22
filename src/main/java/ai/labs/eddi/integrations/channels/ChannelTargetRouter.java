@@ -91,6 +91,18 @@ public class ChannelTargetRouter {
     private final AtomicLong invalidationGeneration = new AtomicLong();
 
     /**
+     * Guards the pair {@code (invalidationGeneration, lastRefreshTime)}.
+     * <p>
+     * Reading the generation and then stamping the timestamp is a check-then-act,
+     * and an invalidation landing between those two steps is exactly the case being
+     * defended against: it would zero the timestamp only for the stamp to overwrite
+     * it a moment later. The counter alone narrows that window, it does not close
+     * it. Both sides take this lock, so the check and the stamp are one step, as
+     * are the increment and the zeroing.
+     */
+    private final Object cacheStateLock = new Object();
+
+    /**
      * Thread → locked target (prevents mid-thread target switching). TTL-evicted.
      */
     private final ICache<String, ChannelTarget> threadTargetLock;
@@ -447,8 +459,10 @@ public class ChannelTargetRouter {
     @PostConstruct
     void registerSecretInvalidation() {
         secretResolver.registerInvalidationListener(reference -> {
-            invalidationGeneration.incrementAndGet();
-            lastRefreshTime = 0;
+            synchronized (cacheStateLock) {
+                invalidationGeneration.incrementAndGet();
+                lastRefreshTime = 0;
+            }
             LOGGER.info("Channel integration cache marked stale after a vault secret change");
         });
     }
@@ -470,8 +484,10 @@ public class ChannelTargetRouter {
         long generationAtStart = invalidationGeneration.get();
         try {
             refreshInternal();
-            if (invalidationGeneration.get() == generationAtStart) {
-                lastRefreshTime = now;
+            synchronized (cacheStateLock) {
+                if (invalidationGeneration.get() == generationAtStart) {
+                    lastRefreshTime = now;
+                }
             }
         } catch (Exception e) {
             LOGGER.warn("Failed to refresh channel target router", e);

@@ -75,7 +75,10 @@ poll interval. But the listener only zeroed a timestamp, and `refreshIfNeeded` w
 after its store reads returned. A rotation landing while a refresh was in flight was therefore
 overwritten: the maps held pre-rotation secrets and the cache was marked fresh for a full interval —
 precisely the window the listener exists to close. An invalidation counter read before the store reads
-now decides whether the refresh may stamp at all.
+now decides whether the refresh may stamp at all — under a lock shared with the listener, because
+reading the counter and then stamping is itself a check-then-act, and an invalidation landing between
+those two steps is the very case being defended against. The counter alone narrows the window; the lock
+closes it.
 
 ### Discovery endpoints logged credentialed URLs
 
@@ -90,8 +93,14 @@ endpoints now run the URL through `UriRedactor` first.
 names the location it could not read. The response body was therefore
 ``Failed to parse OpenAPI spec: Unable to read location `https://user:<token>@host/spec.json` `` — the
 credential returned to whoever called the endpoint. The message itself is worth keeping, since it says
-which part of the spec failed, so it goes through `SecretRedactionFilter` rather than being dropped.
-Reverting that one call turns the new regression test red with the whole token in the failure output.
+which part of the spec failed, so it is redacted rather than dropped.
+
+Redacting it takes two passes, because the two redactors answer different questions.
+`SecretRedactionFilter` matches credential SHAPES, so it never sees an ordinary password —
+`https://alice:hunter2@host` has nothing token-like in it and went back to the caller intact even after
+the first fix. `UriRedactor` knows a URI's grammar and strips the userinfo, but only from a whole URI,
+so embedded URLs are extracted first and the shape pass runs after for anything quoted outside one.
+Reverting either pass turns a regression test red with the credential in the failure output.
 
 ---
 

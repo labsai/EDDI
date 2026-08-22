@@ -26,6 +26,8 @@ import org.jboss.logging.Logger;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
@@ -135,16 +137,36 @@ public class RestApiCallsStore implements IRestApiCallsStore {
     }
 
     /**
+     * A URL as it appears INSIDE a longer message. Bounded on both sides by
+     * characters no URI may contain, so the scan stays linear.
+     */
+    private static final Pattern EMBEDDED_URI = Pattern.compile("https?://[^\\s\"'`<>\\\\]{1,2048}");
+
+    /**
      * A parser complaint the caller may read.
      * <p>
      * The text is worth returning — it names the part of the spec that failed,
      * which is the whole value of a 400 here — but a parser routinely quotes the
      * offending input back, and the input is a caller-supplied URL that may carry
-     * credentials. Redacting keeps the diagnosis and drops the credential.
+     * credentials.
+     * <p>
+     * Two passes, because the two redactors answer different questions and each
+     * misses what the other catches. {@code SecretRedactionFilter} matches
+     * credential SHAPES, so it never sees an arbitrary password:
+     * {@code https://user:hunter2@host} has nothing token-like in it and would have
+     * gone back to the caller intact. {@code UriRedactor} knows a URI's grammar and
+     * strips the userinfo and sensitive query parameters, but only from a whole URI
+     * — hence the extraction. The shape pass still runs after, for credentials
+     * quoted outside a URL.
      */
     private static String safeMessage(Exception failure) {
         String message = failure.getMessage();
-        return message == null || message.isBlank() ? "The OpenAPI spec could not be parsed" : SecretRedactionFilter.redact(message);
+        if (message == null || message.isBlank()) {
+            return "The OpenAPI spec could not be parsed";
+        }
+        String withoutUriCredentials = EMBEDDED_URI.matcher(message)
+                .replaceAll(match -> Matcher.quoteReplacement(UriRedactor.redactUri(match.group())));
+        return SecretRedactionFilter.redact(withoutUriCredentials);
     }
 
     private Response discover(String specUrl, String apiBaseUrl, String authHeaderRef) {

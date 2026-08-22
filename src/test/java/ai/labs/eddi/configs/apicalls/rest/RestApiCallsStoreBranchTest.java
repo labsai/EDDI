@@ -221,6 +221,22 @@ class RestApiCallsStoreBranchTest {
             assertFalse(String.valueOf(response.getEntity()).contains("sk-ant-aaaaaaaaaaaaaaaaaaaaaaaaaaa"),
                     "the error body reaches whoever called the endpoint: " + response.getEntity());
         }
+
+        @Test
+        @DisplayName("an ordinary password in the spec URL is not echoed either")
+        void arbitraryPasswordInTheSpecUrlIsNotEchoed() {
+            // Shape-based redaction cannot help here: "hunter2" looks like nothing
+            // in particular, so only URI-aware handling knows it sits in the
+            // userinfo of a URL and is therefore a password.
+            String url = "https://alice:hunter2@invalid-spec-url.test/spec.json";
+
+            Response response = restApiCallsStore.discoverEndpoints(new ApiEndpointDiscoveryRequest(url, null, null));
+
+            assertFalse(String.valueOf(response.getEntity()).contains("hunter2"),
+                    "a password is a password whether or not it looks like a token: " + response.getEntity());
+            assertTrue(String.valueOf(response.getEntity()).contains("invalid-spec-url.test"),
+                    "the host still has to survive, or the caller cannot tell which URL failed: " + response.getEntity());
+        }
     }
 
     @Nested
