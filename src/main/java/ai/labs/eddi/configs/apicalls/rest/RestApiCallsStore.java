@@ -25,6 +25,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 
 /**
@@ -123,7 +124,7 @@ public class RestApiCallsStore implements IRestApiCallsStore {
             return badRequest("specUrl is required");
         }
         try {
-            LOGGER.infof("Discovering API endpoints from OpenAPI spec at '%s'", specUrl);
+            LOGGER.infof("Discovering API endpoints from OpenAPI spec at '%s'", sanitize(specUrl));
 
             String effectiveBaseUrl = trimToNull(apiBaseUrl);
 
@@ -144,10 +145,10 @@ public class RestApiCallsStore implements IRestApiCallsStore {
 
             return Response.ok(response).build();
         } catch (IllegalArgumentException e) {
-            LOGGER.warnf(e, "Failed to parse OpenAPI spec from '%s'", specUrl);
+            LOGGER.warnf(e, "Failed to parse OpenAPI spec from '%s'", sanitize(specUrl));
             return badRequest(e.getMessage());
         } catch (Exception e) {
-            LOGGER.errorf(e, "Unexpected error discovering endpoints from '%s'", specUrl);
+            LOGGER.errorf(e, "Unexpected error discovering endpoints from '%s'", sanitize(specUrl));
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
                     .entity(Map.of("error", "Failed to discover endpoints (" + e.getClass().getSimpleName() + ") — see server logs for details"))
                     .build();

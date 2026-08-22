@@ -13,6 +13,7 @@ import org.jboss.logging.Logger;
 import java.net.URI;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
  * Resolves {@code ${caller:...}} references in outbound API call headers,
@@ -70,8 +71,15 @@ public class CallerIdentityResolver {
      * resolver returns that form unchanged (the {@code $} is literal template text
      * it never adds), so the bare form is never substituted — it would simply be
      * sent to the API as text. Matching it here turns that into a clear error.
+     * <p>
+     * The span is bounded rather than open-ended because that optional {@code $} is
+     * what would make the open form quadratic: a bare <code>{caller:</code> also
+     * starts a match, so a value built from repeated <code>{{caller:</code> gives
+     * one scan of the whole remaining string per occurrence. A real reference is a
+     * namespace and a short key, so this covers every plausible typo while keeping
+     * each attempt constant work.
      */
-    private static final Pattern ANY_CALLER_PATTERN = Pattern.compile("\\$?\\{caller:[^}]*\\}");
+    private static final Pattern ANY_CALLER_PATTERN = Pattern.compile("\\$?\\{caller:[^}]{0,64}\\}");
 
     /** {@code ${caller:token}} in either the documented or the bare Qute form. */
     private static final Pattern ANY_TOKEN_PATTERN = Pattern.compile("\\$?\\{caller:token\\}");
@@ -268,8 +276,8 @@ public class CallerIdentityResolver {
         }
         if (!OriginMatcher.sameOrigin(identity.origin(), target)) {
             // Do not log the target's full URI at INFO — it may embed identifiers.
-            LOGGER.warnf("Refusing to forward the caller token to a different origin (caller=%s, target=%s)", identity.origin(),
-                    OriginMatcher.normalize(target));
+            LOGGER.warnf("Refusing to forward the caller token to a different origin (caller=%s, target=%s)", sanitize(identity.origin()),
+                    sanitize(OriginMatcher.normalize(target)));
             record("cross_origin", REF_TOKEN);
             throw new CallerIdentityException("${caller:token} may only be sent back to the origin the caller came from ("
                     + identity.origin() + "), but this call targets " + OriginMatcher.normalize(target) + ".");

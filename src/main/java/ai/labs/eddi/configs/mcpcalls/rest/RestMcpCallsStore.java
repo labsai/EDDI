@@ -29,6 +29,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 
 /**
@@ -184,7 +185,7 @@ public class RestMcpCallsStore implements IRestMcpCallsStore {
         }
 
         try {
-            LOGGER.infof("Discovering tools from MCP server at '%s'", url);
+            LOGGER.infof("Discovering tools from MCP server at '%s'", sanitize(url));
 
             // Build a temporary McpServerConfig for probing
             McpServerConfig tempConfig = new McpServerConfig();
@@ -212,7 +213,7 @@ public class RestMcpCallsStore implements IRestMcpCallsStore {
             return Response.ok(Map.of("tools", tools, "count", tools.size())).build();
 
         } catch (Exception e) {
-            LOGGER.warnf(e, "Failed to discover tools from MCP server at '%s'", url);
+            LOGGER.warnf(e, "Failed to discover tools from MCP server at '%s'", sanitize(url));
             return Response.status(Response.Status.BAD_GATEWAY)
                     .entity(Map.of("error", "Failed to connect to MCP server (" + e.getClass().getSimpleName() + ") — see server logs for details"))
                     .build();

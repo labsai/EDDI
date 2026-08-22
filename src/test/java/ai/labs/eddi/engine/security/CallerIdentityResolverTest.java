@@ -312,4 +312,28 @@ class CallerIdentityResolverTest {
         assertNull(resolver.redactCallerToken(null, "<REDACTED>"));
         assertEquals("", resolver.redactCallerToken("", "<REDACTED>"));
     }
+
+    @Test
+    @DisplayName("a config value built to make the reference scan quadratic is still checked in linear time")
+    void unsupportedReferenceScanDoesNotDegrade() {
+        // The optional leading $ means a bare "{caller:" also starts a match, so an
+        // unbounded span gave one scan of the rest of the string per occurrence.
+        // A header value is author-supplied, so that is reachable from configuration.
+        String hostile = "{{caller:".repeat(20_000);
+
+        long startedAt = System.nanoTime();
+        resolver.rejectUnsupportedReference(hostile);
+        long elapsedMillis = (System.nanoTime() - startedAt) / 1_000_000;
+
+        assertTrue(elapsedMillis < 2_000,
+                "scanning 20k repetitions took " + elapsedMillis + "ms; the reference span is unbounded again");
+    }
+
+    @Test
+    @DisplayName("a typo is still reported, which is the whole reason the scan exists")
+    void stillReportsATypo() {
+        var error = assertThrows(CallerIdentityException.class, () -> resolver.rejectUnsupportedReference("Bearer ${caller:tokn}"));
+
+        assertTrue(error.getMessage().contains("tokn"), error.getMessage());
+    }
 }
