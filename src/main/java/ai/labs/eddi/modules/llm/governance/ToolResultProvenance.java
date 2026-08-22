@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.llm.governance;
 
 import java.util.Locale;
+import java.util.regex.Pattern;
 
 /**
  * Wraps a tool result in a delimiter that names where it came from and says, in
@@ -33,6 +34,20 @@ public final class ToolResultProvenance {
     /** Closing delimiter; the opening one names the tool and its source. */
     static final String END = "[end of tool result]";
 
+    /** Ceiling on each label inside the header. */
+    private static final int MAX_LABEL_CHARS = 64;
+
+    /**
+     * Everything a label may NOT contain: anything outside plain ASCII identifier
+     * characters plus the few separators tool names legitimately use
+     * ({@code mcp__server__tool}, {@code fetch-page}, {@code files/read}).
+     * <p>
+     * Declared before {@link #MAX_ENVELOPE_CHARS}, whose initializer builds a
+     * sample header and so reaches this pattern while the class is still
+     * initializing.
+     */
+    private static final Pattern LABEL_DISALLOWED = Pattern.compile("[^a-zA-Z0-9_.:/-]");
+
     /**
      * Worst-case characters the envelope adds, so a caller can subtract it from a
      * configured ceiling BEFORE truncating.
@@ -50,9 +65,6 @@ public final class ToolResultProvenance {
         // The header with both labels at their maximum length.
         return header("x".repeat(MAX_LABEL_CHARS), "x".repeat(MAX_LABEL_CHARS)).length();
     }
-
-    /** Ceiling on each label inside the header. */
-    private static final int MAX_LABEL_CHARS = 64;
 
     private ToolResultProvenance() {
     }
@@ -91,15 +103,19 @@ public final class ToolResultProvenance {
      * the inside, which is the one thing the envelope exists to prevent. Sources
      * are EDDI-authored constants and could not, but they go through the same call
      * so there is no second rule to forget.
+     * <p>
+     * A label is an identifier, not prose, so the rule is a WHITELIST rather than a
+     * list of characters to strip. That is what makes the length cut below safe:
+     * blacklisting left every non-ASCII character intact, so a remote name padded
+     * with emoji or CJK text could put a surrogate PAIR astride the cut and leave a
+     * lone high surrogate in the header. Whitelisting retires that class of bug
+     * along with the delimiters, quotes and control characters, in one pass.
      */
     private static String sanitizeLabel(String label) {
         if (label == null || label.isBlank()) {
             return "unknown";
         }
-        String cleaned = label.replaceAll("[\\p{Cntrl}\\[\\]'\\r\\n]", "_").trim().toLowerCase(Locale.ROOT);
-        if (cleaned.isEmpty()) {
-            return "unknown";
-        }
+        String cleaned = LABEL_DISALLOWED.matcher(label).replaceAll("_").toLowerCase(Locale.ROOT);
         return cleaned.length() > MAX_LABEL_CHARS ? cleaned.substring(0, MAX_LABEL_CHARS) : cleaned;
     }
 }

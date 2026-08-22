@@ -728,7 +728,15 @@ class ToolLoopRunner {
         reserved.setSummarizerModel(limits.getSummarizerModel());
         if (limits.getPerToolLimits() != null) {
             var perTool = new HashMap<String, Integer>();
-            limits.getPerToolLimits().forEach((tool, limit) -> perTool.put(tool, limit == null ? null : reduce(limit)));
+            // A null entry — legal in the agent's JSON as {"fetch_page": null} — is
+            // dropped rather than carried over, so the tool resolves to the default
+            // ceiling. Copying it forward only preserved a key whose sole effect is
+            // to say "no limit configured".
+            limits.getPerToolLimits().forEach((tool, limit) -> {
+                if (limit != null) {
+                    perTool.put(tool, reduce(limit));
+                }
+            });
             reserved.setPerToolLimits(perTool);
         }
         return reserved;

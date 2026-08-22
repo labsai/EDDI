@@ -73,14 +73,32 @@ public class SecretScrubber {
             "private_key", "clientsecret", "client_secret");
 
     /**
-     * Name suffixes that mark a credential wherever the field appears. No benign
-     * configuration field ends in any of these.
+     * Name suffixes that mark a credential wherever the field appears — unless the
+     * name in front of them measures a quantity, see {@link #QUANTITY_QUALIFIERS}.
      */
     private static final Set<String> SECRET_FIELD_NAME_SUFFIXES = Set.of("token", "secret", "password", "passwd", "credential", "credentials",
             "authorization");
 
-    /** Credential words looked for inside an {@code x-}-prefixed header name. */
-    private static final Set<String> CREDENTIAL_WORDS = Set.of("key", "token", "secret", "auth", "credential", "password");
+    /**
+     * Qualifiers that turn a credential noun into a COUNT of them.
+     * <p>
+     * Without this the suffix rule above is a round-trip bug on the most common LLM
+     * parameter there is: {@code maxTokens} singularises to {@code maxtoken}, which
+     * ends in {@code token}, so every agent export replaced the model's output
+     * limit with a vault placeholder — and the export is stored as
+     * {@code Map<String, String>}, so the value IS a JSON string and the rule
+     * really fires. {@code maxTokens} is read by eight of the model builders,
+     * {@code maxOutputTokens} by Gemini and {@code maxNewTokens} by HuggingFace —
+     * every token-shaped parameter key a builder reads is one of those three, and
+     * {@code budgetTokens} and {@code maxCompletionTokens} are the same field again
+     * wherever a config carries them.
+     * <p>
+     * Matched as a PREFIX of the whole name and only in front of a credential
+     * suffix, so no genuine credential is exempted: {@code apiToken},
+     * {@code accessToken}, {@code refreshToken} and {@code authToken} do not begin
+     * with a quantity.
+     */
+    private static final Set<String> QUANTITY_QUALIFIERS = Set.of("max", "min", "num", "number", "total", "budget");
 
     private final ObjectMapper objectMapper;
 
@@ -182,7 +200,11 @@ public class SecretScrubber {
         // the whole value: an exported config whose target host has become a
         // placeholder is neither reviewable nor importable.
         if (looksLikeUrl(textValue)) {
-            String redactedUrl = UriRedactor.redactUri(textValue);
+            // The scrubber's own marker, not the approval card's <REDACTED>: this
+            // value goes into an exported config, where the angle brackets are not
+            // URI characters and a vault placeholder is both legible and what the
+            // importer expects an operator to replace.
+            String redactedUrl = UriRedactor.redactUri(textValue, REDACTED);
             return redactedUrl.equals(textValue) ? null : redactedUrl;
         }
 
@@ -214,13 +236,13 @@ public class SecretScrubber {
      * Two additions, deliberately asymmetric:
      * <ul>
      * <li>a name ENDING in token/secret/password/credential(s)/authorization is a
-     * credential wherever it appears — there is no benign field with those
-     * suffixes;</li>
-     * <li>a name ending in {@code key}, or an {@code x-}-prefixed name containing a
-     * credential word, counts only INSIDE a header map. Applied globally,
-     * {@code endsWith("key")} would redact {@code publicKey}, {@code groupKey} and
-     * every other structural identifier, and export → import is the one round trip
-     * that must stay lossless.</li>
+     * credential wherever it appears, unless a quantity qualifier in front of the
+     * suffix makes it a count — see {@link #QUANTITY_QUALIFIERS};</li>
+     * <li>a name ending in {@code key}, and the shared header rule
+     * {@link UriRedactor#isSensitiveHeaderName(String)}, count only INSIDE a header
+     * map. Applied globally, {@code endsWith("key")} would redact
+     * {@code publicKey}, {@code groupKey} and every other structural identifier,
+     * and export → import is the one round trip that must stay lossless.</li>
      * </ul>
      */
     private static boolean isSecretFieldName(String fieldName, String parentFieldName) {
@@ -236,17 +258,26 @@ public class SecretScrubber {
             return true;
         }
         for (String suffix : SECRET_FIELD_NAME_SUFFIXES) {
-            if (name.endsWith(suffix) || singular.endsWith(suffix)) {
+            if (isCredentialSuffix(name, suffix) || isCredentialSuffix(singular, suffix)) {
                 return true;
             }
         }
         if (!isHeaderContainer(parentFieldName)) {
             return false;
         }
-        if (name.endsWith("key")) {
-            return true;
-        }
-        return name.startsWith("x") && CREDENTIAL_WORDS.stream().anyMatch(name::contains);
+        // endsWith("key") stays header-local and stays broader than the shared
+        // rule: a vendor names its credential header Ocp-Apim-Subscription-Key,
+        // which no curated word list predicts. The rest of the header decision is
+        // the shared one, so a header this scrubber exports and the same header on
+        // an approval card cannot disagree about what is a credential.
+        return name.endsWith("key") || UriRedactor.isSensitiveHeaderName(fieldName);
+    }
+
+    /**
+     * Whether {@code name} ends in a credential suffix and is not a count of them.
+     */
+    private static boolean isCredentialSuffix(String name, String suffix) {
+        return name.endsWith(suffix) && QUANTITY_QUALIFIERS.stream().noneMatch(name::startsWith);
     }
 
     /**

@@ -227,6 +227,29 @@ class ToolLoopRunnerGuardrailWiringTest {
     }
 
     @Test
+    @DisplayName("a per-tool limit that is present but null does not kill the turn")
+    void toleratesANullPerToolLimit() {
+        // {"perToolLimits": {"get_order": null}} is a legal agent document, and
+        // reserving the envelope copies that map entry by entry. Unboxing the null
+        // there throws inside the shared per-request pipeline, which fails the
+        // whole turn — for a tool the operator had simply left unconfigured.
+        var limits = new LlmConfiguration.ToolResponseLimits();
+        limits.setDefaultMaxChars(2_000);
+        var perToolLimits = new HashMap<String, Integer>();
+        perToolLimits.put("get_order", null);
+        limits.setPerToolLimits(perToolLimits);
+        task.setToolResponseLimits(limits);
+        runner = runnerWithRealTruncator();
+
+        String governed = execute("z".repeat(10_000), Map.of("get_order", "mcp"), new ArrayList<>());
+
+        assertTrue(governed.contains("source 'mcp'"), "the turn must complete and still be governed: " + governed);
+        assertTrue(governed.contains("[TRUNCATED"),
+                "and the entry must read as 'no limit configured', leaving the 2000-char default in force: "
+                        + governed.substring(0, Math.min(200, governed.length())));
+    }
+
+    @Test
     @DisplayName("the trace records what the TOOL returned, not EDDI's envelope")
     void traceShowsTheToolsOwnOutput() {
         var trace = new ArrayList<Map<String, Object>>();

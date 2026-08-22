@@ -18,8 +18,9 @@ import java.util.logging.LogRecord;
  * This filter always returns {@code true} (it never suppresses logs). It has
  * two side effects: it redacts the record in place via
  * {@link LogRecordRedactor}, so console output matches the ring buffer, and it
- * pushes each record to {@link BoundedLogStore#capture(LogRecord)} for
- * ring-buffer storage and SSE streaming.
+ * pushes each record — with the redacted text the redactor already produced —
+ * to {@link BoundedLogStore#capture(LogRecord, String)} for ring-buffer storage
+ * and SSE streaming.
  * </p>
  *
  * <h3>Bootstrap Safety</h3>
@@ -43,7 +44,7 @@ import java.util.logging.LogRecord;
  *
  * @author ginccc
  * @since 6.0.0
- * @see BoundedLogStore#capture(LogRecord)
+ * @see BoundedLogStore#capture(LogRecord, String)
  */
 @LoggingFilter(name = "eddi-log-capture")
 public final class LogCaptureFilter implements Filter {
@@ -71,18 +72,24 @@ public final class LogCaptureFilter implements Filter {
         // destination an operator cannot revoke after the fact — carrying the
         // credentials the ring buffer, the database and the SSE stream were all
         // already stripped of.
+        String redactedMessage = null;
         try {
-            LogRecordRedactor.redactInPlace(record);
+            // The redacted text is carried over to capture(), which would
+            // otherwise format and redact the same record a second time — a full
+            // second pass of the rules, on the thread emitting the line, that
+            // could not change anything the first pass had already done.
+            redactedMessage = LogRecordRedactor.redact(record).message();
         } catch (Exception _) {
             // A redaction failure must never suppress or break a log line. The
-            // record is published unredacted rather than lost; BoundedLogStore
-            // still redacts its own copy below, so the ring buffer stays clean.
+            // record is published unredacted rather than lost, and the null
+            // message below sends BoundedLogStore back through its own format and
+            // redact, so the ring buffer stays clean.
         }
 
         BoundedLogStore store = staticStore;
         if (store != null) {
             try {
-                store.capture(record);
+                store.capture(record, redactedMessage);
             } catch (Exception _) {
                 // Ignore errors during hot-reload or shutdown
             }

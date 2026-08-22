@@ -28,8 +28,10 @@ import java.util.Locale;
  * therefore a returned {@link Outcome}, and any internal failure degrades to
  * {@link #ACTION_ALLOW}: a guardrail bug must not take a conversation down.
  * <h3>What it does not do</h3> This is not a content classifier and does not
- * call a model. It applies the same directive-shape rule the tool-description
- * path already uses, so the two cannot diverge, and leaves semantic judgement
+ * call a model. It applies {@link RemoteTextGovernor}'s directive-shape rule —
+ * the RESULT variant of it, which is deliberately narrower than the one
+ * guarding tool descriptions because this path sees bulk machine output rather
+ * than a sentence of remote-authored guidance — and leaves semantic judgement
  * to whatever policy layer an operator puts in front of EDDI.
  */
 @ApplicationScoped
@@ -100,16 +102,23 @@ public class ToolResultGuardrail {
         // transcript position a system instruction occupies, teaching the model that
         // an unmarked result is authoritative. The narrowing example is in the
         // shipped docs, so it was one copy-paste away.
-        if (appliesToDirectives(effective, source) && !isExempt(effective, toolName) && RemoteTextGovernor.containsDirective(result)) {
+        // One scan, not two: redactResultDirectives detects and redacts together and
+        // returns null when nothing matched. Asking "does it contain one?" and then
+        // "redact it" meant two full regex passes over the same bulk text on the
+        // DEFAULT path, for every tool result of every turn.
+        //
+        // No length cap on the redaction: truncation is ToolResponseTruncator's job
+        // and has already happened, so re-truncating here would silently shorten a
+        // result the operator configured to that length.
+        String redacted = appliesToDirectives(effective, source) && !isExempt(effective, toolName)
+                ? RemoteTextGovernor.redactResultDirectives(result)
+                : null;
+        if (redacted != null) {
             action = normalizeAction(effective.getDirectiveAction());
             LOGGER.warnf("Tool '%s' (source '%s') returned directive-shaped content — action '%s'", sanitize(toolName), sanitize(source), action);
             governed = switch (action) {
                 case ToolResultGuardrailConfig.ACTION_BLOCK -> BLOCKED_NOTICE;
-                // Bounded by Integer.MAX_VALUE, not by a cap: truncation is
-                // ToolResponseTruncator's job and has already happened, and
-                // re-truncating here would silently shorten a result the operator
-                // configured to that length.
-                case ToolResultGuardrailConfig.ACTION_REDACT -> RemoteTextGovernor.govern(result, Integer.MAX_VALUE);
+                case ToolResultGuardrailConfig.ACTION_REDACT -> redacted;
                 default -> result;
             };
         }

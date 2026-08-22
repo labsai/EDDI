@@ -331,4 +331,150 @@ class SecretScrubberTest {
 
         assertTrue(scrubber.scrubJson(json).contains("https://api.example.com/v1/pets"));
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // A measured quantity is not a credential. The suffix rule read "maxTokens"
+    // as "…token" and replaced the model's output limit with a vault
+    // placeholder on EVERY export — parameters are stored as
+    // Map<String, String>, so the value is a JSON string and the rule really
+    // fired.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("token-BUDGET parameters survive an export round trip unchanged")
+    void scrubJson_measuredQuantities_notScrubbed() {
+        // Every token-shaped key a model builder actually reads: eight builders
+        // take maxTokens, Gemini maxOutputTokens, HuggingFace maxNewTokens.
+        // budgetTokens and maxCompletionTokens are the same field again wherever
+        // a config carries them.
+        String json = """
+                {"parameters": {
+                    "maxTokens": "4096",
+                    "maxOutputTokens": "8192",
+                    "maxNewTokens": "512",
+                    "budgetTokens": "1024",
+                    "maxCompletionTokens": "256",
+                    "temperature": "0.7"
+                }}
+                """;
+
+        String scrubbed = scrubber.scrubJson(json);
+
+        assertFalse(scrubbed.contains("REDACTED"),
+                "a count of tokens is not a token; redacting it corrupts every exported agent: " + scrubbed);
+        assertTrue(scrubbed.contains("\"maxTokens\":\"4096\""), scrubbed);
+        assertTrue(scrubbed.contains("\"maxOutputTokens\":\"8192\""), scrubbed);
+        assertTrue(scrubbed.contains("\"maxNewTokens\":\"512\""), scrubbed);
+        assertTrue(scrubbed.contains("\"budgetTokens\":\"1024\""), scrubbed);
+        assertTrue(scrubbed.contains("\"maxCompletionTokens\":\"256\""), scrubbed);
+    }
+
+    @Test
+    @DisplayName("a genuine credential name is still redacted, quantity carve-out notwithstanding")
+    void scrubJson_credentialNames_stillScrubbedBesideQuantities() {
+        // Deliberately zero-entropy, so ONLY the field-name check can redact it.
+        // That isolates the property under test — the quantity carve-out must not
+        // punch a hole in credential detection — instead of letting the entropy
+        // heuristic pass the test for the wrong reason. None of these names begins
+        // with a quantity qualifier, which is exactly why the carve-out is a
+        // prefix rule rather than a word list.
+        String credential = "aaaaaaaaaaaaaaaaaaaa";
+
+        for (String field : List.of("apiToken", "accessToken", "refreshToken", "authToken", "api_key", "password", "clientSecret")) {
+            String json = String.format("{\"parameters\": {\"%s\": \"%s\", \"maxTokens\": \"4096\"}}", field, credential);
+
+            String scrubbed = scrubber.scrubJson(json);
+
+            assertTrue(scrubbed.contains("\"" + field + "\":\"${vault:REDACTED}\""),
+                    "'" + field + "' names a credential and must still be redacted: " + scrubbed);
+            assertTrue(scrubbed.contains("\"maxTokens\":\"4096\""),
+                    "and the quantity beside it must still survive: " + scrubbed);
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // The export path's adoption of the shared header rule (UriRedactorTest owns
+    // the rule itself).
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("a header named Authentication is redacted on export; 'auth' substrings are not")
+    void scrubJson_authenticationHeaderRedacted_benignAuthNamesSurvive() {
+        // "Bearer <token>" contains a space, which the whole-string entropy
+        // pattern never matches — so the name rule is the only thing that can
+        // catch these three, and the assertions below cannot pass for another
+        // reason.
+        String json = """
+                {"headers": {
+                    "Authentication": "Bearer aaaaaaaaaaaaaaaaaaaa",
+                    "Authorization": "Bearer aaaaaaaaaaaaaaaaaaaa",
+                    "Proxy-Authorization": "Basic aaaaaaaaaaaaaaaaaaaa",
+                    "Author": "jane-the-author-xx",
+                    "X-Authored-By": "jane-xx",
+                    "Authority": "eu-west-1"
+                }}
+                """;
+
+        String scrubbed = scrubber.scrubJson(json);
+
+        assertTrue(scrubbed.contains("\"Authentication\":\"${vault:REDACTED}\""),
+                "an Authorization-equivalent header must not export in plaintext: " + scrubbed);
+        assertTrue(scrubbed.contains("\"Authorization\":\"${vault:REDACTED}\""), scrubbed);
+        assertTrue(scrubbed.contains("\"Proxy-Authorization\":\"${vault:REDACTED}\""), scrubbed);
+        assertTrue(scrubbed.contains("\"Author\":\"jane-the-author-xx\""),
+                "a header whose name merely contains 'auth' must stay readable: " + scrubbed);
+        assertTrue(scrubbed.contains("\"X-Authored-By\":\"jane-xx\""), scrubbed);
+        assertTrue(scrubbed.contains("\"Authority\":\"eu-west-1\""), scrubbed);
+    }
+
+    @Test
+    @DisplayName("an 'auth'-containing query parameter is not mistaken for a credential either")
+    void scrubJson_benignAuthQueryParams_survive() {
+        String json = "{\"targetServerUrl\": \"https://api.example.com/posts?author=jane-doe&authority=eu-west-1"
+                + "&access_token=abcdefghijklmnop\"}";
+
+        String scrubbed = scrubber.scrubJson(json);
+
+        assertTrue(scrubbed.contains("author=jane-doe"), "a benign query parameter must survive export: " + scrubbed);
+        assertTrue(scrubbed.contains("authority=eu-west-1"), scrubbed);
+        assertFalse(scrubbed.contains("abcdefghijklmnop"),
+                "while the credential beside them is still redacted: " + scrubbed);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // What export writes into a URL field has to import again.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("an exported URL keeps its query structure when a credential is removed")
+    void scrubJson_redactedUrlKeepsItsQueryStructure() {
+        // %26 is an encoded ampersand. Writing the decoded form back turned it
+        // into a structural '&' that splits one parameter into two, and %20 into
+        // a raw space that is not a URI character — in a config that has to be
+        // importable.
+        String json = "{\"targetServerUrl\": \"https://api.example.com/v1/report?access_token=abcdefghijklmnop"
+                + "&filter=a%26b%20c&mode=fast\"}";
+
+        String scrubbed = scrubber.scrubJson(json);
+
+        assertFalse(scrubbed.contains("abcdefghijklmnop"), "the credential must not survive: " + scrubbed);
+        assertTrue(scrubbed.contains("access_token=${vault:REDACTED}"),
+                "and must be replaced by the placeholder an operator fills in on import: " + scrubbed);
+        assertTrue(scrubbed.contains("&filter=a%26b%20c&mode=fast"),
+                "the benign parameters must keep the encoding they were written with: " + scrubbed);
+    }
+
+    @Test
+    @DisplayName("a Qute placeholder in an exported URL is left legible, not blanked")
+    void scrubJson_templatePlaceholderInUrl_preserved() {
+        // ?api_key={properties.apiKey} is the documented wizard pattern. Judged by
+        // name alone it is redacted, and that loses which property the call reads.
+        String json = "{\"targetServerUrl\": \"https://api.example.com/v1?api_key={properties.apiKey}&lang=en\"}";
+
+        String scrubbed = scrubber.scrubJson(json);
+
+        assertTrue(scrubbed.contains("api_key={properties.apiKey}"),
+                "a placeholder is a pointer, not a secret, and an export that blanks it is not importable: " + scrubbed);
+        assertTrue(scrubbed.contains("&lang=en"), scrubbed);
+    }
 }

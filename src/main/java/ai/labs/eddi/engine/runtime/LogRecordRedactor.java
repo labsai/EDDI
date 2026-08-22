@@ -29,12 +29,33 @@ import java.util.logging.LogRecord;
  * place.
  * <p>
  * The record is left untouched when nothing matched, which is the overwhelming
- * majority of records — the cost on that path is one format and one regex
- * sweep, the same sweep {@code capture} already performed.
+ * majority of records — the cost on that path is one format and one pass of the
+ * rules, and {@link Redaction} carries the result on to
+ * {@link BoundedLogStore#capture} so that pass happens once per record rather
+ * than twice.
  */
 final class LogRecordRedactor {
 
     private LogRecordRedactor() {
+    }
+
+    /**
+     * What one pass produced: the record's formatted message after redaction — the
+     * text a console handler will print — and whether the record was changed.
+     * <p>
+     * The message is handed back so {@link BoundedLogStore#capture} need not format
+     * and redact the same record all over again. That second pass could never
+     * change anything the first had already done, and it ran the whole rule set a
+     * second time on the thread emitting the log line.
+     *
+     * @param message
+     *            the redacted message, or {@code null} when this class cannot
+     *            resolve the record's parameters as faithfully as {@code capture}
+     *            would — see {@link #reusableMessage}
+     * @param modified
+     *            whether the record itself was rewritten
+     */
+    record Redaction(String message, boolean modified) {
     }
 
     /**
@@ -44,41 +65,60 @@ final class LogRecordRedactor {
      * @return whether the record was modified
      */
     static boolean redactInPlace(LogRecord record) {
-        if (record == null) {
-            return false;
-        }
-        boolean modified = redactMessage(record);
-        return redactThrown(record) || modified;
+        return redact(record).modified();
     }
 
     /**
-     * Resolves parameters first, then redacts.
+     * Redacts the record in place and reports what a downstream consumer needs in
+     * order not to repeat the work.
      * <p>
-     * A secret is far more often a {@code %s} argument than part of the format
-     * string — {@code LOGGER.warnf("connecting to %s", url)} — so redacting
+     * Parameters are resolved first, then redacted. A secret is far more often a
+     * {@code %s} argument than part of the format string —
+     * {@code LOGGER.warnf("connecting to %s", url)} — so redacting
      * {@link LogRecord#getMessage()} alone would miss the case that matters.
      * Formatting is therefore collapsed into the message and the parameters are
      * dropped, which also stops a downstream formatter from re-applying them.
      */
-    private static boolean redactMessage(LogRecord record) {
+    static Redaction redact(LogRecord record) {
+        if (record == null) {
+            return new Redaction(null, false);
+        }
         String formatted = formatMessage(record);
-        if (formatted == null || formatted.isEmpty()) {
-            return false;
+        String redacted = formatted == null || formatted.isEmpty() ? formatted : SecretRedactionFilter.redact(formatted);
+        boolean messageModified = redacted != null && !redacted.equals(formatted);
+        if (messageModified) {
+            if (record instanceof ExtLogRecord extRecord) {
+                // NO_FORMAT, because the text is already substituted: leaving the
+                // style as PRINTF would have the console handler read a stray '%'
+                // in the redacted text as a conversion and either mangle or drop
+                // the line.
+                extRecord.setMessage(redacted, ExtLogRecord.FormatStyle.NO_FORMAT);
+            } else {
+                record.setMessage(redacted);
+            }
+            record.setParameters(null);
         }
-        String redacted = SecretRedactionFilter.redact(formatted);
-        if (redacted.equals(formatted)) {
-            return false;
+        boolean modified = redactThrown(record) || messageModified;
+        return new Redaction(reusableMessage(record, redacted, messageModified), modified);
+    }
+
+    /**
+     * The redacted message, but only where it is what
+     * {@link BoundedLogStore#capture} would itself have formatted.
+     * <p>
+     * It is, but for one shape: a plain JUL record still carrying parameters.
+     * {@link #formatMessage} resolves those with {@link MessageFormat} alone while
+     * capture tries printf first, so handing that one over would drop a {@code %s}
+     * argument from the ring buffer — a log line quietly losing the value it was
+     * emitted to report. A record whose message WAS redacted has had its parameters
+     * collapsed already, so it is never that shape.
+     */
+    private static String reusableMessage(LogRecord record, String redacted, boolean messageModified) {
+        if (messageModified || record instanceof ExtLogRecord) {
+            return redacted;
         }
-        if (record instanceof ExtLogRecord extRecord) {
-            // NO_FORMAT, because the text is already substituted: leaving the style
-            // as PRINTF would have the console handler read a stray '%' in the
-            // redacted text as a conversion and either mangle or drop the line.
-            extRecord.setMessage(redacted, ExtLogRecord.FormatStyle.NO_FORMAT);
-        } else {
-            record.setMessage(redacted);
-        }
-        record.setParameters(null);
-        return true;
+        Object[] parameters = record.getParameters();
+        return parameters == null || parameters.length == 0 ? redacted : null;
     }
 
     /** The record's message with its parameters applied, or null. */
