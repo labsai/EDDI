@@ -87,11 +87,21 @@ test.describe("Conversations — Full Stack", () => {
       skipHealthCheck: true,
     });
 
-    const table = page.locator("table");
-    await expect(table).toBeVisible({ timeout: 15_000 });
+    // The default view is CARDS, not a table: getStoredViewMode falls back to
+    // "card" and this browser profile has no localStorage, so `page.locator("table")`
+    // matched nothing and this test has been red on every push to main. Assert
+    // what the page actually renders by default.
+    const grid = page.getByTestId("conversation-grid");
+    await expect(grid).toBeVisible({ timeout: 15_000 });
 
-    // At least our 2 created conversations should appear (auto-retries)
-    await expect(table.locator("tbody tr")).not.toHaveCount(0);
+    // The conversations THIS test created, by id — not merely "a card exists",
+    // which any leftover from any previous run against this backend satisfies.
+    // The card carries the id in its testid (src/pages/conversations.tsx).
+    for (const convId of conversationsToCleanup) {
+      await expect(grid.getByTestId(`conversation-card-${convId}`)).toBeVisible({
+        timeout: 15_000,
+      });
+    }
   });
 
   test("conversations table shows correct state badges", async ({ page }) => {
@@ -123,7 +133,9 @@ test.describe("Conversations — Full Stack", () => {
   test("clicking conversation navigates to detail", async ({ page }) => {
     await navigateTo(page, "/manage/conversations");
 
-    const firstConvLink = page.locator("table tbody tr a").first();
+    // Cards, not rows — the default view has no table. Each card IS the link.
+    const firstConvLink = page.getByTestId(/^conversation-card-/).first();
+    await expect(firstConvLink).toBeVisible({ timeout: 15_000 });
     await firstConvLink.click();
     await expect(page).toHaveURL(/\/manage\/conversationview\//);
   });

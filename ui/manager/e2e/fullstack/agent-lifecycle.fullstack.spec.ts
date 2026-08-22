@@ -167,10 +167,13 @@ test.describe("Agent Lifecycle — Full Stack", () => {
 
     await navigateTo(page, "/manage/conversations");
 
-    // The conversations table should show at least one row (auto-retries)
-    const table = page.locator("table");
-    await expect(table).toBeVisible({ timeout: 15_000 });
-    await expect(table.locator("tbody tr")).not.toHaveCount(0);
+    // The conversations list defaults to CARDS, not a table (getStoredViewMode
+    // falls back to "card" and a fresh browser profile has no localStorage).
+    const grid = page.getByTestId("conversation-grid");
+    await expect(grid).toBeVisible({ timeout: 15_000 });
+    await expect(grid.getByTestId(/^conversation-card-/).first()).toBeVisible({
+      timeout: 15_000,
+    });
   });
 
   test("conversation detail renders steps", async ({ page, request }) => {

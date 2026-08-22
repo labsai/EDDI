@@ -345,6 +345,8 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
               onClick={() => setAgentSelectorOpen((p) => !p)}
               className="flex w-full items-center gap-2 rounded-lg border border-input bg-card px-3 py-2 text-sm transition-colors hover:bg-muted"
               data-testid="agent-selector"
+              aria-haspopup="listbox"
+              aria-expanded={agentSelectorOpen}
             >
               <Bot className="h-4 w-4 text-muted-foreground" />
               <span
@@ -365,7 +367,11 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
 
             {/* Dropdown */}
             {agentSelectorOpen && (
-              <div className="absolute inset-s-0 top-full z-50 mt-1 w-full max-h-80 overflow-y-auto rounded-lg border border-border bg-popover p-1 shadow-lg">
+              <div
+                role="listbox"
+                aria-label={t("chat.selectAgent")}
+                className="absolute inset-s-0 top-full z-50 mt-1 w-full max-h-80 overflow-y-auto rounded-lg border border-border bg-popover p-1 shadow-lg"
+              >
                 {agentsLoading ? (
                   <div className="flex items-center justify-center py-3">
                     <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
@@ -378,6 +384,9 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
                   deployedAgents.map((agent) => (
                     <button
                       key={agent.resource}
+                      role="option"
+                      aria-selected={agent.id === selectedAgentId}
+                      data-testid={`agent-option-${agent.id}`}
                       onClick={() => handleSelectAgent(agent.id, agent.name || agent.id)}
                       className={cn(
                         "flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors hover:bg-muted min-w-0",
