@@ -19,6 +19,29 @@ data:
   {{- end }}
   QUARKUS_HTTP_CORS_ORIGINS: {{ .Values.eddi.corsOrigins | quote }}
   QUARKUS_OIDC_TENANT_ENABLED: {{ .Values.eddi.oidc.enabled | quote }}
+  {{- /*
+    With OIDC off, AuthStartupGuard refuses a production boot unless the escape
+    hatch is set, and HighValueSurfaceGuard additionally refuses to expose /mcp
+    and /secretstore without their own opt-in. Derived from oidc.enabled so an
+    authenticated install never ships permissive flags, and overridable for the
+    air-gapped case where OIDC is off deliberately.
+
+    Each flag asks "did the operator set this?" rather than piping through
+    `default`. To Go templates a boolean false is EMPTY, so `default` could not
+    tell `allowUnauthenticatedMcp: false` — the documented way to keep /mcp shut
+    on a no-OIDC install — apart from an unset value, and substituted the derived
+    TRUE instead. The surface failed OPEN against an operator's explicit
+    instruction, and only the quoted string "false" happened to survive. The
+    `kindIs "bool"` arm is what restores an explicit false; the bare truthiness
+    test after it keeps the string spelling working.
+  */}}
+  {{- $oidcOff := not .Values.eddi.oidc.enabled }}
+  {{- $allowAll := .Values.eddi.security.allowUnauthenticated }}
+  {{- $allowMcp := .Values.eddi.security.allowUnauthenticatedMcp }}
+  {{- $allowSecretStore := .Values.eddi.security.allowUnauthenticatedSecretStore }}
+  EDDI_SECURITY_ALLOW_UNAUTHENTICATED: {{ if or (kindIs "bool" $allowAll) $allowAll }}{{ $allowAll | quote }}{{ else }}{{ $oidcOff | quote }}{{ end }}
+  EDDI_MCP_ALLOW_UNAUTHENTICATED: {{ if or (kindIs "bool" $allowMcp) $allowMcp }}{{ $allowMcp | quote }}{{ else }}{{ $oidcOff | quote }}{{ end }}
+  EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED: {{ if or (kindIs "bool" $allowSecretStore) $allowSecretStore }}{{ $allowSecretStore | quote }}{{ else }}{{ $oidcOff | quote }}{{ end }}
   {{- if .Values.eddi.oidc.enabled }}
   {{- if .Values.keycloak.enabled }}
   QUARKUS_OIDC_AUTH_SERVER_URL: "http://{{ include "eddi.fullname" . }}-keycloak:8080/realms/eddi"

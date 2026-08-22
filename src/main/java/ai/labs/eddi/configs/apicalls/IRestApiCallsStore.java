@@ -6,6 +6,7 @@ package ai.labs.eddi.configs.apicalls;
 
 import ai.labs.eddi.configs.IRestVersionInfo;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
+import ai.labs.eddi.configs.apicalls.model.ApiEndpointDiscoveryRequest;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import jakarta.annotation.security.RolesAllowed;
 import org.eclipse.microprofile.openapi.annotations.Operation;
@@ -14,8 +15,10 @@ import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 import jakarta.ws.rs.*;
+import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.UriInfo;
 import java.util.List;
 
 /**
@@ -82,14 +85,37 @@ public interface IRestApiCallsStore extends IRestVersionInfo {
                             @QueryParam("permanent")
                             @DefaultValue("false") Boolean permanent);
 
+    /**
+     * Parse an OpenAPI document and return importable ApiCall configurations.
+     * <p>
+     * {@code POST}, and the auth field is reference-only — see
+     * {@link ApiEndpointDiscoveryRequest}. The superseded {@code GET} form took a
+     * live {@code Authorization} value as {@code ?apiAuth=} and echoed it back
+     * inside every generated call.
+     */
+    @POST
+    @Path("/discover-endpoints")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
+    @Operation(summary = "Discover API endpoints", description = "Parse an OpenAPI 3.x spec (URL or inline JSON/YAML) and return available endpoints "
+            + "grouped by tag. Returns fully generated ApiCall objects ready for import. Used by the Manager UI for selective API call import. "
+            + "authHeaderRef must be a ${vault:…}, ${vars:…} or ${caller:…} reference — a literal credential is rejected.")
+    @APIResponse(responseCode = "200", description = "Discovered endpoints grouped by tag, with generated ApiCall objects.")
+    Response discoverEndpoints(ApiEndpointDiscoveryRequest request);
+
+    /**
+     * Credential-free discovery of a public OpenAPI document.
+     * <p>
+     * Rejects a request that still carries a credential query parameter rather than
+     * ignoring it, so a client that has not migrated learns it is putting a secret
+     * in a URL instead of silently continuing to do so.
+     */
     @GET
     @Path("/discover-endpoints")
     @Produces(MediaType.APPLICATION_JSON)
-    @Operation(summary = "Discover API endpoints", description = "Parse an OpenAPI 3.x spec (URL or inline JSON/YAML) and return available endpoints "
-            + "grouped by tag. Returns fully generated ApiCall objects ready for import. " + "Used by the Manager UI for selective API call import.")
-    @APIResponse(responseCode = "200", description = "Discovered endpoints grouped by tag, with generated ApiCall objects.")
-    Response discoverEndpoints(@QueryParam("specUrl") String specUrl, @QueryParam("apiBaseUrl")
-    @DefaultValue("") String apiBaseUrl,
-                               @QueryParam("apiAuth")
-                               @DefaultValue("") String apiAuth);
+    @Deprecated(since = "6.3.0", forRemoval = true)
+    @Operation(deprecated = true, summary = "Discover API endpoints (no credential)", description = "Deprecated — use POST /discover-endpoints. "
+            + "A credential query parameter is rejected.")
+    Response discoverEndpointsUnauthenticated(@QueryParam("specUrl") String specUrl, @QueryParam("apiBaseUrl")
+    @DefaultValue("") String apiBaseUrl, @Context UriInfo uriInfo);
 }

@@ -1,0 +1,91 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Reaching a stdio-only MCP server from EDDI, via a bridge sidecar.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.mcp-sidecar.yml up
+#
+# EDDI implements one MCP transport: StreamableHTTP. Most vendor-shipped MCP
+# servers are stdio binaries. The bridge speaks StreamableHTTP to EDDI and stdio
+# to the server, so EDDI needs no process-spawning code, no interpreter in its
+# runtime image, and no new code-execution surface.
+#
+# READ docs/mcp-client.md BEFORE COPYING THIS. Container separation bounds the
+# blast radius of a hostile MCP server; it does not remove process-execution or
+# supply-chain risk. Every hardening line below is load-bearing, and the two
+# placeholders marked TODO are not optional.
+# ─────────────────────────────────────────────────────────────────────────────
+services:
+
+  # An example: the reference filesystem MCP server, exposed read-only.
+  filesystem-mcp:
+    # Built locally, because the MCP server has to be IN the image. The upstream
+    # bridge image is Python-on-Alpine and ships no Node runtime, and this
+    # container sits on an `internal: true` network with no route off the host —
+    # so a command that fetched the server at startup could neither find `npx`
+    # nor reach a registry. mcp-sidecar/Dockerfile installs it at build time and
+    # pins both the base digest and the server version.
+    #
+    #   docker build -t eddi-mcp-filesystem:2025.8.21 ./mcp-sidecar
+    build: ./mcp-sidecar
+    image: eddi-mcp-filesystem:2025.8.21
+    command:
+      - "--port=8096"
+      - "--host=0.0.0.0"
+      - "--"
+      # The pre-installed binary, run offline. No resolution step, so no
+      # supply-chain change can arrive without a rebuild you chose to do.
+      - "mcp-server-filesystem"
+      - "/data"
+    user: "10001:10001"
+    read_only: true
+    tmpfs:
+      # The server still wants somewhere writable; give it tmpfs rather than the
+      # image. /home/node is gone with npx — nothing needs a writable HOME now.
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - "no-new-privileges:true"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 256M
+    volumes:
+      # Read-only, and scoped to exactly what the agent should see.
+      - ./mcp-data:/data:ro
+    networks:
+      # Deliberately NOT on the default network: nothing but EDDI should be able
+      # to reach an unauthenticated tool server. In Kubernetes, express this as a
+      # NetworkPolicy restricting both ingress (EDDI only) and egress (the
+      # provider this server actually needs, and nothing else).
+      - mcp-internal
+    # No `ports:` mapping. The bridge is reachable from EDDI by service name and
+    # from nowhere else. Publishing 8096 to the host would undo the isolation
+    # above.
+
+  eddi:
+    networks:
+      - default
+      - mcp-internal
+
+networks:
+  mcp-internal:
+    internal: true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Then create an mcpcalls configuration pointing at the bridge:
+#
+#   {
+#     "mcpServerUrl": "http://filesystem-mcp:8096/mcp",
+#     "name": "filesystem",
+#     "transport": "http"
+#   }
+#
+# TODO: put authentication on the bridge and reference it here as
+#       "apiKey": "${vault:filesystem-mcp-token}". Without it, anything that
+#       reaches the port gets an unauthenticated tool server — and "it is on an
+#       internal network" is one misconfigured NetworkPolicy away from false.
+#
+# Note that every replica runs its own sidecar. If the MCP server holds per-user
+# state, five EDDI pods mean five independent copies of it.
+# ─────────────────────────────────────────────────────────────────────────────

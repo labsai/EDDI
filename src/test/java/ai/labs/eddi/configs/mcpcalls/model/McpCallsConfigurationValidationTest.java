@@ -36,12 +36,26 @@ class McpCallsConfigurationValidationTest {
                 () -> config("http://mcp.example.com/mcp", "stdio").validate());
         assertTrue(e.getMessage().contains("stdio"), e.getMessage());
         assertTrue(e.getMessage().contains("StreamableHTTP"), "message must say what IS supported: " + e.getMessage());
+        assertTrue(e.getMessage().contains("sidecar"), "a stdio-only server has a supported answer — the message must name it: " + e.getMessage());
     }
 
     @Test
-    @DisplayName("I3: 'sse' is documented but not implemented — rejected")
-    void rejectsSseTransport() {
-        assertThrows(IllegalArgumentException.class, () -> config("http://mcp.example.com/mcp", "sse").validate());
+    @DisplayName("'sse' is accepted as a deprecated alias — the write path must not reject what the engine runs")
+    void acceptsSseAsDeprecatedAlias() {
+        // McpToolProviderManager deliberately honours "sse" (served over
+        // StreamableHTTP, with a one-time deprecation warning) rather than stripping
+        // every tool from an agent written against the old documentation. This
+        // validator rejecting it made the two disagree, so a stored config could be
+        // read and then not saved back unchanged.
+        config("http://mcp.example.com/mcp", "sse").validate();
+        config("http://mcp.example.com/mcp", "SSE").validate();
+    }
+
+    @Test
+    @DisplayName("an unrecognised transport is still rejected, and the message points at the bridge")
+    void rejectsUnknownTransport() {
+        var e = assertThrows(IllegalArgumentException.class, () -> config("http://mcp.example.com/mcp", "websocket").validate());
+        assertTrue(e.getMessage().contains("websocket"), e.getMessage());
     }
 
     @Test

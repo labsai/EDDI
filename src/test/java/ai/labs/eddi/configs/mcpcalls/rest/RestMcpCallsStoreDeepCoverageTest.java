@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.mcpcalls.rest;
 
+import ai.labs.eddi.configs.mcpcalls.model.McpToolDiscoveryRequest;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.mcpcalls.IMcpCallsStore;
 import ai.labs.eddi.configs.mcpcalls.model.McpCallsConfiguration;
@@ -59,7 +60,7 @@ class RestMcpCallsStoreDeepCoverageTest {
             var result = new McpToolProviderManager.McpToolsResult(List.of(spec1, spec2), Map.of());
             doReturn(result).when(mcpToolProviderManager).discoverTools(any());
 
-            Response response = restStore.discoverTools("http://remote:8080", "http", null);
+            Response response = restStore.discoverTools(new McpToolDiscoveryRequest("http://remote:8080", "http"), null);
             assertEquals(200, response.getStatus());
 
             @SuppressWarnings("unchecked")
@@ -81,7 +82,7 @@ class RestMcpCallsStoreDeepCoverageTest {
             var result = new McpToolProviderManager.McpToolsResult(List.of(spec), Map.of());
             doReturn(result).when(mcpToolProviderManager).discoverTools(any());
 
-            Response response = restStore.discoverTools("http://remote:8080", "sse", "my-api-key");
+            Response response = restStore.discoverTools(new McpToolDiscoveryRequest("http://remote:8080", "sse"), "my-api-key");
             assertEquals(200, response.getStatus());
         }
 
@@ -92,7 +93,7 @@ class RestMcpCallsStoreDeepCoverageTest {
             var result = new McpToolProviderManager.McpToolsResult(List.of(spec), Map.of());
             doReturn(result).when(mcpToolProviderManager).discoverTools(any());
 
-            Response response = restStore.discoverTools("http://remote:8080", null, null);
+            Response response = restStore.discoverTools(new McpToolDiscoveryRequest("http://remote:8080", null), null);
             assertEquals(200, response.getStatus());
         }
 
@@ -102,7 +103,7 @@ class RestMcpCallsStoreDeepCoverageTest {
             var result = new McpToolProviderManager.McpToolsResult(List.of(), Map.of());
             doReturn(result).when(mcpToolProviderManager).discoverTools(any());
 
-            Response response = restStore.discoverTools("http://remote:8080", "http", null);
+            Response response = restStore.discoverTools(new McpToolDiscoveryRequest("http://remote:8080", "http"), null);
             assertEquals(200, response.getStatus());
 
             @SuppressWarnings("unchecked")

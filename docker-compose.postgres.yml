@@ -10,7 +10,14 @@ services:
       QUARKUS_DATASOURCE_USERNAME: eddi
       QUARKUS_DATASOURCE_PASSWORD: eddi
       EDDI_DATASTORE_TYPE: postgres
-      EDDI_SECURITY_ALLOW_UNAUTHENTICATED: "true"
+      # Same defaults as docker-compose.yml, and read from the environment for the
+      # same reason. This file is layered ON TOP of that one, so a literal "true"
+      # here overrides an operator who set these to "false" in .env: the surface
+      # would fail open against an explicit instruction to keep it shut, which is
+      # the one way these flags can be got wrong silently.
+      EDDI_SECURITY_ALLOW_UNAUTHENTICATED: "${EDDI_SECURITY_ALLOW_UNAUTHENTICATED:-true}"
+      EDDI_MCP_ALLOW_UNAUTHENTICATED: "${EDDI_MCP_ALLOW_UNAUTHENTICATED:-true}"
+      EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED: "${EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED:-true}"
       EDDI_VAULT_MASTER_KEY: "${EDDI_VAULT_MASTER_KEY:-}"
     depends_on:
       postgres:
