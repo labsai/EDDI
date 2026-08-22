@@ -66,9 +66,19 @@ export const STILL_LOADING = [
   'main [data-testid*="loading"]',
 ].join(", ");
 
+/**
+ * The two shells this app has.
+ *
+ * `/manage/*` renders AppLayout; `/workforce/*` renders WorkforceLayout, which
+ * is a different component tree with no `app-layout` anywhere in it. Waiting on
+ * `app-layout` alone made this helper unusable for half the routes, which is a
+ * fair part of why the Workforce surface had no E2E spec at all.
+ */
+const APP_SHELL = '[data-testid="app-layout"], [data-testid="workforce-layout"]';
+
 export async function waitForApp(page: Page) {
-  // The shell.
-  await page.waitForSelector('[data-testid="app-layout"]', { timeout: 15_000 });
+  // Whichever shell this route uses.
+  await page.waitForSelector(APP_SHELL, { timeout: 15_000 });
 
   // The route's code-split chunk (SuspendedOutlet's fallback).
   await expect(page.getByTestId("page-loader")).toHaveCount(0, { timeout: 15_000 });

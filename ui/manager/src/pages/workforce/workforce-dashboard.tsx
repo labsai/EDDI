@@ -409,6 +409,7 @@ function WorkforceDashboard() {
                       className="absolute top-2 start-2 z-10 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
                       aria-label={selectedIds.has(board.id) ? t("Workforce.dashboard.deselect", "Deselect") : t("Workforce.dashboard.selectItem", "Select")}
                       aria-pressed={selectedIds.has(board.id)}
+                      data-testid={`select-board-${board.id}`}
                       onClick={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
@@ -470,6 +471,7 @@ function WorkforceDashboard() {
             <Button
               variant="ghost"
               size="sm"
+              data-testid="bulk-select-toggle"
               onClick={() => {
                 setBulkMode(!bulkMode);
                 setSelectedIds(new Set());
@@ -506,6 +508,7 @@ function WorkforceDashboard() {
                       className="absolute top-2 start-2 z-10 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
                       aria-label={selectedIds.has(board.id) ? t("Workforce.dashboard.deselect", "Deselect") : t("Workforce.dashboard.selectItem", "Select")}
                       aria-pressed={selectedIds.has(board.id)}
+                      data-testid={`select-board-${board.id}`}
                       onClick={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
@@ -553,6 +556,7 @@ function WorkforceDashboard() {
                       className="absolute top-2 start-2 z-10 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
                       aria-label={selectedIds.has(board.id) ? t("Workforce.dashboard.deselect", "Deselect") : t("Workforce.dashboard.selectItem", "Select")}
                       aria-pressed={selectedIds.has(board.id)}
+                      data-testid={`select-board-${board.id}`}
                       onClick={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
