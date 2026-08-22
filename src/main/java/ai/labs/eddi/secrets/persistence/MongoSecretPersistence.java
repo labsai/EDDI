@@ -7,16 +7,22 @@ package ai.labs.eddi.secrets.persistence;
 import ai.labs.eddi.secrets.model.EncryptedDek;
 import ai.labs.eddi.secrets.model.EncryptedSecret;
 import ai.labs.eddi.utils.RuntimeUtilities;
+import com.mongodb.ErrorCategory;
+import com.mongodb.MongoException;
+import com.mongodb.MongoWriteException;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.model.Indexes;
+import com.mongodb.client.model.Sorts;
 import com.mongodb.client.model.UpdateOptions;
 import com.mongodb.client.model.Updates;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.bson.Document;
+import org.bson.conversions.Bson;
 import org.jboss.logging.Logger;
 
 import java.time.Instant;
@@ -59,6 +65,13 @@ public class MongoSecretPersistence implements ISecretPersistence {
     private static final String FIELD_LAST_ACCESSED_AT = "lastAccessedAt";
     private static final String FIELD_LAST_ROTATED_AT = "lastRotatedAt";
     private static final String FIELD_ENCRYPTED_DEK = "encryptedDek";
+    private static final String FIELD_GENERATION = "generation";
+
+    /**
+     * The pre-generation index: unique on tenantId alone, so it blocks a second
+     * generation.
+     */
+    private static final String LEGACY_DEK_INDEX = "idx_dek_tenant";
 
     private final MongoCollection<Document> secretsCollection;
     private final MongoCollection<Document> deksCollection;
@@ -78,13 +91,36 @@ public class MongoSecretPersistence implements ISecretPersistence {
         secretsCollection.createIndex(Indexes.compoundIndex(Indexes.ascending(FIELD_TENANT_ID), Indexes.ascending(FIELD_KEY_NAME)),
                 new IndexOptions().name("idx_secret_tenant_key").unique(true).background(true));
 
-        // Unique index on tenantId for DEKs (one DEK per tenant)
-        deksCollection.createIndex(Indexes.ascending(FIELD_TENANT_ID), new IndexOptions().name("idx_dek_tenant").unique(true).background(true));
+        migrateDeksToGenerations();
 
         // Unique index on key for metadata
         metaCollection.createIndex(Indexes.ascending("key"), new IndexOptions().name("idx_meta_key").unique(true).background(true));
 
         LOGGER.info("Secrets vault MongoDB indexes ensured");
+    }
+
+    /**
+     * Brings an existing deployment onto one row per (tenant, generation).
+     * <p>
+     * Order matters. The backfill runs first so every pre-generation document has a
+     * generation to be indexed on; then the old unique-on-tenantId index goes,
+     * because while it exists a tenant cannot hold a second generation at all and
+     * rotation has nowhere to write.
+     */
+    private void migrateDeksToGenerations() {
+        deksCollection.updateMany(Filters.exists(FIELD_GENERATION, false),
+                Updates.set(FIELD_GENERATION, EncryptedDek.FIRST_GENERATION));
+
+        try {
+            deksCollection.dropIndex(LEGACY_DEK_INDEX);
+        } catch (MongoException e) {
+            // Absent on every deployment created after generations existed, and on
+            // every boot after the first. Nothing to do either way.
+            LOGGER.debugf("No legacy DEK index '%s' to drop", LEGACY_DEK_INDEX);
+        }
+
+        deksCollection.createIndex(Indexes.compoundIndex(Indexes.ascending(FIELD_TENANT_ID), Indexes.ascending(FIELD_GENERATION)),
+                new IndexOptions().name("idx_dek_tenant_generation").unique(true).background(true));
     }
 
     // ─── Secrets ───
@@ -142,41 +178,118 @@ public class MongoSecretPersistence implements ISecretPersistence {
         }
     }
 
+    @Override
+    public boolean updateSecretSealing(EncryptedSecret secret, String expectedDekId) {
+        RuntimeUtilities.checkNotNull(secret, "secret");
+        try {
+            // eq(field, null) matches "absent" as well as "explicitly null", which is
+            // what guards a row written before dekId was ever stamped.
+            var filter = and(eq(FIELD_TENANT_ID, secret.getTenantId()), eq(FIELD_KEY_NAME, secret.getKeyName()),
+                    eq(FIELD_DEK_ID, expectedDekId));
+
+            var update = Updates.combine(Updates.set(FIELD_ENCRYPTED_VALUE, secret.getEncryptedValue()), Updates.set(FIELD_IV, secret.getIv()),
+                    Updates.set(FIELD_DEK_ID, secret.getDekId()),
+                    Updates.set(FIELD_LAST_ROTATED_AT, instantToString(secret.getLastRotatedAt())));
+
+            // matchedCount, not modifiedCount: winning the guard is what matters, and a
+            // rewrite that happens to produce identical bytes still won it.
+            return secretsCollection.updateOne(filter, update).getMatchedCount() == 1;
+        } catch (MongoException e) {
+            throw new PersistenceException("Failed to re-seal secret " + secret.getTenantId() + "/" + secret.getKeyName(), e);
+        }
+    }
+
     // ─── DEKs ───
 
     @Override
     public void upsertDek(EncryptedDek dek) {
         RuntimeUtilities.checkNotNull(dek, "dek");
         try {
-            var filter = eq(FIELD_TENANT_ID, dek.getTenantId());
+            var filter = dekKey(dek.getTenantId(), dek.getGeneration());
 
             var update = Updates.combine(Updates.set(FIELD_ENCRYPTED_DEK, dek.getEncryptedDek()), Updates.set(FIELD_IV, dek.getIv()),
-                    Updates.setOnInsert(FIELD_TENANT_ID, dek.getTenantId()),
+                    Updates.setOnInsert(FIELD_TENANT_ID, dek.getTenantId()), Updates.setOnInsert(FIELD_GENERATION, dek.getGeneration()),
                     Updates.setOnInsert(FIELD_CREATED_AT, instantToString(dek.getCreatedAt())));
 
             deksCollection.updateOne(filter, update, new UpdateOptions().upsert(true));
-        } catch (com.mongodb.MongoException e) {
+        } catch (MongoException e) {
             throw new PersistenceException("Failed to upsert DEK for tenant " + dek.getTenantId(), e);
+        }
+    }
+
+    @Override
+    public boolean insertDek(EncryptedDek dek) {
+        RuntimeUtilities.checkNotNull(dek, "dek");
+        var document = new Document(FIELD_TENANT_ID, dek.getTenantId()).append(FIELD_GENERATION, dek.getGeneration())
+                .append(FIELD_ENCRYPTED_DEK, dek.getEncryptedDek()).append(FIELD_IV, dek.getIv())
+                .append(FIELD_CREATED_AT, instantToString(dek.getCreatedAt()));
+        try {
+            deksCollection.insertOne(document);
+            return true;
+        } catch (MongoWriteException e) {
+            if (e.getError().getCategory() == ErrorCategory.DUPLICATE_KEY) {
+                // Somebody else installed this generation. The unique index is the
+                // arbiter, so exactly one rotation proceeds.
+                return false;
+            }
+            throw new PersistenceException("Failed to insert DEK generation for tenant " + dek.getTenantId(), e);
+        } catch (MongoException e) {
+            throw new PersistenceException("Failed to insert DEK generation for tenant " + dek.getTenantId(), e);
         }
     }
 
     @Override
     public Optional<EncryptedDek> findDek(String tenantId) {
         try {
-            var doc = deksCollection.find(eq(FIELD_TENANT_ID, tenantId)).first();
+            var doc = deksCollection.find(eq(FIELD_TENANT_ID, tenantId)).sort(Sorts.descending(FIELD_GENERATION)).first();
             return doc != null ? Optional.of(documentToDek(doc)) : Optional.empty();
-        } catch (com.mongodb.MongoException e) {
+        } catch (MongoException e) {
             throw new PersistenceException("Failed to find DEK for tenant " + tenantId, e);
+        }
+    }
+
+    @Override
+    public Optional<EncryptedDek> findDek(String tenantId, int generation) {
+        try {
+            var doc = deksCollection.find(dekKey(tenantId, generation)).first();
+            return doc != null ? Optional.of(documentToDek(doc)) : Optional.empty();
+        } catch (MongoException e) {
+            throw new PersistenceException("Failed to find DEK generation " + generation + " for tenant " + tenantId, e);
+        }
+    }
+
+    @Override
+    public List<EncryptedDek> listDeks(String tenantId) {
+        try {
+            var deks = new ArrayList<EncryptedDek>();
+            for (var doc : deksCollection.find(eq(FIELD_TENANT_ID, tenantId)).sort(Sorts.ascending(FIELD_GENERATION))) {
+                deks.add(documentToDek(doc));
+            }
+            return deks;
+        } catch (MongoException e) {
+            throw new PersistenceException("Failed to list DEKs for tenant " + tenantId, e);
         }
     }
 
     @Override
     public void deleteDek(String tenantId) {
         try {
-            deksCollection.deleteOne(eq(FIELD_TENANT_ID, tenantId));
-        } catch (com.mongodb.MongoException e) {
+            deksCollection.deleteMany(eq(FIELD_TENANT_ID, tenantId));
+        } catch (MongoException e) {
             throw new PersistenceException("Failed to delete DEK for tenant " + tenantId, e);
         }
+    }
+
+    /**
+     * A row with no {@code generation} field is generation 1. The boot migration
+     * backfills those, but a replica still running an older build writes fresh ones
+     * without it, so generation 1 matches both spellings for as long as a rolling
+     * upgrade lasts.
+     */
+    private static Bson dekKey(String tenantId, int generation) {
+        return generation == EncryptedDek.FIRST_GENERATION
+                ? and(eq(FIELD_TENANT_ID, tenantId), Filters.or(eq(FIELD_GENERATION, generation), Filters.exists(FIELD_GENERATION, false)))
+                : and(eq(FIELD_TENANT_ID, tenantId), eq(FIELD_GENERATION, generation));
     }
 
     @Override
@@ -237,8 +350,10 @@ public class MongoSecretPersistence implements ISecretPersistence {
     }
 
     private EncryptedDek documentToDek(Document doc) {
+        Object generation = doc.get(FIELD_GENERATION);
         return new EncryptedDek(doc.getObjectId("_id") != null ? doc.getObjectId("_id").toHexString() : null, doc.getString(FIELD_TENANT_ID),
-                doc.getString(FIELD_ENCRYPTED_DEK), doc.getString(FIELD_IV), parseInstant(doc.getString(FIELD_CREATED_AT)));
+                generation instanceof Number number ? number.intValue() : EncryptedDek.FIRST_GENERATION, doc.getString(FIELD_ENCRYPTED_DEK),
+                doc.getString(FIELD_IV), parseInstant(doc.getString(FIELD_CREATED_AT)));
     }
 
     private static String instantToString(Instant instant) {

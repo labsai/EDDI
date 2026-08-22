@@ -11,6 +11,8 @@ import ai.labs.eddi.configs.connections.model.StaticAuth;
 import ai.labs.eddi.connections.model.ConnectionReference;
 import ai.labs.eddi.engine.security.CallerIdentity;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
+import ai.labs.eddi.engine.security.ResolutionPrincipal;
+import ai.labs.eddi.engine.security.ResolutionPrincipalContext;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -71,6 +73,20 @@ public class ConnectionResolver {
      */
     private final AccessTokenSupplier accessTokenSupplier;
 
+    /**
+     * The principal of the conversation turn running on this thread, and how much
+     * that identity is worth. The authoritative input to a {@link Binding#PER_USER}
+     * decision.
+     * <p>
+     * Field-injected rather than taken through the constructor because a
+     * {@code ConnectionResolver} is also built directly, without a container. A
+     * {@code null} context is not a licence to fall back to something else: nothing
+     * is bound, so every {@code PER_USER} resolution refuses, which is the only
+     * safe reading of "I cannot tell who this is".
+     */
+    @Inject
+    ResolutionPrincipalContext resolutionPrincipalContext;
+
     @Inject
     public ConnectionResolver(ConnectionRegistry connectionRegistry, CredentialReferenceResolver credentialReferenceResolver,
             CallerIdentityContext callerIdentityContext, MeterRegistry meterRegistry, AccessTokenSupplier accessTokenSupplier,
@@ -97,12 +113,12 @@ public class ConnectionResolver {
      *            where the call is going; checked against the connection's
      *            {@code baseUrlAllowlist}
      * @param principalOverride
-     *            the conversation's user id. Takes PRECEDENCE over the thread-bound
-     *            caller, because the credential belongs to whoever owns the
-     *            conversation and not to whoever is driving the current request —
-     *            they differ on a HITL resume. {@code null} to read the bound
-     *            caller. Only ever consulted for a principal that a VERIFIED
-     *            identity produced — see
+     *            the conversation's user id as the caller knows it, or {@code null}
+     *            when the caller has none to offer. A cross-check only: the
+     *            authority for a {@link Binding#PER_USER} grant is the
+     *            {@link ResolutionPrincipal} bound to this turn, which carries a
+     *            provenance this parameter cannot. A non-null value that disagrees
+     *            with the bound principal is refused rather than preferred — see
      *            {@link #resolvePrincipal(ConnectionConfiguration, String)}.
      * @throws ConnectionException
      *             on every failure; never returns null
@@ -204,50 +220,88 @@ public class ConnectionResolver {
     /**
      * Decides whose grant to use, and refuses rather than guessing.
      * <p>
+     * The one input is the {@link ResolutionPrincipal} bound to this thread: the
+     * owner of the conversation whose turn is executing, together with how that
+     * owner's user id was established. Never the thread's {@link CallerIdentity} —
+     * on a HITL resume that is the APPROVER, often an administrator by design, and
+     * resolving there ran the approved call against the approver's SaaS account.
+     * Never the request either, since a cached MCP client's request has no
+     * conversation at all.
+     * <p>
      * {@link Binding#PER_USER} needs a <em>verified</em> principal, not merely a
-     * present one. With {@code authorization.enabled=false} — the shipped default —
-     * there is no verified identity anywhere in the system, and the
-     * OpenAI-compatible adapter documents that it believes
-     * {@code X-OpenWebUI-User-Id} verbatim. Without this check, anyone claiming
-     * {@code userId=alice} resolves Alice's Google token. The startup guard refuses
-     * that configuration outright; this is the second of the two enforcement
-     * points, because a guard covers the deployment and this covers the request.
+     * present one. {@code authorization.enabled=true} is not that proof: the
+     * OpenAI-compatible {@code /v1} adapter, in api-key mode with
+     * {@code trust-user-headers} (its default), believes a caller-supplied
+     * {@code X-OpenWebUI-User-Id} verbatim, so a holder of the shared key can open
+     * a conversation as anyone and would otherwise resolve that person's live
+     * tokens. A deployment that deliberately delegates authentication to such a
+     * proxy says so per connection, and says it about that connection only.
+     * <p>
+     * The startup guard reports the same conditions at boot but does not refuse —
+     * it logs, because refusing cost a cluster its next rolling restart over one
+     * config document. This is where the refusal actually happens.
      */
     private String resolvePrincipal(ConnectionConfiguration connection, String principalOverride) {
         if (connection.getBinding() != Binding.PER_USER) {
             return SERVICE_PRINCIPAL;
         }
-        if (!authorizationEnabled) {
+        ResolutionPrincipal principal = resolutionPrincipalContext == null ? null : resolutionPrincipalContext.current();
+        if (principal == null || !principal.hasUserId()) {
             throw new ConnectionException(ConnectionException.Reason.NO_VERIFIED_PRINCIPAL,
-                    "Connection '" + connection.getName() + "' is PER_USER, but authorization.enabled=false, so no caller identity is "
-                            + "verified. Any caller could claim any userId and resolve that user's tokens. Enable OIDC or make the "
-                            + "connection SERVICE-bound.");
+                    "Connection '" + connection.getName() + "' is PER_USER and no conversation principal is bound to this turn — a "
+                            + "scheduled run, a trigger, or an outbound call made outside the conversation pipeline"
+                            + (hasBoundCaller()
+                                    ? " (a request caller IS bound here, but the caller of a request is not the owner of the conversation)"
+                                    : "")
+                            + ". Refusing rather than falling back to the service grant.");
         }
-        // The CONVERSATION's owner wins over whoever happens to be driving this
-        // HTTP request. They are the same person on an ordinary turn, and they are
-        // NOT the same person on a HITL resume: the thread is bound to the approver
-        // — often an administrator, by design — while the call being approved
-        // belongs to the user who asked for it. Reading the thread there ran the
-        // approved call against the APPROVER's SaaS account, which is both the wrong
-        // data and an approval that did not mean what the approver was shown.
-        //
-        // Safe in the other direction because the override is not caller-supplied:
-        // it is the conversation's userId, fixed at creation from a verified
-        // identity, and PER_USER already refuses outright unless
-        // authorization.enabled=true.
-        String principal = principalOverride != null && !principalOverride.isBlank() ? principalOverride : callerUserId();
-        if (principal == null || principal.isBlank()) {
+        // Cross-check, not a second source. The override is the conversation's own
+        // userId read from template data, so it agrees with the bound principal on
+        // every path that has both; a disagreement means the two disagree about
+        // whose call this is, and that is never a question to answer by picking one.
+        if (principalOverride != null && !principalOverride.isBlank() && !principalOverride.equals(principal.userId())) {
             throw new ConnectionException(ConnectionException.Reason.NO_VERIFIED_PRINCIPAL,
-                    "Connection '" + connection.getName() + "' is PER_USER and this turn has no resolvable user — a scheduled run, a "
-                            + "trigger or a retry on a callback thread. Refusing rather than falling back to the service grant.");
+                    "Connection '" + connection.getName() + "' is PER_USER and the turn's bound principal does not match the user the "
+                            + "call was built for. Refusing rather than choosing one of two disagreeing identities.");
         }
-        return principal;
+        if (!principal.isVerified() && !allowsUnverifiedPrincipal(connection)) {
+            throw new ConnectionException(ConnectionException.Reason.NO_VERIFIED_PRINCIPAL,
+                    "Connection '" + connection.getName() + "' is PER_USER, but nothing authenticated this conversation's user id"
+                            + (authorizationEnabled
+                                    ? " — it was self-asserted by the surface that opened the conversation, or the conversation predates "
+                                            + "provenance being recorded and must be started again."
+                                    : ", because authorization.enabled=false and no identity in this deployment is verified.")
+                            + " Resolving it would hand that user's tokens to whoever claimed to be them. Enable OIDC, make the connection "
+                            + "SERVICE-bound, or — if a trusted proxy authenticates these users — allow an unverified principal on this "
+                            + "connection deliberately.");
+        }
+        return principal.userId();
     }
 
-    /** The user bound to this thread, if a verified identity produced one. */
-    private String callerUserId() {
-        CallerIdentity caller = callerIdentityContext.current();
-        return caller == null || caller.userId() == null || caller.userId().isBlank() ? null : caller.userId();
+    /**
+     * Whether a request identity is bound here at all.
+     * <p>
+     * Never an input to the decision — a request caller is not the conversation's
+     * owner, which is the whole reason this class stopped reading it. It only tells
+     * the refusal apart from the one raised on a scheduled run, where the answer to
+     * "why is nobody here" is a completely different piece of advice.
+     */
+    private boolean hasBoundCaller() {
+        CallerIdentity caller = callerIdentityContext == null ? null : callerIdentityContext.current();
+        return caller != null;
+    }
+
+    /**
+     * Whether this connection's owner has accepted that its users are authenticated
+     * somewhere other than EDDI.
+     * <p>
+     * The escape hatch exists because delegating authentication to a front proxy is
+     * a legitimate deployment, not a mistake — but it has to be stated per
+     * connection, default off, so that turning it on is a decision about one
+     * provider's tokens rather than a global posture.
+     */
+    private static boolean allowsUnverifiedPrincipal(ConnectionConfiguration connection) {
+        return connection.isAllowUnverifiedPrincipal();
     }
 
     /**

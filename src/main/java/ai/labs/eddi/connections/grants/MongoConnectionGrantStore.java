@@ -171,13 +171,18 @@ public class MongoConnectionGrantStore implements IConnectionGrantStore {
     }
 
     @Override
-    public boolean updateSealedTokens(ConnectionGrant grant) {
+    public boolean updateSealedTokens(ConnectionGrant grant, long expectedVersion) {
+        // No version bump and no lease field in the update: a re-seal must be
+        // invisible to a refresh that is mid-flight, or it turns a rotation into a
+        // lost token.
         var result = grants.updateOne(
-                key(grant.getTenantId(), grant.getConnectionName(), grant.getPrincipal()),
+                Filters.and(key(grant.getTenantId(), grant.getConnectionName(), grant.getPrincipal()),
+                        Filters.eq(FIELD_VERSION, expectedVersion)),
                 Updates.combine(Updates.set(FIELD_ACCESS, grant.getEncryptedAccessToken()), Updates.set(FIELD_ACCESS_IV, grant.getAccessTokenIv()),
                         Updates.set(FIELD_REFRESH, grant.getEncryptedRefreshToken()), Updates.set(FIELD_REFRESH_IV, grant.getRefreshTokenIv()),
                         Updates.set(FIELD_DEK, grant.getDekId())));
-        return result.getModifiedCount() > 0;
+        // matchedCount for the same reason as the claim and the CAS above.
+        return result.getMatchedCount() == 1;
     }
 
     @Override

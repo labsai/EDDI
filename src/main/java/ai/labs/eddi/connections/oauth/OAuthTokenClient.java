@@ -204,6 +204,11 @@ public class OAuthTokenClient {
             if (expiresIn.isNegative() || expiresIn.isZero()) {
                 expiresIn = TokenResponse.DEFAULT_LIFETIME;
             }
+            // Anything positive is passed through as the provider stated it, however
+            // short. Rounding a legal expires_in=20 up to something comfortable would
+            // mean sending a token the provider has already expired; the service side
+            // absorbs a short lifetime by shrinking its expiry margin instead — see
+            // OAuthTokenService.effectiveMargin.
             List<String> scopes = new ArrayList<>();
             String granted = json.path("scope").asText(null);
             if (granted != null && !granted.isBlank()) {

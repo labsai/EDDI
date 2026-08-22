@@ -5,7 +5,9 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
+import ai.labs.eddi.connections.ConnectionException;
 import ai.labs.eddi.connections.ConnectionResolver;
+import ai.labs.eddi.connections.model.ConnectionReference;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.A2AAgentConfig;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import ai.labs.eddi.secrets.SecretResolver;
@@ -151,6 +153,13 @@ public class A2AToolProviderManager {
                 discoverAgentTools(config, toolSpecs, executors);
                 // Reset circuit on success
                 circuitBreakers.remove(config.getUrl());
+            } catch (ConnectionException | IllegalArgumentException | IllegalStateException e) {
+                // A credential or a malformed config is deliberately NOT fed to the
+                // breaker. The breaker exists to stop hammering a flaky peer, and
+                // neither of these is healed by waiting — while opening it suppresses
+                // discovery for EVERY user because one of them has no grant, and tells
+                // the operator the peer is unreachable when it is fine.
+                LOGGER.warnf("A2A agent at %s could not be given a usable credential: %s", config.getUrl(), e.getMessage());
             } catch (Exception e) {
                 recordFailure(config.getUrl());
                 LOGGER.warnf("Failed to discover tools from A2A agent at %s: %s", config.getUrl(), e.getMessage());
@@ -246,7 +255,7 @@ public class A2AToolProviderManager {
         HttpRequest.Builder requestBuilder = HttpRequest.newBuilder().uri(URI.create(cardUrl))
                 .timeout(Duration.ofMillis(config.getTimeoutMs() != null ? config.getTimeoutMs() : 30000)).GET();
 
-        applyCredential(requestBuilder, config, agentUrl);
+        applyCredential(requestBuilder, config, agentUrl, true);
 
         HttpResponse<String> response = httpClient().send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString());
 
@@ -382,9 +391,37 @@ public class A2AToolProviderManager {
      * discovered its skills correctly and then sent the literal string
      * {@code Bearer ${connection:salesforce}} as its bearer token on every actual
      * call. Two copies of a credential rule is one copy too many.
+     * <p>
+     * This form is the task call; the overload below is the same rule with the one
+     * distinction the two paths genuinely have.
      */
     // Package-private so a test can assert what actually lands on the request.
     void applyCredential(HttpRequest.Builder requestBuilder, A2AAgentConfig config, String agentUrl) {
+        applyCredential(requestBuilder, config, agentUrl, false);
+    }
+
+    /**
+     * The same credential rule, told whether it is serving discovery.
+     *
+     * @param discovery
+     *            whether this is the agent-card fetch rather than a task call. Its
+     *            result is CACHED for five minutes and served to every conversation
+     *            that follows, so a {@code PER_USER} connection must not establish
+     *            it — the first caller's authority would answer for everybody after
+     *            them, and a caller who is not bound at all would fail discovery
+     *            for all of them. {@code ConnectionResolver#resolveForDiscovery}
+     *            draws that line, exactly as the MCP handshake does; empty means
+     *            send the request unauthenticated and let the peer decide.
+     *            <p>
+     *            A task call is the opposite: it belongs to one conversation, so a
+     *            {@code PER_USER} connection resolves against the
+     *            {@code ResolutionPrincipal} bound to the turn — the conversation's
+     *            owner and whether anybody authenticated them. Nothing is passed
+     *            from here because nothing here knows better; and the thread's
+     *            CALLER is deliberately not consulted, since on a HITL resume that
+     *            is the approver rather than the user whose call was approved.
+     */
+    void applyCredential(HttpRequest.Builder requestBuilder, A2AAgentConfig config, String agentUrl, boolean discovery) {
         String apiKey = config.getApiKey();
         if (isNullOrEmpty(apiKey)) {
             return;
@@ -396,6 +433,12 @@ public class A2AToolProviderManager {
             if (connectionResolver == null) {
                 throw new IllegalStateException("A2A agent at " + agentUrl + " uses a ${connection:…} apiKey, but this manager was "
                         + "constructed without a ConnectionResolver.");
+            }
+            ConnectionReference.requireSole(apiKey, "The apiKey of the A2A agent at " + agentUrl);
+            if (discovery) {
+                connectionResolver.resolveForDiscovery(apiKey, URI.create(agentUrl))
+                        .ifPresent(credential -> requestBuilder.header(credential.headerName(), credential.headerValue()));
+                return;
             }
             var credential = connectionResolver.resolve(apiKey, URI.create(agentUrl), null);
             requestBuilder.header(credential.headerName(), credential.headerValue());

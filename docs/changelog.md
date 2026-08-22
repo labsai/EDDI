@@ -7,6 +7,149 @@
 
 
 
+## feat(connections): DEK generations, verified principals, and the REST contract as it actually is (2026-08-22)
+
+**Repo:** EDDI (`feat/saas-connectors`)
+
+`docs/connections.md` and `docs/secrets-vault.md` described a system that is no longer the one this
+branch implements. Three of the corrections are safety-relevant, one is a migration consequence
+operators have to know about before they upgrade, and the rest are contract details a caller cannot
+guess.
+
+### DEK rotation is additive, and the docs described the opposite
+
+Both documents described rotation as "generate a new DEK, re-encrypt everything, replace the key",
+with connections.md adding that a failed re-seal "aborts the rotation with the old key still in
+place". Neither is the behaviour, and the behaviour is the stronger of the two.
+
+A tenant now holds one DEK row per **generation**, and every ciphertext records the generation that
+sealed it (`<tenantId>#g<n>`, readable so a database row explains itself). Rotation verifies every
+existing generation, **inserts** the next one — the single atomic commit point, guarded by a unique
+key on `(tenant, generation)` — and then sweeps rows onto it one at a time, each write guarded on
+the state the row was read in.
+
+The consequences that had to be written down:
+
+* **Old generations are never deleted.** Deleting the generation a row still names is the one action
+  that makes a partly swept tenant unreadable. Nothing in EDDI does it, and pruning one is an
+  operator decision that requires knowing no row still names it. Documented as such, because "the
+  system keeps old keys" reads like an oversight unless the reason is stated next to it.
+* **A partial sweep is reported and safe to re-run.** `POST /{tenantId}/rotate-dek` answers **500**
+  with a message saying the new generation is active, at least *N* rows still name an older one,
+  nothing is lost, and re-running finishes the migration. A 500 that means "incomplete, retry" needs
+  to say so in the docs or an operator will read it as "rotation is broken".
+* **KEK rotation re-wraps every generation**, not just the newest — a tenant part-way through a
+  sweep still depends on older ones.
+* **The schema migrates on boot on both backends**, and the two differ enough to be worth a table:
+  Postgres drops the column-level `UNIQUE (tenant_id)` that would otherwise leave rotation nowhere
+  to write, Mongo backfills `generation` *before* dropping the legacy unique index so every document
+  has something to be indexed on. A pre-generation row reads as generation 1, which is why no
+  ciphertext migration exists at all.
+
+### `PER_USER` now requires a *verified* identity — and legacy conversations must be restarted
+
+This is the migration note, and it is stated plainly in `connections.md` rather than left to be
+discovered: **a conversation that existed before provenance was recorded has none, which counts as
+not verified, and must be started again once before it can use a `PER_USER` connection.** No grant
+is invalidated and nobody has to re-link; the conversation is the thing that has to be new.
+
+The polarity is deliberate rather than an oversight. `authorization.enabled=true` was being read as
+proof that a conversation's user id had been authenticated, and it is not: the `/v1` adapter in
+api-key mode with `trust-user-headers` (the shipped default) believes a caller-supplied
+`X-OpenWebUI-User-Id` verbatim once the shared key matches, so a holder of that one key can open a
+conversation as anyone. The conversations this field exists to distrust are exactly the ones that
+predate it, so grandfathering them would leave the hole open on precisely the deployments that just
+closed it.
+
+Also documented: a conversation spawned from inside a running turn inherits its parent's provenance
+but **only for the same user id**; and the `allowUnverifiedPrincipal` per-connection opt-in, with
+what it actually costs — anyone who can assert a user id to the fronting proxy resolves that user's
+stored credentials, and nothing downstream re-checks it. Default off, per connection rather than per
+deployment, so enabling it is a decision about one provider's tokens.
+
+### The startup guard, and the document contradicting itself
+
+`docs/connections.md` said the guard "refuses to boot on four states" in one section and said it
+logs in another. It refuses on two (both properties of the deployment: a missing or non-bare-origin
+`public-base-url`) and **reports** three read from stored documents. The document now says which is
+which, why reporting is not a weakened control, and where enforcement actually lives — a **400** at
+the write boundary while the administrator is still looking at the request, plus the per-request
+refusal. The third reported state — a `PER_USER` connection alongside `/v1` in api-key mode with
+`trust-user-headers` — was not documented at all.
+
+### Behaviour a config author trips over
+
+* **A header value must be exactly one connection reference.** `Bearer ${connection:jira}` is
+  refused with an actionable error. It used to work by coincidence for OAuth connections (the
+  connection contributes its own `Bearer `) and silently broke `STATIC` ones, which sent a bare token
+  with no scheme and got back a 401 naming nothing. Documented alongside the two header rules that
+  were also undocumented: the header must be named what the connection names it, and one credential
+  per header name.
+* **On a HITL resume the credential follows the conversation's owner, not the approver.** The bullet
+  existed; the *reason* did not. A resume proves who approved and says nothing about whose
+  credentials the approved call may spend, so both the user id and its provenance are read from the
+  stored conversation and never from the resuming request.
+* **Every REST status the document claims is now checked against the code**, including the two it
+  did not mention: a disabled feature answers **404** (with a body on the authenticated routes,
+  empty on the callback, which has only a browser to answer), and a connection refusal escaping to a
+  REST caller is mapped by reason — 400 / 404 / **409** / 503 — rather than becoming a bare 500 with
+  the actionable sentence stranded in the server log.
+* **The metrics table omitted outcomes the code emits**: `binding_mismatch` on the callback (a valid
+  state arriving without the nonce cookie — the confused-deputy case) and `lease_released` on the
+  refresh claim. Every metric now lists the outcome values actually emitted, and the callback
+  counter's `authType` tag, which was missing.
+
+### Corrections to earlier claims in this file
+
+The 2026-08-21 entry below describes grants being "re-sealed prepare-then-commit" with a failure
+aborting the rotation. That was the shape at the time; generations superseded it, and the
+`SealedDataRotationParticipant` contract now says the opposite — throwing rolls nothing back, the
+new generation is already active, and a row left behind still opens with the generation it names.
+The earlier entry is left as written, being a record of that day; this paragraph is the pointer.
+
+The `Limitations` bullet on group conversations claimed the resolver "refuses because the principal
+is not the human". It is now stated as it behaves: a member conversation opens under the group
+conversation's own `userId` and takes whatever provenance that moment can establish — `VERIFIED` on
+a synchronous authenticated discussion, `SELF_ASSERTED` and therefore refused on an asynchronous or
+scheduled one. That is an accident of when a discussion starts rather than an answer to whose
+authority a debating agent carries, and it still needs a product decision.
+
+### Deliberately not done
+
+* **No doc for `UNSUPPORTED_PLACEMENT` as a live refusal.** The reason exists in the enum and in the
+  exception mapper's table, but nothing in `src/main` throws it — placement refusals are
+  `IllegalArgumentException`, which the generic mapper answers with a 400. It is listed in the
+  status table (the mapper does map it) and not described as something a caller will see.
+* **`eddi.connections.enabled` still does not force SSRF protection on.** Unchanged and still
+  awaiting sign-off; see the 2026-08-21 entry.
+* **Old DEK generations are not pruned, and no endpoint prunes them.** Retaining them is what makes
+  a partial sweep harmless, and deciding a generation is unreferenced needs knowledge no automatic
+  step has. Storage cost is one wrapped 256-bit key per rotation per tenant.
+* **Multi-tenant connections still are not implemented.** `tenantId` other than `default` is refused
+  at the write boundary, because the per-user endpoints remain scoped to the default tenant and a
+  grant filed anywhere else could be neither listed nor disconnected.
+
+### Coverage referenced
+
+Each behaviour documented here has a test that pins it, checked rather than assumed:
+`VaultSecretProviderBranchTest` ("rotation ADDS a generation and sweeps secrets onto it", "a secret
+the sweep cannot move is reported, not silently counted as migrated", "losing the race to install a
+generation refuses cleanly"); `SecretVaultIntegrationTest` ("a row the sweep could not move still
+resolves, because the old generation is kept"); `ConnectionGrantResealerTest` (mixed generations, a
+refresh landing mid-sweep keeping its own tokens, a row left behind being counted rather than
+forced); `ConnectionResolverTest` (self-asserted refused, the proxy opt-in honoured, no principal
+refused rather than falling back to the service grant); `ApiCallExecutorConnectionHeaderTest`
+(literal text around a reference, two references in one value, header-name collisions, and
+references outside a header); `A2ACredentialTest` (the same sole-reference rule on the A2A path);
+and `ConnectionExceptionMapperTest`, which asserts every `Reason` is covered so the status table
+cannot silently fall behind the enum.
+
+
+
+---
+
+
+
 ## feat(connections): one credential model for every outbound call — Phases 2, 4 and 5 of the SaaS connectors plan (2026-08-21)
 
 **Repo:** EDDI (`feat/saas-connectors`)

@@ -14,6 +14,7 @@ import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
+import ai.labs.eddi.engine.security.ResolutionPrincipal;
 
 import java.io.Serializable;
 import java.time.Instant;
@@ -215,6 +216,24 @@ public interface IConversationMemory extends Serializable {
         return null;
     }
     default void setHitlPendingToolCalls(PendingToolCallBatch batch) {
+    }
+
+    /**
+     * How this conversation's {@link #getUserId()} came to be, fixed when the
+     * conversation was created and persisted with it.
+     * <p>
+     * Persisted because the decision it feeds happens much later than the moment it
+     * can be established: a HITL resume days after creation runs on a request that
+     * belongs to the approver, so there is nothing left on that thread to judge the
+     * conversation's owner by. {@code null} — a conversation created before this
+     * was recorded — deliberately reads as NOT verified: pre-upgrade conversations
+     * opened from the self-asserting surfaces are precisely the population that
+     * must not be grandfathered into per-user credentials.
+     */
+    default ResolutionPrincipal.Provenance getResolutionProvenance() {
+        return null;
+    }
+    default void setResolutionProvenance(ResolutionPrincipal.Provenance provenance) {
     }
 
     /**

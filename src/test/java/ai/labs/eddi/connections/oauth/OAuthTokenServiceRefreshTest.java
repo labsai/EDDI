@@ -16,20 +16,24 @@ import ai.labs.eddi.connections.grants.ConnectionGrant;
 import ai.labs.eddi.connections.grants.InMemoryConnectionGrantStore;
 import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.secrets.SecretResolver;
+import ai.labs.eddi.secrets.model.EncryptedDek;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -37,8 +41,12 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -55,6 +63,20 @@ class OAuthTokenServiceRefreshTest {
     private static final String CONNECTION = "drive";
     private static final String PRINCIPAL = "alice";
 
+    /**
+     * The generation the vault seals with here. A grant records this, not the bare
+     * tenant id — which named no key at all, so after a rotation the ciphertext
+     * could only be opened by whichever generation happened to be newest at read
+     * time.
+     */
+    private static final String ACTIVE_DEK = EncryptedDek.dekId(TENANT, 2);
+
+    /**
+     * What a seeded grant was sealed under: an older generation, the ordinary state
+     * of a row a rotation sweep has not reached yet.
+     */
+    private static final String STORED_DEK = EncryptedDek.dekId(TENANT, 1);
+
     private InMemoryConnectionGrantStore grantStore;
     private OAuthTokenClient tokenClient;
     private ISecretProvider secretProvider;
@@ -69,8 +91,10 @@ class OAuthTokenServiceRefreshTest {
 
         // A trivially reversible "cipher": the property under test is the refresh
         // protocol, not the crypto, and a real vault here would need a master key.
+        // It answers with a generation-qualified dekId because that is what the real
+        // vault returns, and the grant is expected to store it verbatim.
         lenient().when(secretProvider.seal(anyString(), anyString()))
-                .thenAnswer(i -> new ISecretProvider.SealedValue("sealed:" + i.getArgument(1), "iv"));
+                .thenAnswer(i -> new ISecretProvider.SealedValue("sealed:" + i.getArgument(1), "iv", ACTIVE_DEK));
         lenient().when(secretProvider.unseal(anyString(), any()))
                 .thenAnswer(i -> i.<ISecretProvider.SealedValue>getArgument(1).ciphertext().substring("sealed:".length()));
     }
@@ -109,6 +133,7 @@ class OAuthTokenServiceRefreshTest {
         grant.setAccessTokenIv("iv");
         grant.setEncryptedRefreshToken("sealed:old-refresh");
         grant.setRefreshTokenIv("iv");
+        grant.setDekId(STORED_DEK);
         grant.setExpiresAt(Instant.now().minusSeconds(60));
         grant.setStatus(ConnectionGrant.Status.ACTIVE);
         grantStore.seed(grant);
@@ -186,19 +211,25 @@ class OAuthTokenServiceRefreshTest {
 
     @Test
     @DisplayName("a live access token is returned without contacting the provider at all")
-    void usesUnexpiredToken() {
+    void usesUnexpiredToken() throws Exception {
         var grant = new ConnectionGrant();
         grant.setTenantId(TENANT);
         grant.setConnectionName(CONNECTION);
         grant.setPrincipal(PRINCIPAL);
         grant.setEncryptedAccessToken("sealed:still-good");
         grant.setAccessTokenIv("iv");
+        grant.setDekId(STORED_DEK);
         grant.setExpiresAt(Instant.now().plus(Duration.ofHours(1)));
         grant.setStatus(ConnectionGrant.Status.ACTIVE);
         grantStore.seed(grant);
 
         assertEquals("still-good", service().accessToken(connection(), PRINCIPAL));
         assertEquals(0, tokenRequests.get());
+
+        var sealed = ArgumentCaptor.forClass(ISecretProvider.SealedValue.class);
+        verify(secretProvider).unseal(eq(TENANT), sealed.capture());
+        assertEquals(STORED_DEK, sealed.getValue().dekId(),
+                "a row the last rotation has not swept yet must be opened with the generation it names, not with whichever is newest");
     }
 
     @Test
@@ -230,7 +261,7 @@ class OAuthTokenServiceRefreshTest {
 
     @Test
     @DisplayName("a provider that does not rotate keeps the refresh token it already had")
-    void keepsRefreshTokenWhenProviderDoesNotRotate() {
+    void keepsRefreshTokenWhenProviderDoesNotRotate() throws Exception {
         seedExpiredGrant();
         when(tokenClient.refresh(any(), anyString(), anyString()))
                 .thenReturn(new TokenResponse("fresh-access", null, Duration.ofHours(1), List.of()));
@@ -239,6 +270,107 @@ class OAuthTokenServiceRefreshTest {
 
         assertEquals("sealed:old-refresh", grantStore.find(TENANT, CONNECTION, PRINCIPAL).orElseThrow().getEncryptedRefreshToken(),
                 "overwriting it with null would make the NEXT refresh impossible");
+        verify(secretProvider, times(1)).unseal(eq(TENANT), any());
+    }
+
+    @Test
+    @DisplayName("the carried-forward refresh token is the plaintext in hand, never a second unseal")
+    void doesNotUnsealTheRefreshTokenTwice() throws Exception {
+        // The second unseal had a null-returning failure path, so one vault blip in
+        // the window between the two calls persisted a grant with NO refresh token
+        // and the next refresh failed terminally — a reconnect demanded for an error
+        // that fixes itself.
+        seedExpiredGrant();
+        when(tokenClient.refresh(any(), anyString(), anyString()))
+                .thenReturn(new TokenResponse("fresh-access", null, Duration.ofHours(1), List.of()));
+        // doAnswer/doReturn, not when(...): when() CALLS the mock, and the answer
+        // installed in setUp dereferences its argument, so re-stubbing this way would
+        // throw inside the stubbing line itself.
+        doAnswer(i -> i.<ISecretProvider.SealedValue>getArgument(1).ciphertext().substring("sealed:".length()))
+                .doReturn(null)
+                .when(secretProvider).unseal(anyString(), any());
+
+        assertEquals("fresh-access", service().accessToken(connection(), PRINCIPAL));
+
+        assertEquals("sealed:old-refresh", grantStore.find(TENANT, CONNECTION, PRINCIPAL).orElseThrow().getEncryptedRefreshToken(),
+                "a second unseal would have returned null here and silently dropped the refresh token");
+    }
+
+    @Test
+    @DisplayName("a refreshed grant records the DEK generation that sealed it")
+    void recordsTheSealingDekGeneration() {
+        seedExpiredGrant();
+        when(tokenClient.refresh(any(), anyString(), anyString()))
+                .thenReturn(new TokenResponse("fresh-access", "new-refresh", Duration.ofHours(1), List.of()));
+
+        service().accessToken(connection(), PRINCIPAL);
+
+        assertEquals(ACTIVE_DEK, grantStore.find(TENANT, CONNECTION, PRINCIPAL).orElseThrow().getDekId(),
+                "the tenant id named no key at all; the row must say which generation opens its ciphertext");
+    }
+
+    @Test
+    @DisplayName("a short-lived token is usable at all: the expiry margin never exceeds half its lifetime")
+    void halvesTheMarginForAShortLivedToken() {
+        // A provider answering expires_in=20 is legal — RFC 6749 sets no floor. With
+        // a flat 30-second margin such a token is unusable the instant it is stored,
+        // so every call refreshes and the connection hammers the token endpoint.
+        seedExpiredGrant();
+        when(tokenClient.refresh(any(), anyString(), anyString())).thenAnswer(invocation -> {
+            tokenRequests.incrementAndGet();
+            return new TokenResponse("short-lived", "new-refresh", Duration.ofSeconds(20), List.of());
+        });
+        OAuthTokenService service = service();
+
+        assertEquals("short-lived", service.accessToken(connection(), PRINCIPAL));
+        assertEquals("short-lived", service.accessToken(connection(), PRINCIPAL));
+
+        assertEquals(1, tokenRequests.get(), "the second call must adopt the token it just stored, not refresh again");
+    }
+
+    @Test
+    @DisplayName("a REFRESH_FAILED client_credentials grant is re-minted, not left dead")
+    void reMintsARejectedServiceGrant() {
+        // Re-authenticating IS the client_credentials renewal path: there is no
+        // refresh token that could have gone stale and no human to bring back. Left
+        // terminal, one rejected mint parks a row no API can clear.
+        var connection = connection();
+        connection.setAuthType(AuthType.OAUTH2_CLIENT_CREDENTIALS);
+        connection.setBinding(Binding.SERVICE);
+        var dead = new ConnectionGrant();
+        dead.setTenantId(TENANT);
+        dead.setConnectionName(CONNECTION);
+        dead.setPrincipal(ConnectionResolver.SERVICE_PRINCIPAL);
+        dead.setDekId(STORED_DEK);
+        dead.setStatus(ConnectionGrant.Status.REFRESH_FAILED);
+        grantStore.seed(dead);
+        when(tokenClient.clientCredentials(any(), anyString()))
+                .thenReturn(new TokenResponse("re-minted", null, Duration.ofHours(1), List.of()));
+
+        assertEquals("re-minted", service().accessToken(connection, ConnectionResolver.SERVICE_PRINCIPAL));
+
+        var stored = grantStore.find(TENANT, CONNECTION, ConnectionResolver.SERVICE_PRINCIPAL).orElseThrow();
+        assertEquals(ConnectionGrant.Status.ACTIVE, stored.getStatus(), "the upsert must replace the dead row, not add a second one beside it");
+        assertEquals(1, grantStore.findByPrincipal(TENANT, ConnectionResolver.SERVICE_PRINCIPAL).size());
+    }
+
+    @Test
+    @DisplayName("a REVOKED client_credentials grant stays refused, because somebody decided it should stop working")
+    void doesNotReMintARevokedServiceGrant() {
+        var connection = connection();
+        connection.setAuthType(AuthType.OAUTH2_CLIENT_CREDENTIALS);
+        connection.setBinding(Binding.SERVICE);
+        var revoked = new ConnectionGrant();
+        revoked.setTenantId(TENANT);
+        revoked.setConnectionName(CONNECTION);
+        revoked.setPrincipal(ConnectionResolver.SERVICE_PRINCIPAL);
+        revoked.setStatus(ConnectionGrant.Status.REVOKED);
+        grantStore.seed(revoked);
+
+        var error = assertThrows(ConnectionException.class,
+                () -> service().accessToken(connection, ConnectionResolver.SERVICE_PRINCIPAL));
+
+        assertEquals(ConnectionException.Reason.GRANT_UNUSABLE, error.getReason());
     }
 
     @Test
@@ -305,12 +437,14 @@ class OAuthTokenServiceRefreshTest {
 
     @Test
     @DisplayName("a grant deleted mid-refresh fails fast as NOT_CONNECTED, not after the deadline")
-    void deletedGrantFailsFast() throws Exception {
+    void deletedGrantFailsFast() {
+        // The row has to still be there when the caller starts, or this never
+        // reaches the await path and merely re-tests "there was never a grant". The
+        // disconnect lands on the second read: the one the waiter makes while
+        // polling for somebody else's refresh.
+        grantStore = new InterferingGrantStore(2, store -> store.delete(TENANT, CONNECTION, PRINCIPAL));
         seedExpiredGrant();
-        // Claim the lease as somebody else, so this caller takes the await path, and
-        // delete the row underneath it — a disconnect landing mid-refresh.
         grantStore.claimRefresh(TENANT, CONNECTION, PRINCIPAL, "another-replica", Instant.now().plus(Duration.ofSeconds(60)));
-        grantStore.delete(TENANT, CONNECTION, PRINCIPAL);
 
         long start = System.nanoTime();
         var error = assertThrows(ConnectionException.class, () -> service().accessToken(connection(), PRINCIPAL));
@@ -320,5 +454,53 @@ class OAuthTokenServiceRefreshTest {
                 "waiting cannot bring a deleted grant back, and TOKEN_ENDPOINT_UNAVAILABLE names the wrong cause");
         assertTrue(elapsedMillis < OAuthTokenService.AWAIT_TIMEOUT.toMillis() / 2,
                 "must not spin to the deadline: took " + elapsedMillis + "ms");
+    }
+
+    @Test
+    @DisplayName("a lease given back with no token written is claimed immediately, not waited out")
+    void takesOverWhenTheClaimantReleasesWithoutWriting() {
+        // The claimant failed transiently, or died. No token is coming, so polling
+        // on burns the whole await timeout — a minute of dead air for every waiter
+        // after one provider hiccup — and then reports the wrong reason.
+        grantStore = new InterferingGrantStore(2,
+                store -> store.releaseRefresh(TENANT, CONNECTION, PRINCIPAL, "another-replica"));
+        seedExpiredGrant();
+        grantStore.claimRefresh(TENANT, CONNECTION, PRINCIPAL, "another-replica", Instant.now().plus(Duration.ofSeconds(60)));
+        when(tokenClient.refresh(any(), anyString(), anyString())).thenAnswer(invocation -> {
+            tokenRequests.incrementAndGet();
+            return new TokenResponse("fresh-access", "new-refresh", Duration.ofHours(1), List.of());
+        });
+
+        long start = System.nanoTime();
+        assertEquals("fresh-access", service().accessToken(connection(), PRINCIPAL));
+        long elapsedMillis = (System.nanoTime() - start) / 1_000_000;
+
+        assertEquals(1, tokenRequests.get(), "the waiter must take the lease over and refresh, exactly once");
+        assertTrue(elapsedMillis < OAuthTokenService.AWAIT_TIMEOUT.toMillis() / 2,
+                "must not wait out the deadline for a refresh nobody is performing: took " + elapsedMillis + "ms");
+    }
+
+    /**
+     * Changes the row underneath a caller that is already waiting, on the nth read.
+     * Deterministic where a background thread would race the poll interval.
+     */
+    private static final class InterferingGrantStore extends InMemoryConnectionGrantStore {
+
+        private final int onRead;
+        private final Consumer<InMemoryConnectionGrantStore> interference;
+        private int reads;
+
+        private InterferingGrantStore(int onRead, Consumer<InMemoryConnectionGrantStore> interference) {
+            this.onRead = onRead;
+            this.interference = interference;
+        }
+
+        @Override
+        public synchronized Optional<ConnectionGrant> find(String tenantId, String connectionName, String principal) {
+            if (++reads == onRead) {
+                interference.accept(this);
+            }
+            return super.find(tenantId, connectionName, principal);
+        }
     }
 }

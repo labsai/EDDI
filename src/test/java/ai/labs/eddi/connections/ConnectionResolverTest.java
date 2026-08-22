@@ -13,8 +13,11 @@ import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.connections.model.ConnectionReference;
 import ai.labs.eddi.engine.security.CallerIdentity;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
+import ai.labs.eddi.engine.security.ResolutionPrincipal;
+import ai.labs.eddi.engine.security.ResolutionPrincipalContext;
 import ai.labs.eddi.secrets.SecretResolver;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -35,6 +38,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -52,6 +56,7 @@ class ConnectionResolverTest {
     private GlobalVariableResolver globalVariableResolver;
     private CallerIdentityContext callerIdentityContext;
     private AccessTokenSupplier accessTokenSupplier;
+    private ResolutionPrincipalContext resolutionPrincipalContext;
 
     @BeforeEach
     void setUp() {
@@ -60,16 +65,37 @@ class ConnectionResolverTest {
         globalVariableResolver = mock(GlobalVariableResolver.class);
         callerIdentityContext = mock(CallerIdentityContext.class);
         accessTokenSupplier = mock(AccessTokenSupplier.class);
+        resolutionPrincipalContext = new ResolutionPrincipalContext();
 
         lenient().when(globalVariableResolver.resolveValue(anyString())).thenAnswer(i -> i.getArgument(0));
         lenient().when(secretResolver.resolveValue(anyString()))
                 .thenAnswer(i -> i.<String>getArgument(0).replace("${vault:jira-token}", "live-token").replace("${vault:jira-password}", "hunter2"));
     }
 
+    @AfterEach
+    void unbindPrincipal() {
+        // The binding is a ThreadLocal and JUnit reuses the thread, so a leaked
+        // principal would silently authorise the next test — which for PER_USER is
+        // the difference between proving a refusal and proving nothing.
+        resolutionPrincipalContext.clear();
+    }
+
     private ConnectionResolver resolver(boolean authorizationEnabled) {
-        return new ConnectionResolver(registry, new CredentialReferenceResolver(secretResolver, globalVariableResolver), callerIdentityContext,
-                new SimpleMeterRegistry(),
-                accessTokenSupplier, authorizationEnabled);
+        var resolver = new ConnectionResolver(registry, new CredentialReferenceResolver(secretResolver, globalVariableResolver),
+                callerIdentityContext, new SimpleMeterRegistry(), accessTokenSupplier, authorizationEnabled);
+        resolver.resolutionPrincipalContext = resolutionPrincipalContext;
+        return resolver;
+    }
+
+    /**
+     * Binds the principal the pipeline would have bound for this turn.
+     * <p>
+     * Every PER_USER case has to state this explicitly, which is the point: the
+     * credential follows the CONVERSATION, and a test that did not say whose
+     * conversation it is would be describing a turn that cannot happen.
+     */
+    private void boundPrincipal(String userId, ResolutionPrincipal.Provenance provenance) {
+        resolutionPrincipalContext.bind(new ResolutionPrincipal(userId, provenance));
     }
 
     private void register(ConnectionConfiguration connection) {
@@ -220,20 +246,42 @@ class ConnectionResolverTest {
         }
 
         @Test
-        @DisplayName("with authorization disabled it refuses outright — a self-asserted userId is not an identity")
-        void refusesWithoutAuthorization() {
+        @DisplayName("a self-asserted user id is refused — nothing authenticated it")
+        void refusesSelfAssertedPrincipal() {
+            // The /v1 adapter in api-key mode believes a caller-supplied user id
+            // verbatim. A conversation opened that way carries a real user id that
+            // nobody verified, and releasing that user's stored SaaS tokens to whoever
+            // asserted it is the whole hole this provenance exists to close.
             register(perUserConnection());
-            when(callerIdentityContext.current()).thenReturn(new CallerIdentity(null, "alice", "https://eddi.example"));
+            boundPrincipal("alice", ResolutionPrincipal.Provenance.SELF_ASSERTED);
 
-            var error = assertThrows(ConnectionException.class, () -> resolver(false).resolve("${connection:drive}", ALLOWED_TARGET, "alice"));
+            var error = assertThrows(ConnectionException.class, () -> resolver(true).resolve("${connection:drive}", ALLOWED_TARGET, "alice"));
 
             assertEquals(ConnectionException.Reason.NO_VERIFIED_PRINCIPAL, error.getReason());
-            assertTrue(error.getMessage().contains("verified"), error.getMessage());
+            verify(accessTokenSupplier, never()).accessToken(any(), any());
+        }
+
+        @Test
+        @DisplayName("a connection whose users are authenticated upstream may opt in to that")
+        void honoursTheProxyOptIn() {
+            // Delegating authentication to a front proxy is a real deployment, so the
+            // refusal above has an escape hatch — per connection, default off, so
+            // enabling it is a decision about one provider's tokens.
+            var connection = perUserConnection();
+            connection.setAllowUnverifiedPrincipal(true);
+            register(connection);
+            boundPrincipal("alice", ResolutionPrincipal.Provenance.SELF_ASSERTED);
+            when(accessTokenSupplier.accessToken(any(), any())).thenReturn("ya29.token");
+
+            assertEquals("Bearer ya29.token", resolver(true).resolve("${connection:drive}", ALLOWED_TARGET, "alice").headerValue());
+            verify(accessTokenSupplier).accessToken(any(), eq("alice"));
         }
 
         @Test
         @DisplayName("with no resolvable user it refuses rather than falling back to the service grant")
         void refusesWithoutPrincipal() {
+            // A scheduled run or a trigger: no conversation principal is bound, so
+            // there is nobody to spend a credential on behalf of.
             register(perUserConnection());
             when(callerIdentityContext.current()).thenReturn(null);
 
@@ -244,10 +292,10 @@ class ConnectionResolverTest {
         }
 
         @Test
-        @DisplayName("the verified caller's own grant is used when the turn has no other owner")
-        void resolvesForVerifiedCaller() {
+        @DisplayName("a verified conversation owner resolves their own grant")
+        void resolvesForVerifiedOwner() {
             register(perUserConnection());
-            when(callerIdentityContext.current()).thenReturn(new CallerIdentity("jwt", "alice", "https://eddi.example"));
+            boundPrincipal("alice", ResolutionPrincipal.Provenance.VERIFIED);
             when(accessTokenSupplier.accessToken(any(), any())).thenReturn("ya29.token");
 
             var credential = resolver(true).resolve("${connection:drive}", ALLOWED_TARGET, null);
@@ -257,20 +305,37 @@ class ConnectionResolverTest {
         }
 
         @Test
-        @DisplayName("the CONVERSATION's owner wins over whoever is driving the request")
+        @DisplayName("the CONVERSATION's owner is used, not whoever is driving the request")
         void conversationOwnerBeatsBoundCaller() {
             // This is the HITL resume. The thread is bound to the APPROVER - an
             // administrator, by design - while the call being approved belongs to the
-            // user who asked for it. Preferring the thread ran the approved call
-            // against the approver's own SaaS account: the wrong data, and an approval
-            // that did not mean what the approver was shown.
+            // user who asked for it. Reading the thread ran the approved call against
+            // the approver's own SaaS account: the wrong data, and an approval that
+            // did not mean what the approver was shown.
             register(perUserConnection());
+            boundPrincipal("alice", ResolutionPrincipal.Provenance.VERIFIED);
             when(callerIdentityContext.current()).thenReturn(new CallerIdentity("jwt", "approver-admin", "https://eddi.example"));
             when(accessTokenSupplier.accessToken(any(), any())).thenReturn("ya29.token");
 
             resolver(true).resolve("${connection:drive}", ALLOWED_TARGET, "alice");
 
             verify(accessTokenSupplier).accessToken(any(), eq("alice"));
+            verify(accessTokenSupplier, never()).accessToken(any(), eq("approver-admin"));
+        }
+
+        @Test
+        @DisplayName("two disagreeing identities are refused, never reconciled by picking one")
+        void refusesWhenTheOverrideDisagrees() {
+            // The bound principal says the turn belongs to alice; the call was built
+            // for bob. One of the two is wrong and nothing here can tell which, so
+            // spending either user's credential would be a guess.
+            register(perUserConnection());
+            boundPrincipal("alice", ResolutionPrincipal.Provenance.VERIFIED);
+
+            var error = assertThrows(ConnectionException.class, () -> resolver(true).resolve("${connection:drive}", ALLOWED_TARGET, "bob"));
+
+            assertEquals(ConnectionException.Reason.NO_VERIFIED_PRINCIPAL, error.getReason());
+            verify(accessTokenSupplier, never()).accessToken(any(), any());
         }
 
         @Test
@@ -284,6 +349,8 @@ class ConnectionResolverTest {
         @Test
         @DisplayName("a SERVICE connection resolves under the service principal")
         void serviceBindingUsesServicePrincipal() {
+            // Deliberately no bound principal: a SERVICE connection is one credential
+            // for everybody, so it must resolve on a scheduled run too.
             var connection = perUserConnection();
             connection.setAuthType(AuthType.OAUTH2_CLIENT_CREDENTIALS);
             connection.setBinding(Binding.SERVICE);

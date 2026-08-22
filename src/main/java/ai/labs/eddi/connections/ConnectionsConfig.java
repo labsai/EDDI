@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.connections;
 
+import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -84,7 +85,12 @@ public class ConnectionsConfig {
             return false;
         }
         if (candidate.startsWith("/")) {
-            return true;
+            // Parseability is part of "allowed". The redirect that eventually uses
+            // this value builds a URI from it, and that happens in the CALLBACK —
+            // after the single-use state is consumed and the grant is stored. A path
+            // carrying an unencoded space is refused here, where the user can simply
+            // be sent to the default page, rather than there, where they cannot.
+            return isParseable(candidate);
         }
         if (publicBaseUrl.isEmpty()) {
             return false;
@@ -95,9 +101,25 @@ public class ConnectionsConfig {
             if (target.getScheme() == null || target.getHost() == null) {
                 return false;
             }
+            // Each side's port is folded against its OWN scheme. Raw ports would make
+            // https://host and https://host:443 two different origins, so a base URL
+            // written either way rejects a returnTo written the other way — and the
+            // user lands on the default page right after authenticating, with nothing
+            // saying why.
             return target.getScheme().equalsIgnoreCase(base.getScheme()) && target.getHost().equalsIgnoreCase(base.getHost())
-                    && target.getPort() == base.getPort();
+                    && ConnectionConfiguration.normalizePort(target.getScheme(), target.getPort()) == ConnectionConfiguration
+                            .normalizePort(base.getScheme(), base.getPort());
         } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /** Whether {@code URI.create} — what the redirect uses — accepts this value. */
+    private static boolean isParseable(String candidate) {
+        try {
+            URI.create(candidate);
+            return true;
+        } catch (IllegalArgumentException e) {
             return false;
         }
     }

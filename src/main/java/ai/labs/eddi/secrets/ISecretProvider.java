@@ -100,14 +100,21 @@ public interface ISecretProvider {
     List<SecretMetadata> listKeys(String tenantId) throws SecretProviderException;
 
     /**
-     * Rotate the Data Encryption Key (DEK) for a specific tenant. Generates a new
-     * DEK, re-encrypts all secrets for the tenant, and replaces the old DEK.
+     * Rotate the Data Encryption Key (DEK) for a specific tenant: adds a new DEK
+     * generation, then sweeps existing sealed data onto it.
+     * <p>
+     * The old generations are kept, not replaced, so a row that has not been swept
+     * yet still names a key that exists and decrypts. The single irreversible step
+     * is the insert of the new generation; everything after it is idempotent and
+     * safe to re-run.
      *
      * @param tenantId
      *            the tenant whose DEK to rotate
-     * @return the number of secrets re-encrypted
+     * @return the number of secrets moved onto the new generation
      * @throws SecretProviderException
-     *             if rotation fails
+     *             if the new generation could not be installed, or if it was
+     *             installed but some rows are still on an older one — the message
+     *             says which case it is
      */
     int rotateDek(String tenantId) throws SecretProviderException;
 
@@ -163,12 +170,28 @@ public interface ISecretProvider {
     String unseal(String tenantId, SealedValue sealed) throws SecretProviderException;
 
     /**
-     * Ciphertext plus its initialization vector.
+     * Ciphertext, its initialization vector, and the name of the key that sealed
+     * it.
+     * <p>
+     * The {@code dekId} is what makes rotation survivable: a value carries the DEK
+     * generation it was sealed under, so it stays readable after the tenant moves
+     * to a newer generation and until a sweep has re-sealed it. Callers persist it
+     * alongside the ciphertext and hand it back on {@link #unseal}.
      * <p>
      * {@code toString} is overridden because this travels through log statements
      * and debugger views on the token-refresh path.
      */
-    record SealedValue(String ciphertext, String iv) {
+    record SealedValue(String ciphertext, String iv, String dekId) {
+
+        /**
+         * For ciphertext whose sealing key is not recorded — everything written before
+         * generations existed. It reads as generation 1, which is what those rows are
+         * actually sealed with.
+         */
+        public SealedValue(String ciphertext, String iv) {
+            this(ciphertext, iv, null);
+        }
+
         @Override
         public String toString() {
             return "SealedValue[<REDACTED>]";

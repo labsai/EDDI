@@ -79,20 +79,27 @@ public class ConnectionStore extends AbstractResourceStore<ConnectionConfigurati
         if (name == null || name.isBlank()) {
             return null;
         }
-        String effectiveTenant = tenantId == null || tenantId.isBlank() ? "default" : tenantId;
+        String effectiveTenant = ConnectionConfiguration.effectiveTenant(tenantId);
         try {
-            List<DocumentDescriptor> descriptors = descriptorStore.readDescriptors(RESOURCE_TYPE, "", 0, IDescriptorStore.NO_LIMIT, false);
+            // null rather than "": a blank filter is still a filter, and the descriptor
+            // store turns it into five OR'd regex clauses over fields a connection
+            // lookup does not consult.
+            List<DocumentDescriptor> descriptors = descriptorStore.readDescriptors(RESOURCE_TYPE, null, 0, IDescriptorStore.NO_LIMIT, false);
             if (descriptors == null) {
                 return null;
             }
             for (DocumentDescriptor descriptor : descriptors) {
-                ConnectionConfiguration candidate = readQuietly(descriptor.getResource());
+                URI resourceUri = descriptor.getResource();
+                if (resourceUri == null) {
+                    continue;
+                }
+                String id = idOf(resourceUri);
+                ConnectionConfiguration candidate = readIfPresent(id, resourceUri);
                 if (candidate == null) {
                     continue;
                 }
-                String candidateTenant = candidate.getTenantId() == null ? "default" : candidate.getTenantId();
-                if (name.equals(candidate.getName()) && effectiveTenant.equals(candidateTenant)) {
-                    return new Match(idOf(descriptor.getResource()), candidate);
+                if (name.equals(candidate.getName()) && effectiveTenant.equals(ConnectionConfiguration.effectiveTenant(candidate))) {
+                    return new Match(id, candidate);
                 }
             }
             return null;
@@ -102,23 +109,24 @@ public class ConnectionStore extends AbstractResourceStore<ConnectionConfigurati
     }
 
     /**
-     * Reads one descriptor's resource, tolerating a dangling reference.
+     * Reads one descriptor's resource, tolerating a dangling reference but never a
+     * store failure.
      * <p>
-     * A descriptor whose resource has been deleted must not abort the scan — that
-     * would make one stale index entry break credential resolution for every
-     * connection in the deployment.
+     * The two cases look alike here and could not be more different downstream. A
+     * descriptor whose resource has been deleted must not abort the scan — one
+     * stale index entry would break credential resolution for every connection in
+     * the deployment. A store that could not answer is the opposite: swallowing it
+     * turns "the database blinked" into "no connection by that name", and
+     * {@code ConnectionRegistry} caches an absent connection for the whole TTL, so
+     * one transient read error fails every turn that uses a live connection for a
+     * minute after the database recovered. That one propagates, and the registry
+     * deliberately does not cache what it never got an answer for.
      */
-    private ConnectionConfiguration readQuietly(URI resourceUri) {
-        if (resourceUri == null) {
-            return null;
-        }
+    private ConnectionConfiguration readIfPresent(String id, URI resourceUri) throws ResourceStoreException {
         try {
-            return read(idOf(resourceUri), versionOf(resourceUri));
+            return read(id, versionOf(resourceUri));
         } catch (ResourceNotFoundException e) {
             LOGGER.debugv("Connection descriptor references a missing resource: {0}", resourceUri);
-            return null;
-        } catch (ResourceStoreException e) {
-            LOGGER.warnv("Failed to read connection {0}: {1}", resourceUri, e.getMessage());
             return null;
         }
     }

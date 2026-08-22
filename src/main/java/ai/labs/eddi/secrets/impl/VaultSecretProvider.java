@@ -48,8 +48,13 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * is governed by {@code allowedAgents} (see below)</li>
  * </ul>
  * <p>
- * <b>Key rotation:</b> Supports both DEK rotation (per-tenant, re-encrypts all
- * secrets) and KEK rotation (re-encrypts all DEKs with a new master key).
+ * <b>Key rotation:</b> Supports both DEK rotation and KEK rotation. DEK
+ * rotation is per-tenant and <b>additive</b>: it installs a new DEK generation
+ * and then sweeps existing rows onto it, rather than replacing a key underneath
+ * data that names it. Every ciphertext records the generation that sealed it,
+ * so a sweep that stops halfway leaves every row readable and the rotation safe
+ * to re-run. KEK rotation re-wraps every generation of every tenant with a new
+ * master key and does not touch any ciphertext.
  * <p>
  * <b>Access model:</b> {@code allowedAgents} is not consulted here — this class
  * resolves secrets and does not police who asked. It is checked one level up,
@@ -166,8 +171,10 @@ public class VaultSecretProvider implements ISecretProvider {
 
             EncryptedSecret secret = secretOpt.get();
 
-            // Decrypt: KEK → DEK → plaintext
-            byte[] dek = getOrCreateDek(reference.tenantId());
+            // Decrypt: KEK → the DEK generation this row names → plaintext. Not the
+            // newest generation: a row the last rotation's sweep has not reached yet is
+            // still sealed with an older one, and that one still exists.
+            byte[] dek = dekFor(reference.tenantId(), secret.getDekId());
             String plaintext = EnvelopeCrypto.decrypt(secret.getEncryptedValue(), secret.getIv(), dek);
 
             // Update last accessed timestamp (best-effort, fire-and-forget)
@@ -208,10 +215,10 @@ public class VaultSecretProvider implements ISecretProvider {
         Timer.Sample sample = Timer.start(meterRegistry);
 
         try {
-            byte[] dek = getOrCreateDek(reference.tenantId());
+            ActiveDek dek = activeDek(reference.tenantId());
 
             // Encrypt the plaintext with the tenant's DEK
-            EnvelopeCrypto.EncryptionResult result = EnvelopeCrypto.encrypt(plaintext, dek);
+            EnvelopeCrypto.EncryptionResult result = EnvelopeCrypto.encrypt(plaintext, dek.key());
             String checksum = EnvelopeCrypto.sha256Hex(plaintext);
 
             // Check if this is an update (rotation) or new secret
@@ -219,7 +226,7 @@ public class VaultSecretProvider implements ISecretProvider {
             Instant now = Instant.now();
 
             EncryptedSecret secret = new EncryptedSecret(existingOpt.map(EncryptedSecret::getId).orElse(UUID.randomUUID().toString()),
-                    reference.tenantId(), reference.keyName(), result.ciphertext(), result.iv(), reference.tenantId(), checksum, description,
+                    reference.tenantId(), reference.keyName(), result.ciphertext(), result.iv(), dek.dekId(), checksum, description,
                     allowedAgents != null ? allowedAgents : List.of("*"), existingOpt.map(EncryptedSecret::getCreatedAt).orElse(now), null,
                     existingOpt.isPresent() ? now : null);
 
@@ -294,82 +301,160 @@ public class VaultSecretProvider implements ISecretProvider {
     /**
      * {@inheritDoc}
      * <p>
-     * Generates a new DEK, re-encrypts all secrets for the tenant with the new DEK,
-     * and replaces the old DEK. If any re-encryption fails, the operation aborts
-     * and an exception is thrown.
+     * Three phases, and only the middle one is irreversible:
+     * <ol>
+     * <li><b>Verify</b> — every existing generation is opened with the current KEK,
+     * so a wrong master key is discovered before anything is written.</li>
+     * <li><b>Commit</b> — the next generation is <em>inserted</em>. One statement,
+     * guarded by a unique key on (tenant, generation), so two racing rotations
+     * produce one winner and one clean refusal. From here on new values seal with
+     * the new key while every existing row still names a generation that exists and
+     * decrypts.</li>
+     * <li><b>Sweep</b> — rows are moved onto the new generation one at a time, each
+     * write guarded on the state the row was read in. A row the sweep cannot move
+     * is reported, not lost: it keeps working, and re-running the rotation picks it
+     * up.</li>
+     * </ol>
+     * Old generations are never deleted here. Deleting one is what would make a
+     * partially swept tenant unreadable, which is the failure this design exists to
+     * remove.
      */
     @Override
     public int rotateDek(String tenantId) throws SecretProviderException {
         ensureAvailable();
         rotateCounter.increment();
 
+        int nextGeneration;
+        byte[] newDek;
         try {
-            // 1. Verify: decrypt all secrets with old DEK (validates key before mutating
-            // anything)
-            var dekOpt = persistence.findDek(tenantId);
-            if (dekOpt.isEmpty()) {
+            // 1. Verify. Every generation, not just the newest: the sweep below has to
+            // open older ones, and finding out mid-sweep that the KEK cannot is a
+            // discovery that belongs before the commit point.
+            List<EncryptedDek> generations = persistence.listDeks(tenantId);
+            if (generations.isEmpty()) {
                 throw new SecretProviderException("No DEK found for tenant " + tenantId + " — nothing to rotate");
             }
-
-            byte[] oldDek = EnvelopeCrypto.decryptDek(dekOpt.get().getEncryptedDek(), dekOpt.get().getIv(), kek);
-            List<EncryptedSecret> secrets = persistence.listSecretsByTenant(tenantId);
-
-            // 2. Generate new DEK
-            byte[] newDek = EnvelopeCrypto.generateDek();
-
-            // 3. Prepare: decrypt all and re-encrypt in memory (no writes yet)
-            Instant now = Instant.now();
-            List<SimpleEntry<EncryptedSecret, EnvelopeCrypto.EncryptionResult>> reEncrypted = new ArrayList<>();
-            for (EncryptedSecret secret : secrets) {
-                String plaintext = EnvelopeCrypto.decrypt(secret.getEncryptedValue(), secret.getIv(), oldDek);
-                EnvelopeCrypto.EncryptionResult enc = EnvelopeCrypto.encrypt(plaintext, newDek);
-                reEncrypted.add(new SimpleEntry<>(secret, enc));
+            int highest = 0;
+            for (EncryptedDek generation : generations) {
+                EnvelopeCrypto.decryptDek(generation.getEncryptedDek(), generation.getIv(), kek);
+                highest = Math.max(highest, generation.getGeneration());
             }
 
-            // 4. Commit: write all re-encrypted secrets, then replace the DEK
-            for (var entry : reEncrypted) {
-                EncryptedSecret secret = entry.getKey();
-                EnvelopeCrypto.EncryptionResult enc = entry.getValue();
-                secret.setEncryptedValue(enc.ciphertext());
-                secret.setIv(enc.iv());
-                secret.setLastRotatedAt(now);
-                persistence.upsertSecret(secret);
+            // 2. Commit. The single atomic step in the whole operation.
+            nextGeneration = highest + 1;
+            newDek = EnvelopeCrypto.generateDek();
+            EnvelopeCrypto.EncryptionResult enc = EnvelopeCrypto.encryptDek(newDek, kek);
+            EncryptedDek entity = new EncryptedDek(UUID.randomUUID().toString(), tenantId, nextGeneration, enc.ciphertext(), enc.iv(),
+                    Instant.now());
+            if (!persistence.insertDek(entity)) {
+                throw new SecretProviderException("Generation " + nextGeneration + " already exists for tenant '" + sanitize(tenantId)
+                        + "'. Another rotation installed it first; nothing was changed by this one.");
             }
-
-            // 5. Re-seal everything ELSE that was encrypted with this DEK, while it is
-            // still the tenant's DEK. Skipping this step is what made rotation
-            // destructive: OAuth grants are sealed with the same key and live in their
-            // own collection, so replacing the DEK below used to orphan every one of
-            // them and disconnect every linked account in the tenant.
-            int resealed = resealParticipants(tenantId, oldDek, newDek);
-
-            EnvelopeCrypto.EncryptionResult newDekEnc = EnvelopeCrypto.encryptDek(newDek, kek);
-            EncryptedDek newDekEntity = new EncryptedDek(dekOpt.get().getId(), tenantId, newDekEnc.ciphertext(), newDekEnc.iv(), Instant.now());
-            persistence.upsertDek(newDekEntity);
-
-            LOGGER.infof("DEK rotated for tenant '%s': %d secrets re-encrypted, %d sealed values re-sealed", tenantId, secrets.size(), resealed);
-            return secrets.size();
         } catch (PersistenceException | EnvelopeCrypto.CryptoException e) {
             errorCounter.increment();
             throw new SecretProviderException("DEK rotation failed for tenant " + tenantId, e);
         }
+
+        // 3. Sweep. Past the commit point, so a failure here is incomplete rather
+        // than destructive and is reported as such.
+        String activeDekId = EncryptedDek.dekId(tenantId, nextGeneration);
+        Instant now = Instant.now();
+        int migrated = 0;
+        int outstanding = 0;
+
+        List<EncryptedSecret> secrets;
+        try {
+            secrets = persistence.listSecretsByTenant(tenantId);
+        } catch (PersistenceException e) {
+            errorCounter.increment();
+            throw new SecretProviderException("DEK rotation for tenant '" + sanitize(tenantId) + "': generation " + nextGeneration
+                    + " is now the active key, but the secrets could not be listed to migrate them. Nothing is lost and the operation is safe to"
+                    + " re-run.", e);
+        }
+        for (EncryptedSecret secret : secrets) {
+            // Per row, so one secret nobody can open does not strand the rest of the
+            // tenant on an older generation for every future rotation as well.
+            try {
+                if (migrateSecret(tenantId, secret, activeDekId, newDek, now)) {
+                    migrated++;
+                } else {
+                    outstanding++;
+                }
+            } catch (SecretProviderException | PersistenceException | EnvelopeCrypto.CryptoException e) {
+                outstanding++;
+                LOGGER.errorf(e, "DEK rotation for tenant '%s': secret '%s' could not be moved to generation %d", sanitize(tenantId),
+                        sanitize(secret.getKeyName()), nextGeneration);
+            }
+        }
+
+        outstanding += resealParticipants(tenantId, activeDekId, newDek);
+
+        if (outstanding > 0) {
+            errorCounter.increment();
+            throw new SecretProviderException("DEK rotation for tenant '" + sanitize(tenantId) + "': generation " + nextGeneration
+                    + " is now the active key and every new value is sealed with it, but at least " + outstanding
+                    + " sealed row(s) still name an older generation. Nothing is lost — those rows still decrypt with the generation they name,"
+                    + " which has not been deleted — and the operation is safe to re-run to finish the migration.");
+        }
+
+        LOGGER.infof("DEK rotated for tenant '%s': generation %d is active, %d secret(s) migrated", sanitize(tenantId), nextGeneration, migrated);
+        return migrated;
     }
 
     /**
-     * Asks every {@link SealedDataRotationParticipant} to re-seal its data from the
-     * old DEK to the new one.
+     * Moves one secret onto the active generation, tolerating a concurrent writer.
      * <p>
-     * Runs BEFORE the DEK is replaced, so a participant that throws aborts the
-     * rotation with the tenant still on a key that decrypts everything. That
-     * ordering is the whole safety property: the reverse order would leave the
-     * failure in a state where neither key opens the data.
-     * <p>
-     * A participant failure is not swallowed. Rotation reporting success while some
-     * grants stayed on a dead key is precisely the silent corruption this method
-     * exists to prevent, and a rotation an operator has to re-run is far cheaper
-     * than one that quietly logs out an entire tenant.
+     * The write is guarded on the dekId the row was read with, so a {@code store}
+     * that landed in between is never overwritten with a re-seal of the value it
+     * replaced. On a lost guard the row is re-read once: if it now names the active
+     * generation somebody else already did the work, and otherwise one retry is
+     * enough — a row losing twice is a row being written continuously, and leaving
+     * it costs nothing because the generation it names still opens it.
+     *
+     * @return whether the row is on the active generation when this returns
      */
-    private int resealParticipants(String tenantId, byte[] oldDek, byte[] newDek) {
+    private boolean migrateSecret(String tenantId, EncryptedSecret secret, String activeDekId, byte[] activeDek, Instant now)
+            throws SecretProviderException {
+        EncryptedSecret current = secret;
+        for (int attempt = 0; attempt < 2; attempt++) {
+            if (current == null) {
+                // Deleted mid-sweep. There is nothing left to migrate, which is not a
+                // failure.
+                return true;
+            }
+            String rowDekId = current.getDekId();
+            if (activeDekId.equals(rowDekId)) {
+                return true;
+            }
+            String plaintext = EnvelopeCrypto.decrypt(current.getEncryptedValue(), current.getIv(), dekFor(tenantId, rowDekId));
+            EnvelopeCrypto.EncryptionResult enc = EnvelopeCrypto.encrypt(plaintext, activeDek);
+            current.setEncryptedValue(enc.ciphertext());
+            current.setIv(enc.iv());
+            current.setDekId(activeDekId);
+            current.setLastRotatedAt(now);
+            if (persistence.updateSecretSealing(current, rowDekId)) {
+                return true;
+            }
+            current = persistence.findSecret(tenantId, secret.getKeyName()).orElse(null);
+        }
+        return false;
+    }
+
+    /**
+     * Asks every {@link SealedDataRotationParticipant} to move its rows onto the
+     * new generation.
+     * <p>
+     * Runs AFTER the new generation is committed, which is what makes it safe to
+     * fail: every older generation still exists, so a row this sweep does not reach
+     * still names a key that opens it. The re-sealer decrypts with the generation
+     * each value names rather than with one assumed key, so a participant holding a
+     * mix of generations — the normal state after an interrupted rotation — is
+     * migrated correctly.
+     *
+     * @return how many rows are known to still be on an older generation, counting
+     *         a participant that failed outright as at least one
+     */
+    private int resealParticipants(String tenantId, String activeDekId, byte[] activeDek) {
         if (rotationParticipants == null || rotationParticipants.isUnsatisfied()) {
             return 0;
         }
@@ -378,29 +463,44 @@ public class VaultSecretProvider implements ISecretProvider {
                 return sealed;
             }
             try {
-                String plaintext = EnvelopeCrypto.decrypt(sealed.ciphertext(), sealed.iv(), oldDek);
-                EnvelopeCrypto.EncryptionResult enc = EnvelopeCrypto.encrypt(plaintext, newDek);
-                return new SealedValue(enc.ciphertext(), enc.iv());
-            } catch (EnvelopeCrypto.CryptoException e) {
+                String plaintext = EnvelopeCrypto.decrypt(sealed.ciphertext(), sealed.iv(), dekFor(tenantId, sealed.dekId()));
+                EnvelopeCrypto.EncryptionResult enc = EnvelopeCrypto.encrypt(plaintext, activeDek);
+                return new SealedValue(enc.ciphertext(), enc.iv(), activeDekId);
+            } catch (SecretProviderException | EnvelopeCrypto.CryptoException e) {
                 // Never quotes the ciphertext or the participant's row: this runs over
                 // refresh tokens.
                 throw new IllegalStateException("Failed to re-seal a value during DEK rotation for tenant " + sanitize(tenantId), e);
             }
         };
-        int total = 0;
+        int outstanding = 0;
         for (SealedDataRotationParticipant participant : rotationParticipants) {
-            int count = participant.resealAll(tenantId, resealer);
-            total += count;
-            LOGGER.infof("DEK rotation for tenant '%s': re-sealed %d value(s) of %s", sanitize(tenantId), count,
-                    participant.sealedDataDescription());
+            try {
+                int left = participant.resealAll(tenantId, activeDekId, resealer);
+                outstanding += left;
+                LOGGER.infof("DEK rotation for tenant '%s': %d row(s) of %s still on an older generation", sanitize(tenantId), left,
+                        participant.sealedDataDescription());
+            } catch (RuntimeException e) {
+                // Participants signal a re-seal failure with an unchecked exception, and
+                // one that gave up mid-sweep cannot say how much it left behind. Counted
+                // as one so the caller reports "at least N" honestly rather than
+                // reporting success.
+                outstanding++;
+                LOGGER.errorf(e, "DEK rotation for tenant '%s': %s could not be fully migrated", sanitize(tenantId),
+                        participant.sealedDataDescription());
+            }
         }
-        return total;
+        return outstanding;
     }
 
     /**
      * Rotate the KEK (Master Key). Re-encrypts all tenant DEKs with a new master
      * key. The actual secret ciphertexts are NOT modified — only the DEK wrappers
      * change.
+     * <p>
+     * Every generation is re-wrapped, not just the newest. A tenant part-way
+     * through a DEK sweep still has rows depending on an older generation, and
+     * leaving one behind on the old KEK is exactly the orphaned-key failure DEK
+     * generations exist to prevent.
      * <p>
      * <b>Usage:</b>
      * <ol>
@@ -505,8 +605,12 @@ public class VaultSecretProvider implements ISecretProvider {
             return null;
         }
         try {
-            EnvelopeCrypto.EncryptionResult result = EnvelopeCrypto.encrypt(plaintext, getOrCreateDek(tenantId));
-            return new SealedValue(result.ciphertext(), result.iv());
+            ActiveDek dek = activeDek(tenantId);
+            EnvelopeCrypto.EncryptionResult result = EnvelopeCrypto.encrypt(plaintext, dek.key());
+            // The caller persists the dekId next to the ciphertext; without it the value
+            // would only ever be openable by whatever generation happened to be newest
+            // at read time.
+            return new SealedValue(result.ciphertext(), result.iv(), dek.dekId());
         } catch (EnvelopeCrypto.CryptoException e) {
             errorCounter.increment();
             throw new SecretProviderException("Encryption failure while sealing data for tenant " + sanitize(tenantId), e);
@@ -520,7 +624,7 @@ public class VaultSecretProvider implements ISecretProvider {
             return null;
         }
         try {
-            return EnvelopeCrypto.decrypt(sealed.ciphertext(), sealed.iv(), getOrCreateDek(tenantId));
+            return EnvelopeCrypto.decrypt(sealed.ciphertext(), sealed.iv(), dekFor(tenantId, sealed.dekId()));
         } catch (EnvelopeCrypto.CryptoException e) {
             errorCounter.increment();
             // The message deliberately says nothing about the ciphertext. A failed
@@ -532,21 +636,62 @@ public class VaultSecretProvider implements ISecretProvider {
 
     // === Private helpers ===
 
-    private byte[] getOrCreateDek(String tenantId) throws SecretProviderException {
+    /**
+     * A usable DEK together with the name ciphertext must record for it.
+     */
+    private record ActiveDek(byte[] key, String dekId) {
+    }
+
+    /**
+     * The generation new values are sealed with — the newest one — creating it on
+     * first use.
+     * <p>
+     * Read from the store on every call, deliberately un-cached. That is the
+     * behaviour this class already had, and a cache here would need invalidating
+     * the instant another replica installs a generation.
+     */
+    private ActiveDek activeDek(String tenantId) throws SecretProviderException {
         try {
             var dekOpt = persistence.findDek(tenantId);
             if (dekOpt.isPresent()) {
                 EncryptedDek encryptedDek = dekOpt.get();
                 try {
-                    return EnvelopeCrypto.decryptDek(encryptedDek.getEncryptedDek(), encryptedDek.getIv(), kek);
+                    return new ActiveDek(EnvelopeCrypto.decryptDek(encryptedDek.getEncryptedDek(), encryptedDek.getIv(), kek),
+                            encryptedDek.dekId());
                 } catch (EnvelopeCrypto.CryptoException e) {
-                    return handleDekDecryptionFailure(tenantId, e);
+                    return new ActiveDek(handleDekDecryptionFailure(tenantId, e), encryptedDek.dekId());
                 }
             }
 
-            return generateAndPersistDek(tenantId);
+            return new ActiveDek(generateAndPersistDek(tenantId), EncryptedDek.dekId(tenantId, EncryptedDek.FIRST_GENERATION));
         } catch (PersistenceException e) {
             throw new SecretProviderException("Persistence failure while managing DEK for tenant " + tenantId, e);
+        }
+    }
+
+    /**
+     * The key that a stored dekId names.
+     * <p>
+     * Never creates one: a missing generation means ciphertext exists that nothing
+     * can open, and minting a fresh key would answer that with a decryption failure
+     * one layer further down instead of saying what actually happened.
+     */
+    private byte[] dekFor(String tenantId, String dekId) throws SecretProviderException {
+        int generation = EncryptedDek.generationOf(tenantId, dekId);
+        try {
+            var dekOpt = persistence.findDek(tenantId, generation);
+            if (dekOpt.isEmpty()) {
+                throw new SecretProviderException("DEK generation " + generation + " for tenant '" + sanitize(tenantId)
+                        + "' is missing, but stored data is still sealed with it. Old generations must never be deleted while any row names them.");
+            }
+            EncryptedDek encryptedDek = dekOpt.get();
+            try {
+                return EnvelopeCrypto.decryptDek(encryptedDek.getEncryptedDek(), encryptedDek.getIv(), kek);
+            } catch (EnvelopeCrypto.CryptoException e) {
+                return handleDekDecryptionFailure(tenantId, e);
+            }
+        } catch (PersistenceException e) {
+            throw new SecretProviderException("Persistence failure while reading DEK generation " + generation + " for tenant " + tenantId, e);
         }
     }
 
@@ -588,7 +733,8 @@ public class VaultSecretProvider implements ISecretProvider {
         byte[] newDek = EnvelopeCrypto.generateDek();
         EnvelopeCrypto.EncryptionResult encResult = EnvelopeCrypto.encryptDek(newDek, kek);
 
-        EncryptedDek dek = new EncryptedDek(UUID.randomUUID().toString(), tenantId, encResult.ciphertext(), encResult.iv(), Instant.now());
+        EncryptedDek dek = new EncryptedDek(UUID.randomUUID().toString(), tenantId, EncryptedDek.FIRST_GENERATION, encResult.ciphertext(),
+                encResult.iv(), Instant.now());
 
         persistence.upsertDek(dek);
         LOGGER.infof("Generated new DEK for tenant: %s", tenantId);

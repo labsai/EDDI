@@ -274,9 +274,12 @@ public class PostgresConnectionGrantStore implements IConnectionGrantStore {
     }
 
     @Override
-    public boolean updateSealedTokens(ConnectionGrant grant) {
+    public boolean updateSealedTokens(ConnectionGrant grant, long expectedVersion) {
+        // Neither version nor the lease columns appear in the SET clause: a re-seal
+        // must be invisible to a refresh that is mid-flight, or it turns a rotation
+        // into a lost token.
         String sql = "UPDATE connection_grants SET encrypted_access_token = ?, access_token_iv = ?, encrypted_refresh_token = ?, "
-                + "refresh_token_iv = ?, dek_id = ? WHERE tenant_id = ? AND connection_name = ? AND principal = ?";
+                + "refresh_token_iv = ?, dek_id = ? WHERE tenant_id = ? AND connection_name = ? AND principal = ? AND version = ?";
         try (Connection connection = dataSource.getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, grant.getEncryptedAccessToken());
             statement.setString(2, grant.getAccessTokenIv());
@@ -286,7 +289,8 @@ public class PostgresConnectionGrantStore implements IConnectionGrantStore {
             statement.setString(6, grant.getTenantId());
             statement.setString(7, grant.getConnectionName());
             statement.setString(8, grant.getPrincipal());
-            return statement.executeUpdate() > 0;
+            statement.setLong(9, expectedVersion);
+            return statement.executeUpdate() == 1;
         } catch (SQLException e) {
             throw new IllegalStateException("Failed to write re-sealed connection grant tokens", e);
         }

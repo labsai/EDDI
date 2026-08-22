@@ -34,5 +34,18 @@ public enum AuthType {
      * OAuth 2.0 authorization code with PKCE — a grant per end user. The only type
      * that may carry {@link Binding#PER_USER}.
      */
-    OAUTH2_AUTHORIZATION_CODE
+    OAUTH2_AUTHORIZATION_CODE;
+
+    /**
+     * Whether this type completes an OAuth 2.0 flow, and so needs a token endpoint,
+     * a client secret and a stored grant.
+     * <p>
+     * A method rather than the two-term disjunction spelled out at each call site.
+     * A third OAuth type — device code, JWT bearer — has to reach every one of
+     * them, and the site that gets missed is a connection that saves without a
+     * vault and then fails at the moment the token comes back.
+     */
+    public boolean isOAuth() {
+        return this == OAUTH2_AUTHORIZATION_CODE || this == OAUTH2_CLIENT_CREDENTIALS;
+    }
 }

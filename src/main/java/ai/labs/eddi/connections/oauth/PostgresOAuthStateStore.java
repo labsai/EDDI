@@ -105,15 +105,24 @@ public class PostgresOAuthStateStore implements IOAuthStateStore {
         if (state == null || state.isBlank()) {
             return Optional.empty();
         }
+        // The instant is bound, not taken from the database's CURRENT_TIMESTAMP.
+        // expires_at was written by this JVM, so comparing it against the DB clock
+        // makes app/DB skew shift the ten-minute window in either direction — a state
+        // row that expires early, or one that outlives its TTL. The Mongo store
+        // already compares JVM-written against JVM-now; one authoritative clock is
+        // what makes the two backends agree.
         String sql = """
                 UPDATE connection_oauth_states
-                   SET consumed_at = CURRENT_TIMESTAMP
-                 WHERE state = ? AND consumed_at IS NULL AND expires_at > CURRENT_TIMESTAMP
+                   SET consumed_at = ?
+                 WHERE state = ? AND consumed_at IS NULL AND expires_at > ?
                 RETURNING state, tenant_id, connection_name, principal, code_verifier, redirect_uri, return_to,
                           nonce_hash, created_at, expires_at, consumed_at
                 """;
+        Instant now = Instant.now();
         try (Connection connection = dataSource.getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
-            statement.setString(1, state);
+            statement.setTimestamp(1, Timestamp.from(now));
+            statement.setString(2, state);
+            statement.setTimestamp(3, Timestamp.from(now));
             try (ResultSet rows = statement.executeQuery()) {
                 return rows.next() ? Optional.of(toState(rows)) : Optional.empty();
             }
@@ -124,9 +133,12 @@ public class PostgresOAuthStateStore implements IOAuthStateStore {
 
     @Override
     public int deleteExpired() {
+        // Same clock as claim(), for the same reason: a sweep on the DB clock could
+        // delete rows claim() still considers live, or leave rows it has stopped
+        // accepting.
         try (Connection connection = dataSource.getConnection();
-                PreparedStatement statement = connection
-                        .prepareStatement("DELETE FROM connection_oauth_states WHERE expires_at < CURRENT_TIMESTAMP")) {
+                PreparedStatement statement = connection.prepareStatement("DELETE FROM connection_oauth_states WHERE expires_at < ?")) {
+            statement.setTimestamp(1, Timestamp.from(Instant.now()));
             return statement.executeUpdate();
         } catch (SQLException e) {
             LOGGER.warnf(e, "Failed to delete expired OAuth states");

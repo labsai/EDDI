@@ -26,7 +26,6 @@ import jakarta.inject.Inject;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.ForbiddenException;
 import jakarta.ws.rs.NotFoundException;
-import jakarta.ws.rs.ServiceUnavailableException;
 import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.NewCookie;
 import jakarta.ws.rs.core.Response;
@@ -138,7 +137,7 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
         String nonce = randomUrlSafe(32);
         var state = new OAuthState();
         state.setState(randomUrlSafe(32));
-        state.setTenantId(tenantOf(connection));
+        state.setTenantId(ConnectionConfiguration.effectiveTenant(connection));
         state.setConnectionName(connection.getName());
         state.setPrincipal(principal);
         state.setCodeVerifier(codeVerifier);
@@ -151,7 +150,7 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
 
         count("connection.oauth.authorize.count", "outcome", "issued", connection);
         return Response.ok(Map.of("authorizationUrl", buildAuthorizationUrl(connection, state, codeVerifier)))
-                .cookie(browserBindingCookie(state.getState(), nonce)).build();
+                .cookie(bindingCookie(state.getState(), nonce, (int) STATE_TTL.toSeconds())).build();
     }
 
     /**
@@ -168,18 +167,20 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
      * {@code Secure} follows the deployment's own base URL, so a plain-HTTP
      * development instance still works while a real one never sends the nonce in
      * clear.
+     * <p>
+     * Issuing and expiring share this one builder: the attributes a browser matches
+     * a cookie on have to agree, and {@code Secure} in particular is derived rather
+     * than literal, so two chains would be two chances to drift.
      */
-    private NewCookie browserBindingCookie(String state, String nonce) {
-        return new NewCookie.Builder(nonceCookieName(state)).value(nonce).path(COOKIE_PATH).httpOnly(true)
-                .secure(connectionsConfig.redirectUri().regionMatches(true, 0, "https:", 0, 6))
-                .maxAge((int) STATE_TTL.toSeconds()).sameSite(NewCookie.SameSite.LAX).build();
+    private NewCookie bindingCookie(String state, String value, int maxAge) {
+        return new NewCookie.Builder(nonceCookieName(state)).value(value).path(COOKIE_PATH).httpOnly(true)
+                .secure(connectionsConfig.redirectUri().regionMatches(true, 0, "https:", 0, 6)).maxAge(maxAge)
+                .sameSite(NewCookie.SameSite.LAX).build();
     }
 
     /** Expires the binding cookie once its flow is over, win or lose. */
     private NewCookie expiredBindingCookie(String state) {
-        return new NewCookie.Builder(nonceCookieName(state)).value("").path(COOKIE_PATH).httpOnly(true)
-                .secure(connectionsConfig.redirectUri().regionMatches(true, 0, "https:", 0, 6)).maxAge(0)
-                .sameSite(NewCookie.SameSite.LAX).build();
+        return bindingCookie(state, "", 0);
     }
 
     private static String nonceCookieName(String state) {
@@ -193,7 +194,7 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
         params.put("client_id", oauth.getClientId());
         params.put("redirect_uri", state.getRedirectUri());
         params.put("state", state.getState());
-        params.put("code_challenge", s256(codeVerifier));
+        params.put("code_challenge", sha256(codeVerifier));
         params.put("code_challenge_method", "S256");
         if (oauth.getScopes() != null && !oauth.getScopes().isEmpty()) {
             params.put("scope", String.join(" ", oauth.getScopes()));
@@ -335,9 +336,19 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
 
     // ── helpers ──────────────────────────────────────────────────────────────
 
+    /**
+     * Refuses every route on this resource when the feature is off.
+     * <p>
+     * A 404, matching what {@link #callback} answers in the same state: one
+     * disabled feature that gives two different answers is a puzzle for whoever is
+     * turning it on. It is also the status whose body actually arrives —
+     * {@code ClientErrorExceptionMapper} copies a message into the response only
+     * for 4xx, so the 503 this used to throw delivered an empty body and left the
+     * one sentence naming the setting to fix in the server log.
+     */
     private void requireEnabled() {
         if (!connectionsConfig.isEnabled()) {
-            throw new ServiceUnavailableException("Connections are disabled. Set eddi.connections.enabled=true to use them.");
+            throw new NotFoundException("Connections are disabled. Set eddi.connections.enabled=true to use them.");
         }
     }
 
@@ -345,9 +356,11 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
      * The verified caller, or a refusal.
      * <p>
      * {@code @Authenticated} is a no-op when {@code authorization.enabled=false},
-     * so this is checked in code as well. The startup guard refuses that
-     * combination outright; between them a grant can never be minted for a
-     * self-asserted principal.
+     * so this is checked in code as well. The startup guard only logs about that
+     * combination; enforcement is this method, together with the 400
+     * {@code RestConnectionStore} returns when a {@code PER_USER} connection is
+     * written to a deployment with authorization disabled. Between them a grant can
+     * never be minted for a self-asserted principal.
      */
     private String requirePrincipal() {
         if (securityIdentity == null || securityIdentity.isAnonymous() || securityIdentity.getPrincipal() == null) {
@@ -374,27 +387,57 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
     }
 
     /**
-     * Redirects the browser, tolerating a state row that carries no destination.
+     * Redirects the browser, tolerating a state row that carries no destination —
+     * or one whose destination cannot be turned into a URI at all.
      * <p>
-     * {@code authorize} always stores one, but a row written by an earlier version
-     * or by a direct database write would not — and by the time the callback gets
-     * here it has already claimed the state and may have stored the grant, so
-     * throwing would leave the user with a 500 and no way to retry (their state is
-     * consumed). A fragment is dropped rather than appended past, since a query
-     * appended after a fragment is not a query.
+     * {@code authorize} stores only a destination {@code isAllowedReturnTo}
+     * accepted, but a row written by an earlier version or by a direct database
+     * write carries whatever it carries — and by the time the callback gets here it
+     * has already claimed the state and may have stored the grant, so throwing
+     * would leave the user with a 500 and no way to retry (their state is
+     * consumed). Every failure therefore degrades to the default page instead.
      */
     private Response redirect(String returnTo, String key, String value, NewCookie... cookies) {
-        String destination = (returnTo == null || returnTo.isBlank()) ? connectionsConfig.defaultReturnTo() : returnTo;
-        int fragment = destination.indexOf('#');
-        if (fragment >= 0) {
-            destination = destination.substring(0, fragment);
-        }
-        String separator = destination.contains("?") ? "&" : "?";
-        var response = Response.seeOther(URI.create(destination + separator + encode(key) + "=" + encode(value)));
+        var response = Response.seeOther(destination(returnTo, key, value));
         for (NewCookie cookie : cookies) {
             response.cookie(cookie);
         }
         return response.build();
+    }
+
+    private URI destination(String returnTo, String key, String value) {
+        String requested = (returnTo == null || returnTo.isBlank()) ? connectionsConfig.defaultReturnTo() : returnTo;
+        URI target = buildDestination(requested, key, value);
+        if (target == null) {
+            LOGGER.warn("A stored returnTo could not be turned into a redirect target; sending the browser to the default page instead");
+            target = buildDestination(connectionsConfig.defaultReturnTo(), key, value);
+        }
+        // A misconfigured public base URL would take the default page down with it,
+        // and there is still a browser waiting. Relative is fine: the Manager sends
+        // relative returnTo values already, and JAX-RS resolves them.
+        return target == null ? URI.create("/") : target;
+    }
+
+    /**
+     * The destination with the outcome appended, or {@code null} if it will not
+     * parse. A fragment is dropped rather than appended past, since a query
+     * appended after a fragment is not a query.
+     */
+    private static URI buildDestination(String destination, String key, String value) {
+        if (destination == null || destination.isBlank()) {
+            return null;
+        }
+        String base = destination;
+        int fragment = base.indexOf('#');
+        if (fragment >= 0) {
+            base = base.substring(0, fragment);
+        }
+        String separator = base.contains("?") ? "&" : "?";
+        try {
+            return URI.create(base + separator + encode(key) + "=" + encode(value));
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
     }
 
     /**
@@ -424,25 +467,50 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
                 oauthState.getNonceHash().getBytes(StandardCharsets.US_ASCII));
     }
 
-    /** base64url(sha256(value)), unpadded — the stored form of the nonce. */
+    /**
+     * base64url(sha256(value)), unpadded.
+     * <p>
+     * Both the PKCE challenge (RFC 7636 {@code S256}) and the stored form of the
+     * browser-binding nonce are exactly this, so they share one implementation.
+     * SHA-256 is mandated by the platform; if it is genuinely absent neither
+     * guarantee can be honoured, and the flow must not quietly continue without
+     * them.
+     */
     private static String sha256(String value) {
         try {
             byte[] digest = MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.US_ASCII));
             return Base64.getUrlEncoder().withoutPadding().encodeToString(digest);
         } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 is unavailable, so the OAuth flow cannot be bound to a browser", e);
+            throw new IllegalStateException("SHA-256 is unavailable, so PKCE cannot be applied and the OAuth flow cannot be bound to a browser",
+                    e);
         }
     }
 
+    /**
+     * Records one outcome.
+     * <p>
+     * The tag KEYS are fixed whether or not a connection is in hand, because a
+     * meter name registered with two different tag shapes is a registration failure
+     * and Quarkus builds the Prometheus registry with
+     * {@code throwExceptionOnRegistrationFailure}. The callback emits this same
+     * meter both with a connection and without one, so the two shapes would have
+     * collided in production and not in any test that exercised one path.
+     * <p>
+     * The whole body is guarded for the same reason the redirect is: by the time
+     * the success counter is reached the grant is already stored, and no
+     * instrumentation failure may turn a completed link into a 500 the user cannot
+     * retry — their state is consumed.
+     */
     private void count(String metric, String tagName, String tagValue, ConnectionConfiguration connection) {
         if (meterRegistry == null) {
             return;
         }
-        // The connection NAME is never a tag — author-supplied and unbounded.
-        if (connection != null && connection.getAuthType() != null) {
-            meterRegistry.counter(metric, tagName, tagValue, "authType", connection.getAuthType().name()).increment();
-        } else {
-            meterRegistry.counter(metric, tagName, tagValue).increment();
+        try {
+            // The connection NAME is never a tag — author-supplied and unbounded.
+            String authType = connection != null && connection.getAuthType() != null ? connection.getAuthType().name() : "unknown";
+            meterRegistry.counter(metric, tagName, tagValue, "authType", authType).increment();
+        } catch (RuntimeException e) {
+            LOGGER.debugf(e, "Could not record metric '%s'", metric);
         }
     }
 
@@ -452,27 +520,18 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
      * A single method rather than a literal at each call site, so the multi-tenancy
      * work has one place to change. Until {@code TenantContext} lands this is the
      * default tenant, which is also what every connection document defaults to.
+     * <p>
+     * It does not move alone. {@link #requireConnection} looks the connection up
+     * under the same default and must take its tenant from the same source;
+     * {@code ConnectionConfiguration.tenantId} has to be populated from the tenant
+     * context rather than from the stored document; and
+     * {@code RestConnectionStore.requireDefaultTenant()}, which today refuses any
+     * other tenant at the write boundary precisely because this method cannot see
+     * one, comes out at that point. Changing any one of the four on its own files a
+     * grant under a tenant another of them cannot find.
      */
     private static String callerTenant() {
         return ConnectionReference.DEFAULT_TENANT;
-    }
-
-    private static String tenantOf(ConnectionConfiguration connection) {
-        return connection.getTenantId() == null || connection.getTenantId().isBlank()
-                ? ConnectionReference.DEFAULT_TENANT
-                : connection.getTenantId();
-    }
-
-    /** RFC 7636 S256: base64url(sha256(verifier)), unpadded. */
-    private static String s256(String codeVerifier) {
-        try {
-            byte[] digest = MessageDigest.getInstance("SHA-256").digest(codeVerifier.getBytes(StandardCharsets.US_ASCII));
-            return Base64.getUrlEncoder().withoutPadding().encodeToString(digest);
-        } catch (NoSuchAlgorithmException e) {
-            // SHA-256 is mandated by the platform. If it is genuinely absent, PKCE
-            // cannot be honoured and the flow must not silently continue without it.
-            throw new IllegalStateException("SHA-256 is unavailable, so PKCE cannot be applied", e);
-        }
     }
 
     private static String randomUrlSafe(int bytes) {

@@ -28,11 +28,18 @@ import java.util.function.UnaryOperator;
  * vault changes.
  *
  * <h3>The contract implementations must honour</h3> {@link #resealAll} is
- * called <b>while the old DEK is still the tenant's DEK</b>. Prepare every
- * re-sealed value in memory first and only then write — the same
- * prepare-then-commit shape the secret loop uses — so a failure partway through
- * leaves rows readable rather than half-migrated. Throwing aborts the rotation
- * before the DEK is replaced, which is the safe outcome.
+ * called <b>after</b> the new DEK generation has been committed, and it is a
+ * migration sweep rather than an all-or-nothing switch. Every older generation
+ * still exists and still decrypts, so a row this method fails to move is
+ * <b>not</b> lost — it keeps naming a key that works, and the next rotation
+ * picks it up. Write row by row, each write guarded on the state the row was
+ * read in, so a concurrent writer is never clobbered.
+ * <p>
+ * Throwing does not roll anything back: the new generation is already active.
+ * Rotation catches it, counts the tenant as incompletely migrated, and reports
+ * that the operation is safe to re-run. Reporting outstanding rows through the
+ * return value is preferred, because a count survives where an exception ends
+ * the sweep.
  */
 public interface SealedDataRotationParticipant {
 
@@ -43,15 +50,23 @@ public interface SealedDataRotationParticipant {
     String sealedDataDescription();
 
     /**
-     * Re-seals every value this participant holds for the tenant.
+     * Moves every value this participant holds for the tenant onto the active DEK
+     * generation, skipping whatever is already there.
      *
      * @param tenantId
      *            the tenant being rotated
+     * @param activeDekId
+     *            the dekId of the generation to end up on. A row already naming it
+     *            needs nothing done and must be left alone — a concurrent writer
+     *            sealed it under the new key while this sweep was running
      * @param resealer
-     *            turns a value sealed with the OLD DEK into one sealed with the NEW
-     *            DEK. Valid only for the duration of this call, and only for values
-     *            belonging to {@code tenantId}
-     * @return how many values were re-sealed, for the rotation log
+     *            re-seals one value under the active generation, opening it with
+     *            whichever generation its own
+     *            {@link ISecretProvider.SealedValue#dekId()} names. Valid only for
+     *            the duration of this call, and only for values belonging to
+     *            {@code tenantId}
+     * @return how many rows are still NOT on the active generation when this
+     *         returns — zero means the tenant is fully migrated
      */
-    int resealAll(String tenantId, UnaryOperator<ISecretProvider.SealedValue> resealer);
+    int resealAll(String tenantId, String activeDekId, UnaryOperator<ISecretProvider.SealedValue> resealer);
 }

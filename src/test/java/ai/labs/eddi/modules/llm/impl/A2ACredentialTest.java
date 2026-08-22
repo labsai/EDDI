@@ -118,6 +118,37 @@ class A2ACredentialTest {
     }
 
     @Test
+    @DisplayName("a scheme spelled out in front of the reference is refused, naming the text that is in the way")
+    void refusesASchemePrefix() {
+        // A connection supplies the WHOLE header value. "Bearer ${connection:sf}"
+        // used to drop the word Bearer silently and send a bare token, and the 401
+        // that came back named nothing at all — so the author had no way to learn
+        // that the scheme belongs in the connection's valueTemplate instead.
+        var builder = request();
+
+        var error = assertThrows(IllegalArgumentException.class,
+                () -> manager().applyCredential(builder, config("Bearer ${connection:sf}"), AGENT_URL));
+
+        assertTrue(error.getMessage().contains(AGENT_URL), "the refusal has to say WHICH peer is misconfigured: " + error.getMessage());
+        assertTrue(error.getMessage().contains("Bearer"), "and which text is in the way: " + error.getMessage());
+        assertTrue(error.getMessage().contains("valueTemplate"), "and where that text belongs instead: " + error.getMessage());
+        assertTrue(builder.build().headers().firstValue("Authorization").isEmpty(), "nothing may go out on a refused credential");
+    }
+
+    @Test
+    @DisplayName("two references in one value are refused rather than silently using the first")
+    void refusesTwoReferences() {
+        var builder = request();
+
+        var error = assertThrows(IllegalArgumentException.class,
+                () -> manager().applyCredential(builder, config("${connection:sf} ${connection:billing}"), AGENT_URL));
+
+        assertTrue(error.getMessage().contains("a second ${connection:…} reference"),
+                "only the first reference is ever parsed, so the second one vanishing has to be said out loud: " + error.getMessage());
+        assertTrue(builder.build().headers().firstValue("Authorization").isEmpty());
+    }
+
+    @Test
     @DisplayName("a connection reference with no resolver fails loudly instead of sending the reference")
     void refusesWithoutAResolver() {
         var manager = new A2AToolProviderManager(globalVariableResolver, secretResolver, false);

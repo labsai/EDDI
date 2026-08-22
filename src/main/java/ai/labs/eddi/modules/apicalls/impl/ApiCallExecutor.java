@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.apicalls.model.HttpPostResponse;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.connections.ConnectionResolver;
+import ai.labs.eddi.connections.model.ConnectionReference;
 import ai.labs.eddi.engine.security.CallerIdentityResolver;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.httpclient.IHttpClient;
@@ -33,7 +34,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -48,7 +48,6 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 import static jakarta.ws.rs.core.MediaType.TEXT_PLAIN;
 import static java.lang.String.format;
 import static java.lang.System.currentTimeMillis;
-import static java.util.Objects.requireNonNullElse;
 
 /**
  * Reusable HTTP call executor that can be used by different lifecycle tasks.
@@ -778,10 +777,13 @@ public class ApiCallExecutor implements IApiCallExecutor {
         rejectConnectionReference(requestBody, "a request body");
 
         Map<String, String> headers = requestConfig.getHeaders();
-        // Header names already claimed by a connection, lower-cased because HTTP
-        // header names are case-insensitive and two configs differing only in case
-        // would otherwise both "win".
-        var connectionHeaders = new HashSet<String>();
+        // Header names already written to this request, lower-cased because HTTP
+        // header names are case-insensitive and setHttpHeader REPLACES rather than
+        // appends — two entries differing only in case displace each other, and
+        // whichever iterates last wins with no signal. The flag records whether a
+        // CONNECTION owns the name: that is the collision iteration order must
+        // never decide, because one side of it is a credential.
+        var claimedHeaders = new HashMap<String, Boolean>();
         for (String headerName : headers.keySet()) {
             String headerValue = prePostUtils.templateValues(headers.get(headerName), templateDataObjects);
             // Resolve global variable references, then vault references in headers
@@ -796,6 +798,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
             // string — which is also why it replaces the whole header rather than
             // being interpolated into one.
             if (ConnectionResolver.containsReference(headerValue)) {
+                ConnectionReference.requireSole(headerValue, "Header '" + headerName + "'");
                 var credential = connectionResolver.resolve(headerValue, targetUri, principalFrom(templateDataObjects));
                 // The connection owns the header NAME — that is the point of storing
                 // one, since Authorization and X-Api-Key are the same connection model
@@ -808,12 +811,25 @@ public class ApiCallExecutor implements IApiCallExecutor {
                             + credential.headerName() + "'. Name the header the same as the connection's, so what the config says and what "
                             + "is sent cannot disagree.");
                 }
-                if (!connectionHeaders.add(credential.headerName().toLowerCase(Locale.ROOT))) {
+                Boolean claimedByConnection = claimedHeaders.putIfAbsent(credential.headerName().toLowerCase(Locale.ROOT), Boolean.TRUE);
+                if (Boolean.TRUE.equals(claimedByConnection)) {
                     throw new IllegalArgumentException("More than one header resolves to '" + credential.headerName()
                             + "' through a connection. Only one credential can occupy a header; the others would be silently dropped.");
                 }
+                if (claimedByConnection != null) {
+                    throw connectionHeaderCollision(credential.headerName());
+                }
                 request.setHttpHeader(credential.headerName(), credential.headerValue());
                 continue;
+            }
+            // The same map, read from the other side. A plain header sharing a name
+            // with a connection-owned one used to slip past every guard here, because
+            // the collision set was only ever consulted inside the branch above — and
+            // then the two silently overwrote each other by iteration order. Two
+            // genuinely different names, and even two plain headers differing only in
+            // case, keep behaving exactly as before.
+            if (Boolean.TRUE.equals(claimedHeaders.putIfAbsent(headerName.toLowerCase(Locale.ROOT), Boolean.FALSE))) {
+                throw connectionHeaderCollision(headerName);
             }
             request.setHttpHeader(headerName, headerValue);
         }
@@ -837,12 +853,12 @@ public class ApiCallExecutor implements IApiCallExecutor {
      * The conversation's user id, from the same template data every other value in
      * this method is built from.
      * <p>
-     * A fallback, not the primary source: {@code ConnectionResolver} prefers the
-     * bound {@code CallerIdentityContext} and only consults this when the pipeline
-     * is running on a worker thread that lost the binding. It is safe as a fallback
-     * because the resolver refuses {@code PER_USER} outright unless
-     * {@code authorization.enabled=true}, and with authorization on this id came
-     * from a verified identity at conversation creation.
+     * A cross-check, not a source. {@code ConnectionResolver} takes its authority
+     * from the {@code ResolutionPrincipal} bound to the turn, which carries a
+     * provenance a bare id cannot — whether anything actually authenticated that
+     * user. Passing the id here only lets the resolver refuse when the call was
+     * built for one user while the turn is running as another; it can never grant
+     * anything on its own.
      */
     private static String principalFrom(Map<String, Object> templateDataObjects) {
         if (templateDataObjects != null && templateDataObjects.get("userInfo") instanceof Map<?, ?> userInfo) {
@@ -867,6 +883,15 @@ public class ApiCallExecutor implements IApiCallExecutor {
             throw new IllegalArgumentException("A ${connection:…} reference may only appear in a header, not in " + where
                     + ". A credential in a URL or query string is recorded by every hop before the provider sees it.");
         }
+    }
+
+    /**
+     * The refusal for a header that a connection owns and a plain entry also sets.
+     */
+    private static IllegalArgumentException connectionHeaderCollision(String headerName) {
+        return new IllegalArgumentException("Header '" + headerName + "' is set both directly and by a connection. HTTP header names are "
+                + "case-insensitive and the last write wins, so which of the two is sent would depend on config order alone. Remove the "
+                + "plain header, or give it a name the connection does not claim.");
     }
 
     /**

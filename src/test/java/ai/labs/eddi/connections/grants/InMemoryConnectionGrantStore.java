@@ -14,14 +14,14 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * A grant store that models what the database guarantees, and nothing more.
  * <p>
- * The point of this double is the two conditional writes. Both real stores make
- * {@code claimRefresh} and {@code completeRefresh} atomic — Mongo with a single
- * {@code updateOne} under a document lock, Postgres with a single
- * {@code UPDATE … WHERE} under a row lock — so this one holds the map's monitor
- * for the whole read-decide-write, which is the same guarantee expressed in the
- * only way a map can express it. A double that merely reads and then writes
- * would let the concurrency tests pass while the property under test was
- * absent.
+ * The point of this double is the three conditional writes. Both real stores
+ * make {@code claimRefresh}, {@code completeRefresh} and
+ * {@code updateSealedTokens} atomic — Mongo with a single {@code updateOne}
+ * under a document lock, Postgres with a single {@code UPDATE … WHERE} under a
+ * row lock — so this one holds the map's monitor for the whole
+ * read-decide-write, which is the same guarantee expressed in the only way a
+ * map can express it. A double that merely reads and then writes would let the
+ * concurrency tests pass while the property under test was absent.
  * <p>
  * Everything else here is deliberately naive: this is not a persistence test.
  */
@@ -71,6 +71,8 @@ public class InMemoryConnectionGrantStore implements IConnectionGrantStore {
         stored.setVersion(existing == null ? 1 : existing.getVersion() + 1);
         stored.setCreatedAt(existing == null ? Instant.now() : existing.getCreatedAt());
         stored.setUpdatedAt(Instant.now());
+        // Both real stores write ACTIVE for an unset status rather than storing null.
+        stored.setStatus(grant.getStatus() == null ? ConnectionGrant.Status.ACTIVE : grant.getStatus());
         stored.setRefreshInProgress(null);
         stored.setRefreshLeaseExpiresAt(null);
         grants.put(mapKey, stored);
@@ -146,9 +148,12 @@ public class InMemoryConnectionGrantStore implements IConnectionGrantStore {
     }
 
     @Override
-    public synchronized boolean updateSealedTokens(ConnectionGrant grant) {
+    public synchronized boolean updateSealedTokens(ConnectionGrant grant, long expectedVersion) {
         ConnectionGrant stored = grants.get(key(grant.getTenantId(), grant.getConnectionName(), grant.getPrincipal()));
-        if (stored == null) {
+        // The version belongs in the condition, exactly as it is in the real stores'
+        // filter and WHERE clause. A double that wrote unconditionally would make
+        // every re-seal succeed, and the CAS tests would then assert nothing.
+        if (stored == null || stored.getVersion() != expectedVersion) {
             return false;
         }
         stored.setEncryptedAccessToken(grant.getEncryptedAccessToken());
@@ -156,6 +161,9 @@ public class InMemoryConnectionGrantStore implements IConnectionGrantStore {
         stored.setEncryptedRefreshToken(grant.getEncryptedRefreshToken());
         stored.setRefreshTokenIv(grant.getRefreshTokenIv());
         stored.setDekId(grant.getDekId());
+        // No version bump, no updatedAt, no lease field: neither real store touches
+        // them, and a re-seal that moved any of them would be visible to a refresh
+        // that is mid-flight.
         return true;
     }
 

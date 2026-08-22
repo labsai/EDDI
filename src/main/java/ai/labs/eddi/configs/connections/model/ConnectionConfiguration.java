@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.configs.connections.model;
 
+import ai.labs.eddi.connections.model.ConnectionReference;
+
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.ArrayList;
@@ -74,7 +76,7 @@ public class ConnectionConfiguration {
      * point it is populated from {@code TenantContext} rather than from the
      * document. Present now so the stored shape does not have to change then.
      */
-    private String tenantId = "default";
+    private String tenantId = ConnectionReference.DEFAULT_TENANT;
 
     /** Free text for whoever reads the connection list. */
     private String description;
@@ -82,6 +84,24 @@ public class ConnectionConfiguration {
     private AuthType authType = AuthType.STATIC;
 
     private Binding binding = Binding.SERVICE;
+
+    /**
+     * Whether a {@link Binding#PER_USER} grant may be resolved for a user id EDDI
+     * itself never authenticated, on the grounds that a trusted front proxy did.
+     * <p>
+     * The risk this accepts, stated plainly: with this on, anyone who can assert a
+     * user id to the fronting proxy can resolve <em>that user's</em> stored SaaS
+     * credentials. Nothing checks the assertion afterwards — the id is the entire
+     * authority for choosing whose refresh token to spend, so a proxy that lets a
+     * caller pick the id it forwards hands out other people's live tokens. It
+     * belongs only to a deployment that genuinely authenticates its users upstream.
+     * <p>
+     * Default off, and per connection rather than per deployment, so switching it
+     * on is a decision about one provider's tokens instead of a global posture:
+     * proxy identity can be good enough for a calendar connection while the finance
+     * one still demands a principal EDDI verified itself.
+     */
+    private boolean allowUnverifiedPrincipal;
 
     private StaticAuth staticAuth;
 
@@ -115,6 +135,7 @@ public class ConnectionConfiguration {
             throw new IllegalArgumentException("authType is required (STATIC, BASIC, OAUTH2_CLIENT_CREDENTIALS or OAUTH2_AUTHORIZATION_CODE).");
         }
         validateBinding();
+        validateUnverifiedPrincipalFlag();
         validateAllowlist();
         switch (authType) {
             case STATIC, BASIC -> validateStaticAuth();
@@ -145,6 +166,22 @@ public class ConnectionConfiguration {
                     + "the user who completed the consent screen, so a SERVICE-bound one would look for a grant under the service principal "
                     + "that nothing can ever create — it would save and deploy and then fail every call as 'not connected'. Use "
                     + "OAUTH2_CLIENT_CREDENTIALS for a service account.");
+        }
+    }
+
+    /**
+     * The flag has nothing to relax unless the binding is per user.
+     * <p>
+     * Refused rather than ignored. A flag whose name promises to loosen an identity
+     * check, sitting on a document where it does nothing, reads to the next person
+     * as a deliberate posture that is already in force — so the day the binding
+     * changes, a relaxation nobody re-decided comes into force with it.
+     */
+    private void validateUnverifiedPrincipalFlag() {
+        if (allowUnverifiedPrincipal && binding != Binding.PER_USER) {
+            throw new IllegalArgumentException("allowUnverifiedPrincipal applies only to binding PER_USER: it relaxes WHICH end user's grant "
+                    + "may be resolved, and any other binding resolves the same credential for everybody regardless of who is asking. Remove "
+                    + "the flag, or set binding PER_USER if this connection really is per end user.");
         }
     }
 
@@ -318,12 +355,53 @@ public class ConnectionConfiguration {
         return canonicalOrigin(parsed);
     }
 
-    /** {@code scheme://host[:port]}, lowercased, with no trailing slash. */
+    /**
+     * {@code scheme://host[:port]}, lowercased, with no trailing slash and the
+     * scheme's default port folded away.
+     */
     public static String canonicalOrigin(URI uri) {
         String scheme = uri.getScheme().toLowerCase(Locale.ROOT);
         String host = uri.getHost().toLowerCase(Locale.ROOT);
-        int port = uri.getPort();
+        int port = normalizePort(scheme, uri.getPort());
         return port < 0 ? scheme + "://" + host : scheme + "://" + host + ":" + port;
+    }
+
+    /**
+     * The port, or {@code -1} when it is the scheme's own default.
+     * <p>
+     * {@code https://api.example.com} and {@code https://api.example.com:443} are
+     * one origin, and a comparison that says otherwise refuses a target the
+     * allowlist was written to permit — an allowlist that looks correct and blocks
+     * everything, which is precisely the failure canonicalisation exists to
+     * prevent. Exposed because the same fold is needed wherever a URL of this
+     * deployment is compared to another, not only inside an origin string.
+     */
+    public static int normalizePort(String scheme, int port) {
+        if (port < 0) {
+            return -1;
+        }
+        String lower = scheme == null ? "" : scheme.toLowerCase(Locale.ROOT);
+        if (("https".equals(lower) && port == 443) || ("http".equals(lower) && port == 80)) {
+            return -1;
+        }
+        return port;
+    }
+
+    /**
+     * The tenant a connection belongs to, with the default applied.
+     * <p>
+     * One helper rather than a ternary per call site: the grants, the OAuth state
+     * rows and the registry cache key are all filed under this exact string, so two
+     * sites that spell the default differently file one connection's data under two
+     * tenants and neither can find the other's.
+     */
+    public static String effectiveTenant(ConnectionConfiguration connection) {
+        return connection == null ? ConnectionReference.DEFAULT_TENANT : effectiveTenant(connection.getTenantId());
+    }
+
+    /** @see #effectiveTenant(ConnectionConfiguration) */
+    public static String effectiveTenant(String tenantId) {
+        return tenantId == null || tenantId.isBlank() ? ConnectionReference.DEFAULT_TENANT : tenantId;
     }
 
     private static URI parse(String value, String field) {
@@ -374,6 +452,14 @@ public class ConnectionConfiguration {
 
     public void setBinding(Binding binding) {
         this.binding = binding;
+    }
+
+    public boolean isAllowUnverifiedPrincipal() {
+        return allowUnverifiedPrincipal;
+    }
+
+    public void setAllowUnverifiedPrincipal(boolean allowUnverifiedPrincipal) {
+        this.allowUnverifiedPrincipal = allowUnverifiedPrincipal;
     }
 
     public StaticAuth getStaticAuth() {

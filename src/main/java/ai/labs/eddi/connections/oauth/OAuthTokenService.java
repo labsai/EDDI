@@ -11,6 +11,7 @@ import ai.labs.eddi.connections.ConnectionException;
 import ai.labs.eddi.connections.CredentialReferenceResolver;
 import ai.labs.eddi.connections.grants.ConnectionGrant;
 import ai.labs.eddi.connections.grants.IConnectionGrantStore;
+import ai.labs.eddi.connections.model.ConnectionReference;
 import ai.labs.eddi.secrets.ISecretProvider;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -20,10 +21,12 @@ import org.jboss.logging.Logger;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CompletionException;
+import java.util.function.Supplier;
 
 /**
  * Produces a live access token for a connection and principal, refreshing when
@@ -67,6 +70,10 @@ public class OAuthTokenService implements AccessTokenSupplier {
     /**
      * Treat a token as expired this long before it really is, so a provider whose
      * clock differs from ours by a second does not produce a 401 that looks random.
+     * <p>
+     * The ceiling, not a constant: a token whose whole lifetime is shorter than
+     * twice this would never be usable at all. See
+     * {@link #effectiveMargin(ConnectionConfiguration, ConnectionGrant)}.
      */
     static final Duration EXPIRY_MARGIN = Duration.ofSeconds(30);
 
@@ -87,6 +94,13 @@ public class OAuthTokenService implements AccessTokenSupplier {
 
     /** Per-JVM single-flight, keyed by grant. */
     private final ConcurrentHashMap<String, CompletableFuture<String>> inFlight = new ConcurrentHashMap<>();
+
+    /**
+     * Connections already warned about a sub-margin token lifetime. The condition
+     * is a property of the provider, so it would otherwise be logged on every
+     * single resolve for as long as the connection exists.
+     */
+    private final Set<String> shortLifetimeWarned = ConcurrentHashMap.newKeySet();
 
     /**
      * Identifies this replica's claims, so a release cannot clear somebody else's.
@@ -115,23 +129,39 @@ public class OAuthTokenService implements AccessTokenSupplier {
     public String accessToken(ConnectionConfiguration connection, String principal) {
         String tenantId = tenantOf(connection);
         Optional<ConnectionGrant> existing = grantStore.find(tenantId, connection.getName(), principal);
+        boolean serviceAccount = connection.getAuthType() == AuthType.OAUTH2_CLIENT_CREDENTIALS;
 
         if (existing.isEmpty()) {
-            if (connection.getAuthType() == AuthType.OAUTH2_CLIENT_CREDENTIALS) {
+            if (serviceAccount) {
                 // A service account needs no human step: the first call mints it.
-                return mintServiceGrant(connection, tenantId, principal);
+                return mintSingleFlight(connection, tenantId, principal);
             }
             throw new ConnectionException(ConnectionException.Reason.NOT_CONNECTED, "Connection '" + connection.getName()
                     + "' has no grant for this user yet. Connect the account first (POST /connections/" + connection.getName() + "/authorize).");
         }
 
         ConnectionGrant grant = existing.get();
-        if (grant.getStatus() == ConnectionGrant.Status.REVOKED || grant.getStatus() == ConnectionGrant.Status.REFRESH_FAILED) {
+        if (grant.getStatus() == ConnectionGrant.Status.REVOKED) {
+            // Terminal for every flow, service accounts included: somebody decided
+            // this grant should stop working, and re-minting would undo that.
             throw new ConnectionException(ConnectionException.Reason.GRANT_UNUSABLE, "The grant for connection '" + connection.getName()
-                    + "' is " + grant.getStatus() + ". The user must reconnect the account.");
+                    + "' is REVOKED. The user must reconnect the account.");
         }
-        if (grant.isAccessTokenUsable(Instant.now(), EXPIRY_MARGIN)) {
-            return unseal(tenantId, grant.getEncryptedAccessToken(), grant.getAccessTokenIv(), connection);
+        if (grant.getStatus() == ConnectionGrant.Status.REFRESH_FAILED) {
+            if (serviceAccount) {
+                // Re-authenticating IS the client_credentials renewal path — there is
+                // no refresh token that could have gone stale and no human to bring
+                // back. Left terminal, a single rejected mint (a rotated client secret,
+                // a provider returning invalid_client for a minute) parks a row that no
+                // API can clear, and the connection stays dead until somebody edits the
+                // database. The upsert replaces the dead row rather than adding to it.
+                return mintSingleFlight(connection, tenantId, principal);
+            }
+            throw new ConnectionException(ConnectionException.Reason.GRANT_UNUSABLE, "The grant for connection '" + connection.getName()
+                    + "' is REFRESH_FAILED. The user must reconnect the account.");
+        }
+        if (grant.isAccessTokenUsable(Instant.now(), effectiveMargin(connection, grant))) {
+            return unseal(tenantId, grant.getEncryptedAccessToken(), grant.getAccessTokenIv(), grant.getDekId(), connection);
         }
         return refreshSingleFlight(connection, tenantId, principal, grant);
     }
@@ -139,11 +169,37 @@ public class OAuthTokenService implements AccessTokenSupplier {
     /**
      * Collapses concurrent callers on this replica, then defers to the
      * cross-replica claim.
+     */
+    private String refreshSingleFlight(ConnectionConfiguration connection, String tenantId, String principal, ConnectionGrant grant) {
+        return singleFlight(flightKey(tenantId, connection, principal), () -> refreshOrAwait(connection, tenantId, principal, grant));
+    }
+
+    /**
+     * Mints through the same single-flight a refresh uses.
      * <p>
-     * The refresh runs on the CALLING thread, not on a pool. {@code supplyAsync}
-     * would put it on the common ForkJoinPool, where the non-claimant's polling
-     * wait — a genuinely blocking operation — occupies a thread sized for CPU work
-     * and shared with every parallel stream in the process.
+     * A cold start is N conversations discovering the missing grant in the same
+     * millisecond, and called directly the mint gives each of them its own token
+     * request. The cross-replica claim is deliberately not involved:
+     * {@code client_credentials} has no refresh token for a second request to
+     * rotate away, so a duplicate across pods costs one wasted call rather than a
+     * logged-out user, while the fan-out worth removing is the one inside a single
+     * replica.
+     */
+    private String mintSingleFlight(ConnectionConfiguration connection, String tenantId, String principal) {
+        return singleFlight(flightKey(tenantId, connection, principal), () -> mintServiceGrant(connection, tenantId, principal));
+    }
+
+    private static String flightKey(String tenantId, ConnectionConfiguration connection, String principal) {
+        return tenantId + "|" + connection.getName() + "|" + principal;
+    }
+
+    /**
+     * One token acquisition per grant per replica; everybody else joins it.
+     * <p>
+     * The work runs on the CALLING thread, not on a pool. {@code supplyAsync} would
+     * put it on the common ForkJoinPool, where the non-claimant's polling wait — a
+     * genuinely blocking operation — occupies a thread sized for CPU work and
+     * shared with every parallel stream in the process.
      * <p>
      * Exceptions are unwrapped for joiners. A {@link CompletableFuture} wraps
      * whatever it was completed with in a {@link CompletionException}, and the
@@ -151,15 +207,14 @@ public class OAuthTokenService implements AccessTokenSupplier {
      * it — a wrapped exception silently turns "reconnect required" into an
      * unclassified failure.
      */
-    private String refreshSingleFlight(ConnectionConfiguration connection, String tenantId, String principal, ConnectionGrant grant) {
-        String key = tenantId + "|" + connection.getName() + "|" + principal;
+    private String singleFlight(String key, Supplier<String> acquire) {
         var flight = new CompletableFuture<String>();
         CompletableFuture<String> existing = inFlight.putIfAbsent(key, flight);
         if (existing != null) {
             return join(existing);
         }
         try {
-            String token = refreshOrAwait(connection, tenantId, principal, grant);
+            String token = acquire.get();
             flight.complete(token);
             return token;
         } catch (RuntimeException e) {
@@ -209,6 +264,16 @@ public class OAuthTokenService implements AccessTokenSupplier {
                 throw new ConnectionException(ConnectionException.Reason.NOT_CONNECTED, "The grant for connection '" + connection.getName()
                         + "' was removed while a token refresh was in progress. Connect the account again.");
             }
+            if (awaited.leaseFree()) {
+                // The claimant gave the lease back without writing a token: it failed
+                // transiently, or it died. No token is coming, so polling on would burn
+                // the whole await timeout — a minute of dead air for every waiter after
+                // one provider hiccup. Claim instead. The poll already paced this by an
+                // interval, and the deadline below still bounds a permanently contended
+                // grant, so this cannot spin.
+                count("connection.token.refresh.claim.count", "outcome", "lease_released");
+                continue;
+            }
             if (Instant.now().isAfter(deadline)) {
                 // The lease outlived its holder — a crashed replica, or one that hung.
                 // Retry the claim rather than refreshing blind, so exactly one caller
@@ -232,18 +297,27 @@ public class OAuthTokenService implements AccessTokenSupplier {
      *            the grant row disappeared, which no amount of further waiting can
      *            fix — distinguished from "not ready yet" so the caller can fail
      *            fast with the right reason instead of spinning to the deadline
+     * @param leaseFree
+     *            the lease was given back with no token written, so the claimant
+     *            failed and nothing is on its way — also distinguished from "not
+     *            ready yet", because waiting for a refresh nobody is performing
+     *            costs the full timeout and ends in the wrong reason
      */
-    private record AwaitOutcome(String token, boolean grantGone) {
+    private record AwaitOutcome(String token, boolean grantGone, boolean leaseFree) {
         static AwaitOutcome adopted(String token) {
-            return new AwaitOutcome(token, false);
+            return new AwaitOutcome(token, false, false);
         }
 
         static AwaitOutcome timedOut() {
-            return new AwaitOutcome(null, false);
+            return new AwaitOutcome(null, false, false);
         }
 
         static AwaitOutcome grantRemoved() {
-            return new AwaitOutcome(null, true);
+            return new AwaitOutcome(null, true, false);
+        }
+
+        static AwaitOutcome leaseReleased() {
+            return new AwaitOutcome(null, false, true);
         }
     }
 
@@ -266,8 +340,12 @@ public class OAuthTokenService implements AccessTokenSupplier {
                 throw new ConnectionException(ConnectionException.Reason.GRANT_UNUSABLE, "The grant for connection '" + connection.getName()
                         + "' became unusable during a refresh. The user must reconnect the account.");
             }
-            if (current.getRefreshInProgress() == null && current.isAccessTokenUsable(Instant.now(), EXPIRY_MARGIN)) {
-                return AwaitOutcome.adopted(unseal(tenantId, current.getEncryptedAccessToken(), current.getAccessTokenIv(), connection));
+            if (current.getRefreshInProgress() == null) {
+                if (current.isAccessTokenUsable(Instant.now(), effectiveMargin(connection, current))) {
+                    return AwaitOutcome
+                            .adopted(unseal(tenantId, current.getEncryptedAccessToken(), current.getAccessTokenIv(), current.getDekId(), connection));
+                }
+                return AwaitOutcome.leaseReleased();
             }
         }
         return AwaitOutcome.timedOut();
@@ -280,19 +358,13 @@ public class OAuthTokenService implements AccessTokenSupplier {
         ConnectionGrant grant = grantStore.find(tenantId, connection.getName(), principal).orElseThrow(() -> new ConnectionException(
                 ConnectionException.Reason.NOT_CONNECTED, "The grant for connection '" + connection.getName() + "' disappeared mid-refresh."));
         try {
-            if (grant.isAccessTokenUsable(Instant.now(), EXPIRY_MARGIN)) {
-                return unseal(tenantId, grant.getEncryptedAccessToken(), grant.getAccessTokenIv(), connection);
+            if (grant.isAccessTokenUsable(Instant.now(), effectiveMargin(connection, grant))) {
+                return unseal(tenantId, grant.getEncryptedAccessToken(), grant.getAccessTokenIv(), grant.getDekId(), connection);
             }
-            TokenResponse token = requestNewToken(connection, tenantId, grant);
-            String refreshToken = token.refreshToken() != null
-                    ? token.refreshToken()
-                    // A provider that does not rotate returns no refresh_token; keeping
-                    // the previous one is required, not optional — overwriting it with
-                    // null makes the NEXT refresh impossible.
-                    : unsealOrNull(tenantId, grant.getEncryptedRefreshToken(), grant.getRefreshTokenIv());
-            persist(connection, tenantId, principal, token, refreshToken, grant.getVersion());
+            RefreshResult refreshed = requestNewToken(connection, tenantId, grant);
+            persist(connection, tenantId, principal, refreshed.token(), refreshed.refreshToken(), grant.getVersion());
             count("connection.token.refresh.count", "outcome", "success");
-            return token.accessToken();
+            return refreshed.token().accessToken();
         } catch (ConnectionException e) {
             handleRefreshFailure(connection, tenantId, principal, grant, e);
             throw e;
@@ -323,18 +395,62 @@ public class OAuthTokenService implements AccessTokenSupplier {
         }
     }
 
-    private TokenResponse requestNewToken(ConnectionConfiguration connection, String tenantId, ConnectionGrant grant) {
+    /**
+     * A token endpoint's answer together with the refresh token that belongs with
+     * it — the rotated one, or the one we sent when the provider chose not to
+     * rotate. They travel as a pair so the second value is never recovered by
+     * unsealing the stored ciphertext again; see {@link #carryForward}.
+     */
+    private record RefreshResult(TokenResponse token, String refreshToken) {
+    }
+
+    private RefreshResult requestNewToken(ConnectionConfiguration connection, String tenantId, ConnectionGrant grant) {
         String clientSecret = resolveClientSecret(connection);
+        String stored = storedRefreshToken(connection, tenantId, grant);
         if (connection.getAuthType() == AuthType.OAUTH2_CLIENT_CREDENTIALS) {
             // A service account has no refresh token by design — it re-authenticates.
-            return tokenClient.clientCredentials(connection, clientSecret);
+            return carryForward(tokenClient.clientCredentials(connection, clientSecret), stored);
         }
-        String refreshToken = unsealOrNull(tenantId, grant.getEncryptedRefreshToken(), grant.getRefreshTokenIv());
-        if (refreshToken == null) {
+        if (stored == null) {
             throw new ConnectionException(ConnectionException.Reason.GRANT_UNUSABLE, "The grant for connection '" + connection.getName()
                     + "' has no refresh token, so its expired access token cannot be renewed. The user must reconnect.");
         }
-        return tokenClient.refresh(connection, clientSecret, refreshToken);
+        return carryForward(tokenClient.refresh(connection, clientSecret, stored), stored);
+    }
+
+    /**
+     * A provider that does not rotate returns no {@code refresh_token}; keeping the
+     * previous one is required, not optional — overwriting it with null makes the
+     * NEXT refresh impossible.
+     * <p>
+     * It is the plaintext already in hand, never a second unseal of the same
+     * ciphertext. That second unseal had a null-returning failure path, so one
+     * vault or DEK blip in the window between the two calls persisted a grant with
+     * no refresh token at all, and the next refresh failed terminally — a reconnect
+     * demanded for a transient error, with nothing left to retry with.
+     */
+    private static RefreshResult carryForward(TokenResponse response, String previousRefreshToken) {
+        return new RefreshResult(response, response.refreshToken() != null ? response.refreshToken() : previousRefreshToken);
+    }
+
+    /**
+     * The refresh token the grant already holds, or null if it never had one.
+     * <p>
+     * Ciphertext that is present but will not open is a vault or DEK problem, not a
+     * revoked grant: reporting it as terminal would mark the grant dead and demand
+     * a reconnect for something that fixes itself, so it fails transiently and the
+     * grant survives untouched.
+     */
+    private String storedRefreshToken(ConnectionConfiguration connection, String tenantId, ConnectionGrant grant) {
+        if (grant.getEncryptedRefreshToken() == null) {
+            return null;
+        }
+        String plaintext = unsealOrNull(tenantId, grant.getEncryptedRefreshToken(), grant.getRefreshTokenIv(), grant.getDekId());
+        if (plaintext == null) {
+            throw new ConnectionException(ConnectionException.Reason.TOKEN_ENDPOINT_UNAVAILABLE, "The stored refresh token for connection '"
+                    + connection.getName() + "' could not be decrypted. The grant is unchanged; the next request will retry.");
+        }
+        return plaintext;
     }
 
     /**
@@ -360,7 +476,12 @@ public class OAuthTokenService implements AccessTokenSupplier {
         LOGGER.warnf("Refresh for connection '%s' was rejected by the provider; the grant is marked REFRESH_FAILED", connection.getName());
     }
 
-    /** Mints and stores a {@code client_credentials} grant on first use. */
+    /**
+     * Mints and stores a {@code client_credentials} grant: on first use, and again
+     * when a rejected one left the row {@code REFRESH_FAILED}. The upsert is keyed
+     * on the same triple, so the second case replaces the dead row rather than
+     * adding a second one beside it.
+     */
     private String mintServiceGrant(ConnectionConfiguration connection, String tenantId, String principal) {
         TokenResponse token = tokenClient.clientCredentials(connection, resolveClientSecret(connection));
         persistNew(connection, tenantId, principal, token, token.refreshToken());
@@ -402,7 +523,10 @@ public class OAuthTokenService implements AccessTokenSupplier {
             grant.setEncryptedRefreshToken(refresh.ciphertext());
             grant.setRefreshTokenIv(refresh.iv());
         }
-        grant.setDekId(tenantId);
+        // The DEK generation that actually sealed the ciphertext above, so a later
+        // read opens it with that key rather than with whichever is newest by then.
+        // It used to be set to the tenant id, which named nothing.
+        grant.setDekId(access.dekId());
         grant.setExpiresAt(Instant.now().plus(token.expiresIn()));
         grant.setScopes(token.scopes() == null || token.scopes().isEmpty() ? connection.getOauth().getScopes() : token.scopes());
         grant.setStatus(ConnectionGrant.Status.ACTIVE);
@@ -423,8 +547,8 @@ public class OAuthTokenService implements AccessTokenSupplier {
         }
     }
 
-    private String unseal(String tenantId, String ciphertext, String iv, ConnectionConfiguration connection) {
-        String plaintext = unsealOrNull(tenantId, ciphertext, iv);
+    private String unseal(String tenantId, String ciphertext, String iv, String dekId, ConnectionConfiguration connection) {
+        String plaintext = unsealOrNull(tenantId, ciphertext, iv, dekId);
         if (plaintext == null) {
             throw new ConnectionException(ConnectionException.Reason.GRANT_UNUSABLE,
                     "The stored token for connection '" + connection.getName() + "' could not be decrypted. The user must reconnect.");
@@ -432,20 +556,58 @@ public class OAuthTokenService implements AccessTokenSupplier {
         return plaintext;
     }
 
-    private String unsealOrNull(String tenantId, String ciphertext, String iv) {
+    /**
+     * @param dekId
+     *            the grant's own {@code dekId}, which names the DEK generation that
+     *            sealed this ciphertext. Passing it is not optional: after a
+     *            rotation the tenant's newest generation is not the one a grant
+     *            still waiting to be swept was sealed with, and opening it with the
+     *            wrong key looks exactly like a revoked grant.
+     */
+    private String unsealOrNull(String tenantId, String ciphertext, String iv, String dekId) {
         if (ciphertext == null) {
             return null;
         }
         try {
-            return secretProvider.unseal(tenantId, new ISecretProvider.SealedValue(ciphertext, iv));
+            return secretProvider.unseal(tenantId, new ISecretProvider.SealedValue(ciphertext, iv, dekId));
         } catch (ISecretProvider.SecretProviderException e) {
             LOGGER.warnf("Failed to unseal a stored grant token for tenant '%s'", tenantId);
             return null;
         }
     }
 
+    /**
+     * The skew margin to apply to one grant: {@link #EXPIRY_MARGIN}, but never more
+     * than half of the lifetime the provider actually granted.
+     * <p>
+     * Applied flat, the margin makes a legal-but-short token unusable the instant
+     * it is stored. A provider answering {@code expires_in=20} — RFC 6749 sets no
+     * floor — yields a grant that never clears a 30-second bar, so every call
+     * refreshes, no waiter can ever adopt the result, and the connection hammers
+     * the token endpoint forever. Inflating the stored expiry would hide that by
+     * sending a token the provider has already expired, so the margin gives way
+     * instead: half of a short lifetime, full skew protection for every normal one.
+     */
+    private Duration effectiveMargin(ConnectionConfiguration connection, ConnectionGrant grant) {
+        Instant issuedAt = grant.getLastRefreshAt();
+        if (issuedAt == null || grant.getExpiresAt() == null) {
+            return EXPIRY_MARGIN;
+        }
+        Duration lifetime = Duration.between(issuedAt, grant.getExpiresAt());
+        if (lifetime.isNegative() || lifetime.isZero() || lifetime.compareTo(EXPIRY_MARGIN.multipliedBy(2)) >= 0) {
+            return EXPIRY_MARGIN;
+        }
+        if (shortLifetimeWarned.add(tenantOf(connection) + "|" + connection.getName())) {
+            LOGGER.warnf("Connection '%s' issues access tokens with a lifetime of %ds, below the %ds expiry margin; the margin is halved for "
+                    + "this connection so its tokens are usable at all.", connection.getName(), lifetime.toSeconds(), EXPIRY_MARGIN.toSeconds());
+        }
+        return lifetime.dividedBy(2);
+    }
+
     private static String tenantOf(ConnectionConfiguration connection) {
-        return connection.getTenantId() == null || connection.getTenantId().isBlank() ? "default" : connection.getTenantId();
+        return connection.getTenantId() == null || connection.getTenantId().isBlank()
+                ? ConnectionReference.DEFAULT_TENANT
+                : connection.getTenantId();
     }
 
     /** Bounded categoricals only — see {@code ConnectionResolver#record}. */

@@ -6,7 +6,6 @@ package ai.labs.eddi.configs.connections.rest;
 
 import ai.labs.eddi.configs.connections.IConnectionStore;
 import ai.labs.eddi.configs.connections.IRestConnectionStore;
-import ai.labs.eddi.configs.connections.model.AuthType;
 import ai.labs.eddi.configs.connections.model.Binding;
 import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
@@ -81,8 +80,12 @@ public class RestConnectionStore implements IRestConnectionStore {
     @Override
     public Response updateConnection(String id, Integer version, ConnectionConfiguration connectionConfiguration) {
         validateForWrite(connectionConfiguration);
-        requireNameUnchanged(id, connectionConfiguration);
+        requireIdentityUnchanged(id, connectionConfiguration);
         requireNameIsFree(connectionConfiguration, id);
+        // Last of the write checks, deliberately: it refuses a document that is not
+        // wrong, only ahead of the feature, so anything genuinely malformed gets to
+        // name its own field first.
+        requireDefaultTenant(connectionConfiguration);
         Response response = restVersionInfo.update(id, version, connectionConfiguration);
         connectionRegistry.invalidate();
         return response;
@@ -92,6 +95,7 @@ public class RestConnectionStore implements IRestConnectionStore {
     public Response createConnection(ConnectionConfiguration connectionConfiguration) {
         validateForWrite(connectionConfiguration);
         requireNameIsFree(connectionConfiguration, null);
+        requireDefaultTenant(connectionConfiguration);
         Response response = restVersionInfo.create(connectionConfiguration);
         connectionRegistry.invalidate();
         return response;
@@ -106,6 +110,10 @@ public class RestConnectionStore implements IRestConnectionStore {
         // resolve by scan order. Suffixed rather than refused, because refusing to
         // duplicate is a worse answer than producing an obviously-renamed copy.
         config.setName(nextFreeName(config));
+        // A copy is a new connection, so it faces the same gate: duplicating a
+        // pre-existing non-default-tenant document would mint a second one nobody
+        // can link or unlink.
+        requireDefaultTenant(config);
         Response response = restVersionInfo.create(config);
         connectionRegistry.invalidate();
         return response;
@@ -149,7 +157,7 @@ public class RestConnectionStore implements IRestConnectionStore {
             if (connection == null || connection.getName() == null) {
                 return null;
             }
-            return new ConnectionIdentity(tenantOf(connection), connection.getName());
+            return new ConnectionIdentity(ConnectionConfiguration.effectiveTenant(connection), connection.getName());
         } catch (Exception e) {
             LOGGER.warnf("Could not resolve the identity of connection '%s'; its grants cannot be cleaned up automatically and may need "
                     + "removing by hand.", id);
@@ -157,40 +165,46 @@ public class RestConnectionStore implements IRestConnectionStore {
         }
     }
 
-    private static String tenantOf(ConnectionConfiguration connection) {
-        return connection.getTenantId() == null || connection.getTenantId().isBlank()
-                ? ConnectionReference.DEFAULT_TENANT
-                : connection.getTenantId();
-    }
-
     /**
-     * Refuses a rename, because a connection's name is its identity everywhere
-     * else.
+     * Refuses a rename or a tenant move, because (tenant, name) is a connection's
+     * identity everywhere else.
      * <p>
      * A connection reference names it, and - the part that bites - every stored
-     * grant is filed under it. Renaming "jira" to "jira-old" therefore orphans
-     * every user's tokens rather than moving them, and the next connection anyone
-     * creates called "jira" silently INHERITS them: a fresh connection, possibly to
-     * an entirely different provider, resolving other people's live refresh tokens
-     * on its first call.
+     * grant is filed under BOTH halves. Renaming "jira" to "jira-old", or moving it
+     * to another tenant, therefore orphans every user's tokens rather than moving
+     * them, and the next connection anyone creates under the old pair silently
+     * INHERITS them: a fresh connection, possibly to an entirely different
+     * provider, resolving other people's live refresh tokens on its first call.
+     * Checking only the name left the tenant half of that hole wide open.
      * <p>
      * Refused rather than cascaded. A rename that rewrites grant rows is a
      * migration, not a field edit, and performing one silently inside a PUT is how
      * the inheritance above happens by accident in the first place. Create the new
      * connection and let users link it.
+     * <p>
+     * An identity that cannot be read is refused too, matching
+     * {@link #requireNameIsFree}: permitting the write would be deciding "not a
+     * rename" from no evidence, and the cost of being wrong is the inheritance
+     * above.
      */
-    private void requireNameUnchanged(String id, ConnectionConfiguration connectionConfiguration) {
-        if (connectionConfiguration == null || connectionConfiguration.getName() == null) {
+    private void requireIdentityUnchanged(String id, ConnectionConfiguration connectionConfiguration) {
+        if (connectionConfiguration == null) {
             return;
         }
         ConnectionIdentity current = identityOf(id);
-        if (current == null || current.name().equals(connectionConfiguration.getName())) {
+        if (current == null) {
+            throw new BadRequestException("Could not read the current identity of connection '" + id + "', so this update cannot be checked "
+                    + "for a rename or a tenant move. Permitting it unchecked would orphan every grant filed under the old (tenant, name) "
+                    + "and hand them to whatever is created under that pair next. Retry once the configuration store is reachable.");
+        }
+        var target = new ConnectionIdentity(ConnectionConfiguration.effectiveTenant(connectionConfiguration), connectionConfiguration.getName());
+        if (current.equals(target)) {
             return;
         }
-        throw new BadRequestException("A connection cannot be renamed from '" + current.name() + "' to '" + connectionConfiguration.getName()
-                + "'. The name is what a connection reference points at AND what every stored grant is filed under, so a rename would "
-                + "orphan this connection's grants and hand them to whatever is created under the old name next. Create a new connection "
-                + "instead.");
+        throw new BadRequestException("A connection cannot be moved from '" + current.tenantId() + "/" + current.name() + "' to '"
+                + target.tenantId() + "/" + target.name() + "'. The name is what a connection reference points at, and (tenant, name) "
+                + "together are what every stored grant is filed under, so this would orphan this connection's grants and hand them to "
+                + "whatever is created under the old pair next. Create a new connection instead.");
     }
 
     /**
@@ -299,6 +313,38 @@ public class RestConnectionStore implements IRestConnectionStore {
     }
 
     /**
+     * Refuses a connection filed under any tenant but the default, until the rest
+     * of the feature can follow it there.
+     * <p>
+     * The document carries a {@code tenantId} and the resolver honours a
+     * tenant-qualified {@code ${connection:tenant/name}}, so a client-credentials
+     * connection under "acme" resolves and mints a grant filed under "acme" — but
+     * the per-user endpoints are still pinned to the default tenant, so that grant
+     * is one the linked-accounts page cannot show and disconnect cannot delete. A
+     * live refresh token with no revoke button, produced by a field that reads like
+     * it is supported.
+     * <p>
+     * Refused at the write boundary rather than papered over at read time: the
+     * runtime behaviour is consistent as it stands, and quietly rewriting an
+     * author's tenantId would be a worse surprise than refusing it. Three things
+     * change together when a real tenant context lands, and no one of them is
+     * enough alone: {@code RestConnectionAuthorization.callerTenant()}, which
+     * scopes {@code listMine} and {@code disconnect};
+     * {@code ConnectionConfiguration.tenantId}, which must then be populated from
+     * the tenant context rather than from the document; and this check, which comes
+     * out at that point.
+     */
+    private static void requireDefaultTenant(ConnectionConfiguration connectionConfiguration) {
+        String tenant = ConnectionConfiguration.effectiveTenant(connectionConfiguration);
+        if (!ConnectionReference.DEFAULT_TENANT.equals(tenant)) {
+            throw new BadRequestException("tenantId '" + tenant + "' is not supported yet — multi-tenant connections are not implemented. "
+                    + "The endpoints that list and revoke a user's linked accounts are still scoped to the '"
+                    + ConnectionReference.DEFAULT_TENANT + "' tenant, so a grant filed under any other one could never be shown or "
+                    + "disconnected. Leave tenantId unset.");
+        }
+    }
+
+    /**
      * Refuses a connection this deployment could store but could never resolve.
      * <p>
      * These two checks used to live only in the startup guard, where they threw and
@@ -314,16 +360,11 @@ public class RestConnectionStore implements IRestConnectionStore {
                     + "could claim any userId and resolve that user's tokens, so resolution refuses outright — the connection would save "
                     + "and then fail every call. Enable OIDC, or use SERVICE binding.");
         }
-        if (isOAuth(connectionConfiguration) && !secretProvider.isAvailable()) {
+        if (connectionConfiguration.getAuthType() != null && connectionConfiguration.getAuthType().isOAuth() && !secretProvider.isAvailable()) {
             throw new BadRequestException("An OAuth connection requires an active SecretsVault (set EDDI_VAULT_MASTER_KEY). Grants are "
                     + "envelope-encrypted with the tenant DEK and there is deliberately no plaintext fallback for refresh tokens, so "
                     + "linking an account would fail at the moment the token comes back.");
         }
-    }
-
-    private static boolean isOAuth(ConnectionConfiguration connectionConfiguration) {
-        return connectionConfiguration.getAuthType() == AuthType.OAUTH2_AUTHORIZATION_CODE
-                || connectionConfiguration.getAuthType() == AuthType.OAUTH2_CLIENT_CREDENTIALS;
     }
 
     @Override

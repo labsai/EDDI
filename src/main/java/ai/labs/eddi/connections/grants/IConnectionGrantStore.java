@@ -12,9 +12,9 @@ import java.util.Optional;
  * Persistence for {@link ConnectionGrant}s, keyed
  * {@code (tenantId, connectionName, principal)}.
  * <p>
- * Two of these methods carry the concurrency design and are not ordinary CRUD:
- * {@link #claimRefresh} and {@link #completeRefresh}. Read their comments
- * before changing either.
+ * Three of these methods carry the concurrency design and are not ordinary
+ * CRUD: {@link #claimRefresh}, {@link #completeRefresh} and
+ * {@link #updateSealedTokens}. Read their comments before changing any of them.
  */
 public interface IConnectionGrantStore {
 
@@ -100,11 +100,17 @@ public interface IConnectionGrantStore {
      * Separate from {@link #upsert} because rotation is not a grant update: it must
      * not bump {@code updatedAt}, must not touch a refresh lease it does not own,
      * and must not change what any concurrent refresh sees except the bytes it is
-     * about to rewrite anyway.
+     * about to rewrite anyway. It deliberately does <b>not</b> bump {@code version}
+     * either — a re-seal is invisible to anyone holding a version, and invalidating
+     * their CAS would fail a refresh that has nothing wrong with it.
      *
-     * @return whether a row was written
+     * @param expectedVersion
+     *            the version the row was read at. A refresh that landed in between
+     *            has already sealed its tokens with the current DEK, so losing this
+     *            guard means the work is done, not that it must be forced through
+     * @return whether the write landed
      */
-    boolean updateSealedTokens(ConnectionGrant grant);
+    boolean updateSealedTokens(ConnectionGrant grant, long expectedVersion);
 
     /** Counts by status, for the {@code connection.grant.status} gauge. */
     long countByStatus(String tenantId, ConnectionGrant.Status status);
