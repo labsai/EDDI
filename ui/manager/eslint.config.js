@@ -76,24 +76,33 @@ export default tseslint.config(
       // unrunnable cases can disable this rule with a comment saying why — the
       // friction is the point.
       //
-      // Covers `test.skip`, `test.fixme` and `test.slow` (all three silence a
-      // failure) and the `test.describe.skip` / `test.describe.fixme` forms,
-      // where the callee's object is itself a MemberExpression — a selector
-      // matching only `[callee.object.name='test']` misses those entirely,
-      // leaving three equally effective escape hatches open.
+      // Covers `test.skip`, `test.fixme`, `test.slow` and `test.fail` — all four
+      // turn a failure into a pass — at every callee depth the API offers:
+      //
+      //   test.skip                     object.name
+      //   test.describe.skip            object.object.name
+      //   test.describe.serial.skip     object.object.object.name
+      //
+      // The first version of this rule stopped at the second, which left
+      // `test.describe.serial.skip` and `test.describe.parallel.fixme` silently
+      // disabling whole suites with a clean lint. Enumerating depths is ugly;
+      // esquery has no ancestor-axis operator, and the alternative — matching
+      // any member expression rooted at `test` — is not expressible here.
       selector: [
         ":matches(",
         "CallExpression[callee.object.name='test'],",
-        "CallExpression[callee.object.object.name='test']",
+        "CallExpression[callee.object.object.name='test'],",
+        "CallExpression[callee.object.object.object.name='test']",
         ")",
         ":matches(",
         "[callee.property.name='skip'],",
         "[callee.property.name='fixme'],",
-        "[callee.property.name='slow']",
+        "[callee.property.name='slow'],",
+        "[callee.property.name='fail']",
         ")",
       ].join(""),
       message:
-        "test.skip()/fixme()/slow() in E2E hides the failure it guards against. Create missing fixtures in beforeAll and let real failures fail. If a skip is genuinely correct, disable this rule on the line with a reason.",
+        "test.skip()/fixme()/slow()/fail() in E2E hides the failure it guards against. Create missing fixtures in beforeAll and let real failures fail. If a skip is genuinely correct, disable this rule on the line with a reason.",
     };
 
     const IMPORT_THE_FIXTURE = {
@@ -125,7 +134,16 @@ export default tseslint.config(
       {
         // UI tier only — the tiers that run against a real backend have no MSW
         // and so nothing for the fixture to check.
-        files: ["e2e/*.spec.ts"],
+        //
+        // Matched recursively, and excluded at ANY depth — playwright.config.ts
+        // uses `**/integration/**`, so anchoring these at the root would have
+        // flagged a nested `e2e/foo/integration/bar.spec.ts` that Playwright
+        // excludes. The original `e2e/*.spec.ts` was the top level only, while
+        // the ui project is `testDir: "./e2e"` with `testIgnore` — so a spec in
+        // any new subdirectory ran in the ui tier without the fixture, silently
+        // losing the unhandled-API-call assertion that is the point of it.
+        files: ["e2e/**/*.spec.{ts,tsx}"],
+        ignores: ["e2e/**/integration/**", "e2e/**/fullstack/**"],
         rules: {
           "no-restricted-imports": ["error", { paths: [IMPORT_THE_FIXTURE] }],
         },

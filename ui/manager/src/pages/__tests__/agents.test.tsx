@@ -213,6 +213,24 @@ describe("AgentsPage", () => {
 
   // --- Sorting in list view ---
 
+  /**
+   * The nth cell of every body row of the list view.
+   *
+   * Columns: 0 name, 1 id, 2 version, 3 modified, 4 actions.
+   */
+  const column = (index: number) =>
+    within(screen.getByTestId("agent-list"))
+      .getAllByRole("row")
+      .slice(1) // row 0 is the header
+      .map((r) => {
+        // Not `?? ""`. A wrong index would otherwise yield a column of empty
+        // strings, which sorts and reverses exactly like a real one — the
+        // assertions below would pass while reading nothing.
+        const cell = r.querySelectorAll("td")[index];
+        if (!cell) throw new Error(`row has no cell at index ${index}`);
+        return cell.textContent?.trim() ?? "";
+      });
+
   it("sorts by name when clicking Name header and verifies order", async () => {
     renderAgents();
     const user = userEvent.setup();
@@ -236,11 +254,7 @@ describe("AgentsPage", () => {
     // list whose middle is shuffled, and the descending half asserted
     // `localeCompare(...) >= 0`, which also passes when the two are equal —
     // i.e. when the sort did nothing at all.
-    const namesInOrder = () =>
-      within(screen.getByTestId("agent-list"))
-        .getAllByRole("row")
-        .slice(1) // row 0 is the header
-        .map((r) => r.querySelector("td")?.textContent ?? "");
+    const namesInOrder = () => column(0);
 
     const ascending = namesInOrder();
     expect(ascending.length).toBeGreaterThan(1);
@@ -267,11 +281,23 @@ describe("AgentsPage", () => {
       expect(screen.getByTestId("agent-list")).toBeInTheDocument();
     });
 
+    // The whole column against a sorted copy of itself, the same way the name
+    // case above does it. "the list is still rendered" — what this asserted —
+    // was already true before the click, so it passed against a comparator
+    // that did nothing: replacing the non-name branches of `agents.tsx`'s
+    // comparator with `cmp = 0` left this green.
+    const versionsInOrder = () =>
+      column(2).map((cell) => Number(cell.replace(/^v/, "")));
+
     const versionButton = screen.getByLabelText("Sort by version");
     await user.click(versionButton);
 
-    // Just verify the list is still rendered after sort
-    expect(screen.getByTestId("agent-list")).toBeInTheDocument();
+    const ascending = versionsInOrder();
+    expect(ascending.length).toBeGreaterThan(1);
+    expect(ascending).toEqual([...ascending].sort((a, b) => a - b));
+
+    await user.click(versionButton);
+    expect(versionsInOrder()).toEqual([...ascending].reverse());
   });
 
   it("sorts by modified", async () => {
@@ -288,10 +314,48 @@ describe("AgentsPage", () => {
       expect(screen.getByTestId("agent-list")).toBeInTheDocument();
     });
 
+    // Nothing here parses the date cell. It renders `toLocaleString()`, so it
+    // reads "22.8.2026, 01:05:32" here and "8/22/2026, 1:05:32 AM" on a CI
+    // runner, and `Date.parse` returns NaN for one and a confidently wrong
+    // value for the other. The assertions below compare the column against
+    // itself and against row identity, both of which are locale-independent.
     const modifiedButton = screen.getByLabelText("Sort by last modified");
     await user.click(modifiedButton);
 
-    expect(screen.getByTestId("agent-list")).toBeInTheDocument();
+    // The DATE column, not the name column: two fixture agents share a
+    // timestamp, and a stable sort keeps tied rows in insertion order both ways,
+    // so the row identities are not an exact reverse of each other. The rendered
+    // values are — equal strings are interchangeable.
+    const ascending = column(3);
+    const namesNow = column(0);
+    expect(ascending.length).toBeGreaterThan(1);
+
+    // Which END is which, not just that the two clicks mirror each other.
+    // `toEqual(reverse)` alone holds under ANY total order, so flipping the
+    // comparator to `b - a` — turning the default newest-first list into
+    // oldest-first, which a user would notice — sailed through it. The fixture's
+    // oldest agent is Appointment Scheduler (2 days) and its newest is IT
+    // Helpdesk Bot (30 minutes).
+    expect(namesNow[0]).toBe("Appointment Scheduler");
+    expect(namesNow[namesNow.length - 1]).toBe("IT Helpdesk Bot");
+
+    // A comparator that does nothing leaves the order untouched, so the second
+    // click would return the same column rather than its reverse.
+    await user.click(modifiedButton);
+    expect(column(3)).toEqual([...ascending].reverse());
+
+    // And it is reading `lastModifiedOn` rather than falling back to the name.
+    // The fixture's two orders genuinely differ — modified puts Invoice Analyst
+    // second where alphabetical puts Contract Review Assistant — so ruling out
+    // BOTH alphabetical directions rules out a name comparator.
+    //
+    // Both directions, because one is not enough: swapping this branch to
+    // `localeCompare` and checking only the ascending form still passed, since a
+    // name comparator can land either way round depending on sort direction.
+    // Checked, then fixed.
+    const alphabetical = [...namesNow].sort((a, b) => a.localeCompare(b));
+    expect(namesNow).not.toEqual(alphabetical);
+    expect(namesNow).not.toEqual([...alphabetical].reverse());
   });
 
   // --- Delete flow ---

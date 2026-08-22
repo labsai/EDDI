@@ -87,65 +87,80 @@ const EXEMPT: Record<string, string> = {
  * versions of the backup endpoints, for instance, never run: `handlers` claims
  * those paths first.
  *
+ * Keyed by the NORMALISED path, because that is what MSW matches on.
+ * path-to-regexp ignores parameter names, so `/ratelimit/:tool` and
+ * `/ratelimit/:toolName` are one route to it and two strings to us — keying on
+ * the raw pattern counted 52 duplicates and missed 6, including that pair
+ * (handlers.ts:4166 and :4363, whose 60s and 45s reset windows differ and only
+ * the first of which ever runs). Two people naming the same id differently is
+ * the most likely way a duplicate gets introduced, and it was the one way this
+ * ratchet could not see.
+ *
  * Frozen rather than fixed here for the reason `check-i18n.mjs` freezes its
  * COLLIDING set: the list can shrink but never grow, so the debt is visible and
- * bounded while untangling 52 shadowed handlers stays a separate change with
+ * bounded while untangling 58 shadowed handlers stays a separate change with
  * its own test run. A NEW duplicate fails immediately — including one that
  * merely swaps for a removed entry, since the set is compared and not counted.
  */
 const KNOWN_DUPLICATE_ROUTES: readonly string[] = [
   "DELETE */administration/coordinator/dead-letters",
-  "DELETE */schedulestore/schedules/:id",
+  "DELETE */administration/coordinator/dead-letters/{}",
+  "DELETE */schedulestore/schedules/{}",
   "GET */administration/coordinator/dead-letters",
   "GET */administration/coordinator/status",
-  "GET */administration/quotas/:tenantId",
-  "GET */administration/quotas/:tenantId/usage",
-  "GET */apicallstore/apicalls/:id",
+  "GET */administration/quotas/{}",
+  "GET */administration/quotas/{}/usage",
+  "GET */agents/{}",
   "GET */apicallstore/apicalls/descriptors",
-  "GET */auditstore/:conversationId",
-  "GET */auditstore/:conversationId/count",
-  "GET */auditstore/agent/:agentId",
-  "GET */backup/export/:filename",
-  "GET */dictionarystore/dictionaries/:id",
+  "GET */apicallstore/apicalls/{}",
+  "GET */auditstore/agent/{}",
+  "GET */auditstore/{}",
+  "GET */auditstore/{}/count",
+  "GET */backup/export/{}",
   "GET */dictionarystore/dictionaries/descriptors",
-  "GET */groups/:groupId/conversations",
+  "GET */dictionarystore/dictionaries/{}",
+  "GET */groups/{}/conversations",
   "GET */llm/tools/cache/stats",
   "GET */llm/tools/costs",
-  "GET */llmstore/llms/:id",
+  "GET */llm/tools/costs/conversation/{}",
+  "GET */llm/tools/history/{}",
+  "GET */llm/tools/ratelimit/{}",
   "GET */llmstore/llms/descriptors",
-  "GET */mcpcallsstore/mcpcalls/:id",
+  "GET */llmstore/llms/{}",
   "GET */mcpcallsstore/mcpcalls/descriptors",
-  "GET */outputstore/outputsets/:id",
+  "GET */mcpcallsstore/mcpcalls/{}",
   "GET */outputstore/outputsets/descriptors",
-  "GET */parserstore/parsers/:id",
+  "GET */outputstore/outputsets/{}",
   "GET */parserstore/parsers/descriptors",
-  "GET */propertysetterstore/propertysetters/:id",
+  "GET */parserstore/parsers/{}",
   "GET */propertysetterstore/propertysetters/descriptors",
-  "GET */ragstore/rags/:id",
+  "GET */propertysetterstore/propertysetters/{}",
   "GET */ragstore/rags/descriptors",
-  "GET */rulestore/rulesets/:id",
+  "GET */ragstore/rags/{}",
   "GET */rulestore/rulesets/descriptors",
+  "GET */rulestore/rulesets/{}",
   "GET */schedulestore/schedules",
-  "GET */schedulestore/schedules/:id",
-  "GET */schedulestore/schedules/:id/fires",
   "GET */schedulestore/schedules/admin/failed",
+  "GET */schedulestore/schedules/{}",
+  "GET */schedulestore/schedules/{}/fires",
   "GET */secretstore/secrets/health",
-  "GET */snippetstore/snippets/:id",
   "GET */snippetstore/snippets/descriptors",
+  "GET */snippetstore/snippets/{}",
   "POST */administration/agents/setup",
-  "POST */administration/quotas/:tenantId/usage/reset",
-  "POST */backup/export/:agentId",
+  "POST */administration/coordinator/dead-letters/{}/replay",
+  "POST */administration/quotas/{}/usage/reset",
+  "POST */backup/export/{}",
   "POST */backup/import",
   "POST */backup/import/preview",
-  "POST */groups/:groupId/conversations",
+  "POST */groups/{}/conversations",
   "POST */schedulestore/schedules",
-  "POST */schedulestore/schedules/:id/disable",
-  "POST */schedulestore/schedules/:id/dismiss",
-  "POST */schedulestore/schedules/:id/enable",
-  "POST */schedulestore/schedules/:id/fire",
-  "POST */schedulestore/schedules/:id/retry",
-  "PUT */administration/quotas/:tenantId",
-  "PUT */schedulestore/schedules/:id",
+  "POST */schedulestore/schedules/{}/disable",
+  "POST */schedulestore/schedules/{}/dismiss",
+  "POST */schedulestore/schedules/{}/enable",
+  "POST */schedulestore/schedules/{}/fire",
+  "POST */schedulestore/schedules/{}/retry",
+  "PUT */administration/quotas/{}",
+  "PUT */schedulestore/schedules/{}",
 ];
 
 /**
@@ -358,7 +373,7 @@ describe(`MSW handlers against EDDI ${snapshot.eddiVersion}'s API surface`, () =
   it("registers each endpoint once, or no more often than it already did", () => {
     const counts = new Map<string, number>();
     for (const r of routes) {
-      const key = `${r.method} ${r.raw}`;
+      const key = `${r.method} ${normalisePath(r.raw)}`;
       counts.set(key, (counts.get(key) ?? 0) + 1);
     }
     const duplicated = [...counts.entries()]

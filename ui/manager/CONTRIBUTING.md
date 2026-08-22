@@ -322,15 +322,34 @@ chore(deps): bump React to 19.1
 
 Every PR runs through these automated gates:
 
-| Check          | What It Does                                          | Must Pass? |
-| -------------- | ----------------------------------------------------- | ---------- |
-| **Audit**      | `npm run audit:prod` — production advisories only      | ✅ Yes     |
-| **Lint**       | ESLint over `src/` and `e2e/`, `--max-warnings 0`      | ✅ Yes     |
-| **i18n**       | `npm run i18n:check` — locale ↔ code drift             | ✅ Yes     |
-| **Type Check** | `tsc -b` — the app, the node configs, AND `e2e/`       | ✅ Yes     |
-| **Unit Tests** | Vitest, with coverage thresholds enforced              | ✅ Yes     |
-| **Build**      | Production build via `tsc -b && vite build`            | ✅ Yes     |
-| **E2E Tests**  | Playwright UI tests with MSW mocks                     | ✅ Yes     |
+| Check              | What It Does                                            | Must Pass? |
+| ------------------ | ------------------------------------------------------- | ---------- |
+| **Audit**          | `npm run audit:prod` — production advisories only        | ✅ Yes     |
+| **Lint**           | ESLint over `src/` and `e2e/`, `--max-warnings 0`        | ✅ Yes     |
+| **i18n**           | `npm run i18n:check` — locale ↔ code drift               | ✅ Yes     |
+| **Type Check**     | `tsc -b` — the app, the node configs, AND `e2e/`         | ✅ Yes     |
+| **Unit Tests**     | Vitest, with coverage thresholds enforced                | ✅ Yes     |
+| **Build**          | Production build via `tsc -b && vite build`              | ✅ Yes     |
+| **UI E2E**         | Playwright against MSW mocks, no backend                 | ✅ Yes     |
+| **API Integration**| Playwright against a live EDDI in Docker, API-only       | ✅ Yes     |
+| **Mutation**       | Stryker — **only** if the PR touches the guarded scope   | ✅ Yes     |
+
+The **full-stack tier** — a browser against a live EDDI, on both MongoDB and
+Postgres — runs on push to main and on `workflow_dispatch`, not on PRs. If you
+change anything it exercises, dispatch it against your branch rather than
+trusting the PR tick: a PR reports "Backend E2E — skipping" either way.
+
+The **OpenAPI snapshot check** runs in both places, with different teeth:
+advisory on a PR, blocking on push. The EDDI image tracks `latest` and can gain
+an operation with no PR touching it, so a hard failure on PRs would redden every
+open one over something none of them did.
+
+The API-integration tier is the one most likely to surprise you, since it needs
+Docker. To reproduce it locally:
+
+```bash
+npm run infra:up:mongo && npm run test:e2e:integration
+```
 
 ## Security
 
