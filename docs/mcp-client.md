@@ -274,7 +274,7 @@ other tool source. A gated MCP call now shows its approver:
 and is pinned to a fingerprint that is re-checked immediately before execution. The
 credential's *value* is deliberately excluded from that fingerprint: a token
 refresh between approval and execution is routine, and hashing the live value would
-make every approval of a credentialled call fail its own re-check.
+make every approval of a credentialed call fail its own re-check.
 
 ---
 

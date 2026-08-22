@@ -207,6 +207,20 @@ class RestApiCallsStoreBranchTest {
             // Will return either 400 or 500 depending on the exception type
             assertTrue(response.getStatus() >= 400);
         }
+
+        @Test
+        @DisplayName("a credential in the spec URL does not come back in the error body")
+        void credentialInTheSpecUrlIsNotEchoed() {
+            // The parser names the location it could not read, so its message carries
+            // the caller's URL — and that URL is exactly where a credential would be.
+            // The 400 is worth returning; the credential in it is not.
+            String url = "https://user:sk-ant-aaaaaaaaaaaaaaaaaaaaaaaaaaa@invalid-spec-url.test/spec.json";
+
+            Response response = restApiCallsStore.discoverEndpoints(new ApiEndpointDiscoveryRequest(url, null, null));
+
+            assertFalse(String.valueOf(response.getEntity()).contains("sk-ant-aaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+                    "the error body reaches whoever called the endpoint: " + response.getEntity());
+        }
     }
 
     @Nested

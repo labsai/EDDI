@@ -176,7 +176,7 @@ public class RestMcpCallsStore implements IRestMcpCallsStore {
      * forged log line — and leaves credential material alone, so
      * {@code https://user:token@mcp.example.com/rpc} was logged with the token in
      * it. The URL is caller-supplied and reaches the log on every probe, including
-     * the failures, where a credentialled URL is most likely.
+     * the failures, where a URL carrying credentials is most likely.
      */
     private static String forLog(String url) {
         return sanitize(UriRedactor.redactUri(url));

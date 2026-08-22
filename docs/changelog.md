@@ -53,12 +53,21 @@ several. Read over a whole URL, "carries a reference somewhere" exempted the liv
 `?api_key=${vault:k}&access_token=<plaintext>` was exported intact. URLs now always go to the
 part-by-part pass, which judges each parameter on its own.
 
-### Discovery endpoints logged credentialled URLs
+### Discovery endpoints logged credentialed URLs
 
 `LogSanitizer.sanitize` answers a different question — it stops a forged log line — and leaves
 credential material alone, so `https://user:token@host/spec.json` was logged with the token in it, on
-every discovery attempt including the failures where a credentialled URL is most likely. Both discovery
+every discovery attempt including the failures where a URL carrying credentials is most likely. Both discovery
 endpoints now run the URL through `UriRedactor` first.
+
+### …and handed one straight back in the 400
+
+`discoverEndpoints` returned the parser's `IllegalArgumentException` message verbatim, and the parser
+names the location it could not read. The response body was therefore
+``Failed to parse OpenAPI spec: Unable to read location `https://user:<token>@host/spec.json` `` — the
+credential returned to whoever called the endpoint. The message itself is worth keeping, since it says
+which part of the spec failed, so it goes through `SecretRedactionFilter` rather than being dropped.
+Reverting that one call turns the new regression test red with the whole token in the failure output.
 
 ---
 
@@ -232,7 +241,7 @@ evaluate "call `delete_issue`" without knowing *which server* it goes to.
 
 * **The credential's value is excluded from the fingerprint.** Not merely privacy: a
   connection-backed credential legitimately differs between approval and execution (a refresh in
-  between is routine), so hashing the live value would make every approval of a credentialled call
+  between is routine), so hashing the live value would make every approval of a credentialed call
   fail its own re-check. Its *presence* is fingerprinted, because that changes who the call runs as.
 * **The body is a preview, not the wire format.** The real envelopes carry a fresh JSON-RPC `id`, and
   A2A generates two UUIDs. Hashing those would make every fingerprint unique and the re-check

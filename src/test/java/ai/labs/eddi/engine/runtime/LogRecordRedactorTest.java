@@ -82,7 +82,7 @@ class LogRecordRedactorTest {
     }
 
     @Test
-    @DisplayName("a throwable message carrying a credentialled URL is replaced, keeping its type and trace")
+    @DisplayName("a throwable message carrying a credentialed URL is replaced, keeping its type and trace")
     void redactsThrowableMessage() {
         ExtLogRecord record = extRecord("MCP handshake failed");
         var original = new java.net.ConnectException("failed to connect to https://mcp.example.com?apiKey=" + KEY);

@@ -15,6 +15,7 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.engine.mcp.McpApiToolBuilder;
 import ai.labs.eddi.modules.apicalls.impl.RequestRedactor;
+import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import ai.labs.eddi.secrets.sanitize.UriRedactor;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -127,10 +128,23 @@ public class RestApiCallsStore implements IRestApiCallsStore {
      * forged log line — and leaves credential material alone, so
      * {@code https://user:token@host/spec.json} was logged with the token in it.
      * The URL is caller-supplied and reaches the log on every discovery attempt,
-     * including the failures, where a credentialled spec URL is most likely.
+     * including the failures, where a URL carrying credentials is most likely.
      */
     private static String forLog(String url) {
         return sanitize(UriRedactor.redactUri(url));
+    }
+
+    /**
+     * A parser complaint the caller may read.
+     * <p>
+     * The text is worth returning — it names the part of the spec that failed,
+     * which is the whole value of a 400 here — but a parser routinely quotes the
+     * offending input back, and the input is a caller-supplied URL that may carry
+     * credentials. Redacting keeps the diagnosis and drops the credential.
+     */
+    private static String safeMessage(Exception failure) {
+        String message = failure.getMessage();
+        return message == null || message.isBlank() ? "The OpenAPI spec could not be parsed" : SecretRedactionFilter.redact(message);
     }
 
     private Response discover(String specUrl, String apiBaseUrl, String authHeaderRef) {
@@ -160,7 +174,7 @@ public class RestApiCallsStore implements IRestApiCallsStore {
             return Response.ok(response).build();
         } catch (IllegalArgumentException e) {
             LOGGER.warnf(e, "Failed to parse OpenAPI spec from '%s'", forLog(specUrl));
-            return badRequest(e.getMessage());
+            return badRequest(safeMessage(e));
         } catch (Exception e) {
             LOGGER.errorf(e, "Unexpected error discovering endpoints from '%s'", forLog(specUrl));
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR)

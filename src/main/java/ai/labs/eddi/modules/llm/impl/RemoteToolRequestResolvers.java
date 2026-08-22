@@ -34,7 +34,7 @@ import java.util.Map;
  * That is not merely privacy: a connection-backed credential legitimately
  * differs between approval time and execution time (a token refresh in between
  * is normal), so hashing its live value would make every approval of a
- * credentialled call fail its own re-check. The fingerprint covers the target,
+ * credentialed call fail its own re-check. The fingerprint covers the target,
  * the method, the tool and its arguments — everything that determines what the
  * call DOES.
  * <h3>Why the body is a preview, not the wire format</h3> The real JSON-RPC
