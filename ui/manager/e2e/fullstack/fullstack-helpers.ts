@@ -6,9 +6,38 @@ import { waitForBackend, API_BASE } from "../integration/integration-helpers";
  * Full-stack E2E helpers.
  *
  * Unlike the MSW-based UI E2E tier, full-stack tests require a live EDDI
- * backend.  The Vite dev server auto-detects the backend and skips MSW
- * (see `mocksForced` / the probe in main.tsx), so no special MSW bypass is needed.
+ * backend. `main.tsx` decides which it gets by probing the backend at startup,
+ * and — this is the part that matters here — falls back to MSW on any failure.
+ *
+ * That fallback is silent by construction, and the tier's assertions are
+ * shape-based, so fixtures satisfy them. Nothing used to check which of the two
+ * a run had actually used: a probe that lost a race with Vite's first-load
+ * transform produced a full green full-stack report that proved nothing about
+ * EDDI at all. `assertRealBackend` is the check, and every navigation helper
+ * below runs it.
  */
+
+/**
+ * Fail the test if the app is running on mocks.
+ *
+ * `main.tsx` probes `/agentstore/agents/descriptors?limit=1` with a 1500 ms
+ * timeout and starts MSW on ANY failure — a slow dev server counts. It sets
+ * `__EDDI_MOCK_ACTIVE__` when it does, which is the only reliable signal: the
+ * mock-data banner can be suppressed with `?hideMockBanner=true`, and every
+ * loading affordance this tier waits on is satisfied by MSW *sooner* than by a
+ * real backend.
+ */
+async function assertRealBackend(page: Page) {
+  const onMocks = await page.evaluate(
+    () => (window as unknown as Record<string, unknown>).__EDDI_MOCK_ACTIVE__ === true,
+  );
+  expect(
+    onMocks,
+    "this full-stack test ran against MSW, not EDDI — main.tsx's startup probe " +
+      "of /agentstore/agents/descriptors?limit=1 (1500 ms) failed, so the app fell " +
+      "back to mocks and everything below proves nothing about the real backend",
+  ).toBe(false);
+}
 
 /**
  * Wait for loading placeholders to disappear, indicating real data has loaded.
@@ -44,6 +73,7 @@ export async function waitForFullStack(
   }
   await page.goto(path);
   await page.waitForSelector('[data-testid="app-layout"]', { timeout: 30_000 });
+  await assertRealBackend(page);
   await waitForDataLoad(page);
 }
 
@@ -54,6 +84,7 @@ export async function waitForFullStack(
 export async function navigateTo(page: Page, path: string) {
   await page.goto(path);
   await page.waitForSelector('[data-testid="app-layout"]', { timeout: 15_000 });
+  await assertRealBackend(page);
   await waitForDataLoad(page);
 }
 

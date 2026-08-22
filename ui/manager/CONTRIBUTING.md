@@ -168,7 +168,6 @@ for one — and those kill a blanked literal without pinning a sentence. It is i
 scope now, for about a minute of runtime. Worth remembering when you reach for
 the next exclusion: that was the one arrived at by reasoning rather than
 measurement, and it was the one that turned out to be wrong.
-tests instead.
 
 CI runs this three ways: on a PR that touches the guarded scope, the tests that
 cover it, or the config that decides what it measures; weekly on a schedule;

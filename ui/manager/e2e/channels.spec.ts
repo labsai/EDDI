@@ -42,16 +42,18 @@ test.describe("Channels Page", () => {
   });
 
   test("view toggle switches between card and list", async ({ page }) => {
-    const toggle = page.getByTestId("view-toggle");
-    if (await toggle.isVisible().catch(() => false)) {
-      const buttons = toggle.locator("button");
-      const count = await buttons.count();
-      if (count >= 2) {
-        await buttons.nth(1).click();
-        await page.waitForTimeout(300);
-        await expect(page.locator("main")).toBeVisible();
-      }
-    }
+    // Two nested `if`s and a `.catch(() => false)` used to make this a no-op on
+    // any run where the toggle was missing — and on the happy path its only
+    // assertion was that `main` still existed, which it would have whatever the
+    // click did. The toggle is not conditional: it is always rendered, so the
+    // guard is an assertion now, and the click has to actually change the view.
+    await expect(page.getByTestId("view-toggle")).toBeVisible();
+
+    await page.getByTestId("view-toggle-list").click();
+    await expect(page.getByTestId(/^channel-row-/).first()).toBeVisible();
+
+    await page.getByTestId("view-toggle-card").click();
+    await expect(page.getByTestId(/^channel-row-/)).toHaveCount(0);
   });
 });
 

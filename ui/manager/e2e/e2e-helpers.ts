@@ -32,7 +32,6 @@ import { type Page, expect } from "@playwright/test";
  *
  * ## What it waits for now
  *
- * Real loading placeholders inside the content area. The app has **four**
  * Real loading placeholders inside the content area, matched by **semantics,
  * never by animation class**. That distinction is the whole lesson above:
  * `animate-pulse` and `animate-spin` are presentation, and this app uses both

@@ -114,8 +114,13 @@ jobs:
         continue-on-error: true
         run: |
           node .github/scripts/refresh-openapi-operations.mjs
-          if ! git diff --exit-code -- src/test/mocks/openapi-operations.json; then
-            echo "::warning::The EDDI API surface has changed and src/test/mocks/openapi-operations.json is stale."
+          # Operations only, same as the push-side copy below: `eddiVersion`
+          # moves on any patch release of an image that tracks `latest`, and a
+          # whole-file diff would warn about an API change that did not happen.
+          if ! git diff --exit-code \
+               -I '"eddiVersion"' \
+               -- src/test/mocks/openapi-operations.json; then
+            echo "::warning::EDDI's API surface has changed and src/test/mocks/openapi-operations.json is stale."
             echo "::warning::Run: npm run openapi:refresh against a local backend, then commit the result."
             exit 1
           fi
@@ -223,28 +228,37 @@ jobs:
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
 
-      # Runs BEFORE the test steps, deliberately. Steps stop at the first
-      # failure, so parked after the fullstack tier this never executed on any
-      # run where that tier was red — which was every run for five days. It
-      # needs a live backend, nothing more, so it belongs here.
-      #
-      # Blocking on push, unlike the advisory copy in `integration-tests`: the
-      # EDDI image tracks `latest` and moves between merges, and main is where
-      # that first has to be noticed.
-      - name: Check the OpenAPI snapshot still matches this backend
-        run: |
-          node .github/scripts/refresh-openapi-operations.mjs
-          if ! git diff --exit-code -- src/test/mocks/openapi-operations.json; then
-            echo "::error::The EDDI API surface has changed and src/test/mocks/openapi-operations.json is stale."
-            echo "::error::Run: npm run openapi:refresh against a local backend, then commit the result."
-            exit 1
-          fi
-          echo "Snapshot matches the running backend."
       - name: Run integration tests (${{ matrix.database }})
         run: npm run test:e2e:integration
 
       - name: Run full-stack tests (${{ matrix.database }})
         run: npm run test:e2e:fullstack
+
+      # AFTER the tests, and `always()`, because of what this step costs when it
+      # fails. Steps stop at the first failure, so parked ahead of them a stale
+      # snapshot took the integration AND full-stack tiers with it, on both
+      # database legs — the entire backend signal, lost to a bookkeeping file.
+      # It was put first because parked after a RED fullstack tier it never ran;
+      # `if: always()` is the answer to that, not reordering.
+      #
+      # It compares the OPERATIONS only. The snapshot also records `eddiVersion`,
+      # which the contract test asserts on (openapi-contract.test.ts) and which
+      # therefore has to stay in the file — but the EDDI image tracks `latest`,
+      # so a patch release with an identical API surface bumps that string and a
+      # whole-file diff would report 'the EDDI API surface has changed' when it
+      # provably has not.
+      - name: Check the OpenAPI snapshot still matches this backend
+        if: always()
+        run: |
+          node .github/scripts/refresh-openapi-operations.mjs
+          if ! git diff --exit-code \
+               -I '"eddiVersion"' \
+               -- src/test/mocks/openapi-operations.json; then
+            echo "::error::EDDI's API surface has changed and src/test/mocks/openapi-operations.json is stale."
+            echo "::error::Run: npm run openapi:refresh against a local backend, then commit the result."
+            exit 1
+          fi
+          echo "Snapshot operations match the running backend."
 
 
       - name: Collect backend logs
