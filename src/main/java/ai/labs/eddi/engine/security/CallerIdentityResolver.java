@@ -76,10 +76,18 @@ public class CallerIdentityResolver {
      * what would make the open form quadratic: a bare <code>{caller:</code> also
      * starts a match, so a value built from repeated <code>{{caller:</code> gives
      * one scan of the whole remaining string per occurrence. A real reference is a
-     * namespace and a short key, so this covers every plausible typo while keeping
-     * each attempt constant work.
+     * namespace and a short key, so 64 characters covers every plausible typo while
+     * keeping each attempt constant work.
+     * <p>
+     * The second alternative is what stops that bound becoming a bypass. This
+     * pattern exists only to REJECT, so a reference it cannot see is a reference
+     * that ships to the API as a literal placeholder — which made an
+     * over-64-character key a way to evade the very check performed here. Matching
+     * a fixed 65 characters says "longer than any real key" in constant work and
+     * without needing a closing brace, so an overlong reference is caught and then
+     * fails {@link #CALLER_PATTERN} like any other malformed one.
      */
-    private static final Pattern ANY_CALLER_PATTERN = Pattern.compile("\\$?\\{caller:[^}]{0,64}\\}");
+    private static final Pattern ANY_CALLER_PATTERN = Pattern.compile("\\$?\\{caller:(?:[^}]{0,64}\\}|[^}]{65})");
 
     /** {@code ${caller:token}} in either the documented or the bare Qute form. */
     private static final Pattern ANY_TOKEN_PATTERN = Pattern.compile("\\$?\\{caller:token\\}");

@@ -104,18 +104,23 @@ StreamableHTTP on one side and stdio on the other
 [`supergateway`](https://github.com/supercorp-ai/supergateway) and others do this).
 EDDI then talks to it over the transport it already has.
 
+The bridge image has to carry the server. `mcp-proxy` is Python-on-Alpine and
+ships no Node runtime, and the sidecar sits on an `internal: true` network with no
+route off the host — so a command that resolved the server at startup would find
+neither `npx` nor a registry. `mcp-sidecar/Dockerfile` installs it at build time,
+pinning the base digest and the server version, and the container runs it offline.
+
 ```yaml
 # docker-compose.mcp-sidecar.yml — see the repository root for the runnable file
 services:
   filesystem-mcp:
-    image: ghcr.io/sparfenyuk/mcp-proxy@sha256:<digest>   # pin a DIGEST, not a tag
+    build: ./mcp-sidecar         # pins the base DIGEST and the server version
+    image: eddi-mcp-filesystem:2025.8.21
     command:
       - "--port=8096"
       - "--host=0.0.0.0"
       - "--"
-      - "npx"
-      - "-y"
-      - "@modelcontextprotocol/server-filesystem@2025.8.21"
+      - "mcp-server-filesystem"  # pre-installed; no resolution at start
       - "/data"
     user: "10001:10001"          # never root
     read_only: true
@@ -153,7 +158,7 @@ So the container hardening above is not decoration. Each line is load-bearing:
 | Control | Why |
 | --- | --- |
 | **Digest-pinned image** | The same rule EDDI applies to its own base image. A tag is mutable; a digest is the artifact you reviewed. |
-| **Pinned server version** | `npx -y some-server` resolves *latest* at container start — a supply-chain change with no deploy. |
+| **Server installed at build time, version-pinned** | `npx -y some-server` resolves *latest* on every container start — a supply-chain change with no deploy behind it, and on an `internal` network it cannot resolve at all. |
 | **Non-root, `read_only`, `cap_drop: ALL`** | The bridge needs none of it. |
 | **CPU/memory limits** | A runaway or hostile server must not starve the node. |
 | **Isolated network** | The bridge must not be reachable by anything else on the pod network, and the server's own egress should be restricted to the provider it needs. |

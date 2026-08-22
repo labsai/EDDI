@@ -53,6 +53,30 @@ several. Read over a whole URL, "carries a reference somewhere" exempted the liv
 `?api_key=${vault:k}&access_token=<plaintext>` was exported intact. URLs now always go to the
 part-by-part pass, which judges each parameter on its own.
 
+### The ReDoS bound became a bypass
+
+Bounding `ANY_CALLER_PATTERN` to a 64-character key fixed the quadratic scan, and quietly opened a hole.
+That pattern is used only to **reject** — `rejectUnsupportedReference` and `rejectAnyReference` throw on
+what it finds — so a reference the pattern cannot see is not "allowed", it is *invisible*, and an
+invisible `${caller:…}` is shipped to the API as a literal placeholder. A 65-character key therefore
+walked straight past the check the bound was protecting. The pattern now carries a second alternative
+matching a fixed 65 characters: constant work, no closing brace required, and an overlong reference is
+caught and then fails `CALLER_PATTERN` like any other malformed one. The existing ReDoS perf guard now
+expects the rejection it always should have.
+
+### The MCP sidecar example could never have started
+
+`docker-compose.mcp-sidecar.yml` handed `npx -y @modelcontextprotocol/server-filesystem@… /data` to
+`ghcr.io/sparfenyuk/mcp-proxy`. Verified against the image rather than assumed: it is Python on Alpine
+and ships **no Node runtime**, so there is no `npx` to run — and it could not have downloaded one
+either, because the sidecar sits on an `internal: true` network with no route off the host, which is the
+whole point of that network. The documented example failed before it started.
+
+Added `mcp-sidecar/Dockerfile`, which installs the server at build time on top of the digest-pinned
+base, and pointed the compose file and `docs/mcp-client.md` at the pre-installed binary. Verified the
+built image runs the server under `--network none --read-only --cap-drop ALL` as uid 10001. The
+`/home/node` tmpfs went with `npx`; nothing needs a writable HOME now.
+
 ### A credential whose name merely began with a quantity word
 
 `SecretScrubber` exempts token-BUDGET fields from the credential-suffix rule, because `maxTokens`

@@ -17,26 +17,30 @@ services:
 
   # An example: the reference filesystem MCP server, exposed read-only.
   filesystem-mcp:
-    # Pin a DIGEST, not a tag — the same rule EDDI applies to its own base image.
-    # A tag is mutable; a digest is the artifact you actually reviewed.
-    # TODO: replace with the digest you verified.
-    image: ghcr.io/sparfenyuk/mcp-proxy:latest
+    # Built locally, because the MCP server has to be IN the image. The upstream
+    # bridge image is Python-on-Alpine and ships no Node runtime, and this
+    # container sits on an `internal: true` network with no route off the host —
+    # so a command that fetched the server at startup could neither find `npx`
+    # nor reach a registry. mcp-sidecar/Dockerfile installs it at build time and
+    # pins both the base digest and the server version.
+    #
+    #   docker build -t eddi-mcp-filesystem:2025.8.21 ./mcp-sidecar
+    build: ./mcp-sidecar
+    image: eddi-mcp-filesystem:2025.8.21
     command:
       - "--port=8096"
       - "--host=0.0.0.0"
       - "--"
-      # Pin the SERVER version too. `npx -y pkg` without one resolves *latest* at
-      # every container start, which is a supply-chain change with no deploy.
-      - "npx"
-      - "-y"
-      - "@modelcontextprotocol/server-filesystem@2025.8.21"
+      # The pre-installed binary, run offline. No resolution step, so no
+      # supply-chain change can arrive without a rebuild you chose to do.
+      - "mcp-server-filesystem"
       - "/data"
     user: "10001:10001"
     read_only: true
     tmpfs:
-      # npx needs a writable HOME and cache; give it tmpfs rather than the image.
+      # The server still wants somewhere writable; give it tmpfs rather than the
+      # image. /home/node is gone with npx — nothing needs a writable HOME now.
       - /tmp
-      - /home/node
     cap_drop:
       - ALL
     security_opt:
