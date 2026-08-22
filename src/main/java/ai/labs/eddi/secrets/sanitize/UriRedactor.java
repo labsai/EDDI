@@ -118,7 +118,14 @@ public final class UriRedactor {
      * digit and on each camel-case hump, so {@code X-Api-Token},
      * {@code x_api_token} and {@code xApiToken} all yield the same three words.
      */
-    private static List<String> splitWords(String name) {
+    /**
+     * The words in a field or header name, lower-cased.
+     * <p>
+     * Package-private because {@code SecretScrubber} needs the SAME split: it
+     * decides whether a name's first word is a quantity qualifier, and a name that
+     * has already been normalized has lost the boundaries that answer that.
+     */
+    static List<String> splitWords(String name) {
         var words = new ArrayList<String>();
         var word = new StringBuilder();
         for (int i = 0; i < name.length(); i++) {

@@ -27,6 +27,7 @@ import java.time.Duration;
 import java.util.*;
 import java.util.Locale;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static ai.labs.eddi.utils.RestUtilities.extractResourceId;
 
@@ -81,6 +82,13 @@ public class ChannelTargetRouter {
 
     private volatile long lastRefreshTime = 0;
     private final AtomicBoolean refreshInProgress = new AtomicBoolean(false);
+
+    /**
+     * Counts invalidations, so a refresh can tell whether one landed while it was
+     * reading. Without it the marker this class exists to set was simply lost — see
+     * {@link #refreshIfNeeded}.
+     */
+    private final AtomicLong invalidationGeneration = new AtomicLong();
 
     /**
      * Thread → locked target (prevents mid-thread target switching). TTL-evicted.
@@ -439,6 +447,7 @@ public class ChannelTargetRouter {
     @PostConstruct
     void registerSecretInvalidation() {
         secretResolver.registerInvalidationListener(reference -> {
+            invalidationGeneration.incrementAndGet();
             lastRefreshTime = 0;
             LOGGER.info("Channel integration cache marked stale after a vault secret change");
         });
@@ -452,12 +461,25 @@ public class ChannelTargetRouter {
         if (!refreshInProgress.compareAndSet(false, true)) {
             return;
         }
+        // Read BEFORE the store reads below. An invalidation that arrives while
+        // they are in flight would otherwise zero the timestamp only for this
+        // method to stamp it fresh again a moment later — with maps built from
+        // rows read before the rotation. The cache would then serve the revoked
+        // credential for a full interval, which is exactly the window the
+        // invalidation listener exists to close.
+        long generationAtStart = invalidationGeneration.get();
         try {
             refreshInternal();
-            lastRefreshTime = now;
+            if (invalidationGeneration.get() == generationAtStart) {
+                lastRefreshTime = now;
+            }
         } catch (Exception e) {
             LOGGER.warn("Failed to refresh channel target router", e);
-            lastRefreshTime = now; // Avoid hammering on repeated failures
+            // Stamped even when an invalidation raced, unlike the success path: the
+            // maps are stale either way, and a store that just failed will fail
+            // again on the next inbound message. Retrying it per webhook trades a
+            // stale cache for a hot loop against a store that is already down.
+            lastRefreshTime = now;
         } finally {
             refreshInProgress.set(false);
         }

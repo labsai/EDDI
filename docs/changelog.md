@@ -53,6 +53,30 @@ several. Read over a whole URL, "carries a reference somewhere" exempted the liv
 `?api_key=${vault:k}&access_token=<plaintext>` was exported intact. URLs now always go to the
 part-by-part pass, which judges each parameter on its own.
 
+### A credential whose name merely began with a quantity word
+
+`SecretScrubber` exempts token-BUDGET fields from the credential-suffix rule, because `maxTokens`
+singularises to `maxtoken` and every export was replacing the model's output limit with a vault
+placeholder. The exemption tested a raw prefix against the NORMALIZED name — and normalizing strips the
+separators that say where the first word ends. So `minioSecret` became `miniosecret`, which begins with
+`min`, took the exemption, and left a real credential in the export in plaintext. `numericToken` went
+the same way. The check is now against the first WORD of the original name, split on the camel-case and
+separator boundaries (`UriRedactor.splitWords`, now shared).
+
+The regression test uses zero-entropy values deliberately: a realistic-looking literal is caught by the
+entropy heuristic regardless of its field name, which would have made the test pass whether or not the
+name rule worked.
+
+### A rotation landing mid-refresh was stamped away
+
+`ChannelTargetRouter` caches bot tokens and signing secrets already resolved to plaintext, and
+registers a vault-invalidation listener so a rotation drops the cache immediately rather than after the
+poll interval. But the listener only zeroed a timestamp, and `refreshIfNeeded` wrote that timestamp
+after its store reads returned. A rotation landing while a refresh was in flight was therefore
+overwritten: the maps held pre-rotation secrets and the cache was marked fresh for a full interval —
+precisely the window the listener exists to close. An invalidation counter read before the store reads
+now decides whether the refresh may stamp at all.
+
 ### Discovery endpoints logged credentialed URLs
 
 `LogSanitizer.sanitize` answers a different question — it stops a forged log line — and leaves

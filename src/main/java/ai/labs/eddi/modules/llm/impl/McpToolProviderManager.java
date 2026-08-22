@@ -578,9 +578,10 @@ public class McpToolProviderManager {
      * Remote resource metadata and content are authored by the SERVER and land
      * verbatim in the model's context — the same threat {@code governDescription}
      * defends against for remote tool descriptions (finding F16), over a strictly
-     * larger surface. Applying the identical {@link #DIRECTIVE_PATTERN} redaction
-     * here keeps the two paths from diverging; leaving it out would have made the
-     * resource bridge the easy way around a guard the tool path already has.
+     * larger surface. Applying the identical
+     * {@link RemoteTextGovernor#DESCRIPTION_DIRECTIVE_PATTERN} redaction here keeps
+     * the two paths from diverging; leaving it out would have made the resource
+     * bridge the easy way around a guard the tool path already has.
      */
     private static String governRemoteText(String text, int maxChars) {
         return RemoteTextGovernor.govern(text, maxChars);

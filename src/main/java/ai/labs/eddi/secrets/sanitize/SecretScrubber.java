@@ -14,6 +14,7 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.util.Iterator;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
@@ -267,7 +268,7 @@ public class SecretScrubber {
             return true;
         }
         for (String suffix : SECRET_FIELD_NAME_SUFFIXES) {
-            if (isCredentialSuffix(name, suffix) || isCredentialSuffix(singular, suffix)) {
+            if (isCredentialSuffix(name, suffix, fieldName) || isCredentialSuffix(singular, suffix, fieldName)) {
                 return true;
             }
         }
@@ -285,8 +286,25 @@ public class SecretScrubber {
     /**
      * Whether {@code name} ends in a credential suffix and is not a count of them.
      */
-    private static boolean isCredentialSuffix(String name, String suffix) {
-        return name.endsWith(suffix) && QUANTITY_QUALIFIERS.stream().noneMatch(name::startsWith);
+    private static boolean isCredentialSuffix(String name, String suffix, String originalFieldName) {
+        return name.endsWith(suffix) && !startsWithQuantityWord(originalFieldName);
+    }
+
+    /**
+     * Whether the name's FIRST WORD measures a quantity.
+     * <p>
+     * A raw prefix test is not enough, and the difference leaks credentials.
+     * Normalizing strips the separators that say where the first word ends, so
+     * {@code minioSecret} becomes {@code miniosecret} — which begins with
+     * {@code min}, took the exemption, and left a real credential in the export in
+     * plaintext. {@code numericToken} went the same way. Splitting the ORIGINAL
+     * name keeps the camel-case and separator boundaries, so {@code maxTokens}
+     * stays exempt for the reason it is meant to be and {@code minioSecret} does
+     * not.
+     */
+    private static boolean startsWithQuantityWord(String fieldName) {
+        List<String> words = UriRedactor.splitWords(fieldName);
+        return !words.isEmpty() && QUANTITY_QUALIFIERS.contains(words.get(0));
     }
 
     /**

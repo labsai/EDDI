@@ -370,6 +370,31 @@ class SecretScrubberTest {
     }
 
     @Test
+    @DisplayName("a credential whose name merely BEGINS with a quantity word is still scrubbed")
+    void scrubJson_qualifierIsAWordNotAPrefix() {
+        // The exemption was a raw prefix test against the NORMALIZED name, and
+        // normalizing strips the separators that say where the first word ends.
+        // "minioSecret" became "miniosecret", which begins with "min", took the
+        // token-budget exemption, and left a real credential in the export in
+        // plaintext.
+        // Zero-entropy values on purpose. A realistic-looking literal is caught by
+        // the entropy check regardless of its field name, which would make this
+        // test pass whether or not the name rule works — the thing it is here to
+        // prove. Repeated characters clear the length and shape tests and fail the
+        // entropy one, so the field NAME is the only thing left that can catch
+        // them.
+        String json = "{\"parameters\": {\"minioSecret\": \"aaaaaaaaaaaaaaaaaaaa\", "
+                + "\"numericToken\": \"bbbbbbbbbbbbbbbbbbbb\", \"maxTokens\": \"4096\"}}";
+
+        String scrubbed = scrubber.scrubJson(json);
+
+        assertFalse(scrubbed.contains("aaaaaaaaaaaaaaaaaaaa"), "minio is not a quantity: " + scrubbed);
+        assertFalse(scrubbed.contains("bbbbbbbbbbbbbbbbbbbb"), "neither is numeric: " + scrubbed);
+        assertTrue(scrubbed.contains("\"maxTokens\":\"4096\""),
+                "and the exemption still has to work for the field it exists for: " + scrubbed);
+    }
+
+    @Test
     @DisplayName("a genuine credential name is still redacted, quantity carve-out notwithstanding")
     void scrubJson_credentialNames_stillScrubbedBesideQuantities() {
         // Deliberately zero-entropy, so ONLY the field-name check can redact it.
