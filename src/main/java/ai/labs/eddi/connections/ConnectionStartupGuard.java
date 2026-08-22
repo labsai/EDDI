@@ -17,6 +17,8 @@ import ai.labs.eddi.secrets.ISecretProvider;
 import io.quarkus.runtime.LaunchMode;
 import io.quarkus.runtime.StartupEvent;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.annotation.Priority;
+import jakarta.interceptor.Interceptor;
 import jakarta.enterprise.event.Observes;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -40,6 +42,13 @@ public class ConnectionStartupGuard {
 
     private static final Logger LOGGER = Logger.getLogger(ConnectionStartupGuard.class);
 
+    /**
+     * Later than {@code VaultSecretProvider}, which derives the KEK and decides
+     * {@code isAvailable()} in its own startup observer. A larger number runs
+     * later.
+     */
+    private static final int CONNECTIONS_GUARD_PRIORITY = Interceptor.Priority.APPLICATION + 500;
+
     private final ConnectionsConfig connectionsConfig;
     private final CredentialEndpointAllowlist endpointAllowlist;
     private final IConnectionStore connectionStore;
@@ -59,8 +68,16 @@ public class ConnectionStartupGuard {
         this.authorizationEnabled = authorizationEnabled;
     }
 
+    /**
+     * Ordered explicitly, because one of the checks below asks the vault whether it
+     * is available and the vault decides that in its OWN startup observer. With
+     * both unordered, CDI was free to run this first, see an uninitialised vault,
+     * and report every OAuth connection as unsupported - on some boots and not
+     * others, on the same configuration.
+     */
     // CDI requires the @Observes parameter for event discovery; not read directly
-    void onStart(@Observes StartupEvent event) {
+    void onStart(@Observes
+    @Priority(CONNECTIONS_GUARD_PRIORITY) StartupEvent event) {
         if (!connectionsConfig.isEnabled()) {
             return;
         }
@@ -113,12 +130,27 @@ public class ConnectionStartupGuard {
     }
 
     /**
-     * Refuses the two configurations that make a stored grant meaningless.
+     * Reports the two configurations that make a stored grant meaningless.
      * <p>
      * Both are checked against what is actually STORED rather than against a flag,
      * because the dangerous state is "someone created a PER_USER connection on a
      * deployment that has no verified identities" and no configuration property
      * records that.
+     * <p>
+     * <b>Reports, not refuses.</b> These used to throw, and the consequence was out
+     * of all proportion: an administrator saving one connection through the REST
+     * API - a live, permitted, single request - left every replica in the cluster
+     * unable to boot from that moment on, including the ones that had not restarted
+     * yet and so gave no warning. The next rolling restart took the deployment down
+     * entirely, over a config document, with the only fix being a direct database
+     * edit.
+     * <p>
+     * Nothing unsafe is permitted by logging instead: both conditions fail closed
+     * at request time anyway - {@code ConnectionResolver} refuses PER_USER without
+     * a verified principal, and the vault refuses to seal a grant when it is
+     * inactive. The check that genuinely belongs at boot has been moved to where it
+     * is actionable: the write boundary, where the administrator making the change
+     * is still there to see the error.
      */
     private void requireStoredConnectionsAreSupportable() {
         List<ConnectionConfiguration> connections = readAll();
@@ -128,14 +160,16 @@ public class ConnectionStartupGuard {
                         || connection.getAuthType() == AuthType.OAUTH2_CLIENT_CREDENTIALS);
 
         if (anyPerUser && !authorizationEnabled) {
-            throw new IllegalStateException("PER_USER connections require authorization.enabled=true — without a verified identity, any caller "
-                    + "can claim any userId and resolve that user's tokens (see OpenAiAuthFilter's trust-user-headers caveat). Enable OIDC, "
-                    + "or change the connection to SERVICE binding.");
+            LOGGER.error("[CONNECTIONS] A PER_USER connection is stored, but authorization.enabled=false. Every resolution of it will be "
+                    + "REFUSED at request time, because without a verified identity any caller could claim any userId and resolve that "
+                    + "user's tokens (see OpenAiAuthFilter's trust-user-headers caveat). Enable OIDC, or change the connection to SERVICE "
+                    + "binding.");
         }
         if (anyOAuth && !secretProvider.isAvailable()) {
-            throw new IllegalStateException("OAuth connections require an active SecretsVault (EDDI_VAULT_MASTER_KEY) — grants are "
-                    + "envelope-encrypted with the tenant DEK and there is deliberately no plaintext fallback. This is the one place the "
-                    + "autoVaultSecret pattern of degrading to plaintext is not acceptable: these are refresh tokens.");
+            LOGGER.error("[CONNECTIONS] An OAuth connection is stored, but the SecretsVault is inactive (EDDI_VAULT_MASTER_KEY is unset). "
+                    + "Every grant it would store or read will be REFUSED at request time: grants are envelope-encrypted with the tenant "
+                    + "DEK and there is deliberately no plaintext fallback. This is the one place the autoVaultSecret pattern of degrading "
+                    + "to plaintext is not acceptable, because these are refresh tokens.");
         }
     }
 

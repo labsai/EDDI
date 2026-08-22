@@ -162,6 +162,25 @@ public class MongoConnectionGrantStore implements IConnectionGrantStore {
     }
 
     @Override
+    public List<ConnectionGrant> findByTenant(String tenantId) {
+        var results = new ArrayList<ConnectionGrant>();
+        for (Document document : grants.find(Filters.eq(FIELD_TENANT, tenantId))) {
+            results.add(toGrant(document));
+        }
+        return results;
+    }
+
+    @Override
+    public boolean updateSealedTokens(ConnectionGrant grant) {
+        var result = grants.updateOne(
+                key(grant.getTenantId(), grant.getConnectionName(), grant.getPrincipal()),
+                Updates.combine(Updates.set(FIELD_ACCESS, grant.getEncryptedAccessToken()), Updates.set(FIELD_ACCESS_IV, grant.getAccessTokenIv()),
+                        Updates.set(FIELD_REFRESH, grant.getEncryptedRefreshToken()), Updates.set(FIELD_REFRESH_IV, grant.getRefreshTokenIv()),
+                        Updates.set(FIELD_DEK, grant.getDekId())));
+        return result.getModifiedCount() > 0;
+    }
+
+    @Override
     public long countByStatus(String tenantId, ConnectionGrant.Status status) {
         return grants.countDocuments(Filters.and(Filters.eq(FIELD_TENANT, tenantId), Filters.eq(FIELD_STATUS, status.name())));
     }

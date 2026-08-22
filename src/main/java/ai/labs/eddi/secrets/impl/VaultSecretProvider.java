@@ -5,6 +5,7 @@
 package ai.labs.eddi.secrets.impl;
 
 import ai.labs.eddi.secrets.ISecretProvider;
+import ai.labs.eddi.secrets.SealedDataRotationParticipant;
 import ai.labs.eddi.secrets.VaultStartupBanner;
 import ai.labs.eddi.secrets.crypto.EnvelopeCrypto;
 import ai.labs.eddi.secrets.crypto.VaultSaltManager;
@@ -16,15 +17,19 @@ import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import io.quarkus.runtime.StartupEvent;
 import jakarta.annotation.PostConstruct;
+import jakarta.annotation.Priority;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
+import jakarta.interceptor.Interceptor;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.time.Instant;
 import java.util.*;
 import java.util.AbstractMap.SimpleEntry;
+import java.util.function.UnaryOperator;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -70,6 +75,12 @@ public class VaultSecretProvider implements ISecretProvider {
     private final VaultSaltManager saltManager;
     private final MeterRegistry meterRegistry;
 
+    /**
+     * Everything else that stores data sealed with a tenant DEK. Discovered through
+     * CDI so this package stays a leaf - see {@link SealedDataRotationParticipant}.
+     */
+    private final Instance<SealedDataRotationParticipant> rotationParticipants;
+
     private byte[] kek; // Key Encryption Key derived from master key
     private boolean available = false;
 
@@ -84,11 +95,24 @@ public class VaultSecretProvider implements ISecretProvider {
 
     @Inject
     public VaultSecretProvider(@ConfigProperty(name = "eddi.vault.master-key") Optional<String> masterKeyConfig, ISecretPersistence persistence,
-            VaultSaltManager saltManager, MeterRegistry meterRegistry) {
+            VaultSaltManager saltManager, MeterRegistry meterRegistry, Instance<SealedDataRotationParticipant> rotationParticipants) {
         this.masterKeyConfig = masterKeyConfig;
         this.persistence = persistence;
         this.saltManager = saltManager;
         this.meterRegistry = meterRegistry;
+        this.rotationParticipants = rotationParticipants;
+    }
+
+    /**
+     * Test seam: no sealed-data participants.
+     * <p>
+     * Rotation then re-seals only the secret collection, which is exactly what the
+     * pre-participant behaviour was — fine for a test that is not about rotation,
+     * and never what production wires up.
+     */
+    VaultSecretProvider(Optional<String> masterKeyConfig, ISecretPersistence persistence, VaultSaltManager saltManager,
+            MeterRegistry meterRegistry) {
+        this(masterKeyConfig, persistence, saltManager, meterRegistry, null);
     }
 
     @PostConstruct
@@ -102,7 +126,13 @@ public class VaultSecretProvider implements ISecretProvider {
         this.storeTimer = meterRegistry.timer("eddi.vault.store.duration");
     }
 
-    void onStartup(@Observes StartupEvent event) {
+    /**
+     * Runs before anything that asks {@link #isAvailable()} at startup - the
+     * connections guard does, and with both observers unordered CDI was free to ask
+     * before this had run.
+     */
+    void onStartup(@Observes
+    @Priority(Interceptor.Priority.APPLICATION) StartupEvent event) {
         if (masterKeyConfig.isEmpty() || masterKeyConfig.get().isBlank()) {
             VaultStartupBanner.printDisabled();
             return;
@@ -306,16 +336,65 @@ public class VaultSecretProvider implements ISecretProvider {
                 persistence.upsertSecret(secret);
             }
 
+            // 5. Re-seal everything ELSE that was encrypted with this DEK, while it is
+            // still the tenant's DEK. Skipping this step is what made rotation
+            // destructive: OAuth grants are sealed with the same key and live in their
+            // own collection, so replacing the DEK below used to orphan every one of
+            // them and disconnect every linked account in the tenant.
+            int resealed = resealParticipants(tenantId, oldDek, newDek);
+
             EnvelopeCrypto.EncryptionResult newDekEnc = EnvelopeCrypto.encryptDek(newDek, kek);
             EncryptedDek newDekEntity = new EncryptedDek(dekOpt.get().getId(), tenantId, newDekEnc.ciphertext(), newDekEnc.iv(), Instant.now());
             persistence.upsertDek(newDekEntity);
 
-            LOGGER.infof("DEK rotated for tenant '%s': %d secrets re-encrypted", tenantId, secrets.size());
+            LOGGER.infof("DEK rotated for tenant '%s': %d secrets re-encrypted, %d sealed values re-sealed", tenantId, secrets.size(), resealed);
             return secrets.size();
         } catch (PersistenceException | EnvelopeCrypto.CryptoException e) {
             errorCounter.increment();
             throw new SecretProviderException("DEK rotation failed for tenant " + tenantId, e);
         }
+    }
+
+    /**
+     * Asks every {@link SealedDataRotationParticipant} to re-seal its data from the
+     * old DEK to the new one.
+     * <p>
+     * Runs BEFORE the DEK is replaced, so a participant that throws aborts the
+     * rotation with the tenant still on a key that decrypts everything. That
+     * ordering is the whole safety property: the reverse order would leave the
+     * failure in a state where neither key opens the data.
+     * <p>
+     * A participant failure is not swallowed. Rotation reporting success while some
+     * grants stayed on a dead key is precisely the silent corruption this method
+     * exists to prevent, and a rotation an operator has to re-run is far cheaper
+     * than one that quietly logs out an entire tenant.
+     */
+    private int resealParticipants(String tenantId, byte[] oldDek, byte[] newDek) {
+        if (rotationParticipants == null || rotationParticipants.isUnsatisfied()) {
+            return 0;
+        }
+        UnaryOperator<SealedValue> resealer = sealed -> {
+            if (sealed == null || sealed.ciphertext() == null) {
+                return sealed;
+            }
+            try {
+                String plaintext = EnvelopeCrypto.decrypt(sealed.ciphertext(), sealed.iv(), oldDek);
+                EnvelopeCrypto.EncryptionResult enc = EnvelopeCrypto.encrypt(plaintext, newDek);
+                return new SealedValue(enc.ciphertext(), enc.iv());
+            } catch (EnvelopeCrypto.CryptoException e) {
+                // Never quotes the ciphertext or the participant's row: this runs over
+                // refresh tokens.
+                throw new IllegalStateException("Failed to re-seal a value during DEK rotation for tenant " + sanitize(tenantId), e);
+            }
+        };
+        int total = 0;
+        for (SealedDataRotationParticipant participant : rotationParticipants) {
+            int count = participant.resealAll(tenantId, resealer);
+            total += count;
+            LOGGER.infof("DEK rotation for tenant '%s': re-sealed %d value(s) of %s", sanitize(tenantId), count,
+                    participant.sealedDataDescription());
+        }
+        return total;
     }
 
     /**

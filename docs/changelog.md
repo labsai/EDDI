@@ -253,6 +253,125 @@ A max-effort review of this branch surfaced nine defects; all are fixed here.
 Plus one nitpick: `requireCredentialEndpoint` built its message from two adjacent literals and told
 the author the authType was "OAuth", which is not one of the values.
 
+### Second review pass — multi-agent adversarial review (2026-08-22)
+
+An eight-angle review with per-finding refutation found thirteen more defects, three of which broke
+the feature's headline use cases outright. All are fixed here, with behavioural tests.
+
+**A connection-bound MCP server registered zero tools.** `authorizationHeader` withheld the
+credential whenever `McpCallContext.invocationContext()` was null — which is exactly how
+`initialize` and `tools/list` always arrive. The reasoning ("a cached session must not carry one
+user's token") is sound for `PER_USER` and simply false for `SERVICE`, where the credential is the
+same for everybody by definition. So discovery went out unauthenticated, the server answered 401,
+and the agent silently had no tools at all. New `ConnectionResolver.resolveForDiscovery` gates on
+the binding: `SERVICE` supplies the credential, `PER_USER` returns empty and the caller sends the
+request unauthenticated with a WARN naming the cause, and an unknown connection still throws rather
+than becoming another empty tool list with no explanation.
+
+The MCP **resource bridge** had the same defect by a different route: `list_resources` and
+`read_resource` are tools, executed inside a `ToolExecutor` on behalf of one user, but they called
+the no-context `McpClient` overloads — so they too looked like discovery and were sent
+unauthenticated. They now pass a shared `InvocationContext` whose only job is to say "this is a tool
+call". It carries no per-user state; the identity still comes from the thread, as it does for every
+other tool.
+
+**`executeA2ATask` sent the reference as the token.** The credential block existed twice in
+`A2AToolProviderManager`, and the two had drifted: only the agent-card fetch understood
+`${connection:…}`. An agent configured against a connection therefore discovered its peer's skills
+perfectly and then sent the literal string `Bearer ${connection:salesforce}` on every call it was
+actually asked to make. Both paths now go through one `applyCredential`, tested directly so a third
+caller cannot quietly become a third copy. While there: `warnIfRawKey` did not recognise
+`${connection:…}` and so told authors who had done the most managed thing possible that they were
+risking a leak; and the tool executor returned `e.getMessage()` to the MODEL, which can quote a URL
+with a token in its query or a provider body echoing the request.
+
+**DEK rotation destroyed every OAuth grant.** `rotateDek` re-encrypted the vault's secret collection
+and then replaced the key. Grants are sealed with that same DEK — deliberately, so there is one key
+hierarchy rather than two — and they live in their own collection, so an operator running a routine,
+documented, compliance-driven rotation silently disconnected every linked account in the tenant and
+found out one `invalid_grant` at a time, days later, with no way back. New
+`SealedDataRotationParticipant` SPI, discovered through CDI so `ai.labs.eddi.secrets` stays a leaf
+package, with `ConnectionGrantResealer` as its first implementation. Re-sealing happens **before**
+the DEK is replaced and is prepare-then-commit, so a failure aborts the rotation with the old key
+still in place rather than leaving rows that neither key opens.
+
+Refusing rotation while grants exist was the other option and was rejected: it makes a compliance
+control unusable from the moment the first user links an account.
+
+**The OAuth state was never bound to a browser.** The attack is the reverse of the one people
+expect. The state binds a principal, but on a hostile flow the *attacker* chooses that principal:
+they start a link under their own account, keep the state, and send the victim the provider's
+consent link built around it. The victim consents with their own Google account, the callback files
+the tokens under the attacker's principal — every field exactly as intended — and the attacker reads
+the victim's mail on their next turn. `authorize` now issues a per-state nonce cookie (`HttpOnly`,
+`SameSite=Lax` because the callback is a top-level cross-site GET that `Strict` would refuse,
+`Secure` when the public base URL is `https`) and the callback refuses without it. Only the SHA-256
+is stored, so database read access is not enough. Named per state so two tabs do not clobber each
+other. The check runs *after* the claim, so a failed binding cannot be retried with the same state,
+and it is answered identically to an invalid state.
+
+**Grant cleanup looked in the wrong place, twice.** `deleteConnection` read the name at the version
+in the request and always looked under the default tenant. So deleting an old version could revoke
+against a name the live connection no longer uses, and a connection belonging to any other tenant
+had every one of its refresh tokens survive its deletion. Now one `ConnectionIdentity` resolved at
+the current version, carrying both halves.
+
+Relatedly, **renaming a connection is now refused**. The name is what `${connection:…}` points at
+*and* what every grant is filed under, so a rename orphans this connection's grants and hands them
+to whatever is created under the old name next — a fresh connection, possibly to a different
+provider, resolving other people's live refresh tokens on its first call. A rename that rewrites
+grant rows is a migration, not a field edit. And `disconnect` now deletes by name without requiring
+the connection to still exist, because the case that matters most is exactly the one where an
+administrator deleted it and the user would otherwise hold an unrevokable token.
+
+**A HITL-approved call ran against the approver's account.** `resolvePrincipal` preferred the
+thread-bound caller over the conversation's owner. They are the same person on an ordinary turn and
+they are *not* on a resume, where the thread belongs to the approver — often an administrator, by
+design. So an approved call read the approver's SaaS data, and the approval did not mean what the
+approver was shown. The conversation principal now wins; it is not caller-supplied (it is the
+conversation's `userId`, fixed at creation from a verified identity) and `PER_USER` already refuses
+outright unless `authorization.enabled=true`.
+
+**`SERVICE` + `OAUTH2_AUTHORIZATION_CODE` validated but could never resolve** — and since `binding`
+defaults to `SERVICE`, that was the *default* shape of an authorization-code connection. It saved,
+deployed and showed users a working consent screen, then resolved every call against `__service__`,
+which no authorization-code flow can produce a grant for. The binding rule is now symmetric.
+
+**One admin write broke every replica's next boot.** `ConnectionStartupGuard` threw on the two
+unsupportable configurations. Creating one through the REST API is a live, permitted, single
+request — and from that moment no replica could start, including the ones that had not restarted yet
+and so gave no warning; the next rolling restart took the deployment down over a config document,
+fixable only by editing the database. The guard now logs, and the checks moved to the write boundary
+where the administrator is still there to see the 400. Nothing unsafe is permitted by that: both
+conditions already fail closed per request.
+
+The guard also raced the vault. Both observe `StartupEvent`, both were unordered, and one of the
+guard's checks asks `secretProvider.isAvailable()` — which the vault decides in *its* observer. Both
+now carry an explicit `@Priority`.
+
+**An unresolved `${vars:}` permanently killed every grant on a connection.** There were three copies
+of the resolve-and-check logic, each checking a different subset of the reference forms; the one on
+the refresh path missed `${vars:}` entirely. So a typo in a global variable was sent to the token
+endpoint *as the client secret*, the provider answered `invalid_client`, that maps to
+`GRANT_UNUSABLE`, and every user of the connection was marked `REFRESH_FAILED` — terminally — with
+nothing anywhere naming the variable. One `CredentialReferenceResolver` now, used by all three.
+
+**`releaseRefresh` in a `finally` could discard a successful refresh.** The new token was already
+persisted; a store blip while clearing the lease then replaced a successful return with an
+exception, so the caller saw a failed resolve for a grant that had in fact just been refreshed. The
+two stores did not even agree — Postgres logs and carries on, Mongo propagates. Now caught at the
+call site, which makes it uniform, and the lease expires on its own anyway.
+
+**Nothing swept `connection_oauth_states`.** `deleteExpired()` had no caller. Mongo has a TTL index;
+Postgres has nothing, so every abandoned consent screen left a row holding a live PKCE verifier,
+forever. New `OAuthStateMaintenance` sweeps hourly. The rows were already unusable — `claim` checks
+`expiresAt` itself — so this is retention, not enforcement.
+
+Also: `A2AToolProviderManager` built its `HttpClient` in the constructor, so merely injecting the
+bean started a selector thread and opened a loopback socket. Now created on first use with
+double-checked locking, which additionally makes the six A2A test classes runnable in environments
+without loopback.
+
 
 
 ---

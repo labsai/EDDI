@@ -12,6 +12,8 @@ import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
+import jakarta.ws.rs.core.Context;
+import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import org.eclipse.microprofile.openapi.annotations.Operation;
@@ -50,14 +52,17 @@ public interface IRestConnectionAuthorization {
      *            where to send the browser afterwards. Validated against the
      *            deployment's own public base URL; an unvalidated value here is an
      *            open redirect on a page the user reaches mid-authentication.
-     * @return {@code {"authorizationUrl": "…"}} for the browser to follow
+     * @return {@code {"authorizationUrl": "…"}} for the browser to follow, plus a
+     *         {@code Set-Cookie} that binds the flow to this browser. A client
+     *         calling this cross-origin must send and store credentials, or the
+     *         callback will refuse — see {@code docs/connections.md}.
      */
     @POST
     @Path("/{name}/authorize")
     @Authenticated
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(summary = "Begin linking an account", description = "Returns the provider authorization URL for the calling user.")
-    Map<String, String> authorize(@PathParam("name") String name, @QueryParam("returnTo") String returnTo);
+    Response authorize(@PathParam("name") String name, @QueryParam("returnTo") String returnTo);
 
     /**
      * The provider's redirect target.
@@ -65,15 +70,18 @@ public interface IRestConnectionAuthorization {
      * Necessarily a {@code permit} path: the redirect is a top-level browser GET
      * carrying no bearer token, and {@code quarkus.oidc.application-type=service}
      * answers an unauthenticated request with a 401 rather than a login redirect.
-     * It is secured by the single-use, short-TTL, server-stored {@code state},
-     * which binds tenant, connection and principal — the callback never trusts a
-     * request parameter for identity.
+     * It is secured by two things that must BOTH hold: the single-use, short-TTL,
+     * server-stored {@code state}, which binds tenant, connection and principal;
+     * and a nonce cookie proving the callback reached the same browser that started
+     * the flow. The state alone is not enough — an attacker who starts a flow under
+     * their own account can send the victim the provider's consent link and have
+     * the victim's tokens filed under the attacker's principal.
      */
     @GET
     @Path("/callback")
     @Operation(summary = "OAuth redirect target", description = "Consumes the provider's authorization code. Guarded by a single-use state.")
     Response callback(@QueryParam("code") String code, @QueryParam("state") String state, @QueryParam("error") String error,
-                      @QueryParam("error_description") String errorDescription);
+                      @QueryParam("error_description") String errorDescription, @Context HttpHeaders headers);
 
     /** The calling user's linked accounts. Never includes token material. */
     @GET

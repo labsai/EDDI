@@ -211,6 +211,25 @@ class ConnectionConfigurationValidationTest {
         }
 
         @Test
+        @DisplayName("SERVICE on the authorization-code flow is refused — and that was the DEFAULT")
+        void refusesServiceOnAuthorizationCode() {
+            // binding defaults to SERVICE, so an author who wrote an authorization-code
+            // block and never thought about binding got a connection that saved,
+            // deployed, and showed users a working consent screen — then resolved every
+            // call against the __service__ principal, which no authorization-code flow
+            // can ever produce a grant for. The symptom was "not connected" for a user
+            // who had just connected.
+            var connection = oauthConnection(AuthType.OAUTH2_AUTHORIZATION_CODE);
+            connection.setBinding(Binding.SERVICE);
+
+            var error = assertThrows(IllegalArgumentException.class, connection::validate);
+
+            assertTrue(error.getMessage().contains("PER_USER"), error.getMessage());
+            assertTrue(error.getMessage().contains("OAUTH2_CLIENT_CREDENTIALS"),
+                    "the message must name the alternative, or the author has nowhere to go: " + error.getMessage());
+        }
+
+        @Test
         @DisplayName("PKCE cannot be turned off for the authorization-code flow")
         void refusesDisablingPkce() {
             var connection = oauthConnection(AuthType.OAUTH2_AUTHORIZATION_CODE);

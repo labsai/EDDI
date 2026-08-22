@@ -32,8 +32,10 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -65,7 +67,8 @@ class ConnectionResolverTest {
     }
 
     private ConnectionResolver resolver(boolean authorizationEnabled) {
-        return new ConnectionResolver(registry, secretResolver, globalVariableResolver, callerIdentityContext, new SimpleMeterRegistry(),
+        return new ConnectionResolver(registry, new CredentialReferenceResolver(secretResolver, globalVariableResolver), callerIdentityContext,
+                new SimpleMeterRegistry(),
                 accessTokenSupplier, authorizationEnabled);
     }
 
@@ -241,15 +244,41 @@ class ConnectionResolverTest {
         }
 
         @Test
-        @DisplayName("the verified caller's own grant is used")
+        @DisplayName("the verified caller's own grant is used when the turn has no other owner")
         void resolvesForVerifiedCaller() {
             register(perUserConnection());
             when(callerIdentityContext.current()).thenReturn(new CallerIdentity("jwt", "alice", "https://eddi.example"));
             when(accessTokenSupplier.accessToken(any(), any())).thenReturn("ya29.token");
 
-            var credential = resolver(true).resolve("${connection:drive}", ALLOWED_TARGET, "not-alice");
+            var credential = resolver(true).resolve("${connection:drive}", ALLOWED_TARGET, null);
 
             assertEquals("Bearer ya29.token", credential.headerValue());
+            verify(accessTokenSupplier).accessToken(any(), eq("alice"));
+        }
+
+        @Test
+        @DisplayName("the CONVERSATION's owner wins over whoever is driving the request")
+        void conversationOwnerBeatsBoundCaller() {
+            // This is the HITL resume. The thread is bound to the APPROVER - an
+            // administrator, by design - while the call being approved belongs to the
+            // user who asked for it. Preferring the thread ran the approved call
+            // against the approver's own SaaS account: the wrong data, and an approval
+            // that did not mean what the approver was shown.
+            register(perUserConnection());
+            when(callerIdentityContext.current()).thenReturn(new CallerIdentity("jwt", "approver-admin", "https://eddi.example"));
+            when(accessTokenSupplier.accessToken(any(), any())).thenReturn("ya29.token");
+
+            resolver(true).resolve("${connection:drive}", ALLOWED_TARGET, "alice");
+
+            verify(accessTokenSupplier).accessToken(any(), eq("alice"));
+        }
+
+        @Test
+        @DisplayName("discovery withholds a PER_USER credential - a cached session would pin one user's token")
+        void perUserDiscoveryIsWithheld() {
+            register(perUserConnection());
+
+            assertTrue(resolver(true).resolveForDiscovery("${connection:drive}", ALLOWED_TARGET).isEmpty());
         }
 
         @Test
@@ -282,7 +311,8 @@ class ConnectionResolverTest {
         var meterRegistry = new SimpleMeterRegistry();
         when(registry.require(any(ConnectionReference.class)))
                 .thenThrow(new ConnectionException(ConnectionException.Reason.NOT_FOUND, "No connection named 'gone'"));
-        var resolver = new ConnectionResolver(registry, secretResolver, globalVariableResolver, callerIdentityContext, meterRegistry,
+        var resolver = new ConnectionResolver(registry, new CredentialReferenceResolver(secretResolver, globalVariableResolver),
+                callerIdentityContext, meterRegistry,
                 accessTokenSupplier, false);
 
         assertThrows(ConnectionException.class, () -> resolver.resolve("${connection:gone}", ALLOWED_TARGET, null));
@@ -290,6 +320,35 @@ class ConnectionResolverTest {
         var counter = meterRegistry.find("connection.resolve.count").tag("outcome", "not_found").counter();
         assertTrue(counter != null && counter.count() == 1,
                 "a deleted or misspelled connection fails every turn; a flat dashboard makes that invisible");
+    }
+
+    @Test
+    @DisplayName("a SERVICE connection DOES supply a credential to discovery")
+    void serviceBoundDiscoveryCarriesTheCredential() {
+        // The regression: discovery was withheld for EVERY binding, so a
+        // connection-bound MCP server had its initialize/tools-list handshake sent
+        // unauthenticated, was answered 401, and registered ZERO tools. The agent
+        // then simply had no tools, with nothing naming the cause. A SERVICE
+        // credential is the same for everybody, so a shared session has nothing to
+        // leak.
+        register(staticConnection());
+
+        var credential = resolver(false).resolveForDiscovery("${connection:jira}", ALLOWED_TARGET);
+
+        assertTrue(credential.isPresent(), "withholding this is what left the tool list empty");
+        assertEquals("Bearer live-token", credential.get().headerValue());
+    }
+
+    @Test
+    @DisplayName("an unknown connection still throws at discovery rather than quietly returning nothing")
+    void unknownConnectionThrowsAtDiscovery() {
+        when(registry.find(any(ConnectionReference.class))).thenReturn(Optional.empty());
+        when(registry.require(any(ConnectionReference.class)))
+                .thenThrow(new ConnectionException(ConnectionException.Reason.NOT_FOUND, "No connection named 'gone'"));
+
+        // Swallowing this would reintroduce the empty-tool-list-with-no-explanation
+        // failure by a different route.
+        assertThrows(ConnectionException.class, () -> resolver(false).resolveForDiscovery("${connection:gone}", ALLOWED_TARGET));
     }
 
     @Test

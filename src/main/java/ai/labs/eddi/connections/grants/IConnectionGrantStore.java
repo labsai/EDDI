@@ -84,6 +84,28 @@ public interface IConnectionGrantStore {
      */
     List<ConnectionGrant> findByPrincipal(String tenantId, String principal);
 
+    /**
+     * Every grant in a tenant, for DEK rotation.
+     * <p>
+     * Deliberately not exposed over REST: this returns token ciphertext for the
+     * whole tenant. Its one caller re-seals the ciphertext and never decrypts it
+     * into anything that outlives the call.
+     */
+    List<ConnectionGrant> findByTenant(String tenantId);
+
+    /**
+     * Writes re-sealed token ciphertext in place, leaving the grant's lifecycle
+     * fields alone.
+     * <p>
+     * Separate from {@link #upsert} because rotation is not a grant update: it must
+     * not bump {@code updatedAt}, must not touch a refresh lease it does not own,
+     * and must not change what any concurrent refresh sees except the bytes it is
+     * about to rewrite anyway.
+     *
+     * @return whether a row was written
+     */
+    boolean updateSealedTokens(ConnectionGrant grant);
+
     /** Counts by status, for the {@code connection.grant.status} gauge. */
     long countByStatus(String tenantId, ConnectionGrant.Status status);
 }

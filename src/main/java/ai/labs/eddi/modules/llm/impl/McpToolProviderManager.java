@@ -26,6 +26,7 @@ import dev.langchain4j.mcp.client.McpResourceTemplate;
 import dev.langchain4j.mcp.client.McpTextResourceContents;
 import dev.langchain4j.mcp.client.transport.McpTransport;
 import dev.langchain4j.mcp.client.transport.http.StreamableHttpMcpTransport;
+import dev.langchain4j.invocation.InvocationContext;
 import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
 import dev.langchain4j.service.tool.ToolExecutor;
 import dev.langchain4j.service.tool.ToolProviderResult;
@@ -487,6 +488,24 @@ public class McpToolProviderManager {
      */
     static final int RESOURCE_FIELD_MAX_CHARS = 256;
 
+    /**
+     * Marks a resource-bridge request as the tool call it actually is.
+     * <p>
+     * {@code list_resources} and {@code read_resource} are exposed to the model as
+     * tools and run inside a {@link ToolExecutor}, on behalf of one user, in one
+     * conversation. Calling the no-context overloads made them arrive at
+     * {@link #authorizationHeader} indistinguishable from the {@code initialize}
+     * handshake, which withholds the credential on purpose — so a caller-bound or
+     * connection-bound server answered every resource read with a 401 while its
+     * ordinary tools worked.
+     * <p>
+     * The context carries no per-user state and is deliberately shared: it is a
+     * discriminator ("this is a tool call"), not an identity. The identity comes
+     * from the thread-bound caller, exactly as it does for a normal tool call.
+     */
+    private static final InvocationContext RESOURCE_BRIDGE_INVOCATION = InvocationContext.builder()
+            .interfaceName(McpToolProviderManager.class.getName()).methodName("mcpResourceBridge").build();
+
     private static final ObjectMapper RESOURCE_ARGS_MAPPER = new ObjectMapper();
 
     /** The two synthesized tools bridging one server's MCP resources. */
@@ -559,7 +578,7 @@ public class McpToolProviderManager {
                 return "Error: the 'uri' argument is required - call " + listName + " for the available uris.";
             }
             try {
-                return renderResourceContents(getOrCreateClient(serverConfig).readResource(uri), uri, serverName);
+                return renderResourceContents(getOrCreateClient(serverConfig).readResource(uri, RESOURCE_BRIDGE_INVOCATION), uri, serverName);
             } catch (Exception e) {
                 LOGGER.warnf("MCP read_resource failed for '%s' uri '%s': %s", sanitize(serverName), sanitize(uri), e.getMessage());
                 return "Error reading resource '" + uri + "' from MCP server '" + serverName + "': " + e.getMessage();
@@ -621,7 +640,7 @@ public class McpToolProviderManager {
      */
     private static String renderResourceList(McpClient client, String serverName) {
         var sb = new StringBuilder(remoteContentHeader(serverName));
-        List<McpResource> resources = client.listResources();
+        List<McpResource> resources = client.listResources(RESOURCE_BRIDGE_INVOCATION);
         if (resources == null || resources.isEmpty()) {
             sb.append("No resources.\n");
         } else {
@@ -687,7 +706,7 @@ public class McpToolProviderManager {
      */
     private static List<McpResourceTemplate> safeListTemplates(McpClient client) {
         try {
-            return client.listResourceTemplates();
+            return client.listResourceTemplates(RESOURCE_BRIDGE_INVOCATION);
         } catch (Exception e) {
             return List.of();
         }
@@ -1048,16 +1067,27 @@ public class McpToolProviderManager {
      * <p>
      * A caller-bound config therefore has nothing to offer discovery and sends it
      * unauthenticated, letting the server decide.
+     * <p>
+     * A connection-bound config is NOT the same case, and treating it as one was a
+     * defect: a {@code SERVICE}-bound connection is one credential shared by
+     * everybody, so there is nothing a cached session can leak and the handshake
+     * needs it. Only a {@code PER_USER} connection is withheld here — see
+     * {@link ConnectionResolver#resolveForDiscovery(String, URI)}.
      */
     private Map<String, String> authorizationHeader(String configuredKey, McpServerConfig config, boolean callerBound, boolean connectionBound,
                                                     McpCallContext callContext) {
         if (connectionBound) {
-            // Discovery is excluded for the same reason a caller reference excludes
-            // it: the client is cached, so a session established with one principal's
-            // credential would be reused by everyone after them.
             if (callContext == null || callContext.invocationContext() == null) {
-                LOGGER.debugf("MCP discovery request to '%s' carries no connection credential by design", sanitize(config.getUrl()));
-                return Map.of();
+                // Discovery. A PER_USER connection has nothing a shared, cached session
+                // may carry; a SERVICE one is the same credential for everybody, so
+                // withholding it only produced a 401 and an agent with no tools at all.
+                var discovery = connectionResolver.resolveForDiscovery(configuredKey, URI.create(config.getUrl()));
+                if (discovery.isEmpty()) {
+                    LOGGER.warnf("MCP server '%s' is bound to a PER_USER connection, so discovery is sent unauthenticated. If the server "
+                            + "requires a token to list tools, bind it to a SERVICE connection instead.", sanitize(config.getName()));
+                    return Map.of();
+                }
+                return Map.of(discovery.get().headerName(), discovery.get().headerValue());
             }
             var credential = connectionResolver.resolve(configuredKey, URI.create(config.getUrl()), null);
             return Map.of(credential.headerName(), credential.headerValue());

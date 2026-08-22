@@ -122,10 +122,29 @@ public class ConnectionConfiguration {
         }
     }
 
+    /**
+     * The two halves of one rule, and both are needed.
+     * <p>
+     * The first was here from the start. The second was not, and its absence made
+     * the DEFAULT configuration of an authorization-code connection a dead one:
+     * {@code binding} defaults to {@code SERVICE}, so an author who wrote an
+     * authorization-code block and did not think about binding got a connection
+     * that saved cleanly, deployed cleanly, offered its users a working consent
+     * screen — and then resolved every call against the {@code __service__}
+     * principal, which no authorization-code flow can ever produce a grant for. The
+     * symptom is "not connected" for a user who just connected, with nothing
+     * anywhere naming the cause.
+     */
     private void validateBinding() {
         if (binding == Binding.PER_USER && authType != AuthType.OAUTH2_AUTHORIZATION_CODE) {
             throw new IllegalArgumentException("PER_USER binding requires authType OAUTH2_AUTHORIZATION_CODE — it is the only flow that "
                     + "produces a grant per end user. A static key is the same key for everybody however it is bound.");
+        }
+        if (authType == AuthType.OAUTH2_AUTHORIZATION_CODE && binding != Binding.PER_USER) {
+            throw new IllegalArgumentException("authType OAUTH2_AUTHORIZATION_CODE requires binding PER_USER. The flow files its grant under "
+                    + "the user who completed the consent screen, so a SERVICE-bound one would look for a grant under the service principal "
+                    + "that nothing can ever create — it would save and deploy and then fail every call as 'not connected'. Use "
+                    + "OAUTH2_CLIENT_CREDENTIALS for a service account.");
         }
     }
 

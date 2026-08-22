@@ -135,6 +135,31 @@ public class InMemoryConnectionGrantStore implements IConnectionGrantStore {
     }
 
     @Override
+    public synchronized List<ConnectionGrant> findByTenant(String tenantId) {
+        var results = new ArrayList<ConnectionGrant>();
+        for (ConnectionGrant grant : grants.values()) {
+            if (tenantId.equals(grant.getTenantId())) {
+                results.add(copy(grant));
+            }
+        }
+        return results;
+    }
+
+    @Override
+    public synchronized boolean updateSealedTokens(ConnectionGrant grant) {
+        ConnectionGrant stored = grants.get(key(grant.getTenantId(), grant.getConnectionName(), grant.getPrincipal()));
+        if (stored == null) {
+            return false;
+        }
+        stored.setEncryptedAccessToken(grant.getEncryptedAccessToken());
+        stored.setAccessTokenIv(grant.getAccessTokenIv());
+        stored.setEncryptedRefreshToken(grant.getEncryptedRefreshToken());
+        stored.setRefreshTokenIv(grant.getRefreshTokenIv());
+        stored.setDekId(grant.getDekId());
+        return true;
+    }
+
+    @Override
     public synchronized List<ConnectionGrant> findByPrincipal(String tenantId, String principal) {
         var results = new ArrayList<ConnectionGrant>();
         for (ConnectionGrant grant : grants.values()) {

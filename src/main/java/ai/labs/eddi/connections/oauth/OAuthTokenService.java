@@ -6,13 +6,12 @@ package ai.labs.eddi.connections.oauth;
 
 import ai.labs.eddi.configs.connections.model.AuthType;
 import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
-import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.connections.AccessTokenSupplier;
 import ai.labs.eddi.connections.ConnectionException;
+import ai.labs.eddi.connections.CredentialReferenceResolver;
 import ai.labs.eddi.connections.grants.ConnectionGrant;
 import ai.labs.eddi.connections.grants.IConnectionGrantStore;
 import ai.labs.eddi.secrets.ISecretProvider;
-import ai.labs.eddi.secrets.SecretResolver;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -20,7 +19,6 @@ import org.jboss.logging.Logger;
 
 import java.time.Duration;
 import java.time.Instant;
-import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -84,8 +82,7 @@ public class OAuthTokenService implements AccessTokenSupplier {
     private final IConnectionGrantStore grantStore;
     private final OAuthTokenClient tokenClient;
     private final ISecretProvider secretProvider;
-    private final SecretResolver secretResolver;
-    private final GlobalVariableResolver globalVariableResolver;
+    private final CredentialReferenceResolver credentialReferenceResolver;
     private final MeterRegistry meterRegistry;
 
     /** Per-JVM single-flight, keyed by grant. */
@@ -98,12 +95,11 @@ public class OAuthTokenService implements AccessTokenSupplier {
 
     @Inject
     public OAuthTokenService(IConnectionGrantStore grantStore, OAuthTokenClient tokenClient, ISecretProvider secretProvider,
-            SecretResolver secretResolver, GlobalVariableResolver globalVariableResolver, MeterRegistry meterRegistry) {
+            CredentialReferenceResolver credentialReferenceResolver, MeterRegistry meterRegistry) {
         this.grantStore = grantStore;
         this.tokenClient = tokenClient;
         this.secretProvider = secretProvider;
-        this.secretResolver = secretResolver;
-        this.globalVariableResolver = globalVariableResolver;
+        this.credentialReferenceResolver = credentialReferenceResolver;
         this.meterRegistry = meterRegistry;
         // Checked against the CEILING a connection can configure, not against the
         // default. The default is what an unconfigured connection uses; the ceiling
@@ -301,9 +297,29 @@ public class OAuthTokenService implements AccessTokenSupplier {
             handleRefreshFailure(connection, tenantId, principal, grant, e);
             throw e;
         } finally {
-            // Best-effort; completeRefresh already cleared it on the success path, and
-            // this is scoped to our own claimantId so it cannot clear a successor's.
-            grantStore.releaseRefresh(tenantId, connection.getName(), principal, claimantId);
+            releaseQuietly(tenantId, connection.getName(), principal);
+        }
+    }
+
+    /**
+     * Releases our own lease, and never at the cost of the refresh that just
+     * succeeded.
+     * <p>
+     * Best-effort in the true sense: {@code completeRefresh} has already cleared
+     * the lease on the success path, and the claim is scoped to our own
+     * {@code claimantId} so it cannot clear a successor's. What it must not do is
+     * throw. This runs in a {@code finally} after the new token is persisted, so a
+     * store blip here used to replace a successful return with an exception - the
+     * caller saw a failed resolve for a grant that had in fact just been refreshed.
+     * The two stores did not even agree on it: Postgres logs and carries on, Mongo
+     * propagates. The lease has an expiry, so the worst case of failing to clear it
+     * is a short wait, not a stuck grant.
+     */
+    private void releaseQuietly(String tenantId, String connectionName, String principal) {
+        try {
+            grantStore.releaseRefresh(tenantId, connectionName, principal, claimantId);
+        } catch (RuntimeException e) {
+            LOGGER.warnf("Could not release the refresh lease for connection '%s'; it will expire on its own", connectionName);
         }
     }
 
@@ -395,13 +411,7 @@ public class OAuthTokenService implements AccessTokenSupplier {
     }
 
     private String resolveClientSecret(ConnectionConfiguration connection) {
-        String resolved = globalVariableResolver.resolveValue(connection.getOauth().getClientSecret());
-        resolved = secretResolver.resolveValue(resolved);
-        if (resolved == null || resolved.isBlank() || resolved.contains("${vault:") || resolved.contains("${eddivault:")) {
-            throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION, "The client secret for connection '"
-                    + connection.getName() + "' did not resolve. The vault key is missing, or the vault is inactive.");
-        }
-        return resolved;
+        return credentialReferenceResolver.resolveRequired(connection.getOauth().getClientSecret(), connection.getName(), "client secret");
     }
 
     private ISecretProvider.SealedValue seal(String tenantId, String plaintext, ConnectionConfiguration connection) {

@@ -42,6 +42,7 @@ public class PostgresOAuthStateStore implements IOAuthStateStore {
                 code_verifier VARCHAR(255) NOT NULL,
                 redirect_uri TEXT NOT NULL,
                 return_to TEXT,
+                nonce_hash VARCHAR(128),
                 created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 expires_at TIMESTAMP NOT NULL,
                 consumed_at TIMESTAMP
@@ -49,6 +50,12 @@ public class PostgresOAuthStateStore implements IOAuthStateStore {
             """;
 
     private static final String CREATE_INDEX = "CREATE INDEX IF NOT EXISTS idx_oauth_state_expires ON connection_oauth_states (expires_at)";
+
+    /**
+     * Added after the table shipped, so an existing deployment gets the column
+     * rather than an insert that fails on every account link.
+     */
+    private static final String ADD_NONCE_COLUMN = "ALTER TABLE connection_oauth_states ADD COLUMN IF NOT EXISTS nonce_hash VARCHAR(128)";
 
     private final DataSource dataSource;
 
@@ -61,6 +68,7 @@ public class PostgresOAuthStateStore implements IOAuthStateStore {
     void createSchema() {
         try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement()) {
             statement.execute(CREATE_TABLE);
+            statement.execute(ADD_NONCE_COLUMN);
             statement.execute(CREATE_INDEX);
         } catch (SQLException e) {
             LOGGER.errorf(e, "Failed to create the connection_oauth_states schema");
@@ -71,8 +79,9 @@ public class PostgresOAuthStateStore implements IOAuthStateStore {
     public void create(OAuthState state) {
         String sql = """
                 INSERT INTO connection_oauth_states
-                    (state, tenant_id, connection_name, principal, code_verifier, redirect_uri, return_to, created_at, expires_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (state, tenant_id, connection_name, principal, code_verifier, redirect_uri, return_to, nonce_hash,
+                     created_at, expires_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """;
         try (Connection connection = dataSource.getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, state.getState());
@@ -82,8 +91,9 @@ public class PostgresOAuthStateStore implements IOAuthStateStore {
             statement.setString(5, state.getCodeVerifier());
             statement.setString(6, state.getRedirectUri());
             statement.setString(7, state.getReturnTo());
-            statement.setTimestamp(8, Timestamp.from(state.getCreatedAt()));
-            statement.setTimestamp(9, Timestamp.from(state.getExpiresAt()));
+            statement.setString(8, state.getNonceHash());
+            statement.setTimestamp(9, Timestamp.from(state.getCreatedAt()));
+            statement.setTimestamp(10, Timestamp.from(state.getExpiresAt()));
             statement.executeUpdate();
         } catch (SQLException e) {
             throw new IllegalStateException("Failed to store an OAuth state", e);
@@ -100,7 +110,7 @@ public class PostgresOAuthStateStore implements IOAuthStateStore {
                    SET consumed_at = CURRENT_TIMESTAMP
                  WHERE state = ? AND consumed_at IS NULL AND expires_at > CURRENT_TIMESTAMP
                 RETURNING state, tenant_id, connection_name, principal, code_verifier, redirect_uri, return_to,
-                          created_at, expires_at, consumed_at
+                          nonce_hash, created_at, expires_at, consumed_at
                 """;
         try (Connection connection = dataSource.getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, state);
@@ -133,6 +143,7 @@ public class PostgresOAuthStateStore implements IOAuthStateStore {
         state.setCodeVerifier(rows.getString("code_verifier"));
         state.setRedirectUri(rows.getString("redirect_uri"));
         state.setReturnTo(rows.getString("return_to"));
+        state.setNonceHash(rows.getString("nonce_hash"));
         state.setCreatedAt(toInstant(rows.getTimestamp("created_at")));
         state.setExpiresAt(toInstant(rows.getTimestamp("expires_at")));
         state.setConsumedAt(toInstant(rows.getTimestamp("consumed_at")));

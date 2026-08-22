@@ -45,6 +45,7 @@ public class MongoOAuthStateStore implements IOAuthStateStore {
     private static final String FIELD_CREATED = "createdAt";
     private static final String FIELD_EXPIRES = "expiresAt";
     private static final String FIELD_CONSUMED = "consumedAt";
+    private static final String FIELD_NONCE_HASH = "nonceHash";
 
     private final MongoCollection<Document> states;
 
@@ -62,7 +63,8 @@ public class MongoOAuthStateStore implements IOAuthStateStore {
         states.insertOne(new Document(FIELD_STATE, state.getState()).append(FIELD_TENANT, state.getTenantId())
                 .append(FIELD_CONNECTION, state.getConnectionName()).append(FIELD_PRINCIPAL, state.getPrincipal())
                 .append(FIELD_VERIFIER, state.getCodeVerifier()).append(FIELD_REDIRECT_URI, state.getRedirectUri())
-                .append(FIELD_RETURN_TO, state.getReturnTo()).append(FIELD_CREATED, Date.from(state.getCreatedAt()))
+                .append(FIELD_RETURN_TO, state.getReturnTo()).append(FIELD_NONCE_HASH, state.getNonceHash())
+                .append(FIELD_CREATED, Date.from(state.getCreatedAt()))
                 .append(FIELD_EXPIRES, Date.from(state.getExpiresAt())));
     }
 
@@ -96,6 +98,7 @@ public class MongoOAuthStateStore implements IOAuthStateStore {
         state.setCodeVerifier(document.getString(FIELD_VERIFIER));
         state.setRedirectUri(document.getString(FIELD_REDIRECT_URI));
         state.setReturnTo(document.getString(FIELD_RETURN_TO));
+        state.setNonceHash(document.getString(FIELD_NONCE_HASH));
         state.setCreatedAt(document.getDate(FIELD_CREATED) == null ? null : document.getDate(FIELD_CREATED).toInstant());
         state.setExpiresAt(document.getDate(FIELD_EXPIRES) == null ? null : document.getDate(FIELD_EXPIRES).toInstant());
         state.setConsumedAt(document.getDate(FIELD_CONSUMED) == null ? null : document.getDate(FIELD_CONSUMED).toInstant());

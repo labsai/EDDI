@@ -115,6 +115,16 @@ The first call mints the grant; there is no human step.
 
 Each user links their own account once (see [below](#per-user-accounts)).
 
+`binding` and `authType` constrain each other in **both** directions, and both
+rules are enforced at save time. `PER_USER` requires
+`OAUTH2_AUTHORIZATION_CODE`, because nothing else produces a grant per end user.
+`OAUTH2_AUTHORIZATION_CODE` equally requires `PER_USER` — the flow files its
+grant under whoever completed the consent screen, so a `SERVICE`-bound one would
+look for a grant under a service principal that nothing can ever create. Since
+`binding` defaults to `SERVICE`, omitting it here used to produce a connection
+that saved, deployed, showed a working consent screen, and then failed every call
+as "not connected". Use `OAUTH2_CLIENT_CREDENTIALS` for a service account.
+
 ---
 
 ## The model
@@ -245,12 +255,39 @@ to it as a top-level GET with no bearer token, and
 * short-lived (10 minutes) and bound to tenant, connection and principal, so the
   callback never trusts a request parameter for identity.
 
+The state is **not sufficient on its own**, and the reason is the attack people
+usually have backwards. The state binds a principal — but on a hostile flow the
+*attacker* chooses that principal. They start a link under their own EDDI
+account, keep the state, and send the victim the provider's consent link built
+around it. The victim consents with their own Google account, the callback files
+the resulting tokens under the principal in the row — the attacker — and the
+attacker reads the victim's mail on their next turn. Every field in the row is
+exactly what it should be.
+
+So `authorize` also issues a **nonce cookie** (`eddi_oauth_nonce_<state>`,
+`HttpOnly`, `SameSite=Lax`, `Secure` whenever the public base URL is `https`,
+scoped to `/connections`), and the callback refuses unless the request carries
+the matching nonce for its state. Only the SHA-256 of the nonce is stored, so
+database read access is not enough to complete a flow.
+
+> **If your UI is on a different origin than EDDI**, the call to `authorize` must
+> send and store credentials (`fetch(..., { credentials: 'include' })`, and CORS
+> configured to allow them) or the browser will never hold the cookie and every
+> link attempt will fail at the callback. EDDI-Manager is served from EDDI itself,
+> so the default deployment needs no special handling.
+
 **PKCE is mandatory**, not configurable. A public redirect endpoint without it is
 an authorization-code interception vector, and no provider in scope lacks S256.
 
-Unknown, expired and already-used states are answered **identically**. Telling
-them apart is a state-guessing oracle, and none of the three is actionable by the
-user beyond "start again".
+Unknown, expired and already-used states are answered **identically**, and so is
+a missing or mismatched nonce cookie. Telling them apart is a state-guessing
+oracle, and none of them is actionable by the user beyond "start again".
+
+`DELETE /connections/{name}/grant` deletes **by name**, without requiring the
+connection to still exist. The case that matters most is exactly the one where it
+does not: an administrator deletes a connection while automatic grant cleanup is
+failing, and the user would otherwise be left holding a live refresh token with
+no way to revoke it. Unlinking must never be harder than linking was.
 
 ---
 
@@ -295,22 +332,40 @@ latency matters.
   `${connection:name}`; the credential exists in memory for one outbound request.
 * **Tokens are envelope-encrypted** with the vault's per-tenant DEK — the same
   key hierarchy as every other secret, so there is one key to rotate and one
-  master key to protect rather than two.
+  master key to protect rather than two. **DEK rotation carries them across**: the
+  vault asks every `SealedDataRotationParticipant` to re-seal before it replaces
+  the key, so rotating does not disconnect anybody. Grants are re-sealed
+  prepare-then-commit and a failure aborts the rotation with the old key still in
+  place, rather than leaving rows neither key can open.
 * **Grants are never exported**, never returned by any REST endpoint, and never
   logged. `/connections/mine` returns connection name, status, scopes and expiry,
   enumerated explicitly rather than serialised from the entity.
-* **Deleting a connection deletes its grants**, decided by re-reading the name
-  rather than by the `permanent` flag — a soft delete already stops the name
-  resolving, and leaving live refresh tokens at rest for a connection nobody can
-  use is not a revocation.
+* **Deleting a connection deletes its grants**, decided by re-reading the
+  connection's `(tenant, name)` at its *current* version rather than by the
+  `permanent` flag or the version in the request — a soft delete already stops the
+  name resolving, and leaving live refresh tokens at rest for a connection nobody
+  can use is not a revocation.
+* **A connection cannot be renamed.** The name is both what `${connection:…}`
+  refers to and what every grant is filed under, so a rename would orphan this
+  connection's grants and hand them to whatever is created under the old name
+  next — a fresh connection, possibly to a different provider, resolving other
+  people's live refresh tokens on its first call. Create a new connection and let
+  users link it.
 * **`VaultGrantChecker` follows the hop.** A `${connection:name}` is an *indirect*
   vault reference: the connection document holds the `${vault:…}` client secret.
   Without following it an agent could use a credential it was never granted
   simply by naming somebody else's connection.
-* **`PER_USER` fails closed twice** — at startup (the guard refuses the
-  deployment) and per request (the resolver refuses without a verified
-  principal). It never falls back to the service grant: sending the wrong
-  authority is how one user reads another's data.
+* **`PER_USER` fails closed twice** — at the write boundary (creating one on a
+  deployment without OIDC is a 400) and per request (the resolver refuses without
+  a verified principal). It never falls back to the service grant: sending the
+  wrong authority is how one user reads another's data. The startup guard *logs*
+  rather than throwing, deliberately: a fatal check there meant one permitted REST
+  write left every replica unable to boot, and the next rolling restart took the
+  deployment down over a config document.
+* **A `PER_USER` credential belongs to the conversation's owner**, not to whoever
+  is driving the current request. They differ on a HITL resume, where the thread
+  is bound to the *approver* — often an administrator, by design — while the call
+  being approved belongs to the user who asked for it.
 * **The token client goes through `SafeHttpClient`.** This is the one new
   outbound path, so it starts compliant. `Redirect.NEVER` matters more here than
   almost anywhere: a token request carries the client secret in an

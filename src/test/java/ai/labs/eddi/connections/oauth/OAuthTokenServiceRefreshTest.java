@@ -11,6 +11,7 @@ import ai.labs.eddi.configs.connections.model.OAuthConfig;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.connections.ConnectionException;
 import ai.labs.eddi.connections.ConnectionResolver;
+import ai.labs.eddi.connections.CredentialReferenceResolver;
 import ai.labs.eddi.connections.grants.ConnectionGrant;
 import ai.labs.eddi.connections.grants.InMemoryConnectionGrantStore;
 import ai.labs.eddi.secrets.ISecretProvider;
@@ -79,7 +80,8 @@ class OAuthTokenServiceRefreshTest {
         GlobalVariableResolver globalVariableResolver = mock(GlobalVariableResolver.class);
         lenient().when(globalVariableResolver.resolveValue(anyString())).thenAnswer(i -> i.getArgument(0));
         lenient().when(secretResolver.resolveValue(anyString())).thenReturn("client-secret-value");
-        return new OAuthTokenService(grantStore, tokenClient, secretProvider, secretResolver, globalVariableResolver, new SimpleMeterRegistry());
+        return new OAuthTokenService(grantStore, tokenClient, secretProvider, new CredentialReferenceResolver(secretResolver, globalVariableResolver),
+                new SimpleMeterRegistry());
     }
 
     private static ConnectionConfiguration connection() {

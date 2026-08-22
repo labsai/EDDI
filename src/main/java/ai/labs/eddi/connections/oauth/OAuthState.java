@@ -42,6 +42,25 @@ public class OAuthState {
     /** Where to send the browser afterwards. Validated before it is stored. */
     private String returnTo;
 
+    /**
+     * SHA-256 of the nonce handed to the browser as a cookie when this flow
+     * started. Binds the row to the browser that began it.
+     * <p>
+     * Without it the state is a bearer token that only the ATTACKER needs to know.
+     * The attack is the reverse of the one people expect: the attacker starts a
+     * flow under their own EDDI account, keeps the state, and sends the victim the
+     * provider consent link built around it. The victim consents with their own
+     * Google account, the callback stores the resulting tokens against the
+     * principal in the row — the attacker — and the attacker's next chat turn reads
+     * the victim's mail. Binding the tenant, connection and principal does not stop
+     * this, because every one of those fields is exactly what the attacker wants
+     * them to be.
+     * <p>
+     * The hash, not the nonce: this row is readable by anything that can read the
+     * database, and a stored nonce would be as good as the cookie.
+     */
+    private String nonceHash;
+
     private Instant createdAt;
     private Instant expiresAt;
 
@@ -107,6 +126,14 @@ public class OAuthState {
 
     public void setReturnTo(String returnTo) {
         this.returnTo = returnTo;
+    }
+
+    public String getNonceHash() {
+        return nonceHash;
+    }
+
+    public void setNonceHash(String nonceHash) {
+        this.nonceHash = nonceHash;
     }
 
     public Instant getCreatedAt() {

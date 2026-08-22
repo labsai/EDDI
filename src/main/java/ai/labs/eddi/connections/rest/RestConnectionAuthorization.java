@@ -5,10 +5,10 @@
 package ai.labs.eddi.connections.rest;
 
 import ai.labs.eddi.configs.connections.model.AuthType;
-import ai.labs.eddi.configs.connections.model.Binding;
 import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
 import ai.labs.eddi.connections.ConnectionException;
 import ai.labs.eddi.connections.ConnectionRegistry;
+import ai.labs.eddi.connections.CredentialReferenceResolver;
 import ai.labs.eddi.connections.ConnectionsConfig;
 import ai.labs.eddi.connections.grants.ConnectionGrant;
 import ai.labs.eddi.connections.grants.IConnectionGrantStore;
@@ -19,8 +19,6 @@ import ai.labs.eddi.connections.oauth.OAuthState;
 import ai.labs.eddi.connections.oauth.OAuthTokenClient;
 import ai.labs.eddi.connections.oauth.OAuthTokenService;
 import ai.labs.eddi.connections.oauth.TokenResponse;
-import ai.labs.eddi.configs.variables.GlobalVariableResolver;
-import ai.labs.eddi.secrets.SecretResolver;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -29,6 +27,8 @@ import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.ForbiddenException;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.ServiceUnavailableException;
+import jakarta.ws.rs.core.HttpHeaders;
+import jakarta.ws.rs.core.NewCookie;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
@@ -50,16 +50,28 @@ import java.util.Map;
  * The per-user grant lifecycle.
  *
  * <h3>The callback is the interesting part</h3> It is a {@code permit} path
- * because it has to be, and it is guarded by exactly one thing: a single-use,
- * server-stored, short-TTL {@code state} that binds the tenant, the connection
- * and the principal. Three consequences follow, and all three are enforced
- * below:
+ * because it has to be, and it is guarded by two things that must both hold: a
+ * single-use, server-stored, short-TTL {@code state} that binds the tenant, the
+ * connection and the principal, and a nonce cookie proving the callback reached
+ * the browser that started the flow.
+ * <p>
+ * Both are needed. The state binds a principal, but the ATTACKER chooses that
+ * principal: they start a flow under their own account, keep the state, and
+ * send the victim the provider's consent link built around it. The victim
+ * consents with their own account and the tokens are filed under the attacker's
+ * principal — every field in the row exactly as intended, and the attacker
+ * reading the victim's mail on their next turn. The cookie is what the attacker
+ * cannot put in the victim's browser.
+ * <p>
+ * Four consequences follow, and all four are enforced below:
  * <ul>
  * <li>the claim is the FIRST thing that happens, as one conditional write;</li>
  * <li>identity comes from the claimed row, never from a query parameter;</li>
  * <li>the browser is told nothing that distinguishes "unknown state" from
  * "expired" from "already used" — that distinction is a state-guessing
- * oracle.</li>
+ * oracle;</li>
+ * <li>a missing or mismatched binding cookie is answered exactly as an invalid
+ * state is, for the same reason.</li>
  * </ul>
  */
 @ApplicationScoped
@@ -69,6 +81,15 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
 
     /** How long a user has to complete the provider's consent screen. */
     static final Duration STATE_TTL = Duration.ofMinutes(10);
+
+    /**
+     * Cookie name prefix for the browser-binding nonce. The state token is appended
+     * so concurrent flows in two tabs do not clobber one another.
+     */
+    static final String COOKIE_PREFIX = "eddi_oauth_nonce_";
+
+    /** Scoped as narrowly as the flow allows: nothing else needs to see it. */
+    private static final String COOKIE_PATH = "/connections";
 
     private static final SecureRandom RANDOM = new SecureRandom();
 
@@ -80,15 +101,14 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
     private final CredentialEndpointAllowlist endpointAllowlist;
     private final ConnectionsConfig connectionsConfig;
     private final SecurityIdentity securityIdentity;
-    private final SecretResolver secretResolver;
-    private final GlobalVariableResolver globalVariableResolver;
+    private final CredentialReferenceResolver credentialReferenceResolver;
     private final MeterRegistry meterRegistry;
 
     @Inject
     public RestConnectionAuthorization(ConnectionRegistry connectionRegistry, IOAuthStateStore stateStore, IConnectionGrantStore grantStore,
             OAuthTokenClient tokenClient, OAuthTokenService tokenService, CredentialEndpointAllowlist endpointAllowlist,
-            ConnectionsConfig connectionsConfig, SecurityIdentity securityIdentity, SecretResolver secretResolver,
-            GlobalVariableResolver globalVariableResolver, MeterRegistry meterRegistry) {
+            ConnectionsConfig connectionsConfig, SecurityIdentity securityIdentity, CredentialReferenceResolver credentialReferenceResolver,
+            MeterRegistry meterRegistry) {
         this.connectionRegistry = connectionRegistry;
         this.stateStore = stateStore;
         this.grantStore = grantStore;
@@ -97,13 +117,12 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
         this.endpointAllowlist = endpointAllowlist;
         this.connectionsConfig = connectionsConfig;
         this.securityIdentity = securityIdentity;
-        this.secretResolver = secretResolver;
-        this.globalVariableResolver = globalVariableResolver;
+        this.credentialReferenceResolver = credentialReferenceResolver;
         this.meterRegistry = meterRegistry;
     }
 
     @Override
-    public Map<String, String> authorize(String name, String returnTo) {
+    public Response authorize(String name, String returnTo) {
         requireEnabled();
         String principal = requirePrincipal();
         ConnectionConfiguration connection = requireConnection(name);
@@ -116,6 +135,7 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
         endpointAllowlist.require(connection.getOauth().getTokenUrl(), "oauth.tokenUrl");
 
         String codeVerifier = randomUrlSafe(64);
+        String nonce = randomUrlSafe(32);
         var state = new OAuthState();
         state.setState(randomUrlSafe(32));
         state.setTenantId(tenantOf(connection));
@@ -124,12 +144,46 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
         state.setCodeVerifier(codeVerifier);
         state.setRedirectUri(connectionsConfig.redirectUri());
         state.setReturnTo(connectionsConfig.isAllowedReturnTo(returnTo) ? returnTo : connectionsConfig.defaultReturnTo());
+        state.setNonceHash(sha256(nonce));
         state.setCreatedAt(Instant.now());
         state.setExpiresAt(Instant.now().plus(STATE_TTL));
         stateStore.create(state);
 
         count("connection.oauth.authorize.count", "outcome", "issued", connection);
-        return Map.of("authorizationUrl", buildAuthorizationUrl(connection, state, codeVerifier));
+        return Response.ok(Map.of("authorizationUrl", buildAuthorizationUrl(connection, state, codeVerifier)))
+                .cookie(browserBindingCookie(state.getState(), nonce)).build();
+    }
+
+    /**
+     * The cookie that ties this flow to this browser.
+     * <p>
+     * Named per state so two tabs linking two connections do not overwrite each
+     * other — a single shared name would silently break whichever flow the user
+     * started first, and "try again in one tab at a time" is not a thing anyone
+     * would ever work out.
+     * <p>
+     * {@code SameSite=Lax} rather than {@code Strict}: the callback arrives as a
+     * top-level GET navigation from the provider's origin, which Lax allows and
+     * Strict does not — Strict here would refuse every legitimate link.
+     * {@code Secure} follows the deployment's own base URL, so a plain-HTTP
+     * development instance still works while a real one never sends the nonce in
+     * clear.
+     */
+    private NewCookie browserBindingCookie(String state, String nonce) {
+        return new NewCookie.Builder(nonceCookieName(state)).value(nonce).path(COOKIE_PATH).httpOnly(true)
+                .secure(connectionsConfig.redirectUri().regionMatches(true, 0, "https:", 0, 6))
+                .maxAge((int) STATE_TTL.toSeconds()).sameSite(NewCookie.SameSite.LAX).build();
+    }
+
+    /** Expires the binding cookie once its flow is over, win or lose. */
+    private NewCookie expiredBindingCookie(String state) {
+        return new NewCookie.Builder(nonceCookieName(state)).value("").path(COOKIE_PATH).httpOnly(true)
+                .secure(connectionsConfig.redirectUri().regionMatches(true, 0, "https:", 0, 6)).maxAge(0)
+                .sameSite(NewCookie.SameSite.LAX).build();
+    }
+
+    private static String nonceCookieName(String state) {
+        return COOKIE_PREFIX + state;
     }
 
     private String buildAuthorizationUrl(ConnectionConfiguration connection, OAuthState state, String codeVerifier) {
@@ -168,7 +222,7 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
     }
 
     @Override
-    public Response callback(String code, String state, String error, String errorDescription) {
+    public Response callback(String code, String state, String error, String errorDescription, HttpHeaders headers) {
         if (!connectionsConfig.isEnabled()) {
             return Response.status(Response.Status.NOT_FOUND).build();
         }
@@ -187,17 +241,28 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
         }
         OAuthState oauthState = claimed.get();
 
+        // SECOND: prove the callback reached the browser that started the flow.
+        // After the claim, deliberately — the state is single-use whichever way this
+        // check goes, so a failed binding cannot be retried with the same state.
+        if (!bindingMatches(oauthState, headers, state)) {
+            count("connection.oauth.callback.count", "outcome", "binding_mismatch", null);
+            LOGGER.warnf("An OAuth callback for connection '%s' arrived without the browser binding that started the flow. The state was "
+                    + "valid, so this is either a link followed in a different browser or an attempt to file somebody else's tokens "
+                    + "under another principal.", sanitize(oauthState.getConnectionName()));
+            return redirect(oauthState.getReturnTo(), "error", "invalid_state", expiredBindingCookie(state));
+        }
+
         if (error != null && !error.isBlank()) {
             // The user declined, or the provider refused. The provider's own
             // description is NOT echoed onward: it is attacker-influenceable text
             // heading for a browser.
             count("connection.oauth.callback.count", "outcome", "provider_error", null);
             LOGGER.warnf("The provider refused an authorization for connection '%s' (%s)", oauthState.getConnectionName(), sanitize(error));
-            return redirect(oauthState.getReturnTo(), "error", "authorization_declined");
+            return redirect(oauthState.getReturnTo(), "error", "authorization_declined", expiredBindingCookie(state));
         }
         if (code == null || code.isBlank()) {
             count("connection.oauth.callback.count", "outcome", "bad_state", null);
-            return redirect(oauthState.getReturnTo(), "error", "missing_code");
+            return redirect(oauthState.getReturnTo(), "error", "missing_code", expiredBindingCookie(state));
         }
 
         ConnectionConfiguration connection;
@@ -205,7 +270,7 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
             connection = connectionRegistry.require(new ConnectionReference(oauthState.getTenantId(), oauthState.getConnectionName()));
         } catch (ConnectionException e) {
             count("connection.oauth.callback.count", "outcome", "exchange_failed", null);
-            return redirect(oauthState.getReturnTo(), "error", "connection_removed");
+            return redirect(oauthState.getReturnTo(), "error", "connection_removed", expiredBindingCookie(state));
         }
 
         try {
@@ -216,11 +281,11 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
             // somebody else's name.
             tokenService.persistNew(connection, oauthState.getTenantId(), oauthState.getPrincipal(), token, token.refreshToken());
             count("connection.oauth.callback.count", "outcome", "success", connection);
-            return redirect(oauthState.getReturnTo(), "connected", connection.getName());
+            return redirect(oauthState.getReturnTo(), "connected", connection.getName(), expiredBindingCookie(state));
         } catch (ConnectionException e) {
             count("connection.oauth.callback.count", "outcome", "exchange_failed", connection);
             LOGGER.warnf("Token exchange failed for connection '%s': %s", connection.getName(), e.getReason());
-            return redirect(oauthState.getReturnTo(), "error", "exchange_failed");
+            return redirect(oauthState.getReturnTo(), "error", "exchange_failed", expiredBindingCookie(state));
         }
     }
 
@@ -252,11 +317,19 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
     public Response disconnect(String name) {
         requireEnabled();
         String principal = requirePrincipal();
-        ConnectionConfiguration connection = requireConnection(name);
-        boolean deleted = grantStore.delete(tenantOf(connection), connection.getName(), principal);
+        if (name == null || name.isBlank()) {
+            throw new BadRequestException("A connection name is required.");
+        }
+        // By NAME, without requiring the connection to still exist. Grants are filed
+        // under the name, and the case that matters most is exactly the one where the
+        // connection is gone: an admin deletes it while automatic cleanup is failing,
+        // and the user is left holding a live refresh token with no way to revoke it
+        // because unlinking insisted on a 404 first. Unlinking must never be harder
+        // than linking was.
+        boolean deleted = grantStore.delete(callerTenant(), name, principal);
         // Deliberately the same answer either way: whether a given user had linked a
         // given connection is not something a caller needs to learn by probing.
-        LOGGER.infof("Disconnect for connection '%s' (existing grant: %s)", connection.getName(), deleted);
+        LOGGER.infof("Disconnect for connection '%s' (existing grant: %s)", sanitize(name), deleted);
         return Response.noContent().build();
     }
 
@@ -297,13 +370,7 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
     }
 
     private String resolveClientSecret(ConnectionConfiguration connection) {
-        String resolved = globalVariableResolver.resolveValue(connection.getOauth().getClientSecret());
-        resolved = secretResolver.resolveValue(resolved);
-        if (resolved == null || resolved.isBlank() || resolved.contains("${vault:")) {
-            throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION,
-                    "The client secret for connection '" + connection.getName() + "' did not resolve.");
-        }
-        return resolved;
+        return credentialReferenceResolver.resolveRequired(connection.getOauth().getClientSecret(), connection.getName(), "client secret");
     }
 
     /**
@@ -316,14 +383,55 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
      * consumed). A fragment is dropped rather than appended past, since a query
      * appended after a fragment is not a query.
      */
-    private Response redirect(String returnTo, String key, String value) {
+    private Response redirect(String returnTo, String key, String value, NewCookie... cookies) {
         String destination = (returnTo == null || returnTo.isBlank()) ? connectionsConfig.defaultReturnTo() : returnTo;
         int fragment = destination.indexOf('#');
         if (fragment >= 0) {
             destination = destination.substring(0, fragment);
         }
         String separator = destination.contains("?") ? "&" : "?";
-        return Response.seeOther(URI.create(destination + separator + encode(key) + "=" + encode(value))).build();
+        var response = Response.seeOther(URI.create(destination + separator + encode(key) + "=" + encode(value)));
+        for (NewCookie cookie : cookies) {
+            response.cookie(cookie);
+        }
+        return response.build();
+    }
+
+    /**
+     * Whether the callback carries the nonce this flow was started with.
+     * <p>
+     * A row written before this check existed has no {@code nonceHash}, and is
+     * refused rather than grandfathered: such a row lives at most
+     * {@link #STATE_TTL} past an upgrade, so accepting it buys ten minutes of
+     * convenience in exchange for leaving the hole open on exactly the deployments
+     * that just patched it. The user retries and the retry is bound.
+     */
+    private boolean bindingMatches(OAuthState oauthState, HttpHeaders headers, String state) {
+        if (oauthState.getNonceHash() == null || oauthState.getNonceHash().isBlank()) {
+            return false;
+        }
+        if (headers == null || state == null || state.isBlank()) {
+            return false;
+        }
+        var cookie = headers.getCookies() == null ? null : headers.getCookies().get(nonceCookieName(state));
+        if (cookie == null || cookie.getValue() == null || cookie.getValue().isBlank()) {
+            return false;
+        }
+        // Constant time. The comparison is over a hash rather than the nonce, but a
+        // byte-at-a-time equals on a value an attacker can resend is a timing oracle
+        // for the stored hash, and there is no reason to leave one lying around.
+        return MessageDigest.isEqual(sha256(cookie.getValue()).getBytes(StandardCharsets.US_ASCII),
+                oauthState.getNonceHash().getBytes(StandardCharsets.US_ASCII));
+    }
+
+    /** base64url(sha256(value)), unpadded — the stored form of the nonce. */
+    private static String sha256(String value) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.US_ASCII));
+            return Base64.getUrlEncoder().withoutPadding().encodeToString(digest);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is unavailable, so the OAuth flow cannot be bound to a browser", e);
+        }
     }
 
     private void count(String metric, String tagName, String tagValue, ConnectionConfiguration connection) {

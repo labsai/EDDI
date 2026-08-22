@@ -257,6 +257,42 @@ public class PostgresConnectionGrantStore implements IConnectionGrantStore {
     }
 
     @Override
+    public List<ConnectionGrant> findByTenant(String tenantId) {
+        String sql = "SELECT " + SELECT_COLUMNS + " FROM connection_grants WHERE tenant_id = ?";
+        var results = new ArrayList<ConnectionGrant>();
+        try (Connection connection = dataSource.getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, tenantId);
+            try (ResultSet rows = statement.executeQuery()) {
+                while (rows.next()) {
+                    results.add(toGrant(rows));
+                }
+            }
+            return results;
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to list connection grants for tenant", e);
+        }
+    }
+
+    @Override
+    public boolean updateSealedTokens(ConnectionGrant grant) {
+        String sql = "UPDATE connection_grants SET encrypted_access_token = ?, access_token_iv = ?, encrypted_refresh_token = ?, "
+                + "refresh_token_iv = ?, dek_id = ? WHERE tenant_id = ? AND connection_name = ? AND principal = ?";
+        try (Connection connection = dataSource.getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, grant.getEncryptedAccessToken());
+            statement.setString(2, grant.getAccessTokenIv());
+            statement.setString(3, grant.getEncryptedRefreshToken());
+            statement.setString(4, grant.getRefreshTokenIv());
+            statement.setString(5, grant.getDekId());
+            statement.setString(6, grant.getTenantId());
+            statement.setString(7, grant.getConnectionName());
+            statement.setString(8, grant.getPrincipal());
+            return statement.executeUpdate() > 0;
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to write re-sealed connection grant tokens", e);
+        }
+    }
+
+    @Override
     public long countByStatus(String tenantId, ConnectionGrant.Status status) {
         String sql = "SELECT COUNT(*) FROM connection_grants WHERE tenant_id = ? AND status = ?";
         try (Connection connection = dataSource.getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {

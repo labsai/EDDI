@@ -8,11 +8,9 @@ import ai.labs.eddi.configs.connections.model.AuthType;
 import ai.labs.eddi.configs.connections.model.Binding;
 import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
 import ai.labs.eddi.configs.connections.model.StaticAuth;
-import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.connections.model.ConnectionReference;
 import ai.labs.eddi.engine.security.CallerIdentity;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
-import ai.labs.eddi.secrets.SecretResolver;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -25,7 +23,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.List;
 import java.util.Locale;
-import java.util.regex.Pattern;
+import java.util.Optional;
 
 /**
  * Turns a {@code ${connection:name}} reference into a credential for
@@ -60,15 +58,8 @@ public class ConnectionResolver {
     /** Principal under which a {@link Binding#SERVICE} grant is stored. */
     public static final String SERVICE_PRINCIPAL = "__service__";
 
-    /**
-     * A reference that survived resolution — meaning the key or variable behind it
-     * does not exist.
-     */
-    private static final Pattern UNRESOLVED_REFERENCE = Pattern.compile("\\$\\{(vault|eddivault|vars):[^}]*}");
-
     private final ConnectionRegistry connectionRegistry;
-    private final SecretResolver secretResolver;
-    private final GlobalVariableResolver globalVariableResolver;
+    private final CredentialReferenceResolver credentialReferenceResolver;
     private final CallerIdentityContext callerIdentityContext;
     private final MeterRegistry meterRegistry;
     private final boolean authorizationEnabled;
@@ -81,13 +72,11 @@ public class ConnectionResolver {
     private final AccessTokenSupplier accessTokenSupplier;
 
     @Inject
-    public ConnectionResolver(ConnectionRegistry connectionRegistry, SecretResolver secretResolver,
-            GlobalVariableResolver globalVariableResolver, CallerIdentityContext callerIdentityContext, MeterRegistry meterRegistry,
-            AccessTokenSupplier accessTokenSupplier,
+    public ConnectionResolver(ConnectionRegistry connectionRegistry, CredentialReferenceResolver credentialReferenceResolver,
+            CallerIdentityContext callerIdentityContext, MeterRegistry meterRegistry, AccessTokenSupplier accessTokenSupplier,
             @ConfigProperty(name = "authorization.enabled", defaultValue = "false") boolean authorizationEnabled) {
         this.connectionRegistry = connectionRegistry;
-        this.secretResolver = secretResolver;
-        this.globalVariableResolver = globalVariableResolver;
+        this.credentialReferenceResolver = credentialReferenceResolver;
         this.callerIdentityContext = callerIdentityContext;
         this.meterRegistry = meterRegistry;
         this.accessTokenSupplier = accessTokenSupplier;
@@ -108,9 +97,11 @@ public class ConnectionResolver {
      *            where the call is going; checked against the connection's
      *            {@code baseUrlAllowlist}
      * @param principalOverride
-     *            the conversation's user id where request scope is unavailable (the
-     *            pipeline runs on a pool thread); {@code null} to read the bound
-     *            caller. It is only ever consulted for a principal that a VERIFIED
+     *            the conversation's user id. Takes PRECEDENCE over the thread-bound
+     *            caller, because the credential belongs to whoever owns the
+     *            conversation and not to whoever is driving the current request —
+     *            they differ on a HITL resume. {@code null} to read the bound
+     *            caller. Only ever consulted for a principal that a VERIFIED
      *            identity produced — see
      *            {@link #resolvePrincipal(ConnectionConfiguration, String)}.
      * @throws ConnectionException
@@ -139,6 +130,43 @@ public class ConnectionResolver {
             record(connection, e.getReason().name().toLowerCase(Locale.ROOT), sample);
             throw e;
         }
+    }
+
+    /**
+     * Resolves the credential for a <em>discovery</em> request — one whose result
+     * is shared, not served to the user who happened to trigger it.
+     * <p>
+     * The MCP {@code initialize} handshake and {@code tools/list} run once per
+     * cached client and their outcome is reused by every conversation that follows.
+     * Sending one user's credential there would pin that user's session, and their
+     * permissions, onto everybody after them.
+     * <p>
+     * That is a reason to withhold a {@link Binding#PER_USER} grant. It was
+     * mistakenly applied to <em>every</em> binding, and the consequence was that a
+     * connection-bound MCP server registered ZERO tools: discovery went out
+     * unauthenticated, the server answered 401, and the failure surfaced as an
+     * agent that silently had no tools. A {@link Binding#SERVICE} grant is the same
+     * credential for everyone by definition, so there is nothing to leak and every
+     * reason to send it.
+     *
+     * @return the credential, or empty when the connection is {@code PER_USER} and
+     *         genuinely has nothing a shared session may carry — the caller sends
+     *         the request unauthenticated and lets the server decide
+     * @throws ConnectionException
+     *             if a non-{@code PER_USER} connection cannot be resolved; a
+     *             discovery failure must be loud, not another silent empty tool
+     *             list
+     */
+    public Optional<ResolvedCredential> resolveForDiscovery(String reference, URI targetUrl) {
+        ConnectionReference parsed = ConnectionReference.parse(reference);
+        // Read the binding without resolving. An unknown name falls through to
+        // resolve(), which throws NOT_FOUND and counts it — swallowing it here would
+        // reintroduce the empty-tool-list-with-no-explanation failure by a new route.
+        Binding binding = connectionRegistry.find(parsed).map(ConnectionConfiguration::getBinding).orElse(null);
+        if (binding == Binding.PER_USER) {
+            return Optional.empty();
+        }
+        return Optional.of(resolve(reference, targetUrl, null));
     }
 
     private ResolvedCredential resolveCredential(ConnectionConfiguration connection, String principalOverride) {
@@ -195,14 +223,31 @@ public class ConnectionResolver {
                             + "verified. Any caller could claim any userId and resolve that user's tokens. Enable OIDC or make the "
                             + "connection SERVICE-bound.");
         }
-        CallerIdentity caller = callerIdentityContext.current();
-        String principal = caller != null && caller.userId() != null && !caller.userId().isBlank() ? caller.userId() : principalOverride;
+        // The CONVERSATION's owner wins over whoever happens to be driving this
+        // HTTP request. They are the same person on an ordinary turn, and they are
+        // NOT the same person on a HITL resume: the thread is bound to the approver
+        // — often an administrator, by design — while the call being approved
+        // belongs to the user who asked for it. Reading the thread there ran the
+        // approved call against the APPROVER's SaaS account, which is both the wrong
+        // data and an approval that did not mean what the approver was shown.
+        //
+        // Safe in the other direction because the override is not caller-supplied:
+        // it is the conversation's userId, fixed at creation from a verified
+        // identity, and PER_USER already refuses outright unless
+        // authorization.enabled=true.
+        String principal = principalOverride != null && !principalOverride.isBlank() ? principalOverride : callerUserId();
         if (principal == null || principal.isBlank()) {
             throw new ConnectionException(ConnectionException.Reason.NO_VERIFIED_PRINCIPAL,
                     "Connection '" + connection.getName() + "' is PER_USER and this turn has no resolvable user — a scheduled run, a "
                             + "trigger or a retry on a callback thread. Refusing rather than falling back to the service grant.");
         }
         return principal;
+    }
+
+    /** The user bound to this thread, if a verified identity produced one. */
+    private String callerUserId() {
+        CallerIdentity caller = callerIdentityContext.current();
+        return caller == null || caller.userId() == null || caller.userId().isBlank() ? null : caller.userId();
     }
 
     /**
@@ -262,22 +307,7 @@ public class ConnectionResolver {
      * expand to a vault reference, and the reverse is never intended.
      */
     private String resolveReferences(String template, ConnectionConfiguration connection) {
-        String resolved = globalVariableResolver.resolveValue(template);
-        resolved = secretResolver.resolveValue(resolved);
-        if (resolved == null || resolved.isBlank()) {
-            throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION,
-                    "Connection '" + connection.getName() + "' resolved to an empty credential. Check that the referenced vault key exists.");
-        }
-        // Every reference form this method resolves is checked, not just the vault
-        // one. A ${vars:} that did not resolve fails identically — the literal text is
-        // sent as the credential and the provider answers 401 with nothing naming the
-        // missing variable — so checking only ${vault:} left half the guard missing.
-        if (UNRESOLVED_REFERENCE.matcher(resolved).find()) {
-            throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION,
-                    "Connection '" + connection.getName() + "' has a reference that did not resolve. The vault key or global variable is "
-                            + "missing, or the vault is inactive.");
-        }
-        return resolved;
+        return credentialReferenceResolver.resolveRequired(template, connection.getName(), "credential");
     }
 
     /**
