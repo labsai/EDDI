@@ -7,6 +7,70 @@
 
 
 
+## 🔑 fix(secrets): review findings on DEK generations — a below-1 generation sealed under the wrong name (2026-08-22)
+
+**Repo:** EDDI (`fix/dek-rotation-atomicity`)
+
+Review pass over the generations work on this branch. One finding was a real correctness bug, the rest
+are hardening.
+
+### The bug: a row could name itself a generation it would not be read back as
+
+`generationOf` treats everything below `FIRST_GENERATION` as generation 1 — that is the rule that lets
+rows written before generations existed still resolve. But nothing stopped a below-1 generation from
+reaching the field. A row holding generation 0 sealed its ciphertext under the name `tenant#g0`, and
+`generationOf` read that name back as generation **1** — so the ciphertext would later be opened with a
+different key than sealed it.
+
+Fixed at the model boundary: `EncryptedDek` normalizes in both the constructor and `setGeneration`, so
+the name a row writes and the generation that name reads back as are always the same one. Every source
+of a below-1 generation means the same thing (a row that predates the column), so it is mapped once
+here rather than at each store. `PostgresSecretPersistence.resultSetToDek` drops its own copy of the
+rule accordingly.
+
+`EncryptedDekTest` is new and covers the round trip directly; reverting the normalization fails it on
+`expected: <tenant-1#g1> but was: <tenant-1#g0>`.
+
+### Dropping the legacy DEK index no longer passes for "already gone"
+
+The boot migration caught `MongoException` around `dropIndex(idx_dek_tenant)` and shrugged. That is
+right for `IndexNotFound` (code 27) — absent on every deployment created after generations existed, and
+on every boot after the first — but it also swallowed *not authorized* and *stepped-down primary*, where
+the legacy unique-on-tenantId index may well still be standing. While it stands, a tenant cannot hold a
+second generation and rotation has nowhere to write. Now only code 27 is tolerated; anything else fails
+the boot.
+
+### Log forging in vault messages
+
+Tenant and key names are caller-controlled and every message built here is eventually logged, so a
+newline in either would forge log records (CWE-117). Routed the tenant/key pair through one `describe()`
+helper and sanitized the remaining standalone tenant ids — the point of the single helper being that it
+stays true of the next message somebody adds.
+
+### Review nitpicks
+
+The rotation test verified that the sweep called `updateSecretSealing`, but never that the swept row
+came out naming the NEW generation. A regression that re-encrypted with the new key while writing the
+old `dekId` would have passed — and that row is then openable by neither key, which is worse than not
+sweeping at all. The assertion is now on the captured row; reverting `setDekId` fails it with
+`expected: <test-tenant#g2> but was: <test-tenant>`.
+
+`ISecretProvider.seal`/`unseal` also gained their missing `@param`/`@return` tags, including the null
+contract they actually implement: null passes through in both directions, so a grant with no refresh
+token stays distinguishable from one that sealed to nothing — but the availability check comes first,
+so a null against an inactive vault still throws rather than returning null.
+
+### Corrected an over-claiming Javadoc
+
+`onStartup`'s `@Priority` comment implied it ordered the vault ahead of anything that asks
+`isAvailable()`. It orders it among `StartupEvent` **observers** only. `@PostConstruct` callbacks sit
+outside that sequence entirely — `SecretResolver` reads `isAvailable()` from one — so callers on that
+side must tolerate a not-yet-available vault rather than rely on ordering. Said so.
+
+---
+
+
+
 ## chore(ci): persist the project metrics series instead of letting it expire (2026-08-21)
 
 **Repo:** EDDI (`chore/persist-repo-metrics-history`)

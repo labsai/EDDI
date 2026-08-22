@@ -17,6 +17,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
@@ -76,6 +77,17 @@ class VaultSecretProviderBranchTest {
                 encResult.ciphertext(), encResult.iv(), Instant.now());
     }
 
+    /**
+     * Both DEK lookups the provider makes: the newest generation, which a write
+     * seals with, and the specific generation a stored row names, which a read
+     * opens it with. An unstubbed {@code findDek(tenant, generation)} answers "no
+     * such generation" and every resolve then fails.
+     */
+    private void stubDekLookups(EncryptedDek dek) {
+        when(persistence.findDek(TENANT_ID)).thenReturn(Optional.of(dek));
+        when(persistence.findDek(TENANT_ID, dek.getGeneration())).thenReturn(Optional.of(dek));
+    }
+
     private EncryptedSecret createEncryptedSecret(String plaintext, byte[] dek) {
         EnvelopeCrypto.EncryptionResult encResult = EnvelopeCrypto.encrypt(plaintext, dek);
         String checksum = EnvelopeCrypto.sha256Hex(plaintext);
@@ -132,7 +144,7 @@ class VaultSecretProviderBranchTest {
     class RotateDekTests {
 
         @Test
-        @DisplayName("successful DEK rotation re-encrypts all secrets")
+        @DisplayName("rotation ADDS a generation and sweeps secrets onto it")
         void successfulRotation() throws Exception {
             VaultSecretProvider provider = createAvailableProvider();
 
@@ -140,19 +152,35 @@ class VaultSecretProviderBranchTest {
             EncryptedDek encDek = createEncryptedDek(dek);
             EncryptedSecret encSecret = createEncryptedSecret("my-secret", dek);
 
-            when(persistence.findDek(TENANT_ID)).thenReturn(Optional.of(encDek));
+            stubDekLookups(encDek);
+            when(persistence.listDeks(TENANT_ID)).thenReturn(List.of(encDek));
+            when(persistence.insertDek(any(EncryptedDek.class))).thenReturn(true);
             when(persistence.listSecretsByTenant(TENANT_ID)).thenReturn(List.of(encSecret));
+            when(persistence.updateSecretSealing(any(EncryptedSecret.class), any())).thenReturn(true);
 
             int count = provider.rotateDek(TENANT_ID);
 
             assertEquals(1, count);
-            // Old secret was re-encrypted + new DEK stored
-            verify(persistence).upsertSecret(any(EncryptedSecret.class));
-            verify(persistence).upsertDek(any(EncryptedDek.class));
+            // The commit point is an INSERT of the next generation, not an upsert
+            // replacing the key underneath the data that names it.
+            var inserted = ArgumentCaptor.forClass(EncryptedDek.class);
+            verify(persistence).insertDek(inserted.capture());
+            assertEquals(encDek.getGeneration() + 1, inserted.getValue().getGeneration());
+            verify(persistence, never()).deleteDek(TENANT_ID);
+            // The sweep writes through the guarded update, and guards on the dekId
+            // the row was read with.
+            var swept = ArgumentCaptor.forClass(EncryptedSecret.class);
+            verify(persistence).updateSecretSealing(swept.capture(), eq(TENANT_ID));
+            // The post-condition that actually matters. Re-encrypting with the new
+            // key while still naming the old generation is the one outcome worse
+            // than not sweeping at all: the row is then openable by neither key,
+            // and nothing above would have noticed.
+            assertEquals(EncryptedDek.dekId(TENANT_ID, encDek.getGeneration() + 1), swept.getValue().getDekId(),
+                    "the swept row must name the generation it was just re-sealed with");
         }
 
         @Test
-        @DisplayName("persistence error during DEK rotation throws SecretProviderException")
+        @DisplayName("a secret the sweep cannot move is reported, not silently counted as migrated")
         void persistenceErrorDuringRotation() {
             VaultSecretProvider provider = createAvailableProvider();
 
@@ -160,13 +188,33 @@ class VaultSecretProviderBranchTest {
             EncryptedDek encDek = createEncryptedDek(dek);
             EncryptedSecret encSecret = createEncryptedSecret("my-secret", dek);
 
-            when(persistence.findDek(TENANT_ID)).thenReturn(Optional.of(encDek));
+            stubDekLookups(encDek);
+            when(persistence.listDeks(TENANT_ID)).thenReturn(List.of(encDek));
+            when(persistence.insertDek(any(EncryptedDek.class))).thenReturn(true);
             when(persistence.listSecretsByTenant(TENANT_ID)).thenReturn(List.of(encSecret));
             doThrow(new PersistenceException("write failed"))
-                    .when(persistence).upsertSecret(any(EncryptedSecret.class));
+                    .when(persistence).updateSecretSealing(any(EncryptedSecret.class), any());
 
-            assertThrows(SecretProviderException.class,
-                    () -> provider.rotateDek(TENANT_ID));
+            var ex = assertThrows(SecretProviderException.class, () -> provider.rotateDek(TENANT_ID));
+
+            assertTrue(ex.getMessage().contains("safe to re-run"),
+                    "the new generation is already committed and nothing is lost, so the message must say so: " + ex.getMessage());
+        }
+
+        @Test
+        @DisplayName("losing the race to install a generation refuses cleanly instead of writing a second key")
+        void concurrentRotationLoses() {
+            VaultSecretProvider provider = createAvailableProvider();
+
+            EncryptedDek encDek = createEncryptedDek(EnvelopeCrypto.generateDek());
+            when(persistence.listDeks(TENANT_ID)).thenReturn(List.of(encDek));
+            when(persistence.insertDek(any(EncryptedDek.class))).thenReturn(false);
+
+            var ex = assertThrows(SecretProviderException.class, () -> provider.rotateDek(TENANT_ID));
+
+            assertTrue(ex.getMessage().contains("nothing was changed by this one"),
+                    "two keys claiming the same generation is the failure this refusal exists to prevent: " + ex.getMessage());
+            verify(persistence, never()).updateSecretSealing(any(EncryptedSecret.class), any());
         }
     }
 
@@ -282,7 +330,7 @@ class VaultSecretProviderBranchTest {
             EncryptedSecret encSecret = createEncryptedSecret(plaintext, dek);
 
             when(persistence.findSecret(TENANT_ID, KEY_NAME)).thenReturn(Optional.of(encSecret));
-            when(persistence.findDek(TENANT_ID)).thenReturn(Optional.of(encDek));
+            stubDekLookups(encDek);
 
             String result = provider.resolve(new SecretReference(TENANT_ID, KEY_NAME));
             assertEquals(plaintext, result);
@@ -330,7 +378,7 @@ class VaultSecretProviderBranchTest {
             provider.store(new SecretReference(TENANT_ID, KEY_NAME),
                     "value", null, null);
 
-            var captor = org.mockito.ArgumentCaptor.forClass(EncryptedSecret.class);
+            var captor = ArgumentCaptor.forClass(EncryptedSecret.class);
             verify(persistence).upsertSecret(captor.capture());
             assertEquals(List.of("*"), captor.getValue().getAllowedAgents());
         }
@@ -349,7 +397,7 @@ class VaultSecretProviderBranchTest {
             provider.store(new SecretReference(TENANT_ID, KEY_NAME),
                     "value", null, List.of("agent-1"));
 
-            var captor = org.mockito.ArgumentCaptor.forClass(EncryptedSecret.class);
+            var captor = ArgumentCaptor.forClass(EncryptedSecret.class);
             verify(persistence).upsertSecret(captor.capture());
             assertNull(captor.getValue().getDescription());
             assertEquals(List.of("agent-1"), captor.getValue().getAllowedAgents());
@@ -559,7 +607,7 @@ class VaultSecretProviderBranchTest {
                     "test-secret-value", "desc", null);
 
             // Verify a new DEK was upserted
-            var dekCaptor = org.mockito.ArgumentCaptor.forClass(EncryptedDek.class);
+            var dekCaptor = ArgumentCaptor.forClass(EncryptedDek.class);
             verify(persistence).upsertDek(dekCaptor.capture());
             EncryptedDek generatedDek = dekCaptor.getValue();
             assertEquals(TENANT_ID, generatedDek.getTenantId());
