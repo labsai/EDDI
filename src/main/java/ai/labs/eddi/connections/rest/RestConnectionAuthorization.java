@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.connections.rest;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import ai.labs.eddi.configs.connections.model.AuthType;
 import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
 import ai.labs.eddi.connections.ConnectionException;
@@ -258,7 +259,8 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
             // description is NOT echoed onward: it is attacker-influenceable text
             // heading for a browser.
             count("connection.oauth.callback.count", "outcome", "provider_error", null);
-            LOGGER.warnf("The provider refused an authorization for connection '%s' (%s)", oauthState.getConnectionName(), sanitize(error));
+            LOGGER.warnf("The provider refused an authorization for connection '%s' (%s)", sanitize(oauthState.getConnectionName()),
+                    sanitize(error));
             return redirect(oauthState.getReturnTo(), "error", "authorization_declined", expiredBindingCookie(state));
         }
         if (code == null || code.isBlank()) {
@@ -544,8 +546,4 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
         return value == null ? "" : URLEncoder.encode(value, StandardCharsets.UTF_8);
     }
 
-    /** Strips CR/LF so a provider-supplied error cannot forge log lines. */
-    private static String sanitize(String value) {
-        return value == null ? "null" : value.replaceAll("[\\r\\n]", "_");
-    }
 }

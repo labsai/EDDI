@@ -47,7 +47,10 @@ import static org.mockito.Mockito.when;
  */
 class ConnectionStoreFindByNameTest {
 
-    private static final String JIRA_ID = "68a1b2c3d4e5f60718293a4b";
+    // Named for what it is rather than for the connection it belongs to: a
+    // provider name sitting next to a hex blob is the shape every credential
+    // scanner looks for, and this is a document id.
+    private static final String CONNECTION_ID = "68a1b2c3d4e5f60718293a4b";
     private static final String OTHER_TENANT_ID = "68a1b2c3d4e5f60718293a4c";
     private static final String DANGLING_ID = "68a1b2c3d4e5f60718293a4d";
 
@@ -93,8 +96,8 @@ class ConnectionStoreFindByNameTest {
     @Test
     @DisplayName("a store failure during the scan reaches the caller instead of reading as 'no such connection'")
     void propagatesAStoreFailureRatherThanReportingAbsence() throws Exception {
-        indexed(JIRA_ID);
-        store.cannotBeRead(JIRA_ID);
+        indexed(CONNECTION_ID);
+        store.cannotBeRead(CONNECTION_ID);
 
         var error = assertThrows(IResourceStore.ResourceStoreException.class, () -> store.readByName("default", "jira"));
 
@@ -111,8 +114,8 @@ class ConnectionStoreFindByNameTest {
         // swallowed an outage, a second connection called "jira" would be created
         // during the outage and resolution would then depend on scan order — one
         // system's credential going to another system's allowlisted origin.
-        indexed(JIRA_ID);
-        store.cannotBeRead(JIRA_ID);
+        indexed(CONNECTION_ID);
+        store.cannotBeRead(CONNECTION_ID);
 
         var error = assertThrows(IResourceStore.ResourceStoreException.class, () -> store.idOfName("default", "jira"));
 
@@ -125,11 +128,11 @@ class ConnectionStoreFindByNameTest {
         // The other half of the same rule, and the reason it cannot be written as one
         // blanket catch: one stale index entry must not hide every connection filed
         // behind it.
-        indexed(DANGLING_ID, JIRA_ID);
-        store.holding(JIRA_ID, connection("jira", "default"));
+        indexed(DANGLING_ID, CONNECTION_ID);
+        store.holding(CONNECTION_ID, connection("jira", "default"));
 
         assertNotNull(store.readByName("default", "jira"), "a stale index entry must not make the connections after it unreachable");
-        assertEquals(JIRA_ID, store.idOfName("default", "jira"));
+        assertEquals(CONNECTION_ID, store.idOfName("default", "jira"));
     }
 
     @Test
@@ -139,11 +142,11 @@ class ConnectionStoreFindByNameTest {
         // alone would hand one tenant's connection — and its stored tokens — to
         // another's reference. The other tenant is indexed FIRST so a name-only match
         // returns it and this fails.
-        indexed(OTHER_TENANT_ID, JIRA_ID);
+        indexed(OTHER_TENANT_ID, CONNECTION_ID);
         store.holding(OTHER_TENANT_ID, connection("jira", "acme"));
-        store.holding(JIRA_ID, connection("jira", "default"));
+        store.holding(CONNECTION_ID, connection("jira", "default"));
 
-        assertEquals(JIRA_ID, store.idOfName("default", "jira"), "the default tenant's own 'jira' must be the one that resolves");
+        assertEquals(CONNECTION_ID, store.idOfName("default", "jira"), "the default tenant's own 'jira' must be the one that resolves");
         assertEquals(OTHER_TENANT_ID, store.idOfName("acme", "jira"), "and acme's 'jira' must be acme's");
         assertNull(store.idOfName("globex", "jira"), "a tenant holding no connection of that name must get nothing, not somebody else's");
     }
@@ -154,11 +157,11 @@ class ConnectionStoreFindByNameTest {
         // ${connection:jira} carries no tenant, and the stored document may leave
         // tenantId unset. Both sides go through effectiveTenant, so two spellings of
         // the default must not file one connection under two tenants.
-        indexed(JIRA_ID);
-        store.holding(JIRA_ID, connection("jira", null));
+        indexed(CONNECTION_ID);
+        store.holding(CONNECTION_ID, connection("jira", null));
 
-        assertEquals(JIRA_ID, store.idOfName(null, "jira"));
-        assertEquals(JIRA_ID, store.idOfName("default", "jira"));
+        assertEquals(CONNECTION_ID, store.idOfName(null, "jira"));
+        assertEquals(CONNECTION_ID, store.idOfName("default", "jira"));
     }
 
     /**

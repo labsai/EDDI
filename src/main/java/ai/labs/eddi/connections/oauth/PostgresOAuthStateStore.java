@@ -5,8 +5,8 @@
 package ai.labs.eddi.connections.oauth;
 
 import io.quarkus.arc.DefaultBean;
-import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
@@ -57,19 +57,32 @@ public class PostgresOAuthStateStore implements IOAuthStateStore {
      */
     private static final String ADD_NONCE_COLUMN = "ALTER TABLE connection_oauth_states ADD COLUMN IF NOT EXISTS nonce_hash VARCHAR(128)";
 
-    private final DataSource dataSource;
+    /**
+     * Resolved lazily, never at construction.
+     * <p>
+     * On a MongoDB deployment the datasource bean is INACTIVE, and Quarkus resolves
+     * it while firing the startup event — so a constructor that takes a
+     * {@code DataSource} directly aborts the whole boot on a deployment that will
+     * never touch Postgres. Every other Postgres store here takes
+     * {@code Instance<DataSource>} for that reason.
+     */
+    private final Instance<DataSource> dataSourceInstance;
+    private volatile boolean schemaInitialized;
 
     @Inject
-    public PostgresOAuthStateStore(DataSource dataSource) {
-        this.dataSource = dataSource;
+    public PostgresOAuthStateStore(Instance<DataSource> dataSourceInstance) {
+        this.dataSourceInstance = dataSourceInstance;
     }
 
-    @PostConstruct
-    void createSchema() {
-        try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement()) {
+    private synchronized void createSchema() {
+        if (schemaInitialized) {
+            return;
+        }
+        try (Connection connection = dataSourceInstance.get().getConnection(); Statement statement = connection.createStatement()) {
             statement.execute(CREATE_TABLE);
             statement.execute(ADD_NONCE_COLUMN);
             statement.execute(CREATE_INDEX);
+            schemaInitialized = true;
         } catch (SQLException e) {
             LOGGER.errorf(e, "Failed to create the connection_oauth_states schema");
         }
@@ -77,13 +90,14 @@ public class PostgresOAuthStateStore implements IOAuthStateStore {
 
     @Override
     public void create(OAuthState state) {
+        createSchema();
         String sql = """
                 INSERT INTO connection_oauth_states
                     (state, tenant_id, connection_name, principal, code_verifier, redirect_uri, return_to, nonce_hash,
                      created_at, expires_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """;
-        try (Connection connection = dataSource.getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+        try (Connection connection = dataSourceInstance.get().getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, state.getState());
             statement.setString(2, state.getTenantId());
             statement.setString(3, state.getConnectionName());
@@ -102,6 +116,7 @@ public class PostgresOAuthStateStore implements IOAuthStateStore {
 
     @Override
     public Optional<OAuthState> claim(String state) {
+        createSchema();
         if (state == null || state.isBlank()) {
             return Optional.empty();
         }
@@ -119,7 +134,7 @@ public class PostgresOAuthStateStore implements IOAuthStateStore {
                           nonce_hash, created_at, expires_at, consumed_at
                 """;
         Instant now = Instant.now();
-        try (Connection connection = dataSource.getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+        try (Connection connection = dataSourceInstance.get().getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setTimestamp(1, Timestamp.from(now));
             statement.setString(2, state);
             statement.setTimestamp(3, Timestamp.from(now));
@@ -133,10 +148,11 @@ public class PostgresOAuthStateStore implements IOAuthStateStore {
 
     @Override
     public int deleteExpired() {
+        createSchema();
         // Same clock as claim(), for the same reason: a sweep on the DB clock could
         // delete rows claim() still considers live, or leave rows it has stopped
         // accepting.
-        try (Connection connection = dataSource.getConnection();
+        try (Connection connection = dataSourceInstance.get().getConnection();
                 PreparedStatement statement = connection.prepareStatement("DELETE FROM connection_oauth_states WHERE expires_at < ?")) {
             statement.setTimestamp(1, Timestamp.from(Instant.now()));
             return statement.executeUpdate();

@@ -7,8 +7,8 @@ package ai.labs.eddi.connections.grants;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.quarkus.arc.DefaultBean;
-import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
@@ -71,18 +71,31 @@ public class PostgresConnectionGrantStore implements IConnectionGrantStore {
             created_at, updated_at, last_refresh_at, version, refresh_in_progress, refresh_lease_expires_at
             """;
 
-    private final DataSource dataSource;
+    /**
+     * Resolved lazily, never at construction.
+     * <p>
+     * On a MongoDB deployment the datasource bean is INACTIVE, and Quarkus resolves
+     * it while firing the startup event — so a constructor that takes a
+     * {@code DataSource} directly aborts the whole boot on a deployment that will
+     * never touch Postgres. Every other Postgres store here takes
+     * {@code Instance<DataSource>} for that reason.
+     */
+    private final Instance<DataSource> dataSourceInstance;
+    private volatile boolean schemaInitialized;
 
     @Inject
-    public PostgresConnectionGrantStore(DataSource dataSource) {
-        this.dataSource = dataSource;
+    public PostgresConnectionGrantStore(Instance<DataSource> dataSourceInstance) {
+        this.dataSourceInstance = dataSourceInstance;
     }
 
-    @PostConstruct
-    void createSchema() {
-        try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement()) {
+    private synchronized void createSchema() {
+        if (schemaInitialized) {
+            return;
+        }
+        try (Connection connection = dataSourceInstance.get().getConnection(); Statement statement = connection.createStatement()) {
             statement.execute(CREATE_TABLE);
             statement.execute(CREATE_INDEX);
+            schemaInitialized = true;
         } catch (SQLException e) {
             LOGGER.errorf(e, "Failed to create the connection_grants schema");
         }
@@ -90,9 +103,10 @@ public class PostgresConnectionGrantStore implements IConnectionGrantStore {
 
     @Override
     public Optional<ConnectionGrant> find(String tenantId, String connectionName, String principal) {
+        createSchema();
         String sql = "SELECT " + SELECT_COLUMNS
                 + " FROM connection_grants WHERE tenant_id = ? AND connection_name = ? AND principal = ?";
-        try (Connection connection = dataSource.getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+        try (Connection connection = dataSourceInstance.get().getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, tenantId);
             statement.setString(2, connectionName);
             statement.setString(3, principal);
@@ -106,6 +120,7 @@ public class PostgresConnectionGrantStore implements IConnectionGrantStore {
 
     @Override
     public void upsert(ConnectionGrant grant) {
+        createSchema();
         String sql = """
                 INSERT INTO connection_grants (tenant_id, connection_name, principal, encrypted_access_token, access_token_iv,
                     encrypted_refresh_token, refresh_token_iv, dek_id, expires_at, scopes, status, updated_at, last_refresh_at,
@@ -126,7 +141,7 @@ public class PostgresConnectionGrantStore implements IConnectionGrantStore {
                     refresh_in_progress = NULL,
                     refresh_lease_expires_at = NULL
                 """;
-        try (Connection connection = dataSource.getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+        try (Connection connection = dataSourceInstance.get().getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, grant.getTenantId());
             statement.setString(2, grant.getConnectionName());
             statement.setString(3, grant.getPrincipal());
@@ -147,6 +162,7 @@ public class PostgresConnectionGrantStore implements IConnectionGrantStore {
 
     @Override
     public boolean claimRefresh(String tenantId, String connectionName, String principal, String claimantId, Instant leaseExpiresAt) {
+        createSchema();
         // One statement, so the predicate and the write happen under one row lock.
         // A SELECT followed by an UPDATE lets two replicas both see the lease free.
         String sql = """
@@ -155,7 +171,7 @@ public class PostgresConnectionGrantStore implements IConnectionGrantStore {
                  WHERE tenant_id = ? AND connection_name = ? AND principal = ?
                    AND (refresh_in_progress IS NULL OR refresh_lease_expires_at < CURRENT_TIMESTAMP)
                 """;
-        try (Connection connection = dataSource.getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+        try (Connection connection = dataSourceInstance.get().getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, claimantId);
             statement.setTimestamp(2, toTimestamp(leaseExpiresAt));
             statement.setString(3, tenantId);
@@ -169,6 +185,7 @@ public class PostgresConnectionGrantStore implements IConnectionGrantStore {
 
     @Override
     public boolean completeRefresh(ConnectionGrant grant, long expectedVersion) {
+        createSchema();
         String sql = """
                 UPDATE connection_grants
                    SET encrypted_access_token = ?, access_token_iv = ?, encrypted_refresh_token = ?, refresh_token_iv = ?,
@@ -177,7 +194,7 @@ public class PostgresConnectionGrantStore implements IConnectionGrantStore {
                        refresh_in_progress = NULL, refresh_lease_expires_at = NULL
                  WHERE tenant_id = ? AND connection_name = ? AND principal = ? AND version = ?
                 """;
-        try (Connection connection = dataSource.getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+        try (Connection connection = dataSourceInstance.get().getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, grant.getEncryptedAccessToken());
             statement.setString(2, grant.getAccessTokenIv());
             statement.setString(3, grant.getEncryptedRefreshToken());
@@ -198,11 +215,12 @@ public class PostgresConnectionGrantStore implements IConnectionGrantStore {
 
     @Override
     public void releaseRefresh(String tenantId, String connectionName, String principal, String claimantId) {
+        createSchema();
         String sql = """
                 UPDATE connection_grants SET refresh_in_progress = NULL, refresh_lease_expires_at = NULL
                  WHERE tenant_id = ? AND connection_name = ? AND principal = ? AND refresh_in_progress = ?
                 """;
-        try (Connection connection = dataSource.getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+        try (Connection connection = dataSourceInstance.get().getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, tenantId);
             statement.setString(2, connectionName);
             statement.setString(3, principal);
@@ -215,8 +233,9 @@ public class PostgresConnectionGrantStore implements IConnectionGrantStore {
 
     @Override
     public boolean delete(String tenantId, String connectionName, String principal) {
+        createSchema();
         String sql = "DELETE FROM connection_grants WHERE tenant_id = ? AND connection_name = ? AND principal = ?";
-        try (Connection connection = dataSource.getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+        try (Connection connection = dataSourceInstance.get().getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, tenantId);
             statement.setString(2, connectionName);
             statement.setString(3, principal);
@@ -228,8 +247,9 @@ public class PostgresConnectionGrantStore implements IConnectionGrantStore {
 
     @Override
     public int deleteByConnection(String tenantId, String connectionName) {
+        createSchema();
         String sql = "DELETE FROM connection_grants WHERE tenant_id = ? AND connection_name = ?";
-        try (Connection connection = dataSource.getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+        try (Connection connection = dataSourceInstance.get().getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, tenantId);
             statement.setString(2, connectionName);
             return statement.executeUpdate();
@@ -240,9 +260,10 @@ public class PostgresConnectionGrantStore implements IConnectionGrantStore {
 
     @Override
     public List<ConnectionGrant> findByPrincipal(String tenantId, String principal) {
+        createSchema();
         String sql = "SELECT " + SELECT_COLUMNS + " FROM connection_grants WHERE tenant_id = ? AND principal = ?";
         var results = new ArrayList<ConnectionGrant>();
-        try (Connection connection = dataSource.getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+        try (Connection connection = dataSourceInstance.get().getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, tenantId);
             statement.setString(2, principal);
             try (ResultSet rows = statement.executeQuery()) {
@@ -258,9 +279,10 @@ public class PostgresConnectionGrantStore implements IConnectionGrantStore {
 
     @Override
     public List<ConnectionGrant> findByTenant(String tenantId) {
+        createSchema();
         String sql = "SELECT " + SELECT_COLUMNS + " FROM connection_grants WHERE tenant_id = ?";
         var results = new ArrayList<ConnectionGrant>();
-        try (Connection connection = dataSource.getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+        try (Connection connection = dataSourceInstance.get().getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, tenantId);
             try (ResultSet rows = statement.executeQuery()) {
                 while (rows.next()) {
@@ -275,12 +297,13 @@ public class PostgresConnectionGrantStore implements IConnectionGrantStore {
 
     @Override
     public boolean updateSealedTokens(ConnectionGrant grant, long expectedVersion) {
+        createSchema();
         // Neither version nor the lease columns appear in the SET clause: a re-seal
         // must be invisible to a refresh that is mid-flight, or it turns a rotation
         // into a lost token.
         String sql = "UPDATE connection_grants SET encrypted_access_token = ?, access_token_iv = ?, encrypted_refresh_token = ?, "
                 + "refresh_token_iv = ?, dek_id = ? WHERE tenant_id = ? AND connection_name = ? AND principal = ? AND version = ?";
-        try (Connection connection = dataSource.getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+        try (Connection connection = dataSourceInstance.get().getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, grant.getEncryptedAccessToken());
             statement.setString(2, grant.getAccessTokenIv());
             statement.setString(3, grant.getEncryptedRefreshToken());
@@ -298,8 +321,9 @@ public class PostgresConnectionGrantStore implements IConnectionGrantStore {
 
     @Override
     public long countByStatus(String tenantId, ConnectionGrant.Status status) {
+        createSchema();
         String sql = "SELECT COUNT(*) FROM connection_grants WHERE tenant_id = ? AND status = ?";
-        try (Connection connection = dataSource.getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+        try (Connection connection = dataSourceInstance.get().getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, tenantId);
             statement.setString(2, status.name());
             try (ResultSet rows = statement.executeQuery()) {

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.connections.rest;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import ai.labs.eddi.configs.connections.IConnectionStore;
 import ai.labs.eddi.configs.connections.IRestConnectionStore;
 import ai.labs.eddi.configs.connections.model.Binding;
@@ -160,7 +161,7 @@ public class RestConnectionStore implements IRestConnectionStore {
             return new ConnectionIdentity(ConnectionConfiguration.effectiveTenant(connection), connection.getName());
         } catch (Exception e) {
             LOGGER.warnf("Could not resolve the identity of connection '%s'; its grants cannot be cleaned up automatically and may need "
-                    + "removing by hand.", id);
+                    + "removing by hand.", sanitize(id));
             return null;
         }
     }

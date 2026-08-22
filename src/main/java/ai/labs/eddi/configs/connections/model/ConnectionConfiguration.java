@@ -53,10 +53,10 @@ public class ConnectionConfiguration {
      * {@code "sk-live-x${vault:unused}"} would pass as a reference while carrying a
      * literal key.
      */
-    private static final Pattern REFERENCE_ONLY = Pattern.compile("\\$\\{(vault|eddivault|vars):[^}]+}");
+    private static final Pattern REFERENCE_ONLY = Pattern.compile("\\$\\{(vault|eddivault|vars):[^}]{1,256}}");
 
     /** Interpolated segments inside a header value template. */
-    private static final Pattern INTERPOLATION = Pattern.compile("\\$\\{[^}]*}");
+    private static final Pattern INTERPOLATION = Pattern.compile("\\$\\{[^}]{0,256}}");
 
     /**
      * Names that mark a value as credential-shaped, used to keep one out of
