@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Bookmark, Users, Trash2 } from "lucide-react";
 import { toast } from "sonner";
@@ -6,6 +7,7 @@ import { useTemplates, type DiscussionTemplate } from "@/hooks/use-templates";
 import { styleLabel } from "@/lib/discussion-styles";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { AlertDialog } from "@/components/ui/alert-dialog";
 
 interface TemplatesPanelProps {
   onUseTemplate: (template: DiscussionTemplate) => void;
@@ -15,6 +17,10 @@ export function TemplatesPanel({ onUseTemplate }: TemplatesPanelProps) {
   const { t } = useTranslation();
   const { templates, deleteTemplate } = useTemplates();
 
+  // window.confirm here was the odd one out: every other destructive action in
+  // the app asks through AlertDialog. It is also the only kind of confirmation
+  // a test cannot see, which is why nothing covered this button.
+  const [pendingDelete, setPendingDelete] = useState<DiscussionTemplate | null>(null);
 
   return (
     <section className="space-y-3">
@@ -61,12 +67,11 @@ export function TemplatesPanel({ onUseTemplate }: TemplatesPanelProps) {
                   "group-hover/card:opacity-100 focus-visible:opacity-100 transition-opacity",
                   "text-muted-foreground hover:text-destructive"
                 )}
+                aria-label={t("Workforce.templates.deleteTemplate", "Delete template")}
+                data-testid={`template-delete-${template.id}`}
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (window.confirm(t("Workforce.templates.deleteConfirm", "Delete this template?"))) {
-                    deleteTemplate(template.id);
-                    toast.success(t("Workforce.templates.deleted", "Template deleted"));
-                  }
+                  setPendingDelete(template);
                 }}
               >
                 <Trash2 className="h-3.5 w-3.5" />
@@ -102,6 +107,27 @@ export function TemplatesPanel({ onUseTemplate }: TemplatesPanelProps) {
           ))}
         </div>
       )}
+
+      <AlertDialog
+        open={pendingDelete !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingDelete(null);
+        }}
+        title={t("Workforce.templates.deleteTitle", "Delete template?")}
+        description={t(
+          "Workforce.templates.deleteNamedConfirm",
+          "“{{name}}” will be removed from your saved templates.",
+          { name: pendingDelete?.name ?? "" },
+        )}
+        confirmLabel={t("common.delete", "Delete")}
+        cancelLabel={t("common.cancel", "Cancel")}
+        onConfirm={() => {
+          if (!pendingDelete) return;
+          deleteTemplate(pendingDelete.id);
+          toast.success(t("Workforce.templates.deleted", "Template deleted"));
+          setPendingDelete(null);
+        }}
+      />
     </section>
   );
 }

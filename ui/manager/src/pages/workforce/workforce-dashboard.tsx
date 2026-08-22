@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
@@ -18,6 +18,7 @@ import { useEnrichedGroupDescriptors, useDeleteGroup } from "@/hooks/use-groups"
 import { useAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { AlertDialog } from "@/components/ui/alert-dialog";
 import { WorkforceCard } from "@/components/workforce/workforce-card";
 import { AgentWorkforceCard } from "@/components/workforce/agent-workforce-card";
 import { KnowledgeHealthCard } from "@/components/workforce/knowledge-health-card";
@@ -260,6 +261,7 @@ function WorkforceDashboard() {
 
   const [viewMode, setViewMode] = useState<"grid" | "list">(getStoredViewMode);
   const [bulkMode, setBulkMode] = useState(false);
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const pinnedBoards = useMemo(
@@ -280,7 +282,17 @@ function WorkforceDashboard() {
     });
   }, []);
 
+  // A ref, not `deleteGroup.isPending`. The dialog already disables its confirm
+  // button on `isPending`, but both come from the same render: the render in
+  // which the button is clickable is exactly the one whose closure captured
+  // `isPending === false`, so guarding on it cannot catch anything the disabled
+  // attribute did not already catch. Two clicks in one tick deleted the same
+  // group twice. A ref updates synchronously, so the second call sees it.
+  const bulkDeleting = useRef(false);
+
   const handleBulkDelete = useCallback(async () => {
+    if (bulkDeleting.current) return;
+    bulkDeleting.current = true;
     let successCount = 0;
     let failCount = 0;
     for (const id of selectedIds) {
@@ -293,11 +305,15 @@ function WorkforceDashboard() {
         failCount++;
       }
     }
+    bulkDeleting.current = false;
+    setBulkDeleteOpen(false);
     setSelectedIds(new Set());
     setBulkMode(false);
     if (failCount === 0) {
       toast.success(
-        t("Workforce.dashboard.deletedCount", "Deleted {{count}} task forces", {
+        t("Workforce.dashboard.deletedCount", {
+          defaultValue: "Deleted {{count}} task force",
+          defaultValue_other: "Deleted {{count}} task forces",
           count: successCount,
         }),
       );
@@ -584,13 +600,39 @@ function WorkforceDashboard() {
                 count: selectedIds.size,
               })}
             </span>
-            <Button variant="destructive" size="sm" onClick={handleBulkDelete}>
+            <Button
+              variant="destructive"
+              size="sm"
+              data-testid="bulk-delete-btn"
+              onClick={() => setBulkDeleteOpen(true)}
+            >
               <Trash2 className="h-4 w-4" />
               {t("Workforce.dashboard.deleteSelected", "Delete")}
             </Button>
           </div>
         </div>
       )}
+
+      {/* Deleting one task force asks first (WorkforceCard's own AlertDialog);
+          deleting several used to not, which had the more destructive action
+          carrying the weaker guard. Same dialog, count in the wording. */}
+      <AlertDialog
+        open={bulkDeleteOpen}
+        onOpenChange={setBulkDeleteOpen}
+        title={t("Workforce.dashboard.bulkDeleteTitle", {
+          defaultValue: "Dissolve this task force?",
+          defaultValue_other: "Dissolve {{count}} task forces?",
+          count: selectedIds.size,
+        })}
+        description={t(
+          "Workforce.dashboard.bulkDeleteConfirm",
+          "This dissolves every selected task force and cannot be undone.",
+        )}
+        confirmLabel={t("common.delete", "Delete")}
+        cancelLabel={t("common.cancel", "Cancel")}
+        isPending={deleteGroup.isPending}
+        onConfirm={handleBulkDelete}
+      />
 
       {/* Mobile FAB */}
       <MobileFab />
