@@ -78,3 +78,14 @@ eebfe898b34858918d5cbbe11e60336d1b6a916e:src/test/java/ai/labs/eddi/secrets/sani
 # tests authenticates against anything — the value is compared for equality and
 # hashed for a checksum, and any string would do.
 30ff68d1d2eaa568e7399fa24dc6acf7315b30f6:src/test/java/ai/labs/eddi/engine/setup/AgentSetupVaultKeyReuseTest.java:generic-api-key:50
+
+# ConnectionStoreFindByNameTest: not a credential at all, and not even a
+# credential-shaped literal — a 24-character MongoDB ObjectId standing in for a
+# stored connection's document id. What tripped the atlassian-api-token rule was
+# the CONSTANT NAME: `JIRA_ID = "68a1b2c3d4e5f60718293a4b"` puts a provider name
+# next to a hex blob, which is the shape the rule looks for. Renamed in a
+# follow-up commit to CONNECTION_ID, which says what the value is and takes the
+# provider name out of the picture, but gitleaks scans a PR's whole commit range,
+# so the commit that introduced the original name stays in history and still
+# needs an entry. Never a key: the value is a document id used to look a row up.
+2c8c512a84cc1b3e60cd8bac18b4437728bc282b:src/test/java/ai/labs/eddi/configs/connections/mongo/ConnectionStoreFindByNameTest.java:atlassian-api-token:50

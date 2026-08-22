@@ -6,6 +6,7 @@ package ai.labs.eddi.secrets.persistence;
 
 import ai.labs.eddi.secrets.model.EncryptedDek;
 import ai.labs.eddi.secrets.model.EncryptedSecret;
+import com.mongodb.MongoCommandException;
 import com.mongodb.MongoException;
 import com.mongodb.MongoWriteException;
 import com.mongodb.ServerAddress;
@@ -18,6 +19,9 @@ import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.result.DeleteResult;
 import com.mongodb.client.result.UpdateResult;
 import org.bson.BsonDocument;
+import org.bson.BsonDouble;
+import org.bson.BsonInt32;
+import org.bson.BsonString;
 import org.bson.Document;
 import org.bson.conversions.Bson;
 import org.bson.types.ObjectId;
@@ -46,6 +50,13 @@ class MongoSecretPersistenceTest {
 
     @BeforeEach
     void setUp() {
+        persistence = new MongoSecretPersistence(mockDatabase());
+    }
+
+    /**
+     * Fresh collection mocks, so a test may stub the boot migration before it runs.
+     */
+    private MongoDatabase mockDatabase() {
         MongoDatabase database = mock(MongoDatabase.class);
         secretsCollection = mock(MongoCollection.class);
         deksCollection = mock(MongoCollection.class);
@@ -55,7 +66,7 @@ class MongoSecretPersistenceTest {
         when(database.getCollection("secretvault_deks")).thenReturn(deksCollection);
         when(database.getCollection("secretvault_meta")).thenReturn(metaCollection);
 
-        persistence = new MongoSecretPersistence(database);
+        return database;
     }
 
     // ==================== startup migration ====================
@@ -71,6 +82,29 @@ class MongoSecretPersistenceTest {
         order.verify(deksCollection).updateMany(any(Bson.class), any(Bson.class));
         order.verify(deksCollection).dropIndex("idx_dek_tenant");
         order.verify(deksCollection).createIndex(any(Bson.class), any(IndexOptions.class));
+    }
+
+    @Test
+    @DisplayName("startup — a legacy index that is simply not there is nothing to do")
+    void migrationToleratesAnAbsentLegacyIndex() {
+        MongoDatabase database = mockDatabase();
+        doThrow(commandFailure(27, "index not found with name [idx_dek_tenant]")).when(deksCollection).dropIndex(anyString());
+
+        assertDoesNotThrow(() -> new MongoSecretPersistence(database));
+        verify(deksCollection).createIndex(any(Bson.class), any(IndexOptions.class));
+    }
+
+    @Test
+    @DisplayName("startup — any other drop failure fails the boot instead of passing for 'already gone'")
+    void migrationPropagatesANonIndexNotFoundFailure() {
+        // Not authorized, or a stepped-down primary: the legacy unique-on-tenantId
+        // index may well still be standing, and while it does a tenant cannot hold a
+        // second generation and rotation has nowhere to write.
+        MongoDatabase database = mockDatabase();
+        doThrow(commandFailure(13, "not authorized on eddi to execute command")).when(deksCollection).dropIndex(anyString());
+
+        assertThrows(MongoCommandException.class, () -> new MongoSecretPersistence(database));
+        verify(deksCollection, never()).createIndex(any(Bson.class), any(IndexOptions.class));
     }
 
     // ==================== upsertSecret ====================
@@ -386,6 +420,14 @@ class MongoSecretPersistenceTest {
     }
 
     // ==================== Helpers ====================
+
+    /** A server-side command failure carrying a specific error code. */
+    private static MongoCommandException commandFailure(int code, String message) {
+        BsonDocument response = new BsonDocument("ok", new BsonDouble(0.0))
+                .append("errmsg", new BsonString(message))
+                .append("code", new BsonInt32(code));
+        return new MongoCommandException(response, new ServerAddress());
+    }
 
     private EncryptedSecret createTestSecret() {
         EncryptedSecret secret = new EncryptedSecret();

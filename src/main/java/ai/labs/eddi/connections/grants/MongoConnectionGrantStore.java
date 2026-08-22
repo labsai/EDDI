@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.connections.grants;
 
+import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Filters;
@@ -83,7 +84,7 @@ public class MongoConnectionGrantStore implements IConnectionGrantStore {
                 Updates.set(FIELD_ACCESS_IV, grant.getAccessTokenIv()), Updates.set(FIELD_REFRESH, grant.getEncryptedRefreshToken()),
                 Updates.set(FIELD_REFRESH_IV, grant.getRefreshTokenIv()), Updates.set(FIELD_DEK, grant.getDekId()),
                 Updates.set(FIELD_EXPIRES, toDate(grant.getExpiresAt())), Updates.set(FIELD_SCOPES, grant.getScopes()),
-                Updates.set(FIELD_STATUS, grant.getStatus() == null ? ConnectionGrant.Status.ACTIVE.name() : grant.getStatus().name()),
+                Updates.set(FIELD_STATUS, grant.statusName()),
                 Updates.set(FIELD_UPDATED, Date.from(now)), Updates.setOnInsert(FIELD_CREATED, Date.from(now)),
                 Updates.set(FIELD_LAST_REFRESH, toDate(grant.getLastRefreshAt())),
                 // The lease is cleared on any upsert: a fresh grant written by the
@@ -95,6 +96,13 @@ public class MongoConnectionGrantStore implements IConnectionGrantStore {
 
     @Override
     public boolean claimRefresh(String tenantId, String connectionName, String principal, String claimantId, Instant leaseExpiresAt) {
+        // A null lease is not a shorter lease, it is a permanent one: the claim
+        // predicate asks whether the lease has expired, and in SQL
+        // `NULL < CURRENT_TIMESTAMP` is NULL rather than true, so a row claimed
+        // without an expiry can never be claimed by anyone again and refresh for
+        // that grant is wedged until something rewrites the row. Refused here
+        // rather than written, and refused the same way on both backends.
+        checkNotNull(leaseExpiresAt, "leaseExpiresAt");
         Instant now = Instant.now();
         Bson free = Filters.or(Filters.exists(FIELD_REFRESH_IN_PROGRESS, false), Filters.eq(FIELD_REFRESH_IN_PROGRESS, null),
                 Filters.lt(FIELD_LEASE_EXPIRES, Date.from(now)));
@@ -123,7 +131,7 @@ public class MongoConnectionGrantStore implements IConnectionGrantStore {
                 Updates.set(FIELD_ACCESS_IV, grant.getAccessTokenIv()), Updates.set(FIELD_REFRESH, grant.getEncryptedRefreshToken()),
                 Updates.set(FIELD_REFRESH_IV, grant.getRefreshTokenIv()), Updates.set(FIELD_DEK, grant.getDekId()),
                 Updates.set(FIELD_EXPIRES, toDate(grant.getExpiresAt())), Updates.set(FIELD_SCOPES, grant.getScopes()),
-                Updates.set(FIELD_STATUS, grant.getStatus().name()), Updates.set(FIELD_UPDATED, Date.from(now)),
+                Updates.set(FIELD_STATUS, grant.statusName()), Updates.set(FIELD_UPDATED, Date.from(now)),
                 Updates.set(FIELD_LAST_REFRESH, Date.from(now)), Updates.unset(FIELD_REFRESH_IN_PROGRESS), Updates.unset(FIELD_LEASE_EXPIRES),
                 Updates.inc(FIELD_VERSION, 1L));
         // matchedCount for the same reason as the claim above: a CAS that rewrites

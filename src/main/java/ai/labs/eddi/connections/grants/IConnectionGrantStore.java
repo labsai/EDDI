@@ -41,7 +41,12 @@ public interface IConnectionGrantStore {
      * @param leaseExpiresAt
      *            must be later than the token-endpoint timeout, or a slow provider
      *            frees the lease while the claimant is still in flight and
-     *            reintroduces exactly the double refresh this prevents
+     *            reintroduces exactly the double refresh this prevents. Must also
+     *            be non-null: a missing expiry is not a shorter lease but a
+     *            permanent one, since the predicate asks whether the lease has
+     *            expired and {@code NULL < CURRENT_TIMESTAMP} is NULL rather than
+     *            true. Implementations reject it instead of writing a grant whose
+     *            refresh can never be claimed again
      * @return true if this caller now owns the refresh
      */
     boolean claimRefresh(String tenantId, String connectionName, String principal, String claimantId, Instant leaseExpiresAt);

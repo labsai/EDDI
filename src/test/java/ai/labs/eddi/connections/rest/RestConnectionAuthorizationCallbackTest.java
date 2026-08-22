@@ -241,10 +241,10 @@ class RestConnectionAuthorizationCallbackTest {
         RestConnectionAuthorization resource = resource(registry);
 
         StartedFlow flow = startFlow(resource, "/manage/connections");
-        resource.callback(CODE, flow.row().getState(), null, null, browserWith(flow.cookie()));
+        resource.callback(CODE, flow.row().getState(), null, browserWith(flow.cookie()));
 
         when(stateStore.claim("state-nobody-issued")).thenReturn(Optional.empty());
-        resource.callback(CODE, "state-nobody-issued", null, null, browserWithNoCookies());
+        resource.callback(CODE, "state-nobody-issued", null, browserWithNoCookies());
 
         Set<String> outcomes = registry.getMeters().stream().filter(meter -> CALLBACK_METRIC.equals(meter.getId().getName()))
                 .map(meter -> meter.getId().getTag("outcome")).collect(Collectors.toSet());
@@ -267,7 +267,7 @@ class RestConnectionAuthorizationCallbackTest {
         RestConnectionAuthorization resource = resource(new ExplodingMeterRegistry());
         StartedFlow flow = startFlow(resource, "/manage/connections");
 
-        Response response = resource.callback(CODE, flow.row().getState(), null, null, browserWith(flow.cookie()));
+        Response response = resource.callback(CODE, flow.row().getState(), null, browserWith(flow.cookie()));
 
         assertEquals(List.of(PRINCIPAL), grantsStoredFor, "the grant is stored before the counter is touched, which is what makes a "
                 + "throwing registry unrecoverable rather than merely untidy");
@@ -290,7 +290,7 @@ class RestConnectionAuthorizationCallbackTest {
         // the claimed row is how one user's tokens end up filed under another's name.
         doReturn("mallory").when(principal).getName();
 
-        Response response = resource.callback(CODE, flow.row().getState(), null, null, browserWith(flow.cookie()));
+        Response response = resource.callback(CODE, flow.row().getState(), null, browserWith(flow.cookie()));
 
         assertEquals(List.of(PRINCIPAL), grantsStoredFor,
                 "the grant must be filed under the principal in the claimed row (alice), not under whoever the callback request looks like "
@@ -340,7 +340,7 @@ class RestConnectionAuthorizationCallbackTest {
         RestConnectionAuthorization resource = resource(new SimpleMeterRegistry());
         StartedFlow flow = startFlow(resource, "/manage/connections");
 
-        Response response = resource.callback(CODE, flow.row().getState(), null, null, browserWithNoCookies());
+        Response response = resource.callback(CODE, flow.row().getState(), null, browserWithNoCookies());
 
         assertEquals(303, response.getStatus(), "the browser is redirected rather than shown an error page");
         assertEquals(URI.create("/manage/connections?error=invalid_state"), response.getLocation(),
@@ -362,7 +362,7 @@ class RestConnectionAuthorizationCallbackTest {
 
         // Right cookie name, wrong value: what an attacker can arrange by setting a
         // cookie of their own choosing, having never seen the one EDDI issued.
-        Response response = resource.callback(CODE, flow.row().getState(), null, null,
+        Response response = resource.callback(CODE, flow.row().getState(), null,
                 browserWith(flow.cookie().getName(), "a-nonce-the-attacker-picked"));
 
         assertEquals(303, response.getStatus(), "the browser is redirected rather than shown an error page");
@@ -383,7 +383,7 @@ class RestConnectionAuthorizationCallbackTest {
         StartedFlow flow = startFlow(resource, "/manage/connections");
         flow.row().setNonceHash(null);
 
-        Response response = resource.callback(CODE, flow.row().getState(), null, null, browserWith(flow.cookie()));
+        Response response = resource.callback(CODE, flow.row().getState(), null, browserWith(flow.cookie()));
 
         assertEquals(URI.create("/manage/connections?error=invalid_state"), response.getLocation(),
                 "an unbindable row must be refused, not accepted on the strength of the cookie alone");
@@ -400,13 +400,13 @@ class RestConnectionAuthorizationCallbackTest {
         RestConnectionAuthorization resource = resource(new SimpleMeterRegistry());
 
         when(stateStore.claim("state-nobody-issued")).thenReturn(Optional.empty());
-        Response unknown = resource.callback(CODE, "state-nobody-issued", null, null, browserWithNoCookies());
+        Response unknown = resource.callback(CODE, "state-nobody-issued", null, browserWithNoCookies());
 
         // Started with no returnTo, so this flow's destination is the same default
         // page the unknown-state answer uses; anything else would distinguish the two
         // by URL alone.
         StartedFlow flow = startFlow(resource, null);
-        Response unbound = resource.callback(CODE, flow.row().getState(), null, null, browserWithNoCookies());
+        Response unbound = resource.callback(CODE, flow.row().getState(), null, browserWithNoCookies());
 
         assertEquals(URI.create(CONFIG.defaultReturnTo() + "?error=invalid_state"), unknown.getLocation(),
                 "an unknown state must be reported as an invalid state on the default page");
@@ -433,7 +433,7 @@ class RestConnectionAuthorizationCallbackTest {
             StartedFlow flow = startFlow(resource, returnTo);
             assertEquals(returnTo, flow.row().getReturnTo(), "an accepted returnTo must be stored verbatim: " + returnTo);
 
-            Response response = resource.callback(CODE, flow.row().getState(), null, null, browserWithNoCookies());
+            Response response = resource.callback(CODE, flow.row().getState(), null, browserWithNoCookies());
 
             String base = returnTo.contains("#") ? returnTo.substring(0, returnTo.indexOf('#')) : returnTo;
             assertEquals(303, response.getStatus(), "an accepted returnTo must produce a redirect: " + returnTo);
@@ -454,7 +454,7 @@ class RestConnectionAuthorizationCallbackTest {
         assertEquals(CONFIG.defaultReturnTo(), flow.row().getReturnTo(),
                 "a returnTo that is not a page of this deployment must be replaced with the default before it is ever stored");
 
-        Response response = resource.callback(CODE, flow.row().getState(), null, null, browserWith(flow.cookie()));
+        Response response = resource.callback(CODE, flow.row().getState(), null, browserWith(flow.cookie()));
 
         assertEquals(URI.create(CONFIG.defaultReturnTo() + "?connected=drive"), response.getLocation(),
                 "the callback must send the browser to this deployment's own page, never to a host the request named");
@@ -469,7 +469,7 @@ class RestConnectionAuthorizationCallbackTest {
         // write leaves behind: an unencoded space, which URI.create refuses.
         flow.row().setReturnTo("/manage/my connections");
 
-        Response response = resource.callback(CODE, flow.row().getState(), null, null, browserWith(flow.cookie()));
+        Response response = resource.callback(CODE, flow.row().getState(), null, browserWith(flow.cookie()));
 
         assertEquals(List.of(PRINCIPAL), grantsStoredFor, "the exchange still has to happen; this is the case where the destination fails "
                 + "AFTER the tokens are safely stored");
@@ -487,7 +487,7 @@ class RestConnectionAuthorizationCallbackTest {
         RestConnectionAuthorization resource = resource(new SimpleMeterRegistry(), new ConnectionsConfig(true, Optional.of("ht tp://eddi")));
         when(stateStore.claim("state-nobody-issued")).thenReturn(Optional.empty());
 
-        Response response = resource.callback(CODE, "state-nobody-issued", null, null, browserWithNoCookies());
+        Response response = resource.callback(CODE, "state-nobody-issued", null, browserWithNoCookies());
 
         assertEquals(303, response.getStatus(), "there is a browser waiting; a misconfigured base URL must not turn into a 500");
         assertEquals(URI.create("/"), response.getLocation(), "the last resort is this deployment's own root, resolved relatively");
@@ -499,7 +499,7 @@ class RestConnectionAuthorizationCallbackTest {
         var disabled = new ConnectionsConfig(false, Optional.of("https://eddi.example.com"));
         RestConnectionAuthorization resource = resource(new SimpleMeterRegistry(), disabled);
 
-        Response response = resource.callback(CODE, "any-state", null, null, browserWithNoCookies());
+        Response response = resource.callback(CODE, "any-state", null, browserWithNoCookies());
 
         assertEquals(404, response.getStatus(), "a disabled feature answers 404 here and on every other route of this resource");
         verifyNoInteractions(stateStore);

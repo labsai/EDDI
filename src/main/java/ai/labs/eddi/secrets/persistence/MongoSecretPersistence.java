@@ -8,6 +8,7 @@ import ai.labs.eddi.secrets.model.EncryptedDek;
 import ai.labs.eddi.secrets.model.EncryptedSecret;
 import ai.labs.eddi.utils.RuntimeUtilities;
 import com.mongodb.ErrorCategory;
+import com.mongodb.MongoCommandException;
 import com.mongodb.MongoException;
 import com.mongodb.MongoWriteException;
 import com.mongodb.client.MongoCollection;
@@ -73,6 +74,12 @@ public class MongoSecretPersistence implements ISecretPersistence {
      */
     private static final String LEGACY_DEK_INDEX = "idx_dek_tenant";
 
+    /**
+     * MongoDB's {@code IndexNotFound} — the only reason dropping it may fail
+     * benignly.
+     */
+    private static final int ERROR_INDEX_NOT_FOUND = 27;
+
     private final MongoCollection<Document> secretsCollection;
     private final MongoCollection<Document> deksCollection;
     private final MongoCollection<Document> metaCollection;
@@ -113,7 +120,14 @@ public class MongoSecretPersistence implements ISecretPersistence {
 
         try {
             deksCollection.dropIndex(LEGACY_DEK_INDEX);
-        } catch (MongoException e) {
+        } catch (MongoCommandException e) {
+            if (e.getErrorCode() != ERROR_INDEX_NOT_FOUND) {
+                // Anything else — not authorized, a stepped-down primary — means the
+                // index may well still be standing, and a tenant that cannot hold a
+                // second generation has nowhere for rotation to write. Reported as a
+                // failed boot rather than mistaken for "it was already gone".
+                throw e;
+            }
             // Absent on every deployment created after generations existed, and on
             // every boot after the first. Nothing to do either way.
             LOGGER.debugf("No legacy DEK index '%s' to drop", LEGACY_DEK_INDEX);

@@ -28,6 +28,8 @@ import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 /**
  * Refuses to start when connections are enabled in a configuration that would
  * make them unsafe or non-functional.
@@ -220,15 +222,25 @@ public class ConnectionStartupGuard {
     }
 
     private ConnectionConfiguration readByDescriptor(DocumentDescriptor descriptor) {
+        String id = null;
         try {
             URI resource = descriptor.getResource();
             if (resource == null || resource.getPath() == null) {
                 return null;
             }
             String path = resource.getPath();
-            String id = path.substring(path.lastIndexOf('/') + 1);
+            id = path.substring(path.lastIndexOf('/') + 1);
             return connectionStore.read(id, versionOf(resource));
         } catch (Exception e) {
+            // Skipping the row is right — one unreadable connection must not stop a
+            // boot — but doing it silently is not. A connection that never
+            // deserializes reads exactly like a connection that is not there, so
+            // this guard would quietly decline to make the PER_USER and
+            // inactive-vault reports it exists to make, for the one connection
+            // nobody can inspect. readAll's own warning sits a level up and does
+            // not fire for this.
+            LOGGER.warnf(e, "Connection '%s' could not be read, so it was not inspected at startup; "
+                    + "any credential exposure it would have been reported for is unreported", sanitize(id));
             return null;
         }
     }

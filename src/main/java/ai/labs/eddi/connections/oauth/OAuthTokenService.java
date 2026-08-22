@@ -366,7 +366,7 @@ public class OAuthTokenService implements AccessTokenSupplier {
             count("connection.token.refresh.count", "outcome", "success");
             return refreshed.token().accessToken();
         } catch (ConnectionException e) {
-            handleRefreshFailure(connection, tenantId, principal, grant, e);
+            handleRefreshFailure(connection, grant, e);
             throw e;
         } finally {
             releaseQuietly(tenantId, connection.getName(), principal);
@@ -463,8 +463,7 @@ public class OAuthTokenService implements AccessTokenSupplier {
      * of a connection out during a provider outage, and they come back to
      * "reconnect required" for something that fixed itself.
      */
-    private void handleRefreshFailure(ConnectionConfiguration connection, String tenantId, String principal, ConnectionGrant grant,
-                                      ConnectionException failure) {
+    private void handleRefreshFailure(ConnectionConfiguration connection, ConnectionGrant grant, ConnectionException failure) {
         if (failure.getReason() != ConnectionException.Reason.GRANT_UNUSABLE) {
             count("connection.token.refresh.count", "outcome", "transient");
             LOGGER.warnf("Refresh for connection '%s' failed transiently; the grant is unchanged", connection.getName());

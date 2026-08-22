@@ -224,7 +224,7 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
     }
 
     @Override
-    public Response callback(String code, String state, String error, String errorDescription, HttpHeaders headers) {
+    public Response callback(String code, String state, String error, HttpHeaders headers) {
         if (!connectionsConfig.isEnabled()) {
             return Response.status(Response.Status.NOT_FOUND).build();
         }
@@ -256,8 +256,9 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
 
         if (error != null && !error.isBlank()) {
             // The user declined, or the provider refused. The provider's own
-            // description is NOT echoed onward: it is attacker-influenceable text
-            // heading for a browser.
+            // error_description is not bound at all, let alone echoed onward: it is
+            // attacker-influenceable text heading for a browser. Only the short
+            // error code is logged, sanitized.
             count("connection.oauth.callback.count", "outcome", "provider_error", null);
             LOGGER.warnf("The provider refused an authorization for connection '%s' (%s)", sanitize(oauthState.getConnectionName()),
                     sanitize(error));

@@ -132,9 +132,17 @@ public class VaultSecretProvider implements ISecretProvider {
     }
 
     /**
-     * Runs before anything that asks {@link #isAvailable()} at startup - the
-     * connections guard does, and with both observers unordered CDI was free to ask
-     * before this had run.
+     * Turns the vault on.
+     * <p>
+     * The priority orders this <em>among {@link StartupEvent} observers only</em>:
+     * {@link Interceptor.Priority#APPLICATION} is below the CDI default of
+     * {@code APPLICATION + 500}, so every observer that does not name a lower
+     * priority of its own sees {@link #isAvailable()} already settled. It orders
+     * nothing else. {@code @PostConstruct} callbacks are outside that sequence
+     * entirely — {@link ai.labs.eddi.secrets.SecretResolver} reads
+     * {@code isAvailable()} from one, which fires whenever that bean is first
+     * instantiated and may well be before this observer has run. Callers on that
+     * side must tolerate a not-yet-available vault rather than rely on ordering.
      */
     void onStartup(@Observes
     @Priority(Interceptor.Priority.APPLICATION) StartupEvent event) {
@@ -166,7 +174,7 @@ public class VaultSecretProvider implements ISecretProvider {
         try {
             var secretOpt = persistence.findSecret(reference.tenantId(), reference.keyName());
             if (secretOpt.isEmpty()) {
-                throw new SecretNotFoundException("Secret not found: " + reference.tenantId() + "/" + reference.keyName());
+                throw new SecretNotFoundException("Secret not found: " + describe(reference));
             }
 
             EncryptedSecret secret = secretOpt.get();
@@ -186,10 +194,10 @@ public class VaultSecretProvider implements ISecretProvider {
             throw e;
         } catch (PersistenceException e) {
             errorCounter.increment();
-            throw new SecretProviderException("Persistence failure while resolving " + reference.tenantId() + "/" + reference.keyName(), e);
+            throw new SecretProviderException("Persistence failure while resolving " + describe(reference), e);
         } catch (EnvelopeCrypto.CryptoException e) {
             errorCounter.increment();
-            throw new SecretProviderException("Decryption failure for " + reference.tenantId() + "/" + reference.keyName(), e);
+            throw new SecretProviderException("Decryption failure for " + describe(reference), e);
         } finally {
             sample.stop(resolveTimer);
         }
@@ -204,7 +212,8 @@ public class VaultSecretProvider implements ISecretProvider {
             secret.setLastAccessedAt(Instant.now());
             persistence.upsertSecret(secret);
         } catch (PersistenceException e) {
-            LOGGER.debugf("Failed to update lastAccessedAt for %s/%s: %s", secret.getTenantId(), secret.getKeyName(), e.getMessage());
+            LOGGER.debugf("Failed to update lastAccessedAt for %s/%s: %s", sanitize(secret.getTenantId()), sanitize(secret.getKeyName()),
+                    e.getMessage());
         }
     }
 
@@ -231,14 +240,13 @@ public class VaultSecretProvider implements ISecretProvider {
                     existingOpt.isPresent() ? now : null);
 
             persistence.upsertSecret(secret);
-            LOGGER.infof("Secret stored: %s/%s (description: %s)", reference.tenantId(), reference.keyName(),
-                    description != null ? description : "none");
+            LOGGER.infof("Secret stored: %s (description: %s)", describe(reference), description != null ? sanitize(description) : "none");
         } catch (PersistenceException e) {
             errorCounter.increment();
-            throw new SecretProviderException("Persistence failure while storing " + reference.tenantId() + "/" + reference.keyName(), e);
+            throw new SecretProviderException("Persistence failure while storing " + describe(reference), e);
         } catch (EnvelopeCrypto.CryptoException e) {
             errorCounter.increment();
-            throw new SecretProviderException("Encryption failure for " + reference.tenantId() + "/" + reference.keyName(), e);
+            throw new SecretProviderException("Encryption failure for " + describe(reference), e);
         } finally {
             sample.stop(storeTimer);
         }
@@ -252,12 +260,12 @@ public class VaultSecretProvider implements ISecretProvider {
         try {
             boolean deleted = persistence.deleteSecret(reference.tenantId(), reference.keyName());
             if (!deleted) {
-                throw new SecretNotFoundException("Secret not found: " + reference.tenantId() + "/" + reference.keyName());
+                throw new SecretNotFoundException("Secret not found: " + describe(reference));
             }
-            LOGGER.infof("Secret deleted: %s/%s", reference.tenantId(), reference.keyName());
+            LOGGER.infof("Secret deleted: %s", describe(reference));
         } catch (PersistenceException e) {
             errorCounter.increment();
-            throw new SecretProviderException("Persistence failure while deleting " + reference.tenantId() + "/" + reference.keyName(), e);
+            throw new SecretProviderException("Persistence failure while deleting " + describe(reference), e);
         }
     }
 
@@ -267,14 +275,14 @@ public class VaultSecretProvider implements ISecretProvider {
         try {
             var secretOpt = persistence.findSecret(reference.tenantId(), reference.keyName());
             if (secretOpt.isEmpty()) {
-                throw new SecretNotFoundException("Secret not found: " + reference.tenantId() + "/" + reference.keyName());
+                throw new SecretNotFoundException("Secret not found: " + describe(reference));
             }
             EncryptedSecret s = secretOpt.get();
             return new SecretMetadata(s.getTenantId(), s.getKeyName(), s.getCreatedAt(), s.getLastAccessedAt(), s.getLastRotatedAt(), s.getChecksum(),
                     s.getDescription(), s.getAllowedAgents());
         } catch (PersistenceException e) {
             errorCounter.increment();
-            throw new SecretProviderException("Persistence failure while reading metadata for " + reference.tenantId() + "/" + reference.keyName(),
+            throw new SecretProviderException("Persistence failure while reading metadata for " + describe(reference),
                     e);
         }
     }
@@ -287,7 +295,7 @@ public class VaultSecretProvider implements ISecretProvider {
                     s.getLastAccessedAt(), s.getLastRotatedAt(), s.getChecksum(), s.getDescription(), s.getAllowedAgents())).toList();
         } catch (PersistenceException e) {
             errorCounter.increment();
-            throw new SecretProviderException("Persistence failure while listing secrets for tenant " + tenantId, e);
+            throw new SecretProviderException("Persistence failure while listing secrets for tenant " + sanitize(tenantId), e);
         }
     }
 
@@ -332,7 +340,7 @@ public class VaultSecretProvider implements ISecretProvider {
             // discovery that belongs before the commit point.
             List<EncryptedDek> generations = persistence.listDeks(tenantId);
             if (generations.isEmpty()) {
-                throw new SecretProviderException("No DEK found for tenant " + tenantId + " — nothing to rotate");
+                throw new SecretProviderException("No DEK found for tenant '" + sanitize(tenantId) + "' — nothing to rotate");
             }
             int highest = 0;
             for (EncryptedDek generation : generations) {
@@ -352,7 +360,7 @@ public class VaultSecretProvider implements ISecretProvider {
             }
         } catch (PersistenceException | EnvelopeCrypto.CryptoException e) {
             errorCounter.increment();
-            throw new SecretProviderException("DEK rotation failed for tenant " + tenantId, e);
+            throw new SecretProviderException("DEK rotation failed for tenant '" + sanitize(tenantId) + "'", e);
         }
 
         // 3. Sweep. Past the commit point, so a failure here is incomplete rather
@@ -637,6 +645,18 @@ public class VaultSecretProvider implements ISecretProvider {
     // === Private helpers ===
 
     /**
+     * A tenant/key pair as it may appear in a message.
+     * <p>
+     * Both halves are caller-controlled and every message built here is eventually
+     * logged by somebody, so a newline in either would forge log records (CWE-117).
+     * Going through one helper is what keeps that true of the next message somebody
+     * adds.
+     */
+    private static String describe(SecretReference reference) {
+        return sanitize(reference.tenantId()) + "/" + sanitize(reference.keyName());
+    }
+
+    /**
      * A usable DEK together with the name ciphertext must record for it.
      */
     private record ActiveDek(byte[] key, String dekId) {
@@ -665,7 +685,7 @@ public class VaultSecretProvider implements ISecretProvider {
 
             return new ActiveDek(generateAndPersistDek(tenantId), EncryptedDek.dekId(tenantId, EncryptedDek.FIRST_GENERATION));
         } catch (PersistenceException e) {
-            throw new SecretProviderException("Persistence failure while managing DEK for tenant " + tenantId, e);
+            throw new SecretProviderException("Persistence failure while managing DEK for tenant '" + sanitize(tenantId) + "'", e);
         }
     }
 
@@ -691,7 +711,8 @@ public class VaultSecretProvider implements ISecretProvider {
                 return handleDekDecryptionFailure(tenantId, e);
             }
         } catch (PersistenceException e) {
-            throw new SecretProviderException("Persistence failure while reading DEK generation " + generation + " for tenant " + tenantId, e);
+            throw new SecretProviderException(
+                    "Persistence failure while reading DEK generation " + generation + " for tenant '" + sanitize(tenantId) + "'", e);
         }
     }
 
@@ -716,8 +737,9 @@ public class VaultSecretProvider implements ISecretProvider {
                         ? secretCount + " secret(s) are stored for this tenant and would be permanently lost if you reset."
                         : "Unable to determine how many secrets are stored for this tenant.";
 
+        String safeTenantId = sanitize(tenantId);
         throw new SecretProviderException(
-                "Cannot decrypt the Data Encryption Key (DEK) for tenant '" + tenantId + "'. "
+                "Cannot decrypt the Data Encryption Key (DEK) for tenant '" + safeTenantId + "'. "
                         + "This means the EDDI_VAULT_MASTER_KEY has changed since the DEK was created. "
                         + secretInfo + " "
                         + "Recovery options: "
@@ -725,7 +747,7 @@ public class VaultSecretProvider implements ISecretProvider {
                         + "(2) If you have both old and new keys, use POST /secretstore/secrets/admin/rotate-kek "
                         + "to migrate all encrypted data to the new key. "
                         + "(3) To start fresh (deletes all secrets for this tenant), use "
-                        + "POST /secretstore/secrets/" + tenantId + "/reset to clear the vault for this tenant.",
+                        + "POST /secretstore/secrets/" + safeTenantId + "/reset to clear the vault for this tenant.",
                 cause);
     }
 
@@ -737,7 +759,7 @@ public class VaultSecretProvider implements ISecretProvider {
                 encResult.iv(), Instant.now());
 
         persistence.upsertDek(dek);
-        LOGGER.infof("Generated new DEK for tenant: %s", tenantId);
+        LOGGER.infof("Generated new DEK for tenant: %s", sanitize(tenantId));
         return newDek;
     }
 

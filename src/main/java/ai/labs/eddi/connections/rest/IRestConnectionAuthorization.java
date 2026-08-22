@@ -76,12 +76,18 @@ public interface IRestConnectionAuthorization {
      * the flow. The state alone is not enough — an attacker who starts a flow under
      * their own account can send the victim the provider's consent link and have
      * the victim's tokens filed under the attacker's principal.
+     * <p>
+     * The provider's {@code error_description} is deliberately not bound: it is
+     * attacker-influenceable text on its way to a browser, so the callback answers
+     * a refusal with its own fixed outcome code and logs the provider's short
+     * {@code error} value sanitized. Declaring the parameter only to leave it
+     * unread invites a later reader to "fix" the omission by echoing it onward.
      */
     @GET
     @Path("/callback")
     @Operation(summary = "OAuth redirect target", description = "Consumes the provider's authorization code. Guarded by a single-use state.")
     Response callback(@QueryParam("code") String code, @QueryParam("state") String state, @QueryParam("error") String error,
-                      @QueryParam("error_description") String errorDescription, @Context HttpHeaders headers);
+                      @Context HttpHeaders headers);
 
     /** The calling user's linked accounts. Never includes token material. */
     @GET

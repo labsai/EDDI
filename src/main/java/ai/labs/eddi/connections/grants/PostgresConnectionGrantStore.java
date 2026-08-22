@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.connections.grants;
 
+import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.quarkus.arc.DefaultBean;
@@ -152,7 +153,7 @@ public class PostgresConnectionGrantStore implements IConnectionGrantStore {
             statement.setString(8, grant.getDekId());
             statement.setTimestamp(9, toTimestamp(grant.getExpiresAt()));
             statement.setString(10, writeScopes(grant.getScopes()));
-            statement.setString(11, (grant.getStatus() == null ? ConnectionGrant.Status.ACTIVE : grant.getStatus()).name());
+            statement.setString(11, grant.statusName());
             statement.setTimestamp(12, toTimestamp(grant.getLastRefreshAt()));
             statement.executeUpdate();
         } catch (SQLException e) {
@@ -162,6 +163,13 @@ public class PostgresConnectionGrantStore implements IConnectionGrantStore {
 
     @Override
     public boolean claimRefresh(String tenantId, String connectionName, String principal, String claimantId, Instant leaseExpiresAt) {
+        // A null lease is not a shorter lease, it is a permanent one: the claim
+        // predicate asks whether the lease has expired, and in SQL
+        // `NULL < CURRENT_TIMESTAMP` is NULL rather than true, so a row claimed
+        // without an expiry can never be claimed by anyone again and refresh for
+        // that grant is wedged until something rewrites the row. Refused here
+        // rather than written, and refused the same way on both backends.
+        checkNotNull(leaseExpiresAt, "leaseExpiresAt");
         createSchema();
         // One statement, so the predicate and the write happen under one row lock.
         // A SELECT followed by an UPDATE lets two replicas both see the lease free.
@@ -202,7 +210,7 @@ public class PostgresConnectionGrantStore implements IConnectionGrantStore {
             statement.setString(5, grant.getDekId());
             statement.setTimestamp(6, toTimestamp(grant.getExpiresAt()));
             statement.setString(7, writeScopes(grant.getScopes()));
-            statement.setString(8, grant.getStatus().name());
+            statement.setString(8, grant.statusName());
             statement.setString(9, grant.getTenantId());
             statement.setString(10, grant.getConnectionName());
             statement.setString(11, grant.getPrincipal());

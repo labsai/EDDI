@@ -178,6 +178,20 @@ public class ConnectionGrant {
         this.status = status;
     }
 
+    /**
+     * The status a store writes, which is {@link Status#ACTIVE} when none is set.
+     * <p>
+     * Both write paths need the same answer and they did not agree: {@code upsert}
+     * defaulted a null status while {@code completeRefresh} dereferenced it, so a
+     * grant whose status had been explicitly nulled was stored through one path and
+     * threw through the other — on the path that runs after a successful token
+     * refresh, where throwing loses the freshly issued token. The rule lives here
+     * so the two cannot drift apart again.
+     */
+    public String statusName() {
+        return (status == null ? Status.ACTIVE : status).name();
+    }
+
     public Instant getCreatedAt() {
         return createdAt;
     }

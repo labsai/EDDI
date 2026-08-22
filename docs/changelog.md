@@ -7,6 +7,70 @@
 
 
 
+## 🧪 test(connections): cover the four stores nothing was testing, and close two defects that surfaced doing it (2026-08-22)
+
+**Repo:** EDDI (`feat/saas-connectors`)
+
+The JaCoCo bundle gate (90% instruction / 80% branch) went red on this branch. The cause was not a
+regression elsewhere — it was this branch's own new persistence code arriving untested:
+`ai.labs.eddi.connections.grants` sat at **17.6%** instruction coverage and
+`ai.labs.eddi.connections.oauth` at **46.9%**, because the four real store implementations (Mongo and
+Postgres, for grants and for OAuth state) had no tests at all. Only the in-memory double did.
+
+### What was added
+
+Unit tests against mocked drivers — `MongoDatabase`/`MongoCollection` for the Mongo stores, the
+`Instance<DataSource>` → `Connection` → `PreparedStatement` chain for the Postgres ones, matching the
+existing `PostgresAgentTriggerStoreUnitTest` and `MongoSecretPersistenceTest` patterns. Also
+`OAuthTokenClient`, `TokenResponse`, `ConnectionGrant`, `ConnectionStartupGuard`,
+`McpAuthChallengeParser` and `ConnectionParameterGuard`.
+
+The assertions are on the query documents and SQL parameters actually built, the values returned, and
+the exceptions thrown — never "it ran without throwing". The compare-and-swap methods get particular
+attention, because their booleans *are* the cross-replica refresh design: `claimRefresh`,
+`completeRefresh` and `updateSealedTokens` each turn a row count into a boolean, and widening `== 1`
+would silently reintroduce the double refresh that logs users out with nothing else noticing.
+
+Result: `connections.grants` **17.6% → 99.6%** instruction (96.5% branch), `connections.oauth`
+**46.9% → 89.2%**, `McpAuthChallengeParser` and `ConnectionParameterGuard` to 100% branch.
+
+### Two defects the coverage work surfaced
+
+**A missing lease expiry was a permanent lease, not a shorter one.** `claimRefresh` accepted a null
+`leaseExpiresAt` and wrote SQL NULL. The claim predicate asks whether the lease has expired, and
+`NULL < CURRENT_TIMESTAMP` is NULL rather than true — so a grant claimed without an expiry could never
+be claimed by anyone again, and refresh for it was wedged until something rewrote the row. Both stores
+now refuse it outright, and the interface says why.
+
+**The two write paths disagreed about a null status.** `upsert` defaulted it to `ACTIVE`;
+`completeRefresh` dereferenced it. So one grant was storable through one path and fatal through the
+other — and `completeRefresh` is the path that runs *after* a successful token refresh, where throwing
+discards the token the provider just issued. The rule now lives on `ConnectionGrant.statusName()`, once,
+so the two cannot drift apart again.
+
+Neither was reachable from EDDI's own callers today; both were reachable from the interface.
+
+### A guard that skipped the connection it exists to report on
+
+Covering `ConnectionStartupGuard` — which had zero tests — turned up a third one. `readByDescriptor`
+caught bare `Exception` and returned `null` with no log line at all, so a connection document that never
+deserializes read exactly like a connection that is not there. The guard would then quietly decline to
+make the PER_USER and inactive-vault reports it exists to make, for the one connection nobody can
+inspect, and `readAll`'s own "could not enumerate" warning sits a level up and never fires for it.
+Skipping the row is still right — one bad document must not stop a boot — but it now says so, naming
+the id.
+
+### Also
+
+The vault files shared with #709 were re-synced so the two branches stay byte-identical, and the
+gitleaks triage for `ConnectionStoreFindByNameTest` is recorded in `.gitleaksignore` (a MongoDB
+ObjectId that a constant named `JIRA_ID` made look like an Atlassian token — renamed since, but the
+introducing commit stays in the PR's scan range).
+
+---
+
+
+
 ## feat(connections): DEK generations, verified principals, and the REST contract as it actually is (2026-08-22)
 
 **Repo:** EDDI (`feat/saas-connectors`)
