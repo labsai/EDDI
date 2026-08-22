@@ -77,6 +77,11 @@ public class ConversationMemoryUtilities {
             snapshot.setUserId(conversationMemory.getUserId());
         }
 
+        // Unconditional, unlike the userId above: a null here is a meaningful value
+        // (not verified) and skipping the write would let a re-store silently keep a
+        // provenance the live memory no longer claims.
+        snapshot.setResolutionProvenance(conversationMemory.getResolutionProvenance());
+
         if (conversationMemory.getConversationId() != null) {
             snapshot.setConversationId(conversationMemory.getConversationId());
         }
@@ -138,6 +143,7 @@ public class ConversationMemoryUtilities {
                 snapshot.getUserId());
 
         conversationMemory.setConversationState(snapshot.getConversationState());
+        conversationMemory.setResolutionProvenance(snapshot.getResolutionProvenance());
         conversationMemory.setHitlPausedWorkflowId(snapshot.getHitlPausedWorkflowId());
         conversationMemory.setHitlPausedAbsoluteTaskIndex(snapshot.getHitlPausedAbsoluteTaskIndex());
         conversationMemory.setHitlPausedAt(snapshot.getHitlPausedAt());

@@ -8,7 +8,10 @@ import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.apicalls.IApiCallsStore;
 import ai.labs.eddi.configs.llm.ILlmStore;
+import ai.labs.eddi.configs.connections.IConnectionStore;
+import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
 import ai.labs.eddi.configs.mcpcalls.IMcpCallsStore;
+import ai.labs.eddi.connections.model.ConnectionReference;
 import ai.labs.eddi.configs.rag.IRagStore;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
@@ -29,6 +32,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Checks, at deployment time, that every vault reference an agent's
@@ -73,6 +77,12 @@ public class VaultGrantChecker {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
+    /**
+     * Finds a ${connection:…} so the connection's own vault reference can be
+     * followed.
+     */
+    private static final Pattern CONNECTION_PATTERN = Pattern.compile(ConnectionReference.CONNECTION_PATTERN);
+
     private final ISecretProvider secretProvider;
     private final IAgentStore agentStore;
     private final IWorkflowStore workflowStore;
@@ -80,10 +90,11 @@ public class VaultGrantChecker {
     private final IApiCallsStore apiCallsStore;
     private final IMcpCallsStore mcpCallsStore;
     private final IRagStore ragStore;
+    private final IConnectionStore connectionStore;
 
     @Inject
     public VaultGrantChecker(ISecretProvider secretProvider, IAgentStore agentStore, IWorkflowStore workflowStore, ILlmStore llmStore,
-            IApiCallsStore apiCallsStore, IMcpCallsStore mcpCallsStore, IRagStore ragStore) {
+            IApiCallsStore apiCallsStore, IMcpCallsStore mcpCallsStore, IRagStore ragStore, IConnectionStore connectionStore) {
         this.secretProvider = secretProvider;
         this.agentStore = agentStore;
         this.workflowStore = workflowStore;
@@ -91,6 +102,7 @@ public class VaultGrantChecker {
         this.apiCallsStore = apiCallsStore;
         this.mcpCallsStore = mcpCallsStore;
         this.ragStore = ragStore;
+        this.connectionStore = connectionStore;
     }
 
     /**
@@ -189,6 +201,11 @@ public class VaultGrantChecker {
                 Object extensionConfig = readExtensionConfig(step.getType().toString(), configuredUri.toString());
                 if (extensionConfig != null) {
                     scanForVaultReferences(extensionConfig, references);
+                    // A ${connection:name} is an INDIRECT vault reference: the
+                    // connection document holds the ${vault:…} client secret, and
+                    // without following the hop an agent could use a credential it was
+                    // never granted simply by naming a connection somebody else made.
+                    scanReferencedConnections(extensionConfig, references);
                 }
             }
         }
@@ -232,6 +249,41 @@ public class VaultGrantChecker {
                     sanitize(e.getMessage()));
         }
         return null;
+    }
+
+    /**
+     * Follows every {@code ${connection:name}} in a config and scans the connection
+     * document it names.
+     * <p>
+     * Serialize-and-scan on both hops, deliberately: enumerating which fields may
+     * carry a connection reference is exactly the kind of check that rots when a
+     * new field is added, and the traversal above already made that argument for
+     * vault references.
+     */
+    private void scanReferencedConnections(Object config, Set<String> sink) {
+        String serialized;
+        try {
+            serialized = MAPPER.writeValueAsString(config);
+        } catch (Exception e) {
+            return;
+        }
+        Matcher matcher = CONNECTION_PATTERN.matcher(serialized);
+        Set<String> alreadyScanned = new LinkedHashSet<>();
+        while (matcher.find()) {
+            String tenantId = matcher.group(1) != null ? matcher.group(1) : ConnectionReference.DEFAULT_TENANT;
+            String name = matcher.group(2);
+            if (!alreadyScanned.add(tenantId + "/" + name)) {
+                continue;
+            }
+            try {
+                ConnectionConfiguration connection = connectionStore.readByName(tenantId, name);
+                if (connection != null) {
+                    scanForVaultReferences(connection, sink);
+                }
+            } catch (Exception e) {
+                LOGGER.debugf("Could not read connection %s while checking vault grants: %s", sanitize(name), sanitize(e.getMessage()));
+            }
+        }
     }
 
     private static void scanForVaultReferences(Object config, Set<String> sink) {

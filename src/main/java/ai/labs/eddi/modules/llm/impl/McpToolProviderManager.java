@@ -5,6 +5,10 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
+import ai.labs.eddi.connections.ConnectionException;
+import ai.labs.eddi.connections.ConnectionResolver;
+import ai.labs.eddi.connections.McpAuthChallengeParser;
+import ai.labs.eddi.connections.model.ConnectionReference;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.CallerIdentityResolver;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
@@ -25,6 +29,7 @@ import dev.langchain4j.mcp.client.McpResourceTemplate;
 import dev.langchain4j.mcp.client.McpTextResourceContents;
 import dev.langchain4j.mcp.client.transport.McpTransport;
 import dev.langchain4j.mcp.client.transport.http.StreamableHttpMcpTransport;
+import dev.langchain4j.invocation.InvocationContext;
 import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
 import dev.langchain4j.service.tool.ToolExecutor;
 import dev.langchain4j.service.tool.ToolProviderResult;
@@ -46,6 +51,7 @@ import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
@@ -75,6 +81,13 @@ public class McpToolProviderManager {
     private final CallerIdentityContext callerIdentityContext;
     private final boolean ssrfProtectionEnabled;
     private final int maxDescriptionChars;
+
+    /**
+     * Resolves a {@code ${connection:name}} apiKey per request. Injected as an
+     * {@code Instance} because this manager is also constructed directly by two
+     * back-compat constructors that have no container to resolve a bean from.
+     */
+    private final ConnectionResolver connectionResolver;
     private final long toolCacheTtlMillis;
 
     /**
@@ -151,7 +164,9 @@ public class McpToolProviderManager {
             CallerIdentityResolver callerIdentityResolver, CallerIdentityContext callerIdentityContext,
             @ConfigProperty(name = "eddi.security.ssrf-protection.enabled", defaultValue = "false") boolean ssrfProtectionEnabled,
             @ConfigProperty(name = "eddi.mcp.tool-description.max-chars", defaultValue = "1024") int maxDescriptionChars,
-            @ConfigProperty(name = "eddi.mcp.tool-cache.ttl-ms", defaultValue = "300000") long toolCacheTtlMillis) {
+            @ConfigProperty(name = "eddi.mcp.tool-cache.ttl-ms", defaultValue = "300000") long toolCacheTtlMillis,
+            ConnectionResolver connectionResolver) {
+        this.connectionResolver = connectionResolver;
         this.globalVariableResolver = globalVariableResolver;
         this.secretResolver = secretResolver;
         this.callerIdentityResolver = callerIdentityResolver;
@@ -178,7 +193,19 @@ public class McpToolProviderManager {
     McpToolProviderManager(GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver, boolean ssrfProtectionEnabled,
             int maxDescriptionChars, long toolCacheTtlMillis) {
         this(globalVariableResolver, secretResolver, new CallerIdentityResolver(UNBOUND_CALLER_CONTEXT, true), UNBOUND_CALLER_CONTEXT,
-                ssrfProtectionEnabled, maxDescriptionChars, toolCacheTtlMillis);
+                ssrfProtectionEnabled, maxDescriptionChars, toolCacheTtlMillis, null);
+    }
+
+    /**
+     * Test/back-compat constructor without a connection resolver — see the
+     * {@code null} note on {@link ConnectionResolver} usage in
+     * {@code createTransport}.
+     */
+    McpToolProviderManager(GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver,
+            CallerIdentityResolver callerIdentityResolver, CallerIdentityContext callerIdentityContext, boolean ssrfProtectionEnabled,
+            int maxDescriptionChars, long toolCacheTtlMillis) {
+        this(globalVariableResolver, secretResolver, callerIdentityResolver, callerIdentityContext, ssrfProtectionEnabled, maxDescriptionChars,
+                toolCacheTtlMillis, null);
     }
 
     /**
@@ -188,7 +215,7 @@ public class McpToolProviderManager {
      */
     McpToolProviderManager(GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver) {
         this(globalVariableResolver, secretResolver, new CallerIdentityResolver(UNBOUND_CALLER_CONTEXT, true), UNBOUND_CALLER_CONTEXT, false,
-                DEFAULT_MAX_DESCRIPTION_CHARS, DEFAULT_TOOL_CACHE_TTL_MILLIS);
+                DEFAULT_MAX_DESCRIPTION_CHARS, DEFAULT_TOOL_CACHE_TTL_MILLIS, null);
     }
 
     /**
@@ -197,6 +224,15 @@ public class McpToolProviderManager {
      * from a transient connectivity problem.
      */
     public enum McpFailureKind {
+        /**
+         * The server answered with an authentication challenge, or EDDI had no
+         * credential to send it — a user who has not connected yet, a revoked grant, a
+         * turn with no verified principal. Distinct from CONNECTION_FAILURE because it
+         * is fixed by supplying a credential, not by waiting — and because it
+         * deliberately does NOT feed the circuit breaker.
+         */
+        AUTHENTICATION_REQUIRED,
+
         /** URL/transport rejected before any request was made — fix the config. */
         INVALID_CONFIGURATION,
         /** The server was contacted but the discovery call failed. */
@@ -313,6 +349,7 @@ public class McpToolProviderManager {
                 validateServerUrl(url);
                 validateTransport(serverConfig.getTransport());
                 validateCallerBoundKey(serverConfig);
+                validateConnectionBoundKey(serverConfig);
             } catch (IllegalArgumentException e) {
                 LOGGER.errorf("MCP server '%s' was NOT contacted because its configuration is invalid: %s — "
                         + "the agent runs without this server's tools until the config is fixed",
@@ -369,10 +406,40 @@ public class McpToolProviderManager {
                 count("success");
 
             } catch (Exception e) {
-                LOGGER.warnf(e, "Failed to connect to MCP server '%s': %s", sanitize(serverName), e.getMessage());
-                failures.add(new McpServerFailure(serverName, url, McpFailureKind.CONNECTION_FAILURE, e.getMessage()));
-                recordFailure(circuitKey);
-                count("failure");
+                ConnectionException credentialFailure = credentialFailure(e);
+                if (credentialFailure != null) {
+                    // Classified by the exception TYPE, not by its text. A credential
+                    // that cannot be resolved — a missing vault client secret, a user
+                    // who has not connected, an origin off the allowlist — used to be
+                    // reported as CONNECTION_FAILURE and fed to the breaker, which told
+                    // the operator to go and look at a server that is perfectly healthy
+                    // and then suppressed discovery for everyone else configured against
+                    // it. Nothing here is healed by waiting, so the breaker stays out of
+                    // it. A ConnectionException's message never quotes a credential.
+                    McpFailureKind kind = failureKindOf(credentialFailure);
+                    LOGGER.errorf("MCP server '%s' has no usable credential: %s", sanitize(serverName),
+                            sanitize(credentialFailure.getMessage()));
+                    failures.add(new McpServerFailure(serverName, url, kind, credentialFailure.getMessage()));
+                    count(kind == McpFailureKind.AUTHENTICATION_REQUIRED ? "auth_required" : "invalid_configuration");
+                } else if (isAuthenticationChallenge(e)) {
+                    // A 401 is the server saying "who are you", not "I am down". It used
+                    // to increment the same counter as a refused connection, so three
+                    // attempts opened the circuit and the operator was told the server
+                    // was unreachable — with nothing anywhere pointing at credentials.
+                    // The breaker exists to shield a flaky server from retries; an
+                    // authentication problem is not healed by waiting, and not made
+                    // worse by asking again.
+                    LOGGER.warnf("MCP server '%s' requires authentication. Configure an apiKey — a ${vault:…} secret, or a "
+                            + "${connection:…} reference for OAuth.", sanitize(serverName));
+                    failures.add(new McpServerFailure(serverName, url, McpFailureKind.AUTHENTICATION_REQUIRED,
+                            "The server answered with an authentication challenge. Configure a credential for it."));
+                    count("auth_required");
+                } else {
+                    LOGGER.warnf(e, "Failed to connect to MCP server '%s': %s", sanitize(serverName), e.getMessage());
+                    failures.add(new McpServerFailure(serverName, url, McpFailureKind.CONNECTION_FAILURE, e.getMessage()));
+                    recordFailure(circuitKey);
+                    count("failure");
+                }
             }
         }
 
@@ -443,6 +510,24 @@ public class McpToolProviderManager {
      */
     static final int RESOURCE_FIELD_MAX_CHARS = 256;
 
+    /**
+     * Marks a resource-bridge request as the tool call it actually is.
+     * <p>
+     * {@code list_resources} and {@code read_resource} are exposed to the model as
+     * tools and run inside a {@link ToolExecutor}, on behalf of one user, in one
+     * conversation. Calling the no-context overloads made them arrive at
+     * {@link #authorizationHeader} indistinguishable from the {@code initialize}
+     * handshake, which withholds the credential on purpose — so a caller-bound or
+     * connection-bound server answered every resource read with a 401 while its
+     * ordinary tools worked.
+     * <p>
+     * The context carries no per-user state and is deliberately shared: it is a
+     * discriminator ("this is a tool call"), not an identity. The identity comes
+     * from the thread-bound caller, exactly as it does for a normal tool call.
+     */
+    private static final InvocationContext RESOURCE_BRIDGE_INVOCATION = InvocationContext.builder()
+            .interfaceName(McpToolProviderManager.class.getName()).methodName("mcpResourceBridge").build();
+
     private static final ObjectMapper RESOURCE_ARGS_MAPPER = new ObjectMapper();
 
     /** The two synthesized tools bridging one server's MCP resources. */
@@ -480,6 +565,7 @@ public class McpToolProviderManager {
         validateServerUrl(url);
         validateTransport(serverConfig.getTransport());
         validateCallerBoundKey(serverConfig);
+        validateConnectionBoundKey(serverConfig);
 
         String serverName = serverConfig.getName() != null ? serverConfig.getName() : url;
         String prefix = toolNamePrefix(serverName, url);
@@ -515,7 +601,7 @@ public class McpToolProviderManager {
                 return "Error: the 'uri' argument is required - call " + listName + " for the available uris.";
             }
             try {
-                return renderResourceContents(getOrCreateClient(serverConfig).readResource(uri), uri, serverName);
+                return renderResourceContents(getOrCreateClient(serverConfig).readResource(uri, RESOURCE_BRIDGE_INVOCATION), uri, serverName);
             } catch (Exception e) {
                 LOGGER.warnf("MCP read_resource failed for '%s' uri '%s': %s", sanitize(serverName), sanitize(uri), e.getMessage());
                 return "Error reading resource '" + uri + "' from MCP server '" + serverName + "': " + e.getMessage();
@@ -577,7 +663,7 @@ public class McpToolProviderManager {
      */
     private static String renderResourceList(McpClient client, String serverName) {
         var sb = new StringBuilder(remoteContentHeader(serverName));
-        List<McpResource> resources = client.listResources();
+        List<McpResource> resources = client.listResources(RESOURCE_BRIDGE_INVOCATION);
         if (resources == null || resources.isEmpty()) {
             sb.append("No resources.\n");
         } else {
@@ -643,7 +729,7 @@ public class McpToolProviderManager {
      */
     private static List<McpResourceTemplate> safeListTemplates(McpClient client) {
         try {
-            return client.listResourceTemplates();
+            return client.listResourceTemplates(RESOURCE_BRIDGE_INVOCATION);
         } catch (Exception e) {
             return List.of();
         }
@@ -826,6 +912,22 @@ public class McpToolProviderManager {
         }
     }
 
+    /**
+     * Refuse an apiKey that mixes a {@code ${connection:…}} reference with anything
+     * else, before the server is contacted.
+     * <p>
+     * {@code createTransport} applies the same guard, but it runs inside the cached
+     * client's construction — the throw would surface from the discovery catch as a
+     * connectivity failure and trip the breaker, blaming the server for something
+     * the config did. Checked here it lands where the URL and transport checks do,
+     * as {@code INVALID_CONFIGURATION}.
+     */
+    private static void validateConnectionBoundKey(McpServerConfig config) {
+        if (ConnectionResolver.containsReference(config.getApiKey())) {
+            ConnectionReference.requireSole(config.getApiKey(), "apiKey");
+        }
+    }
+
     void validateServerUrl(String url) {
         if (isNullOrEmpty(url)) {
             throw new IllegalArgumentException("MCP server URL must not be empty");
@@ -927,7 +1029,19 @@ public class McpToolProviderManager {
         // static key and be sent as literal text; this turns it into a clear error.
         callerIdentityResolver.rejectUnsupportedReference(apiKey);
         boolean callerBound = CallerIdentityResolver.containsReference(apiKey);
-        if (!isNullOrEmpty(apiKey) && !callerBound) {
+        // A connection reference is resolved per REQUEST for the same reason a
+        // caller reference is: it can be PER_USER, and it can be refreshed between
+        // two calls one second apart. Freezing either into the cached client would
+        // hand one user's credential to everybody who follows.
+        boolean connectionBound = ConnectionResolver.containsReference(apiKey);
+        if (connectionBound && connectionResolver == null) {
+            throw new IllegalArgumentException("MCP server '" + config.getName() + "' uses a ${connection:…} apiKey, but this manager was "
+                    + "constructed without a ConnectionResolver.");
+        }
+        if (connectionBound) {
+            ConnectionReference.requireSole(apiKey, "The apiKey of MCP server '" + config.getName() + "'");
+        }
+        if (!isNullOrEmpty(apiKey) && !callerBound && !connectionBound) {
             apiKey = globalVariableResolver.resolveValue(apiKey);
             apiKey = secretResolver.resolveValue(apiKey);
         }
@@ -942,7 +1056,7 @@ public class McpToolProviderManager {
             // into the cached client, which is why a ${caller:...} reference has to be
             // resolved here: the client is shared across conversations, the caller is
             // not. Applies to every POST the transport makes.
-            transportBuilder.customHeaders(callContext -> authorizationHeader(configuredKey, config, callerBound, callContext));
+            transportBuilder.customHeaders(callContext -> authorizationHeader(configuredKey, config, callerBound, connectionBound, callContext));
         }
 
         return transportBuilder.build();
@@ -995,9 +1109,43 @@ public class McpToolProviderManager {
      * <p>
      * A caller-bound config therefore has nothing to offer discovery and sends it
      * unauthenticated, letting the server decide.
+     * <p>
+     * A connection-bound config is NOT the same case, and treating it as one was a
+     * defect: a {@code SERVICE}-bound connection is one credential shared by
+     * everybody, so there is nothing a cached session can leak and the handshake
+     * needs it. Only a {@code PER_USER} connection is withheld here — see
+     * {@link ConnectionResolver#resolveForDiscovery(String, URI)}.
+     * <p>
+     * A {@code PER_USER} connection on a tool call resolves against the
+     * {@code ResolutionPrincipal} bound to the turn — the owner of the conversation
+     * that invoked the tool, and whether anyone authenticated them. That is why
+     * this lambda can pass no principal of its own and still be correct on a
+     * shared, cached client: it has no conversation in scope by construction, and
+     * the thread it runs on does. Reading the thread's CALLER instead would be
+     * wrong for the same reason it is wrong everywhere else — on a HITL resume the
+     * caller is the approver, so the approved call would run against the approver's
+     * account.
      */
-    private Map<String, String> authorizationHeader(String configuredKey, McpServerConfig config, boolean callerBound,
+    private Map<String, String> authorizationHeader(String configuredKey, McpServerConfig config, boolean callerBound, boolean connectionBound,
                                                     McpCallContext callContext) {
+        if (connectionBound) {
+            if (callContext == null || callContext.invocationContext() == null) {
+                // Discovery. A PER_USER connection has nothing a shared, cached session
+                // may carry; a SERVICE one is the same credential for everybody, so
+                // withholding it only produced a 401 and an agent with no tools at all.
+                var discovery = connectionResolver.resolveForDiscovery(configuredKey, URI.create(config.getUrl()));
+                if (discovery.isEmpty()) {
+                    LOGGER.warnf("MCP server '%s' is bound to a PER_USER connection, so discovery is sent unauthenticated. If the server "
+                            + "requires a token to list tools, bind it to a SERVICE connection instead.", sanitize(config.getName()));
+                    return Map.of();
+                }
+                return Map.of(discovery.get().headerName(), discovery.get().headerValue());
+            }
+            // No principal offered: the resolver reads the turn's bound one, which is
+            // the only place a per-user decision can be taken from here.
+            var credential = connectionResolver.resolve(configuredKey, URI.create(config.getUrl()), null);
+            return Map.of(credential.headerName(), credential.headerValue());
+        }
         if (!callerBound) {
             return Map.of("Authorization", withBearerPrefix(configuredKey));
         }
@@ -1083,6 +1231,80 @@ public class McpToolProviderManager {
     }
 
     // ========================== Circuit Breaker ==========================
+
+    /**
+     * The one status-bearing message the langchain4j MCP transport emits. Anchored
+     * on that literal so the status is READ rather than guessed at.
+     */
+    private static final Pattern LANGCHAIN4J_STATUS = Pattern.compile("(?i)unexpected\\s+status\\s+code:\\s*(\\d{3})");
+
+    /** {@code unauthorized} as a word, not as a substring of something longer. */
+    private static final Pattern UNAUTHORIZED_WORD = Pattern.compile("(?i)\\bunauthorized\\b");
+
+    /**
+     * Whether a discovery failure is the server asking for credentials.
+     * <p>
+     * The transport does not surface a status code, so the status is parsed out of
+     * the one message shape that actually carries one and handed to
+     * {@link McpAuthChallengeParser#isAuthChallenge(int)} — which also covers 403,
+     * and is the single place the repository decides what an auth challenge is.
+     * <p>
+     * A bare {@code "401"} substring test used to stand in for that, and it
+     * misfired both ways: any message that merely CONTAINED those three digits — a
+     * server-provided body echoed into a message, a byte count — was excused from
+     * {@code recordFailure}, so the breaker never opened for a server that was
+     * genuinely down.
+     */
+    static boolean isAuthenticationChallenge(Throwable failure) {
+        var seen = new IdentityHashMap<Throwable, Boolean>();
+        for (Throwable current = failure; current != null && seen.put(current, Boolean.TRUE) == null; current = current.getCause()) {
+            String message = current.getMessage();
+            if (message == null) {
+                continue;
+            }
+            Matcher status = LANGCHAIN4J_STATUS.matcher(message);
+            if (status.find() && McpAuthChallengeParser.isAuthChallenge(Integer.parseInt(status.group(1)))) {
+                return true;
+            }
+            if (UNAUTHORIZED_WORD.matcher(message).find() || message.toLowerCase(Locale.ROOT).contains("www-authenticate")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * The {@link ConnectionException} in a failure's cause chain whose reason names
+     * a credential or configuration fault, or {@code null}.
+     * <p>
+     * By TYPE, never by text: the resolver's messages are written for an operator
+     * and are free to change, and a text match on them would classify by prose. A
+     * {@link ConnectionException.Reason#TOKEN_ENDPOINT_UNAVAILABLE} is deliberately
+     * NOT one of these — it is the one reason that is genuinely transient, so it
+     * keeps the connectivity treatment and the circuit breaker with it.
+     */
+    private static ConnectionException credentialFailure(Throwable failure) {
+        var seen = new IdentityHashMap<Throwable, Boolean>();
+        for (Throwable current = failure; current != null && seen.put(current, Boolean.TRUE) == null; current = current.getCause()) {
+            if (current instanceof ConnectionException connectionException
+                    && connectionException.getReason() != ConnectionException.Reason.TOKEN_ENDPOINT_UNAVAILABLE) {
+                return connectionException;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Which failure an unresolvable credential is, in the vocabulary the caller
+     * already reads: something a human must connect or re-authorize, versus
+     * something an operator must edit in a config document.
+     */
+    private static McpFailureKind failureKindOf(ConnectionException failure) {
+        return switch (failure.getReason()) {
+            case NO_VERIFIED_PRINCIPAL, NOT_CONNECTED, GRANT_UNUSABLE -> McpFailureKind.AUTHENTICATION_REQUIRED;
+            default -> McpFailureKind.INVALID_CONFIGURATION;
+        };
+    }
 
     /**
      * Whether the circuit is open for a configured server. It opens when the server

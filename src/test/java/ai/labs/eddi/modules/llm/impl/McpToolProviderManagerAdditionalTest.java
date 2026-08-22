@@ -191,11 +191,14 @@ class McpToolProviderManagerAdditionalTest {
         private Map<String, String> headersFor(McpServerConfig config, McpCallContext callContext) throws Exception {
             var manager = new McpToolProviderManager(globalVariableResolver, secretResolver,
                     new CallerIdentityResolver(context, true), context, false, 1024, 300000L);
+            // The connectionBound flag is false throughout this class: these tests are
+            // about ${caller:…}, and a connection reference takes a different branch
+            // with its own tests.
             var method = McpToolProviderManager.class.getDeclaredMethod("authorizationHeader", String.class, McpServerConfig.class,
-                    boolean.class, McpCallContext.class);
+                    boolean.class, boolean.class, McpCallContext.class);
             method.setAccessible(true);
             @SuppressWarnings("unchecked")
-            var headers = (Map<String, String>) method.invoke(manager, config.getApiKey(), config, true, callContext);
+            var headers = (Map<String, String>) method.invoke(manager, config.getApiKey(), config, true, false, callContext);
             return headers;
         }
 
@@ -260,10 +263,10 @@ class McpToolProviderManagerAdditionalTest {
             var manager = new McpToolProviderManager(globalVariableResolver, secretResolver,
                     new CallerIdentityResolver(context, true), context, false, 1024, 300000L);
             var method = McpToolProviderManager.class.getDeclaredMethod("authorizationHeader", String.class, McpServerConfig.class,
-                    boolean.class, McpCallContext.class);
+                    boolean.class, boolean.class, McpCallContext.class);
             method.setAccessible(true);
             @SuppressWarnings("unchecked")
-            var onDiscovery = (Map<String, String>) method.invoke(manager, "static-key", config, false, discovery());
+            var onDiscovery = (Map<String, String>) method.invoke(manager, "static-key", config, false, false, discovery());
             assertEquals("Bearer static-key", onDiscovery.get("Authorization"), "discovery keeps the service credential");
         }
     }

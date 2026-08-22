@@ -99,6 +99,7 @@ class McpToolsProvider implements ToolSourceProvider {
                     case INVALID_CONFIGURATION -> ProviderFailure.Kind.INVALID_CONFIGURATION;
                     case CONNECTION_FAILURE -> ProviderFailure.Kind.CONNECTION_FAILURE;
                     case CIRCUIT_OPEN -> ProviderFailure.Kind.CIRCUIT_OPEN;
+                    case AUTHENTICATION_REQUIRED -> ProviderFailure.Kind.AUTHENTICATION_REQUIRED;
                 }, f.message()))
                 .toList();
     }

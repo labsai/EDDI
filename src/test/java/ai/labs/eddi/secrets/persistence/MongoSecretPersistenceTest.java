@@ -6,13 +6,22 @@ package ai.labs.eddi.secrets.persistence;
 
 import ai.labs.eddi.secrets.model.EncryptedDek;
 import ai.labs.eddi.secrets.model.EncryptedSecret;
+import com.mongodb.MongoCommandException;
 import com.mongodb.MongoException;
+import com.mongodb.MongoWriteException;
+import com.mongodb.ServerAddress;
+import com.mongodb.WriteError;
 import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
 import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.result.DeleteResult;
 import com.mongodb.client.result.UpdateResult;
+import org.bson.BsonDocument;
+import org.bson.BsonDouble;
+import org.bson.BsonInt32;
+import org.bson.BsonString;
 import org.bson.Document;
 import org.bson.conversions.Bson;
 import org.bson.types.ObjectId;
@@ -41,6 +50,13 @@ class MongoSecretPersistenceTest {
 
     @BeforeEach
     void setUp() {
+        persistence = new MongoSecretPersistence(mockDatabase());
+    }
+
+    /**
+     * Fresh collection mocks, so a test may stub the boot migration before it runs.
+     */
+    private MongoDatabase mockDatabase() {
         MongoDatabase database = mock(MongoDatabase.class);
         secretsCollection = mock(MongoCollection.class);
         deksCollection = mock(MongoCollection.class);
@@ -50,7 +66,45 @@ class MongoSecretPersistenceTest {
         when(database.getCollection("secretvault_deks")).thenReturn(deksCollection);
         when(database.getCollection("secretvault_meta")).thenReturn(metaCollection);
 
-        persistence = new MongoSecretPersistence(database);
+        return database;
+    }
+
+    // ==================== startup migration ====================
+
+    @Test
+    @DisplayName("startup — DEK documents are backfilled BEFORE the unique-on-tenant index is dropped")
+    void migratesDeksToGenerations() {
+        // Order is the whole point. Backfill first, so every pre-generation document
+        // has a generation to be indexed on; then the old index goes, because while
+        // it stands a tenant cannot hold a second generation and rotation has
+        // nowhere to write.
+        var order = inOrder(deksCollection);
+        order.verify(deksCollection).updateMany(any(Bson.class), any(Bson.class));
+        order.verify(deksCollection).dropIndex("idx_dek_tenant");
+        order.verify(deksCollection).createIndex(any(Bson.class), any(IndexOptions.class));
+    }
+
+    @Test
+    @DisplayName("startup — a legacy index that is simply not there is nothing to do")
+    void migrationToleratesAnAbsentLegacyIndex() {
+        MongoDatabase database = mockDatabase();
+        doThrow(commandFailure(27, "index not found with name [idx_dek_tenant]")).when(deksCollection).dropIndex(anyString());
+
+        assertDoesNotThrow(() -> new MongoSecretPersistence(database));
+        verify(deksCollection).createIndex(any(Bson.class), any(IndexOptions.class));
+    }
+
+    @Test
+    @DisplayName("startup — any other drop failure fails the boot instead of passing for 'already gone'")
+    void migrationPropagatesANonIndexNotFoundFailure() {
+        // Not authorized, or a stepped-down primary: the legacy unique-on-tenantId
+        // index may well still be standing, and while it does a tenant cannot hold a
+        // second generation and rotation has nowhere to write.
+        MongoDatabase database = mockDatabase();
+        doThrow(commandFailure(13, "not authorized on eddi to execute command")).when(deksCollection).dropIndex(anyString());
+
+        assertThrows(MongoCommandException.class, () -> new MongoSecretPersistence(database));
+        verify(deksCollection, never()).createIndex(any(Bson.class), any(IndexOptions.class));
     }
 
     // ==================== upsertSecret ====================
@@ -171,40 +225,144 @@ class MongoSecretPersistenceTest {
     // ==================== findDek ====================
 
     @Test
-    @DisplayName("findDek — returns DEK when found")
+    @DisplayName("findDek — the ACTIVE generation is the highest one, so the query is sorted")
     void findDekFound() {
+        // Unsorted, "the tenant's DEK" is whichever row the server happens to hand
+        // back first, and a rotation would sooner or later seal new values with a
+        // superseded key.
+        FindIterable<Document> iterable = dekIterable(dekDoc(3));
+        when(deksCollection.find(any(Bson.class))).thenReturn(iterable);
+
+        Optional<EncryptedDek> result = persistence.findDek(TENANT);
+
+        assertTrue(result.isPresent());
+        assertEquals(TENANT, result.get().getTenantId());
+        assertEquals(3, result.get().getGeneration());
+        assertEquals(TENANT + "#g3", result.get().dekId(), "this is the name ciphertext records, so it has to carry the generation");
+        verify(iterable).sort(any(Bson.class));
+    }
+
+    @Test
+    @DisplayName("findDek — a row written before generations existed reads as generation 1")
+    void findDekWithoutGenerationField() {
         Document doc = new Document("_id", TEST_OID)
                 .append("tenantId", TENANT)
                 .append("encryptedDek", "enc-data")
                 .append("iv", "iv-data")
                 .append("createdAt", Instant.now().toString());
-        FindIterable<Document> iterable = mock(FindIterable.class);
+        // Built before the stubbing starts: dekIterable does its own stubbing, and
+        // Mockito rejects a nested when() inside an unfinished one.
+        FindIterable<Document> iterable = dekIterable(doc);
         when(deksCollection.find(any(Bson.class))).thenReturn(iterable);
-        when(iterable.first()).thenReturn(doc);
 
-        Optional<EncryptedDek> result = persistence.findDek(TENANT);
-        assertTrue(result.isPresent());
-        assertEquals(TENANT, result.get().getTenantId());
+        assertEquals(EncryptedDek.FIRST_GENERATION, persistence.findDek(TENANT).orElseThrow().getGeneration(),
+                "that rule is what lets every already-stored row keep working with no migration of ciphertext");
     }
 
     @Test
     @DisplayName("findDek — returns empty when not found")
     void findDekNotFound() {
-        FindIterable<Document> iterable = mock(FindIterable.class);
+        FindIterable<Document> iterable = dekIterable(null);
         when(deksCollection.find(any(Bson.class))).thenReturn(iterable);
-        when(iterable.first()).thenReturn(null);
 
         assertFalse(persistence.findDek(TENANT).isPresent());
+    }
+
+    @Test
+    @DisplayName("findDek(generation) — reads the one generation a stored row names")
+    void findDekByGeneration() {
+        // Deliberately no sort() stub: the key is unique, so this lookup must not
+        // need one, and a production sort() here would fail on the null it returns.
+        FindIterable<Document> iterable = mock(FindIterable.class);
+        when(deksCollection.find(any(Bson.class))).thenReturn(iterable);
+        when(iterable.first()).thenReturn(dekDoc(2));
+
+        Optional<EncryptedDek> result = persistence.findDek(TENANT, 2);
+
+        assertTrue(result.isPresent());
+        assertEquals(2, result.get().getGeneration());
+    }
+
+    // ==================== insertDek ====================
+
+    @Test
+    @DisplayName("insertDek — a fresh generation is inserted")
+    void insertDekSucceeds() {
+        assertTrue(persistence.insertDek(new EncryptedDek("id", TENANT, 2, "encDek", "iv", Instant.now())));
+        verify(deksCollection).insertOne(any(Document.class));
+    }
+
+    @Test
+    @DisplayName("insertDek — a generation somebody else installed first is refused, not overwritten")
+    void insertDekLosesToDuplicateKey() {
+        // The commit point of a rotation. Two replicas racing must produce one
+        // winner and one clean refusal, never two keys claiming one generation.
+        doThrow(new MongoWriteException(new WriteError(11000, "E11000 duplicate key error", new BsonDocument()), new ServerAddress()))
+                .when(deksCollection).insertOne(any(Document.class));
+
+        assertFalse(persistence.insertDek(new EncryptedDek("id", TENANT, 2, "encDek", "iv", Instant.now())));
+    }
+
+    @Test
+    @DisplayName("insertDek — any other write error is a failure, not a lost race")
+    void insertDekPropagatesOtherWriteErrors() {
+        doThrow(new MongoWriteException(new WriteError(50, "ExceededTimeLimit", new BsonDocument()), new ServerAddress()))
+                .when(deksCollection).insertOne(any(Document.class));
+
+        assertThrows(PersistenceException.class, () -> persistence.insertDek(new EncryptedDek("id", TENANT, 2, "encDek", "iv", Instant.now())));
+    }
+
+    // ==================== listDeks ====================
+
+    @Test
+    @DisplayName("listDeks — every generation the tenant holds, oldest first")
+    void listDeks() {
+        FindIterable<Document> iterable = mock(FindIterable.class);
+        when(deksCollection.find(any(Bson.class))).thenReturn(iterable);
+        when(iterable.sort(any(Bson.class))).thenReturn(iterable);
+        MongoCursor<Document> cursor = mock(MongoCursor.class);
+        doReturn(cursor).when(iterable).iterator();
+        when(cursor.hasNext()).thenReturn(true, true, false);
+        when(cursor.next()).thenReturn(dekDoc(1), dekDoc(2));
+
+        List<EncryptedDek> result = persistence.listDeks(TENANT);
+
+        assertEquals(List.of(1, 2), result.stream().map(EncryptedDek::getGeneration).toList());
+        verify(iterable).sort(any(Bson.class));
+    }
+
+    // ==================== updateSecretSealing ====================
+
+    @Test
+    @DisplayName("updateSecretSealing — a matched row counts as written, even if the bytes are identical")
+    void updateSecretSealingWins() {
+        UpdateResult result = mock(UpdateResult.class);
+        when(result.getMatchedCount()).thenReturn(1L);
+        when(secretsCollection.updateOne(any(Bson.class), any(Bson.class))).thenReturn(result);
+
+        assertTrue(persistence.updateSecretSealing(createTestSecret(), "dek-0"));
+    }
+
+    @Test
+    @DisplayName("updateSecretSealing — a row somebody else re-sealed first is left alone")
+    void updateSecretSealingLosesTheGuard() {
+        UpdateResult result = mock(UpdateResult.class);
+        when(result.getMatchedCount()).thenReturn(0L);
+        when(secretsCollection.updateOne(any(Bson.class), any(Bson.class))).thenReturn(result);
+
+        assertFalse(persistence.updateSecretSealing(createTestSecret(), "dek-0"));
     }
 
     // ==================== deleteDek ====================
 
     @Test
-    @DisplayName("deleteDek — deletes DEK for tenant")
+    @DisplayName("deleteDek — deletes EVERY generation for the tenant")
     void deleteDek() {
-        when(deksCollection.deleteOne(any(Bson.class))).thenReturn(mock(DeleteResult.class));
+        // deleteOne would leave the older generations behind, and a tenant reset
+        // that keeps keys is not a reset.
+        when(deksCollection.deleteMany(any(Bson.class))).thenReturn(mock(DeleteResult.class));
         assertDoesNotThrow(() -> persistence.deleteDek(TENANT));
-        verify(deksCollection).deleteOne(any(Bson.class));
+        verify(deksCollection).deleteMany(any(Bson.class));
     }
 
     // ==================== listAllDeks ====================
@@ -263,6 +421,14 @@ class MongoSecretPersistenceTest {
 
     // ==================== Helpers ====================
 
+    /** A server-side command failure carrying a specific error code. */
+    private static MongoCommandException commandFailure(int code, String message) {
+        BsonDocument response = new BsonDocument("ok", new BsonDouble(0.0))
+                .append("errmsg", new BsonString(message))
+                .append("code", new BsonInt32(code));
+        return new MongoCommandException(response, new ServerAddress());
+    }
+
     private EncryptedSecret createTestSecret() {
         EncryptedSecret secret = new EncryptedSecret();
         secret.setTenantId(TENANT);
@@ -276,6 +442,23 @@ class MongoSecretPersistenceTest {
         secret.setCreatedAt(Instant.now());
         secret.setLastAccessedAt(Instant.now());
         return secret;
+    }
+
+    private Document dekDoc(int generation) {
+        return new Document("_id", TEST_OID)
+                .append("tenantId", TENANT)
+                .append("generation", generation)
+                .append("encryptedDek", "enc-data")
+                .append("iv", "iv-data")
+                .append("createdAt", Instant.now().toString());
+    }
+
+    /** A find() whose sort() chains, which is what the driver actually does. */
+    private FindIterable<Document> dekIterable(Document first) {
+        FindIterable<Document> iterable = mock(FindIterable.class);
+        when(iterable.sort(any(Bson.class))).thenReturn(iterable);
+        when(iterable.first()).thenReturn(first);
+        return iterable;
     }
 
     private Document createSecretDoc() {

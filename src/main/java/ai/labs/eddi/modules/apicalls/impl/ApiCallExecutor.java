@@ -8,6 +8,8 @@ import ai.labs.eddi.configs.apicalls.model.*;
 import ai.labs.eddi.configs.apicalls.model.HttpPostResponse;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
+import ai.labs.eddi.connections.ConnectionResolver;
+import ai.labs.eddi.connections.model.ConnectionReference;
 import ai.labs.eddi.engine.security.CallerIdentityResolver;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.httpclient.IHttpClient;
@@ -46,7 +48,6 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 import static jakarta.ws.rs.core.MediaType.TEXT_PLAIN;
 import static java.lang.String.format;
 import static java.lang.System.currentTimeMillis;
-import static java.util.Objects.requireNonNullElse;
 
 /**
  * Reusable HTTP call executor that can be used by different lifecycle tasks.
@@ -121,6 +122,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
     private final CallerIdentityResolver callerIdentityResolver;
     private final CallerIdentityContext callerIdentityContext;
     private final RequestRedactor requestRedactor;
+    private final ConnectionResolver connectionResolver;
     private final boolean ssrfProtectionEnabled;
     private final long defaultTimeoutInMillis;
     private final int defaultMaxResponseSizeInBytes;
@@ -128,7 +130,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
     @Inject
     public ApiCallExecutor(IHttpClient httpClient, IJsonSerialization jsonSerialization, IRuntime runtime, PrePostUtils prePostUtils,
             GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver, CallerIdentityResolver callerIdentityResolver,
-            CallerIdentityContext callerIdentityContext, RequestRedactor requestRedactor,
+            CallerIdentityContext callerIdentityContext, RequestRedactor requestRedactor, ConnectionResolver connectionResolver,
             @ConfigProperty(name = "eddi.security.ssrf-protection.enabled", defaultValue = "false") boolean ssrfProtectionEnabled,
             @ConfigProperty(name = "eddi.httpcalls.default-timeout-millis", defaultValue = "30000") long defaultTimeoutInMillis,
             @ConfigProperty(name = "eddi.httpcalls.default-max-response-size-bytes", defaultValue = "2000000") int defaultMaxResponseSizeInBytes) {
@@ -141,6 +143,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
         this.callerIdentityResolver = callerIdentityResolver;
         this.callerIdentityContext = callerIdentityContext;
         this.requestRedactor = requestRedactor;
+        this.connectionResolver = connectionResolver;
         this.ssrfProtectionEnabled = ssrfProtectionEnabled;
         this.defaultTimeoutInMillis = defaultTimeoutInMillis;
         this.defaultMaxResponseSizeInBytes = defaultMaxResponseSizeInBytes;
@@ -733,6 +736,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
         // reach URI.create() to fail as "Illegal character in path" — an error that
         // names the symptom and not the cause.
         callerIdentityResolver.rejectAnyReference(targetUriStr, "the request path");
+        rejectConnectionReference(targetUriStr, "the request path");
         var targetUri = URI.create(targetUriStr);
         var requestBody = prePostUtils.templateValues(requestConfig.getBody(), templateDataObjects);
         // Resolve global variable references, then vault references in request body
@@ -770,8 +774,16 @@ public class ApiCallExecutor implements IApiCallExecutor {
         // a literal placeholder — not just a token one. Reject the lot instead of
         // shipping nonsense to the API.
         callerIdentityResolver.rejectAnyReference(requestBody, "a request body");
+        rejectConnectionReference(requestBody, "a request body");
 
         Map<String, String> headers = requestConfig.getHeaders();
+        // Header names already written to this request, lower-cased because HTTP
+        // header names are case-insensitive and setHttpHeader REPLACES rather than
+        // appends — two entries differing only in case displace each other, and
+        // whichever iterates last wins with no signal. The flag records whether a
+        // CONNECTION owns the name: that is the collision iteration order must
+        // never decide, because one side of it is a credential.
+        var claimedHeaders = new HashMap<String, Boolean>();
         for (String headerName : headers.keySet()) {
             String headerValue = prePostUtils.templateValues(headers.get(headerName), templateDataObjects);
             // Resolve global variable references, then vault references in headers
@@ -780,6 +792,45 @@ public class ApiCallExecutor implements IApiCallExecutor {
             // Caller identity resolves last and needs the target URI: the token is
             // only released when the call goes back to the caller's own origin.
             headerValue = callerIdentityResolver.resolveValue(headerValue, targetUri);
+            // Connections resolve last, and only in a header. A ${connection:name}
+            // resolves to a credential bound to THIS caller and THIS moment, so
+            // unlike a vault reference it cannot be substituted into a cached
+            // string — which is also why it replaces the whole header rather than
+            // being interpolated into one.
+            if (ConnectionResolver.containsReference(headerValue)) {
+                ConnectionReference.requireSole(headerValue, "Header '" + headerName + "'");
+                var credential = connectionResolver.resolve(headerValue, targetUri, principalFrom(templateDataObjects));
+                // The connection owns the header NAME — that is the point of storing
+                // one, since Authorization and X-Api-Key are the same connection model
+                // — but a silent displacement is not acceptable in either direction.
+                // Two references resolving to one header name used to overwrite each
+                // other with no signal, and the request went out carrying whichever
+                // won.
+                if (!headerName.equalsIgnoreCase(credential.headerName())) {
+                    throw new IllegalArgumentException("Header '" + headerName + "' references a connection whose header is '"
+                            + credential.headerName() + "'. Name the header the same as the connection's, so what the config says and what "
+                            + "is sent cannot disagree.");
+                }
+                Boolean claimedByConnection = claimedHeaders.putIfAbsent(credential.headerName().toLowerCase(Locale.ROOT), Boolean.TRUE);
+                if (Boolean.TRUE.equals(claimedByConnection)) {
+                    throw new IllegalArgumentException("More than one header resolves to '" + credential.headerName()
+                            + "' through a connection. Only one credential can occupy a header; the others would be silently dropped.");
+                }
+                if (claimedByConnection != null) {
+                    throw connectionHeaderCollision(credential.headerName());
+                }
+                request.setHttpHeader(credential.headerName(), credential.headerValue());
+                continue;
+            }
+            // The same map, read from the other side. A plain header sharing a name
+            // with a connection-owned one used to slip past every guard here, because
+            // the collision set was only ever consulted inside the branch above — and
+            // then the two silently overwrote each other by iteration order. Two
+            // genuinely different names, and even two plain headers differing only in
+            // case, keep behaving exactly as before.
+            if (Boolean.TRUE.equals(claimedHeaders.putIfAbsent(headerName.toLowerCase(Locale.ROOT), Boolean.FALSE))) {
+                throw connectionHeaderCollision(headerName);
+            }
             request.setHttpHeader(headerName, headerValue);
         }
 
@@ -791,10 +842,56 @@ public class ApiCallExecutor implements IApiCallExecutor {
             qpValue = secretResolver.resolveValue(qpValue);
             // A token in a query string leaks via access logs and proxies.
             callerIdentityResolver.rejectTokenReference(qpValue, "a query parameter");
+            rejectConnectionReference(qpValue, "a query parameter");
             qpValue = callerIdentityResolver.resolveValue(qpValue, targetUri);
             request.setQueryParam(queryParam, qpValue);
         }
         return request;
+    }
+
+    /**
+     * The conversation's user id, from the same template data every other value in
+     * this method is built from.
+     * <p>
+     * A cross-check, not a source. {@code ConnectionResolver} takes its authority
+     * from the {@code ResolutionPrincipal} bound to the turn, which carries a
+     * provenance a bare id cannot — whether anything actually authenticated that
+     * user. Passing the id here only lets the resolver refuse when the call was
+     * built for one user while the turn is running as another; it can never grant
+     * anything on its own.
+     */
+    private static String principalFrom(Map<String, Object> templateDataObjects) {
+        if (templateDataObjects != null && templateDataObjects.get("userInfo") instanceof Map<?, ?> userInfo) {
+            Object userId = userInfo.get("userId");
+            return userId == null ? null : userId.toString();
+        }
+        return null;
+    }
+
+    /**
+     * Refuses a {@code ${connection:…}} anywhere other than a header.
+     * <p>
+     * Same restriction set as {@code ${caller:token}}, for the same reasons. A
+     * credential in a URL or a query string is written to ingress logs, proxy logs
+     * and browser history before it reaches the provider; a credential in a body is
+     * not a credential the provider will read. Rejecting at build time turns all
+     * three into an actionable configuration error rather than a placeholder sent
+     * as literal text and a 401 with no explanation.
+     */
+    private static void rejectConnectionReference(String value, String where) {
+        if (ConnectionResolver.containsReference(value)) {
+            throw new IllegalArgumentException("A ${connection:…} reference may only appear in a header, not in " + where
+                    + ". A credential in a URL or query string is recorded by every hop before the provider sees it.");
+        }
+    }
+
+    /**
+     * The refusal for a header that a connection owns and a plain entry also sets.
+     */
+    private static IllegalArgumentException connectionHeaderCollision(String headerName) {
+        return new IllegalArgumentException("Header '" + headerName + "' is set both directly and by a connection. HTTP header names are "
+                + "case-insensitive and the last write wins, so which of the two is sent would depend on config order alone. Remove the "
+                + "plain header, or give it a name the connection does not claim.");
     }
 
     /**
