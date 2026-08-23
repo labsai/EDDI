@@ -14,7 +14,40 @@ import {
  * Resource types and their API store paths.
  * Used for parameterized CRUD testing through the browser UI.
  */
-const RESOURCE_TYPES = [
+interface ResourceTypeCase {
+  name: string;
+  urlType: string;
+  store: string;
+  plural: string;
+  createPayload: Record<string, unknown>;
+}
+
+/**
+ * KNOWN FAILURE, unresolved: whichever type runs FIRST does not appear in its
+ * store's descriptor list, and the case for it fails.
+ *
+ * What five dispatches against a live backend established:
+ *
+ *  - It follows POSITION, not type. Rules failed while first; removing Rules
+ *    moved the failure to API Calls; restoring it moved it back.
+ *  - The resource IS created — 201, and retrievable by id. Only the descriptor
+ *    is missing, on both MongoDB and Postgres.
+ *  - It is not a UI or caching problem. Polling the descriptors API directly,
+ *    before any page is opened, fails the same way.
+ *  - No warm-up fixes it: not one create/delete before the suite, not one per
+ *    store inside each case.
+ *  - And a readiness probe in `beforeAll` that waited for a created resource to
+ *    be listed timed out after NINETY seconds — while a case running about a
+ *    minute into the same run passes. Those two facts do not fit together, so
+ *    the mechanism is still unknown and anything written here would be a guess.
+ *    Three guesses have already been wrong.
+ *
+ * It is left failing on purpose. The tier reports one true thing rather than
+ * hiding it behind a skip, and the message now names the store and the id
+ * instead of timing out against a UI locator. Worth raising upstream with the
+ * run ids above rather than absorbing here.
+ */
+const RESOURCE_TYPES: ResourceTypeCase[] = [
   {
     name: "Rules",
     urlType: "rules",
@@ -98,6 +131,7 @@ test.describe("Resources — Full Stack", () => {
       page,
       request,
     }) => {
+
       // Create resource via API
       const basePath = `${rt.store}/${rt.plural}`;
       const createRes = await request.post(`${API_BASE}/${basePath}`, {
@@ -109,14 +143,54 @@ test.describe("Resources — Full Stack", () => {
       );
       cleanup.push({ storePath: basePath, id, version });
 
+      // Wait for the BACKEND to list it before opening the page.
+      //
+      // Not because of any theory about when the page fetches — I had one and
+      // it was wrong. Because asking the API directly is what turns a UI locator
+      // timing out into a sentence naming the store, the id and what the
+      // backend actually returned. See the note above RESOURCE_TYPES for what
+      // that message went on to establish.
+      const descriptorsUrl = `${API_BASE}/${basePath}/descriptors?limit=100&index=0`;
+
+      // A hard error is not 'not listed yet'. Polling a 401/404/500 for thirty
+      // seconds and then reporting that the resource never appeared would be
+      // the same species of false message this file exists to remove, so the
+      // endpoint is checked once up front and the status is in the failure.
+      const firstLook = await request.get(descriptorsUrl);
+      expect(
+        firstLook.ok(),
+        `${basePath}/descriptors responded HTTP ${firstLook.status()}`
+      ).toBe(true);
+
+      await expect
+        .poll(
+          async () => {
+            const res = await request.get(descriptorsUrl);
+            if (!res.ok()) {
+              // `expect.poll` swallows this and keeps polling, but it reports
+              // the last error's message on timeout — so the status still
+              // reaches the log rather than being flattened into an empty list.
+              throw new Error(
+                `${basePath}/descriptors responded HTTP ${res.status()}`
+              );
+            }
+            const descriptors = (await res.json()) as Array<{ resource?: string }>;
+            return descriptors.map((d) => d.resource ?? "");
+          },
+          {
+            timeout: 30_000,
+            message: `${rt.name} was created but never appeared in ${basePath}/descriptors`,
+          }
+        )
+        .toEqual(expect.arrayContaining([expect.stringContaining(id)]));
+
       // Navigate to the resource type list page
       await navigateTo(page, `/manage/resources/${rt.urlType}`);
 
-      // The list should contain at least one resource link
-      const resourceLinks = page.locator(
-        `main a[href*="/manage/resources/${rt.urlType}/"]`
-      );
-      await expect(resourceLinks.first()).toBeVisible({ timeout: 10_000 });
+      // The resource THIS test created, by id — not merely 'a link exists'.
+      await expect(
+        page.locator(`main a[href*="/manage/resources/${rt.urlType}/${id}"]`)
+      ).toBeVisible({ timeout: 10_000 });
     });
   }
 
@@ -156,3 +230,4 @@ test.describe("Resources — Full Stack", () => {
     await expect(page).toHaveURL(/\/manage\/resources\/behavior/);
   });
 });
+
