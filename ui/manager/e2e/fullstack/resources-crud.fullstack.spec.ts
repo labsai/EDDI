@@ -42,6 +42,8 @@ interface ResourceTypeCase {
  *    the mechanism is still unknown and anything written here would be a guess.
  *    Three guesses have already been wrong.
  *
+ * Tracked upstream: https://github.com/labsai/EDDI/issues/712
+ *
  * It is left failing on purpose. The tier reports one true thing rather than
  * hiding it behind a skip, and the message now names the store and the id
  * instead of timing out against a UI locator. Worth raising upstream with the
