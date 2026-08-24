@@ -53,6 +53,7 @@
 - [MCP Server](mcp-server.md)
 - [MCP Client](mcp-client.md)
 - [A2A Protocol](a2a-protocol.md)
+- [Connections](connections.md)
 - [Slack Integration](slack-integration.md)
 - [OpenAI-Compatible API (Open WebUI)](open-webui-integration.md)
 

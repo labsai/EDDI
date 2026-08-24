@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
+import ai.labs.eddi.connections.ConnectionParameterGuard;
 import ai.labs.eddi.secrets.SecretResolver;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
@@ -90,6 +91,7 @@ public class EmbeddingModelFactory {
     private EmbeddingModel build(RagConfiguration config) {
         Map<String, String> rawParams = config.getEmbeddingParameters() != null ? config.getEmbeddingParameters() : Map.of();
         Map<String, String> params = globalVariableResolver.resolveAll(rawParams);
+        ConnectionParameterGuard.rejectConnectionReferences(params);
         params = secretResolver.resolveSecrets(params);
         String provider = config.getEmbeddingProvider();
         LOGGER.infof("Building embedding model for provider: %s", provider);

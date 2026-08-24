@@ -7,6 +7,76 @@
 
 
 
+## 🧪 test(connections): cover the four stores nothing was testing, and close two defects that surfaced doing it (2026-08-22)
+
+**Repo:** EDDI (`feat/saas-connectors`)
+
+The JaCoCo bundle gate (90% instruction / 80% branch) went red on this branch. The cause was not a
+regression elsewhere — it was this branch's own new persistence code arriving untested:
+`ai.labs.eddi.connections.grants` sat at **17.6%** instruction coverage and
+`ai.labs.eddi.connections.oauth` at **46.9%**, because the four real store implementations (Mongo and
+Postgres, for grants and for OAuth state) had no tests at all. Only the in-memory double did.
+
+### What was added
+
+Unit tests against mocked drivers — `MongoDatabase`/`MongoCollection` for the Mongo stores, the
+`Instance<DataSource>` → `Connection` → `PreparedStatement` chain for the Postgres ones, matching the
+existing `PostgresAgentTriggerStoreUnitTest` and `MongoSecretPersistenceTest` patterns. Also
+`OAuthTokenClient`, `TokenResponse`, `ConnectionGrant`, `ConnectionStartupGuard`,
+`McpAuthChallengeParser` and `ConnectionParameterGuard`.
+
+The assertions are on the query documents and SQL parameters actually built, the values returned, and
+the exceptions thrown — never "it ran without throwing". The compare-and-swap methods get particular
+attention, because their booleans *are* the cross-replica refresh design: `claimRefresh`,
+`completeRefresh` and `updateSealedTokens` each turn a row count into a boolean, and widening `== 1`
+would silently reintroduce the double refresh that logs users out with nothing else noticing.
+
+Result: `connections.grants` **17.6% → 99.6%** instruction (96.5% branch), `connections.oauth`
+**46.9% → 89.2%**, `McpAuthChallengeParser` and `ConnectionParameterGuard` to 100% branch.
+
+### Two defects the coverage work surfaced
+
+**A missing lease expiry was a permanent lease, not a shorter one.** `claimRefresh` accepted a null
+`leaseExpiresAt` and wrote SQL NULL. The claim predicate asks whether the lease has expired, and
+`NULL < CURRENT_TIMESTAMP` is NULL rather than true — so a grant claimed without an expiry could never
+be claimed by anyone again, and refresh for it was wedged until something rewrote the row. Both stores
+now refuse it outright, and the interface says why.
+
+**The two write paths disagreed about a null status.** `upsert` defaulted it to `ACTIVE`;
+`completeRefresh` dereferenced it. So one grant was storable through one path and fatal through the
+other — and `completeRefresh` is the path that runs *after* a successful token refresh, where throwing
+discards the token the provider just issued. The rule now lives on `ConnectionGrant.statusName()`, once,
+so the two cannot drift apart again.
+
+Neither was reachable from EDDI's own callers today; both were reachable from the interface.
+
+### A guard that skipped the connection it exists to report on
+
+Covering `ConnectionStartupGuard` — which had zero tests — turned up a third one. `readByDescriptor`
+caught bare `Exception` and returned `null` with no log line at all, so a connection document that never
+deserializes read exactly like a connection that is not there. The guard would then quietly decline to
+make the PER_USER and inactive-vault reports it exists to make, for the one connection nobody can
+inspect, and `readAll`'s own "could not enumerate" warning sits a level up and never fires for it.
+Skipping the row is still right — one bad document must not stop a boot — but it now says so, naming
+the id.
+
+### Vault re-sync
+
+`EncryptedDek` and `MongoSecretPersistence` picked up the second-pass generation fix from #709 &mdash;
+the static `dekId` now normalizes like the field, and the Mongo backfill covers a stored generation
+below 1 rather than only an absent one. Kept byte-identical with #709.
+
+### Also
+
+The vault files shared with #709 were re-synced so the two branches stay byte-identical, and the
+gitleaks triage for `ConnectionStoreFindByNameTest` is recorded in `.gitleaksignore` (a MongoDB
+ObjectId that a constant named `JIRA_ID` made look like an Atlassian token — renamed since, but the
+introducing commit stays in the PR's scan range).
+
+---
+
+
+
 ## 🛡️ fix(security): review findings — a forgeable approval preview and three ways a secret still reached the console (2026-08-22)
 
 **Repo:** EDDI (`feat/outbound-hardening`)
@@ -157,6 +227,147 @@ Reverting either pass turns a regression test red with the credential in the fai
 
 
 
+## feat(connections): DEK generations, verified principals, and the REST contract as it actually is (2026-08-22)
+
+**Repo:** EDDI (`feat/saas-connectors`)
+
+`docs/connections.md` and `docs/secrets-vault.md` described a system that is no longer the one this
+branch implements. Three of the corrections are safety-relevant, one is a migration consequence
+operators have to know about before they upgrade, and the rest are contract details a caller cannot
+guess.
+
+### DEK rotation is additive, and the docs described the opposite
+
+Both documents described rotation as "generate a new DEK, re-encrypt everything, replace the key",
+with connections.md adding that a failed re-seal "aborts the rotation with the old key still in
+place". Neither is the behaviour, and the behaviour is the stronger of the two.
+
+A tenant now holds one DEK row per **generation**, and every ciphertext records the generation that
+sealed it (`<tenantId>#g<n>`, readable so a database row explains itself). Rotation verifies every
+existing generation, **inserts** the next one — the single atomic commit point, guarded by a unique
+key on `(tenant, generation)` — and then sweeps rows onto it one at a time, each write guarded on
+the state the row was read in.
+
+The consequences that had to be written down:
+
+* **Old generations are never deleted.** Deleting the generation a row still names is the one action
+  that makes a partly swept tenant unreadable. Nothing in EDDI does it, and pruning one is an
+  operator decision that requires knowing no row still names it. Documented as such, because "the
+  system keeps old keys" reads like an oversight unless the reason is stated next to it.
+* **A partial sweep is reported and safe to re-run.** `POST /{tenantId}/rotate-dek` answers **500**
+  with a message saying the new generation is active, at least *N* rows still name an older one,
+  nothing is lost, and re-running finishes the migration. A 500 that means "incomplete, retry" needs
+  to say so in the docs or an operator will read it as "rotation is broken".
+* **KEK rotation re-wraps every generation**, not just the newest — a tenant part-way through a
+  sweep still depends on older ones.
+* **The schema migrates on boot on both backends**, and the two differ enough to be worth a table:
+  Postgres drops the column-level `UNIQUE (tenant_id)` that would otherwise leave rotation nowhere
+  to write, Mongo backfills `generation` *before* dropping the legacy unique index so every document
+  has something to be indexed on. A pre-generation row reads as generation 1, which is why no
+  ciphertext migration exists at all.
+
+### `PER_USER` now requires a *verified* identity — and legacy conversations must be restarted
+
+This is the migration note, and it is stated plainly in `connections.md` rather than left to be
+discovered: **a conversation that existed before provenance was recorded has none, which counts as
+not verified, and must be started again once before it can use a `PER_USER` connection.** No grant
+is invalidated and nobody has to re-link; the conversation is the thing that has to be new.
+
+The polarity is deliberate rather than an oversight. `authorization.enabled=true` was being read as
+proof that a conversation's user id had been authenticated, and it is not: the `/v1` adapter in
+api-key mode with `trust-user-headers` (the shipped default) believes a caller-supplied
+`X-OpenWebUI-User-Id` verbatim once the shared key matches, so a holder of that one key can open a
+conversation as anyone. The conversations this field exists to distrust are exactly the ones that
+predate it, so grandfathering them would leave the hole open on precisely the deployments that just
+closed it.
+
+Also documented: a conversation spawned from inside a running turn inherits its parent's provenance
+but **only for the same user id**; and the `allowUnverifiedPrincipal` per-connection opt-in, with
+what it actually costs — anyone who can assert a user id to the fronting proxy resolves that user's
+stored credentials, and nothing downstream re-checks it. Default off, per connection rather than per
+deployment, so enabling it is a decision about one provider's tokens.
+
+### The startup guard, and the document contradicting itself
+
+`docs/connections.md` said the guard "refuses to boot on four states" in one section and said it
+logs in another. It refuses on two (both properties of the deployment: a missing or non-bare-origin
+`public-base-url`) and **reports** three read from stored documents. The document now says which is
+which, why reporting is not a weakened control, and where enforcement actually lives — a **400** at
+the write boundary while the administrator is still looking at the request, plus the per-request
+refusal. The third reported state — a `PER_USER` connection alongside `/v1` in api-key mode with
+`trust-user-headers` — was not documented at all.
+
+### Behaviour a config author trips over
+
+* **A header value must be exactly one connection reference.** `Bearer ${connection:jira}` is
+  refused with an actionable error. It used to work by coincidence for OAuth connections (the
+  connection contributes its own `Bearer `) and silently broke `STATIC` ones, which sent a bare token
+  with no scheme and got back a 401 naming nothing. Documented alongside the two header rules that
+  were also undocumented: the header must be named what the connection names it, and one credential
+  per header name.
+* **On a HITL resume the credential follows the conversation's owner, not the approver.** The bullet
+  existed; the *reason* did not. A resume proves who approved and says nothing about whose
+  credentials the approved call may spend, so both the user id and its provenance are read from the
+  stored conversation and never from the resuming request.
+* **Every REST status the document claims is now checked against the code**, including the two it
+  did not mention: a disabled feature answers **404** (with a body on the authenticated routes,
+  empty on the callback, which has only a browser to answer), and a connection refusal escaping to a
+  REST caller is mapped by reason — 400 / 404 / **409** / 503 — rather than becoming a bare 500 with
+  the actionable sentence stranded in the server log.
+* **The metrics table omitted outcomes the code emits**: `binding_mismatch` on the callback (a valid
+  state arriving without the nonce cookie — the confused-deputy case) and `lease_released` on the
+  refresh claim. Every metric now lists the outcome values actually emitted, and the callback
+  counter's `authType` tag, which was missing.
+
+### Corrections to earlier claims in this file
+
+The 2026-08-21 entry below describes grants being "re-sealed prepare-then-commit" with a failure
+aborting the rotation. That was the shape at the time; generations superseded it, and the
+`SealedDataRotationParticipant` contract now says the opposite — throwing rolls nothing back, the
+new generation is already active, and a row left behind still opens with the generation it names.
+The earlier entry is left as written, being a record of that day; this paragraph is the pointer.
+
+The `Limitations` bullet on group conversations claimed the resolver "refuses because the principal
+is not the human". It is now stated as it behaves: a member conversation opens under the group
+conversation's own `userId` and takes whatever provenance that moment can establish — `VERIFIED` on
+a synchronous authenticated discussion, `SELF_ASSERTED` and therefore refused on an asynchronous or
+scheduled one. That is an accident of when a discussion starts rather than an answer to whose
+authority a debating agent carries, and it still needs a product decision.
+
+### Deliberately not done
+
+* **No doc for `UNSUPPORTED_PLACEMENT` as a live refusal.** The reason exists in the enum and in the
+  exception mapper's table, but nothing in `src/main` throws it — placement refusals are
+  `IllegalArgumentException`, which the generic mapper answers with a 400. It is listed in the
+  status table (the mapper does map it) and not described as something a caller will see.
+* **`eddi.connections.enabled` still does not force SSRF protection on.** Unchanged and still
+  awaiting sign-off; see the 2026-08-21 entry.
+* **Old DEK generations are not pruned, and no endpoint prunes them.** Retaining them is what makes
+  a partial sweep harmless, and deciding a generation is unreferenced needs knowledge no automatic
+  step has. Storage cost is one wrapped 256-bit key per rotation per tenant.
+* **Multi-tenant connections still are not implemented.** `tenantId` other than `default` is refused
+  at the write boundary, because the per-user endpoints remain scoped to the default tenant and a
+  grant filed anywhere else could be neither listed nor disconnected.
+
+### Coverage referenced
+
+Each behaviour documented here has a test that pins it, checked rather than assumed:
+`VaultSecretProviderBranchTest` ("rotation ADDS a generation and sweeps secrets onto it", "a secret
+the sweep cannot move is reported, not silently counted as migrated", "losing the race to install a
+generation refuses cleanly"); `SecretVaultIntegrationTest` ("a row the sweep could not move still
+resolves, because the old generation is kept"); `ConnectionGrantResealerTest` (mixed generations, a
+refresh landing mid-sweep keeping its own tokens, a row left behind being counted rather than
+forced); `ConnectionResolverTest` (self-asserted refused, the proxy opt-in honoured, no principal
+refused rather than falling back to the service grant); `ApiCallExecutorConnectionHeaderTest`
+(literal text around a reference, two references in one value, header-name collisions, and
+references outside a header); `A2ACredentialTest` (the same sole-reference rule on the A2A path);
+and `ConnectionExceptionMapperTest`, which asserts every `Reason` is covered so the status table
+cannot silently fall behind the enum.
+
+---
+
+
+
 ## fix(llm): directive detection is split by surface — strict for descriptions, conservative for results (2026-08-22)
 
 **Repo:** EDDI (`feat/outbound-hardening`)
@@ -234,6 +445,375 @@ alone", "the shapes nobody writes by accident are still redacted". `A2ADescripti
 covers the description path through the A2A manager.
 
 
+
+---
+
+
+
+## feat(connections): one credential model for every outbound call — Phases 2, 4 and 5 of the SaaS connectors plan (2026-08-21)
+
+**Repo:** EDDI (`feat/saas-connectors`)
+
+Phases 2 (unify), 4 (OAuth service account) and 5 (OAuth per user) of
+[`planning/saas-connectors-plan.md`](../planning/saas-connectors-plan.md). Phases 0, 1 and 3a ship
+separately on `feat/outbound-hardening`; this branch is cut from the same `main` and does not
+depend on them, though the plan is explicit that Phases 2+ must not *ship* without 0–1.
+
+### The shape
+
+One new resource type, `ConnectionConfiguration`, describing **how to authenticate to one external
+system**. Configs reference it as `${connection:name}` and it resolves to a credential **per
+request** — which is the whole trick: `binding: SERVICE` resolves one grant shared by every user,
+`binding: PER_USER` resolves the calling user's own, and those are the same machinery.
+
+Option B from the plan's §4, and the alternatives were rejected for reasons that still hold:
+
+* **Not OAuth fields on each existing config type** — five implementations, five caches, five
+  refresh-concurrency bugs, and an HTTP-calling refresh path inside `ChatModelRegistry`'s build-time
+  resolution.
+* **Not a self-refreshing "dynamic secret" in the vault** — `SecretResolver` deliberately has no
+  agent and no user identity, and `ChatModelRegistry` caches on *unresolved* parameters. Both are
+  load-bearing properties of the deploy-time grant-enforcement design. The vault stays a static
+  secret store; connections live above it and use it for their client secrets.
+
+### Everything secret is a reference, checked as an exact match
+
+`clientSecret`, `passwordRef` and every interpolated segment of a `valueTemplate` must be a
+`${vault:…}` or `${vars:…}` reference. A literal is refused at write time with a message naming
+`POST /secretstore/secrets`.
+
+Two details that a looser check would miss:
+
+* `matches`, not `find` — `sk-live-abcdef${vault:unused}` is a literal key with a reference stapled
+  on, and it passes a `find`-based check;
+* `extraAuthParams` is an arbitrary string map and is therefore the obvious place to paste one, so
+  its KEYS are checked against the credential-shaped denylist.
+
+A plaintext key in a connection document would sit outside the vault, outside export scrubbing and
+outside `VaultGrantChecker`'s scan simultaneously — one field defeating three controls.
+
+### Two allowlists, deliberately separate
+
+`baseUrlAllowlist` (per connection) governs where the **access token** may be sent.
+`eddi.connections.credential-endpoint-allowlist` (per deployment) governs where the **client
+secret** may be sent.
+
+Merging them looked tempting and is wrong twice over. A client secret mints new access tokens, so it
+is the more valuable of the two; and a connection document must not be able to vouch for its own
+token endpoint — an author who can edit one could otherwise point `tokenUrl` at a host they control
+and receive the vault-resolved secret on the first refresh. Their origins also routinely differ
+(`auth.atlassian.com` versus `api.atlassian.com`). An empty operator allowlist means **no OAuth
+connection resolves**: an unconfigured allowlist is far more likely than an operator who meant
+"anywhere".
+
+Both are canonicalised through `URI` and re-serialised rather than string-compared, so
+`api.atlassian.com` (no scheme) fails loudly instead of silently never matching — which would look
+like a working allowlist that blocks everything, and would invite somebody to "fix" it by loosening
+the comparison.
+
+### The refresh race — the ordering is the design
+
+Two conversations hitting an expired grant at once both call the token endpoint. With rotating
+refresh tokens (Google, Atlassian) the second invalidates the first, and a user who did nothing wrong
+is silently logged out.
+
+1. **Claim** — one atomic conditional update on the grant row, before any network call. Mongo does
+   it with a single `updateOne` under a document lock, Postgres with a single `UPDATE … WHERE`.
+2. The claimant refreshes; non-claimants poll for its result rather than refreshing blind.
+3. **Write**, guarded by a version CAS, clearing the lease.
+
+An earlier design in the plan relied on the CAS alone. A CAS is checked at *write* time, by which
+point both replicas have already called the endpoint and the provider has already rotated one token
+away — the CAS then dutifully serialises two writes, one carrying a token that is already dead.
+
+The lease must outlast the token-endpoint timeout or a slow provider frees it mid-flight and the
+double refresh returns. That relationship is asserted in the constructor and in a test, not left to
+a comment.
+
+**Failure semantics distinguish two cases a naive implementation conflates.** `invalid_grant` /
+`invalid_client` / `unauthorized_client` mark the grant `REFRESH_FAILED` — reconnect required. A
+timeout, a 5xx or a rate limit change *nothing*: the grant stays usable and the next request
+retries. Conflating them logs every user of a connection out during a five-minute provider outage.
+
+Writing the concurrency test caught a real defect in my own first cut: `CompletableFuture.join()`
+wraps whatever the future was completed with in a `CompletionException`, so every joiner received an
+unclassified failure and the whole `ConnectionException.Reason` vocabulary — the thing downstream
+switches on — was defeated for exactly the callers that were waiting. Fixed by unwrapping, and by
+running the refresh on the calling thread rather than the common ForkJoinPool, where a genuinely
+blocking poll has no business.
+
+### The callback
+
+Necessarily a `permit` path: the provider redirects the user's browser to it as a top-level GET with
+no bearer token, and `quarkus.oidc.application-type=service` answers an unauthenticated request with
+a 401 rather than a login redirect. Its only guard is the `state`, so:
+
+* the claim is the **first** thing the handler does, as one conditional write. Validating and then
+  marking consumed is a read-then-write, and two concurrent callbacks would both observe it
+  unconsumed and both redeem the code;
+* the state row is **persisted**, not in memory — behind a load balancer the redirect routinely
+  lands on a different replica than the one that issued it;
+* the principal comes from the **claimed row**, never from a query parameter;
+* unknown, expired and already-used are answered **identically**, because telling them apart is a
+  state-guessing oracle and none of the three is actionable beyond "start again";
+* the provider's own `error_description` is **not** echoed onward — it is attacker-influenceable
+  text heading for a browser.
+
+PKCE is forced on at validate time rather than being configurable. `returnTo` is validated
+same-origin, and rejects `//evil.example.com` explicitly: a protocol-relative URL has no scheme and
+is not a relative path, so it slips straight past a `startsWith("/")` check into another host — on
+the one page a user reaches immediately after authenticating, when they are least likely to read the
+address bar.
+
+### Fail-closed identity, enforced twice
+
+`PER_USER` needs a *verified* principal, not merely a present one. With `authorization.enabled=false`
+— the shipped default — there is no verified identity anywhere, and the `/v1` adapter documents that
+it believes `X-OpenWebUI-User-Id` verbatim. So:
+
+* `ConnectionStartupGuard` refuses to boot when a `PER_USER` connection exists and authorization is
+  off (checked against what is actually **stored**, because no property records that state), and
+  when an OAuth connection exists and the vault is inert — this is the one place the
+  `autoVaultSecret` degrade-to-plaintext pattern is unacceptable, since these are refresh tokens;
+* `ConnectionResolver` refuses per request, and never falls back to the service grant. Sending the
+  wrong authority is how one user reads another's data; `CallerIdentityResolver` made the same call.
+
+### Storage
+
+`connection_grants`, keyed `(tenantId, connectionName, principal)`, in both Mongo and Postgres.
+Tokens are envelope-encrypted with the vault's per-tenant DEK via two new `ISecretProvider` methods
+(`seal`/`unseal`) — a second key hierarchy for refresh tokens would mean a second key to rotate, a
+second master key to lose, and a second place for the crypto to be subtly wrong.
+
+Deleting a connection deletes its grants, decided by **re-reading the name** rather than by the
+`permanent` flag: a soft delete of the current version already stops the name resolving, and
+deleting an older version of a live connection must not revoke anybody. Asking "does this name still
+resolve" answers both with one question.
+
+`VaultGrantChecker` now follows the hop. A `${connection:name}` is an *indirect* vault reference —
+the connection document holds the `${vault:…}` client secret — so without following it an agent
+could use a credential it was never granted simply by naming somebody else's connection.
+Serialize-and-scan on both hops, per the 2026-08-10 decision that enumeration is how this kind of
+check rots.
+
+### 4b — an MCP 401 is an auth challenge, not an outage
+
+`McpToolProviderManager` treated a 401 as a discovery failure, so three attempts opened the circuit
+breaker and the operator was told the server was unreachable, with nothing anywhere pointing at
+credentials. Authentication failures now get their own `AUTHENTICATION_REQUIRED` failure kind and
+**do not feed the breaker** — the breaker exists to stop hammering a struggling server, and an
+authentication problem is not healed by waiting.
+
+`McpAuthChallengeParser` parses RFC 9728 `resource_metadata`, and refuses to follow it unless it
+shares an origin with the server that issued the challenge — a server may not redirect discovery to
+a host of its choosing. Any authorization server a metadata document names must already be on the
+operator's credential-endpoint allowlist: discovery may *select* among pre-approved servers, never
+*introduce* one.
+
+### Deliberate deviations from the plan, and why
+
+* **The plan lists a `ConnectionResolver` wired into all five resolution chains. Four are wired; the
+  LLM / embedding / vector-store chain refuses instead.** A connection resolves to an HTTP *header*
+  — a name and a value — because that is what an outbound call needs and what lets one model cover
+  `Authorization: Bearer …` and `X-Api-Key: …` alike. Those builders want a bare credential, and
+  there is no honest way to derive one: stripping a scheme prefix off a static template is a guess,
+  and a guess that is wrong for one provider out of eleven produces an authentication failure with
+  no visible cause. Those three caches are also keyed on *unresolved* parameters by design. So
+  `ConnectionParameterGuard` refuses a reference there with an explanatory error rather than sending
+  it as literal text. `${vault:…}` already does everything a `SERVICE`-bound connection would there.
+  Shipping a half-guessed credential-format transformation into eleven providers is worse than not
+  shipping it.
+* **No `ExtensionDescriptor`.** The plan's §5.1 lists one, following `AGENTS.md §4.3`, but that
+  checklist is for `ILifecycleTask` workflow extensions. A connection is not a workflow step — it is
+  referenced by name from other configs — so there is no step for a descriptor to describe.
+* **Slack still uses its own `botToken`.** Listed as a path in the plan's inventory; converting it is
+  mechanical and independent, and is better done where the channel-export gap (G11) is addressed.
+* **The plan's §13.1 open question stands.** When a group agent acts inside a `GroupConversation` the
+  principal may not be the human at all, so `PER_USER` currently refuses there. That needs a product
+  decision, not a default.
+* **0.7 (the SSRF default) is still unresolved.** The plan proposes that
+  `eddi.connections.enabled=true` force SSRF protection on. It is deliberately NOT implemented here:
+  the plan says this needs explicit sign-off, and silently changing a documented default as a side
+  effect of enabling an unrelated feature is exactly the kind of surprise the sign-off exists to
+  prevent. **Sign-off required.**
+
+### Tests
+
+`ConnectionConfigurationValidationTest` covers each write-time refusal separately — they have
+separate causes and one passing does not imply the others. `ConnectionResolverTest` covers the
+fail-closed rules, including that a malformed allowlist entry is a configuration error rather than a
+silent match-all. `OAuthTokenServiceRefreshTest` covers the refresh race with two *separate* service
+instances contending on one row, which is the case the in-process single-flight map cannot cover and
+the reason the claim exists. `InMemoryConnectionGrantStore` holds its monitor across the whole
+read-decide-write, because a double that merely reads and then writes would let those tests pass
+while the property under test was absent.
+
+### Review fixes (max-effort pass, same day)
+
+A max-effort review of this branch surfaced nine defects; all are fixed here.
+
+* **The refresh lease was validated against the wrong number.** The constructor asserted
+  `REFRESH_LEASE > OAuthTokenClient.DEFAULT_TIMEOUT`, but the client uses the per-connection
+  `timeoutMs` — which a config can set above the 60-second lease. A connection with
+  `timeoutMs: 120000` and a slow provider frees the lease mid-flight and a second replica performs
+  exactly the second token request the claim protocol exists to prevent. There is now a
+  `MAX_TIMEOUT` ceiling that a connection's timeout is clamped to, and the constructor checks
+  against **that** — the ceiling is what the slowest configurable connection uses, and it is the
+  slow one that decides whether the lease can expire early.
+* **A grant deleted mid-refresh spun to the deadline.** `awaitAnotherRefresh` returned "empty" both
+  for "not ready yet" and for "the row is gone", so a disconnect landing mid-refresh looped
+  claim→await→claim for the full 60 seconds and then reported `TOKEN_ENDPOINT_UNAVAILABLE`. The two
+  are now distinguished and a removed grant fails immediately as `NOT_CONNECTED`.
+* **An unresolved `${vars:…}` was sent as a literal credential.** The guard checked only for a
+  surviving `${vault:}`. Both forms fail identically — the literal text goes out as the header and
+  the provider answers 401 with nothing naming the missing variable — so the check now covers every
+  reference form the method resolves.
+* **Connection names were not unique.** `readByName` returns the first descriptor that matches, and
+  nothing refused a second connection called `jira`. Resolution then depended on scan order, which
+  changes after a delete or a re-index — one system's credential going to another's allowlisted
+  origin, silently and intermittently. Create and update now refuse a taken name, and duplicate
+  suffixes rather than colliding.
+* **Three views of one grant disagreed on the tenant.** `listMine` hardcoded `"default"` while
+  `disconnect` and the delete-cleanup resolved it from the connection. A grant under any other
+  tenant was invisible on the linked-accounts page while the agent resolved it and disconnect
+  deleted it.
+* **A connection header could silently displace another.** The connection's `headerName` replaced
+  the configured one, so `{"X-Jira-Auth": "${connection:jira}"}` sent `Authorization` instead, and
+  two references resolving to one header name overwrote each other with no signal. Both are now
+  refused with a message naming the mismatch.
+* **A missing connection was never counted.** `require()` throws before the timer starts and outside
+  the try block, so a deleted or misspelled connection failed every turn while
+  `connection.resolve.count` stayed flat — a healthy-looking dashboard over a completely broken
+  connector.
+* **`redirect` could NPE on a state row with no `returnTo`**, after the state was already claimed and
+  the code already exchanged — leaving the user a 500 and no way to retry. It now falls back, and
+  drops a fragment rather than appending a query after one.
+* **`claimRefresh` used `modifiedCount`.** Mongo reports zero modified when an update writes the
+  values already present, which a same-millisecond re-claim by the same claimant does — read as a
+  lost claim, sending the caller to wait for a refresh only it was going to perform. Matching the
+  filter *is* winning the claim, so both conditional writes now use `matchedCount`.
+
+Plus one nitpick: `requireCredentialEndpoint` built its message from two adjacent literals and told
+the author the authType was "OAuth", which is not one of the values.
+
+### Second review pass — multi-agent adversarial review (2026-08-22)
+
+An eight-angle review with per-finding refutation found thirteen more defects, three of which broke
+the feature's headline use cases outright. All are fixed here, with behavioural tests.
+
+**A connection-bound MCP server registered zero tools.** `authorizationHeader` withheld the
+credential whenever `McpCallContext.invocationContext()` was null — which is exactly how
+`initialize` and `tools/list` always arrive. The reasoning ("a cached session must not carry one
+user's token") is sound for `PER_USER` and simply false for `SERVICE`, where the credential is the
+same for everybody by definition. So discovery went out unauthenticated, the server answered 401,
+and the agent silently had no tools at all. New `ConnectionResolver.resolveForDiscovery` gates on
+the binding: `SERVICE` supplies the credential, `PER_USER` returns empty and the caller sends the
+request unauthenticated with a WARN naming the cause, and an unknown connection still throws rather
+than becoming another empty tool list with no explanation.
+
+The MCP **resource bridge** had the same defect by a different route: `list_resources` and
+`read_resource` are tools, executed inside a `ToolExecutor` on behalf of one user, but they called
+the no-context `McpClient` overloads — so they too looked like discovery and were sent
+unauthenticated. They now pass a shared `InvocationContext` whose only job is to say "this is a tool
+call". It carries no per-user state; the identity still comes from the thread, as it does for every
+other tool.
+
+**`executeA2ATask` sent the reference as the token.** The credential block existed twice in
+`A2AToolProviderManager`, and the two had drifted: only the agent-card fetch understood
+`${connection:…}`. An agent configured against a connection therefore discovered its peer's skills
+perfectly and then sent the literal string `Bearer ${connection:salesforce}` on every call it was
+actually asked to make. Both paths now go through one `applyCredential`, tested directly so a third
+caller cannot quietly become a third copy. While there: `warnIfRawKey` did not recognise
+`${connection:…}` and so told authors who had done the most managed thing possible that they were
+risking a leak; and the tool executor returned `e.getMessage()` to the MODEL, which can quote a URL
+with a token in its query or a provider body echoing the request.
+
+**DEK rotation destroyed every OAuth grant.** `rotateDek` re-encrypted the vault's secret collection
+and then replaced the key. Grants are sealed with that same DEK — deliberately, so there is one key
+hierarchy rather than two — and they live in their own collection, so an operator running a routine,
+documented, compliance-driven rotation silently disconnected every linked account in the tenant and
+found out one `invalid_grant` at a time, days later, with no way back. New
+`SealedDataRotationParticipant` SPI, discovered through CDI so `ai.labs.eddi.secrets` stays a leaf
+package, with `ConnectionGrantResealer` as its first implementation. Re-sealing happens **before**
+the DEK is replaced and is prepare-then-commit, so a failure aborts the rotation with the old key
+still in place rather than leaving rows that neither key opens.
+
+Refusing rotation while grants exist was the other option and was rejected: it makes a compliance
+control unusable from the moment the first user links an account.
+
+**The OAuth state was never bound to a browser.** The attack is the reverse of the one people
+expect. The state binds a principal, but on a hostile flow the *attacker* chooses that principal:
+they start a link under their own account, keep the state, and send the victim the provider's
+consent link built around it. The victim consents with their own Google account, the callback files
+the tokens under the attacker's principal — every field exactly as intended — and the attacker reads
+the victim's mail on their next turn. `authorize` now issues a per-state nonce cookie (`HttpOnly`,
+`SameSite=Lax` because the callback is a top-level cross-site GET that `Strict` would refuse,
+`Secure` when the public base URL is `https`) and the callback refuses without it. Only the SHA-256
+is stored, so database read access is not enough. Named per state so two tabs do not clobber each
+other. The check runs *after* the claim, so a failed binding cannot be retried with the same state,
+and it is answered identically to an invalid state.
+
+**Grant cleanup looked in the wrong place, twice.** `deleteConnection` read the name at the version
+in the request and always looked under the default tenant. So deleting an old version could revoke
+against a name the live connection no longer uses, and a connection belonging to any other tenant
+had every one of its refresh tokens survive its deletion. Now one `ConnectionIdentity` resolved at
+the current version, carrying both halves.
+
+Relatedly, **renaming a connection is now refused**. The name is what `${connection:…}` points at
+*and* what every grant is filed under, so a rename orphans this connection's grants and hands them
+to whatever is created under the old name next — a fresh connection, possibly to a different
+provider, resolving other people's live refresh tokens on its first call. A rename that rewrites
+grant rows is a migration, not a field edit. And `disconnect` now deletes by name without requiring
+the connection to still exist, because the case that matters most is exactly the one where an
+administrator deleted it and the user would otherwise hold an unrevokable token.
+
+**A HITL-approved call ran against the approver's account.** `resolvePrincipal` preferred the
+thread-bound caller over the conversation's owner. They are the same person on an ordinary turn and
+they are *not* on a resume, where the thread belongs to the approver — often an administrator, by
+design. So an approved call read the approver's SaaS data, and the approval did not mean what the
+approver was shown. The conversation principal now wins; it is not caller-supplied (it is the
+conversation's `userId`, fixed at creation from a verified identity) and `PER_USER` already refuses
+outright unless `authorization.enabled=true`.
+
+**`SERVICE` + `OAUTH2_AUTHORIZATION_CODE` validated but could never resolve** — and since `binding`
+defaults to `SERVICE`, that was the *default* shape of an authorization-code connection. It saved,
+deployed and showed users a working consent screen, then resolved every call against `__service__`,
+which no authorization-code flow can produce a grant for. The binding rule is now symmetric.
+
+**One admin write broke every replica's next boot.** `ConnectionStartupGuard` threw on the two
+unsupportable configurations. Creating one through the REST API is a live, permitted, single
+request — and from that moment no replica could start, including the ones that had not restarted yet
+and so gave no warning; the next rolling restart took the deployment down over a config document,
+fixable only by editing the database. The guard now logs, and the checks moved to the write boundary
+where the administrator is still there to see the 400. Nothing unsafe is permitted by that: both
+conditions already fail closed per request.
+
+The guard also raced the vault. Both observe `StartupEvent`, both were unordered, and one of the
+guard's checks asks `secretProvider.isAvailable()` — which the vault decides in *its* observer. Both
+now carry an explicit `@Priority`.
+
+**An unresolved `${vars:}` permanently killed every grant on a connection.** There were three copies
+of the resolve-and-check logic, each checking a different subset of the reference forms; the one on
+the refresh path missed `${vars:}` entirely. So a typo in a global variable was sent to the token
+endpoint *as the client secret*, the provider answered `invalid_client`, that maps to
+`GRANT_UNUSABLE`, and every user of the connection was marked `REFRESH_FAILED` — terminally — with
+nothing anywhere naming the variable. One `CredentialReferenceResolver` now, used by all three.
+
+**`releaseRefresh` in a `finally` could discard a successful refresh.** The new token was already
+persisted; a store blip while clearing the lease then replaced a successful return with an
+exception, so the caller saw a failed resolve for a grant that had in fact just been refreshed. The
+two stores did not even agree — Postgres logs and carries on, Mongo propagates. Now caught at the
+call site, which makes it uniform, and the lease expires on its own anyway.
+
+**Nothing swept `connection_oauth_states`.** `deleteExpired()` had no caller. Mongo has a TTL index;
+Postgres has nothing, so every abandoned consent screen left a row holding a live PKCE verifier,
+forever. New `OAuthStateMaintenance` sweeps hourly. The rows were already unusable — `claim` checks
+`expiresAt` itself — so this is retention, not enforcement.
+
+Also: `A2AToolProviderManager` built its `HttpClient` in the constructor, so merely injecting the
+bean started a selector thread and opened a loopback socket. Now created on first use with
+double-checked locking, which additionally makes the six A2A test classes runnable in environments
+without loopback.
 
 ---
 

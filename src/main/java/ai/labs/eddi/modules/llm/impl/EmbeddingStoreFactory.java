@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
+import ai.labs.eddi.connections.ConnectionParameterGuard;
 import ai.labs.eddi.datastore.mongo.MongoDriverInfoFactory;
 import ai.labs.eddi.secrets.SecretResolver;
 import com.github.benmanes.caffeine.cache.Cache;
@@ -397,6 +398,7 @@ public class EmbeddingStoreFactory {
     private Map<String, String> resolveParams(RagConfiguration config) {
         Map<String, String> rawParams = config.getStoreParameters() != null ? config.getStoreParameters() : Map.of();
         Map<String, String> resolved = globalVariableResolver.resolveAll(rawParams);
+        ConnectionParameterGuard.rejectConnectionReferences(resolved);
         return secretResolver.resolveSecrets(resolved);
     }
 
