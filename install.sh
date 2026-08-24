@@ -132,7 +132,12 @@ port_in_use() {
     # Use space/end-of-line anchor to avoid matching port 70 when checking 7070
     ss -tln 2>/dev/null | grep -qE ":${port}( |$)" && return 0
   elif command -v lsof &>/dev/null; then
-    lsof -iTCP:"${port}" -sTCP:LISTEN &>/dev/null && return 0
+    # Match on output, not exit code: busybox's lsof (Alpine and friends)
+    # ignores -i/-s entirely, lists every open file, and exits 0 -- by exit
+    # code alone EVERY port reads as taken, and the port resolver would abort
+    # with "no free port found". Real lsof prints "(LISTEN)" on each row;
+    # busybox's file list does not.
+    lsof -iTCP:"${port}" -sTCP:LISTEN 2>/dev/null | grep -q "LISTEN" && return 0
   elif command -v nc &>/dev/null; then
     nc -z 127.0.0.1 "${port}" 2>/dev/null && return 0
   else

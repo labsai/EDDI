@@ -6,6 +6,35 @@
 ---
 
 
+## fix(install): judge lsof port checks by output, not exit code (2026-08-24)
+
+**Repo:** EDDI (`fix/installer-mongodb-port-conflict`)
+
+Found while re-verifying the port-resolution work under old runtimes (the whole branch was exercised
+under Windows PowerShell 5.1 and real bash 3.2.57 in a `bash:3.2` container — parse, lint, and a
+behavioral harness per script). The harness immediately failed in the container: **every** port read
+as taken and the resolver aborted with "No free port found".
+
+Root cause is in the pre-existing `port_in_use` fallback chain (`ss` → `lsof` → `nc` → `/dev/tcp`):
+**busybox's lsof** — the default on Alpine and other minimal systems without `ss` — ignores
+`-iTCP`/`-sTCP:LISTEN` entirely, lists every open file, and exits 0. Judged by exit code alone, every
+port is "in use". Before this branch that was benign (a wrong warning, then proceed); the resolver
+escalated it to a hard abort, so it had to be fixed: the lsof branch now requires `LISTEN` in the
+output — real lsof prints `(LISTEN)` on every matching row, busybox's file list does not. On
+busybox-lsof machines detection now degrades to "everything free", which restores the pre-branch
+behaviour there, with docker's own bind error as the backstop.
+
+Old-runtime verification results, for the record: bash 3.2.57 parses the whole script (`bash -n`) and
+passes all eight harness cases (empty-array guard under `set -u`, reservation-aware
+`find_next_free_port`, reservation-driven collision, `printf -v` indirection, `.env` read-back,
+explicit-busy fail, non-numeric rejection, project-name derivation). PowerShell 5.1 parses the
+installer and passes the same harness. shellcheck at CI's exact invocation
+(`--severity=warning --shell=bash`) is clean. A real-script `-WhatIf` run with `-EddiPort 4317`
+confirmed reservations end-to-end: Jaeger OTLP gRPC moved off free-but-reserved 4317 to 4318, and
+OTLP HTTP cascaded to 4319.
+
+---
+
 ## fix(install): resolve every published host port, not just MongoDB's (2026-08-24)
 
 **Repo:** EDDI (`fix/installer-mongodb-port-conflict`)
