@@ -285,6 +285,29 @@ class AgentSigningServiceTest {
     private static class InMemorySecretProvider implements ISecretProvider {
         private final ConcurrentHashMap<String, String> store = new ConcurrentHashMap<>();
 
+        /**
+         * Reversible obfuscation, not encryption — this is a test double, and the
+         * property under test is that seal/unseal round-trips, not that it is strong.
+         * Prefixed so a test asserting "the stored value is not the plaintext" can see
+         * the difference.
+         */
+        @Override
+        public SealedValue seal(String tenantId, String plaintext) {
+            return plaintext == null ? null : new SealedValue("sealed:" + tenantId + ":" + plaintext, "test-iv");
+        }
+
+        @Override
+        public String unseal(String tenantId, SealedValue sealed) throws SecretProviderException {
+            if (sealed == null || sealed.ciphertext() == null) {
+                return null;
+            }
+            String prefix = "sealed:" + tenantId + ":";
+            if (!sealed.ciphertext().startsWith(prefix)) {
+                throw new SecretProviderException("Sealed with a different tenant key");
+            }
+            return sealed.ciphertext().substring(prefix.length());
+        }
+
         @Override
         public String resolve(SecretReference reference) throws SecretNotFoundException {
             String key = reference.tenantId() + ":" + reference.keyName();

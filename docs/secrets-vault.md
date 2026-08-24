@@ -24,7 +24,8 @@ EDDI includes a built-in secrets vault for managing sensitive values like API ke
 | -------------------------------------- | ------------------ | --------------------------------------------------------------- |
 | `SecretReference`                      | `secrets.model`    | Value object: `tenantId/keyName` URI parsing                    |
 | `EnvelopeCrypto`                       | `secrets.crypto`   | AES-256-GCM encryption with envelope key wrapping               |
-| `ISecretProvider`                      | `secrets`          | SPI for reading/writing encrypted secrets                       |
+| `ISecretProvider`                      | `secrets`          | SPI for reading/writing encrypted secrets, plus `seal`/`unseal` |
+| `SealedDataRotationParticipant`        | `secrets`          | SPI joining DEK rotation's sweep — implemented by anything else that stores `seal`-ed data |
 | `VaultSecretProvider`                  | `secrets.impl`     | Production implementation with envelope crypto + persistence    |
 | `SecretResolver`                       | `secrets`          | Resolves `${vault:...}` references to plaintext at runtime  |
 | `IRestSecretStore` / `RestSecretStore` | `secrets.rest`     | JAX-RS endpoints for secret CRUD and key rotation               |
@@ -136,8 +137,14 @@ Secret → tenant DEK → AES-256-GCM encrypt → ciphertext
                 │
                 └→ KEK wraps DEK → encrypted DEK
                         │
-                        └→ stored: { encryptedDek, iv, ciphertext }
+                        └→ stored: { encryptedDek, iv, ciphertext, dekId }
 ```
+
+`dekId` is `<tenantId>#g<generation>` — readable on purpose, so `default#g3` in a
+database row tells an operator exactly what it means. A tenant holds one DEK row per
+generation because [rotation adds one rather than replacing the key](#dek-rotation-is-additive--it-adds-a-generation),
+and ciphertext therefore has to say which key sealed it. A value written before
+generations existed carries no generation and reads as generation 1.
 
 ### Configuration
 
@@ -357,7 +364,7 @@ All endpoints are under the base path `/secretstore/secrets`. All endpoints requ
 | `GET`    | `/{tenantId}/{keyName}`      | Get secret **metadata only** (never returns plaintext) |
 | `GET`    | `/{tenantId}`                | List all secrets for a tenant (metadata only)          |
 | `GET`    | `/health`                    | Vault health check (provider status)                   |
-| `POST`   | `/{tenantId}/rotate-dek`     | Rotate the tenant's Data Encryption Key                |
+| `POST`   | `/{tenantId}/rotate-dek`     | Install the tenant's next DEK generation and sweep rows onto it |
 | `POST`   | `/admin/rotate-kek`          | Rotate the Master Key (KEK) — **TLS required**         |
 
 > **⚠️ Important:** The `GET` endpoints return **metadata only** (`keyName`, `createdAt`, `lastAccessedAt`, `checksum`). Secret values are **write-only** — they can be stored and used by the engine but never retrieved via API.
@@ -398,13 +405,23 @@ All endpoints are under the base path `/secretstore/secrets`. All endpoints requ
 }
 ```
 
-**`POST /{tenantId}/rotate-dek`** — rotates the tenant's DEK:
+**`POST /{tenantId}/rotate-dek`** — installs the tenant's next DEK generation and
+sweeps existing rows onto it:
 
 ```json
 {
   "tenantId": "default",
   "secretsReEncrypted": 5,
   "message": "DEK rotated successfully. 5 secrets re-encrypted."
+}
+```
+
+If the sweep does not finish, the call answers **500** and says so — the new
+generation is still active, nothing is lost, and re-running finishes the migration:
+
+```json
+{
+  "error": "DEK rotation failed: DEK rotation for tenant 'default': generation 3 is now the active key and every new value is sealed with it, but at least 2 sealed row(s) still name an older generation. Nothing is lost — those rows still decrypt with the generation they name, which has not been deleted — and the operation is safe to re-run to finish the migration."
 }
 ```
 
@@ -430,19 +447,75 @@ Response:
 
 ### Key Rotation
 
-EDDI supports two levels of key rotation:
+EDDI supports two levels of key rotation.
 
-**DEK Rotation** (`POST /{tenantId}/rotate-dek`):
-- Generates a new Data Encryption Key for the tenant
-- Re-encrypts all secrets with the new DEK
+#### DEK rotation is additive — it adds a generation
+
+`POST /{tenantId}/rotate-dek` does **not** replace the tenant's key. A tenant holds
+one DEK row per **generation**, and every ciphertext — a stored secret, and any
+other sealed value written through a `SealedDataRotationParticipant` — records the
+generation that sealed it. Reading opens a value with the generation
+it names, not with whichever one is newest.
+
+Rotation runs three phases, and only the middle one is irreversible:
+
+1. **Verify** — every existing generation is opened with the current KEK, so a wrong
+   `EDDI_VAULT_MASTER_KEY` is discovered before anything is written. Every
+   generation, not just the newest: the sweep below has to open the older ones, and
+   finding that out mid-sweep is a discovery that belongs before the commit point.
+2. **Commit** — the next generation is *inserted*. One statement, guarded by a
+   unique key on `(tenant, generation)`, so two racing rotations produce one winner
+   and one clean refusal. From here new values seal with the new key while every
+   existing row still names a generation that exists and decrypts.
+3. **Sweep** — rows move onto the new generation one at a time, each write guarded on
+   the state the row was read in, so a `store` that landed in between is never
+   overwritten with a re-seal of the value it replaced.
+
+**Old generations are never deleted.** That is precisely what makes a half-finished
+sweep harmless: a row the sweep did not reach still names a key that opens it.
+Deleting the generation a row still names is the one action that would make a
+partly swept tenant unreadable, so nothing here does it — and a resolve that finds
+a named generation missing says so by name rather than failing as a decryption
+error one layer down.
+
+**A partial sweep is reported, and re-running finishes it.** The endpoint answers
+**500** with a message stating that the new generation is active and every new value
+seals with it, that at least *N* sealed rows still name an older generation, that
+nothing is lost, and that the operation is safe to re-run. Re-running picks up
+exactly the rows the previous run left. Rows are swept individually so that one
+secret nobody can open does not strand the rest of the tenant on an older
+generation for every future rotation as well.
+
 - Does NOT require a restart
 - Recommended: rotate periodically or after personnel changes
 
-**KEK Rotation** (`POST /admin/rotate-kek`):
-- Re-encrypts all tenant DEKs with a new master key
+#### KEK rotation
+
+`POST /admin/rotate-kek` re-encrypts all tenant DEKs with a new master key:
+
+- **Every generation of every tenant is re-wrapped**, not just the newest. A tenant
+  part-way through a DEK sweep still has rows depending on an older generation, and
+  leaving one behind on the old KEK is exactly the orphaned-key failure generations
+  exist to prevent.
 - Secret ciphertexts are NOT modified — only DEK wrappers change
 - Requires an application restart with the new `EDDI_VAULT_MASTER_KEY` after rotation
-- Both operations use a verify-then-commit pattern: all decryption is validated before any writes occur
+- Verify-then-commit: every DEK is decrypted and re-encrypted in memory before any
+  write occurs, so a wrong old key fails before it can half-rewrite the set
+
+#### Schema
+
+Generations need one column and one index, and both are created on boot. Nothing to
+run by hand on either backend:
+
+| Backend | On boot |
+| --- | --- |
+| PostgreSQL | Adds `generation INTEGER NOT NULL DEFAULT 1` to `secret_vault_deks`, drops the column-level `UNIQUE (tenant_id)` constraint, and creates a unique index on `(tenant_id, generation)`. The old constraint is the blocker: while it stands a tenant cannot hold a second generation, so rotation has nowhere to write. It is an index rather than a constraint because only an index can be declared `IF NOT EXISTS`, and Postgres accepts one as an `ON CONFLICT` target just the same. |
+| MongoDB | Backfills `generation` on existing DEK documents, *then* drops the legacy unique-on-`tenantId` index and creates a unique compound index on `(tenantId, generation)`. That order matters — the backfill runs first so every pre-generation document has a generation to be indexed on. |
+
+A row written before generations existed reads as generation 1, which is what lets
+every already-stored ciphertext keep working with no migration of the ciphertext
+itself. During a rolling upgrade the two spellings coexist: a document with no
+`generation` field and a document holding `generation: 1` both match generation 1.
 
 ### Input Validation
 
