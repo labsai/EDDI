@@ -81,10 +81,24 @@ networks:
 #     "transport": "http"
 #   }
 #
-# TODO: put authentication on the bridge and reference it here as
-#       "apiKey": "${vault:filesystem-mcp-token}". Without it, anything that
-#       reaches the port gets an unauthenticated tool server — and "it is on an
-#       internal network" is one misconfigured NetworkPolicy away from false.
+# TODO: decide how this port is protected, and be honest about the answer.
+#       Anything that reaches it gets an unauthenticated tool server, and "it is
+#       on an internal network" is one misconfigured NetworkPolicy away from
+#       false.
+#
+#       Note what this bridge image can and cannot do. `mcp-proxy --help` on the
+#       pinned digest offers --client-id, --client-secret and --token-url, but
+#       those are for the proxy acting as an OAuth CLIENT toward an upstream
+#       server. It terminates no authentication of its own: there is no flag
+#       that makes it check an inbound credential. So setting
+#       "apiKey": "${vault:filesystem-mcp-token}" in the mcpcalls config on its
+#       own buys nothing — EDDI would send a token that nothing verifies, which
+#       is worse than no token, because it reads like protection.
+#
+#       Two real options: put a reverse proxy in front of the bridge that
+#       validates the credential (then the mcpcalls apiKey is what it checks),
+#       or treat network isolation as the only control and size the blast radius
+#       accordingly — read-only mount, one server, nothing else on the network.
 #
 # Note that every replica runs its own sidecar. If the MCP server holds per-user
 # state, five EDDI pods mean five independent copies of it.

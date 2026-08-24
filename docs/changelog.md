@@ -64,6 +64,19 @@ matching a fixed 65 characters: constant work, no closing brace required, and an
 caught and then fails `CALLER_PATTERN` like any other malformed one. The existing ReDoS perf guard now
 expects the rejection it always should have.
 
+### The sidecar's authentication advice asked for something the image cannot do
+
+The compose TODO and the hardening table both said to put a token on the bridge and give EDDI that token
+via `mcpcalls.apiKey`. Checked against the pinned image rather than assumed: `mcp-proxy --help` offers
+`--client-id`, `--client-secret` and `--token-url`, but those are for the proxy acting as an OAuth
+*client* toward an upstream server. It terminates no authentication of its own — there is no flag that
+makes it check an inbound credential.
+
+So an operator following that advice would configure EDDI to send a token nothing verifies, which is
+worse than sending none, because it reads like protection. Both places now say what the two real options
+are: front the bridge with a reverse proxy that validates the credential, or treat network isolation as
+the only control and size the blast radius for that.
+
 ### The MCP sidecar example could never have started
 
 `docker-compose.mcp-sidecar.yml` handed `npx -y @modelcontextprotocol/server-filesystem@… /data` to

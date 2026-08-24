@@ -162,7 +162,7 @@ So the container hardening above is not decoration. Each line is load-bearing:
 | **Non-root, `read_only`, `cap_drop: ALL`** | The bridge needs none of it. |
 | **CPU/memory limits** | A runaway or hostile server must not starve the node. |
 | **Isolated network** | The bridge must not be reachable by anything else on the pod network, and the server's own egress should be restricted to the provider it needs. |
-| **Authentication on the bridge** | Without it, anything that can reach the port gets an unauthenticated tool server. Put a token on it and give EDDI the token via `apiKey`. |
+| **Authentication on the bridge** | Without it, anything that can reach the port gets an unauthenticated tool server. Mind what the bridge can actually do, though: `mcp-proxy` offers `--client-id`/`--client-secret`/`--token-url`, but those are for the proxy acting as an OAuth *client* toward an upstream — it terminates no authentication of its own. Setting `apiKey` in the `mcpcalls` config alone therefore buys nothing, because EDDI would send a token nothing verifies. Either front the bridge with a reverse proxy that checks the credential, or treat network isolation as the only control and size the blast radius for that. |
 
 A five-replica deployment runs five sidecars with five independent states. If the
 server holds per-user state, that matters; if it is stateless, it does not.
