@@ -6,6 +6,71 @@
 ---
 
 
+## fix(install): stop the installers dying on a MongoDB port clash (2026-08-24)
+
+**Repo:** EDDI (`fix/installer-mongodb-port-conflict`)
+
+Reported from Windows: `install.ps1` aborted with a raw Docker error and a PowerShell stack trace.
+
+```
+Error response from daemon: ports are not available: exposing port TCP 127.0.0.1:27017 -> ...
+bind: Only one usage of each socket address ... is normally permitted.
+  ❌ Failed to start containers.
+```
+
+`docker-compose.yml` publishes the database on `127.0.0.1:${MONGO_PORT:-27017}`, and the installers'
+port wizard only ever looked at EDDI's own **7070/7443**. So any machine that already had something on
+27017 — including a machine set up by following the README's own development quick start
+(`docker run -d -p 27017:27017 mongo:7`) — hit a bind failure the installer had no words for. The
+resulting message ("Failed to start containers.") named neither the port nor a way forward.
+
+### What changed
+
+`install.ps1` and `install.sh`, symmetrically — the same defect was in both, the report just happened
+to come from Windows.
+
+- **Resolve the database port before Docker refuses the bind.** Step 5 (Ports) now also resolves the
+  MongoDB host port: free → keep 27017; taken → warn and take the next free port. Containers reach
+  MongoDB over the compose network as `mongodb:27017` regardless, so moving the *host* port is
+  invisible to EDDI.
+- **`MONGO_PORT` is written to `.env`**, which `docker-compose.yml` already reads. `.env.example`
+  documented the variable; nothing set it.
+- **New `-MongoPort` / `--mongo-port=` (or `MONGO_PORT` env).** An explicitly chosen port that turns
+  out to be busy is a hard failure, not a silent remap — the caller asked for that port.
+- **The "Failed to start containers" message now names the two likely causes** (a port already held, or
+  orphan containers from a previous install) with the command for each.
+
+### Design decisions
+
+**A port held by our own container is not a conflict.** `docker compose up` reuses an existing
+container rather than binding the port twice, so remapping there would churn the container for nothing.
+Before remapping, both scripts ask `docker ps --filter publish=<port> --filter
+label=com.docker.compose.project=<project>` whether the listener is ours, and keep the port if it is.
+The project name is derived the way Compose derives it — the install directory's basename, lowercased
+and stripped to `[a-z0-9_-]`.
+
+**A previous install's port wins over the default.** Without this, an install that had been moved to
+27018 would drift back to 27017 the moment the foreign listener stopped, recreating the container on
+every re-run. The value is read back out of `.env`.
+
+**PostgreSQL needs none of this.** `docker-compose.postgres-only.yml` publishes no database port at
+all, so `MONGO_PORT` stays empty and is omitted from `.env` for those installs.
+
+**Orphan containers are reported, not removed.** The same run also warned about a leftover
+`eddi-postgres-1` from an earlier PostgreSQL install. `--remove-orphans` would clear it, but it deletes
+containers on the user's behalf to silence a warning that is not what broke the install — so the
+failure path prints the command instead of running it.
+
+### Verification
+
+The new resolution logic was exercised in isolation against the reporting machine's real state (a host
+process on 27017, no container publishing it): default → remapped to 27018 with a warning; `.env`-pinned
+27099 → honoured; explicit free port → honoured; explicit busy port → hard fail; PostgreSQL → empty.
+`bash -n install.sh` and a PowerShell AST parse both pass, and PSScriptAnalyzer reports no new findings
+(the pre-existing warnings are unchanged).
+
+---
+
 
 ## chore(ci): persist the project metrics series instead of letting it expire (2026-08-21)
 

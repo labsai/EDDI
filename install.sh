@@ -16,6 +16,10 @@ EDDI_BRANCH="${EDDI_BRANCH:-main}"
 EDDI_VERSION="${EDDI_VERSION:-latest}"
 EDDI_PORT="${EDDI_PORT:-7070}"
 EDDI_HTTPS_PORT="${EDDI_HTTPS_PORT:-7443}"
+# Host port published by the MongoDB container (empty = resolve automatically)
+MONGO_PORT="${MONGO_PORT:-}"
+MONGO_PORT_EXPLICIT=false
+[[ -n "$MONGO_PORT" ]] && MONGO_PORT_EXPLICIT=true
 EDDI_DIR="${EDDI_DIR:-$HOME/.eddi}"
 # Strip trailing slash to avoid double-slash paths in output/config
 EDDI_DIR="${EDDI_DIR%/}"
@@ -130,6 +134,77 @@ find_next_free_port() {
   echo "0"
 }
 
+# Default Compose project name: the basename of the directory holding the
+# compose files, lowercased with everything outside [a-z0-9_-] stripped.
+compose_project_name() {
+  local name
+  name=$(basename "$EDDI_DIR" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9_-')
+  echo "${name:-eddi}"
+}
+
+# Is the listener on $1 a container of *our* Compose project? Then it is not a
+# conflict -- `docker compose up` reuses that container instead of binding the
+# port a second time.
+port_owned_by_project() {
+  local port="$1" names project
+  project=$(compose_project_name)
+  names=$(docker ps --filter "publish=${port}" --filter "label=com.docker.compose.project=${project}" --format '{{.Names}}' 2>/dev/null) || return 1
+  [[ -n "$names" ]]
+}
+
+# The MongoDB container publishes a host port (docker-compose.yml maps
+# 127.0.0.1:${MONGO_PORT:-27017}). A MongoDB already listening on 27017 -- which
+# the README's development quick start actively tells you to start -- otherwise
+# fails `docker compose up` with a raw "ports are not available" bind error.
+# Containers always reach MongoDB on the compose network as mongodb:27017, so
+# moving the *host* port is invisible to EDDI.
+resolve_mongo_port() {
+  # postgres-only.yml publishes no database port, so nothing to resolve
+  if [[ "${DB_CHOICE:-1}" == "2" ]]; then
+    MONGO_PORT=""
+    return
+  fi
+
+  local preferred=27017
+  if [[ "$MONGO_PORT_EXPLICIT" == "true" ]]; then
+    if [[ ! "$MONGO_PORT" =~ ^[0-9]+$ ]] || (( MONGO_PORT < 1 || MONGO_PORT > 65535 )); then
+      fail "Invalid MONGO_PORT '${MONGO_PORT}'. Must be a port number (1-65535)."
+    fi
+    preferred="$MONGO_PORT"
+  elif [[ -f "$EDDI_DIR/.env" ]]; then
+    # Reuse the port a previous install settled on, so re-runs stay stable
+    local previous
+    previous=$(grep -m1 -E '^MONGO_PORT=[0-9]+$' "$EDDI_DIR/.env" 2>/dev/null | cut -d= -f2 || true)
+    [[ -n "$previous" ]] && preferred="$previous"
+  fi
+
+  if ! port_in_use "$preferred"; then
+    MONGO_PORT="$preferred"
+    info "MongoDB port: ${preferred}"
+    return
+  fi
+
+  if port_owned_by_project "$preferred"; then
+    MONGO_PORT="$preferred"
+    info "MongoDB port: ${preferred} (held by the existing EDDI container)"
+    return
+  fi
+
+  if [[ "$MONGO_PORT_EXPLICIT" == "true" ]]; then
+    fail "Port ${preferred} is already in use by another process.\n     Stop it, or re-run with a different --mongo-port."
+  fi
+
+  warn "Port ${preferred} is in use by another process (a local MongoDB?)."
+  local free
+  free=$(find_next_free_port $((preferred + 1)))
+  if [[ "$free" == "0" ]]; then
+    fail "No free port found near ${preferred} for MongoDB.\n     Stop the process using port ${preferred}, or re-run with --mongo-port=<port>."
+  fi
+  echo -e "  ${DIM}EDDI's MongoDB will publish ${free} instead (EDDI reaches it internally on 27017).${RESET}"
+  MONGO_PORT="$free"
+  info "MongoDB port: ${free}"
+}
+
 # Prompt the user for a port. Shows conflict info and suggests alternatives.
 # Returns the chosen port on stdout.
 # Usage: EDDI_PORT=$(read_port "HTTP" "$EDDI_PORT")
@@ -212,6 +287,7 @@ for arg in "$@"; do
     --with-monitoring) WITH_MONITORING=true ;;
     --vault-key=*)    VAULT_KEY_ARG="${arg#*=}" ;;
     --eddi-version=*) EDDI_VERSION="${arg#*=}" ;;
+    --mongo-port=*)   MONGO_PORT="${arg#*=}"; MONGO_PORT_EXPLICIT=true ;;
     --full)           DB_CHOICE="2"; WITH_AUTH=true; WITH_MONITORING=true ;;
     --local)          LOCAL_IMAGE=true ;;
     --help|-h)
@@ -228,12 +304,14 @@ for arg in "$@"; do
       echo "  --with-auth             Include Keycloak authentication"
       echo "  --with-monitoring       Include Grafana + Prometheus"
       echo "  --eddi-version=<tag>    Pin EDDI image tag (default: latest)"
+      echo "  --mongo-port=<port>     Host port for MongoDB (default: 27017)"
       echo "  --full                  All options enabled"
       echo "  --local                 Use locally built Docker image (skip pull)"
       echo ""
       echo "Environment variables:"
       echo "  EDDI_PORT           HTTP port (default: 7070)"
       echo "  EDDI_HTTPS_PORT     HTTPS port (default: 7443)"
+      echo "  MONGO_PORT          Host port for MongoDB (default: 27017)"
       echo "  EDDI_DIR            Install directory (default: ~/.eddi)"
       echo "  EDDI_VERSION        Image tag to pull (default: latest)"
       exit 0
@@ -515,6 +593,10 @@ wizard_ports() {
 
   EDDI_PORT=$(read_port "HTTP" "$EDDI_PORT")
   EDDI_HTTPS_PORT=$(read_port "HTTPS" "$EDDI_HTTPS_PORT")
+
+  # The database container publishes a host port too -- resolve it before docker
+  # refuses the bind
+  resolve_mongo_port
 }
 
 # ── Compose file management ───────────────────────────────
@@ -709,6 +791,10 @@ EDDI_PORT=$EDDI_PORT
 EDDI_HTTPS_PORT=$EDDI_HTTPS_PORT
 EDDI_VERSION=$EDDI_VERSION
 EOF
+  # Host port for the MongoDB container (empty for PostgreSQL installs)
+  if [[ -n "$MONGO_PORT" ]]; then
+    echo "MONGO_PORT=$MONGO_PORT" >> "$EDDI_DIR/.env"
+  fi
   # Restrict permissions on sensitive files (owner-only read/write)
   chmod 600 "$EDDI_DIR/.env"
   chmod 600 "$EDDI_DIR/.eddi-config"
@@ -763,7 +849,7 @@ start_eddi() {
     echo ""
     cat "$compose_err" >&2
     rm -f "$compose_err"
-    fail "Failed to start containers.\n     Check logs: docker compose logs in $EDDI_DIR"
+    fail "Failed to start containers.\n     If the error above says 'ports are not available', another process holds\n     one of EDDI's ports -- re-run with e.g. EDDI_PORT=7071 --mongo-port=27018.\n     If it mentions orphan containers, a previous install left some behind:\n       docker compose -p $(compose_project_name) down --remove-orphans\n     Check logs: docker compose logs in $EDDI_DIR"
   fi
   rm -f "$compose_err"
 }
@@ -1351,6 +1437,7 @@ print_config_summary() {
     echo -e "  Monitoring:     ${DIM}none${RESET}"
   fi
   echo -e "  Port:           ${BOLD}${EDDI_PORT}${RESET} (HTTP), ${BOLD}${EDDI_HTTPS_PORT}${RESET} (HTTPS)"
+  [[ -n "$MONGO_PORT" ]] && echo -e "  MongoDB port:   ${BOLD}${MONGO_PORT}${RESET}"
   echo -e "  Install dir:    ${BOLD}${EDDI_DIR}${RESET}"
 }
 

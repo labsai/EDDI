@@ -34,6 +34,11 @@
 .PARAMETER EddiHttpsPort
     HTTPS port for EDDI (default: 7443, or EDDI_HTTPS_PORT env var).
 
+.PARAMETER MongoPort
+    Host port the MongoDB container publishes (default: 27017, or MONGO_PORT env
+    var). Only used with -Database mongodb. If the default is taken by another
+    process, the installer picks the next free port automatically.
+
 .PARAMETER EddiDir
     Installation directory (default: ~/.eddi, or EDDI_DIR env var).
 
@@ -71,6 +76,7 @@ param(
     [switch]$Help,
     [string]$EddiPort = $env:EDDI_PORT,
     [string]$EddiHttpsPort = $env:EDDI_HTTPS_PORT,
+    [string]$MongoPort = $env:MONGO_PORT,
     [string]$EddiDir = $env:EDDI_DIR
 )
 
@@ -97,6 +103,12 @@ $ProgressPreference = 'SilentlyContinue'
 if ($Database -and $Database -notin @("mongodb", "postgres")) {
     throw "Invalid -Database value '$Database'. Must be 'mongodb' or 'postgres'."
 }
+
+# Validate -MongoPort if provided
+if ($MongoPort -and ($MongoPort -notmatch '^\d+$' -or [int]$MongoPort -lt 1 -or [int]$MongoPort -gt 65535)) {
+    throw "Invalid -MongoPort value '$MongoPort'. Must be a port number (1-65535)."
+}
+$MongoPortExplicit = [bool]$MongoPort
 
 # -- Configuration ------------------------------------------
 if (-not $EddiPort) { $EddiPort = "7070" }
@@ -190,6 +202,79 @@ function Find-NextFreePort([int]$Start) {
         if (-not (Test-PortInUse $p)) { return $p }
     }
     return 0
+}
+
+# Default Compose project name: the basename of the directory holding the
+# compose files, lowercased with everything outside [a-z0-9_-] stripped.
+function Get-ComposeProjectName {
+    $name = (Split-Path -Path $EddiDir -Leaf).ToLowerInvariant() -replace '[^a-z0-9_-]', ''
+    if (-not $name) { $name = "eddi" }
+    return $name
+}
+
+# Is the listener on $Port a container of *our* Compose project? Then the port is
+# not a conflict -- `docker compose up` reuses that container instead of binding
+# the port a second time.
+function Test-PortOwnedByProject([int]$Port) {
+    try {
+        $project = Get-ComposeProjectName
+        # cmd /c isolates docker's stderr from the PS error stream (see Test-Prerequisites)
+        $names = cmd /c "docker ps --filter publish=$Port --filter label=com.docker.compose.project=$project --format {{.Names}} 2>nul"
+        return -not [string]::IsNullOrWhiteSpace(($names | Out-String))
+    }
+    catch {
+        return $false
+    }
+}
+
+# The MongoDB container publishes a host port (docker-compose.yml maps
+# 127.0.0.1:${MONGO_PORT:-27017}). A MongoDB already listening on 27017 -- which
+# the README's development quick start actively tells you to start -- otherwise
+# fails `docker compose up` with a raw "ports are not available" bind error.
+# Containers always reach MongoDB on the compose network as mongodb:27017, so
+# moving the *host* port is invisible to EDDI.
+function Resolve-MongoPort {
+    # postgres-only.yml publishes no database port, so nothing to resolve
+    if ($Database -eq "postgres") { $script:MongoPort = ""; return }
+
+    $preferred = 27017
+    if ($MongoPortExplicit) {
+        $preferred = [int]$MongoPort
+    }
+    else {
+        # Reuse the port a previous install settled on, so re-runs stay stable
+        $envPath = Join-Path -Path $EddiDir -ChildPath ".env"
+        if (Test-Path $envPath) {
+            $previous = Select-String -Path $envPath -Pattern '^MONGO_PORT=(\d+)' -ErrorAction SilentlyContinue |
+                Select-Object -First 1
+            if ($previous) { $preferred = [int]$previous.Matches[0].Groups[1].Value }
+        }
+    }
+
+    if (-not (Test-PortInUse $preferred)) {
+        $script:MongoPort = "$preferred"
+        Write-Ok "MongoDB port: $preferred"
+        return
+    }
+
+    if (Test-PortOwnedByProject $preferred) {
+        $script:MongoPort = "$preferred"
+        Write-Ok "MongoDB port: $preferred (held by the existing EDDI container)"
+        return
+    }
+
+    if ($MongoPortExplicit) {
+        Write-Fail "Port $preferred is already in use by another process.`n     Stop it, or re-run with a different -MongoPort."
+    }
+
+    Write-Warn "Port $preferred is in use by another process (a local MongoDB?)."
+    $free = Find-NextFreePort ($preferred + 1)
+    if ($free -eq 0) {
+        Write-Fail "No free port found near $preferred for MongoDB.`n     Stop the process using port $preferred, or re-run with -MongoPort <port>."
+    }
+    Write-Information -MessageData "  EDDI's MongoDB will publish $free instead (EDDI reaches it internally on 27017)."
+    $script:MongoPort = "$free"
+    Write-Ok "MongoDB port: $free"
 }
 
 function Read-Port([string]$PortName, [int]$DefaultPort) {
@@ -447,6 +532,10 @@ function Step-Ports {
 
     $script:EddiPort = Read-Port "HTTP" ([int]$EddiPort)
     $script:EddiHttpsPort = Read-Port "HTTPS" ([int]$EddiHttpsPort)
+
+    # The database container publishes a host port too -- resolve it before
+    # docker refuses the bind
+    Resolve-MongoPort
 }
 
 # -- Compose file management ------------------------------
@@ -607,6 +696,8 @@ EDDI_HTTPS_PORT=$EddiHttpsPort
 "@
     $envPath = Join-Path -Path $EddiDir -ChildPath ".env"
     $envContent | Set-Content -Path $envPath
+    # Host port for the MongoDB container (empty for PostgreSQL installs)
+    if ($MongoPort) { Add-Content -Path $envPath -Value "MONGO_PORT=$MongoPort" }
 
     # Restrict sensitive file permissions -- remove broad read access but keep SYSTEM/Admins
     foreach ($securePath in @($envPath, $configPath)) {
@@ -684,7 +775,7 @@ function Start-Eddi {
         $script:ContainersStarted = $true
     }
     else {
-        Write-Fail "Failed to start containers."
+        Write-Fail "Failed to start containers.`n     If the error above says 'ports are not available', another process holds`n     one of EDDI's ports -- re-run with e.g. -EddiPort 7071 -MongoPort 27018.`n     If it mentions orphan containers, a previous install left some behind:`n       docker compose -p $(Get-ComposeProjectName) down --remove-orphans"
     }
 }
 
@@ -793,6 +884,7 @@ function Write-ConfigSummary {
     Write-Information -MessageData "  Monitoring:     $monLabel"
     Write-Information -MessageData "  HTTP port:      $EddiPort"
     Write-Information -MessageData "  HTTPS port:     $EddiHttpsPort"
+    if ($MongoPort) { Write-Information -MessageData "  MongoDB port:   $MongoPort" }
     Write-Information -MessageData "  Install dir:    $EddiDir"
 }
 
