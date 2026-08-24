@@ -99,6 +99,11 @@ public class SecretScrubber {
      * {@code accessToken}, {@code refreshToken} and {@code authToken} do not begin
      * with a quantity.
      */
+    /**
+     * {@code scheme://} at the start of a value. Bounded, so the scan stays linear.
+     */
+    private static final Pattern SCHEME_PREFIX = Pattern.compile("^[a-zA-Z][a-zA-Z0-9+.-]{0,31}://");
+
     private static final Set<String> QUANTITY_QUALIFIERS = Set.of("max", "min", "num", "number", "total", "budget");
 
     private final ObjectMapper objectMapper;
@@ -229,9 +234,25 @@ public class SecretScrubber {
     }
 
     /** An http(s) URL — the only shape {@link UriRedactor} is meant to be given. */
+    /**
+     * Any {@code scheme://authority} value, not just the two web schemes.
+     * <p>
+     * The per-component pass is what pulls a password out of a URI's userinfo, and
+     * restricting the gate to http and https meant a connection string never
+     * reached it: {@code mongodb://user:pw@host/db} is exactly the shape EDDI's own
+     * configuration uses, and its password is not caught by the whole-value checks
+     * either — the {@code :}, {@code /}, {@code ?} and {@code =} of a URI defeat
+     * the key-like pattern the entropy check requires. So it was exported verbatim.
+     * {@code wss://}, {@code redis://}, {@code amqp://} and {@code postgresql://}
+     * carry credentials the same way.
+     * <p>
+     * Matching the RFC 3986 scheme grammar rather than listing schemes: the next
+     * one nobody thought of is the one that leaks. {@link UriRedactor#redactUri} is
+     * scheme-agnostic, and returns the value unchanged when nothing needed
+     * redacting, so widening the gate cannot over-redact a value that is not a URI.
+     */
     private static boolean looksLikeUrl(String value) {
-        String lower = value.trim().toLowerCase(Locale.ROOT);
-        return lower.startsWith("http://") || lower.startsWith("https://");
+        return SCHEME_PREFIX.matcher(value.trim()).find();
     }
 
     /**

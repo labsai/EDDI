@@ -370,6 +370,26 @@ class SecretScrubberTest {
     }
 
     @Test
+    @DisplayName("a connection string's password is scrubbed, not just an http URL's")
+    void scrubJson_nonHttpConnectionStringCredentials() {
+        // The per-component pass is what pulls a password out of a URI's userinfo,
+        // and it was gated on http/https alone. A mongodb:// connection string is
+        // the shape EDDI's own configuration uses, and its password survives the
+        // whole-value checks too — the ':', '/', '?' and '=' of a URI defeat the
+        // key-like pattern the entropy check needs — so it was exported verbatim.
+        String json = "{\"parameters\": {"
+                + "\"mongoUri\": \"mongodb://eddi:s3cretpassword@mongodb:27017/eddi?authSource=admin\", "
+                + "\"streamUri\": \"wss://svc:hunter2@events.example.com/socket\"}}";
+
+        String scrubbed = scrubber.scrubJson(json);
+
+        assertFalse(scrubbed.contains("s3cretpassword"), "a mongodb password is a password: " + scrubbed);
+        assertFalse(scrubbed.contains("hunter2"), "and so is a websocket one: " + scrubbed);
+        assertTrue(scrubbed.contains("mongodb:27017"), "the host has to survive or the export is not importable: " + scrubbed);
+        assertTrue(scrubbed.contains("events.example.com"), scrubbed);
+    }
+
+    @Test
     @DisplayName("a credential whose name merely BEGINS with a quantity word is still scrubbed")
     void scrubJson_qualifierIsAWordNotAPrefix() {
         // The exemption was a raw prefix test against the NORMALIZED name, and

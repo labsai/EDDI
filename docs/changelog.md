@@ -90,6 +90,20 @@ base, and pointed the compose file and `docs/mcp-client.md` at the pre-installed
 built image runs the server under `--network none --read-only --cap-drop ALL` as uid 10001. The
 `/home/node` tmpfs went with `npx`; nothing needs a writable HOME now.
 
+### A connection string's password was not a URL as far as the scrubber was concerned
+
+Second half of the URL finding, missed on the first pass. The per-component redaction is what pulls a
+password out of a URI's userinfo, and the gate onto it tested for `http://` or `https://` only. So
+`mongodb://eddi:s3cretpassword@mongodb:27017/eddi?authSource=admin` &mdash; the exact shape EDDI's own
+configuration uses &mdash; never reached it. Nor did the whole-value checks catch it: the `:`, `/`, `?`
+and `=` of a URI defeat the key-like pattern the entropy check requires, so the password was exported
+verbatim. `wss://`, `redis://`, `amqp://` and `postgresql://` carry credentials the same way.
+
+The gate now matches the RFC 3986 scheme grammar rather than a list of schemes, on the grounds that the
+next scheme nobody thought of is the one that leaks. `UriRedactor.redactUri` is already scheme-agnostic
+and returns its input unchanged when nothing needed redacting, so widening cannot over-redact a value
+that is not a URI.
+
 ### A credential whose name merely began with a quantity word
 
 `SecretScrubber` exempts token-BUDGET fields from the credential-suffix rule, because `maxTokens`
