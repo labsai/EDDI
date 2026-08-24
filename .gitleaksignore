@@ -82,10 +82,29 @@ eebfe898b34858918d5cbbe11e60336d1b6a916e:src/test/java/ai/labs/eddi/secrets/sani
 # ConnectionStoreFindByNameTest: not a credential at all, and not even a
 # credential-shaped literal — a 24-character MongoDB ObjectId standing in for a
 # stored connection's document id. What tripped the atlassian-api-token rule was
-# the CONSTANT NAME: `JIRA_ID = "68a1b2c3d4e5f60718293a4b"` puts a provider name
-# next to a hex blob, which is the shape the rule looks for. Renamed in a
-# follow-up commit to CONNECTION_ID, which says what the value is and takes the
-# provider name out of the picture, but gitleaks scans a PR's whole commit range,
-# so the commit that introduced the original name stays in history and still
-# needs an entry. Never a key: the value is a document id used to look a row up.
+# the CONSTANT NAME: a provider name sitting next to a hex blob is the shape the
+# rule looks for, whatever the blob actually is. Renamed in a follow-up commit to
+# one that says what the value is and leaves the provider out of it, but gitleaks
+# scans a PR's whole commit range, so the introducing commit still needs an entry.
+# Never a key: the value is a document id used to look a row up.
+#
+# Note this comment deliberately does NOT quote the old declaration. The first
+# version of it did, and the allowlist promptly became a finding of its own —
+# see the entry below for the commit that carried it.
 2c8c512a84cc1b3e60cd8bac18b4437728bc282b:src/test/java/ai/labs/eddi/configs/connections/mongo/ConnectionStoreFindByNameTest.java:atlassian-api-token:50
+
+# The allowlist entry above, in the commit where its explanation still quoted the
+# `JIRA_ID = "<hex>"` declaration it was explaining. The comment no longer does,
+# but that commit is in this PR's range.
+0c228141ecfcaf0270190b557dafa2aea0d09eab:.gitleaksignore:atlassian-api-token:85
+
+# MongoOAuthStateStoreTest / PostgresOAuthStateStoreUnitTest: the fixture standing
+# in for a single-use OAuth `state` was written as a short random-looking string
+# next to a constant named STATE_TOKEN — a value shape and a name that together
+# are exactly what generic-api-key is built to match. Replaced in a follow-up
+# commit with a zero-entropy value (repeated characters: same shape, nothing for
+# the scanner to weigh), but the introducing commit stays in the PR's range.
+# Never a credential: an OAuth state is a correlation nonce, compared for equality
+# and then discarded, and any string does the job.
+0c228141ecfcaf0270190b557dafa2aea0d09eab:src/test/java/ai/labs/eddi/connections/oauth/MongoOAuthStateStoreTest.java:generic-api-key:62
+0c228141ecfcaf0270190b557dafa2aea0d09eab:src/test/java/ai/labs/eddi/connections/oauth/PostgresOAuthStateStoreUnitTest.java:generic-api-key:57

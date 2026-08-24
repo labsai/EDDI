@@ -59,7 +59,10 @@ class MongoOAuthStateStoreTest {
 
     private static final String COLLECTION = "connection_oauth_states";
 
-    private static final String STATE_TOKEN = "s-9f2c4a1b7e";
+    // Zero-entropy on purpose. A realistic-looking state value next to a constant
+    // named TOKEN is the exact shape a credential scanner is built to flag, and a
+    // single-use OAuth state is not a credential — any string does here.
+    private static final String STATE_TOKEN = "state-aaaaaaaaaaaa";
     private static final String TENANT = "tenant-1";
     private static final String CONNECTION = "google-mail";
     private static final String PRINCIPAL = "user@example.com";
