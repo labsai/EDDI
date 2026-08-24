@@ -30,6 +30,7 @@ import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
 import ai.labs.eddi.modules.llm.capability.JsonResponseFormatPolicy;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.engine.model.Context;
+import ai.labs.eddi.modules.llm.guardrails.ToolResultGuardrail;
 import ai.labs.eddi.modules.llm.impl.orchestration.ToolApprovalGateSupport;
 import ai.labs.eddi.modules.llm.impl.orchestration.ToolContextBudget;
 import ai.labs.eddi.modules.llm.tools.spi.ToolAssemblyContext;
@@ -293,6 +294,13 @@ class AgentOrchestrator implements IAgentOrchestrator {
     final ConversationHistoryBuilder conversationHistoryBuilder;
 
     /**
+     * Governs what a tool result looks like by the time the model sees it. Held
+     * here rather than in {@link ToolLoopRunner} alone because the runner is
+     * constructed, not injected.
+     */
+    private final ToolResultGuardrail toolResultGuardrail;
+
+    /**
      * The SAME estimator factory {@code LlmTask} uses to window conversation
      * history, reused here to meter the in-turn tool context. Deliberately not a
      * second estimator: one accounting rule for both halves of the request means a
@@ -330,7 +338,15 @@ class AgentOrchestrator implements IAgentOrchestrator {
      */
     private final BuiltinToolsProvider builtinToolsProvider;
 
-    @Inject
+    /**
+     * Convenience constructor without a tool-result guardrail, for tests and for
+     * callers that construct an orchestrator directly.
+     * <p>
+     * The guardrail is still applied — it is constructed here with a {@code null}
+     * meter registry, which only turns metrics off. A constructor that skipped
+     * governance entirely would let a test pass while asserting behaviour that
+     * production does not have.
+     */
     AgentOrchestrator(CalculatorTool calculatorTool, DateTimeTool dateTimeTool, WebSearchTool webSearchTool, DataFormatterTool dataFormatterTool,
             WebScraperTool webScraperTool, TextSummarizerTool textSummarizerTool, PdfReaderTool pdfReaderTool, WeatherTool weatherTool,
             FetchToolResponsePageTool fetchToolResponsePageTool,
@@ -343,6 +359,26 @@ class AgentOrchestrator implements IAgentOrchestrator {
             IConversationService conversationService, IAgentFactory agentFactory, IAgentStore agentStore,
             IHitlToolJournalStore journalStore, ConversationHistoryBuilder conversationHistoryBuilder,
             TokenCounterFactory tokenCounterFactory) {
+        this(calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool, webScraperTool, textSummarizerTool, pdfReaderTool, weatherTool,
+                fetchToolResponsePageTool, toolExecutionService, mcpToolProviderManager, a2aToolProviderManager, restAgentStore, restWorkflowStore,
+                resourceClientLibrary, apiCallExecutor, jsonSerialization, memoryItemConverter, userMemoryStore, toolResponseTruncator,
+                tenantQuotaService, memorySnapshotService, agentSetupService, capabilityRegistryService, conversationService, agentFactory,
+                agentStore, journalStore, conversationHistoryBuilder, tokenCounterFactory, new ToolResultGuardrail(null));
+    }
+
+    @Inject
+    AgentOrchestrator(CalculatorTool calculatorTool, DateTimeTool dateTimeTool, WebSearchTool webSearchTool, DataFormatterTool dataFormatterTool,
+            WebScraperTool webScraperTool, TextSummarizerTool textSummarizerTool, PdfReaderTool pdfReaderTool, WeatherTool weatherTool,
+            FetchToolResponsePageTool fetchToolResponsePageTool,
+            ToolExecutionService toolExecutionService, McpToolProviderManager mcpToolProviderManager, A2AToolProviderManager a2aToolProviderManager,
+            IRestAgentStore restAgentStore, IRestWorkflowStore restWorkflowStore, IResourceClientLibrary resourceClientLibrary,
+            IApiCallExecutor apiCallExecutor, IJsonSerialization jsonSerialization, IMemoryItemConverter memoryItemConverter,
+            IUserMemoryStore userMemoryStore, ToolResponseTruncator toolResponseTruncator, TenantQuotaService tenantQuotaService,
+            MemorySnapshotService memorySnapshotService,
+            AgentSetupService agentSetupService, CapabilityRegistryService capabilityRegistryService,
+            IConversationService conversationService, IAgentFactory agentFactory, IAgentStore agentStore,
+            IHitlToolJournalStore journalStore, ConversationHistoryBuilder conversationHistoryBuilder,
+            TokenCounterFactory tokenCounterFactory, ToolResultGuardrail toolResultGuardrail) {
         this.calculatorTool = calculatorTool;
         this.dateTimeTool = dateTimeTool;
         this.webSearchTool = webSearchTool;
@@ -366,11 +402,12 @@ class AgentOrchestrator implements IAgentOrchestrator {
         this.journalStore = journalStore;
         this.conversationHistoryBuilder = conversationHistoryBuilder;
         this.toolContextBudgetGuard = new ToolContextBudget(tokenCounterFactory);
+        this.toolResultGuardrail = toolResultGuardrail;
         this.httpCallToolsProvider = new HttpCallToolsProvider(restAgentStore, restWorkflowStore, resourceClientLibrary,
                 apiCallExecutor, jsonSerialization, memoryItemConverter);
         this.mcpToolsProvider = new McpToolsProvider(restAgentStore, restWorkflowStore, resourceClientLibrary, mcpToolProviderManager);
         this.toolLoopRunner = new ToolLoopRunner(toolExecutionService, toolResponseTruncator, tenantQuotaService,
-                memorySnapshotService, toolApprovalGate, gateSupport, toolContextBudgetGuard);
+                memorySnapshotService, toolApprovalGate, gateSupport, toolContextBudgetGuard, toolResultGuardrail);
         this.toolLoopResumer = new ToolLoopResumer(this, toolLoopRunner, gateSupport, chatTranscriptCodec, journalStore);
         this.builtinToolsProvider = new BuiltinToolsProvider(calculatorTool, dateTimeTool, webSearchTool,
                 dataFormatterTool, webScraperTool, textSummarizerTool, pdfReaderTool, weatherTool,
@@ -821,13 +858,13 @@ class AgentOrchestrator implements IAgentOrchestrator {
     void executeSingleToolCall(ToolExecutionRequest toolRequest, IConversationMemory memory,
                                List<ChatMessage> currentMessages, List<Map<String, Object>> trace,
                                Map<String, ToolExecutor> toolExecutors, Map<String, Integer> toolRateLimits,
-                               Map<String, String> toolCanonicalNames,
+                               Map<String, String> toolCanonicalNames, Map<String, String> toolSources,
                                int defaultRateLimit, Double maxBudget, String conversationId,
                                boolean enableRateLimiting, boolean enableCaching, boolean enableCostTracking,
                                LlmConfiguration.Task task, boolean isLazy,
                                List<ToolSpecification> builtInSpecs, List<ToolSpecification> activeSpecs) {
         toolLoopRunner.executeSingleToolCall(toolRequest, memory, currentMessages, trace, toolExecutors, toolRateLimits,
-                toolCanonicalNames, defaultRateLimit, maxBudget, conversationId, enableRateLimiting, enableCaching,
+                toolCanonicalNames, toolSources, defaultRateLimit, maxBudget, conversationId, enableRateLimiting, enableCaching,
                 enableCostTracking, task, isLazy, builtInSpecs, activeSpecs);
     }
 
@@ -835,13 +872,13 @@ class AgentOrchestrator implements IAgentOrchestrator {
     String executeSingleToolCallResult(ToolExecutionRequest toolRequest, IConversationMemory memory,
                                        List<Map<String, Object>> trace,
                                        Map<String, ToolExecutor> toolExecutors, Map<String, Integer> toolRateLimits,
-                                       Map<String, String> toolCanonicalNames,
+                                       Map<String, String> toolCanonicalNames, Map<String, String> toolSources,
                                        int defaultRateLimit, Double maxBudget, String conversationId,
                                        boolean enableRateLimiting, boolean enableCaching, boolean enableCostTracking,
                                        LlmConfiguration.Task task, boolean isLazy,
                                        List<ToolSpecification> builtInSpecs, List<ToolSpecification> activeSpecs) {
         return toolLoopRunner.executeSingleToolCallResult(toolRequest, memory, trace, toolExecutors, toolRateLimits,
-                toolCanonicalNames, defaultRateLimit, maxBudget, conversationId, enableRateLimiting, enableCaching,
+                toolCanonicalNames, toolSources, defaultRateLimit, maxBudget, conversationId, enableRateLimiting, enableCaching,
                 enableCostTracking, task, isLazy, builtInSpecs, activeSpecs);
     }
 

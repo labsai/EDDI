@@ -48,6 +48,10 @@ class A2AToolsProvider implements ToolSourceProvider {
             return ToolContribution.empty();
         }
         var result = a2aToolProviderManager.discoverTools(a2aAgents);
-        return new ToolContribution(result.toolSpecs(), result.executors(), Map.of(), Map.of());
+        // Resolvers, so a gated A2A call is pinnable. Passing Map.of() here — which
+        // is what this did — is what left an approver looking at a tool name with no
+        // peer URL and no fingerprint to re-check against.
+        return new ToolContribution(result.toolSpecs(), result.executors(), Map.of(), Map.of(), List.of(), Map.of(),
+                result.requestResolvers());
     }
 }

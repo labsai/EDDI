@@ -168,6 +168,10 @@ class ToolLoopResumer {
         int defaultRateLimit = task.getDefaultRateLimit() != null ? task.getDefaultRateLimit() : 100;
         Map<String, Integer> toolRateLimits = task.getToolRateLimits();
         Map<String, String> toolCanonicalNames = setup.toolCanonicalNames();
+        // Provenance for the tool-result guardrail. The resume path must see the
+        // same sources the live path did, or an approved call's result would come
+        // back ungoverned purely because a human was in the loop.
+        Map<String, String> toolSources = setup.toolSources();
         Double maxBudget = task.getMaxBudgetPerConversation();
         List<ToolSpecification> builtInSpecs = setup.builtInSpecs();
 
@@ -238,7 +242,7 @@ class ToolLoopResumer {
                 // Full per-request pipeline (checkpoint, budget, executeToolWrapped,
                 // truncation, trace). Its own auto-checkpoint fires ONLY here.
                 String result = toolLoopRunner.executeSingleToolCallResult(req, memory, trace, toolExecutors, toolRateLimits,
-                        toolCanonicalNames, defaultRateLimit, maxBudget, conversationId, enableRateLimiting, enableCaching,
+                        toolCanonicalNames, toolSources, defaultRateLimit, maxBudget, conversationId, enableRateLimiting, enableCaching,
                         enableCostTracking, task, isLazy, builtInSpecs, activeSpecs);
                 journalStore.markExecuted(conversationId, pauseEpoch, c.getCallId(),
                         ToolApprovalGateSupport.capUtf8(result, AgentOrchestrator.JOURNAL_RESULT_MAX_BYTES));

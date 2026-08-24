@@ -71,6 +71,8 @@ public class PostgresAgentUseCaseIT extends BaseIntegrationIT {
             .withEnv("QUARKUS_OIDC_TENANT_ENABLED", "false")
             .withEnv("AUTHORIZATION_ENABLED", "false")
             .withEnv("EDDI_SECURITY_ALLOW_UNAUTHENTICATED", "true")
+            .withEnv("EDDI_MCP_ALLOW_UNAUTHENTICATED", "true")
+            .withEnv("EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED", "true")
             .dependsOn(POSTGRES)
             .withLogConsumer(
                     new org.testcontainers.containers.output.Slf4jLogConsumer(org.slf4j.LoggerFactory.getLogger(PostgresAgentUseCaseIT.class)))
