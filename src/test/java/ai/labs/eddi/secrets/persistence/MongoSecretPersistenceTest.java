@@ -6,6 +6,7 @@ package ai.labs.eddi.secrets.persistence;
 
 import ai.labs.eddi.secrets.model.EncryptedDek;
 import ai.labs.eddi.secrets.model.EncryptedSecret;
+import com.mongodb.MongoClientSettings;
 import com.mongodb.MongoCommandException;
 import com.mongodb.MongoException;
 import com.mongodb.MongoWriteException;
@@ -18,6 +19,7 @@ import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.result.DeleteResult;
 import com.mongodb.client.result.UpdateResult;
+import org.bson.BsonArray;
 import org.bson.BsonDocument;
 import org.bson.BsonDouble;
 import org.bson.BsonInt32;
@@ -28,6 +30,7 @@ import org.bson.types.ObjectId;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.time.Instant;
 import java.util.List;
@@ -82,6 +85,25 @@ class MongoSecretPersistenceTest {
         order.verify(deksCollection).updateMany(any(Bson.class), any(Bson.class));
         order.verify(deksCollection).dropIndex("idx_dek_tenant");
         order.verify(deksCollection).createIndex(any(Bson.class), any(IndexOptions.class));
+    }
+
+    @Test
+    @DisplayName("startup — the backfill covers a stored generation BELOW 1, not just an absent one")
+    void migrationBackfillsBelowFirstGeneration() {
+        // The entity normalizes what it READS, so a row physically holding 0 is
+        // handed out as generation 1 — and then looked up as generation 1 by an
+        // exact query that cannot match it. Normalizing only in the entity moves
+        // that disagreement rather than removing it, so the row itself is fixed.
+        var filter = ArgumentCaptor.forClass(Bson.class);
+        verify(deksCollection).updateMany(filter.capture(), any(Bson.class));
+
+        BsonDocument rendered = filter.getValue().toBsonDocument(BsonDocument.class, MongoClientSettings.getDefaultCodecRegistry());
+        BsonArray alternatives = rendered.getArray("$or");
+        assertEquals(2, alternatives.size(), "absent and below-1 are different states and both need migrating: " + rendered.toJson());
+        assertFalse(alternatives.get(0).asDocument().getDocument("generation").getBoolean("$exists").getValue(),
+                "a document written before generations existed: " + rendered.toJson());
+        assertEquals(EncryptedDek.FIRST_GENERATION, alternatives.get(1).asDocument().getDocument("generation").getInt32("$lt").getValue(),
+                "and a document that stored a generation no key can be found by: " + rendered.toJson());
     }
 
     @Test

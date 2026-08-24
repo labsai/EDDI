@@ -69,9 +69,17 @@ public class EncryptedDek {
     /**
      * The name ciphertext carries to say which key sealed it. Every dekId written
      * anywhere in the system comes from here.
+     * <p>
+     * Normalized like the field, and for the same reason one step further out. The
+     * constructor and setter stop a below-1 generation reaching an instance, but
+     * this method is static and takes an {@code int} from the caller — so it could
+     * still mint {@code tenant#g0}, which {@link #generationOf} reads back as
+     * generation 1 and {@code dekFor} then looks up as generation 1. The name and
+     * the row it names would disagree, which is the one property this class exists
+     * to guarantee.
      */
     public static String dekId(String tenantId, int generation) {
-        return tenantId + GENERATION_MARKER + generation;
+        return tenantId + GENERATION_MARKER + normalize(generation);
     }
 
     /**

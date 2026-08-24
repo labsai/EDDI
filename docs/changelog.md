@@ -60,6 +60,12 @@ inspect, and `readAll`'s own "could not enumerate" warning sits a level up and n
 Skipping the row is still right — one bad document must not stop a boot — but it now says so, naming
 the id.
 
+### Vault re-sync
+
+`EncryptedDek` and `MongoSecretPersistence` picked up the second-pass generation fix from #709 &mdash;
+the static `dekId` now normalizes like the field, and the Mongo backfill covers a stored generation
+below 1 rather than only an absent one. Kept byte-identical with #709.
+
 ### Also
 
 The vault files shared with #709 were re-synced so the two branches stay byte-identical, and the

@@ -65,6 +65,19 @@ class EncryptedDekTest {
     }
 
     @Test
+    @DisplayName("the static dekId cannot mint a name that reads back as a different generation")
+    void staticDekIdNormalizesToo() {
+        // The constructor and setter stop a below-1 generation reaching an
+        // instance, but this method is static and takes an int straight from the
+        // caller. Left unnormalized it mints 'tenant-1#g0', which generationOf
+        // reads back as 1 and dekFor then looks up as generation 1 — a name and a
+        // row that disagree, which is the one thing this class guarantees.
+        assertEquals(EncryptedDek.dekId(TENANT, EncryptedDek.FIRST_GENERATION), EncryptedDek.dekId(TENANT, 0));
+        assertEquals(EncryptedDek.dekId(TENANT, EncryptedDek.FIRST_GENERATION), EncryptedDek.dekId(TENANT, -3));
+        assertEquals(EncryptedDek.FIRST_GENERATION, EncryptedDek.generationOf(TENANT, EncryptedDek.dekId(TENANT, 0)));
+    }
+
+    @Test
     @DisplayName("dekId round trip — every generation names itself")
     void dekIdRoundTrips() {
         for (int generation = 1; generation <= 3; generation++) {
