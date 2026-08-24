@@ -16,6 +16,29 @@ EDDI_BRANCH="${EDDI_BRANCH:-main}"
 EDDI_VERSION="${EDDI_VERSION:-latest}"
 EDDI_PORT="${EDDI_PORT:-7070}"
 EDDI_HTTPS_PORT="${EDDI_HTTPS_PORT:-7443}"
+# Host ports for the containers the compose files publish. The *_REQUESTED
+# values are what the caller pinned (empty = "resolve it for me"); the plain ones
+# carry the default until wizard_ports resolves them, so the summary and the
+# closing banner always have something to print. MONGO_PORT is the exception:
+# it stays empty for PostgreSQL installs, which publish no database port.
+MONGO_PORT_REQUESTED="${MONGO_PORT:-}"
+MONGO_PORT=""
+KEYCLOAK_PORT_REQUESTED="${KEYCLOAK_PORT:-}"
+KEYCLOAK_PORT="${KEYCLOAK_PORT:-8180}"
+GRAFANA_PORT_REQUESTED="${GRAFANA_PORT:-}"
+GRAFANA_PORT="${GRAFANA_PORT:-3000}"
+PROMETHEUS_PORT_REQUESTED="${PROMETHEUS_PORT:-}"
+PROMETHEUS_PORT="${PROMETHEUS_PORT:-9090}"
+JAEGER_PORT_REQUESTED="${JAEGER_PORT:-}"
+JAEGER_PORT="${JAEGER_PORT:-16686}"
+OTLP_GRPC_PORT_REQUESTED="${OTLP_GRPC_PORT:-}"
+OTLP_GRPC_PORT="${OTLP_GRPC_PORT:-4317}"
+OTLP_HTTP_PORT_REQUESTED="${OTLP_HTTP_PORT:-}"
+OTLP_HTTP_PORT="${OTLP_HTTP_PORT:-4318}"
+# Ports handed out during this run. Two components with adjacent defaults (Jaeger
+# OTLP 4317/4318) would otherwise both be offered the same free port -- nothing
+# is listening on it yet, so "free" is true for both until docker tries to bind.
+RESERVED_PORTS=()
 EDDI_DIR="${EDDI_DIR:-$HOME/.eddi}"
 # Strip trailing slash to avoid double-slash paths in output/config
 EDDI_DIR="${EDDI_DIR%/}"
@@ -109,7 +132,12 @@ port_in_use() {
     # Use space/end-of-line anchor to avoid matching port 70 when checking 7070
     ss -tln 2>/dev/null | grep -qE ":${port}( |$)" && return 0
   elif command -v lsof &>/dev/null; then
-    lsof -iTCP:"${port}" -sTCP:LISTEN &>/dev/null && return 0
+    # Match on output, not exit code: busybox's lsof (Alpine and friends)
+    # ignores -i/-s entirely, lists every open file, and exits 0 -- by exit
+    # code alone EVERY port reads as taken, and the port resolver would abort
+    # with "no free port found". Real lsof prints "(LISTEN)" on each row;
+    # busybox's file list does not.
+    lsof -iTCP:"${port}" -sTCP:LISTEN 2>/dev/null | grep -q "LISTEN" && return 0
   elif command -v nc &>/dev/null; then
     nc -z 127.0.0.1 "${port}" 2>/dev/null && return 0
   else
@@ -119,15 +147,126 @@ port_in_use() {
   return 1
 }
 
+# A port already handed out during this run counts as taken: nothing is
+# listening on it yet, so port_in_use alone would offer it twice.
+reserve_port() { RESERVED_PORTS+=("$1"); }
+
+port_reserved() {
+  # ${#arr[@]} is safe under `set -u` on an empty array; "${arr[@]}" is not on
+  # bash 3.2, which is what macOS still ships.
+  (( ${#RESERVED_PORTS[@]} == 0 )) && return 1
+  local p
+  for p in "${RESERVED_PORTS[@]}"; do
+    [[ "$p" == "$1" ]] && return 0
+  done
+  return 1
+}
+
+port_taken() { port_reserved "$1" || port_in_use "$1"; }
+
 find_next_free_port() {
   local start="$1"
   for ((p=start; p<=start+100; p++)); do
-    if ! port_in_use "$p"; then
+    if ! port_taken "$p"; then
       echo "$p"
       return
     fi
   done
   echo "0"
+}
+
+# Default Compose project name: the basename of the directory holding the
+# compose files, lowercased with everything outside [a-z0-9_-] stripped.
+compose_project_name() {
+  local name
+  name=$(basename "$EDDI_DIR" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9_-')
+  echo "${name:-eddi}"
+}
+
+# Is the listener on $1 a container of *our* Compose project? Then it is not a
+# conflict -- `docker compose up` reuses that container instead of binding the
+# port a second time.
+port_owned_by_project() {
+  local port="$1" names project
+  project=$(compose_project_name)
+  names=$(docker ps --filter "publish=${port}" --filter "label=com.docker.compose.project=${project}" --format '{{.Names}}' 2>/dev/null) || return 1
+  [[ -n "$names" ]]
+}
+
+# Resolve one host port that the selected compose files publish. The wizard used
+# to look at EDDI's own 7070/7443 and nothing else, so every other published
+# port -- MongoDB 27017, Keycloak 8180, Grafana 3000, Prometheus 9090, Jaeger --
+# reached `docker compose up` unchecked and failed there with a raw
+# "ports are not available" bind error the installer could not explain.
+# Containers reach each other on the compose network using the service name and
+# the *internal* port, so moving a host port is invisible to the stack.
+#
+# Prints the resolved port on stdout; everything else goes to stderr.
+# Usage: resolve_published_port LABEL DEFAULT REQUESTED ENV_KEY
+resolve_published_port() {
+  local label="$1" default_port="$2" requested="$3" env_key="$4"
+  local preferred="$default_port" explicit=false
+
+  if [[ -n "$requested" ]]; then
+    explicit=true
+    if [[ ! "$requested" =~ ^[0-9]+$ ]] || (( requested < 1 || requested > 65535 )); then
+      fail "Invalid ${env_key} '${requested}'. Must be a port number (1-65535)." >&2
+    fi
+    preferred="$requested"
+  elif [[ -f "$EDDI_DIR/.env" ]]; then
+    # Reuse the port a previous install settled on, so re-runs stay stable
+    local previous
+    previous=$(grep -m1 -E "^${env_key}=[0-9]+$" "$EDDI_DIR/.env" 2>/dev/null | cut -d= -f2 || true)
+    [[ -n "$previous" ]] && preferred="$previous"
+  fi
+
+  if ! port_reserved "$preferred"; then
+    if ! port_in_use "$preferred"; then
+      info "${label} port: ${preferred}" >&2
+      echo "$preferred"
+      return
+    fi
+
+    # Our own container from a previous install already holds it -- compose
+    # reuses that container rather than binding the port a second time
+    if port_owned_by_project "$preferred"; then
+      info "${label} port: ${preferred} (held by the existing EDDI container)" >&2
+      echo "$preferred"
+      return
+    fi
+  fi
+
+  if [[ "$explicit" == "true" ]]; then
+    fail "Port ${preferred} is already in use.\n     Stop the process using it, or set ${env_key} to a free port." >&2
+  fi
+
+  warn "Port ${preferred} is in use — moving ${label} to another port." >&2
+  local free
+  free=$(find_next_free_port $((preferred + 1)))
+  if [[ "$free" == "0" ]]; then
+    fail "No free port found near ${preferred} for ${label}.\n     Stop the process using port ${preferred}, or set ${env_key} to a free port." >&2
+  fi
+  info "${label} port: ${free} (default ${preferred} was taken)" >&2
+  echo "$free"
+}
+
+# Resolve a port into the named global and reserve it. The reservation has to
+# happen here: resolve_published_port runs in a command substitution, and a
+# subshell cannot add to RESERVED_PORTS.
+# Usage: resolve_port_into VAR_NAME LABEL DEFAULT REQUESTED ENV_KEY
+resolve_port_into() {
+  local var_name="$1"
+  shift
+  local value
+  # Checked explicitly rather than left to `set -e`: the resolver runs in a
+  # command substitution, and set -e is suppressed for anything called from a
+  # condition context -- there the failed assignment would fall through and pin
+  # the port to an empty string.
+  if ! value=$(resolve_published_port "$@") || [[ -z "$value" ]]; then
+    exit 1
+  fi
+  printf -v "$var_name" '%s' "$value"
+  reserve_port "$value"
 }
 
 # Prompt the user for a port. Shows conflict info and suggests alternatives.
@@ -138,7 +277,7 @@ read_port() {
   local default_port="$2"
   local suggested="$default_port"
 
-  if port_in_use "$default_port"; then
+  if port_taken "$default_port"; then
     warn "Port ${default_port} is already in use!" >&2
     local next_free
     next_free=$(find_next_free_port $((default_port + 1)))
@@ -164,7 +303,7 @@ read_port() {
     read -r reply </dev/tty 2>/dev/null || reply=""
     reply="${reply:-$suggested}"
     if [[ "$reply" =~ ^[0-9]+$ ]] && (( reply >= 1024 && reply <= 65535 )); then
-      if port_in_use "$reply"; then
+      if port_taken "$reply"; then
         warn "Port ${reply} is in use. Try another." >&2
       else
         info "${port_name} port: ${reply}" >&2
@@ -212,6 +351,7 @@ for arg in "$@"; do
     --with-monitoring) WITH_MONITORING=true ;;
     --vault-key=*)    VAULT_KEY_ARG="${arg#*=}" ;;
     --eddi-version=*) EDDI_VERSION="${arg#*=}" ;;
+    --mongo-port=*)   MONGO_PORT_REQUESTED="${arg#*=}" ;;
     --full)           DB_CHOICE="2"; WITH_AUTH=true; WITH_MONITORING=true ;;
     --local)          LOCAL_IMAGE=true ;;
     --help|-h)
@@ -228,14 +368,25 @@ for arg in "$@"; do
       echo "  --with-auth             Include Keycloak authentication"
       echo "  --with-monitoring       Include Grafana + Prometheus"
       echo "  --eddi-version=<tag>    Pin EDDI image tag (default: latest)"
+      echo "  --mongo-port=<port>     Host port for MongoDB (default: 27017)"
       echo "  --full                  All options enabled"
       echo "  --local                 Use locally built Docker image (skip pull)"
       echo ""
       echo "Environment variables:"
       echo "  EDDI_PORT           HTTP port (default: 7070)"
       echo "  EDDI_HTTPS_PORT     HTTPS port (default: 7443)"
+      echo "  MONGO_PORT          Host port for MongoDB (default: 27017)"
+      echo "  KEYCLOAK_PORT       Host port for Keycloak (default: 8180)"
+      echo "  GRAFANA_PORT        Host port for Grafana (default: 3000)"
+      echo "  PROMETHEUS_PORT     Host port for Prometheus (default: 9090)"
+      echo "  JAEGER_PORT         Host port for the Jaeger UI (default: 16686)"
+      echo "  OTLP_GRPC_PORT      Host port for Jaeger OTLP gRPC (default: 4317)"
+      echo "  OTLP_HTTP_PORT      Host port for Jaeger OTLP HTTP (default: 4318)"
       echo "  EDDI_DIR            Install directory (default: ~/.eddi)"
       echo "  EDDI_VERSION        Image tag to pull (default: latest)"
+      echo ""
+      echo "  Every port above is resolved before the containers start: kept"
+      echo "  when free, moved to the next free port when something holds it."
       exit 0
       ;;
   esac
@@ -514,7 +665,30 @@ wizard_ports() {
   echo ""
 
   EDDI_PORT=$(read_port "HTTP" "$EDDI_PORT")
+  reserve_port "$EDDI_PORT"
   EDDI_HTTPS_PORT=$(read_port "HTTPS" "$EDDI_HTTPS_PORT")
+  reserve_port "$EDDI_HTTPS_PORT"
+
+  # Every other host port the selected compose files publish, resolved before
+  # docker refuses the bind
+  if [[ "${DB_CHOICE:-1}" == "2" ]]; then
+    # postgres-only.yml publishes no database port
+    MONGO_PORT=""
+  else
+    resolve_port_into MONGO_PORT "MongoDB" 27017 "$MONGO_PORT_REQUESTED" MONGO_PORT
+  fi
+
+  if [[ "$WITH_AUTH" == "true" ]]; then
+    resolve_port_into KEYCLOAK_PORT "Keycloak" 8180 "$KEYCLOAK_PORT_REQUESTED" KEYCLOAK_PORT
+  fi
+
+  if [[ "$WITH_MONITORING" == "true" ]]; then
+    resolve_port_into GRAFANA_PORT "Grafana" 3000 "$GRAFANA_PORT_REQUESTED" GRAFANA_PORT
+    resolve_port_into PROMETHEUS_PORT "Prometheus" 9090 "$PROMETHEUS_PORT_REQUESTED" PROMETHEUS_PORT
+    resolve_port_into JAEGER_PORT "Jaeger UI" 16686 "$JAEGER_PORT_REQUESTED" JAEGER_PORT
+    resolve_port_into OTLP_GRPC_PORT "Jaeger OTLP gRPC" 4317 "$OTLP_GRPC_PORT_REQUESTED" OTLP_GRPC_PORT
+    resolve_port_into OTLP_HTTP_PORT "Jaeger OTLP HTTP" 4318 "$OTLP_HTTP_PORT_REQUESTED" OTLP_HTTP_PORT
+  fi
 }
 
 # ── Compose file management ───────────────────────────────
@@ -709,6 +883,24 @@ EDDI_PORT=$EDDI_PORT
 EDDI_HTTPS_PORT=$EDDI_HTTPS_PORT
 EDDI_VERSION=$EDDI_VERSION
 EOF
+  # Host ports for the containers the selected compose files publish. Only the
+  # components that are part of this install get a line -- a stale KEYCLOAK_PORT
+  # would otherwise outlive the overlay that used it.
+  if [[ -n "$MONGO_PORT" ]]; then
+    echo "MONGO_PORT=$MONGO_PORT" >> "$EDDI_DIR/.env"
+  fi
+  if [[ "$WITH_AUTH" == "true" ]]; then
+    echo "KEYCLOAK_PORT=$KEYCLOAK_PORT" >> "$EDDI_DIR/.env"
+  fi
+  if [[ "$WITH_MONITORING" == "true" ]]; then
+    {
+      echo "GRAFANA_PORT=$GRAFANA_PORT"
+      echo "PROMETHEUS_PORT=$PROMETHEUS_PORT"
+      echo "JAEGER_PORT=$JAEGER_PORT"
+      echo "OTLP_GRPC_PORT=$OTLP_GRPC_PORT"
+      echo "OTLP_HTTP_PORT=$OTLP_HTTP_PORT"
+    } >> "$EDDI_DIR/.env"
+  fi
   # Restrict permissions on sensitive files (owner-only read/write)
   chmod 600 "$EDDI_DIR/.env"
   chmod 600 "$EDDI_DIR/.eddi-config"
@@ -763,7 +955,7 @@ start_eddi() {
     echo ""
     cat "$compose_err" >&2
     rm -f "$compose_err"
-    fail "Failed to start containers.\n     Check logs: docker compose logs in $EDDI_DIR"
+    fail "Failed to start containers.\n     If the error above says 'ports are not available', another process holds\n     one of EDDI's ports -- re-run with e.g. EDDI_PORT=7071 --mongo-port=27018.\n     If it mentions orphan containers, a previous install left some behind:\n       docker compose -p $(compose_project_name) down --remove-orphans\n     Check logs: docker compose logs in $EDDI_DIR"
   fi
   rm -f "$compose_err"
 }
@@ -1118,9 +1310,9 @@ print_success() {
 
   if [[ "$WITH_MONITORING" == "true" ]]; then
     echo ""
-    echo -e "  ${BOLD}Grafana${RESET}    →  ${CYAN}http://localhost:3000${RESET}  ${DIM}(admin/admin)${RESET}"
-    echo -e "  ${BOLD}Prometheus${RESET} →  ${CYAN}http://localhost:9090${RESET}"
-    echo -e "  ${BOLD}Jaeger${RESET}     →  ${CYAN}http://localhost:16686${RESET}  ${DIM}(trace visualization)${RESET}"
+    echo -e "  ${BOLD}Grafana${RESET}    →  ${CYAN}http://localhost:${GRAFANA_PORT}${RESET}  ${DIM}(admin/admin)${RESET}"
+    echo -e "  ${BOLD}Prometheus${RESET} →  ${CYAN}http://localhost:${PROMETHEUS_PORT}${RESET}"
+    echo -e "  ${BOLD}Jaeger${RESET}     →  ${CYAN}http://localhost:${JAEGER_PORT}${RESET}  ${DIM}(trace visualization)${RESET}"
   fi
 
   if [[ "$WITH_AUTH" == "true" ]]; then
@@ -1130,7 +1322,10 @@ print_success() {
     echo -e "  ${BOLD}│${RESET}  EDDI Admin:  ${CYAN}eddi / eddi${RESET}  (change on first login) ${BOLD}│${RESET}"
     echo -e "  ${BOLD}│${RESET}  Read-only:   ${CYAN}viewer / viewer${RESET}                      ${BOLD}│${RESET}"
     echo -e "  ${BOLD}│${RESET}                                                    ${BOLD}│${RESET}"
-    echo -e "  ${BOLD}│${RESET}  Keycloak Console:  ${CYAN}http://localhost:8180${RESET}           ${BOLD}│${RESET}"
+    # Padded to the width of the default URL so the box stays square
+    local kc_url
+    printf -v kc_url '%-21s' "http://localhost:${KEYCLOAK_PORT}"
+    echo -e "  ${BOLD}│${RESET}  Keycloak Console:  ${CYAN}${kc_url}${RESET}           ${BOLD}│${RESET}"
     echo -e "  ${BOLD}│${RESET}  Console Admin:     ${CYAN}admin / admin${RESET}                  ${BOLD}│${RESET}"
     echo -e "  ${BOLD}└────────────────────────────────────────────────────┘${RESET}"
   fi
@@ -1351,6 +1546,15 @@ print_config_summary() {
     echo -e "  Monitoring:     ${DIM}none${RESET}"
   fi
   echo -e "  Port:           ${BOLD}${EDDI_PORT}${RESET} (HTTP), ${BOLD}${EDDI_HTTPS_PORT}${RESET} (HTTPS)"
+  [[ -n "$MONGO_PORT" ]] && echo -e "  MongoDB port:   ${BOLD}${MONGO_PORT}${RESET}"
+  if [[ "$WITH_AUTH" == "true" ]]; then
+    echo -e "  Keycloak port:  ${BOLD}${KEYCLOAK_PORT}${RESET}"
+  fi
+  if [[ "$WITH_MONITORING" == "true" ]]; then
+    echo -e "  Grafana port:   ${BOLD}${GRAFANA_PORT}${RESET}"
+    echo -e "  Prometheus:     ${BOLD}${PROMETHEUS_PORT}${RESET}"
+    echo -e "  Jaeger port:    ${BOLD}${JAEGER_PORT}${RESET} ${DIM}(OTLP ${OTLP_GRPC_PORT}/${OTLP_HTTP_PORT})${RESET}"
+  fi
   echo -e "  Install dir:    ${BOLD}${EDDI_DIR}${RESET}"
 }
 

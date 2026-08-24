@@ -34,6 +34,23 @@
 .PARAMETER EddiHttpsPort
     HTTPS port for EDDI (default: 7443, or EDDI_HTTPS_PORT env var).
 
+.PARAMETER MongoPort
+    Host port the MongoDB container publishes (default: 27017, or MONGO_PORT env
+    var). Only used with -Database mongodb. If the default is taken by another
+    process, the installer picks the next free port automatically.
+
+.NOTES
+    The optional overlays publish host ports too. Each is resolved the same way
+    -- kept if free, moved to the next free port if not -- and can be pinned
+    through an environment variable:
+
+      -WithAuth        KEYCLOAK_PORT    (8180)
+      -WithMonitoring  GRAFANA_PORT     (3000)
+                       PROMETHEUS_PORT  (9090)
+                       JAEGER_PORT      (16686)
+                       OTLP_GRPC_PORT   (4317)
+                       OTLP_HTTP_PORT   (4318)
+
 .PARAMETER EddiDir
     Installation directory (default: ~/.eddi, or EDDI_DIR env var).
 
@@ -71,6 +88,7 @@ param(
     [switch]$Help,
     [string]$EddiPort = $env:EDDI_PORT,
     [string]$EddiHttpsPort = $env:EDDI_HTTPS_PORT,
+    [string]$MongoPort = $env:MONGO_PORT,
     [string]$EddiDir = $env:EDDI_DIR
 )
 
@@ -98,6 +116,38 @@ if ($Database -and $Database -notin @("mongodb", "postgres")) {
     throw "Invalid -Database value '$Database'. Must be 'mongodb' or 'postgres'."
 }
 
+# Host ports for the components the overlays publish. The *Requested values are
+# what the caller pinned (empty = "resolve it for me"); the plain ones carry the
+# default until Step-Ports resolves them, so the summary and the closing banner
+# always have something to print.
+$KeycloakPortRequested = $env:KEYCLOAK_PORT
+$GrafanaPortRequested = $env:GRAFANA_PORT
+$PrometheusPortRequested = $env:PROMETHEUS_PORT
+$JaegerPortRequested = $env:JAEGER_PORT
+$OtlpGrpcPortRequested = $env:OTLP_GRPC_PORT
+$OtlpHttpPortRequested = $env:OTLP_HTTP_PORT
+
+foreach ($portSetting in @(
+        @{ Name = "-MongoPort"; Value = $MongoPort },
+        @{ Name = "KEYCLOAK_PORT"; Value = $KeycloakPortRequested },
+        @{ Name = "GRAFANA_PORT"; Value = $GrafanaPortRequested },
+        @{ Name = "PROMETHEUS_PORT"; Value = $PrometheusPortRequested },
+        @{ Name = "JAEGER_PORT"; Value = $JaegerPortRequested },
+        @{ Name = "OTLP_GRPC_PORT"; Value = $OtlpGrpcPortRequested },
+        @{ Name = "OTLP_HTTP_PORT"; Value = $OtlpHttpPortRequested })) {
+    $portValue = $portSetting.Value
+    if ($portValue -and ($portValue -notmatch '^\d+$' -or [int]$portValue -lt 1 -or [int]$portValue -gt 65535)) {
+        throw "Invalid $($portSetting.Name) value '$portValue'. Must be a port number (1-65535)."
+    }
+}
+
+$KeycloakPort = if ($KeycloakPortRequested) { $KeycloakPortRequested } else { "8180" }
+$GrafanaPort = if ($GrafanaPortRequested) { $GrafanaPortRequested } else { "3000" }
+$PrometheusPort = if ($PrometheusPortRequested) { $PrometheusPortRequested } else { "9090" }
+$JaegerPort = if ($JaegerPortRequested) { $JaegerPortRequested } else { "16686" }
+$OtlpGrpcPort = if ($OtlpGrpcPortRequested) { $OtlpGrpcPortRequested } else { "4317" }
+$OtlpHttpPort = if ($OtlpHttpPortRequested) { $OtlpHttpPortRequested } else { "4318" }
+
 # -- Configuration ------------------------------------------
 if (-not $EddiPort) { $EddiPort = "7070" }
 if (-not $EddiHttpsPort) { $EddiHttpsPort = "7443" }
@@ -121,6 +171,10 @@ if ($Defaults -and -not $Database) {
 }
 
 # -- State --------------------------------------------------
+# Ports handed out during this run. Two components with adjacent defaults (Jaeger
+# OTLP 4317/4318) would otherwise both be offered the same free port -- nothing
+# is listening on it yet, so "free" is true for both until docker tries to bind.
+$ReservedPorts = @()
 $ContainersStarted = $false
 $Healthy = $false
 $EddiAlreadyRunning = $false
@@ -185,15 +239,100 @@ function Test-PortInUse([int]$Port) {
     }
 }
 
+function Add-ReservedPort([int]$Port) {
+    if ($script:ReservedPorts -notcontains $Port) { $script:ReservedPorts += $Port }
+}
+
+function Test-PortTaken([int]$Port) {
+    if ($ReservedPorts -contains $Port) { return $true }
+    return (Test-PortInUse $Port)
+}
+
 function Find-NextFreePort([int]$Start) {
     for ($p = $Start; $p -le $Start + 100; $p++) {
-        if (-not (Test-PortInUse $p)) { return $p }
+        if (-not (Test-PortTaken $p)) { return $p }
     }
     return 0
 }
 
+# Default Compose project name: the basename of the directory holding the
+# compose files, lowercased with everything outside [a-z0-9_-] stripped.
+function Get-ComposeProjectName {
+    $name = (Split-Path -Path $EddiDir -Leaf).ToLowerInvariant() -replace '[^a-z0-9_-]', ''
+    if (-not $name) { $name = "eddi" }
+    return $name
+}
+
+# Is the listener on $Port a container of *our* Compose project? Then the port is
+# not a conflict -- `docker compose up` reuses that container instead of binding
+# the port a second time.
+function Test-PortOwnedByProject([int]$Port) {
+    try {
+        $project = Get-ComposeProjectName
+        # cmd /c isolates docker's stderr from the PS error stream (see Test-Prerequisites)
+        $names = cmd /c "docker ps --filter publish=$Port --filter label=com.docker.compose.project=$project --format {{.Names}} 2>nul"
+        return -not [string]::IsNullOrWhiteSpace(($names | Out-String))
+    }
+    catch {
+        return $false
+    }
+}
+
+# Resolve one host port that the selected compose files publish. The wizard used
+# to look at EDDI's own 7070/7443 and nothing else, so every other published
+# port -- MongoDB 27017, Keycloak 8180, Grafana 3000, Prometheus 9090, Jaeger --
+# reached `docker compose up` unchecked and failed there with a raw
+# "ports are not available" bind error the installer could not explain.
+# Containers reach each other on the compose network using the service name and
+# the *internal* port, so moving a host port is invisible to the stack.
+function Resolve-PublishedPort([string]$Label, [int]$DefaultPort, [string]$Requested, [string]$EnvKey) {
+    $explicit = [bool]$Requested
+    $preferred = $DefaultPort
+    if ($explicit) {
+        $preferred = [int]$Requested
+    }
+    else {
+        # Reuse the port a previous install settled on, so re-runs stay stable
+        $envPath = Join-Path -Path $EddiDir -ChildPath ".env"
+        if (Test-Path $envPath) {
+            $previous = Select-String -Path $envPath -Pattern "^$EnvKey=(\d+)" -ErrorAction SilentlyContinue |
+                Select-Object -First 1
+            if ($previous) { $preferred = [int]$previous.Matches[0].Groups[1].Value }
+        }
+    }
+
+    if ($ReservedPorts -notcontains $preferred) {
+        if (-not (Test-PortInUse $preferred)) {
+            Add-ReservedPort $preferred
+            Write-Ok "$Label port: $preferred"
+            return $preferred
+        }
+
+        # Our own container from a previous install already holds it -- compose
+        # reuses that container rather than binding the port a second time
+        if (Test-PortOwnedByProject $preferred) {
+            Add-ReservedPort $preferred
+            Write-Ok "$Label port: $preferred (held by the existing EDDI container)"
+            return $preferred
+        }
+    }
+
+    if ($explicit) {
+        Write-Fail "Port $preferred is already in use.`n     Stop the process using it, or set $EnvKey to a free port."
+    }
+
+    Write-Warn "Port $preferred is in use -- moving $Label to another port."
+    $free = Find-NextFreePort ($preferred + 1)
+    if ($free -eq 0) {
+        Write-Fail "No free port found near $preferred for $Label.`n     Stop the process using port $preferred, or set $EnvKey to a free port."
+    }
+    Add-ReservedPort $free
+    Write-Ok "$Label port: $free (default $preferred was taken)"
+    return $free
+}
+
 function Read-Port([string]$PortName, [int]$DefaultPort) {
-    $inUse = Test-PortInUse $DefaultPort
+    $inUse = Test-PortTaken $DefaultPort
 
     if ($inUse) {
         Write-Warn "Port $DefaultPort is already in use!"
@@ -221,7 +360,7 @@ function Read-Port([string]$PortName, [int]$DefaultPort) {
             return $suggested
         }
         if ($reply -match '^\d+$' -and [int]$reply -ge 1024 -and [int]$reply -le 65535) {
-            if (Test-PortInUse ([int]$reply)) {
+            if (Test-PortTaken ([int]$reply)) {
                 Write-Warn "Port $reply is in use. Try another."
             }
             else {
@@ -446,7 +585,31 @@ function Step-Ports {
     Write-Information -MessageData ""
 
     $script:EddiPort = Read-Port "HTTP" ([int]$EddiPort)
+    Add-ReservedPort ([int]$EddiPort)
     $script:EddiHttpsPort = Read-Port "HTTPS" ([int]$EddiHttpsPort)
+    Add-ReservedPort ([int]$EddiHttpsPort)
+
+    # Every other host port the selected compose files publish, resolved before
+    # docker refuses the bind
+    if ($Database -eq "postgres") {
+        # postgres-only.yml publishes no database port
+        $script:MongoPort = ""
+    }
+    else {
+        $script:MongoPort = Resolve-PublishedPort "MongoDB" 27017 $MongoPort "MONGO_PORT"
+    }
+
+    if ($WithAuth) {
+        $script:KeycloakPort = Resolve-PublishedPort "Keycloak" 8180 $KeycloakPortRequested "KEYCLOAK_PORT"
+    }
+
+    if ($WithMonitoring) {
+        $script:GrafanaPort = Resolve-PublishedPort "Grafana" 3000 $GrafanaPortRequested "GRAFANA_PORT"
+        $script:PrometheusPort = Resolve-PublishedPort "Prometheus" 9090 $PrometheusPortRequested "PROMETHEUS_PORT"
+        $script:JaegerPort = Resolve-PublishedPort "Jaeger UI" 16686 $JaegerPortRequested "JAEGER_PORT"
+        $script:OtlpGrpcPort = Resolve-PublishedPort "Jaeger OTLP gRPC" 4317 $OtlpGrpcPortRequested "OTLP_GRPC_PORT"
+        $script:OtlpHttpPort = Resolve-PublishedPort "Jaeger OTLP HTTP" 4318 $OtlpHttpPortRequested "OTLP_HTTP_PORT"
+    }
 }
 
 # -- Compose file management ------------------------------
@@ -608,6 +771,23 @@ EDDI_HTTPS_PORT=$EddiHttpsPort
     $envPath = Join-Path -Path $EddiDir -ChildPath ".env"
     $envContent | Set-Content -Path $envPath
 
+    # Host ports for the containers the selected compose files publish. Only the
+    # components that are part of this install get a line -- a stale
+    # KEYCLOAK_PORT would otherwise outlive the overlay that used it.
+    $publishedPorts = [ordered]@{}
+    if ($MongoPort) { $publishedPorts["MONGO_PORT"] = $MongoPort }
+    if ($WithAuth) { $publishedPorts["KEYCLOAK_PORT"] = $KeycloakPort }
+    if ($WithMonitoring) {
+        $publishedPorts["GRAFANA_PORT"] = $GrafanaPort
+        $publishedPorts["PROMETHEUS_PORT"] = $PrometheusPort
+        $publishedPorts["JAEGER_PORT"] = $JaegerPort
+        $publishedPorts["OTLP_GRPC_PORT"] = $OtlpGrpcPort
+        $publishedPorts["OTLP_HTTP_PORT"] = $OtlpHttpPort
+    }
+    foreach ($key in $publishedPorts.Keys) {
+        Add-Content -Path $envPath -Value "$key=$($publishedPorts[$key])"
+    }
+
     # Restrict sensitive file permissions -- remove broad read access but keep SYSTEM/Admins
     foreach ($securePath in @($envPath, $configPath)) {
         try {
@@ -684,7 +864,7 @@ function Start-Eddi {
         $script:ContainersStarted = $true
     }
     else {
-        Write-Fail "Failed to start containers."
+        Write-Fail "Failed to start containers.`n     If the error above says 'ports are not available', another process holds`n     one of EDDI's ports -- re-run with e.g. -EddiPort 7071 -MongoPort 27018.`n     If it mentions orphan containers, a previous install left some behind:`n       docker compose -p $(Get-ComposeProjectName) down --remove-orphans"
     }
 }
 
@@ -737,9 +917,9 @@ function Write-Success {
 
     if ($WithMonitoring) {
         Write-Information -MessageData ""
-        Write-Information -MessageData "  Grafana    ->  http://localhost:3000  (admin/admin)"
-        Write-Information -MessageData "  Prometheus ->  http://localhost:9090"
-        Write-Information -MessageData "  Jaeger     ->  http://localhost:16686  (trace visualization)"
+        Write-Information -MessageData "  Grafana    ->  http://localhost:${GrafanaPort}  (admin/admin)"
+        Write-Information -MessageData "  Prometheus ->  http://localhost:${PrometheusPort}"
+        Write-Information -MessageData "  Jaeger     ->  http://localhost:${JaegerPort}  (trace visualization)"
     }
 
     if ($WithAuth) {
@@ -749,7 +929,8 @@ function Write-Success {
         Write-Information -MessageData "  |  EDDI Admin:  eddi / eddi  (change on first login) |"
         Write-Information -MessageData "  |  Read-only:   viewer / viewer                      |"
         Write-Information -MessageData "  |                                                    |"
-        Write-Information -MessageData "  |  Keycloak Console:  http://localhost:8180          |"
+        $kcConsole = "http://localhost:${KeycloakPort}".PadRight(31)
+        Write-Information -MessageData "  |  Keycloak Console:  $kcConsole|"
         Write-Information -MessageData "  |  Console Admin:     admin / admin                  |"
         Write-Information -MessageData "  +----------------------------------------------------+"
     }
@@ -793,12 +974,21 @@ function Write-ConfigSummary {
     Write-Information -MessageData "  Monitoring:     $monLabel"
     Write-Information -MessageData "  HTTP port:      $EddiPort"
     Write-Information -MessageData "  HTTPS port:     $EddiHttpsPort"
+    if ($MongoPort) { Write-Information -MessageData "  MongoDB port:   $MongoPort" }
+    if ($WithAuth) { Write-Information -MessageData "  Keycloak port:  $KeycloakPort" }
+    if ($WithMonitoring) {
+        Write-Information -MessageData "  Grafana port:   $GrafanaPort"
+        Write-Information -MessageData "  Prometheus:     $PrometheusPort"
+        Write-Information -MessageData "  Jaeger port:    $JaegerPort  (OTLP $OtlpGrpcPort/$OtlpHttpPort)"
+    }
     Write-Information -MessageData "  Install dir:    $EddiDir"
 }
 
 # -- Install CLI wrapper ---------------------------------
 
 function Install-CliWrapper {
+    [CmdletBinding(SupportsShouldProcess)]
+    param()
     $cliPath = Join-Path -Path $EddiDir -ChildPath "eddi.cmd"
     $cliContent = @"
 @echo off
@@ -928,11 +1118,15 @@ goto :eof
 "@
     $cliContent | Set-Content -Path $cliPath -Encoding ASCII
 
-    # Add to user PATH if not already there (use exact boundary match)
+    # Add to user PATH if not already there (use exact boundary match).
+    # SetEnvironmentVariable is a .NET call, so -WhatIf does not cover it the way
+    # it covers Set-Content -- without this guard a -WhatIf run still edited the
+    # user's PATH permanently, which is exactly what -WhatIf promises not to do.
     try {
         $userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
         $pathEntries = $userPath -split ';'
-        if ($pathEntries -notcontains $EddiDir) {
+        if ($pathEntries -notcontains $EddiDir -and
+            $PSCmdlet.ShouldProcess("user PATH", "Append $EddiDir")) {
             [Environment]::SetEnvironmentVariable('PATH', "$userPath;$EddiDir", 'User')
             Write-Ok "CLI wrapper installed (eddi.cmd). Restart terminal to use 'eddi' command."
         }

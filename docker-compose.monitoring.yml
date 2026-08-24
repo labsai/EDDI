@@ -3,10 +3,17 @@
 # Usage:
 #   docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d
 #
-# Access:
-#   Prometheus:  http://localhost:9090
-#   Grafana:     http://localhost:3000  (admin/admin)
-#   Jaeger UI:   http://localhost:16686
+# Access (host ports; override any of them in .env):
+#   Prometheus:  http://localhost:9090   PROMETHEUS_PORT
+#   Grafana:     http://localhost:3000   GRAFANA_PORT     (admin/admin)
+#   Jaeger UI:   http://localhost:16686  JAEGER_PORT
+#   Jaeger OTLP: 4317 / 4318             OTLP_GRPC_PORT / OTLP_HTTP_PORT
+#
+# These are host bindings only -- the containers reach each other on the compose
+# network using the service name and the internal port (prometheus:9090,
+# jaeger:4317), so moving a host port here changes nothing inside the stack.
+# The installers resolve them against what is already listening; 3000 in
+# particular is a busy port on a development machine.
 #
 # EDDI must set these in its environment:
 #   QUARKUS_OTEL_SDK_DISABLED=false
@@ -23,7 +30,7 @@ services:
     image: prom/prometheus:v3.4.0
     container_name: eddi-prometheus
     ports:
-      - "9090:9090"
+      - "${PROMETHEUS_PORT:-9090}:9090"
     volumes:
       - ./docs/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
@@ -37,7 +44,7 @@ services:
     image: grafana/grafana:11.6.0
     container_name: eddi-grafana
     ports:
-      - "3000:3000"
+      - "${GRAFANA_PORT:-3000}:3000"
     volumes:
       - ./docs/monitoring/eddi-grafana-dashboard.json:/var/lib/grafana/dashboards/eddi.json:ro
       # The provider globs this directory, so a second dashboard needs no
@@ -57,9 +64,9 @@ services:
     image: jaegertracing/jaeger:2.7.0
     container_name: eddi-jaeger
     ports:
-      - "16686:16686"
-      - "4317:4317"
-      - "4318:4318"
+      - "${JAEGER_PORT:-16686}:16686"
+      - "${OTLP_GRPC_PORT:-4317}:4317"
+      - "${OTLP_HTTP_PORT:-4318}:4318"
     environment:
       COLLECTOR_OTLP_ENABLED: "true"
     restart: unless-stopped

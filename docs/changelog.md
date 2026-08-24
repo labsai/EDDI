@@ -6,6 +6,183 @@
 ---
 
 
+## fix(install): judge lsof port checks by output, not exit code (2026-08-24)
+
+**Repo:** EDDI (`fix/installer-mongodb-port-conflict`)
+
+Found while re-verifying the port-resolution work under old runtimes (the whole branch was exercised
+under Windows PowerShell 5.1 and real bash 3.2.57 in a `bash:3.2` container — parse, lint, and a
+behavioral harness per script). The harness immediately failed in the container: **every** port read
+as taken and the resolver aborted with "No free port found".
+
+Root cause is in the pre-existing `port_in_use` fallback chain (`ss` → `lsof` → `nc` → `/dev/tcp`):
+**busybox's lsof** — the default on Alpine and other minimal systems without `ss` — ignores
+`-iTCP`/`-sTCP:LISTEN` entirely, lists every open file, and exits 0. Judged by exit code alone, every
+port is "in use". Before this branch that was benign (a wrong warning, then proceed); the resolver
+escalated it to a hard abort, so it had to be fixed: the lsof branch now requires `LISTEN` in the
+output — real lsof prints `(LISTEN)` on every matching row, busybox's file list does not. On
+busybox-lsof machines detection now degrades to "everything free", which restores the pre-branch
+behaviour there, with docker's own bind error as the backstop.
+
+Old-runtime verification results, for the record: bash 3.2.57 parses the whole script (`bash -n`) and
+passes all eight harness cases (empty-array guard under `set -u`, reservation-aware
+`find_next_free_port`, reservation-driven collision, `printf -v` indirection, `.env` read-back,
+explicit-busy fail, non-numeric rejection, project-name derivation). PowerShell 5.1 parses the
+installer and passes the same harness. shellcheck at CI's exact invocation
+(`--severity=warning --shell=bash`) is clean. A real-script `-WhatIf` run with `-EddiPort 4317`
+confirmed reservations end-to-end: Jaeger OTLP gRPC moved off free-but-reserved 4317 to 4318, and
+OTLP HTTP cascaded to 4319.
+
+---
+
+## fix(install): resolve every published host port, not just MongoDB's (2026-08-24)
+
+**Repo:** EDDI (`fix/installer-mongodb-port-conflict`)
+
+Follow-up to the MongoDB port fix below, from the obvious question about it: *was this only a MongoDB
+problem?* For the installer's PostgreSQL path, yes — `docker-compose.postgres-only.yml` publishes no
+database port at all, so there is nothing to collide with. But the underlying defect was never about
+MongoDB. It was "the wizard checks EDDI's own 7070/7443 and no other port it is about to publish", and
+two more installer flags were exposed to it:
+
+| Flag | Publishes | Was it even fixable? |
+| --- | --- | --- |
+| `-WithMonitoring` | Grafana **3000**, Prometheus **9090**, Jaeger **16686/4317/4318** | No — hardcoded, no variable to set |
+| `-WithAuth` | Keycloak **`${KEYCLOAK_PORT:-8180}`** | Variable existed; installer never set or checked it |
+
+Grafana's 3000 is the one that matters in practice: it is taken on any machine running a Node dev
+server. It was taken on the reporting machine, in fact — the dry run below moved it.
+
+### What changed
+
+- **One resolver for all of them.** `Resolve-MongoPort` / `resolve_mongo_port` became
+  `Resolve-PublishedPort` / `resolve_published_port`, called once per published port: MongoDB,
+  Keycloak, Grafana, Prometheus, Jaeger UI, and both Jaeger OTLP ports. Same rules as before — keep the
+  default when free, keep it when our own container holds it, move to the next free port otherwise,
+  fail loudly when the caller pinned a port that is busy.
+- **`docker-compose.monitoring.yml` got the variables it never had**: `GRAFANA_PORT`,
+  `PROMETHEUS_PORT`, `JAEGER_PORT`, `OTLP_GRPC_PORT`, `OTLP_HTTP_PORT`.
+- **`docker-compose.postgres.yml` was publishing 7070 twice.** It is an overlay on
+  `docker-compose.yml`, and Compose *concatenates* port lists rather than overriding them, so its
+  hardcoded `"7070:7070"` did not replace the base `"${EDDI_PORT:-7070}:7070"` — it was added to it.
+  Verified with `docker compose config` before the fix: with `EDDI_PORT=7071` the eddi service came out
+  published on **7071 and 7070**. Now both entries interpolate the same variable and collapse to one.
+  Its `postgres` service also moved to `127.0.0.1:${POSTGRES_PORT:-5432}`, matching the loopback
+  binding `docker-compose.yml` already uses for MongoDB — it is a development overlay with a hardcoded
+  `eddi/eddi` password and no business listening on the network.
+- **`-WhatIf` no longer edits the user's PATH.** Found by dry-running the wizard: `Install-CliWrapper`
+  appends the install directory to the user PATH through `[Environment]::SetEnvironmentVariable`, a
+  .NET call that `-WhatIf` does not intercept the way it intercepts `Set-Content`. A `-WhatIf` run
+  therefore made one permanent change to the machine — the single thing `-WhatIf` promises not to do.
+  Now guarded by `ShouldProcess`.
+- `.env.example` documents the new variables.
+
+### Design decisions
+
+**Ports are reserved as they are handed out.** Jaeger's OTLP defaults are adjacent: if 4317 is taken,
+the next free port is 4318 — which is the *other* OTLP port's default. Nothing is listening on 4318
+yet, so a pure "is anything listening?" check would hand it to both and fail at bind time. Each
+resolved port now goes into a reservation list that counts as taken. Confirmed: with 4317 held, gRPC
+takes 4318 and HTTP moves to 4319.
+
+**Environment variables, not new flags.** `-MongoPort` stays (MongoDB is the default datastore), but
+the overlay ports are set through `KEYCLOAK_PORT`, `GRAFANA_PORT` and friends. They only apply with
+`-WithAuth` / `-WithMonitoring`, auto-resolution makes pinning rare, and env vars are the only surface
+that works for the `iwr | iex` and `curl | bash` installs the README documents.
+
+**Only the enabled components' ports reach `.env`.** Writing `KEYCLOAK_PORT` on an install with no auth
+overlay leaves a value that outlives the thing that used it and misleads the next run, which reads
+`.env` back to stay stable across re-runs.
+
+**Moving Keycloak's port is safe because the overlay already threaded it everywhere.** `KC_HOSTNAME`,
+`EDDI_KEYCLOAK_PUBLIC_URL` and `QUARKUS_OIDC_TOKEN_ISSUER` all interpolate `${KEYCLOAK_PORT:-8180}`, so
+the token issuer follows the published port instead of drifting out of sync with it. Verified with
+`docker compose config` at `KEYCLOAK_PORT=8181`: all three follow.
+
+### Verification
+
+- `docker compose config` over base + auth + monitoring with every port overridden: all nine host
+  bindings interpolate, and Keycloak's three URLs track the port.
+- A `-WhatIf` wizard run with `-WithAuth -WithMonitoring` on the reporting machine: MongoDB moved
+  27017 → 27018, Grafana 3000 → 3001, the rest kept; the summary lists all of them; seven `MONGO_PORT`
+  … `OTLP_HTTP_PORT` lines are appended to `.env`; PATH untouched afterwards.
+- The real `.env` write block, executed in isolation: correct in both shapes (all seven port lines with
+  auth + monitoring, none for PostgreSQL without overlays).
+- Resolver harnesses in both languages cover default-free, default-taken, our-own-container,
+  `.env`-remembered, reserved-this-run, adjacent-defaults, explicit-busy and non-numeric input.
+- The bash harness caught a real defect on the way: `resolve_port_into` left its failure to `set -e`,
+  which is suppressed for anything called from a condition context — the failed assignment fell through
+  and would have pinned the port to an empty string. It now checks explicitly.
+- `bash -n`, PowerShell AST parse, and `Get-Help -Full` (the new `.NOTES` block does not break the
+  existing parameter and example rendering) all pass; PSScriptAnalyzer reports no new findings.
+
+---
+
+## fix(install): stop the installers dying on a MongoDB port clash (2026-08-24)
+
+**Repo:** EDDI (`fix/installer-mongodb-port-conflict`)
+
+Reported from Windows: `install.ps1` aborted with a raw Docker error and a PowerShell stack trace.
+
+```
+Error response from daemon: ports are not available: exposing port TCP 127.0.0.1:27017 -> ...
+bind: Only one usage of each socket address ... is normally permitted.
+  ❌ Failed to start containers.
+```
+
+`docker-compose.yml` publishes the database on `127.0.0.1:${MONGO_PORT:-27017}`, and the installers'
+port wizard only ever looked at EDDI's own **7070/7443**. So any machine that already had something on
+27017 — including a machine set up by following the README's own development quick start
+(`docker run -d -p 27017:27017 mongo:7`) — hit a bind failure the installer had no words for. The
+resulting message ("Failed to start containers.") named neither the port nor a way forward.
+
+### What changed
+
+`install.ps1` and `install.sh`, symmetrically — the same defect was in both, the report just happened
+to come from Windows.
+
+- **Resolve the database port before Docker refuses the bind.** Step 5 (Ports) now also resolves the
+  MongoDB host port: free → keep 27017; taken → warn and take the next free port. Containers reach
+  MongoDB over the compose network as `mongodb:27017` regardless, so moving the *host* port is
+  invisible to EDDI.
+- **`MONGO_PORT` is written to `.env`**, which `docker-compose.yml` already reads. `.env.example`
+  documented the variable; nothing set it.
+- **New `-MongoPort` / `--mongo-port=` (or `MONGO_PORT` env).** An explicitly chosen port that turns
+  out to be busy is a hard failure, not a silent remap — the caller asked for that port.
+- **The "Failed to start containers" message now names the two likely causes** (a port already held, or
+  orphan containers from a previous install) with the command for each.
+
+### Design decisions
+
+**A port held by our own container is not a conflict.** `docker compose up` reuses an existing
+container rather than binding the port twice, so remapping there would churn the container for nothing.
+Before remapping, both scripts ask `docker ps --filter publish=<port> --filter
+label=com.docker.compose.project=<project>` whether the listener is ours, and keep the port if it is.
+The project name is derived the way Compose derives it — the install directory's basename, lowercased
+and stripped to `[a-z0-9_-]`.
+
+**A previous install's port wins over the default.** Without this, an install that had been moved to
+27018 would drift back to 27017 the moment the foreign listener stopped, recreating the container on
+every re-run. The value is read back out of `.env`.
+
+**PostgreSQL needs none of this.** `docker-compose.postgres-only.yml` publishes no database port at
+all, so `MONGO_PORT` stays empty and is omitted from `.env` for those installs.
+
+**Orphan containers are reported, not removed.** The same run also warned about a leftover
+`eddi-postgres-1` from an earlier PostgreSQL install. `--remove-orphans` would clear it, but it deletes
+containers on the user's behalf to silence a warning that is not what broke the install — so the
+failure path prints the command instead of running it.
+
+### Verification
+
+The new resolution logic was exercised in isolation against the reporting machine's real state (a host
+process on 27017, no container publishing it): default → remapped to 27018 with a warning; `.env`-pinned
+27099 → honoured; explicit free port → honoured; explicit busy port → hard fail; PostgreSQL → empty.
+`bash -n install.sh` and a PowerShell AST parse both pass, and PSScriptAnalyzer reports no new findings
+(the pre-existing warnings are unchanged).
+
+---
+
 
 ## 🛡️ fix(security): review findings — a forgeable approval preview and three ways a secret still reached the console (2026-08-22)
 
