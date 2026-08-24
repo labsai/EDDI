@@ -47,6 +47,24 @@ newline in either would forge log records (CWE-117). Routed the tenant/key pair 
 helper and sanitized the remaining standalone tenant ids — the point of the single helper being that it
 stays true of the next message somebody adds.
 
+### The normalization stopped one step short
+
+Follow-up to the generation fix above, from a second review pass. Normalizing the entity fixed what a
+row *reads back as*, and left two places where the storage and the entity could still disagree.
+
+`EncryptedDek.dekId(String, int)` is static and takes an `int` straight from the caller, so it could
+still mint `tenant#g0` — a name `generationOf` reads back as generation 1, and `dekFor` then looks up as
+generation 1. The class Javadoc claimed the name and the row it names always agree; that was untrue of
+this method. It normalizes now, like the field.
+
+The Mongo boot migration backfilled only *absent* generations. A row physically holding `0` was handed
+out as generation 1 by the entity and then looked up as generation 1 by an exact query that could not
+match it — the entity normalization moved the disagreement rather than removing it. The backfill now
+covers below-1 as well as missing.
+
+Both mutation-checked: reverting the first fails with `expected: <tenant-1#g1> but was: <tenant-1#g0>`,
+reverting the second fails the migration filter assertion.
+
 ### Review nitpicks
 
 The rotation test verified that the sweep called `updateSecretSealing`, but never that the swept row

@@ -115,7 +115,13 @@ public class MongoSecretPersistence implements ISecretPersistence {
      * rotation has nowhere to write.
      */
     private void migrateDeksToGenerations() {
-        deksCollection.updateMany(Filters.exists(FIELD_GENERATION, false),
+        // Below-1 as well as absent. The entity normalizes what it READS, so a row
+        // physically holding 0 is handed out as generation 1 — and is then looked
+        // up as generation 1 by an exact query that cannot match it. Normalizing
+        // the row itself is what keeps the entity and the storage agreeing; doing
+        // it only in the entity moves the disagreement rather than removing it.
+        deksCollection.updateMany(
+                Filters.or(Filters.exists(FIELD_GENERATION, false), Filters.lt(FIELD_GENERATION, EncryptedDek.FIRST_GENERATION)),
                 Updates.set(FIELD_GENERATION, EncryptedDek.FIRST_GENERATION));
 
         try {
