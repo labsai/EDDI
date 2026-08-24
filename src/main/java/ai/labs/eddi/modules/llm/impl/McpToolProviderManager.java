@@ -11,6 +11,7 @@ import ai.labs.eddi.connections.McpAuthChallengeParser;
 import ai.labs.eddi.connections.model.ConnectionReference;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.CallerIdentityResolver;
+import ai.labs.eddi.modules.llm.governance.RemoteTextGovernor;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import ai.labs.eddi.secrets.SecretResolver;
@@ -34,6 +35,7 @@ import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
 import dev.langchain4j.service.tool.ToolExecutor;
 import dev.langchain4j.service.tool.ToolProviderResult;
 import io.micrometer.core.instrument.MeterRegistry;
+import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -114,21 +116,6 @@ public class McpToolProviderManager {
     /** Default cap for a remote tool description before it reaches the model. */
     static final int DEFAULT_MAX_DESCRIPTION_CHARS = 1024;
 
-    /**
-     * Directive-shaped content that a remote MCP server must not be able to inject
-     * into the model's tool definitions (finding F16). Matched case-insensitively
-     * and replaced with {@code [redacted]} — the tool stays usable, the instruction
-     * does not survive.
-     */
-    private static final Pattern DIRECTIVE_PATTERN = Pattern.compile(
-            "(?i)(ignore\\s+(all\\s+|any\\s+)?(previous|prior|above|earlier)\\s+instructions?"
-                    + "|disregard\\s+(all\\s+|any\\s+)?(previous|prior|above|earlier)\\s+instructions?"
-                    + "|you\\s+are\\s+now\\s+"
-                    + "|system\\s*(prompt|message)\\s*[:=]"
-                    + "|</?(system|assistant|user)>"
-                    + "|\\[/?(INST|SYSTEM)\\]"
-                    + "|<\\|im_(start|end)\\|>)");
-
     // ----- Circuit breaker state -----
     /** Maximum failures within the window before the circuit opens. */
     private static final int CIRCUIT_FAILURE_THRESHOLD = 3;
@@ -174,6 +161,55 @@ public class McpToolProviderManager {
         this.ssrfProtectionEnabled = ssrfProtectionEnabled;
         this.maxDescriptionChars = maxDescriptionChars > 0 ? maxDescriptionChars : DEFAULT_MAX_DESCRIPTION_CHARS;
         this.toolCacheTtlMillis = toolCacheTtlMillis >= 0 ? toolCacheTtlMillis : DEFAULT_TOOL_CACHE_TTL_MILLIS;
+    }
+
+    /**
+     * Rebuild cached clients when a vault secret is written or rotated.
+     * <p>
+     * The MCP manager was the one credential-holding cache that did NOT register
+     * for this, while {@code ChatModelRegistry}, {@code EmbeddingModelFactory} and
+     * {@code EmbeddingStoreFactory} all did. Its client cache is keyed on a hash of
+     * the <em>unresolved</em> apiKey — the {@code ${vault:…}} reference string —
+     * and the credential is resolved once, when the transport is built. So a
+     * rotated secret produced no new cache key, and the cached client went on
+     * presenting the old credential until it happened to be evicted. In practice
+     * that is until restart: the client cache has no TTL.
+     * <p>
+     * Eviction is total rather than surgical. The cache key is a digest, so it
+     * cannot say which vault reference a given entry used, and the alternative —
+     * carrying every entry's reference alongside it purely to narrow an eviction —
+     * buys nothing: secret rotation is rare, and reconnecting an MCP client is one
+     * handshake on the next call, not a user-visible failure.
+     */
+    @PostConstruct
+    void registerSecretInvalidation() {
+        secretResolver.registerInvalidationListener(reference -> {
+            int clients = clientCache.size();
+            if (clients == 0 && toolCache.isEmpty()) {
+                return;
+            }
+            closeAllClients();
+            LOGGER.infof("Invalidated %d cached MCP client(s) after a vault secret change", clients);
+        });
+    }
+
+    /**
+     * Closes and drops every cached client and its discovered tools.
+     * <p>
+     * Shared by shutdown and secret invalidation, because dropping a client without
+     * closing it leaks its connection, and dropping it without dropping the tool
+     * cache leaves executors bound to a closed client.
+     */
+    private void closeAllClients() {
+        for (var entry : clientCache.entrySet()) {
+            try {
+                entry.getValue().close();
+            } catch (Exception e) {
+                LOGGER.warnf(e, "Error closing MCP client for '%s'", sanitize(entry.getKey()));
+            }
+        }
+        clientCache.clear();
+        toolCache.clear();
     }
 
     /**
@@ -629,19 +665,13 @@ public class McpToolProviderManager {
      * Remote resource metadata and content are authored by the SERVER and land
      * verbatim in the model's context — the same threat {@code governDescription}
      * defends against for remote tool descriptions (finding F16), over a strictly
-     * larger surface. Applying the identical {@link #DIRECTIVE_PATTERN} redaction
-     * here keeps the two paths from diverging; leaving it out would have made the
-     * resource bridge the easy way around a guard the tool path already has.
+     * larger surface. Applying the identical
+     * {@link RemoteTextGovernor#DESCRIPTION_DIRECTIVE_PATTERN} redaction here keeps
+     * the two paths from diverging; leaving it out would have made the resource
+     * bridge the easy way around a guard the tool path already has.
      */
     private static String governRemoteText(String text, int maxChars) {
-        if (text == null || text.isBlank()) {
-            return "";
-        }
-        String sanitized = DIRECTIVE_PATTERN.matcher(text).replaceAll("[redacted]");
-        if (sanitized.length() > maxChars) {
-            sanitized = sanitized.substring(0, maxChars) + " [\u2026truncated]";
-        }
-        return sanitized;
+        return RemoteTextGovernor.govern(text, maxChars);
     }
 
     /**
@@ -991,17 +1021,16 @@ public class McpToolProviderManager {
             return spec;
         }
 
-        String sanitized = DIRECTIVE_PATTERN.matcher(description).replaceAll("[redacted]");
-        if (!sanitized.equals(description)) {
+        if (RemoteTextGovernor.containsDirective(description)) {
             LOGGER.warnf("MCP tool '%s' from server '%s' had directive-shaped content in its description — redacted before prompting",
                     sanitize(spec.name()), sanitize(serverName));
         }
-
-        if (sanitized.length() > maxDescriptionChars) {
+        if (description.length() > maxDescriptionChars) {
             LOGGER.warnf("MCP tool '%s' from server '%s' description is %d chars — truncated to %d",
-                    sanitize(spec.name()), sanitize(serverName), sanitized.length(), maxDescriptionChars);
-            sanitized = sanitized.substring(0, maxDescriptionChars) + " […truncated]";
+                    sanitize(spec.name()), sanitize(serverName), description.length(), maxDescriptionChars);
         }
+
+        String sanitized = RemoteTextGovernor.govern(description, maxDescriptionChars);
 
         if (sanitized.equals(description)) {
             return spec;
@@ -1205,15 +1234,7 @@ public class McpToolProviderManager {
     @PreDestroy
     void shutdown() {
         LOGGER.infof("Shutting down %d MCP client connection(s)", clientCache.size());
-        for (var entry : clientCache.entrySet()) {
-            try {
-                entry.getValue().close();
-            } catch (Exception e) {
-                LOGGER.warnf(e, "Error closing MCP client for '%s'", sanitize(entry.getKey()));
-            }
-        }
-        clientCache.clear();
-        toolCache.clear();
+        closeAllClients();
     }
 
     /**

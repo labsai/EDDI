@@ -808,7 +808,7 @@ tool credentials → vault, NATS auth, channel export.
 | `connections/oauth/OAuthTokenService.java`, `OAuthStateStore.java`, `rest/RestOAuthCallback.java` | 4-5 |
 | `connections/McpAuthChallengeParser.java` | 4b |
 | `connections/ConnectionStartupGuard.java` | 5 |
-| `docs/connections.md`, `docs/mcp-client.md` (**does not exist today**) | 2-5 |
+| `docs/connections.md` (**new**), `docs/mcp-client.md` (**exists; extended**) | 2-5 |
 
 #### MODIFY
 

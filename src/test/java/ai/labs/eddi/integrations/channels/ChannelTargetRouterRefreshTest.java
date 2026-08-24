@@ -19,16 +19,20 @@ import ai.labs.eddi.engine.model.AgentDeploymentStatus;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.integrations.channels.ChannelTargetRouter.ResolvedTarget;
 import ai.labs.eddi.secrets.SecretResolver;
+import ai.labs.eddi.secrets.model.SecretReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.net.URI;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -77,6 +81,35 @@ class ChannelTargetRouterRefreshTest {
 
         // Default: no legacy agents
         when(agentAdmin.getDeploymentStatuses(any())).thenReturn(List.of());
+    }
+
+    @Test
+    @DisplayName("a secret rotation landing DURING a refresh is not stamped away")
+    void invalidationDuringRefreshIsNotLost() throws Exception {
+        setupNewStyleConfig(CHANNEL_ID, "xoxb-original", "signing-original");
+
+        router.registerSecretInvalidation();
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Consumer<SecretReference>> listener = ArgumentCaptor.forClass(Consumer.class);
+        verify(secretResolver).registerInvalidationListener(listener.capture());
+
+        // The rotation lands while the refresh is still reading the store, so the
+        // maps it is building already hold the revoked credential. The listener
+        // zeroes the timestamp; the refresh must not then stamp it fresh again, or
+        // the router serves the revoked token for a whole interval — the exact
+        // window the listener exists to close.
+        var rotatedMidRefresh = new AtomicBoolean();
+        doAnswer(invocation -> {
+            if (rotatedMidRefresh.compareAndSet(false, true)) {
+                listener.getValue().accept(null);
+            }
+            return accumulatedDescriptors;
+        }).when(descriptorStore).readDescriptors(eq("ai.labs.channel"), anyString(), anyInt(), anyInt(), anyBoolean());
+
+        router.resolveTarget("slack", CHANNEL_ID, "hello");
+        router.resolveTarget("slack", CHANNEL_ID, "hello");
+
+        verify(descriptorStore, times(2)).readDescriptors(eq("ai.labs.channel"), anyString(), anyInt(), anyInt(), anyBoolean());
     }
 
     // ─── Helpers ────────────────────────────────────────────────────────────────

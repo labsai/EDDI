@@ -18,6 +18,7 @@ import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.model.AgentDeploymentStatus;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.secrets.SecretResolver;
+import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -26,6 +27,7 @@ import java.time.Duration;
 import java.util.*;
 import java.util.Locale;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static ai.labs.eddi.utils.RestUtilities.extractResourceId;
 
@@ -80,6 +82,25 @@ public class ChannelTargetRouter {
 
     private volatile long lastRefreshTime = 0;
     private final AtomicBoolean refreshInProgress = new AtomicBoolean(false);
+
+    /**
+     * Counts invalidations, so a refresh can tell whether one landed while it was
+     * reading. Without it the marker this class exists to set was simply lost — see
+     * {@link #refreshIfNeeded}.
+     */
+    private final AtomicLong invalidationGeneration = new AtomicLong();
+
+    /**
+     * Guards the pair {@code (invalidationGeneration, lastRefreshTime)}.
+     * <p>
+     * Reading the generation and then stamping the timestamp is a check-then-act,
+     * and an invalidation landing between those two steps is exactly the case being
+     * defended against: it would zero the timestamp only for the stamp to overwrite
+     * it a moment later. The counter alone narrows that window, it does not close
+     * it. Both sides take this lock, so the check and the stamp are one step, as
+     * are the increment and the zeroing.
+     */
+    private final Object cacheStateLock = new Object();
 
     /**
      * Thread → locked target (prevents mid-thread target switching). TTL-evicted.
@@ -420,6 +441,32 @@ public class ChannelTargetRouter {
 
     // ─── Refresh ───────────────────────────────────────────────────────────────
 
+    /**
+     * Drop the resolved-secret cache the moment a vault secret changes, instead of
+     * waiting out the poll interval.
+     * <p>
+     * This cache holds bot tokens and signing secrets already RESOLVED to their
+     * plaintext values, so after a rotation it keeps presenting the revoked
+     * credential — for up to a minute of inbound webhooks, every one of which fails
+     * against the platform. Every other credential-holding cache in the codebase
+     * registers for this; the poll made the gap look bounded rather than absent,
+     * which is why it went unnoticed.
+     * <p>
+     * Zeroing the timestamp rather than refreshing inline: refreshing here would
+     * run store reads on whatever thread happened to write a secret, and the next
+     * inbound message rebuilds the maps anyway.
+     */
+    @PostConstruct
+    void registerSecretInvalidation() {
+        secretResolver.registerInvalidationListener(reference -> {
+            synchronized (cacheStateLock) {
+                invalidationGeneration.incrementAndGet();
+                lastRefreshTime = 0;
+            }
+            LOGGER.info("Channel integration cache marked stale after a vault secret change");
+        });
+    }
+
     private void refreshIfNeeded() {
         long now = System.currentTimeMillis();
         if (now - lastRefreshTime < REFRESH_INTERVAL_MS) {
@@ -428,12 +475,27 @@ public class ChannelTargetRouter {
         if (!refreshInProgress.compareAndSet(false, true)) {
             return;
         }
+        // Read BEFORE the store reads below. An invalidation that arrives while
+        // they are in flight would otherwise zero the timestamp only for this
+        // method to stamp it fresh again a moment later — with maps built from
+        // rows read before the rotation. The cache would then serve the revoked
+        // credential for a full interval, which is exactly the window the
+        // invalidation listener exists to close.
+        long generationAtStart = invalidationGeneration.get();
         try {
             refreshInternal();
-            lastRefreshTime = now;
+            synchronized (cacheStateLock) {
+                if (invalidationGeneration.get() == generationAtStart) {
+                    lastRefreshTime = now;
+                }
+            }
         } catch (Exception e) {
             LOGGER.warn("Failed to refresh channel target router", e);
-            lastRefreshTime = now; // Avoid hammering on repeated failures
+            // Stamped even when an invalidation raced, unlike the success path: the
+            // maps are stale either way, and a store that just failed will fail
+            // again on the next inbound message. Retrying it per webhook trades a
+            // stale cache for a hot loop against a store that is already down.
+            lastRefreshTime = now;
         } finally {
             refreshInProgress.set(false);
         }

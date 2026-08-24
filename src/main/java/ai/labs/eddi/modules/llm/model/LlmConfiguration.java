@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.apicalls.model.PostResponse;
 import ai.labs.eddi.configs.apicalls.model.PreRequest;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.configs.shared.RetryConfiguration;
+import ai.labs.eddi.modules.llm.guardrails.ToolResultGuardrailConfig;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.ArrayList;
@@ -441,6 +442,16 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
          * window. Reduces context bloat from verbose tool outputs.
          */
         private ToolResponseLimits toolResponseLimits;
+
+        /**
+         * What happens to a tool result on its way back to the model: whether it is
+         * wrapped in a provenance delimiter, and what to do when it carries
+         * directive-shaped content. Null means the defaults — provenance marking on,
+         * directives redacted — which is what an existing config gets.
+         *
+         * @since 6.3.0
+         */
+        private ToolResultGuardrailConfig toolResultGuardrails;
 
         // === Behavioral Counterweight & Identity Masking (Wave 1) ===
 
@@ -898,6 +909,14 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public ToolResponseLimits getToolResponseLimits() {
             return toolResponseLimits;
+        }
+
+        public ToolResultGuardrailConfig getToolResultGuardrails() {
+            return toolResultGuardrails;
+        }
+
+        public void setToolResultGuardrails(ToolResultGuardrailConfig toolResultGuardrails) {
+            this.toolResultGuardrails = toolResultGuardrails;
         }
 
         public void setToolResponseLimits(ToolResponseLimits toolResponseLimits) {
