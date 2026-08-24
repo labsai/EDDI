@@ -109,6 +109,36 @@ test.describe("Workforce dashboard — bulk delete", () => {
 
 
 /**
+ * Only possible since the generic descriptors stub stopped shadowing
+ * `groupstore`. The dashboard used to render exactly one task force — the
+ * eight-group fixture never ran — so selecting two, and therefore the plural
+ * wording and the multi-delete loop, could not be exercised in a browser.
+ */
+test.describe("Workforce dashboard — bulk delete, more than one", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto("/workforce");
+    await waitForApp(page);
+  });
+
+  test("asks in the plural, naming how many", async ({ page }) => {
+    await page.getByTestId("bulk-select-toggle").click();
+
+    const cards = page.getByTestId(/^select-board-/);
+    await expect(cards.first()).toBeVisible();
+    expect(await cards.count()).toBeGreaterThan(1);
+
+    await cards.nth(0).click();
+    await cards.nth(1).click();
+    await page.getByTestId("bulk-delete-btn").click();
+
+    const dialog = page.getByRole("dialog");
+    await expect(dialog.getByRole("heading")).toHaveText(
+      /Dissolve 2 task forces\?/i
+    );
+  });
+});
+
+/**
  * The template delete used `window.confirm`, which is invisible to jsdom AND
  * to Playwright unless a dialog handler is registered — unhandled, Playwright
  * auto-dismisses it, so the delete silently never happened and any assertion

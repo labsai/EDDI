@@ -25,7 +25,15 @@ describe("useJsonSchema", () => {
       wrapper: createWrapper(),
     });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(result.current.data).toBeDefined();
+
+    // `toBeDefined()` alone was satisfied by whatever came back, and what came
+    // back was a RULESET: the `*/rulestore/rulesets/:id` handler matched
+    // "jsonSchema" as an id and answered with a config document. This hook is
+    // for driving a schema-based form, so assert it is a schema.
+    const schema = result.current.data as Record<string, unknown>;
+    expect(schema).toHaveProperty("type", "object");
+    expect(schema).toHaveProperty("properties");
+    expect(schema).not.toHaveProperty("behaviorGroups");
   });
 
   it("is disabled when typeSlug is undefined", () => {

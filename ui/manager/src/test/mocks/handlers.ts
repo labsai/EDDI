@@ -252,6 +252,32 @@ const CONVERSATIONS_MOCK = [
 ];
 
 // --- Enriched JSON Schemas (matching victools Draft 2020-12 output) ---
+/**
+ * Whether a `:id` wildcard has matched something that is not an id.
+ *
+ * These handlers are registered before the dedicated `/descriptors` and
+ * `/jsonSchema` routes, so `:id` swallows both unless they stand aside. Only
+ * `/descriptors` used to be checked, which meant every one of these ten stores
+ * answered `GET …/jsonSchema` with a CONFIG DOCUMENT — a ruleset, an apicall —
+ * where the app expects a JSON Schema. `RESOURCE_SCHEMAS` and the factory that
+ * serves it were unreachable for all of them, and use-json-schema.test.tsx
+ * asserted only `toBeDefined()`, so a ruleset satisfied it.
+ */
+function isNotAnId(pathname: string): boolean {
+  return pathname.endsWith("/descriptors") || pathname.endsWith("/jsonSchema");
+}
+
+/**
+ * Stores whose `/descriptors` route has a dedicated handler of its own.
+ *
+ * The generic handler stands aside for these. Registration order alone is not
+ * enough: `agentstore` and `workflowstore` happen to be declared above it and
+ * win anyway, but `groupstore` and `channelstore` are declared below and would
+ * be swallowed. `groupstore` was, silently, for as long as this list said only
+ * `channelstore`.
+ */
+const STORES_WITH_DEDICATED_DESCRIPTORS = ["channelstore", "groupstore"];
+
 const RESOURCE_SCHEMAS: Record<string, object> = {
   behavior: {
     $schema: "https://json-schema.org/draft/2020-12/schema",
@@ -1336,27 +1362,48 @@ export const handlers = [
     return HttpResponse.json(1);
   }),
 
-  // Generic descriptors handler for resource stores — returns a minimal
-  // descriptor list. Must precede per-store `:id` wildcard handlers.
+  // Generic descriptors handler for resource stores — the stores that have no
+  // dedicated one of their own. Must precede the per-store `:id` wildcards.
+  //
+  // `storesWithDedicatedHandlers` is load-bearing and was incomplete: it named
+  // `channelstore` only, so this handler answered `groupstore` too and the eight
+  // groups defined further down were dead fixture. Every Workforce and Groups
+  // test ran against one synthetic row. `descriptor-handlers.test.ts` now fails
+  // if a dedicated handler is shadowed again.
+  //
+  // Returns THREE rows rather than one, so that list rendering, ordering and
+  // pagination are exercised at all. `limit`/`index` are honoured for the same
+  // reason.
   http.get("*/:store/:plural/descriptors", ({ request, params }) => {
     const url = new URL(request.url);
     const filter = url.searchParams.get("filter") ?? "";
+    const limit = Number(url.searchParams.get("limit") ?? 20);
+    const index = Number(url.searchParams.get("index") ?? 0);
     const storeVal = params.store as string;
-    // Only handle known resource stores; skip stores with dedicated handlers
     if (!storeVal.endsWith("store")) return;
-    const storesWithDedicatedHandlers = ["channelstore"];
-    if (storesWithDedicatedHandlers.includes(storeVal)) return;
+    if (STORES_WITH_DEDICATED_DESCRIPTORS.includes(storeVal)) return;
 
-    const id = filter || "res1";
-    return HttpResponse.json([
-      {
-        resource: `eddi://ai.labs.mock/${storeVal}/${params.plural}/${id}?version=1`,
-        name: `Mock ${id}`,
-        description: "Mock resource descriptor",
-        createdOn: Date.now() - 86400000,
-        lastModifiedOn: Date.now() - 3600000,
-      },
-    ]);
+    const descriptor = (id: string, ageHours: number) => ({
+      resource: `eddi://ai.labs.mock/${storeVal}/${params.plural}/${id}?version=1`,
+      name: `Mock ${id}`,
+      description: "Mock resource descriptor",
+      createdOn: Date.now() - 86400000,
+      lastModifiedOn: Date.now() - ageHours * 3600000,
+    });
+
+    // A filter is TWO different things to this app. On a list page it is the
+    // user's search box; in `getResourceVersions` (resources.ts) it is an id
+    // lookup — `descriptors?filter=<id>` — for a resource this mock has never
+    // heard of. So an unmatched filter still echoes a descriptor for whatever
+    // was asked for, because returning [] there would break every version
+    // picker and detail page. A test that needs an empty list should say so
+    // with its own `server.use` override rather than rely on this.
+    if (filter) {
+      return HttpResponse.json([descriptor(filter, 1)]);
+    }
+
+    const all = ["res1", "res2", "res3"].map((id, i) => descriptor(id, i + 1));
+    return HttpResponse.json(all.slice(index, index + limit));
   }),
 
   // Specific handlers for behavior and httpcalls with realistic mock data
@@ -1364,7 +1411,7 @@ export const handlers = [
     const url = new URL(request.url);
     const includePrevious = url.searchParams.get("includePreviousVersions");
     // Don't match descriptor endpoints
-    if (url.pathname.endsWith("/descriptors") || includePrevious) {
+    if (isNotAnId(url.pathname) || includePrevious) {
       return;
     }
     return HttpResponse.json({
@@ -1511,7 +1558,7 @@ export const handlers = [
   http.get("*/apicallstore/apicalls/:id", ({ request }) => {
     const url = new URL(request.url);
     const includePrevious = url.searchParams.get("includePreviousVersions");
-    if (url.pathname.endsWith("/descriptors") || includePrevious) {
+    if (isNotAnId(url.pathname) || includePrevious) {
       return;
     }
     return HttpResponse.json({
@@ -1643,7 +1690,7 @@ export const handlers = [
   http.get("*/llmstore/llms/:id", ({ request }) => {
     const url = new URL(request.url);
     const includePrevious = url.searchParams.get("includePreviousVersions");
-    if (url.pathname.endsWith("/descriptors") || includePrevious) return;
+    if (isNotAnId(url.pathname) || includePrevious) return;
     return HttpResponse.json({
       tasks: [
         {
@@ -1743,7 +1790,7 @@ export const handlers = [
   http.get("*/outputstore/outputsets/:id", ({ request }) => {
     const url = new URL(request.url);
     const includePrevious = url.searchParams.get("includePreviousVersions");
-    if (url.pathname.endsWith("/descriptors") || includePrevious) return;
+    if (isNotAnId(url.pathname) || includePrevious) return;
     return HttpResponse.json({
       lang: "en",
       outputSet: [
@@ -1847,7 +1894,7 @@ export const handlers = [
   http.get("*/propertysetterstore/propertysetters/:id", ({ request }) => {
     const url = new URL(request.url);
     const includePrevious = url.searchParams.get("includePreviousVersions");
-    if (url.pathname.endsWith("/descriptors") || includePrevious) return;
+    if (isNotAnId(url.pathname) || includePrevious) return;
     return HttpResponse.json({
       setOnActions: [
         {
@@ -1890,7 +1937,7 @@ export const handlers = [
   http.get("*/dictionarystore/dictionaries/:id", ({ request }) => {
     const url = new URL(request.url);
     const includePrevious = url.searchParams.get("includePreviousVersions");
-    if (url.pathname.endsWith("/descriptors") || includePrevious) return;
+    if (isNotAnId(url.pathname) || includePrevious) return;
     return HttpResponse.json({
       lang: "en",
       words: [
@@ -1947,7 +1994,7 @@ export const handlers = [
   http.get("*/mcpcallsstore/mcpcalls/:id", ({ request }) => {
     const url = new URL(request.url);
     const includePrevious = url.searchParams.get("includePreviousVersions");
-    if (url.pathname.endsWith("/descriptors") || includePrevious) return;
+    if (isNotAnId(url.pathname) || includePrevious) return;
     return HttpResponse.json({
       name: "Enterprise Document Tools Server",
       mcpServerUrl: "https://mcp.internal.example.com/v1",
@@ -1992,7 +2039,7 @@ export const handlers = [
   http.get("*/ragstore/rags/:id", ({ request }) => {
     const url = new URL(request.url);
     const includePrevious = url.searchParams.get("includePreviousVersions");
-    if (url.pathname.endsWith("/descriptors") || includePrevious) return;
+    if (isNotAnId(url.pathname) || includePrevious) return;
     return HttpResponse.json({
       name: "product-docs",
       embeddingProvider: "openai",
@@ -2685,7 +2732,7 @@ export const handlers = [
   http.get("*/snippetstore/snippets/:id", ({ request }) => {
     const url = new URL(request.url);
     const includePrevious = url.searchParams.get("includePreviousVersions");
-    if (url.pathname.endsWith("/descriptors") || includePrevious) return;
+    if (isNotAnId(url.pathname) || includePrevious) return;
     return HttpResponse.json({
       name: "cautious_mode",
       category: "governance",
@@ -2700,7 +2747,7 @@ export const handlers = [
   http.get("*/parserstore/parsers/:id", ({ request }) => {
     const url = new URL(request.url);
     const includePrevious = url.searchParams.get("includePreviousVersions");
-    if (url.pathname.endsWith("/descriptors") || includePrevious) return;
+    if (isNotAnId(url.pathname) || includePrevious) return;
     return HttpResponse.json({
       config: {
         appendExpressions: true,

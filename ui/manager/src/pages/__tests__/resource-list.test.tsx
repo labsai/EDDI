@@ -63,6 +63,32 @@ describe("ResourceListPage", () => {
   it("shows resource count after data loads", async () => {
     renderResourceList("rules");
 
+    // Three, and therefore the PLURAL. This asserted "1 resource" until the
+    // generic descriptors handler stopped returning a single synthetic row —
+    // `resources.count_other` existed in all eleven locales and was rendered by
+    // no test at all, because the mock made the singular the only reachable
+    // branch.
+    await waitFor(() => {
+      expect(screen.getByText("3 resources")).toBeInTheDocument();
+    });
+  });
+
+  it("shows the singular for exactly one resource", async () => {
+    server.use(
+      http.get("*/rulestore/rulesets/descriptors", () =>
+        HttpResponse.json([
+          {
+            resource: "eddi://ai.labs.mock/rulestore/rulesets/only?version=1",
+            name: "Only One",
+            description: "",
+            createdOn: Date.now(),
+            lastModifiedOn: Date.now(),
+          },
+        ])
+      )
+    );
+    renderResourceList("rules");
+
     await waitFor(() => {
       expect(screen.getByText("1 resource")).toBeInTheDocument();
     });
