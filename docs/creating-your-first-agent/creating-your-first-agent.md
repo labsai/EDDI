@@ -43,7 +43,7 @@ Example :
 
 ### 4. Creating the Workflow
 
-Now we will align the just created `LifecycleTasks` in the `Workflow`. Make a **`POST`** to **`/packagestore/packages`** with a JSON in the body like this:
+Now we will align the just created `LifecycleTasks` in the `Workflow`. Make a **`POST`** to **`/workflowstore/workflows`** with a JSON in the body like this:
 
 ```javascript
 {
@@ -75,11 +75,11 @@ Extension Types in this examples
 
 >
 
-`eddi://ai.labs.package/packagestore/packages/<UNIQUE_WORKFLOW_ID>?version=<WORKFLOW_VERSION>`
+`eddi://ai.labs.workflow/workflowstore/workflows/<UNIQUE_WORKFLOW_ID>?version=<WORKFLOW_VERSION>`
 
 Example
 
-`eddi://ai.labs.package/packagestore/packages/5a2ae60f17312624f8b8a445?version=1`
+`eddi://ai.labs.workflow/workflowstore/workflows/5a2ae60f17312624f8b8a445?version=1`
 
 > See also the API documentation at [http://localhost:7070/q/swagger-ui](http://localhost:7070/q/swagger-ui)
 
@@ -90,7 +90,7 @@ Make a **`POST`** to **`/agentstore/agents`** with a JSON like this:
 ```javascript
 {
      "packages": [
-          "eddi://ai.labs.package/packagestore/packages/<UNIQUE_WORKFLOW_ID>?version=<WORKFLOW_VERSION>"
+          "eddi://ai.labs.workflow/workflowstore/workflows/<UNIQUE_WORKFLOW_ID>?version=<WORKFLOW_VERSION>"
      ]
 }
 ```

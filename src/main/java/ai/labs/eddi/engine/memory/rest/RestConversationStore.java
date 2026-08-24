@@ -56,6 +56,12 @@ public class RestConversationStore implements IRestConversationStore {
     public static final String DESCRIPTOR_TYPE = "ai.labs.conversation";
 
     /**
+     * Conversation descriptors are written once and then updated in place, so they
+     * never leave version 0 — every other read in this class hard-codes it too.
+     */
+    private static final int CONVERSATION_DESCRIPTOR_VERSION = 0;
+
+    /**
      * Upper bound on how many descriptors an owner-filtered listing will scan
      * before giving up, so a caller who owns few/none of a large shared store
      * cannot turn one list request into a full-collection scan. This is the single
@@ -313,8 +319,10 @@ public class RestConversationStore implements IRestConversationStore {
             // and must NOT leak the unredacted tool arguments or the frozen LLM
             // transcript of a paused conversation — those stay behind the approver-only
             // detail=full gate. Mirrors fix #4's confinement on the Simple surface.
-            return redactRawPendingToolCallsForRead(
-                    conversationMemoryStore.loadConversationMemorySnapshot(conversationId));
+            // requireSnapshot, not the raw load: a missing conversation returned null
+            // here, which JAX-RS renders as 204 No Content — indistinguishable from a
+            // conversation that exists and happens to be empty.
+            return redactRawPendingToolCallsForRead(requireSnapshot(conversationId));
         } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
             throw sneakyThrow(e);
         }
@@ -329,12 +337,43 @@ public class RestConversationStore implements IRestConversationStore {
         conversationAccessGuard.requireConversationOwner(conversationId);
 
         try {
-            return convertSimpleConversationMemory(conversationMemoryStore.loadConversationMemorySnapshot(conversationId), returnDetailed,
-                    returnCurrentStepOnly);
+            return convertSimpleConversationMemory(requireSnapshot(conversationId), returnDetailed, returnCurrentStepOnly);
 
         } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
             throw sneakyThrow(e);
         }
+    }
+
+    /**
+     * The snapshot, or a 404 — never a {@code null} for the caller to dereference.
+     *
+     * <p>
+     * {@code loadConversationMemorySnapshot} answers {@code null} for a
+     * conversation that is not there, and the read paths went straight on to call
+     * {@code getEnvironment()} on it. So a deleted or mistyped conversation id
+     * produced a {@link NullPointerException}, which reached the client as
+     * {@code 500 Internal Server Error} plus an error id — from endpoints whose own
+     * {@code @APIResponse} promised a 404, and which the troubleshooting
+     * documentation tells people to call precisely when something has already gone
+     * wrong.
+     * </p>
+     *
+     * <p>
+     * Throws the checked {@code ResourceNotFoundException} rather than
+     * {@code ConversationNotFoundException}, which {@code ConversationService}'s
+     * twin uses: both read endpoints here already declare it on
+     * {@link IRestConversationStore}, so this is the contract they publish. Both
+     * map to 404.
+     * </p>
+     */
+    private ConversationMemorySnapshot requireSnapshot(String conversationId)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+        var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+        if (snapshot == null) {
+            throw new IResourceStore.ResourceNotFoundException(
+                    String.format("No conversation found! (conversationId=%s)", sanitize(conversationId)));
+        }
+        return snapshot;
     }
 
     @Override
@@ -342,8 +381,8 @@ public class RestConversationStore implements IRestConversationStore {
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
         checkNotNull(conversationId, "conversationId");
         // Deletion is irreversible, so the gate runs before anything is touched —
-        // including the soft-delete path, whose DocumentDescriptorInterceptor marks
-        // the descriptor deleted even when deletePermanently is false.
+        // the soft-delete path included, which still removes the conversation from
+        // every listing.
         conversationAccessGuard.requireConversationOwner(conversationId);
 
         if (deletePermanently) {
@@ -370,11 +409,47 @@ public class RestConversationStore implements IRestConversationStore {
             conversationMemoryStore.deleteConversationMemorySnapshot(conversationId);
             conversationDescriptorStore.deleteAllDescriptor(conversationId);
             log.info(format("Conversation has been permanently deleted (conversationId=%s)", sanitize(conversationId)));
+        } else {
+            softDelete(conversationId);
         }
+    }
 
-        // DocumentDescriptorInterceptor will mark the DocumentDescriptor of this
-        // resource as deleted,
-        // regardless of whether it has been permanently deleted or not
+    /**
+     * Retires the conversation's descriptor so the conversation disappears from
+     * every listing, while its memory snapshot and attachments stay on the server.
+     *
+     * <p>
+     * This branch used to do <em>nothing at all</em>. A comment claimed a
+     * {@code DocumentDescriptorInterceptor} would mark the descriptor deleted
+     * "regardless of whether it has been permanently deleted or not", but no such
+     * interceptor exists anywhere in the code base — so {@code DELETE
+     * /conversationstore/conversations/{id}} (whose {@code deletePermanently}
+     * defaults to {@code false}) answered 204 and left the row untouched, still
+     * {@code "deleted": false} and still listed. The Manager's delete dialog
+     * describes exactly the behaviour implemented here and then reports
+     * "Conversation deleted", so the honest-looking answer was the wrong one: users
+     * saw a success toast next to a conversation that was still there.
+     * </p>
+     *
+     * <p>
+     * {@code deleteDescriptor} archives the descriptor into its history collection
+     * with {@code deleted=true} and drops the live row, which is what the
+     * {@code includeDeleted=false} listings filter on. The snapshot itself is
+     * deliberately untouched — that is the whole distinction from the permanent
+     * path, and it is what lets the retention sweep and GDPR erasure still find the
+     * data.
+     * </p>
+     */
+    private void softDelete(String conversationId) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+        try {
+            conversationDescriptorStore.deleteDescriptor(conversationId, CONVERSATION_DESCRIPTOR_VERSION);
+            log.info(format("Conversation has been deleted (conversationId=%s)", sanitize(conversationId)));
+        } catch (IResourceStore.ResourceModifiedException e) {
+            // The descriptor moved under us — surface it rather than reporting a
+            // deletion that did not happen.
+            throw new IResourceStore.ResourceStoreException(
+                    format("Could not delete conversation %s: its descriptor was modified concurrently", sanitize(conversationId)), e);
+        }
     }
 
     @Scheduled(every = "24h")
@@ -435,7 +510,7 @@ public class RestConversationStore implements IRestConversationStore {
 
         for (var endedConversationId : endedConversationIds) {
             try {
-                var descriptor = documentDescriptorStore.readDescriptor(endedConversationId, 0);
+                var descriptor = documentDescriptorStore.readDescriptor(endedConversationId, CONVERSATION_DESCRIPTOR_VERSION);
                 if (descriptor.getLastModifiedOn().before(deleteOlderThanThisDate)) {
                     documentDescriptorStore.deleteAllDescriptor(endedConversationId);
                     conversationDescriptorStore.deleteAllDescriptor(endedConversationId);
@@ -471,7 +546,7 @@ public class RestConversationStore implements IRestConversationStore {
             conversationStatus.setAgentId(agentId);
             conversationStatus.setAgentVersion(agentVersion);
             conversationStatus.setConversationState(snapshot.getConversationState());
-            var conversationDescriptor = conversationDescriptorStore.readDescriptor(conversationId, 0);
+            var conversationDescriptor = conversationDescriptorStore.readDescriptor(conversationId, CONVERSATION_DESCRIPTOR_VERSION);
             conversationStatus.setLastInteraction(conversationDescriptor.getLastModifiedOn());
             conversationStatuses.add(conversationStatus);
         }
@@ -498,9 +573,10 @@ public class RestConversationStore implements IRestConversationStore {
                     conversationMemoryStore.setConversationState(conversationId, ConversationState.ENDED);
                 }
 
-                ConversationDescriptor conversationDescriptor = conversationDescriptorStore.readDescriptor(conversationId, 0);
+                ConversationDescriptor conversationDescriptor = conversationDescriptorStore.readDescriptor(conversationId,
+                        CONVERSATION_DESCRIPTOR_VERSION);
                 conversationDescriptor.setConversationState(ConversationState.ENDED);
-                conversationDescriptorStore.setDescriptor(conversationId, 0, conversationDescriptor);
+                conversationDescriptorStore.setDescriptor(conversationId, CONVERSATION_DESCRIPTOR_VERSION, conversationDescriptor);
 
                 log.info(format("conversation (%s) has been set to ENDED", conversationId));
             }

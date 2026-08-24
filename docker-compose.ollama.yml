@@ -1,0 +1,76 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Ollama overlay — a local LLM on the same Docker network as EDDI.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.ollama.yml up -d
+#
+# Why an overlay rather than "just run Ollama on the host": inside the eddi
+# container, `localhost` is the container. An Ollama on the host is reachable
+# only as http://host.docker.internal:11434, which needs the extra_hosts entry
+# the base compose file already carries and still breaks on hosts where the
+# gateway alias is unavailable. With this overlay the base URL is simply
+#
+#     http://ollama:11434
+#
+# — plain container-to-container DNS, identical on Linux, macOS and Windows.
+# That is also the value EDDI hands new agents by default here, via
+# eddi.ollama.default-base-url (EDDI_OLLAMA_DEFAULT_BASE_URL), so the Manager's
+# agent wizard and the setup API pre-fill something that actually resolves.
+#
+# The port is still published on the host, so `ollama run …` and curl against
+# http://localhost:11434 keep working from your shell.
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  eddi:
+    environment:
+      # Consumed by AgentSetupService as the default baseUrl for ollama tasks.
+      - "EDDI_OLLAMA_DEFAULT_BASE_URL=${EDDI_OLLAMA_DEFAULT_BASE_URL:-http://ollama:11434}"
+    depends_on:
+      ollama:
+        condition: service_healthy
+
+  ollama:
+    image: ollama/ollama:0.13.0
+    restart: always
+    ports:
+      # Host-visible so the `ollama` CLI and curl still reach it directly.
+      - "${OLLAMA_PORT:-11434}:11434"
+    volumes:
+      # Named volume, so pulled models survive `docker compose down`. Model
+      # weights are measured in gigabytes — re-pulling them on every restart is
+      # the difference between a 5-second and a 5-minute start.
+      - ollama-models:/root/.ollama
+    healthcheck:
+      # `ollama list` rather than an HTTP probe: the image ships no curl, and
+      # this is the same check that proves the API is answering.
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  # One-shot: pulls a model so the stack is usable on first start instead of
+  # answering "model not found" to the first message. Override the model with
+  #   OLLAMA_PULL_MODEL=qwen3:4b docker compose -f … up -d
+  # or set it empty to skip the pull entirely.
+  ollama-pull:
+    image: ollama/ollama:0.13.0
+    restart: "no"
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      - "OLLAMA_HOST=http://ollama:11434"
+      - "OLLAMA_PULL_MODEL=${OLLAMA_PULL_MODEL:-llama3.2:3b}"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        if [ -n "$${OLLAMA_PULL_MODEL}" ]; then
+          echo "Pulling $${OLLAMA_PULL_MODEL} …";
+          ollama pull "$${OLLAMA_PULL_MODEL}";
+        else
+          echo "OLLAMA_PULL_MODEL is empty — skipping the model pull.";
+        fi
+
+volumes:
+  ollama-models:

@@ -142,6 +142,49 @@ class RestConversationStoreTest {
     }
 
     @Nested
+    @DisplayName("reads of a conversation that is not there")
+    class MissingConversationReads {
+
+        /**
+         * {@code loadConversationMemorySnapshot} answers {@code null} rather than
+         * throwing, and these two surfaces passed it straight on. The raw read returned
+         * it, which JAX-RS renders as 204 No Content — indistinguishable from an empty
+         * conversation that does exist — and the simple read dereferenced it into a 500
+         * with an error id. Both endpoints document a 404, which is also what the
+         * troubleshooting guide tells people to expect when they are already trying to
+         * work out what went wrong.
+         */
+        @Test
+        @DisplayName("the raw read is a 404, not an empty 204")
+        void rawReadIsNotFound() throws Exception {
+            when(conversationMemoryStore.loadConversationMemorySnapshot("gone")).thenReturn(null);
+
+            assertThrows(IResourceStore.ResourceNotFoundException.class,
+                    () -> restConversationStore.readRawConversationLog("gone"));
+        }
+
+        @Test
+        @DisplayName("the simple read is a 404, not a 500")
+        void simpleReadIsNotFound() throws Exception {
+            when(conversationMemoryStore.loadConversationMemorySnapshot("gone")).thenReturn(null);
+
+            assertThrows(IResourceStore.ResourceNotFoundException.class,
+                    () -> restConversationStore.readSimpleConversationLog("gone", false, true, null));
+        }
+
+        @Test
+        @DisplayName("the message names the conversation asked for")
+        void messageNamesTheConversation() throws Exception {
+            when(conversationMemoryStore.loadConversationMemorySnapshot("gone")).thenReturn(null);
+
+            var thrown = assertThrows(IResourceStore.ResourceNotFoundException.class,
+                    () -> restConversationStore.readRawConversationLog("gone"));
+
+            assertTrue(thrown.getMessage().contains("gone"), thrown.getMessage());
+        }
+    }
+
+    @Nested
     @DisplayName("deleteConversationLog")
     class DeleteConversationLog {
 
@@ -191,6 +234,50 @@ class RestConversationStoreTest {
 
             verify(conversationMemoryStore, never()).deleteConversationMemorySnapshot("conv-1");
             verify(conversationDescriptorStore, never()).deleteAllDescriptor(any());
+        }
+
+        @Test
+        @DisplayName("soft delete retires the descriptor, so the conversation stops being listed")
+        void softDelete_retiresDescriptor() throws Exception {
+            // The whole point of the non-permanent branch. It used to do nothing at
+            // all — the endpoint answered 204, the descriptor stayed deleted=false,
+            // and the Manager's "Conversation deleted" toast sat next to a row that
+            // was still there.
+            restConversationStore.deleteConversationLog("conv-1", false);
+
+            verify(conversationDescriptorStore).deleteDescriptor("conv-1", 0);
+        }
+
+        @Test
+        @DisplayName("a permanent delete does not also soft-delete")
+        void permanentDelete_doesNotAlsoSoftDelete() throws Exception {
+            restConversationStore.deleteConversationLog("conv-1", true);
+
+            // deleteAllDescriptor already removed every version; calling
+            // deleteDescriptor afterwards would only raise a spurious not-found.
+            verify(conversationDescriptorStore, never()).deleteDescriptor(anyString(), anyInt());
+        }
+
+        @Test
+        @DisplayName("a concurrent modification is reported, not swallowed")
+        void softDelete_concurrentModificationSurfaces() throws Exception {
+            doThrow(new IResourceStore.ResourceModifiedException("moved"))
+                    .when(conversationDescriptorStore).deleteDescriptor("conv-race", 0);
+
+            assertThrows(IResourceStore.ResourceStoreException.class,
+                    () -> restConversationStore.deleteConversationLog("conv-race", false));
+        }
+
+        @Test
+        @DisplayName("the ownership gate still runs before a soft delete")
+        void softDelete_checksOwnershipFirst() {
+            doThrow(new ForbiddenException("not yours"))
+                    .when(conversationAccessGuard).requireConversationOwner("conv-other");
+
+            assertThrows(ForbiddenException.class,
+                    () -> restConversationStore.deleteConversationLog("conv-other", false));
+
+            verifyNoInteractions(conversationDescriptorStore);
         }
 
         @Test

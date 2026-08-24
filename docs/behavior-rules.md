@@ -366,13 +366,13 @@ The **`{id}`** is a path parameters that indicate which behavior rule you want t
 
 | HTTP Method | API Endpoint                                      | Request Body          | Response              |
 | ----------- | ------------------------------------------------- | --------------------- | --------------------- |
-| **DELETE**  | `/behaviorstore/behaviorsets/{id}`                | N/A                   | N/A                   |
-| **GET**     | `/behaviorstore/behaviorsets/{id}`                | N/A                   | **BehaviorSet model** |
-| **PUT**     | `/behaviorstore/behaviorsets/{id}`                | **BehaviorSet model** | N/A                   |
-| **GET**     | `/behaviorstore/behaviorsets/descriptors`         | N/A                   | **BehaviorSet model** |
-| **POST**    | `/behaviorstore/behaviorsets`                     | **BehaviorSet model** | N/A                   |
-| **GET**     | `/behaviorstore/behaviorsets/{id}/currentversion` | N/A                   | **BehaviorSet model** |
-| **POST**    | `/behaviorstore/behaviorsets/{id}/currentversion` | **BehaviorSet model** | N/A                   |
+| **DELETE**  | `/rulestore/rulesets/{id}`                | N/A                   | N/A                   |
+| **GET**     | `/rulestore/rulesets/{id}`                | N/A                   | **BehaviorSet model** |
+| **PUT**     | `/rulestore/rulesets/{id}`                | **BehaviorSet model** | N/A                   |
+| **GET**     | `/rulestore/rulesets/descriptors`         | N/A                   | **BehaviorSet model** |
+| **POST**    | `/rulestore/rulesets`                     | **BehaviorSet model** | N/A                   |
+| **GET**     | `/rulestore/rulesets/{id}/currentversion` | N/A                   | **BehaviorSet model** |
+| **POST**    | `/rulestore/rulesets/{id}/currentversion` | **BehaviorSet model** | N/A                   |
 
 ### Example
 
@@ -380,7 +380,7 @@ We will demonstrate here the creation of a `BehaviorSet`
 
 _Request URL_
 
-`POST http://localhost:7070/behaviorstore/behaviorsets`
+`POST http://localhost:7070/rulestore/rulesets`
 
 _Request Body_
 
@@ -485,5 +485,5 @@ _Response Code_
 The `Location` response header contains the URI of the newly created resource:
 
 ```
-Location: eddi://ai.labs.behavior/behaviorstore/behaviorsets/{id}?version=1
+Location: eddi://ai.labs.rules/rulestore/rulesets/{id}?version=1
 ```

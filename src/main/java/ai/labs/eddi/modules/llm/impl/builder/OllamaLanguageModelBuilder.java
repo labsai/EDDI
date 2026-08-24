@@ -15,6 +15,7 @@ import java.time.Duration;
 import java.util.Map;
 import java.util.Set;
 
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyBoolean;
 import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyDouble;
 import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyInt;
 import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyLong;
@@ -44,10 +45,33 @@ public class OllamaLanguageModelBuilder implements ILanguageModelBuilder {
     private static final String KEY_TOP_P = "topP";
     private static final String KEY_TOP_K = "topK";
 
+    /**
+     * Ollama's own {@code think} switch — tri-state on purpose.
+     * <p>
+     * {@code "true"} asks the model to reason and return the reasoning in a
+     * separate {@code thinking} field; {@code "false"} turns reasoning off;
+     * <em>unset</em> leaves the model's own default, which for a reasoning model
+     * (gemma3n, deepseek-r1, qwen3 …) means it thinks. That default is what makes a
+     * first Ollama agent look broken: streaming a reasoning model emits a long run
+     * of chunks whose {@code content} is empty and whose {@code thinking} carries
+     * the text, so the chat window sits silent for many seconds before the answer
+     * appears all at once. Setting {@code think: "false"} makes such a model answer
+     * immediately.
+     */
+    private static final String KEY_THINK = "think";
+
+    /**
+     * Whether the reasoning text is surfaced rather than discarded. Independent of
+     * {@link #KEY_THINK} — it only controls parsing of the {@code thinking} field
+     * the server sends, so it is off by default and reasoning stays out of the
+     * conversation transcript unless asked for.
+     */
+    private static final String KEY_RETURN_THINKING = "returnThinking";
+
     @Override
     public Set<String> recognisedParameters() {
         return Set.of(KEY_MODEL, KEY_TIMEOUT, KEY_LOG_REQUESTS, KEY_LOG_RESPONSES, KEY_BASE_URL,
-                KEY_TEMPERATURE, KEY_MAX_TOKENS, KEY_TOP_P, KEY_TOP_K);
+                KEY_TEMPERATURE, KEY_MAX_TOKENS, KEY_TOP_P, KEY_TOP_K, KEY_THINK, KEY_RETURN_THINKING);
     }
 
     @Override
@@ -65,6 +89,8 @@ public class OllamaLanguageModelBuilder implements ILanguageModelBuilder {
         applyInt(parameters, KEY_MAX_TOKENS, builder::numPredict);
         applyDouble(parameters, KEY_TOP_P, builder::topP);
         applyInt(parameters, KEY_TOP_K, builder::topK);
+        applyBoolean(parameters, KEY_THINK, builder::think);
+        applyBoolean(parameters, KEY_RETURN_THINKING, builder::returnThinking);
         if (!isNullOrEmpty(parameters.get(KEY_LOG_REQUESTS))) {
             builder.logRequests(Boolean.parseBoolean(parameters.get(KEY_LOG_REQUESTS)));
         }
@@ -90,6 +116,8 @@ public class OllamaLanguageModelBuilder implements ILanguageModelBuilder {
         applyInt(parameters, KEY_MAX_TOKENS, builder::numPredict);
         applyDouble(parameters, KEY_TOP_P, builder::topP);
         applyInt(parameters, KEY_TOP_K, builder::topK);
+        applyBoolean(parameters, KEY_THINK, builder::think);
+        applyBoolean(parameters, KEY_RETURN_THINKING, builder::returnThinking);
         if (!isNullOrEmpty(parameters.get(KEY_LOG_REQUESTS))) {
             builder.logRequests(Boolean.parseBoolean(parameters.get(KEY_LOG_REQUESTS)));
         }

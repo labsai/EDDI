@@ -154,7 +154,7 @@ EDDI provides custom namespace extensions for use in templates (output, httpcall
 **`extractId` and `extractVersion`** work with both MongoDB ObjectIds (24-char hex) and PostgreSQL UUIDs (36-char with dashes):
 
 ```
-// Input: "http://localhost:7070/behaviorstore/behaviorsets/6740832a2b0f614abcaee7ab?version=1"
+// Input: "http://localhost:7070/rulestore/rulesets/6740832a2b0f614abcaee7ab?version=1"
 {uuidUtils:extractId(properties.location)}     → "6740832a2b0f614abcaee7ab"
 {uuidUtils:extractVersion(properties.location)} → "1"
 ```

@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
@@ -41,6 +43,7 @@ class RestAgentAdministrationTest {
 
     private IRuntime runtime;
     private IAgentFactory agentFactory;
+    private IAgentStore agentStore;
     private IDeploymentStore deploymentStore;
     private IConversationMemoryStore conversationMemoryStore;
     private IRestConversationStore restConversationStore;
@@ -66,7 +69,8 @@ class RestAgentAdministrationTest {
         lenient().when(deploymentStore.readDeploymentInfos(any())).thenReturn(List.of());
         lenient().when(agentFactory.getAllLatestAgents(any())).thenReturn(List.of());
         lenient().when(tenantQuotaService.checkAgentQuota(any(), anyInt())).thenReturn(QuotaCheckResult.OK);
-        restAgentAdmin = new RestAgentAdministration(runtime, agentFactory, deploymentStore,
+        agentStore = mock(IAgentStore.class);
+        restAgentAdmin = new RestAgentAdministration(runtime, agentFactory, agentStore, deploymentStore,
                 conversationMemoryStore, restConversationStore, documentDescriptorStore,
                 deploymentListener, scheduleStore, tenantQuotaService);
     }
@@ -117,6 +121,57 @@ class RestAgentAdministrationTest {
             assertThrows(InternalServerErrorException.class,
                     () -> restAgentAdmin.deployAgent(
                             Deployment.Environment.test, "agent-1", 1, true, true));
+        }
+
+        @Test
+        @DisplayName("an agent that does not exist is a 404, not an accepted deploy")
+        void unknownAgentIsNotFound() throws Exception {
+            when(agentStore.read("no-such-agent", 1))
+                    .thenThrow(new IResourceStore.ResourceNotFoundException("no such agent"));
+
+            assertThrows(IResourceStore.ResourceNotFoundException.class,
+                    () -> restAgentAdmin.deployAgent(
+                            Deployment.Environment.test, "no-such-agent", 1, true, false));
+
+            // Nothing was queued: answering 202 and then failing on the runtime
+            // executor is precisely the shape this replaces, because no status code
+            // can reach the caller from there.
+            verify(runtime, never()).submitCallable(any(Callable.class), any());
+        }
+
+        @Test
+        @DisplayName("an id the datastore cannot parse is a 404 in EDDI's words, not the driver's")
+        void unparseableAgentIdIsNotFound() throws Exception {
+            // The MongoDB driver rejects a non-hex or wrong-length id before any
+            // lookup: "state should be: hexString has 24 characters". Surfacing that
+            // blames the wrong thing and names the datastore behind the API.
+            when(agentStore.read("agent-abc-123", 1))
+                    .thenThrow(new IllegalArgumentException("state should be: hexString has 24 characters"));
+
+            var thrown = assertThrows(IResourceStore.ResourceNotFoundException.class,
+                    () -> restAgentAdmin.deployAgent(
+                            Deployment.Environment.test, "agent-abc-123", 1, true, false));
+
+            assertTrue(thrown.getMessage().contains("agent-abc-123"),
+                    "the message must name the id that was not found: " + thrown.getMessage());
+            assertFalse(thrown.getMessage().contains("hexString"),
+                    "the driver's wording must not reach the caller: " + thrown.getMessage());
+            verify(runtime, never()).submitCallable(any(Callable.class), any());
+        }
+
+        @Test
+        @DisplayName("a store outage does not masquerade as a missing agent")
+        void storeOutageStillDeploys() throws Exception {
+            when(agentStore.read("agent-1", 1))
+                    .thenThrow(new IResourceStore.ResourceStoreException("mongo down"));
+            when(agentFactory.getAgent(any(), anyString(), anyInt())).thenReturn(null);
+            when(runtime.submitCallable(any(Callable.class), any()))
+                    .thenReturn(CompletableFuture.completedFuture(null));
+
+            Response response = restAgentAdmin.deployAgent(
+                    Deployment.Environment.test, "agent-1", 1, true, false);
+
+            assertEquals(202, response.getStatus());
         }
     }
 

@@ -223,13 +223,13 @@ You can use _**`${memory.current.httpCalls.<responseObjectName>}`**_ to access y
 
 | HTTP Method | API Endpoint                                    | Request Body    | Response                              |
 | ----------- | ----------------------------------------------- | --------------- | ------------------------------------- |
-| POST        | `/httpcallsstore/httpcalls`                     | http-call-model | N/A                                   |
-| GET         | `/httpcallsstore/httpcalls/descriptors`         | N/A             | list of references to http-call-model |
-| DELETE      | `/httpcallsstore/httpcalls/{id}`                | N/A             | N/A                                   |
-| GET         | `/httpcallsstore/httpcalls/{id}`                | N/A             | http-call-model                       |
-| PUT         | `/httpcallsstore/httpcalls/{id}`                | http-call-model | N/A                                   |
-| GET         | `/httpcallsstore/httpcalls/{id}/currentversion` | N/A             | http-call-model                       |
-| POST        | `/httpcallsstore/httpcalls/{id}/currentversion` | http-call-model | N/A                                   |
+| POST        | `/apicallstore/apicalls`                     | http-call-model | N/A                                   |
+| GET         | `/apicallstore/apicalls/descriptors`         | N/A             | list of references to http-call-model |
+| DELETE      | `/apicallstore/apicalls/{id}`                | N/A             | N/A                                   |
+| GET         | `/apicallstore/apicalls/{id}`                | N/A             | http-call-model                       |
+| PUT         | `/apicallstore/apicalls/{id}`                | http-call-model | N/A                                   |
+| GET         | `/apicallstore/apicalls/{id}/currentversion` | N/A             | http-call-model                       |
+| POST        | `/apicallstore/apicalls/{id}/currentversion` | http-call-model | N/A                                   |
 
 ### httpCall Sample
 
@@ -327,7 +327,7 @@ For the sake of simplicity we will use a free weather API to fetch weather of ci
 
 _Request URL_
 
-`POST` `http://localhost:7070/regulardictionarystore/regulardictionaries`
+`POST` `http://localhost:7070/dictionarystore/dictionaries`
 
 _Request Body_
 
@@ -361,7 +361,7 @@ _Response Code_
 
 `201`
 
-> The `Location` header contains the resource URI, e.g. `eddi://ai.labs.regulardictionary/regulardictionarystore/regulardictionaries/<id>?version=1`
+> The `Location` header contains the resource URI, e.g. `eddi://ai.labs.dictionary/dictionarystore/dictionaries/<id>?version=1`
 
 ### 2 - Create the behaviorSet
 
@@ -369,7 +369,7 @@ _Response Code_
 
 _Request URL_
 
-`POST` `http://localhost:7070/behaviorstore/behaviorsets`
+`POST` `http://localhost:7070/rulestore/rulesets`
 
 _Response Body_
 
@@ -422,7 +422,7 @@ _Request Body_
 }
 ```
 
-> The `Location` header contains the resource URI, e.g. `eddi://ai.labs.behavior/behaviorstore/behaviorsets/<id>?version=1`
+> The `Location` header contains the resource URI, e.g. `eddi://ai.labs.rules/rulestore/rulesets/<id>?version=1`
 
 ### 3 - Create the **httpCall**
 
@@ -430,7 +430,7 @@ Note that we can pass user input to the http call using _**`{memory.current.inpu
 
 _Request URL_
 
-`POST` `http://localhost:7070/httpcallsstore/httpcalls`
+`POST` `http://localhost:7070/apicallstore/apicalls`
 
 _Request Body_
 
@@ -470,7 +470,7 @@ _Response Code_
 
 `201`
 
-> The `Location` header contains the resource URI, e.g. `eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/<id>?version=1`
+> The `Location` header contains the resource URI, e.g. `eddi://ai.labs.apicalls/apicallstore/apicalls/<id>?version=1`
 
 ### 4 - Create the outputSet
 
@@ -540,7 +540,7 @@ _Response Code_
 
 _Request URL_
 
-`POST` `http://localhost:7070/packagestore/packages`
+`POST` `http://localhost:7070/workflowstore/workflows`
 
 _Request Body_
 
@@ -572,7 +572,7 @@ _Request Body_
           {
             "type": "eddi://ai.labs.parser.dictionaries.regular",
             "config": {
-              "uri": "eddi://ai.labs.regulardictionary/regulardictionarystore/regulardictionaries/{{dictionary_id}}?version=1"
+              "uri": "eddi://ai.labs.dictionary/dictionarystore/dictionaries/{{dictionary_id}}?version=1"
             }
           }
         ],
@@ -600,13 +600,13 @@ _Request Body_
     {
       "type": "eddi://ai.labs.behavior",
       "config": {
-        "uri": "eddi://ai.labs.behavior/behaviorstore/behaviorsets/{{behaviourset_id}}?version=1"
+        "uri": "eddi://ai.labs.rules/rulestore/rulesets/{{behaviourset_id}}?version=1"
       }
     },
     {
       "type": "eddi://ai.labs.httpcalls",
       "config": {
-        "uri": "eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/{{httpcall_id}}?version=1"
+        "uri": "eddi://ai.labs.apicalls/apicallstore/apicalls/{{httpcall_id}}?version=1"
       }
     },
     {
@@ -632,7 +632,7 @@ Response Code
 
 `201`
 
-> The `Location` header contains the resource URI, e.g. `eddi://ai.labs.package/packagestore/packages/<id>?version=1`
+> The `Location` header contains the resource URI, e.g. `eddi://ai.labs.workflow/workflowstore/workflows/<id>?version=1`
 
 ### 6 - Creating the agent
 
@@ -645,7 +645,7 @@ _Request Body_
 ```javascript
 {
   "packages": [
-    "eddi://ai.labs.package/packagestore/packages/{{package_id}}?version=1"
+    "eddi://ai.labs.workflow/workflowstore/workflows/{{package_id}}?version=1"
   ],
   "channels": []
 }

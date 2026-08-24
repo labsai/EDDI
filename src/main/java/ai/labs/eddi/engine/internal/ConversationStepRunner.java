@@ -457,6 +457,16 @@ class ConversationStepRunner {
     }
 
     void cacheConversationState(String conversationId, ConversationState conversationState) {
+        if (conversationState == null) {
+            // Caffeine rejects a null value with a bare NullPointerException, and
+            // ConversationService.getConversationState caches BEFORE its own "no such
+            // conversation" check — so a conversation that does not exist produced a
+            // 500 from inside the cache instead of reaching the line that throws
+            // ConversationNotFoundException. There is also nothing to cache: "not
+            // found" is not a state, and caching it would keep it being served for the
+            // TTL even after the conversation appeared.
+            return;
+        }
         conversationStateCache.put(conversationId, conversationState);
     }
 

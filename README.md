@@ -127,12 +127,18 @@ docker compose -f docker-compose.yml -f docker-compose.auth.yml up
 # With Prometheus + Grafana monitoring
 docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up
 
+# With a local LLM — Ollama on the same Docker network, reachable as
+# http://ollama:11434 (no host.docker.internal needed)
+docker compose -f docker-compose.yml -f docker-compose.ollama.yml up -d
+
 # Full stack (all overlays)
 docker compose -f docker-compose.yml -f docker-compose.auth.yml \
   -f docker-compose.monitoring.yml -f docker-compose.nats.yml up
 ```
 
-Available compose overlays: `docker-compose.auth.yml` (Keycloak), `docker-compose.monitoring.yml` (Prometheus+Grafana), `docker-compose.nats.yml` (NATS JetStream), `docker-compose.postgres.yml` / `docker-compose.postgres-only.yml`, `docker-compose.local.yml` (build from source).
+Available compose overlays: `docker-compose.auth.yml` (Keycloak), `docker-compose.monitoring.yml` (Prometheus+Grafana), `docker-compose.nats.yml` (NATS JetStream), `docker-compose.ollama.yml` (local LLM), `docker-compose.chroma.yml` (vector store), `docker-compose.postgres.yml` / `docker-compose.postgres-only.yml`, `docker-compose.local.yml` (build from source).
+
+The Ollama overlay pulls `llama3.2:3b` on first start and keeps models in a named volume; override with `OLLAMA_PULL_MODEL=qwen3:4b`, or set it empty to skip the pull. It also sets `EDDI_OLLAMA_DEFAULT_BASE_URL`, so the agent wizard and the setup API pre-fill a base URL that resolves from inside the container — the one thing that trips up every first local-LLM agent, because `localhost` there is the container, not the host.
 
 ```bash
 docker pull labsai/eddi    # Pull latest from Docker Hub

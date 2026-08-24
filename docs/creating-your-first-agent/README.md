@@ -52,13 +52,13 @@ A agent can consists of the following elements:
 
 ### Example of a resource reference
 
-`eddi://ai.labs.regulardictionary/regulardictionarystore/regulardictionaries/ID?version=VERSION`
+`eddi://ai.labs.dictionary/dictionarystore/dictionaries/ID?version=VERSION`
 
 `eddi://` URI resources starting with this protocol are to be related with in EDDI&#x20;
 
 `ai.labs.regulardictionary` Type of resource
 
-`/regulardictionarystore/regulardictionaries` API path
+`/dictionarystore/dictionaries` API path
 
 &#x20;`ID` ID of the resources
 
