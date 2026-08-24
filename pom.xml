@@ -42,7 +42,7 @@
             <dependency>
                 <groupId>io.github.classgraph</groupId>
                 <artifactId>classgraph</artifactId>
-                <version>4.8.192</version>
+                <version>4.8.193</version>
             </dependency>
             <!-- Override jinjava to fix CVE-2026-25526 (pulled by jlama-core via jlama) -->
             <dependency>
@@ -74,7 +74,7 @@
             <dependency>
                 <groupId>io.projectreactor.netty</groupId>
                 <artifactId>reactor-netty-http</artifactId>
-                <version>1.2.8</version>
+                <version>1.3.7</version>
             </dependency>
             <!-- Override postgresql to fix CVE-2026-42198 (SCRAM iteration count DoS, ≤42.7.10)
                  and CVE-2026-54291 (auth downgrade, ≤42.7.11).
