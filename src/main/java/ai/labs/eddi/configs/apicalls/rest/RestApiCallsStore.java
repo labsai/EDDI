@@ -8,20 +8,28 @@ import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.apicalls.IApiCallsStore;
 import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
+import ai.labs.eddi.configs.apicalls.model.ApiEndpointDiscoveryRequest;
 import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.engine.mcp.McpApiToolBuilder;
+import ai.labs.eddi.modules.apicalls.impl.RequestRedactor;
+import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
+import ai.labs.eddi.secrets.sanitize.UriRedactor;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.UriInfo;
 import org.jboss.logging.Logger;
 
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 
 /**
@@ -83,18 +91,94 @@ public class RestApiCallsStore implements IRestApiCallsStore {
         return restVersionInfo.create(httpCallsConfiguration);
     }
 
+    /**
+     * Values accepted in {@code authHeaderRef} — every one of them a reference the
+     * engine resolves at call time, never a credential at rest.
+     */
+    private static final List<String> ALLOWED_AUTH_REFERENCE_PREFIXES = List.of("${vault:", "${eddivault:", "${vars:", "${caller:");
+
     @Override
-    public Response discoverEndpoints(String specUrl, String apiBaseUrl, String apiAuth) {
+    public Response discoverEndpoints(ApiEndpointDiscoveryRequest request) {
+        if (request == null) {
+            return badRequest("a request body with a 'specUrl' is required");
+        }
+
+        String authHeaderRef = trimToNull(request.authHeaderRef());
+        if (authHeaderRef != null && !isReference(authHeaderRef)) {
+            return badRequest("authHeaderRef must be a ${vault:…}, ${vars:…} or ${caller:…} reference, not a literal credential. "
+                    + "Store the key with POST /secretstore/secrets and reference it here.");
+        }
+
+        return discover(request.specUrl(), request.apiBaseUrl(), authHeaderRef);
+    }
+
+    @Override
+    public Response discoverEndpointsUnauthenticated(String specUrl, String apiBaseUrl, UriInfo uriInfo) {
+        String strayCredential = findCredentialQueryParam(uriInfo);
+        if (strayCredential != null) {
+            return badRequest("'" + strayCredential + "' is no longer accepted as a query parameter — a credential in a URL is logged by every "
+                    + "hop before EDDI sees it, and was previously echoed back inside every generated call. Use "
+                    + "POST /apicallstore/apicalls/discover-endpoints with a vault reference in authHeaderRef instead.");
+        }
+        return discover(specUrl, apiBaseUrl, null);
+    }
+
+    /**
+     * The caller's spec URL, safe to write to a log.
+     * <p>
+     * {@code LogSanitizer.sanitize} answers a different question — it stops a
+     * forged log line — and leaves credential material alone, so
+     * {@code https://user:token@host/spec.json} was logged with the token in it.
+     * The URL is caller-supplied and reaches the log on every discovery attempt,
+     * including the failures, where a URL carrying credentials is most likely.
+     */
+    private static String forLog(String url) {
+        return sanitize(UriRedactor.redactUri(url));
+    }
+
+    /**
+     * A URL as it appears INSIDE a longer message. Bounded on both sides by
+     * characters no URI may contain, so the scan stays linear.
+     */
+    private static final Pattern EMBEDDED_URI = Pattern.compile("https?://[^\\s\"'`<>\\\\]{1,2048}");
+
+    /**
+     * A parser complaint the caller may read.
+     * <p>
+     * The text is worth returning — it names the part of the spec that failed,
+     * which is the whole value of a 400 here — but a parser routinely quotes the
+     * offending input back, and the input is a caller-supplied URL that may carry
+     * credentials.
+     * <p>
+     * Two passes, because the two redactors answer different questions and each
+     * misses what the other catches. {@code SecretRedactionFilter} matches
+     * credential SHAPES, so it never sees an arbitrary password:
+     * {@code https://user:hunter2@host} has nothing token-like in it and would have
+     * gone back to the caller intact. {@code UriRedactor} knows a URI's grammar and
+     * strips the userinfo and sensitive query parameters, but only from a whole URI
+     * — hence the extraction. The shape pass still runs after, for credentials
+     * quoted outside a URL.
+     */
+    private static String safeMessage(Exception failure) {
+        String message = failure.getMessage();
+        if (message == null || message.isBlank()) {
+            return "The OpenAPI spec could not be parsed";
+        }
+        String withoutUriCredentials = EMBEDDED_URI.matcher(message)
+                .replaceAll(match -> Matcher.quoteReplacement(UriRedactor.redactUri(match.group())));
+        return SecretRedactionFilter.redact(withoutUriCredentials);
+    }
+
+    private Response discover(String specUrl, String apiBaseUrl, String authHeaderRef) {
         if (specUrl == null || specUrl.isBlank()) {
-            return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", "specUrl query parameter is required")).build();
+            return badRequest("specUrl is required");
         }
         try {
-            LOGGER.infof("Discovering API endpoints from OpenAPI spec at '%s'", specUrl);
+            LOGGER.infof("Discovering API endpoints from OpenAPI spec at '%s'", forLog(specUrl));
 
-            String effectiveBaseUrl = (apiBaseUrl != null && !apiBaseUrl.isBlank()) ? apiBaseUrl : null;
-            String effectiveAuth = (apiAuth != null && !apiAuth.isBlank()) ? apiAuth : null;
+            String effectiveBaseUrl = trimToNull(apiBaseUrl);
 
-            McpApiToolBuilder.ApiBuildResult result = McpApiToolBuilder.parseAndBuild(specUrl, null, effectiveBaseUrl, effectiveAuth);
+            McpApiToolBuilder.ApiBuildResult result = McpApiToolBuilder.parseAndBuild(specUrl, null, effectiveBaseUrl, authHeaderRef);
 
             if (result.configsByGroup().isEmpty()) {
                 return Response.ok(Map.of("title", "API", "baseUrl", "", "endpointCount", 0, "groups", Map.of())).build();
@@ -111,13 +195,39 @@ public class RestApiCallsStore implements IRestApiCallsStore {
 
             return Response.ok(response).build();
         } catch (IllegalArgumentException e) {
-            LOGGER.warnf(e, "Failed to parse OpenAPI spec from '%s'", specUrl);
-            return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", e.getMessage())).build();
+            LOGGER.warnf(e, "Failed to parse OpenAPI spec from '%s'", forLog(specUrl));
+            return badRequest(safeMessage(e));
         } catch (Exception e) {
-            LOGGER.errorf(e, "Unexpected error discovering endpoints from '%s'", specUrl);
-            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(Map.of("error", "Failed to discover endpoints: " + e.getMessage()))
+            LOGGER.errorf(e, "Unexpected error discovering endpoints from '%s'", forLog(specUrl));
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
+                    .entity(Map.of("error", "Failed to discover endpoints (" + e.getClass().getSimpleName() + ") — see server logs for details"))
                     .build();
         }
+    }
+
+    private static boolean isReference(String value) {
+        return ALLOWED_AUTH_REFERENCE_PREFIXES.stream().anyMatch(value::startsWith);
+    }
+
+    private static String trimToNull(String value) {
+        return (value == null || value.isBlank()) ? null : value.trim();
+    }
+
+    /** Names a credential-bearing query parameter if the caller sent one. */
+    private static String findCredentialQueryParam(UriInfo uriInfo) {
+        if (uriInfo == null) {
+            return null;
+        }
+        for (String name : uriInfo.getQueryParameters().keySet()) {
+            if (RequestRedactor.isSensitiveHeaderName(name)) {
+                return name;
+            }
+        }
+        return null;
+    }
+
+    private static Response badRequest(String message) {
+        return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", message)).build();
     }
 
     @Override

@@ -18,6 +18,11 @@ services:
       # logs a [SECURITY] ERROR banner at boot and a WARN reminder every hour
       # whenever OIDC is off in production mode.
       - "EDDI_SECURITY_ALLOW_UNAUTHENTICATED=${EDDI_SECURITY_ALLOW_UNAUTHENTICATED:-true}"
+      # The MCP endpoint and the secrets vault need their own opt-in: inheriting
+      # the flag above must not be enough to expose agent CRUD or vault writes.
+      # HighValueSurfaceGuard refuses to boot without these while OIDC is off.
+      - "EDDI_MCP_ALLOW_UNAUTHENTICATED=${EDDI_MCP_ALLOW_UNAUTHENTICATED:-true}"
+      - "EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED=${EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED:-true}"
       - "QUARKUS_OIDC_TENANT_ENABLED=${QUARKUS_OIDC_TENANT_ENABLED:-false}"
       - "MONGODB_CONNECTIONSTRING=mongodb://${MONGO_INITDB_ROOT_USERNAME:-eddi}:${MONGO_INITDB_ROOT_PASSWORD:-changeme}@mongodb:27017/eddi?authSource=admin&retryWrites=true&w=majority&connectTimeoutMS=10000&socketTimeoutMS=30000"
 #      - "JAVA_OPTS_APPEND=-Dquarkus.http.cors.origins=http://localhost:3000"

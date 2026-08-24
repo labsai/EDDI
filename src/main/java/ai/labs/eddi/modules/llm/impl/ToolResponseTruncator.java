@@ -266,11 +266,17 @@ public class ToolResponseTruncator {
         }
     }
 
+    /**
+     * A per-tool entry present but null falls back to the default rather than
+     * unboxing. {@code perToolLimits} is deserialized from agent JSON, where
+     * {@code {"fetch_page": null}} is a legal document, and the
+     * containsKey-then-get form turned that one character into an NPE that failed
+     * the whole turn.
+     */
     private int resolveLimit(String toolName, ToolResponseLimits limits) {
-        if (limits.getPerToolLimits() != null && limits.getPerToolLimits().containsKey(toolName)) {
-            return limits.getPerToolLimits().get(toolName);
-        }
-        return limits.getDefaultMaxChars();
+        Map<String, Integer> perToolLimits = limits.getPerToolLimits();
+        Integer perTool = perToolLimits == null ? null : perToolLimits.get(toolName);
+        return perTool != null ? perTool : limits.getDefaultMaxChars();
     }
 
     private void incrementCounter(String toolName, String strategy) {

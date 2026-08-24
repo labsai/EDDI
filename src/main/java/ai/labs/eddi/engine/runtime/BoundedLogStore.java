@@ -137,17 +137,37 @@ public class BoundedLogStore {
      *            the JUL LogRecord (actually a JBoss ExtLogRecord at runtime)
      */
     public void capture(LogRecord record) {
+        capture(record, null);
+    }
+
+    /**
+     * Capture a record whose message has already been formatted and redacted by
+     * {@link LogCaptureFilter}.
+     *
+     * @param record
+     *            the JUL LogRecord (actually a JBoss ExtLogRecord at runtime)
+     * @param preRedactedMessage
+     *            the record's redacted message, or {@code null} to format and
+     *            redact it here — which is what happens when redaction upstream
+     *            threw, so the ring buffer is never fed an unscanned message
+     */
+    public void capture(LogRecord record, String preRedactedMessage) {
         if (record == null)
             return;
 
-        // Format the message using a Formatter (avoids deprecated
-        // getFormattedMessage())
-        String message = formatRecord(record);
-        if (message == null || message.isEmpty())
-            return;
+        String message = preRedactedMessage;
+        if (message == null) {
+            // Format the message using a Formatter (avoids deprecated
+            // getFormattedMessage())
+            message = formatRecord(record);
+            if (message == null || message.isEmpty())
+                return;
 
-        // Redact potential secrets from log messages (defense-in-depth)
-        message = SecretRedactionFilter.redact(message);
+            // Redact potential secrets from log messages (defense-in-depth)
+            message = SecretRedactionFilter.redact(message);
+        }
+        if (message.isEmpty())
+            return;
 
         // Don't capture our own log messages to avoid infinite recursion
         String loggerName = record.getLoggerName();

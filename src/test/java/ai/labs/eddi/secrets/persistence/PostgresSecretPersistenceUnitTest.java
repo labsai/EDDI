@@ -167,12 +167,78 @@ class PostgresSecretPersistenceUnitTest {
     void upsertDek_happyPath() throws Exception {
         when(preparedStatement.executeUpdate()).thenReturn(1);
 
-        EncryptedDek dek = new EncryptedDek("dek-1", "tenant-1", "encDek", "dekIv", Instant.now());
+        EncryptedDek dek = new EncryptedDek("dek-1", "tenant-1", 3, "encDek", "dekIv", Instant.now());
         assertDoesNotThrow(() -> persistence.upsertDek(dek));
 
         verify(preparedStatement).setString(1, "tenant-1");
-        verify(preparedStatement).setString(2, "encDek");
+        // The generation is part of the row's identity now — the conflict target is
+        // (tenant_id, generation), so it has to be bound, not assumed.
+        verify(preparedStatement).setInt(2, 3);
+        verify(preparedStatement).setString(3, "encDek");
         verify(preparedStatement).executeUpdate();
+    }
+
+    @Test
+    void upsertDek_legacyConstructor_writesGenerationOne() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+
+        persistence.upsertDek(new EncryptedDek("dek-1", "tenant-1", "encDek", "dekIv", Instant.now()));
+
+        verify(preparedStatement).setInt(2, EncryptedDek.FIRST_GENERATION);
+    }
+
+    // ─── insertDek ───
+
+    @Test
+    void insertDek_freshGeneration_returnsTrue() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+
+        assertTrue(persistence.insertDek(new EncryptedDek("dek-2", "tenant-1", 2, "encDek", "iv", Instant.now())));
+    }
+
+    @Test
+    void insertDek_generationAlreadyTaken_returnsFalse() throws Exception {
+        // ON CONFLICT DO NOTHING, so the loser gets zero rows back and a live
+        // connection rather than an aborted transaction to unwind.
+        when(preparedStatement.executeUpdate()).thenReturn(0);
+
+        assertFalse(persistence.insertDek(new EncryptedDek("dek-2", "tenant-1", 2, "encDek", "iv", Instant.now())));
+    }
+
+    @Test
+    void insertDek_sqlException_throwsPersistenceException() throws Exception {
+        when(preparedStatement.executeUpdate()).thenThrow(new SQLException("DB error"));
+
+        assertThrows(PersistenceException.class,
+                () -> persistence.insertDek(new EncryptedDek("dek-2", "tenant-1", 2, "encDek", "iv", Instant.now())));
+    }
+
+    // ─── updateSecretSealing ───
+
+    @Test
+    void updateSecretSealing_guardHeld_returnsTrue() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+
+        assertTrue(persistence.updateSecretSealing(createTestSecret(), "dek-0"));
+
+        verify(preparedStatement).setString(7, "dek-0");
+    }
+
+    @Test
+    void updateSecretSealing_guardLost_returnsFalse() throws Exception {
+        // Another writer re-sealed the row first. Nothing was written, and forcing
+        // it through would replace their ciphertext with a re-seal of what they
+        // already replaced.
+        when(preparedStatement.executeUpdate()).thenReturn(0);
+
+        assertFalse(persistence.updateSecretSealing(createTestSecret(), "dek-0"));
+    }
+
+    @Test
+    void updateSecretSealing_sqlException_throwsPersistenceException() throws Exception {
+        when(preparedStatement.executeUpdate()).thenThrow(new SQLException("DB error"));
+
+        assertThrows(PersistenceException.class, () -> persistence.updateSecretSealing(createTestSecret(), "dek-0"));
     }
 
     @Test
@@ -189,17 +255,53 @@ class PostgresSecretPersistenceUnitTest {
     void findDek_found() throws Exception {
         when(preparedStatement.executeQuery()).thenReturn(resultSet);
         when(resultSet.next()).thenReturn(true);
-        when(resultSet.getString("id")).thenReturn("dek-id-1");
-        when(resultSet.getString("tenant_id")).thenReturn("tenant-1");
-        when(resultSet.getString("encrypted_dek")).thenReturn("encDek");
-        when(resultSet.getString("iv")).thenReturn("dekIv");
-        Timestamp ts = Timestamp.from(Instant.now());
-        when(resultSet.getTimestamp("created_at")).thenReturn(ts);
+        mockDekResultSet(3);
 
         Optional<EncryptedDek> result = persistence.findDek("tenant-1");
         assertTrue(result.isPresent());
         assertEquals("tenant-1", result.get().getTenantId());
         assertEquals("encDek", result.get().getEncryptedDek());
+        assertEquals(3, result.get().getGeneration());
+        assertEquals("tenant-1#g3", result.get().dekId(), "this is the name ciphertext records, so it has to carry the generation");
+    }
+
+    @Test
+    void findDek_rowPredatingTheGenerationColumn_readsAsGenerationOne() throws Exception {
+        // A row written before the column existed reads back as 0 until the default
+        // takes effect. Generation 0 names no key, so it is understood as 1 — the
+        // same rule that governs a bare-tenant-id dekId.
+        when(preparedStatement.executeQuery()).thenReturn(resultSet);
+        when(resultSet.next()).thenReturn(true);
+        mockDekResultSet(0);
+
+        assertEquals(EncryptedDek.FIRST_GENERATION, persistence.findDek("tenant-1").orElseThrow().getGeneration());
+    }
+
+    @Test
+    void findDekByGeneration_bindsTheGeneration() throws Exception {
+        when(preparedStatement.executeQuery()).thenReturn(resultSet);
+        when(resultSet.next()).thenReturn(true);
+        mockDekResultSet(2);
+
+        Optional<EncryptedDek> result = persistence.findDek("tenant-1", 2);
+
+        assertTrue(result.isPresent());
+        assertEquals(2, result.get().getGeneration());
+        verify(preparedStatement).setString(1, "tenant-1");
+        verify(preparedStatement).setInt(2, 2);
+    }
+
+    @Test
+    void listDeks_returnsEveryGeneration() throws Exception {
+        when(preparedStatement.executeQuery()).thenReturn(resultSet);
+        when(resultSet.next()).thenReturn(true, true, false);
+        mockDekResultSet(1);
+        when(resultSet.getInt("generation")).thenReturn(1, 2);
+
+        List<EncryptedDek> result = persistence.listDeks("tenant-1");
+
+        assertEquals(List.of(1, 2), result.stream().map(EncryptedDek::getGeneration).toList(),
+                "KEK rotation and the pre-commit verify both have to see every generation, not just the newest");
     }
 
     @Test
@@ -333,6 +435,22 @@ class PostgresSecretPersistenceUnitTest {
         verify(connection, times(1)).createStatement();
     }
 
+    @Test
+    void ensureSchema_migratesTheDekTableToOneRowPerGeneration() throws Exception {
+        when(preparedStatement.executeQuery()).thenReturn(resultSet);
+        when(resultSet.next()).thenReturn(false);
+
+        persistence.findSecret("t", "k");
+
+        verify(statement).execute(contains("ADD COLUMN IF NOT EXISTS generation"));
+        // While the column-level UNIQUE on tenant_id stands, a tenant cannot hold a
+        // second generation and rotation has nowhere to write.
+        verify(statement).execute(contains("DROP CONSTRAINT IF EXISTS secret_vault_deks_tenant_id_key"));
+        // A unique INDEX rather than a constraint: only an index can be declared IF
+        // NOT EXISTS, and ON CONFLICT accepts one just the same.
+        verify(statement).execute(contains("uq_svd_tenant_generation"));
+    }
+
     // ─── resultSetToSecret — allowed_agents JSON parsing ───
 
     @Test
@@ -385,6 +503,15 @@ class PostgresSecretPersistenceUnitTest {
         Instant now = Instant.now();
         return new EncryptedSecret("sec-1", "tenant-1", "api-key", "encVal", "iv123",
                 "dek-1", "chk", "Test secret", List.of("agent-1"), now, now, now);
+    }
+
+    private void mockDekResultSet(int generation) throws SQLException {
+        when(resultSet.getString("id")).thenReturn("dek-id-1");
+        when(resultSet.getString("tenant_id")).thenReturn("tenant-1");
+        when(resultSet.getInt("generation")).thenReturn(generation);
+        when(resultSet.getString("encrypted_dek")).thenReturn("encDek");
+        when(resultSet.getString("iv")).thenReturn("dekIv");
+        when(resultSet.getTimestamp("created_at")).thenReturn(Timestamp.from(Instant.now()));
     }
 
     private void mockSecretResultSet() throws SQLException {

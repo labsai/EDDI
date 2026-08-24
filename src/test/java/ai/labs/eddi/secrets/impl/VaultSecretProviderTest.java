@@ -93,6 +93,18 @@ class VaultSecretProviderTest {
     }
 
     /**
+     * Both DEK lookups the provider makes: {@code findDek(tenant)} for the newest
+     * generation, which is what a write seals with, and
+     * {@code findDek(tenant, generation)} for the one a stored row names, which is
+     * what a read opens it with. Stubbing only the first leaves the second
+     * answering "no such generation" and every resolve fails.
+     */
+    private void stubDekLookups(EncryptedDek dek) {
+        when(persistence.findDek(TENANT_ID)).thenReturn(Optional.of(dek));
+        when(persistence.findDek(TENANT_ID, dek.getGeneration())).thenReturn(Optional.of(dek));
+    }
+
+    /**
      * Creates an encrypted secret using real crypto operations with the given DEK.
      */
     private EncryptedSecret createEncryptedSecret(String plaintext, byte[] dek) {
@@ -221,11 +233,14 @@ class VaultSecretProviderTest {
         EncryptedSecret encSecret = createEncryptedSecret(plaintext, dek);
 
         when(persistence.findSecret(TENANT_ID, KEY_NAME)).thenReturn(Optional.of(encSecret));
-        when(persistence.findDek(TENANT_ID)).thenReturn(Optional.of(encDek));
+        stubDekLookups(encDek);
 
         String result = provider.resolve(new SecretReference(TENANT_ID, KEY_NAME));
 
         assertEquals(plaintext, result);
+        // The row's dekId is the bare tenant id — everything written before
+        // generations existed — and that reads as generation 1.
+        verify(persistence).findDek(TENANT_ID, EncryptedDek.FIRST_GENERATION);
         // Verify lastAccessedAt update was attempted
         verify(persistence, atLeastOnce()).upsertSecret(any(EncryptedSecret.class));
     }
@@ -449,11 +464,15 @@ class VaultSecretProviderTest {
     void rotateDek_noDekFound_throwsSecretProviderException() {
         VaultSecretProvider provider = createAvailableProvider();
 
-        when(persistence.findDek(TENANT_ID)).thenReturn(Optional.empty());
+        // Rotation reads every generation, not just the newest: the sweep has to
+        // open older ones, so a KEK that cannot must be discovered before the
+        // commit point rather than half way through.
+        when(persistence.listDeks(TENANT_ID)).thenReturn(List.of());
 
         SecretProviderException ex = assertThrows(SecretProviderException.class,
                 () -> provider.rotateDek(TENANT_ID));
         assertTrue(ex.getMessage().contains("No DEK found"));
+        verify(persistence, never()).insertDek(any(EncryptedDek.class));
     }
 
     // ─── 20. rotateKek — not available ───

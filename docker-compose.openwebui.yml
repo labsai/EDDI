@@ -28,6 +28,8 @@ services:
       # DEMO ONLY: no OIDC, so EDDI's own REST API is wide open. This is what
       # lets the seeder below call the (normally role-gated) import endpoint.
       - "EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true"
+      - "EDDI_MCP_ALLOW_UNAUTHENTICATED=true"
+      - "EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED=true"
 
       # ── The OpenAI-compatible adapter ──
       - "EDDI_OPENAI_COMPAT_ENABLED=true"
