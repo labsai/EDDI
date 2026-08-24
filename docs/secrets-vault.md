@@ -453,8 +453,9 @@ EDDI supports two levels of key rotation.
 
 `POST /{tenantId}/rotate-dek` does **not** replace the tenant's key. A tenant holds
 one DEK row per **generation**, and every ciphertext — a stored secret, and any
-other sealed value such as an [OAuth connection grant](connections.md#rotating-the-key-that-holds-them)
-— records the generation that sealed it. Reading opens a value with the generation
+other sealed value written through a `SealedDataRotationParticipant`, such as an
+[OAuth connection grant](connections.md#rotating-the-key-that-holds-them) — records
+the generation that sealed it. Reading opens a value with the generation
 it names, not with whichever one is newest.
 
 Rotation runs three phases, and only the middle one is irreversible:
