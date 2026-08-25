@@ -7,6 +7,56 @@
 
 
 
+## 🧪 fix(tenancy): the quota counters were tested against the wall clock (2026-08-25)
+
+**Repo:** EDDI (`fix/tenant-quota-minute-boundary-flake`)
+
+`MongoTenantQuotaStoreContainerTest.allThreeCountersInterleaved` failed CI on a PR that
+touched nothing in this package: `expected: <2> but was: <1>`. Not a regression — a latent
+flake that had been there since the tests were written.
+
+### Why it failed
+
+The quota counters live in wall-clock-aligned windows. `tryIncrementApiCalls` derives its
+window as `Instant.now().truncatedTo(ChronoUnit.MINUTES)` and `rollWindowIfExpired` resets
+the counter when that value changes. So a test that increments twice and asserts 2 is really
+asserting that both calls landed in the same minute — and nothing made that true. Two calls
+milliseconds apart straddle `:00` roughly once every six hundred runs.
+
+The day and month windows have the same shape, so `conversationsToday` and the cost month
+carried the same hazard at lower odds.
+
+### The fix
+
+`Clock` injected into `MongoTenantQuotaStore` and `PostgresTenantQuotaStore`, defaulting to
+`Clock.systemUTC()` in the CDI constructor so production behaviour is unchanged. Every
+`Instant.now()` and `YearMonth.now(ZoneOffset.UTC)` in both stores now reads that field —
+5 + 3 in Mongo, 6 + 3 in Postgres.
+
+`MongoTenantQuotaStoreContainerTest` and `TenantQuotaStoreParityTest` pin the clock at
+`2026-06-15T12:30:30Z`, deliberately mid-window on every axis so no assertion can pass by
+sitting exactly on a boundary. `InMemoryTenantQuotaStore` needs no clock: it has no window
+logic at all, which is why the parity test never flaked on that arm.
+
+`TenantQuotaStoreParityTest` was exposed the same way — it increments `limit` times and
+asserts the counter equals `limit` — so it is fixed here too rather than left to fail later.
+
+### The new test
+
+`minuteBoundaryRollsTheCounter` steps a clock from `12:30:59Z` to `12:31:00Z` between two
+increments and asserts the counter rolls to 1 rather than reaching 2. That converts the
+hazard into an assertion of the intended behaviour, and it pins the wiring: reverting a
+single `clock.instant()` to `Instant.now()` fails it with `expected: <1> but was: <2>`,
+which is how the fix was verified rather than assumed.
+
+### Not changed
+
+The rollover tests still force expiry by writing `dayStart`/`minuteStart` to `0L` directly.
+That is both deterministic and closer to what the rollover path actually reads, so a clock
+was not the right tool there.
+
+---
+
 ## 🩹 fix(api,docs): everything a new user hit walking the developer quickstart (2026-08-25)
 
 **Repo:** EDDI (`fix/quickstart-truth-and-api-honesty`)

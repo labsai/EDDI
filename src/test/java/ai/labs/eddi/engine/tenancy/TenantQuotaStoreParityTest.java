@@ -14,6 +14,9 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
 import java.util.concurrent.atomic.AtomicInteger;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 
@@ -47,12 +50,19 @@ class TenantQuotaStoreParityTest extends MongoTestBase {
      * Store factories, invoked lazily inside each test so that container startup
      * never happens during argument resolution.
      */
+    /** Mid-window on every axis, so nothing passes by sitting on a boundary. */
+    private static final Clock FIXED_CLOCK = Clock.fixed(Instant.parse("2026-06-15T12:30:30Z"), ZoneOffset.UTC);
+
     static Stream<Arguments> stores() {
         Supplier<ITenantQuotaStore> inMemory = () -> new InMemoryTenantQuotaStore(
                 new TenantQuota("unused", -1, -1, -1, -1.0, true));
-        Supplier<ITenantQuotaStore> mongo = () -> new MongoTenantQuotaStore(getDatabase());
+        // Pinned, for the reason MongoTenantQuotaStoreContainerTest pins it: the
+        // counter assertions below increment N times and expect N, which only holds
+        // if every call landed in the same wall-clock minute. The in-memory store has
+        // no windows at all, so it needs no clock and cannot drift.
+        Supplier<ITenantQuotaStore> mongo = () -> new MongoTenantQuotaStore(getDatabase(), FIXED_CLOCK);
         Supplier<ITenantQuotaStore> postgres = () -> new PostgresTenantQuotaStore(
-                PostgresTestBase.createDataSourceInstance());
+                PostgresTestBase.createDataSourceInstance(), FIXED_CLOCK);
 
         return Stream.of(
                 Arguments.of("in-memory", inMemory),
