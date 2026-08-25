@@ -63,10 +63,17 @@ public class ConnectionConfiguration {
      * {@code extraAuthParams}. Same vocabulary as the export scrubber's, minus the
      * entropy heuristic — this is a write-boundary check on a small map, so it can
      * afford to be strict and say why.
+     * <p>
+     * Entries are in <em>normalized</em> form: lower case, with {@code -},
+     * {@code .} and {@code _} removed, because that is the shape
+     * {@link #validateExtraAuthParams()} compares against. An entry spelled the way
+     * the parameter appears on the wire ({@code code_verifier}) can never match,
+     * and the parameter it was meant to catch then passes validation and is
+     * appended to the authorization URL. Keep new entries stripped.
      */
-    private static final Set<String> CREDENTIAL_PARAM_NAMES = Set.of("apikey", "api_key", "apitoken", "api_token", "password", "passwd", "secret",
-            "secretkey", "secret_key", "token", "accesstoken", "access_token", "refreshtoken", "refresh_token", "authorization", "auth",
-            "credential", "credentials", "privatekey", "private_key", "clientsecret", "client_secret", "assertion", "code_verifier");
+    private static final Set<String> CREDENTIAL_PARAM_NAMES = Set.of("apikey", "apitoken", "password", "passwd", "secret", "secretkey",
+            "token", "accesstoken", "refreshtoken", "authorization", "auth", "credential", "credentials", "privatekey", "clientsecret",
+            "assertion", "codeverifier");
 
     /** Referenced as {@code ${connection:name}}. */
     private String name;
@@ -250,7 +257,7 @@ public class ConnectionConfiguration {
                 continue;
             }
             String normalized = key.toLowerCase(Locale.ROOT).replaceAll("[\\-._]", "");
-            if (CREDENTIAL_PARAM_NAMES.contains(normalized) || CREDENTIAL_PARAM_NAMES.contains(normalized.replace("_", ""))) {
+            if (CREDENTIAL_PARAM_NAMES.contains(normalized)) {
                 throw new IllegalArgumentException("oauth.extraAuthParams may carry only non-secret protocol parameters (prompt, audience, …). '"
                         + key + "' is credential-shaped; store it with POST /secretstore/secrets and reference it instead.");
             }

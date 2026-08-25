@@ -7,6 +7,49 @@
 
 
 
+## 🔒 fix(connections): the one credential-shaped param name the denylist could never match (2026-08-25)
+
+**Repo:** EDDI (`fix/connection-extra-auth-params-code-verifier`)
+
+`ConnectionConfiguration.validateExtraAuthParams()` normalizes a key — lower case, with
+`-`, `.` and `_` stripped — and *then* looks it up in `CREDENTIAL_PARAM_NAMES`. The set
+was written in wire spelling, so half its entries were shapes the normalizer can never
+produce. That was harmless for seven of them, because each had a stripped twin in the
+same set (`api_key` alongside `apikey`, `client_secret` alongside `clientsecret`, …).
+`code_verifier` was the one entry with no twin: no spelling of it — `code_verifier`,
+`Code-Verifier`, `codeverifier` — was ever rejected. It passed validation and was
+appended verbatim to the authorization URL, which is the one place a PKCE verifier must
+never appear: the browser history, the `Referer` and every proxy log in front of the
+provider now hold the secret whose whole purpose is to not travel with the challenge.
+
+The second clause of the check, `CREDENTIAL_PARAM_NAMES.contains(normalized.replace("_",
+""))`, was dead — `normalized` has no underscores left by that point — and reads as if it
+covered exactly this case, which is presumably why the gap survived review.
+
+**Fix:** one canonical representation. The set now holds normalized forms only, with
+`codeverifier` added, and the dead clause is gone. The effective rule set is provably
+unchanged apart from that addition — every removed entry's stripped form was already
+present. The field's Javadoc now states the invariant and what breaks when it is
+violated, so the next name added in wire spelling does not silently reopen the hole.
+
+**Test:** a `@ParameterizedTest` in `ConnectionConfigurationValidationTest` sweeps the
+four spellings of `code_verifier` plus the six other underscored wire spellings, pinning
+punctuation-independence rather than one key. Mutation-checked: reverting the source
+change fails exactly those four cases and none of the other 27.
+
+**Checked and deliberately not changed:** `RestConnectionAuthorization.buildAuthorizationUrl()`
+already skips extra params whose key collides with a protocol param, so this was a leak,
+not an override. `SecretScrubber.SECRET_FIELD_NAMES` has the same dead-entry pattern
+against the same normalizer, but no coverage gap — every dead entry there is caught by
+its stripped twin or by the `token`/`secret`/… suffix rule. Cosmetic, and left for its
+own change.
+
+**Mirrored in:** EDDI-Manager's `isCredentialParamName`, being fixed independently; the
+two rule sets stay in agreement because this change adds `codeverifier` and removes
+nothing.
+
+---
+
 ## 🧪 fix(tenancy): the quota counters were tested against the wall clock (2026-08-25)
 
 **Repo:** EDDI (`fix/tenant-quota-minute-boundary-flake`)
