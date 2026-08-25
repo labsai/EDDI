@@ -3,6 +3,19 @@ import { screen } from "@testing-library/react";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
 import { ChannelCard } from "@/components/channels/channel-card";
 import type { EnrichedChannelDescriptor } from "@/lib/api/channels";
+import { useLocation } from "react-router-dom";
+
+/**
+ * The router's own location, rendered so a test can assert on it.
+ *
+ * `window.location` is not it: these render under MemoryRouter, which never
+ * touches the address bar, so asserting on it would pass whether or not the
+ * navigation happened.
+ */
+function LocationProbe() {
+  const location = useLocation();
+  return <span data-testid="router-path">{location.pathname}</span>;
+}
 
 const baseChannel: EnrichedChannelDescriptor = {
   id: "ch-001",
@@ -164,6 +177,99 @@ describe("ChannelCard", () => {
       />
     );
     expect(screen.queryByText("C0123ABC")).not.toBeInTheDocument();
+  });
+
+  it("does not navigate away on Enter from the Delete button", async () => {
+    // The card's own onKeyDown sees Enter and Space bubbling up from the
+    // buttons nested inside it. Unguarded, it navigated to the detail page
+    // instead of deleting — and its preventDefault suppressed the button's own
+    // activation on the way past, so the keyboard reached neither action.
+    //
+    // Asserting on the navigation, not on onDelete: jsdom fires the button's
+    // click from Enter regardless of preventDefault, so `onDelete` is called
+    // either way and an assertion on it passes with the guard removed.
+    const user = userEvent.setup();
+    renderWithProviders(
+      <>
+        <ChannelCard channel={baseChannel} onDelete={vi.fn()} onDuplicate={vi.fn()} />
+        <LocationProbe />
+      </>,
+    );
+
+    screen.getByTitle("Delete").focus();
+    await user.keyboard("{Enter}");
+
+    expect(screen.getByTestId("router-path")).toHaveTextContent("/");
+    expect(screen.getByTestId("router-path")).not.toHaveTextContent(
+      "/manage/channels/ch-001",
+    );
+  });
+
+  it("does not navigate away on Space from the Duplicate button", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(
+      <>
+        <ChannelCard channel={baseChannel} onDelete={vi.fn()} onDuplicate={vi.fn()} />
+        <LocationProbe />
+      </>,
+    );
+
+    screen.getByTitle("Duplicate").focus();
+    await user.keyboard(" ");
+
+    expect(screen.getByTestId("router-path")).not.toHaveTextContent(
+      "/manage/channels/ch-001",
+    );
+  });
+
+  it("still runs the button's own action from the keyboard", async () => {
+    // The guard must not cost the buttons their activation.
+    const user = userEvent.setup();
+    const onDelete = vi.fn();
+    renderWithProviders(
+      <ChannelCard channel={baseChannel} onDelete={onDelete} onDuplicate={vi.fn()} />,
+    );
+
+    screen.getByTitle("Delete").focus();
+    await user.keyboard("{Enter}");
+
+    expect(onDelete).toHaveBeenCalledWith("ch-001", 1);
+  });
+
+  it("still opens the channel on Enter from the card itself", async () => {
+    // The other half: guarding the nested buttons must not cost the card its
+    // own keyboard activation.
+    const user = userEvent.setup();
+    renderWithProviders(
+      <>
+        <ChannelCard channel={baseChannel} onDelete={vi.fn()} onDuplicate={vi.fn()} />
+        <LocationProbe />
+      </>,
+    );
+
+    const card = screen.getByTestId("channel-card-ch-001");
+    card.focus();
+    await user.keyboard("{Enter}");
+
+    expect(screen.getByTestId("router-path")).toHaveTextContent(
+      "/manage/channels/ch-001",
+    );
+  });
+
+  it("reveals the row actions when one of them takes focus", () => {
+    // They are opacity-0 until hover, so revealing them on hover alone left a
+    // keyboard user tabbing into a button they could not see.
+    //
+    // Asserts the class, because jsdom loads no stylesheet and cannot report a
+    // computed opacity that Tailwind never generated. That the utility really
+    // resolves — that `:focus-within` beats `opacity-0` rather than being
+    // tree-shaken away — was checked in a browser against the built CSS.
+    renderWithProviders(
+      <ChannelCard channel={baseChannel} onDelete={vi.fn()} onDuplicate={vi.fn()} />,
+    );
+
+    const actions = screen.getByTitle("Delete").parentElement;
+    expect(actions).toHaveClass("focus-within:opacity-100");
   });
 
   it("has role=button and tabIndex", () => {

@@ -42,6 +42,11 @@ export function ChannelCard({ channel, onDelete, onDuplicate }: ChannelCardProps
       role="button"
       tabIndex={0}
       onKeyDown={(e) => {
+        // Only the card itself. Enter and Space bubble from the Duplicate and
+        // Delete buttons nested inside it, so an unguarded handler navigated
+        // away instead of deleting — and `preventDefault` suppressed the button
+        // activation on the way past.
+        if (e.target !== e.currentTarget) return;
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           navigate(`/manage/channels/${channel.id}?version=${channel.version}`);
@@ -66,7 +71,10 @@ export function ChannelCard({ channel, onDelete, onDuplicate }: ChannelCardProps
             )}
           </div>
         </div>
-        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        {/* `focus-within` alongside `group-hover`: revealing these on hover
+            alone left a keyboard user tabbing into a button they could not
+            see. */}
+        <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
           <Button variant="ghost" size="icon" className="h-7 w-7"
             onClick={(e) => { e.stopPropagation(); onDuplicate(channel.id, channel.version); }}
             title={t("common.duplicate")}>

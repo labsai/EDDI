@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
 import { ChannelsPage } from "@/pages/channels";
 import { server } from "@/test/mocks/server";
@@ -174,6 +174,71 @@ describe("ChannelsPage", () => {
       const rows = screen.getAllByTestId(/^channel-row-/);
       expect(rows.length).toBeGreaterThanOrEqual(1);
     });
+  });
+
+  it("gives the table view a keyboard route into a channel", async () => {
+    // The row's onClick is a mouse affordance only — no role, no tabIndex, no
+    // key handler — so before this the list view could not be used from the
+    // keyboard at all. A real link also restores middle-click and
+    // open-in-new-tab, which navigate() cannot offer.
+    renderWithProviders(<ChannelsPage />, { initialRoute: "/manage/channels" });
+    await waitFor(() =>
+      expect(screen.getAllByTestId(/^channel-card-/).length).toBeGreaterThanOrEqual(1),
+    );
+
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("view-toggle-list"));
+
+    const links = await screen.findAllByTestId(/^channel-link-/);
+    expect(links.length).toBeGreaterThanOrEqual(1);
+    // An anchor with an href is what makes it reachable and openable.
+    expect(links[0]).toHaveAttribute("href", expect.stringContaining("/manage/channels/"));
+    expect(links[0]!.tagName).toBe("A");
+  });
+
+  it("points each link at that row's own channel and version", async () => {
+    // Asserting the URL *shape* would pass for a link to the wrong channel or
+    // the wrong version, which is the failure worth catching: a row that opens
+    // a different document than it describes is worse than no link at all.
+    // Fixture ids and versions are deliberately distinct, and each link is
+    // matched against the row it actually sits in.
+    const expected: Record<string, number> = { chA: 3, chB: 7, chC: 11 };
+    server.use(
+      http.get("*/channelstore/channels/descriptors", () =>
+        HttpResponse.json(
+          Object.entries(expected).map(([id, version]) => ({
+            resource: `eddi://ai.labs.channel/channelstore/channels/${id}?version=${version}`,
+            name: `Channel ${id}`,
+            description: "",
+            createdOn: Date.now(),
+            lastModifiedOn: Date.now(),
+          })),
+        ),
+      ),
+      http.get("*/channelstore/channels/:id", ({ params }) =>
+        HttpResponse.json({
+          name: `Channel ${params.id}`,
+          type: "slack",
+          channelId: `C-${params.id}`,
+          targets: [],
+        }),
+      ),
+    );
+
+    renderWithProviders(<ChannelsPage />, { initialRoute: "/manage/channels" });
+    await waitFor(() =>
+      expect(screen.getAllByTestId(/^channel-card-/).length).toBe(3),
+    );
+
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("view-toggle-list"));
+    await screen.findAllByTestId(/^channel-link-/);
+
+    for (const [id, version] of Object.entries(expected)) {
+      const row = screen.getByTestId(`channel-row-${id}`);
+      const link = within(row).getByTestId(`channel-link-${id}`);
+      expect(link).toHaveAttribute("href", `/manage/channels/${id}?version=${version}`);
+    }
   });
 
   // ─── Delete dialog ──────────────────────────────────────────────────────

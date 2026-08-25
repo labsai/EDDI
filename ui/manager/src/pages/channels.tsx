@@ -20,7 +20,7 @@ import {
   useDeleteChannel,
   useDuplicateChannel,
 } from "@/hooks/use-channels";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
 export function ChannelsPage() {
   const { t } = useTranslation();
@@ -212,7 +212,21 @@ export function ChannelsPage() {
               {filtered.map((ch) => (
                 <tr key={ch.id} className="border-b border-border/30 hover:bg-muted/30 cursor-pointer transition-colors"
                   onClick={() => navigate(`/manage/channels/${ch.id}?version=${ch.version}`)} data-testid={`channel-row-${ch.id}`}>
-                  <td className="px-4 py-3 font-medium">{ch.name}</td>
+                  <td className="px-4 py-3 font-medium">
+                    {/* A real link, not just a row click: the row's onClick is a
+                        mouse affordance only, so without this the table view had
+                        no keyboard route into a channel at all. It also restores
+                        middle-click and open-in-new-tab, which navigate() cannot
+                        offer. */}
+                    <Link
+                      to={`/manage/channels/${ch.id}?version=${ch.version}`}
+                      className="hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      onClick={(e) => e.stopPropagation()}
+                      data-testid={`channel-link-${ch.id}`}
+                    >
+                      {ch.name}
+                    </Link>
+                  </td>
                   <td className="px-4 py-3"><Badge variant="outline" className="text-xs">{ch.channelType}</Badge></td>
                   <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{ch.channelId ?? "—"}</td>
                   <td className="px-4 py-3">{ch.targetCount}</td>
