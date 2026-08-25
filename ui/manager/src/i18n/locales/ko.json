@@ -2543,6 +2543,7 @@
     "negotiationSuperseded": "대체됨",
     "negotiationTableTitle": "협상 테이블",
     "notSet": "설정되지 않음",
+    "policyNotSet": "—",
     "retroConfigLabel": "회고 교훈",
     "retroConfigValue": "실행당 {{perRun}}개, 최대 저장 {{stored}}개",
     "stateAwaitingHumanInput": "구성원 입력 대기 중",

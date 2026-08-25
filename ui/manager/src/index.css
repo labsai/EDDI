@@ -365,6 +365,91 @@
   font-size: 1em;
 }
 
+/* ── Chat-scale markdown rhythm ────────────────────────────────
+   DELIBERATELY UNLAYERED, for the reason spelled out under the headings above.
+
+   Twelve surfaces render model-written markdown — the board transcript, the
+   advisor cards, the synthesis card, the Manager transcript, the conversation
+   viewer, 1:1 chat, the operator, the thread page, artifacts, release notes —
+   and every one of them had hand-rolled its own subset of the same repairs as
+   `[&_p]:my-1`-style utilities. The subsets disagreed: paragraph spacing was
+   4px on the board and the plugin's 16px on the Manager, so the SAME transcript
+   read with two different rhythms depending on which page you opened it from,
+   and `break-words` was present on five of the twelve.
+
+   Rhythm lives here, once. Call sites keep what is genuinely theirs — text
+   colour, padding, a surface-specific code background — and stop restating the
+   parts that are not a per-surface decision.
+
+   The values are chat values, not document values. A message is read in a
+   column a few hundred pixels wide, so paragraphs need to be distinguishable
+   without the air a page gives them: 0.75em against a 1.71 line-height keeps a
+   paragraph a unit while the plugin's 1.14em made a six-paragraph answer scroll
+   for no reason. */
+.prose {
+  overflow-wrap: break-word;
+}
+
+.prose :is(p, ul, ol, blockquote) {
+  margin-top: 0.75em;
+  margin-bottom: 0.75em;
+}
+
+/* Items belong to their list far more tightly than the list belongs to the
+   prose around it. */
+.prose :is(ul, ol) li {
+  margin-top: 0.25em;
+  margin-bottom: 0.25em;
+}
+
+/* A "loose" list — one whose items markdown wrapped in <p> — must not inherit
+   paragraph spacing inside each bullet, or every item becomes its own block. */
+.prose li > p {
+  margin-top: 0;
+  margin-bottom: 0;
+}
+
+/* The card supplies the padding; the first and last blocks must not add to it.
+   Six of the twelve surfaces set this by hand and six did not, so a message
+   opened one way sat a line lower than the same message opened another. */
+.prose > :first-child {
+  margin-top: 0;
+}
+
+.prose > :last-child {
+  margin-bottom: 0;
+}
+
+/* Wide code never widens the message. Five of the twelve set this; the rest let
+   a long line push the card instead. */
+.prose pre {
+  overflow-x: auto;
+}
+
+/* One divider colour everywhere, rather than the two surfaces that remembered
+   to pass `[&_hr]:border-border` and the ten that did not. */
+.prose hr {
+  border-color: var(--color-border);
+}
+
+/* A markdown `---` is a divider, not a chapter break.
+
+   Same reasoning as the headings above, and the same placement rule. The
+   typography plugin gives `hr` a 2.857em margin on both sides — 40px at
+   prose-sm's 14px — and margin collapsing does not help, because the rule sits
+   between two blocks that both want space. A group member who separates every
+   section with `---` (models do this constantly) spent 80px of card on each
+   one: measured at 100px between the end of one paragraph and the text of the
+   next heading, in a card whose paragraphs are 4px apart.
+
+   1em keeps the separator legible while letting the heading's own margin-top
+   win the collapse, so a divider costs about as much as the heading it
+   introduces rather than three times more. */
+.prose hr {
+  margin-top: 1em;
+  margin-bottom: 1em;
+}
+
 /* Markdown tables inside chat bubbles: readable and self-contained. The
    typography plugin provides the base table styling; these add the chat
    specifics — hairline row borders, breathing room in cells, and horizontal

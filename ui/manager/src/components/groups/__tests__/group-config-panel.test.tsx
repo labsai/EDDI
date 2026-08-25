@@ -330,3 +330,58 @@ describe("GroupConfigPanel — role coverage", () => {
     );
   });
 });
+
+/**
+ * `ProtocolConfig` types both member policies as required, but the backend
+ * serialises only what the stored document carries — a group created over the
+ * API rather than through the wizard arrives without them. The panel formatted
+ * them by indexing the value directly, so one such group replaced the entire
+ * board with the error boundary: "Cannot read properties of undefined (reading
+ * 'charAt')".
+ *
+ * `normalizeGroupConfig` fills them on the way in, so the real path never
+ * reaches here undefined. These pin the panel itself anyway, because it takes a
+ * config as a PROP and nothing stops a caller passing one that never went
+ * through the fetch boundary.
+ */
+describe("GroupConfigPanel — a protocol the backend left incomplete", () => {
+  const withProtocol = (protocol: Record<string, unknown>) =>
+    ({
+      ...mockConfig,
+      protocol,
+    }) as unknown as AgentGroupConfiguration;
+
+  it("renders rather than throwing when both policies are missing", () => {
+    renderWithProviders(
+      <GroupConfigPanel config={withProtocol({ agentTimeoutSeconds: 180, maxRetries: 2 })} />,
+    );
+    // The section is on screen, so the panel rendered past the two rows that
+    // used to throw.
+    expect(screen.getByText("180s")).toBeInTheDocument();
+  });
+
+  it("renders when only onMemberUnavailable is missing", () => {
+    renderWithProviders(
+      <GroupConfigPanel
+        config={withProtocol({ agentTimeoutSeconds: 45, maxRetries: 1, onAgentFailure: "RETRY" })}
+      />,
+    );
+    expect(screen.getByText("45s")).toBeInTheDocument();
+    expect(screen.getByText("Retry")).toBeInTheDocument();
+  });
+
+  it("labels the policies it does have", () => {
+    renderWithProviders(
+      <GroupConfigPanel
+        config={withProtocol({
+          agentTimeoutSeconds: 30,
+          maxRetries: 2,
+          onAgentFailure: "ABORT",
+          onMemberUnavailable: "FAIL",
+        })}
+      />,
+    );
+    expect(screen.getByText("Abort")).toBeInTheDocument();
+    expect(screen.getByText("Fail")).toBeInTheDocument();
+  });
+});

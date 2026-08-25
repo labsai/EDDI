@@ -610,7 +610,7 @@ export function DiscussionTranscript({
                 synthCollapsible && !synthExpanded && "max-h-72"
               )}
             >
-              <div className="prose prose-sm dark:prose-invert max-w-none text-foreground [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs [&_hr]:border-border">
+              <div className="prose prose-sm dark:prose-invert max-w-none text-foreground [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs">
                 {/* Deliberately NO rehypeRaw: agent-produced synthesis text is
                     untrusted, so raw HTML stays escaped rather than injected. */}
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>

@@ -103,6 +103,59 @@ describe("Workforce Pages", () => {
       });
     });
 
+    /**
+     * The Sessions and Team slide-overs were `fixed inset-y-0 end-0`, so they
+     * sat on top of the right-hand half of the board's own action bar — "+ New"
+     * included. With a panel open, the first click on "+ New" landed on the
+     * panel; with none open it worked. That is the whole of "the New
+     * conversation button doesn't work, sometimes".
+     *
+     * jsdom has no layout, so the geometry is pinned in `e2e/workforce.spec.ts`.
+     * What is checkable here is the containment that makes the geometry
+     * possible: the panels must live INSIDE the content row, which begins below
+     * the action bar — not as siblings of it.
+     */
+    it("renders the slide-overs below the action bar, not over it", async () => {
+      const user = userEvent.setup();
+      renderPage("/workforce/grp1?version=1", <WorkforceBoard />, "/workforce/:boardId");
+      await screen.findAllByText(/Product Review Panel/i);
+
+      await user.click(screen.getByTestId("sessions-toggle"));
+      const panel = await screen.findByTestId("sessions-panel");
+      // Still a labelled dialog to assistive tech, not merely a div with an id.
+      expect(panel).toHaveAttribute("role", "dialog");
+      expect(panel).toHaveAccessibleName(/sessions panel/i);
+
+      const newButton = screen.getByTestId("new-discussion-btn");
+      // The action bar is outside whatever the panel occupies, so nothing the
+      // panel draws can be on top of it.
+      expect(panel.contains(newButton)).toBe(false);
+      const row = panel.parentElement;
+      expect(row).not.toBeNull();
+      expect(row!.contains(newButton)).toBe(false);
+      // Positioned against the content row rather than the viewport — `fixed`
+      // is what put it over the bar.
+      expect(panel.className).toContain("absolute");
+      expect(panel.className).not.toContain("fixed");
+    });
+
+    it("clears the open slide-over when a new discussion is started", async () => {
+      const user = userEvent.setup();
+      renderPage("/workforce/grp1?version=1", <WorkforceBoard />, "/workforce/:boardId");
+      await screen.findAllByText(/Product Review Panel/i);
+
+      await user.click(screen.getByTestId("sessions-toggle"));
+      expect(await screen.findByTestId("sessions-panel")).toBeInTheDocument();
+
+      await user.click(screen.getByTestId("new-discussion-btn"));
+
+      // Whichever panel was open is about the discussion being left behind, so
+      // a fresh board must not still be showing it.
+      await waitFor(() => {
+        expect(screen.queryByTestId("sessions-panel")).not.toBeInTheDocument();
+      });
+    });
+
     // The board offered two ways into history — the Sessions slide-over and a
     // link to the full-page history. Only the slide-over remains.
     it("offers exactly one history affordance and no link to the history page", async () => {

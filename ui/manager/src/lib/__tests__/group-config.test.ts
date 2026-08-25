@@ -8,6 +8,7 @@ import {
   effectiveDelegationTimeout,
   hasDisplayableDecision,
   isValidCostCeiling,
+  memberPolicyLabel,
   moderatorlessPhaseNames,
   uncoveredRolePhases,
   normalizeConvergence,
@@ -273,5 +274,33 @@ describe("uncoveredRolePhases", () => {
         uncoveredRolePhases({ members: [], phases: null, style, maxRounds: 2 }),
       ).toEqual([]);
     }
+  });
+});
+
+describe("memberPolicyLabel", () => {
+  /** The panel's real `t`: look the key up, fall back to the second argument. */
+  const t = ((key: string, fallback: string) =>
+    ({ "groupWizard.policySkip": "Überspringen" })[key] ?? fallback) as never;
+
+  it("translates a policy through its groupWizard key", () => {
+    expect(memberPolicyLabel(t, "SKIP")).toBe("Überspringen");
+  });
+
+  it("title-cases the fallback, so an untranslated key never shouts", () => {
+    expect(memberPolicyLabel(t, "ABORT")).toBe("Abort");
+    expect(memberPolicyLabel(t, "FAIL")).toBe("Fail");
+    expect(memberPolicyLabel(t, "RETRY")).toBe("Retry");
+  });
+
+  it("degrades to a dash rather than throwing on an absent policy", () => {
+    // The whole reason this is a function: the inlined expression it replaced
+    // called `.charAt` on the value and took the board down with it.
+    expect(memberPolicyLabel(t, undefined)).toBe("—");
+    expect(memberPolicyLabel(t, null)).toBe("—");
+    expect(memberPolicyLabel(t, "")).toBe("—");
+  });
+
+  it("shows a value from a newer backend instead of hiding it", () => {
+    expect(memberPolicyLabel(t, "QUARANTINE")).toBe("Quarantine");
   });
 });

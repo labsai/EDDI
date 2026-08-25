@@ -2543,6 +2543,7 @@
     "negotiationSuperseded": "置き換え済み",
     "negotiationTableTitle": "交渉テーブル",
     "notSet": "未設定",
+    "policyNotSet": "—",
     "retroConfigLabel": "振り返りの学び",
     "retroConfigValue": "1回あたり {{perRun}} 件、最大保存 {{stored}} 件",
     "stateAwaitingHumanInput": "メンバーの入力待ち",

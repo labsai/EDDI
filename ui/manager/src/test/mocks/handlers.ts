@@ -577,6 +577,115 @@ function generateMockAuditEntries(conversationId: string, count: number) {
   }));
 }
 
+/**
+ * A finished DEBATE, reproducing the two things a real one does that the tidy
+ * `gconv1` fixture does not — both of which broke the board in a demo:
+ *
+ *  1. The judge answers in JSON, so the SYNTHESIS entry's body is a ```json
+ *     verdict rather than prose. The engine parses the same object into
+ *     `decision`; the raw text stays on the entry, and rendering it verbatim
+ *     printed a blob where the conclusion should be.
+ *  2. A member pastes something with no break opportunity in it. That is what
+ *     turned (1) into a layout failure: a flex column at `min-width: auto`
+ *     sizes to its widest unbreakable child, so one long line pushed the config
+ *     panel, the composer's Send button and every per-message action off-screen
+ *     — silently, because the shell clips rather than scrolls, so no
+ *     `scrollWidth` probe could see it.
+ *
+ * Requested by id, so `gconv1` keeps describing the ordinary case.
+ */
+const VERDICT_CONVERSATION_ID = "gconv-verdict";
+
+/** One token, no spaces, wider than any viewport this app supports. */
+const UNBREAKABLE_LINE = `https://example.test/trace/${"a1b2c3d4".repeat(240)}`;
+
+const VERDICT_REASONING =
+  "Both sides argued substantively and both left evidentiary gaps, so the verdict is a tie. " +
+  "PRO carried the modular-scalability point; CON carried the counterparty-credit point.";
+
+function verdictConversation() {
+  const now = Date.now();
+  const at = (agoMs: number) => new Date(now - agoMs).toISOString();
+  const entry = (over: Record<string, unknown>) => ({
+    speakerAgentId: "agent3",
+    speakerDisplayName: "Market Analyst",
+    phaseIndex: 0,
+    phaseName: "Opening Arguments",
+    type: "ARGUMENT",
+    errorReason: null,
+    targetAgentId: null,
+    ...over,
+  });
+
+  return {
+    id: VERDICT_CONVERSATION_ID,
+    groupId: "grp2",
+    userId: "manager-user",
+    state: "COMPLETED",
+    originalQuestion: "Which monetization pathway should we back?",
+    transcript: [
+      entry({
+        speakerAgentId: "user",
+        speakerDisplayName: "User",
+        content: "Which monetization pathway should we back?",
+        phaseIndex: -1,
+        phaseName: null,
+        type: "QUESTION",
+        timestamp: at(600_000),
+      }),
+      entry({
+        content: `## My Proposition\n\nI traced the pipeline run here:\n\n\`\`\`\n${UNBREAKABLE_LINE}\n\`\`\`\n\n---\n\n## Argument 1\n\nThe numbers hold.`,
+        timestamp: at(480_000),
+      }),
+      entry({
+        speakerAgentId: "agent4",
+        speakerDisplayName: "Growth Strategist",
+        // The same token OUTSIDE a fence. A code block brings its own
+        // horizontal scroller; bare prose has nothing but `break-words`,
+        // so this is the case that stretches the card itself — and the
+        // one the viewport probe alone cannot see, because everything in
+        // the transcript sits inside its vertical scroll box.
+        content: `Mine is at ${UNBREAKABLE_LINE} — same conclusion.`,
+        timestamp: at(300_000),
+      }),
+      entry({
+        speakerAgentId: "agent4",
+        speakerDisplayName: "Growth Strategist",
+        phaseIndex: 1,
+        phaseName: "Judgment",
+        type: "SYNTHESIS",
+        content: `\`\`\`json\n{\n  "winner": "TIE",\n  "scores": {"PRO": 7, "CON": 7},\n  "reasoning": ${JSON.stringify(VERDICT_REASONING)}\n}\n\`\`\``,
+        timestamp: at(120_000),
+      }),
+    ],
+    memberConversationIds: {},
+    currentPhaseIndex: 1,
+    currentPhaseName: "Judgment",
+    // Empty on purpose: with no conversation-level synthesis, the SYNTHESIS
+    // entry is the only thing carrying the conclusion, so a surface that cannot
+    // read the verdict has nothing else to fall back on.
+    synthesizedAnswer: "",
+    decision: {
+      type: "VERDICT",
+      outcome: "Tie (PRO 7, CON 7)",
+      winner: null,
+      tally: { PRO: 7, CON: 7 },
+      dissents: [],
+      method: "debate-judgment",
+      decidedAtPhase: "Judgment",
+      raw: null,
+    },
+    depth: 0,
+    taskList: null,
+    dynamicMembers: [],
+    createdAgentIds: [],
+    retainedAgentIds: [],
+    availableActions: [],
+    created: at(600_000),
+    lastModified: at(120_000),
+  };
+}
+
 export const handlers = [
   // Template preview — resolves Qute templates for the LLM editor preview
   http.post("*/administration/preview/template", async ({ request }) => {
@@ -4007,7 +4116,8 @@ export const scheduleHandlers = [
   }),
 
   // Get single group conversation (detailed transcript)
-  http.get("*/groups/:groupId/conversations/:convId", () => {
+  http.get("*/groups/:groupId/conversations/:convId", ({ params }) => {
+    if (params.convId === VERDICT_CONVERSATION_ID) return HttpResponse.json(verdictConversation());
     const now = new Date();
     return HttpResponse.json({
       id: "gconv1",

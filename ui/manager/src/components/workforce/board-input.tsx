@@ -243,6 +243,7 @@ function BoardInput({ onSend, disabled = false, placeholder, className, mode = "
 
           )}
           aria-label={t("Workforce.board.send", "Send")}
+          data-testid="board-send"
         >
           <SendIcon />
         </Button>

@@ -178,3 +178,78 @@ describe("BoardTranscript — convergence (I2)", () => {
     expect(screen.queryByTestId(/board-phase-convergence/)).not.toBeInTheDocument();
   });
 });
+
+/**
+ * The judge's answer arrives as JSON, so the SYNTHESIS entry's body is a
+ * ```json block. It used to go straight into the markdown renderer, which drew
+ * it as a code fence — the conclusion of the discussion, printed as a blob, on
+ * the last card of a demo.
+ *
+ * Two things had to be true for the fix to be right: the prose has to surface,
+ * and the winner/tally must NOT be repeated here — that is the verdict card's
+ * job, and it is rendered immediately above.
+ */
+describe("BoardTranscript — a synthesis answered in JSON", () => {
+  const judgeVerdict = JSON.stringify(
+    { winner: "TIE", scores: { PRO: 7, CON: 7 }, reasoning: "Both sides argued substantively." },
+    null,
+    2,
+  );
+
+  it("renders the judge's reasoning, not the JSON", () => {
+    renderWithProviders(
+      <BoardTranscript
+        transcript={[entry("SYNTHESIS", "```json\n" + judgeVerdict + "\n```", 1, "Judgment")]}
+        boardId="board-1"
+      />,
+    );
+
+    const card = screen.getByLabelText("Synthesis result");
+    expect(card).toHaveTextContent("Both sides argued substantively.");
+    expect(card.textContent).not.toContain('"winner"');
+    expect(card.textContent).not.toContain('"scores"');
+    // The code fence is what the blob rendered as; it must be gone entirely.
+    expect(card.querySelector("pre")).toBeNull();
+  });
+
+  it("does the same for a synthesis that arrives on the conversation", () => {
+    // The trailing-synthesis path is a separate branch from the entry one, and
+    // a reloaded conversation goes through it.
+    renderWithProviders(
+      <BoardTranscript
+        transcript={[entry("OPINION", "First take")]}
+        synthesizedAnswer={"```json\n" + judgeVerdict + "\n```"}
+        boardId="board-1"
+      />,
+    );
+    const card = screen.getByLabelText("Synthesis result");
+    expect(card).toHaveTextContent("Both sides argued substantively.");
+    expect(card.textContent).not.toContain('"scores"');
+  });
+
+  it("leaves an ordinary prose synthesis untouched", () => {
+    renderWithProviders(
+      <BoardTranscript
+        transcript={[entry("SYNTHESIS", "The panel recommends a phased rollout.", 1, "Judgment")]}
+        boardId="board-1"
+      />,
+    );
+    expect(screen.getByLabelText("Synthesis result")).toHaveTextContent(
+      "The panel recommends a phased rollout.",
+    );
+  });
+
+  it("still renders a genuine code block a member wrote", () => {
+    // The unwrapping keys off a parseable verdict object, not off "it is
+    // fenced" — a member pasting code must keep their code block.
+    renderWithProviders(
+      <BoardTranscript
+        transcript={[entry("SYNTHESIS", "Ship it:\n\n```ts\nconst x = 1;\n```", 1, "Judgment")]}
+        boardId="board-1"
+      />,
+    );
+    const card = screen.getByLabelText("Synthesis result");
+    expect(card.querySelector("pre")).not.toBeNull();
+    expect(card).toHaveTextContent("const x = 1;");
+  });
+});

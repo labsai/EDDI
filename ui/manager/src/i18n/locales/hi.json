@@ -2543,6 +2543,7 @@
     "negotiationSuperseded": "प्रतिस्थापित",
     "negotiationTableTitle": "वार्ता तालिका",
     "notSet": "सेट नहीं",
+    "policyNotSet": "—",
     "retroConfigLabel": "रेट्रो सबक",
     "retroConfigValue": "{{perRun}}/रन, अधिकतम {{stored}} संग्रहीत",
     "stateAwaitingHumanInput": "सदस्य की प्रतीक्षा",

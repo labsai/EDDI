@@ -120,6 +120,57 @@ describe("normalizeGroupConfig", () => {
 
     const noDynamic = { ...base };
     expect(normalizeGroupConfig(noDynamic)).toBe(noDynamic);
+
+    const completeProtocol = {
+      ...base,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      protocol: { onAgentFailure: "SKIP", onMemberUnavailable: "SKIP" } as any,
+    };
+    expect(normalizeGroupConfig(completeProtocol)).toBe(completeProtocol);
+  });
+
+  /**
+   * The board crashed on `undefined.charAt` for any group whose stored document
+   * never carried these — a group created straight over the API rather than
+   * through the wizard. The type says they are required; the JSON disagrees.
+   */
+  it("fills the protocol member policies the backend omits", () => {
+    const out = normalizeGroupConfig({
+      ...base,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      protocol: { agentTimeoutSeconds: 180, maxRetries: 2 } as any,
+    });
+    expect(out.protocol!.onAgentFailure).toBe("SKIP");
+    expect(out.protocol!.onMemberUnavailable).toBe("SKIP");
+    // Everything the document DID carry survives.
+    expect(out.protocol!.agentTimeoutSeconds).toBe(180);
+  });
+
+  it("never overwrites a policy the document did carry", () => {
+    const out = normalizeGroupConfig({
+      ...base,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      protocol: { onAgentFailure: "ABORT", onMemberUnavailable: "FAIL" } as any,
+    });
+    expect(out.protocol!.onAgentFailure).toBe("ABORT");
+    expect(out.protocol!.onMemberUnavailable).toBe("FAIL");
+  });
+
+  it("leaves a config with no protocol at all alone", () => {
+    const noProtocol = { ...base };
+    expect(normalizeGroupConfig(noProtocol)).toBe(noProtocol);
+  });
+
+  it("fixes both a protocol and a lifecycle policy in one pass", () => {
+    const out = normalizeGroupConfig({
+      ...base,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      protocol: { agentTimeoutSeconds: 60 } as any,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      dynamicAgents: { lifecyclePolicy: "ephemeral" } as any,
+    });
+    expect(out.protocol!.onMemberUnavailable).toBe("SKIP");
+    expect(out.dynamicAgents!.lifecyclePolicy).toBe("EPHEMERAL");
   });
 
   it("is applied by getGroup, so no consumer sees the wire form", async () => {

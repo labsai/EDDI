@@ -20,7 +20,7 @@ import {
   type MemberUnavailablePolicy,
 } from "@/lib/api/groups";
 import { styleInfo, styleLabel, styleDisplay } from "@/lib/discussion-styles";
-import { uncoveredRolePhases } from "@/lib/group-config";
+import { memberPolicyLabel, uncoveredRolePhases } from "@/lib/group-config";
 import {
   getGroupTemplates,
   DEFAULT_AGENT_TIMEOUT_SECONDS,
@@ -907,11 +907,11 @@ function ReviewStep({
         </div>
         <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[10px]">
           <span className="text-muted-foreground">{t("groupWizard.onAgentFailure", "On Agent Failure")}</span>
-          <span className="font-medium">{t(`groupWizard.policy${onAgentFailure.charAt(0) + onAgentFailure.slice(1).toLowerCase()}`, onAgentFailure.toLowerCase())}</span>
+          <span className="font-medium">{memberPolicyLabel(t, onAgentFailure)}</span>
           <span className="text-muted-foreground">{t("groupWizard.maxRetries", "Max Retries")}</span>
           <span className="font-medium">{maxRetries}</span>
           <span className="text-muted-foreground">{t("groupWizard.onMemberUnavailable", "On Member Unavailable")}</span>
-          <span className="font-medium">{t(`groupWizard.policy${onMemberUnavailable.charAt(0) + onMemberUnavailable.slice(1).toLowerCase()}`, onMemberUnavailable.toLowerCase())}</span>
+          <span className="font-medium">{memberPolicyLabel(t, onMemberUnavailable)}</span>
           {maxTurns > 0 && (
             <>
               <span className="text-muted-foreground">{t("groupWizard.maxTurns", "Max Turns")}</span>

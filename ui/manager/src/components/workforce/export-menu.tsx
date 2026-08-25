@@ -12,8 +12,14 @@ import {
 } from "@/components/ui/dropdown-menu";
 import type { GroupConversation } from "@/lib/api/groups";
 import { hasDisplayableDecision } from "@/lib/group-config";
+import { parseTranscriptContent } from "@/components/groups/group-utils";
 
 // ─── Helpers (not exported) ──────────────────────────────────────
+
+/** An entry's body as a reader should see it, never as the wire shape. */
+function readable(content: string | null | undefined): string {
+  return content ? parseTranscriptContent(content) : "";
+}
 
 function generateMarkdown(
   conversation: GroupConversation,
@@ -33,23 +39,28 @@ function generateMarkdown(
   lines.push(``);
 
   for (const entry of conversation.transcript ?? []) {
+    // The same reading every transcript surface does — a judge answers in JSON,
+    // so an unparsed SYNTHESIS body exports as a raw blob under a "Synthesis"
+    // heading. Markdown is the human-readable export; the JSON one below is
+    // where the verbatim document belongs.
+    const body = readable(entry.content);
     if (entry.type === "QUESTION") {
-      lines.push(`> **Question:** ${entry.content ?? ""}`);
+      lines.push(`> **Question:** ${body}`);
       lines.push(``);
     } else if (entry.type === "SYNTHESIS") {
       lines.push(`## Synthesis`);
       lines.push(``);
-      lines.push(entry.content ?? "");
+      lines.push(body);
       lines.push(``);
     } else if (entry.type === "ERROR") {
       lines.push(`### ⚠️ ${entry.speakerDisplayName} (Error)`);
       if (entry.errorReason) lines.push(`> ${entry.errorReason}`);
-      if (entry.content) lines.push(entry.content);
+      if (body) lines.push(body);
       lines.push(``);
     } else if (entry.type !== "SKIPPED") {
       lines.push(`### ${entry.speakerDisplayName} (${entry.type})`);
       lines.push(``);
-      lines.push(entry.content ?? "");
+      lines.push(body);
       lines.push(``);
     }
   }
@@ -90,12 +101,17 @@ function generateMarkdown(
     lines.push(``);
   }
 
-  if (conversation.synthesizedAnswer?.trim()) {
+  // Read the same way as the entries above. A verdict reaches this field
+  // rather than a SYNTHESIS entry whenever the discussion carries no synthesis
+  // element, so exporting it raw put the blob back under a different heading —
+  // and a verdict that was only a tally leaves nothing to print at all.
+  const finalAnswer = readable(conversation.synthesizedAnswer);
+  if (finalAnswer.trim()) {
     lines.push(`---`);
     lines.push(``);
     lines.push(`## Final Answer`);
     lines.push(``);
-    lines.push(conversation.synthesizedAnswer);
+    lines.push(finalAnswer);
   }
 
   return lines.join("\n");

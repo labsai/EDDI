@@ -259,7 +259,7 @@ function AgentEntryCard({
                 isCollapsible && !isExpanded && "max-h-36",
               )}
             >
-              <div className="prose prose-sm dark:prose-invert max-w-none text-foreground/80 [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs [&_p:first-child]:mt-0 [&_p:last-child]:mb-0">
+              <div className="prose prose-sm dark:prose-invert max-w-none text-foreground/80 [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs">
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>
                   {truncateContent(
                     parsedContent,
@@ -352,7 +352,7 @@ function SynthesisEntryCard({
         )}
       >
         {hasContent ? (
-          <div className="prose prose-sm dark:prose-invert max-w-none text-foreground/80 ps-6 [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs [&_p:first-child]:mt-0 [&_p:last-child]:mb-0">
+          <div className="prose prose-sm dark:prose-invert max-w-none text-foreground/80 ps-6 [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>
               {truncateContent(
                 parsedContent,
@@ -491,7 +491,7 @@ function SynthesizedAnswerFooter({ content }: { content: string }) {
           isCollapsible && !isExpanded && "max-h-36",
         )}
       >
-        <div className="prose prose-sm dark:prose-invert max-w-none text-foreground/80 [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs [&_p:first-child]:mt-0 [&_p:last-child]:mb-0">
+        <div className="prose prose-sm dark:prose-invert max-w-none text-foreground/80 [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs">
           <ReactMarkdown remarkPlugins={[remarkGfm]}>
             {truncateContent(parsedContent, t("groups.contentTruncated", "[Content truncated]"))}
           </ReactMarkdown>
@@ -590,23 +590,28 @@ function ConversationViewer({
         lines.push("");
       }
 
+      // The same reading the transcript on screen does. This is a second,
+      // parallel markdown export to `export-menu`'s — reachable from the
+      // history viewer's own toolbar — so it needs the same treatment or a
+      // judge's ```json verdict lands verbatim in the downloaded file.
+      const body = entry.content ? parseTranscriptContent(entry.content) : "";
       if (entry.type === "QUESTION") {
-        lines.push(`> **Question:** ${entry.content ?? ""}`);
+        lines.push(`> **Question:** ${body}`);
         lines.push("");
       } else if (entry.type === "SYNTHESIS") {
         lines.push("## Synthesis");
         lines.push("");
-        lines.push(entry.content ?? "");
+        lines.push(body);
         lines.push("");
       } else if (entry.type === "ERROR") {
         lines.push(`### ⚠️ ${entry.speakerDisplayName} (Error)`);
         if (entry.errorReason) lines.push(`> ${entry.errorReason}`);
-        if (entry.content) lines.push(entry.content);
+        if (body) lines.push(body);
         lines.push("");
       } else if (entry.type !== "SKIPPED") {
         lines.push(`### ${entry.speakerDisplayName} (${entry.type})`);
         lines.push("");
-        lines.push(entry.content ?? "");
+        lines.push(body);
         lines.push("");
       }
     }
@@ -647,15 +652,18 @@ function ConversationViewer({
     }
 
     // Final synthesized answer (if present and not already in transcript)
+    const finalAnswer = conversation.synthesizedAnswer
+      ? parseTranscriptContent(conversation.synthesizedAnswer)
+      : "";
     if (
-      conversation.synthesizedAnswer?.trim() &&
+      finalAnswer.trim() &&
       !conversation.transcript.some((e) => e.type === "SYNTHESIS")
     ) {
       lines.push("---");
       lines.push("");
       lines.push("## Final Synthesized Answer");
       lines.push("");
-      lines.push(conversation.synthesizedAnswer);
+      lines.push(finalAnswer);
       lines.push("");
     }
 

@@ -72,8 +72,11 @@ export function WorkforceChat() {
 
       {/* Main area — chat + optional right details panel */}
       <div className="flex flex-1 min-h-0">
-        {/* Chat panel — fills remaining space */}
-        <div className="flex-1 min-h-0">
+        {/* Chat panel — fills remaining space. `min-w-0` for the same reason
+            the board's transcript column carries it: without it one unbreakable
+            line sizes this column to its content and pushes the details panel
+            out of the window. */}
+        <div className="flex-1 min-w-0 min-h-0">
           <ChatPanel />
         </div>
 

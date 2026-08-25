@@ -409,9 +409,13 @@ function ReleaseNotes({
                notes rely on that — they write `<conversationId>` and `<tool>`
                as prose placeholders, which a raw-HTML pass would swallow.
 
-               `[&_table]:block` is what keeps a wide GFM table scrolling inside
-               its own box instead of stretching the card. */
-            <div className="prose prose-sm dark:prose-invert max-h-96 max-w-none overflow-y-auto break-words [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs [&_h1]:text-base [&_h2]:text-sm [&_h3]:text-sm [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto">
+               Table scrolling and heading scale come from the unlayered `.prose`
+               rules in `index.css`, which every markdown surface shares. The
+               `[&_table]:*` and `[&_h1..3]:*` utilities that used to sit here
+               were dead — an unlayered rule outranks every layered utility in
+               Tailwind v4 — so they described behaviour that was already coming
+               from somewhere else. */
+            <div className="prose prose-sm dark:prose-invert max-h-96 max-w-none overflow-y-auto [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3">
               <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
                 {preview.markdown}
               </ReactMarkdown>

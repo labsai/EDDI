@@ -1,3 +1,4 @@
+import type { TFunction } from "i18next";
 import {
   DEFAULT_MAX_AGENT_TASKS_PER_DISCUSSION,
   DEFAULT_MAX_AGENT_TASKS_PER_TURN,
@@ -194,4 +195,20 @@ export function effectiveDelegationDepth(value: number | null | undefined): numb
 
 export function effectiveDelegationTimeout(value: number | null | undefined): number {
   return typeof value === "number" && value > 0 ? value : DEFAULT_DELEGATION_TIMEOUT_SECONDS;
+}
+
+/**
+ * Localized label for a `ProtocolConfig` member policy — `onAgentFailure`
+ * (SKIP/RETRY/ABORT) and `onMemberUnavailable` (SKIP/FAIL) share the one
+ * `groupWizard.policy*` key space.
+ *
+ * A helper rather than the title-casing expression each call site used to
+ * inline, because that expression indexed the value directly and a config whose
+ * policy the backend had omitted took the whole page down with it. Unknown and
+ * absent values degrade to something readable instead.
+ */
+export function memberPolicyLabel(t: TFunction, policy: string | null | undefined): string {
+  if (!policy) return t("groups.policyNotSet", "—");
+  const titled = policy.charAt(0).toUpperCase() + policy.slice(1).toLowerCase();
+  return t(`groupWizard.policy${titled}`, titled);
 }

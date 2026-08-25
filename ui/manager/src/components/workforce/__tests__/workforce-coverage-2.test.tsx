@@ -803,6 +803,77 @@ describe("Workforce Components – Coverage Batch 2", () => {
       expect(createObjectURL).toHaveBeenCalled();
     });
 
+    /**
+     * A DEBATE judge answers in JSON, so an unparsed SYNTHESIS body used to be
+     * exported verbatim under a "## Synthesis" heading — the same blob the board
+     * itself was fixed to stop showing, in a file the user hands to somebody
+     * else. The transcript surfaces got this transitively through
+     * `parseTranscriptContent`; the export builds its own markdown and did not.
+     */
+    it("exports a judge's verdict as prose, not as the raw JSON", async () => {
+      const conversation = makeGroupConversation({
+        transcript: [
+          makeTranscriptEntry({
+            type: "SYNTHESIS",
+            content:
+              "```json" + "\n" +
+              JSON.stringify({ winner: "TIE", scores: { PRO: 7 }, reasoning: "It was close." }) +
+              "\n" + "```",
+            phaseIndex: 3,
+            phaseName: "Judgment",
+          }),
+        ],
+      });
+      renderWithProviders(<ExportMenu conversation={conversation} groupName="Board" />);
+      // After `setup()`, which installs userEvent's own clipboard stub over
+      // whatever was there.
+      const user = userEvent.setup();
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      Object.defineProperty(navigator, "clipboard", {
+        value: { writeText },
+        configurable: true,
+      });
+
+      await user.click(screen.getByRole("button", { name: /export/i }));
+      await user.click(await screen.findByText("Copy to Clipboard"));
+
+      await waitFor(() => expect(writeText).toHaveBeenCalled());
+      const markdown = writeText.mock.calls[0]![0] as string;
+      expect(markdown).toContain("It was close.");
+      expect(markdown).not.toContain('"winner"');
+      expect(markdown).not.toContain("```json");
+    });
+
+    /**
+     * The verdict reaches `synthesizedAnswer` rather than a SYNTHESIS entry
+     * whenever the discussion carries no synthesis element — a shape the board's
+     * own tests already cover — and this section built its markdown from the
+     * raw field, so the blob came back under a different heading.
+     */
+    it("reads the conversation-level synthesis too, not just the entries", async () => {
+      const conversation = makeGroupConversation({
+        transcript: [makeTranscriptEntry({ type: "OPINION", content: "A view." })],
+        synthesizedAnswer:
+          "```json" + "\n" +
+          JSON.stringify({ winner: "TIE", scores: { PRO: 7 }, reasoning: "It was close." }) +
+          "\n" + "```",
+      });
+
+      renderWithProviders(<ExportMenu conversation={conversation} groupName="Board" />);
+      const user = userEvent.setup();
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+
+      await user.click(screen.getByRole("button", { name: /export/i }));
+      await user.click(await screen.findByText("Copy to Clipboard"));
+
+      await waitFor(() => expect(writeText).toHaveBeenCalled());
+      const markdown = writeText.mock.calls[0]![0] as string;
+      expect(markdown).toContain("It was close.");
+      expect(markdown).not.toContain('"winner"');
+      expect(markdown).not.toContain("```json");
+    });
+
     it("copy to clipboard menu item is available", async () => {
       const conversation = makeGroupConversation();
 

@@ -2543,6 +2543,7 @@
     "negotiationSuperseded": "ถูกแทนที่แล้ว",
     "negotiationTableTitle": "โต๊ะเจรจา",
     "notSet": "ยังไม่ได้ตั้งค่า",
+    "policyNotSet": "—",
     "retroConfigLabel": "บทเรียนจากการทบทวน (Retro)",
     "retroConfigValue": "{{perRun}}/การรัน จัดเก็บสูงสุด {{stored}} รายการ",
     "stateAwaitingHumanInput": "รอสมาชิก",

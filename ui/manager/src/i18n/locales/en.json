@@ -2582,6 +2582,7 @@
     "summarized": "summarized",
     "facilitatorLabel": "Facilitator",
     "notSet": "not set",
+    "policyNotSet": "—",
     "facilitatorMoves": "Allowed moves",
     "artifactConfigLabel": "Shared artifacts",
     "artifactConfigValue": "max {{count}}/discussion",

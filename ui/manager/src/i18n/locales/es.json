@@ -2567,6 +2567,7 @@
     "negotiationSuperseded": "Reemplazada",
     "negotiationTableTitle": "Mesa de negociación",
     "notSet": "no establecido",
+    "policyNotSet": "—",
     "retroConfigLabel": "Lecciones de la retrospectiva",
     "retroConfigValue": "{{perRun}}/ejecución, {{stored}} máx. almacenadas",
     "stateAwaitingHumanInput": "Esperando a un miembro",

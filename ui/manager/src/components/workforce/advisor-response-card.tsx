@@ -296,7 +296,7 @@ const AdvisorResponseCard = memo(function AdvisorResponseCard({
                   isCollapsible && !isExpanded && "max-h-36",
                 )}
               >
-                <div className="prose prose-sm dark:prose-invert max-w-none [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0">
+                <div className="prose prose-sm dark:prose-invert max-w-none overflow-hidden [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs">
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>
                     {truncateContent(content!, t("groups.contentTruncated", "[Content truncated]"))}
                   </ReactMarkdown>

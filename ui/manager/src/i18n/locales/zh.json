@@ -2543,6 +2543,7 @@
     "negotiationSuperseded": "已被取代",
     "negotiationTableTitle": "谈判桌",
     "notSet": "未设置",
+    "policyNotSet": "—",
     "retroConfigLabel": "回顾经验",
     "retroConfigValue": "每次运行 {{perRun}} 条，最多存储 {{stored}} 条",
     "stateAwaitingHumanInput": "等待成员发言",

@@ -10,6 +10,7 @@ import { styleDisplay } from "@/lib/discussion-styles";
 import {
   effectiveDelegationDepth,
   effectiveDelegationTimeout,
+  memberPolicyLabel,
   moderatorlessPhaseNames,
   uncoveredRolePhases,
 } from "@/lib/group-config";
@@ -243,9 +244,9 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
           </h4>
           <div className="rounded-lg border border-border bg-secondary/30 p-2.5 space-y-1">
             <InfoRow label={t("groups.protocolTimeout", "Timeout")} value={`${config.protocol.agentTimeoutSeconds}s`} />
-            <InfoRow label={t("groups.protocolOnFailure", "On Failure")} value={t(`groupWizard.policy${config.protocol.onAgentFailure.charAt(0) + config.protocol.onAgentFailure.slice(1).toLowerCase()}`, config.protocol.onAgentFailure.charAt(0) + config.protocol.onAgentFailure.slice(1).toLowerCase())} />
+            <InfoRow label={t("groups.protocolOnFailure", "On Failure")} value={memberPolicyLabel(t, config.protocol.onAgentFailure)} />
             <InfoRow label={t("groups.protocolMaxRetries", "Max Retries")} value={String(config.protocol.maxRetries)} />
-            <InfoRow label={t("groups.protocolUnavailable", "Unavailable")} value={t(`groupWizard.policy${config.protocol.onMemberUnavailable.charAt(0) + config.protocol.onMemberUnavailable.slice(1).toLowerCase()}`, config.protocol.onMemberUnavailable.charAt(0) + config.protocol.onMemberUnavailable.slice(1).toLowerCase())} />
+            <InfoRow label={t("groups.protocolUnavailable", "Unavailable")} value={memberPolicyLabel(t, config.protocol.onMemberUnavailable)} />
             <InfoRow label={t("groups.protocolMaxRounds", "Max Rounds")} value={String(config.maxRounds)} />
             {config.protocol.maxTurns != null && config.protocol.maxTurns > 0 && (
               <InfoRow label={t("groups.protocolMaxTurns", "Max Turns")} value={String(config.protocol.maxTurns)} />

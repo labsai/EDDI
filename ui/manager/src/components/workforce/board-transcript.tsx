@@ -10,7 +10,7 @@ import { hasDisplayableDecision } from "@/lib/group-config";
 import type { DecisionRecord, TranscriptEntry, TranscriptEntryType } from "@/lib/api/groups";
 import { entryTypeInfo } from "@/lib/api/groups";
 import type { ConvergenceProgress } from "@/hooks/use-group-discussion-stream";
-import { formatMarkdownText } from "@/components/groups/group-utils";
+import { parseTranscriptContent } from "@/components/groups/group-utils";
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -144,7 +144,7 @@ function QuestionBubble({ content, delay }: { content: string | null; delay: num
         </div>
         <div className="flex flex-col items-end gap-1">
           <div className="bg-foreground/10 text-foreground rounded-2xl rounded-ee-md px-4 py-2.5">
-            <p className="text-sm whitespace-pre-wrap leading-relaxed">{content ?? ""}</p>
+            <p className="text-sm whitespace-pre-wrap break-words leading-relaxed">{content ?? ""}</p>
           </div>
         </div>
       </div>
@@ -235,14 +235,25 @@ function SynthesisCard({ content, delay }: { content: string; delay: number }) {
   const [collapsible, setCollapsible] = useState(false);
   const synthRef = useRef<HTMLDivElement>(null);
 
+  // A DEBATE judge answers in JSON, so the raw entry body is a ```json block.
+  // `parseTranscriptContent` unwraps it (and EDDI's response envelope) down to
+  // the prose this card exists to show; the winner and the tally are the verdict
+  // card's job, directly above. Copy hands over the same text that is on screen.
+  const body = useMemo(() => parseTranscriptContent(content), [content]);
+
   useEffect(() => {
     if (synthRef.current) {
       setCollapsible(synthRef.current.scrollHeight > 300);
     }
-  }, [content]);
+  }, [body]);
+
+  // A verdict that was only a tally reads as nothing here — the verdict card
+  // directly above already carries the outcome. Rendering the shell anyway left
+  // a heading, a fade gradient and a Copy button that copied an empty string.
+  if (!body.trim()) return null;
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(content);
+    navigator.clipboard.writeText(body);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -251,6 +262,7 @@ function SynthesisCard({ content, delay }: { content: string; delay: number }) {
     <div
       role="status"
       aria-label={t("Workforce.board.synthesisResult", "Synthesis result")}
+      data-testid="synthesis-card"
       className={cn(
         "rounded-xl border border-border p-4",
         "bg-card",
@@ -290,8 +302,8 @@ function SynthesisCard({ content, delay }: { content: string; delay: number }) {
           collapsible && !expanded && "max-h-72",
         )}
       >
-        <div className="prose prose-sm dark:prose-invert max-w-none text-foreground [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{formatMarkdownText(content)}</ReactMarkdown>
+        <div className="prose prose-sm dark:prose-invert max-w-none overflow-hidden text-foreground [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{body}</ReactMarkdown>
         </div>
         {collapsible && !expanded && (
           <div className="absolute bottom-0 inset-x-0 h-12 bg-gradient-to-t from-card to-transparent pointer-events-none" />

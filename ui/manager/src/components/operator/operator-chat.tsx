@@ -381,7 +381,7 @@ export function OperatorChat({
                    operator output is LLM output built from tool results, i.e.
                    untrusted, so raw HTML stays escaped. Previously plain text,
                    which showed status reports as literal ## and ** markers. */
-                <div className="prose prose-sm dark:prose-invert max-w-none overflow-hidden break-words [&_pre]:rounded-lg [&_pre]:bg-background/60 [&_pre]:p-3 [&_pre]:overflow-x-auto [&_code]:rounded [&_code]:bg-background/60 [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs">
+                <div className="prose prose-sm dark:prose-invert max-w-none overflow-hidden [&_pre]:rounded-lg [&_pre]:bg-background/60 [&_pre]:p-3 [&_code]:rounded [&_code]:bg-background/60 [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs">
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>
                     {formatMarkdownText(message.content)}
                   </ReactMarkdown>

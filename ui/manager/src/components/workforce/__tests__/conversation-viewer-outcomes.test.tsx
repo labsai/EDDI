@@ -1,7 +1,7 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
-import { renderWithProviders } from "@/test/test-utils";
+import { renderWithProviders, userEvent } from "@/test/test-utils";
 // The global test setup already runs this server with ALL handler groups —
 // including the group-conversation GET the viewer fetches. A file-local
 // setupServer(...handlers) would shadow it with a subset that lacks them.
@@ -49,6 +49,81 @@ function conversation(extra: Record<string, unknown>) {
     ...extra,
   };
 }
+
+/**
+ * The history viewer builds its OWN markdown export, parallel to
+ * `export-menu`'s. It was missed when the transcript surfaces were taught to
+ * read a judge's ```json verdict, so History → open a finished debate → Export
+ * downloaded a file with the raw blob under "## Synthesis" — the same defect
+ * the board was fixed for, in the artefact a user hands to somebody else.
+ */
+describe("ConversationViewer — export", () => {
+  const VERDICT =
+    "```json" + "\n" +
+    JSON.stringify({ winner: "TIE", scores: { PRO: 7 }, reasoning: "It was close." }) +
+    "\n" + "```";
+
+  it("exports the judge's reasoning, not the raw JSON", async () => {
+    server.use(
+      http.get("*/groups/:groupId/conversations/:convId", () =>
+        HttpResponse.json(
+          conversation({
+            transcript: [
+              {
+                speakerAgentId: "agent-mod",
+                speakerDisplayName: "Moderator",
+                content: VERDICT,
+                phaseIndex: 1,
+                phaseName: "Judgment",
+                type: "SYNTHESIS",
+                timestamp: new Date().toISOString(),
+                errorReason: null,
+                targetAgentId: null,
+              },
+            ],
+            synthesizedAnswer: VERDICT,
+          }),
+        ),
+      ),
+    );
+
+    // The download is a Blob handed to an <a>. Hold on to the Blob and read it
+    // afterwards — stubbing the global `Blob` to capture its parts synchronously
+    // leaks a subclass into everything else running in this file, MSW included.
+    const blobs: Blob[] = [];
+    const createObjectURL = vi.fn((blob: Blob) => {
+      blobs.push(blob);
+      return "blob:test";
+    });
+    const originalCreate = URL.createObjectURL;
+    const originalRevoke = URL.revokeObjectURL;
+    Object.assign(URL, { createObjectURL, revokeObjectURL: vi.fn() });
+
+    try {
+      renderWithProviders(<ConversationViewer groupId="group1" conversationId="gconv-rich" />);
+      const exportButton = await screen.findByRole("button", { name: "Export" });
+      await userEvent.setup().click(exportButton);
+
+      await waitFor(() => expect(blobs.length).toBeGreaterThan(0));
+      // jsdom's Blob has no `text()`, so read it the long way round.
+      const exported = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = () => reject(reader.error);
+        reader.readAsText(blobs[0]!);
+      });
+
+      expect(exported).toContain("It was close.");
+      expect(exported).not.toContain('"winner"');
+      expect(exported).not.toContain("```json");
+    } finally {
+      Object.assign(URL, {
+        createObjectURL: originalCreate,
+        revokeObjectURL: originalRevoke,
+      });
+    }
+  });
+});
 
 describe("ConversationViewer — structured outcomes", () => {
   it("renders the persisted task board for a session that carries a task list", async () => {

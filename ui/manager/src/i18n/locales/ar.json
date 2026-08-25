@@ -2639,6 +2639,7 @@
     "negotiationSuperseded": "تم استبداله",
     "negotiationTableTitle": "طاولة التفاوض",
     "notSet": "غير محدد",
+    "policyNotSet": "—",
     "retroConfigLabel": "دروس المراجعة الرجعية",
     "retroConfigValue": "{{perRun}}/تشغيل، بحد أقصى {{stored}} مخزّنة",
     "stateAwaitingHumanInput": "في انتظار أحد الأعضاء",
