@@ -449,7 +449,7 @@ and only a context map — to the start endpoint:
 ```bash
 curl -i -X POST "$EDDI/agents/<AGENT_ID>/start?environment=production&userId=test-user" \
   -H "Content-Type: application/json" \
-  -d '{ "userName": { "type": "string", "value": "Karol" } }'
+  -d '{ "userName": { "type": "string", "value": "Ada" } }'
 ```
 
 ## Adding an LLM (Ollama Example)

@@ -11,12 +11,11 @@
 
 **Repo:** EDDI (`fix/quickstart-truth-and-api-honesty`)
 
-Karol worked through
-[`docs/developer-quickstart.md`](developer-quickstart.md) against `labsai/eddi:6.3.0`
-and reported what happened. Seven steps produced four failures, and every one of them was
-ours — the documentation in most cases, the API in the rest. Each item below was
-**reproduced against a real 6.3.0 container** before being fixed, and the fix verified
-against the same stack where it could be.
+Following [`docs/developer-quickstart.md`](developer-quickstart.md) against
+`labsai/eddi:6.3.0` produces four failures in seven steps. All of them are ours — the
+documentation in most cases, the API in the rest. Each item below was **reproduced
+against a real 6.3.0 container** before being fixed, and the fix verified against the
+same stack where it could be.
 
 ### The documentation was wrong, and the compatibility layer hid it
 
@@ -69,8 +68,8 @@ both blames the wrong thing and names the datastore behind the API.
 
 ### Reading a conversation that is not there was a `500`
 
-Not something Karol reported, but the same defect on a different resource — and the
-Troubleshooting section rewritten above now sends people to two of the affected
+Not surfaced by the walkthrough, but the same defect on a different resource — and
+the Troubleshooting section rewritten above now sends people to two of the affected
 endpoints, precisely when something has already gone wrong. Five conversation reads
 answered a deleted or mistyped id with `500 Internal Server Error` and an error id,
 while every one of them documents a 404:
@@ -154,8 +153,8 @@ into "reasoning off".
 
 ### Already fixed, for the record
 
-Karol could not see dictionaries or behavior rules in the Manager, and their
-`descriptors` listings returned `[]` while the resources read back fine individually.
+Dictionaries and behavior rules do not appear in the Manager, and their
+`descriptors` listings return `[]` while the resources read back fine individually.
 That is `60188c2bd` — three stores queried a descriptor type that did not match the
 namespace they write to — which landed *after* 6.3.0 and ships in the next release.
 Reproduced on 6.3.0, confirmed absent on `main`.
