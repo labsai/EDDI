@@ -501,10 +501,44 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
         return Double.isFinite(v) ? v : 0.0;
     }
 
+    /**
+     * Escapes a string for embedding in the hand-built JSON of an SSE event.
+     *
+     * <p>
+     * The replace-chain this grew from covered {@code \ " \n \r \t} and left every
+     * other control character raw, which is invalid inside a JSON string (RFC 8259
+     * §7) and makes the event unparseable for a strict client. The values reaching
+     * here are not all ours: a tool name comes from an LLM, an error summary from
+     * an exception message, and a conversation id straight off the request path.
+     * U+2028 and U+2029 are legal JSON but terminate a line in JavaScript, so they
+     * are escaped too rather than shipped to a browser.
+     * </p>
+     */
     private String escapeJson(String text) {
-        if (text == null)
+        if (text == null) {
             return "";
-        return text.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t");
+        }
+        var sb = new StringBuilder(text.length() + 16);
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            switch (c) {
+                case '\\' -> sb.append("\\\\");
+                case '"' -> sb.append("\\\"");
+                case '\n' -> sb.append("\\n");
+                case '\r' -> sb.append("\\r");
+                case '\t' -> sb.append("\\t");
+                case '\b' -> sb.append("\\b");
+                case '\f' -> sb.append("\\f");
+                default -> {
+                    if (c < 0x20 || c == '\u2028' || c == '\u2029') {
+                        sb.append(String.format("\\u%04x", (int) c));
+                    } else {
+                        sb.append(c);
+                    }
+                }
+            }
+        }
+        return sb.toString();
     }
 
     private String toJsonArray(Object obj) {
