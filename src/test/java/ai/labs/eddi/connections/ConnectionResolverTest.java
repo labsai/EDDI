@@ -188,6 +188,35 @@ class ConnectionResolverTest {
         }
 
         @Test
+        @DisplayName("a stored document with no headerName is a configuration error, not an NPE")
+        void refusesConnectionWithoutHeaderName() {
+            // ConnectionRegistry serves cached documents and does not re-run validate(),
+            // so the save-time rules are not a guarantee here: a document written before
+            // they existed, or straight into the store, still reaches the resolver.
+            // Not `new StaticAuth()`: headerName defaults to "Authorization", so an
+            // author who never set one has a valid document that sends the credential
+            // there. Only an absent block or an explicitly blanked name reach the guard.
+            for (StaticAuth auth : new StaticAuth[]{null, headerNamed("  "), headerNamed(null)}) {
+                var connection = gnowbeConnection();
+                connection.setStaticAuth(auth);
+                register(connection);
+                callerSupplies(Map.of("gnowbe", "key-id:secret"));
+
+                var error = assertThrows(ConnectionException.class,
+                        () -> resolver(true).resolve("${connection:gnowbe}", GNOWBE_TARGET, null));
+
+                assertEquals(ConnectionException.Reason.INVALID_CONFIGURATION, error.getReason(), String.valueOf(auth));
+                assertTrue(error.getMessage().contains("headerName"), error.getMessage());
+            }
+        }
+
+        private StaticAuth headerNamed(String headerName) {
+            var auth = new StaticAuth();
+            auth.setHeaderName(headerName);
+            return auth;
+        }
+
+        @Test
         @DisplayName("the allowlist still bounds where the user's own credential may go")
         void refusesTargetOffTheAllowlist() {
             register(gnowbeConnection());

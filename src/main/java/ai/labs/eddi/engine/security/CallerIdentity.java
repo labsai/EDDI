@@ -25,10 +25,12 @@ import java.util.Map;
  *            token is only ever forwarded back to this exact origin, so it
  *            cannot be leaked to a third-party host named in an agent config.
  * @param connectionCredentials
- *            credentials the caller supplied for
- *            {@link ai.labs.eddi.configs.connections.model.Binding#CALLER_SUPPLIED}
- *            connections, keyed by connection name. Never empty-checked into a
- *            fallback: a connection with no entry here fails closed.
+ *            credentials the caller supplied for connections whose binding is
+ *            {@code CALLER_SUPPLIED}, keyed by connection name. Never
+ *            empty-checked into a fallback: a connection with no entry here
+ *            fails closed. Named rather than {@code @link}ed because an import
+ *            used only from Javadoc is what Checkstyle's {@code UnusedImports}
+ *            calls unused.
  *
  * @author ginccc
  */

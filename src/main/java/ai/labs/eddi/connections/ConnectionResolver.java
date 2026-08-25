@@ -221,6 +221,18 @@ public class ConnectionResolver {
      * new one — see the plan's §5.5 "HITL resume").
      */
     private ResolvedCredential callerSuppliedCredential(ConnectionConfiguration connection) {
+        // The registry serves cached documents and does not re-run validate(), so the
+        // save-time rules are not a guarantee at this point: a document written before
+        // those rules existed, or straight into the store, can still arrive here with
+        // no staticAuth at all. Left unguarded that is an NPE, which reaches the caller
+        // as a 500 saying nothing — where the document really is the problem and
+        // INVALID_CONFIGURATION says so.
+        if (connection.getStaticAuth() == null || connection.getStaticAuth().getHeaderName() == null
+                || connection.getStaticAuth().getHeaderName().isBlank()) {
+            throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION,
+                    "Connection '" + connection.getName() + "' is CALLER_SUPPLIED but names no staticAuth.headerName, so there is no "
+                            + "header to send the caller's credential in. Re-save the connection to apply the current validation rules.");
+        }
         CallerIdentity caller = callerIdentityContext == null ? null : callerIdentityContext.current();
         String value = caller == null ? null : caller.connectionCredential(connection.getName());
         if (value == null) {

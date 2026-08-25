@@ -321,7 +321,7 @@ public record ConnectionConfiguration(
         String tenantId,                   // defaults "default" until multi-tenancy Phase 1 (C9)
         String description,
         AuthType authType,                 // STATIC | BASIC | OAUTH2_CLIENT_CREDENTIALS | OAUTH2_AUTHORIZATION_CODE
-        Binding binding,                   // SERVICE | PER_USER
+        Binding binding,                   // SERVICE | PER_USER | CALLER_SUPPLIED (§5.5)
         StaticAuth staticAuth,             // authType STATIC/BASIC
         OAuthConfig oauth,                 // authType OAUTH2_*
         List<String> baseUrlAllowlist,     // origins this connection's credential may be sent to
@@ -338,7 +338,9 @@ public record StaticAuth(
 `binding` is the field that makes Amplitude and Google Drive the same system:
 `SERVICE` resolves one grant shared by every user of the agent; `PER_USER`
 resolves the calling user's grant and fails closed if absent. It is a config
-choice, never a global mode.
+choice, never a global mode. A third value, `CALLER_SUPPLIED`, was added later
+for a credential that arrives with each request rather than being stored at all
+— see [§5.5](#55-the-caller_supplied-binding).
 
 ```java
 public record OAuthConfig(
@@ -552,10 +554,12 @@ public enum Binding { SERVICE, PER_USER, CALLER_SUPPLIED }
   rejected — the caller supplies a finished header value, so there is nothing for EDDI
   to encode, exchange, or refresh. Leaving them legal would mean silently ignoring
   `oauth`/`username` config that looks load-bearing.
-- `CALLER_SUPPLIED` requires `staticAuth.headerName`, and **rejects**
-  `staticAuth.valueTemplate`. A template here is either dead config or a second
-  credential racing the supplied one; refusing it is the only reading that cannot
-  surprise.
+- `CALLER_SUPPLIED` requires `staticAuth.headerName`, and **rejects every stored
+  credential field on the block** — `valueTemplate`, `username` and `passwordRef`.
+  A `valueTemplate` here is either dead config or a second credential racing the
+  supplied one; `username`/`passwordRef` belong to `BASIC`, which this binding does
+  not allow. Refusing all three is the only reading that cannot surprise, and it is
+  what `docs/connections.md` documents.
 - `baseUrlAllowlist` needs no new rule — `validateAllowlist()` already requires a
   non-empty, canonical-origin list on every connection regardless of binding. Worth
   noting only because it is the entire security property here: for `SERVICE` the
@@ -633,7 +637,7 @@ Three ways out:
 |---|---|
 | **A. Fail closed on resume.** The approved call errors; the user retries in a fresh turn. | Honest and trivial, but makes HITL and caller-supplied credentials mutually exclusive in practice — which defeats the reason for gating writes in the first place. |
 | **B. Park the credential as an ephemeral grant.** Sealed into the **grant store** under `(tenantId, connectionName, principal)` when the call pauses, with `expiresAt` set to the approval deadline; deleted on resolution. | Reuses `EnvelopeCrypto`, `dekId`, `expiresAt`, `status` and `delete(...)` — all present on `ConnectionGrant`/`IConnectionGrantStore`. Adds a credential lifetime bounded by the approval timeout and a deletion path that must not leak on crash. |
-| **C. Re-supply on resume.** The resume request carries the credential again. | Correct and stateless, but the approver is not the credential holder — an administrator cannot supply the user's key, so this only works where the same human does both. |
+| **C. Re-supply on resume.** The resume request carries the credential again. | Correct and stateless. The constraint is not that one human does both — the approver never touches a credential — but that the same **integrating backend** both holds the user's key and makes the resume call. Unavailable where something else drives the resume. |
 
 **Decided 2026-08-25: C, with A as the failure mode.** The driving deployment settles
 it — Gnowbe's backend calls EDDI as one service principal with the end user's key
