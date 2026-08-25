@@ -165,7 +165,7 @@ curl -i -X POST $EDDI/dictionarystore/dictionaries \
 
 **Response**: `201 Created`, with
 
-```
+```text
 Location: eddi://ai.labs.dictionary/dictionarystore/dictionaries/<DICTIONARY_ID>?version=1
 ```
 
@@ -225,8 +225,11 @@ curl -i -X POST $EDDI/rulestore/rulesets \
 curl -s "$EDDI/rulestore/rulesets/descriptors?limit=100" | jq
 ```
 
-> Reading a rule set back shows `rules` where you posted `behaviorRules` — the
-> model accepts both names on write and serialises the canonical one on read.
+> `behaviorRules` is the canonical name: it is what a read returns, and what the
+> shipped reference config and the ZIP fixtures use. `rules` is still accepted on
+> write for older clients. Before 6.4.0 a read answered `rules` regardless of what
+> you posted, which is why a rule set created over the API showed up empty in the
+> Manager.
 
 ### 3. Create Output Templates
 
@@ -395,7 +398,7 @@ curl -i -X POST \
   "$EDDI/agents/<AGENT_ID>/start?environment=production&userId=test-user"
 ```
 
-```
+```text
 HTTP/1.1 201 Created
 Location: eddi://ai.labs.conversation/conversationstore/conversations/<CONVERSATION_ID>
 ```
@@ -551,7 +554,7 @@ Let's trace what happens when a user says "hello":
 
 ### 1. API Request
 
-```
+```text
 POST /agents/{agentId}/start?environment=production   → 201, conversation id in Location
 POST /agents/{conversationId}   (text/plain)  "hello" → the turn below
 ```
@@ -733,7 +736,7 @@ curl -s -X POST "http://localhost:7070/agents/<CONVERSATION_ID>" \
 Access in an output template — and remember the `eddi://ai.labs.templating`
 step, or the placeholder is never resolved:
 
-```
+```text
 Hello {context.userName}!
 ```
 

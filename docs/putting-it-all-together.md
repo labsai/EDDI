@@ -342,42 +342,50 @@ curl -X POST http://localhost:7070/outputstore/outputsets \
 curl -X POST http://localhost:7070/workflowstore/workflows \
   -H "Content-Type: application/json" \
   -d '{
-    "packageExtensions": [
+    "workflowSteps": [
       {
-        "type": "eddi://ai.labs.parser.dictionaries.regular",
+        "type": "eddi://ai.labs.parser",
+        "config": {},
         "extensions": {
-          "uri": "eddi://ai.labs.dictionary/dictionarystore/dictionaries/DICT_ID?version=1"
+          "dictionaries": [
+            {
+              "type": "eddi://ai.labs.parser.dictionaries.regular",
+              "config": {
+                "uri": "eddi://ai.labs.dictionary/dictionarystore/dictionaries/DICT_ID?version=1"
+              }
+            }
+          ],
+          "corrections": []
         }
       },
       {
-        "type": "eddi://ai.labs.behavior",
-        "extensions": {
-          "uri": "eddi://ai.labs.rules/rulestore/rulesets/BEHAVIOR_ID?version=1"
-        },
+        "type": "eddi://ai.labs.rules",
         "config": {
+          "uri": "eddi://ai.labs.rules/rulestore/rulesets/BEHAVIOR_ID?version=1",
           "appendActions": true
         }
       },
       {
         "type": "eddi://ai.labs.property",
-        "extensions": {
+        "config": {
           "uri": "eddi://ai.labs.property/propertysetterstore/propertysetters/PROPERTY_ID?version=1"
         }
       },
       {
-        "type": "eddi://ai.labs.httpcalls",
-        "extensions": {
+        "type": "eddi://ai.labs.apicalls",
+        "config": {
           "uri": "eddi://ai.labs.apicalls/apicallstore/apicalls/HTTP_ID?version=1"
         }
       },
       {
         "type": "eddi://ai.labs.output",
-        "extensions": {
+        "config": {
           "uri": "eddi://ai.labs.output/outputstore/outputsets/OUTPUT_ID?version=1"
         }
       },
       {
-        "type": "eddi://ai.labs.templating"
+        "type": "eddi://ai.labs.templating",
+        "config": {}
       }
     ]
   }'

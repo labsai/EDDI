@@ -81,6 +81,40 @@ class DocumentedRestPathsTest {
 
     private static final Set<String> SKIPPED_DIRS = Set.of("target", ".git", "node_modules", ".claude", ".mvn");
 
+    /**
+     * Payload keys that no longer parse at all, unlike the paths above.
+     * <p>
+     * {@code packageExtensions} was the v5 name for {@code workflowSteps}. Strict
+     * configuration parsing rejects it with a 400 naming the field, so every
+     * documented workflow payload carrying it was an instruction that could not
+     * work — five pages still had one when this test was written, because the v6
+     * sweep had corrected the store paths and left the payload shapes alone.
+     */
+    @Test
+    @DisplayName("no markdown file documents a payload key the API rejects")
+    void noRejectedPayloadKeysInDocumentation() {
+        Path root = repoRoot();
+        var offences = new TreeSet<String>();
+
+        for (Path file : markdownFiles(root)) {
+            String relative = root.relativize(file).toString().replace('\\', '/');
+            if (legacyChangeRecords().contains(relative)) {
+                continue;
+            }
+
+            String[] lines = read(file).split("\r?\n", -1);
+            for (int i = 0; i < lines.length; i++) {
+                if (lines[i].contains("\"packageExtensions\"")) {
+                    offences.add(String.format("%s:%d uses 'packageExtensions' — write 'workflowSteps'", relative, i + 1));
+                }
+            }
+        }
+
+        assertTrue(offences.isEmpty(),
+                "These payloads are rejected by the server with a 400, so the pages carrying them cannot be followed:\n  "
+                        + String.join("\n  ", offences));
+    }
+
     @Test
     @DisplayName("no markdown file documents a pre-v6 store path")
     void noLegacyStorePathsInDocumentation() {
@@ -96,11 +130,8 @@ class DocumentedRestPathsTest {
             String text = read(file);
             String[] lines = text.split("\r?\n", -1);
             for (int i = 0; i < lines.length; i++) {
-                if (namesTheSpellingAsLegacy(lines[i])) {
-                    continue;
-                }
                 for (var entry : LEGACY_TO_V6.entrySet()) {
-                    if (lines[i].contains(entry.getKey())) {
+                    if (lines[i].contains(entry.getKey()) && !allowedMentions().contains(relative + " → " + entry.getKey())) {
                         offences.add(String.format("%s:%d uses '%s' — write '%s'",
                                 relative, i + 1, entry.getKey(), entry.getValue()));
                     }
@@ -116,18 +147,18 @@ class DocumentedRestPathsTest {
     }
 
     /**
-     * A line whose subject <em>is</em> the old spelling may name it.
+     * The exact places a pre-v6 path may still be named, as {@code file → path}.
      * <p>
-     * "Legacy URIs are auto-normalized during import, but new configs should use
-     * the v6 format" is a sentence that cannot be written without the legacy URI in
-     * it, and banning it would push authors toward vaguer guidance rather than
-     * clearer. The marker is deliberately crude — a line that says "legacy" is
-     * exempt — because the failure it guards against is a stale
-     * <em>instruction</em> ("POST to /packagestore/packages"), and such a line
-     * never calls itself legacy.
+     * A first attempt exempted any line containing the word "legacy", which is too
+     * coarse to be a rule: {@code Legacy endpoint: POST /packagestore/packages}
+     * would have passed it while still being a stale instruction, which is the one
+     * thing this test exists to stop. An explicit pair has to be added
+     * deliberately, and shows up in review as what it is.
      */
-    private static boolean namesTheSpellingAsLegacy(String line) {
-        return line.toLowerCase(Locale.ROOT).contains("legacy");
+    private static Set<String> allowedMentions() {
+        // AGENTS.md §5.5 explains that legacy URIs are auto-normalized on import,
+        // which cannot be written without naming one.
+        return Set.of("AGENTS.md → /botstore/bots");
     }
 
     private static Path repoRoot() {

@@ -369,7 +369,7 @@ The **`{id}`** is a path parameters that indicate which behavior rule you want t
 | **DELETE**  | `/rulestore/rulesets/{id}`                | N/A                   | N/A                   |
 | **GET**     | `/rulestore/rulesets/{id}`                | N/A                   | **BehaviorSet model** |
 | **PUT**     | `/rulestore/rulesets/{id}`                | **BehaviorSet model** | N/A                   |
-| **GET**     | `/rulestore/rulesets/descriptors`         | N/A                   | **BehaviorSet model** |
+| **GET**     | `/rulestore/rulesets/descriptors`         | N/A                   | **DocumentDescriptor[]** |
 | **POST**    | `/rulestore/rulesets`                     | **BehaviorSet model** | N/A                   |
 | **GET**     | `/rulestore/rulesets/{id}/currentversion` | N/A                   | **BehaviorSet model** |
 | **POST**    | `/rulestore/rulesets/{id}/currentversion` | **BehaviorSet model** | N/A                   |

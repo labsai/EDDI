@@ -47,7 +47,7 @@ Now we will align the just created `LifecycleTasks` in the `Workflow`. Make a **
 
 ```javascript
 {
-  "packageExtensions": [
+  "workflowSteps": [
     {
       "type": "eddi://ai.labs.output",
       "config": {

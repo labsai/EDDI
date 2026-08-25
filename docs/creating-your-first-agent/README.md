@@ -56,7 +56,7 @@ A agent can consists of the following elements:
 
 `eddi://` URI resources starting with this protocol are to be related with in EDDI&#x20;
 
-`ai.labs.regulardictionary` Type of resource
+`ai.labs.dictionary` Type of resource
 
 `/dictionarystore/dictionaries` API path
 

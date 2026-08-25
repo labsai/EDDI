@@ -268,17 +268,15 @@ A workflow is a **container of functionality** with a list of steps:
 {
   "workflowSteps": [
     {
-      "type": "eddi://ai.labs.behavior",
-      "extensions": {
-        "uri": "eddi://ai.labs.rules/rulestore/rulesets/{behaviorId}?version={version}"
-      },
+      "type": "eddi://ai.labs.rules",
       "config": {
+        "uri": "eddi://ai.labs.rules/rulestore/rulesets/{behaviorId}?version={version}",
         "appendActions": true
       }
     },
     {
-      "type": "eddi://ai.labs.httpcalls",
-      "extensions": {
+      "type": "eddi://ai.labs.apicalls",
+      "config": {
         "uri": "eddi://ai.labs.apicalls/apicallstore/apicalls/{httpCallsId}?version={version}"
       }
     }

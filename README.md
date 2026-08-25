@@ -131,7 +131,7 @@ docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up
 # http://ollama:11434 (no host.docker.internal needed)
 docker compose -f docker-compose.yml -f docker-compose.ollama.yml up -d
 
-# Full stack (all overlays)
+# Auth + monitoring + NATS together (overlays stack in any combination)
 docker compose -f docker-compose.yml -f docker-compose.auth.yml \
   -f docker-compose.monitoring.yml -f docker-compose.nats.yml up
 ```

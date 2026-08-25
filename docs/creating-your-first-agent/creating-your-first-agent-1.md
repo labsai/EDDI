@@ -107,7 +107,7 @@ curl -X POST --header 'Content-Type: application/json' --header 'Accept: applica
 
 > See also Behavior Rules
 
-Next, create a `behaviorRule` resource to configure the decision making a. Make a **`POST`** to **`/rulestore/rulesets`** with a JSON in the body like this:
+Next, create a `behaviorRule` resource to configure the agent's decision making. Make a **`POST`** to **`/rulestore/rulesets`** with a JSON in the body like this:
 
 ```javascript
 {
@@ -350,7 +350,7 @@ Now we will align the just created `LifecycleTasks` in the `Workflow`. Make a **
 
 ```javascript
 {
-  "packageExtensions": [
+  "workflowSteps": [
     {
       "type": "eddi://ai.labs.parser",
       "extensions": {
@@ -472,7 +472,7 @@ Now you can use the new feature of defining properties in the package definition
 
 ```javascript
 {
-  "packageExtensions": [
+  "workflowSteps": [
    ...
     {
       "type": "eddi://ai.labs.property",

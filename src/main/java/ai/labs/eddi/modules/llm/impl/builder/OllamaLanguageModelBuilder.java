@@ -49,22 +49,28 @@ public class OllamaLanguageModelBuilder implements ILanguageModelBuilder {
      * Ollama's own {@code think} switch — tri-state on purpose.
      * <p>
      * {@code "true"} asks the model to reason and return the reasoning in a
-     * separate {@code thinking} field; {@code "false"} turns reasoning off;
-     * <em>unset</em> leaves the model's own default, which for a reasoning model
-     * (gemma3n, deepseek-r1, qwen3 …) means it thinks. That default is what makes a
-     * first Ollama agent look broken: streaming a reasoning model emits a long run
-     * of chunks whose {@code content} is empty and whose {@code thinking} carries
-     * the text, so the chat window sits silent for many seconds before the answer
-     * appears all at once. Setting {@code think: "false"} makes such a model answer
-     * immediately.
+     * separate {@code thinking} field, which langchain4j discards unless
+     * {@link #KEY_RETURN_THINKING} is also on. {@code "false"} turns reasoning off.
+     * <em>Unset</em> leaves it to Ollama and the model, and the two outcomes differ
+     * in where the reasoning ends up: a model that reports it separately makes the
+     * chat window sit silent for as long as it thinks (the reasoning is not part of
+     * the streamed content, and nothing renders until the answer starts), while an
+     * older reasoning model instead prepends {@code <think>…</think>} to the
+     * content itself, so the tags stream into the reply where the user can see
+     * them.
+     * <p>
+     * Either way it is the first thing that makes a local reasoning model (gemma3n,
+     * deepseek-r1, qwen3 …) look broken. {@code think: "false"} makes such a model
+     * answer immediately.
      */
     private static final String KEY_THINK = "think";
 
     /**
-     * Whether the reasoning text is surfaced rather than discarded. Independent of
-     * {@link #KEY_THINK} — it only controls parsing of the {@code thinking} field
-     * the server sends, so it is off by default and reasoning stays out of the
-     * conversation transcript unless asked for.
+     * Whether the separate {@code thinking} field is parsed and surfaced rather
+     * than discarded. Independent of {@link #KEY_THINK} — it does not enable
+     * reasoning, and it has no effect on reasoning a model embedded in the ordinary
+     * content, which is not a {@code thinking} field to parse. Off by default, so
+     * reasoning stays out of the transcript unless asked for.
      */
     private static final String KEY_RETURN_THINKING = "returnThinking";
 

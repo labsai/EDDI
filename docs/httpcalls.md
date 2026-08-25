@@ -546,7 +546,7 @@ _Request Body_
 
 ```javascript
 {
-  "packageExtensions": [
+  "workflowSteps": [
     {
       "type": "eddi://ai.labs.parser",
       "extensions": {
@@ -644,7 +644,7 @@ _Request Body_
 
 ```javascript
 {
-  "packages": [
+  "workflows": [
     "eddi://ai.labs.workflow/workflowstore/workflows/{{package_id}}?version=1"
   ],
   "channels": []

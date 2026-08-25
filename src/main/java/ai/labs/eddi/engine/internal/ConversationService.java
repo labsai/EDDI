@@ -501,7 +501,7 @@ public class ConversationService implements IConversationService {
         contextLogger.setLoggingContext(loggingContext);
 
         try {
-            var conversationMemorySnapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+            var conversationMemorySnapshot = requireSnapshot(conversationId);
             loggingContext.put(USER_ID, conversationMemorySnapshot.getUserId());
             contextLogger.setLoggingContext(loggingContext);
 

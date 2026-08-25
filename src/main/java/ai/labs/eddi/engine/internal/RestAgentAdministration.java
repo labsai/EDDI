@@ -173,7 +173,8 @@ public class RestAgentAdministration implements IRestAgentAdministration {
         } catch (IResourceStore.ResourceStoreException e) {
             // A store outage is not "agent missing" — let the deploy proceed and fail
             // (or succeed) on its own terms rather than reporting a false 404.
-            log.warnf("Could not verify that Agent %s v%s exists before deploying: %s", agentId, version, e.getMessage());
+            log.warnf("Could not verify that Agent %s v%s exists before deploying: %s",
+                    LogSanitizer.sanitize(agentId), version, e.getMessage());
         }
     }
 

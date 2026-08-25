@@ -112,7 +112,7 @@ quickstart's own `"valueAlternatives": ["Hello!"]` where the model wants
 `content-length: 0`. No field, no expectation, no indication the body was even the
 problem. `StrictConfigurationParser` now explains those too:
 
-```
+```text
 Cannot read OutputConfigurationSet at outputSet[0].outputs[0].valueAlternatives[0]:
 expected a JSON object here, found a string. The value's shape is wrong — check this
 field against the resource's JSON Schema at GET /<store>/<resource>/jsonSchema.
@@ -179,6 +179,22 @@ removes the whole class of host-networking problems it may belong to.
 `ModelParameterValues`, `DocumentedRestPathsTest` (new),
 `RuleGroupConfigurationJsonTest` (new), and the existing tests for each behaviour
 above.
+
+### Also corrected under review
+
+Five more pages still carried the pre-v6 workflow payload — `packageExtensions`
+with `extensions.uri` — which the v6 store-path sweep had left alone because it
+rewrote paths, not shapes. Strict parsing rejects `packageExtensions` outright, so
+those were instructions that could not work: `putting-it-all-together.md`,
+`httpcalls.md`, both `creating-your-first-agent` pages and `architecture.md`.
+`DocumentedRestPathsTest` now fails the build on that key too.
+
+`open-webui-integration.md` declared a workflow step of type
+`eddi://ai.labs.langchain`, which no module registers — the LLM module registers
+`ai.labs.llm` only, so that workflow would not load.
+
+And the quickstart still described rule sets reading back as `rules`, which is the
+behaviour *this entry changes*. Corrected to say `behaviorRules` is canonical.
 
 ### Verified, not assumed
 

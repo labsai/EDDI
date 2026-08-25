@@ -312,8 +312,8 @@ Both stored shapes therefore keep working: a config that sets only `streamingTim
 | ---------------- | ------------------------------------------------------------------------------------------- |
 | `baseUrl`        | Ollama's address. Default `http://localhost:11434`, overridable deployment-wide with `EDDI_OLLAMA_DEFAULT_BASE_URL`. |
 | `model`          | Model tag as `ollama list` reports it, e.g. `llama3.2:3b`.                                   |
-| `think`          | `"true"` / `"false"`. Unset leaves the model's own default.                                   |
-| `returnThinking` | `"true"` surfaces a reasoning model's thoughts instead of discarding them. Off by default.   |
+| `think`          | `"true"` / `"false"`. Unset leaves it to Ollama and the model — see below.                    |
+| `returnThinking` | `"true"` surfaces the separate `thinking` field instead of discarding it. Off by default.     |
 | `temperature`, `maxTokens`, `topP`, `topK` | Standard sampling controls. `maxTokens` maps to Ollama's `num_predict`. |
 
 > **Reaching Ollama from a container.** Inside the `eddi` container `localhost`
@@ -324,11 +324,19 @@ Both stored shapes therefore keep working: a config that sets only `streamingTim
 > that base URL for new agents.
 
 > **Reasoning models look like a hang.** gemma3n, deepseek-r1, qwen3 and friends
-> think before they answer, and the reasoning arrives in a separate `thinking`
-> field that is not part of the streamed content — so a streaming chat window
-> shows nothing at all for as long as the model reasons, then the whole answer at
-> once. `"think": "false"` turns reasoning off; `"returnThinking": "true"` shows
-> it. Give such a model a generous `timeout` either way.
+> think before they answer, and where that reasoning goes depends on the model:
+>
+> - Reported in a separate `thinking` field — not part of the streamed content, so
+>   a streaming chat window shows nothing at all for as long as the model reasons,
+>   then the whole answer at once. `"returnThinking": "true"` surfaces it instead
+>   of discarding it.
+> - Prepended to the content itself as `<think>…</think>` — the tags stream into
+>   the reply, where the user sees them. `returnThinking` does not affect this
+>   case; there is no `thinking` field to parse.
+>
+> `"think": "false"` turns reasoning off entirely and is the quickest way to a
+> model that answers immediately. Give such a model a generous `timeout` either
+> way.
 
 #### Hugging Face
 
