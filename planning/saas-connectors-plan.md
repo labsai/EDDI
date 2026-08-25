@@ -495,6 +495,185 @@ if telemetry shows cold-start latency matters.
 
 ---
 
+### 5.5 The `CALLER_SUPPLIED` binding
+
+> **Added 2026-08-25**, after Phases 2/4/5 merged (#711). Driven by the Gnowbe
+> connector: Gnowbe hands EDDI the end user's own API key on every request, and the
+> agent should be able to do exactly what that user can do — no more.
+
+#### The problem this solves
+
+`SERVICE` and `PER_USER` between them assume EDDI *holds* the credential: one shared
+grant, or one grant per user obtained through an OAuth consent screen. Neither fits a
+platform that already authenticates the user and passes their credential inward per
+request. Today that shape has no legal expression:
+
+| Route | Why it fails |
+|---|---|
+| `PER_USER` binding | Rejected at save time unless `authType` is `OAUTH2_AUTHORIZATION_CODE` (§5.1). A caller-supplied key has no grant to file and no consent screen to run. |
+| `${caller:token}` | Same-origin only, enforced in `CallerIdentityResolver`. It forwards the caller's **EDDI** token back to EDDI. Gnowbe is a different origin *and* a different credential. |
+| `{context.apiKey}` in a header | Works mechanically — headers are Qute-templated in `ApiCallExecutor#buildRequest` — but context is stored as `IData<Context>` on the conversation step and persisted. That is the plaintext-token-in-conversation-memory case §12 forbids outright, and `Context` has no transient flag to opt out of it. |
+
+The permission argument is the reason to want this rather than a service key: an agent
+holding one org-wide key can reach every workspace that key can, and the only thing
+standing between a user and someone else's data is the correctness of the agent's own
+reasoning. A caller-supplied credential makes the platform's own authorization the
+boundary — the agent cannot do what the user cannot do, and that property holds
+without EDDI understanding Gnowbe's permission model at all.
+
+#### What it is not
+
+**This is not a relaxation of the same-origin rule on `${caller:token}`.** That rule
+protects an EDDI credential from being sent to a host an agent config names, and it
+should stay exactly as strict as it is. `CALLER_SUPPLIED` carries a *different*
+credential, for a *different* system, supplied explicitly for that purpose — the
+destination is authorized by an operator-authored connection document with a
+`baseUrlAllowlist`, not by a config's say-so. If someone later proposes "just let
+`${caller:token}` go cross-origin when a connection allows it", that is a different
+and worse change: it makes one credential fungible across two trust domains.
+
+**It is also not the thing §12 forbids.** §12 says *"not accept a client-supplied
+header as the grant principal — ever."* That forbids trusting a caller to assert **who
+they are**. A caller-supplied credential asserts nothing: it either authenticates at
+the target or it does not. No grant is stored, no grant is looked up, and no principal
+is derived from it. The distinction is worth stating in the code, because the two
+sentences look alike and the wrong reading would either block this or license the
+thing actually forbidden.
+
+#### Model changes
+
+```java
+public enum Binding { SERVICE, PER_USER, CALLER_SUPPLIED }
+```
+
+`validate()` gains, alongside the existing `PER_USER` rules:
+
+- `CALLER_SUPPLIED` requires `authType == STATIC`. `BASIC` and both OAuth flows are
+  rejected — the caller supplies a finished header value, so there is nothing for EDDI
+  to encode, exchange, or refresh. Leaving them legal would mean silently ignoring
+  `oauth`/`username` config that looks load-bearing.
+- `CALLER_SUPPLIED` requires `staticAuth.headerName`, and **rejects**
+  `staticAuth.valueTemplate`. A template here is either dead config or a second
+  credential racing the supplied one; refusing it is the only reading that cannot
+  surprise.
+- `baseUrlAllowlist` needs no new rule — `validateAllowlist()` already requires a
+  non-empty, canonical-origin list on every connection regardless of binding. Worth
+  noting only because it is the entire security property here: for `SERVICE` the
+  allowlist bounds where EDDI's own stored credential goes, while for
+  `CALLER_SUPPLIED` it is the sole thing preventing a config edit from redirecting an
+  end user's credential to a host they never intended.
+- `allowUnverifiedPrincipal` stays `PER_USER`-only — it governs *whose grant* is read,
+  and no grant is read here.
+
+#### Where the credential arrives, and where it lives
+
+On the inbound HTTP request, as a repeated header:
+
+```
+X-EDDI-Connection-Credential: gnowbe key-id:secret
+```
+
+First token is the connection name; the remainder, after one space, is the whole
+header value to send. Repeated once per connection. A header rather than a body field
+because the carrier must be one the conversation store never sees, and the request
+body becomes conversation input.
+
+It rides the **existing** per-turn carrier rather than a new one. `CallerIdentity`
+already holds a raw bearer token captured on the request thread and handed to the
+pipeline worker by `CallerIdentityContext`, with the invariant spelled out in its
+javadoc: *"deliberately not part of `IConversationMemory`: the raw token must never
+reach the conversation store, an export, or the debugger."* That is precisely the
+invariant needed here, already built and already tested, so `CALLER_SUPPLIED` extends
+that record with a `Map<String, String> connectionCredentials` instead of introducing
+a fourth `ThreadLocal` with the same lifecycle bugs to get wrong.
+
+Consequences that follow from reusing it, and are the point of doing so:
+
+- Never written to the conversation step, an export, the debugger, or a REST response.
+- `RequestRedactor` already redacts the outbound header by name — `x-api-key` splits to
+  `[x, api, key]`, and `xapikey` contains `apikey` (`UriRedactor.CREDENTIAL_WORDS`) — so
+  the stored request record and the HITL approval card are clean without new code. A
+  connection whose `headerName` escapes that heuristic would not be, which is an
+  argument for redacting a connection-owned header by *provenance* rather than by name.
+- Cleared in a `finally` on the pipeline thread, or the next user's turn on a pooled
+  thread resolves the previous user's credential. This is the failure mode
+  `ResolutionPrincipalContext` documents; the same discipline applies unchanged.
+
+#### Fail closed
+
+A `CALLER_SUPPLIED` connection with no matching credential on the turn **refuses the
+call** with a message naming the connection. It must never fall through to an
+unauthenticated request. §5.2's history is the argument: a missing grant that degraded
+quietly produced "an agent that silently had no tools", and a missing credential that
+degraded quietly produces a 401 from the target with nothing explaining why.
+
+Accepting a credential should also require an authenticated caller by default. Not
+because the credential needs EDDI's blessing — it proves itself at the target — but
+because an anonymous caller that can hand EDDI a key and have it drive an agent turns
+the deployment into a credential-relay hop and an open LLM spend surface. A
+per-connection escape hatch can follow if a public chat widget ever needs one; the
+default must be the closed one.
+
+#### HITL resume — the sharp edge
+
+**This is the part that needs a decision, not just an implementation.** A tool call
+gated by `hitlConfig.toolApprovals` pauses, and resumes on a *different* HTTP request
+— from the approving administrator, whose `CallerIdentity` carries their credentials,
+not the original user's. `PER_USER` survives this because the grant is in a store keyed
+by principal, which is exactly why `ResolutionPrincipal` exists separately from
+`CallerIdentity`. `CALLER_SUPPLIED` has no store, so on resume the credential is simply
+gone.
+
+That collides directly with the Gnowbe agent's requirement: writes are the calls worth
+gating, and writes are the calls that would break.
+
+Three ways out:
+
+| Option | Cost |
+|---|---|
+| **A. Fail closed on resume.** The approved call errors; the user retries in a fresh turn. | Honest and trivial, but makes HITL and caller-supplied credentials mutually exclusive in practice — which defeats the reason for gating writes in the first place. |
+| **B. Park the credential as an ephemeral grant.** Sealed into the **grant store** under `(tenantId, connectionName, principal)` when the call pauses, with `expiresAt` set to the approval deadline; deleted on resolution. | Reuses `EnvelopeCrypto`, `dekId`, `expiresAt`, `status` and `delete(...)` — all present on `ConnectionGrant`/`IConnectionGrantStore`. Adds a credential lifetime bounded by the approval timeout and a deletion path that must not leak on crash. |
+| **C. Re-supply on resume.** The resume request carries the credential again. | Correct and stateless, but the approver is not the credential holder — an administrator cannot supply the user's key, so this only works where the same human does both. |
+
+**Decided 2026-08-25: C, with A as the failure mode.** The driving deployment settles
+it — Gnowbe's backend calls EDDI as one service principal with the end user's key
+attached, so the turn's `ResolutionPrincipal` is `SELF_ASSERTED`, never `VERIFIED`. That
+rules B out on its own: the parked row is keyed by principal, and filing a credential
+under an unverified id would put one user's key where another user's turn could read it
+back — the hazard `allowUnverifiedPrincipal` gates for `PER_USER`, arriving by a
+different route. B is only available to a deployment whose end users authenticate to
+EDDI directly, and should be reconsidered if one ever does.
+
+C works here precisely *because* the integrating backend is the single caller: it holds
+the user's key, and it is also what calls `POST /agents/{conversationId}/resume`, so it
+can attach the same credential to the resume request. The approver never handles a
+credential — they approve in whatever surface the platform gives them, and the platform's
+backend supplies the key on the resume call it was going to make anyway.
+
+The engine's obligation is therefore just A: a resume that arrives without the credential
+**fails closed**, with a message that names the connection and says the credential must be
+re-supplied on resume. Never a fall-through to an unauthenticated call, and never a
+silently different credential.
+
+This deletes the largest chunk of the work — no ephemeral grants, no new grant-store
+writes, no crash-recovery deletion path. The grant store stays OAuth-only, exactly as
+#711 built it.
+
+#### Metrics
+
+`connection.resolve.count{authType="STATIC", binding="CALLER_SUPPLIED", outcome=…}`
+needs no new meter — the existing tags carry it. The interesting new outcome is
+`missing_caller_credential`, and a rising count means a client stopped sending the
+header, which looks identical to a permissions problem from the agent's side.
+
+#### Resolves open question 5
+
+§13.5 asks whether `${connection:}` supersedes `${caller:token}`, leaning "both stay,
+`${caller:token}` documented as the same-origin special case". `CALLER_SUPPLIED`
+confirms that lean and sharpens it: `${caller:token}` is EDDI's own credential going
+back to EDDI, and a connection is every credential going anywhere else — including the
+relay case, which is what made the two look like duplicates.
+
 ## 6. OAuth design
 
 ### 6.1 Service account — `client_credentials` (Phase 4)

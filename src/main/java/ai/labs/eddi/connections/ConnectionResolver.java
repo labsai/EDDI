@@ -179,19 +179,59 @@ public class ConnectionResolver {
         // resolve(), which throws NOT_FOUND and counts it — swallowing it here would
         // reintroduce the empty-tool-list-with-no-explanation failure by a new route.
         Binding binding = connectionRegistry.find(parsed).map(ConnectionConfiguration::getBinding).orElse(null);
-        if (binding == Binding.PER_USER) {
+        // CALLER_SUPPLIED is withheld from discovery for exactly the reason PER_USER
+        // is: the handshake's result is cached and replayed for every conversation
+        // that follows, so whichever caller happened to trigger it would pin their
+        // credential — and their permissions — onto everybody after them.
+        if (binding == Binding.PER_USER || binding == Binding.CALLER_SUPPLIED) {
             return Optional.empty();
         }
         return Optional.of(resolve(reference, targetUrl, null));
     }
 
     private ResolvedCredential resolveCredential(ConnectionConfiguration connection, String principalOverride) {
+        // Binding decides before authType does: CALLER_SUPPLIED is always STATIC, but
+        // its value comes from the turn rather than from the document, so it must not
+        // reach the STATIC branch below — that one resolves a valueTemplate this
+        // connection is forbidden to have.
+        if (connection.getBinding() == Binding.CALLER_SUPPLIED) {
+            return callerSuppliedCredential(connection);
+        }
         return switch (connection.getAuthType()) {
             case STATIC -> new ResolvedCredential(connection.getStaticAuth().getHeaderName(),
                     resolveReferences(connection.getStaticAuth().getValueTemplate(), connection));
             case BASIC -> basicCredential(connection);
             case OAUTH2_CLIENT_CREDENTIALS, OAUTH2_AUTHORIZATION_CODE -> oauthCredential(connection, principalOverride);
         };
+    }
+
+    /**
+     * The credential the caller attached to this request, for a connection whose
+     * whole point is that EDDI stores nothing.
+     * <p>
+     * Fails closed when there is none. The tempting alternative — send the call
+     * unauthenticated and let the target answer — produces a 401 from a third party
+     * with nothing anywhere naming the cause, which is the same failure mode the
+     * missing-grant path was fixed for in {@code oauthCredential}.
+     * <p>
+     * The message distinguishes the two ways this happens, because the fix differs
+     * and neither is visible from the other end: a turn that never carried the
+     * credential (the calling system did not attach it) and a HITL resume that did
+     * not carry it again (the credential lives for one request, and the resume is a
+     * new one — see the plan's §5.5 "HITL resume").
+     */
+    private ResolvedCredential callerSuppliedCredential(ConnectionConfiguration connection) {
+        CallerIdentity caller = callerIdentityContext == null ? null : callerIdentityContext.current();
+        String value = caller == null ? null : caller.connectionCredential(connection.getName());
+        if (value == null) {
+            throw new ConnectionException(ConnectionException.Reason.NO_CALLER_CREDENTIAL,
+                    "Connection '" + connection.getName() + "' is CALLER_SUPPLIED, but this request carried no credential for it. "
+                            + "The calling system must send a '" + CallerIdentityContext.CONNECTION_CREDENTIAL_HEADER + ": "
+                            + connection.getName() + " <value>' header — on every request, including a "
+                            + "POST /agents/{conversationId}/resume that releases an approved tool call, because the credential is "
+                            + "never stored and does not survive the pause.");
+        }
+        return new ResolvedCredential(connection.getStaticAuth().getHeaderName(), value);
     }
 
     /**

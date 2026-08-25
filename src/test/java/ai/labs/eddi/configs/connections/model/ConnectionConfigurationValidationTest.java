@@ -187,6 +187,104 @@ class ConnectionConfigurationValidationTest {
     }
 
     @Nested
+    @DisplayName("the CALLER_SUPPLIED binding")
+    class CallerSuppliedRules {
+
+        /**
+         * The shape the Gnowbe connector uses: the platform authenticates the user and
+         * passes their own key inward on every request, so EDDI stores nothing and the
+         * connection carries only the header name and where that key may be sent.
+         */
+        private ConnectionConfiguration callerSuppliedConnection() {
+            var connection = staticConnection();
+            connection.setName("gnowbe");
+            connection.setBinding(Binding.CALLER_SUPPLIED);
+            connection.setBaseUrlAllowlist(List.of("https://api.gnowbe.com"));
+            var auth = new StaticAuth();
+            auth.setHeaderName("x-api-key");
+            connection.setStaticAuth(auth);
+            return connection;
+        }
+
+        @Test
+        @DisplayName("a header name and an allowlist are the whole document")
+        void acceptsHeaderNameOnly() {
+            assertDoesNotThrow(() -> callerSuppliedConnection().validate());
+        }
+
+        @Test
+        @DisplayName("headerName is still required — the connection owns it whoever supplies the value")
+        void refusesMissingHeaderName() {
+            var connection = callerSuppliedConnection();
+            connection.getStaticAuth().setHeaderName(null);
+
+            var error = assertThrows(IllegalArgumentException.class, connection::validate);
+
+            assertTrue(error.getMessage().contains("headerName"), error.getMessage());
+        }
+
+        @Test
+        @DisplayName("a stored valueTemplate is refused — it would race the caller's value silently")
+        void refusesValueTemplate() {
+            var connection = callerSuppliedConnection();
+            connection.getStaticAuth().setValueTemplate("Bearer ${vault:gnowbe-key}");
+
+            var error = assertThrows(IllegalArgumentException.class, connection::validate);
+
+            assertTrue(error.getMessage().contains("valueTemplate"), error.getMessage());
+            assertTrue(error.getMessage().contains("caller supplies"),
+                    "the message must say which value wins and why: " + error.getMessage());
+        }
+
+        @Test
+        @DisplayName("BASIC fields are refused rather than ignored")
+        void refusesBasicFields() {
+            var withUsername = callerSuppliedConnection();
+            withUsername.getStaticAuth().setUsername("svc@example.com");
+            assertTrue(assertThrows(IllegalArgumentException.class, withUsername::validate).getMessage().contains("username"));
+
+            var withPassword = callerSuppliedConnection();
+            withPassword.getStaticAuth().setPasswordRef("${vault:pw}");
+            assertTrue(assertThrows(IllegalArgumentException.class, withPassword::validate).getMessage().contains("passwordRef"));
+        }
+
+        @Test
+        @DisplayName("every authType but STATIC is refused — there is nothing to exchange or refresh")
+        void refusesNonStaticAuthTypes() {
+            for (AuthType authType : List.of(AuthType.BASIC, AuthType.OAUTH2_CLIENT_CREDENTIALS, AuthType.OAUTH2_AUTHORIZATION_CODE)) {
+                var connection = callerSuppliedConnection();
+                connection.setAuthType(authType);
+
+                var error = assertThrows(IllegalArgumentException.class, connection::validate, "authType " + authType);
+
+                assertTrue(error.getMessage().contains("STATIC"), authType + ": " + error.getMessage());
+            }
+        }
+
+        @Test
+        @DisplayName("allowUnverifiedPrincipal stays PER_USER-only — no grant is read here to relax")
+        void refusesUnverifiedPrincipalFlag() {
+            var connection = callerSuppliedConnection();
+            connection.setAllowUnverifiedPrincipal(true);
+
+            var error = assertThrows(IllegalArgumentException.class, connection::validate);
+
+            assertTrue(error.getMessage().contains("PER_USER"), error.getMessage());
+        }
+
+        @Test
+        @DisplayName("the allowlist is still required — here it is the only thing bounding the user's own credential")
+        void refusesEmptyAllowlist() {
+            var connection = callerSuppliedConnection();
+            connection.setBaseUrlAllowlist(List.of());
+
+            var error = assertThrows(IllegalArgumentException.class, connection::validate);
+
+            assertTrue(error.getMessage().contains("baseUrlAllowlist"), error.getMessage());
+        }
+    }
+
+    @Nested
     @DisplayName("binding and PKCE")
     class BindingRules {
 

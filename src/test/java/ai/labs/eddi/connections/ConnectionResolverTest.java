@@ -27,6 +27,7 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -114,6 +115,115 @@ class ConnectionResolverTest {
         auth.setValueTemplate("Bearer ${vault:jira-token}");
         connection.setStaticAuth(auth);
         return connection;
+    }
+
+    @Nested
+    @DisplayName("CALLER_SUPPLIED")
+    class CallerSupplied {
+
+        private static final URI GNOWBE_TARGET = URI.create("https://api.gnowbe.com/api/v2/courses");
+
+        private ConnectionConfiguration gnowbeConnection() {
+            var connection = new ConnectionConfiguration();
+            connection.setName("gnowbe");
+            connection.setAuthType(AuthType.STATIC);
+            connection.setBinding(Binding.CALLER_SUPPLIED);
+            connection.setBaseUrlAllowlist(List.of("https://api.gnowbe.com"));
+            var auth = new StaticAuth();
+            auth.setHeaderName("x-api-key");
+            connection.setStaticAuth(auth);
+            return connection;
+        }
+
+        private void callerSupplies(Map<String, String> credentials) {
+            when(callerIdentityContext.current()).thenReturn(new CallerIdentity(null, "gnowbe-backend", "https://eddi.example.com", credentials));
+        }
+
+        @Test
+        @DisplayName("the caller's value is sent under the connection's header name")
+        void sendsTheCallersCredential() {
+            register(gnowbeConnection());
+            callerSupplies(Map.of("gnowbe", "key-id:secret"));
+
+            var credential = resolver(true).resolve("${connection:gnowbe}", GNOWBE_TARGET, null);
+
+            assertEquals("x-api-key", credential.headerName());
+            assertEquals("key-id:secret", credential.headerValue());
+        }
+
+        @Test
+        @DisplayName("no credential on the request fails closed rather than calling out unauthenticated")
+        void failsClosedWithoutCredential() {
+            register(gnowbeConnection());
+            callerSupplies(Map.of());
+
+            var error = assertThrows(ConnectionException.class, () -> resolver(true).resolve("${connection:gnowbe}", GNOWBE_TARGET, null));
+
+            assertEquals(ConnectionException.Reason.NO_CALLER_CREDENTIAL, error.getReason());
+            assertTrue(error.getMessage().contains("gnowbe"), error.getMessage());
+            assertTrue(error.getMessage().contains("resume"),
+                    "the message must name the resume case, which is the non-obvious half: " + error.getMessage());
+        }
+
+        @Test
+        @DisplayName("a credential for a different connection is not borrowed")
+        void doesNotBorrowAnotherConnectionsCredential() {
+            register(gnowbeConnection());
+            callerSupplies(Map.of("some-other-system", "not-for-gnowbe"));
+
+            var error = assertThrows(ConnectionException.class, () -> resolver(true).resolve("${connection:gnowbe}", GNOWBE_TARGET, null));
+
+            assertEquals(ConnectionException.Reason.NO_CALLER_CREDENTIAL, error.getReason());
+        }
+
+        @Test
+        @DisplayName("no caller identity at all — a scheduled turn — fails closed too")
+        void failsClosedWithoutCallerIdentity() {
+            register(gnowbeConnection());
+            when(callerIdentityContext.current()).thenReturn(null);
+
+            var error = assertThrows(ConnectionException.class, () -> resolver(true).resolve("${connection:gnowbe}", GNOWBE_TARGET, null));
+
+            assertEquals(ConnectionException.Reason.NO_CALLER_CREDENTIAL, error.getReason());
+        }
+
+        @Test
+        @DisplayName("the allowlist still bounds where the user's own credential may go")
+        void refusesTargetOffTheAllowlist() {
+            register(gnowbeConnection());
+            callerSupplies(Map.of("gnowbe", "key-id:secret"));
+
+            var error = assertThrows(ConnectionException.class,
+                    () -> resolver(true).resolve("${connection:gnowbe}", URI.create("https://evil.example.com/collect"), null));
+
+            assertEquals(ConnectionException.Reason.TARGET_NOT_ALLOWED, error.getReason());
+        }
+
+        @Test
+        @DisplayName("withheld from discovery — a cached handshake would pin one caller's credential onto everybody")
+        void withheldFromDiscovery() {
+            register(gnowbeConnection());
+            callerSupplies(Map.of("gnowbe", "key-id:secret"));
+
+            assertTrue(resolver(true).resolveForDiscovery("${connection:gnowbe}", GNOWBE_TARGET).isEmpty());
+        }
+
+        @Test
+        @DisplayName("resolves without a verified principal — the credential is the authority, not the id")
+        void doesNotRequireVerifiedPrincipal() {
+            // The driving deployment calls EDDI as one service principal with the end
+            // user's key attached, so the bound principal is SELF_ASSERTED. Requiring a
+            // verified one here would make the binding unusable in exactly the topology
+            // it was built for — and it is not needed, because nothing is looked up by
+            // principal: the caller hands over the credential itself.
+            register(gnowbeConnection());
+            boundPrincipal("end-user-42", ResolutionPrincipal.Provenance.SELF_ASSERTED);
+            callerSupplies(Map.of("gnowbe", "key-id:secret"));
+
+            var credential = resolver(true).resolve("${connection:gnowbe}", GNOWBE_TARGET, null);
+
+            assertEquals("key-id:secret", credential.headerValue());
+        }
     }
 
     @Nested

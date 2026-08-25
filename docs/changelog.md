@@ -7,6 +7,103 @@
 
 
 
+## ✨ feat(connections): a credential the caller hands over, so the agent cannot outreach the user (2026-08-25)
+
+**Repo:** EDDI (branch for the Gnowbe connector)
+
+Adds `Binding.CALLER_SUPPLIED` — a connection whose credential arrives on each inbound request
+rather than being stored. Driven by the Gnowbe agent: Gnowbe's backend calls EDDI as one service
+principal with the end user's own API key attached, and the agent should be able to do exactly what
+that user can do, no more.
+
+### Why a new binding rather than any of the three things that looked like they already worked
+
+- **`PER_USER`** is rejected at save time unless `authType` is `OAUTH2_AUTHORIZATION_CODE`. A
+  caller-supplied key has no grant to file and no consent screen to run.
+- **`${caller:token}`** is same-origin only, and deliberately so. It relays EDDI's *own* credential
+  back to the origin the caller addressed. Gnowbe is a different origin *and* a different credential.
+  That rule is untouched here — this is not a loosening of it.
+- **`{context.apiKey}` in an httpcall header** works mechanically, and is the trap. Headers are
+  Qute-templated in `ApiCallExecutor#buildRequest`, but context is stored as `IData<Context>` on the
+  conversation step and persisted — the plaintext-credential-in-conversation-memory case
+  `planning/saas-connectors-plan.md` §12 forbids outright, with no transient flag on `Context` to opt
+  out of it. It also gets no destination allowlist at all, so any httpcall in the agent could carry
+  the user's key to any host the config names.
+
+The permission argument is the reason to want this at all: one org-wide key reaches everything that
+key can, and only the agent's own reasoning stands between a user and data they should not see. A
+caller-supplied credential makes the target platform's authorization the boundary, without EDDI
+modelling that platform's permissions.
+
+### What landed
+
+- `Binding.CALLER_SUPPLIED`, with save-time rules: `authType` must be `STATIC`; `headerName` is still
+  required (the connection owns the header name whoever supplies its value); `valueTemplate`,
+  `username` and `passwordRef` are **refused** rather than ignored — a stored template would race the
+  caller's value and win or lose by resolution order, silently.
+- `CallerIdentity` gains `connectionCredentials`, read from repeated
+  `X-EDDI-Connection-Credential: <connectionName> <value>` headers. It rides the existing per-turn
+  carrier rather than a new one: `CallerIdentity` already documents the invariant needed here — *"the
+  raw token must never reach the conversation store, an export, or the debugger"* — and reusing it
+  avoids a fourth `ThreadLocal` with the same lifecycle bugs to get wrong.
+- `ConnectionResolver` branches on binding **before** authType, because `CALLER_SUPPLIED` is always
+  `STATIC` but must not reach the `STATIC` branch — that one resolves a `valueTemplate` this
+  connection is forbidden to have.
+- Fails closed with a new `NO_CALLER_CREDENTIAL` reason (HTTP 400, not the 409 the "you have not
+  linked an account" reasons use — those are fixed by a human connecting, this one by the calling
+  system sending a header it omitted).
+- Withheld from discovery, exactly as `PER_USER` is: an MCP handshake's result is cached and replayed,
+  so whichever caller triggered it would pin their credential and their permissions onto everybody
+  after them.
+- Duplicate or malformed `X-EDDI-Connection-Credential` lines are dropped, never resolved by ordering.
+  A duplicate silently taking the last line would decide by iteration order which of two credentials a
+  call is made with.
+
+### The HITL decision, and why B lost
+
+A gated tool call resumes on a *different* request, so a credential that lives for one request is gone
+by then. Three options were written up in the plan; the deployment settled it. The tempting one —
+park the credential sealed until the approval resolves — is only available where end users
+authenticate to EDDI directly: the row is keyed by principal, and Gnowbe's topology yields a
+`SELF_ASSERTED` principal, so parking would file one user's credential where another user's turn could
+read it back.
+
+Chosen instead: the integrating backend re-supplies the credential on
+`POST /agents/{conversationId}/resume` — which it is well placed to do, being both the credential
+holder and the caller of that endpoint. The engine's obligation is to fail closed when it is absent,
+with an error that names the resume case specifically, since that is the half nobody guesses.
+
+An earlier draft of the plan recommended sealing the credential alongside `PendingToolCallBatch`. That
+was wrong for a second, independent reason found while verifying it: that class lives in
+`engine/memory/model` and is written by both conversation memory stores, so it would have put the
+credential in the conversation document — the exact store this binding exists to avoid.
+
+### Also
+
+`CreateApiAgentRequest.apiAuthHeader` (null → `Authorization`, so every existing agent is unchanged).
+A connection owns its header name and `ApiCallExecutor` refuses a call whose header disagrees with it,
+so a connection declaring `x-api-key` could not be reached through the OpenAPI-agent wizard at all —
+generated httpcalls always named the header `Authorization`, and the mismatch failed at request time
+rather than at setup. Declaring it in the spec does not help either; header parameters are skipped.
+
+### Tests
+
+`ConnectionConfigurationValidationTest` (7 new), `ConnectionResolverTest` (7 new),
+`McpApiToolBuilderTest` (3 new). Each group mutation-checked — neutering the validation rules fails 4,
+neutering the fail-closed and discovery guards fails 4 — so they are testing the code rather than
+passing alongside it.
+
+### Not done
+
+The redaction of a connection-owned outbound header still rests on the header *name* heuristic
+(`x-api-key` → `xapikey` → contains `apikey`). It holds for this connector and is covered by existing
+tests, but a connection whose `headerName` escapes that vocabulary would have its credential written
+to the stored request record in plaintext. Redacting by provenance — the resolver knows the header is
+connection-owned — is the durable fix and is not in this change.
+
+
+---
+
 ## 🧪 test(connections): cover the four stores nothing was testing, and close two defects that surfaced doing it (2026-08-22)
 
 **Repo:** EDDI (`feat/saas-connectors`)

@@ -44,6 +44,18 @@ public final class McpApiToolBuilder {
     private static final int MAX_SUMMARY_ENDPOINTS = 30;
     private static final Pattern PATH_PARAM_PATTERN = Pattern.compile("\\{([^}]+)}");
 
+    /**
+     * The header {@code apiAuth} is sent in when the caller does not name one.
+     */
+    static final String DEFAULT_AUTH_HEADER = "Authorization";
+
+    /**
+     * RFC 9110 {@code field-name}: {@code 1*tchar}. Bounded, so a hostile value
+     * cannot be used to smuggle a second header via CR/LF or to blow up the
+     * request.
+     */
+    private static final Pattern HEADER_NAME_PATTERN = Pattern.compile("[!#$%&'*+\\-.^_`|~0-9A-Za-z]{1,64}");
+
     private McpApiToolBuilder() {
         // utility class
     }
@@ -80,6 +92,44 @@ public final class McpApiToolBuilder {
      *             if the spec cannot be parsed
      */
     public static ApiBuildResult parseAndBuild(String openApiSpec, String endpointFilter, String apiBaseUrl, String apiAuth) {
+        return parseAndBuild(openApiSpec, endpointFilter, apiBaseUrl, apiAuth, null);
+    }
+
+    /**
+     * Parse an OpenAPI spec and build grouped ApiCallsConfigurations, sending
+     * {@code apiAuth} in a caller-named header.
+     * <p>
+     * The credential itself is not this class's problem — a
+     * {@code ${connection:name}} reference already covers static keys, Basic and
+     * OAuth, for a service account or per end user (see
+     * {@code docs/connections.md}). What was missing is the header NAME. A
+     * connection owns its header, and {@code ApiCallExecutor} refuses a generated
+     * call whose header disagrees with the connection's, so a connection declaring
+     * {@code x-api-key} could not be wired through this builder at all: every call
+     * it generated named the header {@value #DEFAULT_AUTH_HEADER}, and the mismatch
+     * failed the request rather than the setup. The spec could not close the gap
+     * either, since header parameters are skipped (see {@link #buildApiCall}).
+     *
+     * @param openApiSpec
+     *            OpenAPI spec as JSON/YAML string or a URL
+     * @param endpointFilter
+     *            comma-separated filter (e.g. "GET /users,POST /orders"), null for
+     *            all
+     * @param apiBaseUrl
+     *            override the spec's server URL, null to use spec's servers[0]
+     * @param apiAuth
+     *            credential header value or vault ref, null for none
+     * @param apiAuthHeader
+     *            header {@code apiAuth} is sent in; null or blank means
+     *            {@value #DEFAULT_AUTH_HEADER}
+     * @return build result with grouped configs and API summary
+     * @throws IllegalArgumentException
+     *             if the spec cannot be parsed, or the header name is not a valid
+     *             HTTP field-name
+     */
+    public static ApiBuildResult parseAndBuild(String openApiSpec, String endpointFilter, String apiBaseUrl, String apiAuth,
+                                               String apiAuthHeader) {
+        String authHeader = resolveAuthHeader(apiAuthHeader);
         OpenAPI openAPI = parseSpec(openApiSpec);
         String baseUrl = resolveBaseUrl(openAPI, apiBaseUrl);
         Set<String> allowedEndpoints = parseEndpointFilter(endpointFilter);
@@ -115,7 +165,7 @@ public final class McpApiToolBuilder {
                     // Determine group (first tag, or "General")
                     String group = (operation.getTags() != null && !operation.getTags().isEmpty()) ? operation.getTags().get(0) : DEFAULT_GROUP;
 
-                    ApiCall httpCall = buildApiCall(method, path, operation, apiAuth, openAPI);
+                    ApiCall httpCall = buildApiCall(method, path, operation, apiAuth, authHeader, openAPI);
                     callsByGroup.computeIfAbsent(group, k -> new ArrayList<>()).add(httpCall);
                     endpointCount++;
 
@@ -210,7 +260,7 @@ public final class McpApiToolBuilder {
     /**
      * Build a single ApiCall from an OpenAPI operation.
      */
-    private static ApiCall buildApiCall(String method, String path, Operation operation, String apiAuth, OpenAPI openAPI) {
+    private static ApiCall buildApiCall(String method, String path, Operation operation, String apiAuth, String authHeader, OpenAPI openAPI) {
         var httpCall = new ApiCall();
 
         // Name: operationId or generated slug
@@ -272,7 +322,7 @@ public final class McpApiToolBuilder {
         // Headers (auth if provided)
         var headers = new LinkedHashMap<String, String>();
         if (apiAuth != null && !apiAuth.isBlank()) {
-            headers.put("Authorization", apiAuth);
+            headers.put(authHeader, apiAuth);
         }
         request.setHeaders(headers);
 
@@ -596,6 +646,29 @@ public final class McpApiToolBuilder {
             return server.getUrl();
         }
         return "https://api.example.com"; // fallback
+    }
+
+    /**
+     * Resolve the header {@code apiAuth} is sent in, defaulting to
+     * {@value #DEFAULT_AUTH_HEADER}.
+     * <p>
+     * Validated rather than sanitised: a header name reaches the wire verbatim, so
+     * a value carrying CR/LF could append a second header to every generated call,
+     * and silently dropping the offending characters would send the credential
+     * under a name the API does not read — authenticating against nothing, which
+     * looks like a permissions problem rather than a config error. Rejecting says
+     * so at setup time.
+     */
+    static String resolveAuthHeader(String apiAuthHeader) {
+        String trimmed = apiAuthHeader == null ? null : apiAuthHeader.trim();
+        if (trimmed == null || trimmed.isEmpty()) {
+            return DEFAULT_AUTH_HEADER;
+        }
+        if (!HEADER_NAME_PATTERN.matcher(trimmed).matches()) {
+            throw new IllegalArgumentException(
+                    "apiAuthHeader is not a valid HTTP header name: it must be 1-64 characters from the RFC 9110 token set (letters, digits and !#$%&'*+-.^_`|~)");
+        }
+        return trimmed;
     }
 
     /**
