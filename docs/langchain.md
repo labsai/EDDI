@@ -294,8 +294,10 @@ Both stored shapes therefore keep working: a config that sets only `streamingTim
       "type": "ollama",
       "description": "Ollama local model chat",
       "parameters": {
-        "model": "llama3",
-        "timeout": "15000",
+        "baseUrl": "http://ollama:11434",
+        "model": "llama3.2:3b",
+        "timeout": "120000",
+        "think": "false",
         "systemMessage": "You are a helpful assistant",
         "addToOutput": "true"
       }
@@ -303,6 +305,38 @@ Both stored shapes therefore keep working: a config that sets only `streamingTim
   ]
 }
 ```
+
+**Ollama-specific parameters**
+
+| Parameter        | Effect                                                                                      |
+| ---------------- | ------------------------------------------------------------------------------------------- |
+| `baseUrl`        | Ollama's address. Default `http://localhost:11434`, overridable deployment-wide with `EDDI_OLLAMA_DEFAULT_BASE_URL`. |
+| `model`          | Model tag as `ollama list` reports it, e.g. `llama3.2:3b`.                                   |
+| `think`          | `"true"` / `"false"`. Unset leaves it to Ollama and the model — see below.                    |
+| `returnThinking` | `"true"` surfaces the separate `thinking` field instead of discarding it. Off by default.     |
+| `temperature`, `maxTokens`, `topP`, `topK` | Standard sampling controls. `maxTokens` maps to Ollama's `num_predict`. |
+
+> **Reaching Ollama from a container.** Inside the `eddi` container `localhost`
+> is the container. Use `http://host.docker.internal:11434` for an Ollama on the
+> host, or bring up the overlay —
+> `docker compose -f docker-compose.yml -f docker-compose.ollama.yml up -d` —
+> which puts Ollama on the same network as `http://ollama:11434` and pre-fills
+> that base URL for new agents.
+
+> **Reasoning models look like a hang.** gemma3n, deepseek-r1, qwen3 and friends
+> think before they answer, and where that reasoning goes depends on the model:
+>
+> - Reported in a separate `thinking` field — not part of the streamed content, so
+>   a streaming chat window shows nothing at all for as long as the model reasons,
+>   then the whole answer at once. `"returnThinking": "true"` surfaces it instead
+>   of discarding it.
+> - Prepended to the content itself as `<think>…</think>` — the tags stream into
+>   the reply, where the user sees them. `returnThinking` does not affect this
+>   case; there is no `thinking` field to parse.
+>
+> `"think": "false"` turns reasoning off entirely and is the quickest way to a
+> model that answers immediately. Give such a model a generous `timeout` either
+> way.
 
 #### Hugging Face
 
@@ -937,31 +971,31 @@ The Langchain task configurations can be managed via REST API endpoints.
 ### Endpoints Overview
 
 1. **Read JSON Schema**
-   - **Endpoint:** `GET /langchainstore/langchains/jsonSchema`
+   - **Endpoint:** `GET /llmstore/llms/jsonSchema`
    - **Description:** Retrieves the JSON schema for validating Langchain configurations
 
 2. **List Langchain Descriptors**
-   - **Endpoint:** `GET /langchainstore/langchains/descriptors`
+   - **Endpoint:** `GET /llmstore/llms/descriptors`
    - **Description:** Returns a list of all Langchain configurations with optional filters
 
 3. **Read Langchain Configuration**
-   - **Endpoint:** `GET /langchainstore/langchains/{id}`
+   - **Endpoint:** `GET /llmstore/llms/{id}`
    - **Description:** Fetches a specific Langchain configuration by its ID
 
 4. **Update Langchain Configuration**
-   - **Endpoint:** `PUT /langchainstore/langchains/{id}`
+   - **Endpoint:** `PUT /llmstore/llms/{id}`
    - **Description:** Updates an existing Langchain configuration
 
 5. **Create Langchain Configuration**
-   - **Endpoint:** `POST /langchainstore/langchains`
+   - **Endpoint:** `POST /llmstore/llms`
    - **Description:** Creates a new Langchain configuration
 
 6. **Duplicate Langchain Configuration**
-   - **Endpoint:** `POST /langchainstore/langchains/{id}`
+   - **Endpoint:** `POST /llmstore/llms/{id}`
    - **Description:** Duplicates an existing Langchain configuration
 
 7. **Delete Langchain Configuration**
-   - **Endpoint:** `DELETE /langchainstore/langchains/{id}`
+   - **Endpoint:** `DELETE /llmstore/llms/{id}`
    - **Description:** Deletes a specific Langchain configuration
 
 ---

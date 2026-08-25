@@ -7,6 +7,208 @@
 
 
 
+## 🩹 fix(api,docs): everything a new user hit walking the developer quickstart (2026-08-25)
+
+**Repo:** EDDI (`fix/quickstart-truth-and-api-honesty`)
+
+Following [`docs/developer-quickstart.md`](developer-quickstart.md) against
+`labsai/eddi:6.3.0` produces four failures in seven steps. All of them are ours — the
+documentation in most cases, the API in the rest. Each item below was **reproduced
+against a real 6.3.0 container** before being fixed, and the fix verified against the
+same stack where it could be.
+
+### The documentation was wrong, and the compatibility layer hid it
+
+The v5→v6 rename gave every store a new path, and `LegacyPathRewriteFilter` keeps the
+old ones answering. That is right for clients and was poison for the docs: a reader
+following `POST /packagestore/packages` got a `201`, so nothing said the page was years
+stale — right up until the *payload* shape had drifted too, at which point the same page
+produced a `400` with an empty body and no way to tell which half was wrong.
+
+`developer-quickstart.md`'s API walkthrough is rewritten end to end against the running
+server: `/dictionarystore/dictionaries`, `/rulestore/rulesets`, `/workflowstore/workflows`
+with `workflowSteps`, agents with `workflows`, `valueAlternatives` as typed output items
+rather than bare strings, and the two-call start/say sequence (the start endpoint takes a
+*context map*, never a message). It now also documents the `descriptors` listings —
+without which there is no way to find what you just created — and the descriptor `PATCH`
+that stops everything being called "Unnamed Agent".
+
+The legacy spellings are swept out of eleven other pages, and
+`DocumentedRestPathsTest` fails the build on any that come back. Writing the test found
+three more the sweep had missed, in `AGENTS.md` and `planning/manager-ui-handoff.md`.
+
+Also corrected in the same page: prerequisites (`./mvnw`, not a separate Maven; MongoDB 7),
+`docker compose up -d` rather than `docker-compose up`, `/manage` for the dashboard, an
+`examples/` folder that has never existed, and a Troubleshooting section that pointed at
+three endpoints which do not exist. The `sendConversation` LLM parameter in the old
+example is read by nothing.
+
+### `DELETE /conversationstore/conversations/{id}` did nothing
+
+`deletePermanently` defaults to `false`, and that branch was a comment claiming a
+`DocumentDescriptorInterceptor` would mark the descriptor deleted "regardless of whether
+it has been permanently deleted or not". No such interceptor exists anywhere in the code
+base. So the endpoint answered `204`, the row stayed `"deleted": false`, and it stayed
+listed. The Manager's dialog describes exactly the behaviour that was missing and then
+reports "Conversation deleted" — a success toast beside a conversation that is still
+there. Now implemented: the descriptor is retired, the snapshot and attachments are
+deliberately kept, which is the whole distinction from the permanent path.
+
+### Deploying an agent that does not exist returned `202 Accepted`
+
+`POST /administration/{env}/deploy/{agentId}` has always advertised a 404 and never
+produced one. Without `waitForCompletion`, any id at all was accepted; the deployment
+then failed on the runtime executor, where no status code can reach the caller, so the
+only signal was a log line. A CI pipeline, the Manager and the setup API all read 202 as
+success and move on to start a conversation that can never exist. The agent store is now
+consulted on the request thread. A store *outage* still deploys — it is not evidence the
+agent is missing. An id the datastore cannot even parse is a 404 too: the MongoDB driver
+rejects it with "state should be: hexString has 24 characters" before any lookup, which
+both blames the wrong thing and names the datastore behind the API.
+
+### Reading a conversation that is not there was a `500`
+
+Not surfaced by the walkthrough, but the same defect on a different resource — and
+the Troubleshooting section rewritten above now sends people to two of the affected
+endpoints, precisely when something has already gone wrong. Five conversation reads
+answered a deleted or mistyped id with `500 Internal Server Error` and an error id,
+while every one of them documents a 404:
+
+- `loadConversationMemorySnapshot` returns `null` rather than throwing, and the read
+  paths dereferenced it — an NPE on `getEnvironment()`.
+- `GET /conversationstore/conversations/{id}` returned that `null` straight out, which
+  JAX-RS renders as `204 No Content` — indistinguishable from a conversation that
+  exists and is empty.
+- `GET /agents/{id}/status` threw `ConversationNotFoundException`, which nothing
+  mapped, so it reached Quarkus's default handler as an unhandled runtime exception.
+  It never even got that far: `cacheConversationState` put the `null` into Caffeine
+  first, which rejects null values, so the NPE came from inside the cache one line
+  before the check that would have said "no such conversation".
+
+All five now answer `404` naming the conversation id.
+`ConversationNotFoundExceptionMapper` is new; the rest is a `requireSnapshot` guard
+and a null check in the right order.
+
+`POST /agents/{id}` and `/rerun` were the same bug once more, and the file already
+said so twice: `sayInternal` carries two comments explaining that "say() is resumed
+through an AsyncResponse, so the exception never reaches [the mapper]" — one for the
+quota denial that used to surface as 500, one for backpressure. This was the third
+instance. Now caught explicitly, `404` with the message.
+
+The streaming twin reports it as a typed `conversation_not_found` **error event**
+rather than a status, which is deliberate: `buildKnownConditionOrOpaqueErrorEvent`
+exists precisely to map the conditions `sayStreaming` rejects synchronously onto
+machine-readable codes — `awaiting_approval`, `conversation_ended`,
+`agent_not_ready` — and its javadoc already listed the twin's 404 among them.
+Deviating for this one condition would have created a new inconsistency rather than
+removing one.
+
+### A malformed configuration body was a `400` with no body
+
+Strictness only covered unknown *field names*. A value of the wrong *shape* — the
+quickstart's own `"valueAlternatives": ["Hello!"]` where the model wants
+`[{"type":"text","text":"Hello!"}]` — fell through to RESTEasy, which answers `400` with
+`content-length: 0`. No field, no expectation, no indication the body was even the
+problem. `StrictConfigurationParser` now explains those too:
+
+```text
+Cannot read OutputConfigurationSet at outputSet[0].outputs[0].valueAlternatives[0]:
+expected a JSON object here, found a string. The value's shape is wrong — check this
+field against the resource's JSON Schema at GET /<store>/<resource>/jsonSchema.
+```
+
+Both messages render the failing position as a JSON path instead of Jackson's
+`ai.labs.eddi.configs…["outputSet"]->java.util.ArrayList[0]->…`, which named classes
+the caller cannot see and published the internal package layout to every client. What
+was *found* is resolved by re-reading the body at that position rather than off the
+parser — `readValue` closes the parser before the exception propagates, so its current
+token is always null by then.
+
+### Behavior rules read back under a different key than they are written with
+
+`RuleGroupConfiguration`'s accessors are `getRules`/`setRules`, so Jackson serialised the
+list as `rules` — while the shipped reference config, the ZIP fixtures, the documentation
+and the Manager's rules editor all say `behaviorRules`. The alias made writes work either
+way, so this only ever bit on **reads**: post `behaviorRules`, get `rules` back, and the
+Manager renders every group as "No rules in this group" no matter what it contains. Its
+own MSW mocks return `behaviorRules`, so its suite agreed with the fiction rather than the
+server. Now `behaviorRules` out, both names in — every stored document keeps loading.
+
+### Ollama: an overlay, and the switch that decides whether it looks alive
+
+`docker-compose.ollama.yml` puts Ollama on the same Docker network, so the base URL is
+`http://ollama:11434` — plain container DNS, identical on every host — and sets
+`EDDI_OLLAMA_DEFAULT_BASE_URL` so the agent wizard and setup API pre-fill something that
+resolves. Inside the `eddi` container `localhost` is the container, and that is the single
+most common way a first local-LLM agent fails. Verified end to end: model pulled, agent
+deployed, real turn answered.
+
+The builder also gained Ollama's `think` and `returnThinking`. A reasoning model
+(gemma3n, deepseek-r1, qwen3) left on its default thinks before answering, and the
+reasoning arrives in a separate `thinking` field that is not part of the streamed
+content — so a streaming window shows nothing for many seconds and then everything at
+once, which reads as a hang. `think` is deliberately tri-state: `applyBoolean` leaves an
+absent or unparseable value alone rather than letting `Boolean.parseBoolean` turn a typo
+into "reasoning off".
+
+### Already fixed, for the record
+
+Dictionaries and behavior rules do not appear in the Manager, and their
+`descriptors` listings return `[]` while the resources read back fine individually.
+That is `60188c2bd` — three stores queried a descriptor type that did not match the
+namespace they write to — which landed *after* 6.3.0 and ships in the next release.
+Reproduced on 6.3.0, confirmed absent on `main`.
+
+### Not reproduced
+
+The `307` seen while streaming against `gemma4:e4b`. Nothing in EDDI emits a 307,
+`langchain4j` normalises the trailing slash before appending `api/chat`, and the Manager's
+streaming client follows redirects. It needs the actual request/response pair — most
+likely from the Ollama side — before anything can be claimed about it. The overlay above
+removes the whole class of host-networking problems it may belong to.
+
+### Files
+
+`docs/developer-quickstart.md` (rewritten walkthrough), eleven other `docs/*.md`
+(legacy-path sweep), `docs/langchain.md` (Ollama parameters + container networking),
+`README.md`, `docker-compose.ollama.yml` (new),
+`RestConversationStore`, `RestAgentAdministration`, `ConversationService`,
+`ConversationStepRunner`, `ConversationNotFoundExceptionMapper` (new),
+`StrictConfigurationParser`, `RuleGroupConfiguration`, `OllamaLanguageModelBuilder`,
+`ModelParameterValues`, `DocumentedRestPathsTest` (new),
+`RuleGroupConfigurationJsonTest` (new), and the existing tests for each behaviour
+above.
+
+### Also corrected under review
+
+Five more pages still carried the pre-v6 workflow payload — `packageExtensions`
+with `extensions.uri` — which the v6 store-path sweep had left alone because it
+rewrote paths, not shapes. Strict parsing rejects `packageExtensions` outright, so
+those were instructions that could not work: `putting-it-all-together.md`,
+`httpcalls.md`, both `creating-your-first-agent` pages and `architecture.md`.
+`DocumentedRestPathsTest` now fails the build on that key too.
+
+`open-webui-integration.md` declared a workflow step of type
+`eddi://ai.labs.langchain`, which no module registers — the LLM module registers
+`ai.labs.llm` only, so that workflow would not load.
+
+And the quickstart still described rule sets reading back as `rules`, which is the
+behaviour *this entry changes*. Corrected to say `behaviorRules` is canonical.
+
+### Verified, not assumed
+
+Every item was reproduced against `labsai/eddi:6.3.0` in Docker before being fixed, and
+each fix was then verified against an image built from this branch — including running
+the rewritten quickstart end to end, verbatim, against a clean database.
+`labsai/eddi:latest` (built 2026-08-20) was checked too, which is how the descriptor
+listing bug below was confirmed still live in CI.
+
+> **Local test note.** `LanguageModelBuildersTest` cannot run in this environment — every
+> builder in it, touched or not, fails with "Unable to establish loopback connection"
+> because the JDK HTTP client cannot open a selector here. CI is the gate for that class.
+
+---
+
 ## 🧪 test(connections): cover the four stores nothing was testing, and close two defects that surfaced doing it (2026-08-22)
 
 **Repo:** EDDI (`feat/saas-connectors`)

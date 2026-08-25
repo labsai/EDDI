@@ -248,6 +248,16 @@ public class RestAgentEngine implements IRestAgentEngine {
             response.resume(Response.status(Response.Status.FORBIDDEN).type(TEXT_PLAIN).entity(e.getMessage()).build());
         } catch (ResourceNotFoundException e) {
             response.resume(new NotFoundException());
+        } catch (ConversationNotFoundException e) {
+            // Must be caught explicitly, for the same reason as the two branches
+            // below: say() is resumed through an AsyncResponse, so the exception
+            // never reaches ConversationNotFoundExceptionMapper and the generic
+            // handler at the bottom turned "no such conversation" into a 500 with
+            // an error id. Every GET on the same conversation already answers 404,
+            // so posting to a deleted or mistyped id was the one place left that
+            // claimed the server had broken.
+            LOGGER.warnf("No such conversation: %s", sanitize(conversationId));
+            response.resume(Response.status(Response.Status.NOT_FOUND).type(TEXT_PLAIN).entity(e.getMessage()).build());
         } catch (QuotaExceededException e) {
             // Must be caught explicitly: say() is resumed through an AsyncResponse, so
             // the exception never reaches QuotaExceededExceptionMapper — without this
