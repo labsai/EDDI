@@ -125,8 +125,9 @@ public class StrictConfigurationParser {
      * {@code "valueAlternatives": ["Hello!"]} where the model wants
      * {@code [{"type":"text","text":"Hello!"}]} and got no hint at all — not which
      * field, not what was expected, not even that the body was the problem. So this
-     * says which JSON path failed and which kind of value belongs there, and leaves
-     * the Java type names out.
+     * names the JSON path that failed, what belongs there, and what was found
+     * instead — and for a polymorphic value, the legal {@code type} ids. No Java
+     * type names either way.
      */
     private String describeMismatch(MismatchedInputException e, Class<?> type, Object rawBody) {
         var message = new StringBuilder("Cannot read ").append(type.getSimpleName());
@@ -168,7 +169,8 @@ public class StrictConfigurationParser {
                 }
             }
         } catch (RuntimeException ignored) {
-            // Decoration only — fall through to the id-less sentence below.
+            // Decoration only — the message below simply omits the "Known types"
+            // clause rather than failing to explain the rejection at all.
         }
 
         String id = e.getTypeId();

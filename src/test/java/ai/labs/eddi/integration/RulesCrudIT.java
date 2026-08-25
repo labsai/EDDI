@@ -10,7 +10,9 @@ import org.junit.jupiter.api.*;
 
 import java.io.IOException;
 
+import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.nullValue;
 
 /**
  * Integration test for Behavior Rules CRUD operations.
@@ -60,8 +62,16 @@ public class RulesCrudIT extends BaseIntegrationIT {
     @Order(3)
     @DisplayName("Update behavior rule set")
     void updateBehavior() {
-        assertUpdate(TEST_JSON2, ROOT_PATH, RESOURCE_URI, resourceId).then().assertThat().body("behaviorGroups[0].rules[0].name",
-                equalTo("Welcome_changed"));
+        // behaviorRules, not rules. The fixtures — like every other authored
+        // artefact — have always written behaviorRules, while the response came
+        // back saying rules, because RuleGroupConfiguration's getRules/setRules
+        // pair gave Jackson that implicit name. This assertion was the only place
+        // in the repository that agreed with the response instead of the request,
+        // which is why nothing caught the Manager rendering every rule group as
+        // empty.
+        assertUpdate(TEST_JSON2, ROOT_PATH, RESOURCE_URI, resourceId).then().assertThat()
+                .body("behaviorGroups[0].behaviorRules[0].name", equalTo("Welcome_changed"))
+                .body("behaviorGroups[0].rules", nullValue());
     }
 
     @Test
@@ -69,5 +79,40 @@ public class RulesCrudIT extends BaseIntegrationIT {
     @DisplayName("Delete behavior rule set")
     void deleteBehavior() {
         assertDelete(ROOT_PATH, resourceId[0]);
+    }
+
+    /**
+     * The compatibility half of the same change, over HTTP rather than through the
+     * mapper: a client that learned the old spelling must keep working, and must
+     * get the canonical one back.
+     * <p>
+     * Ordered last and cleaning up after itself so it cannot disturb the CRUD
+     * sequence above, which shares {@code resourceId} across ordered methods.
+     */
+    @Test
+    @Order(5)
+    @DisplayName("A rule set posted with the legacy 'rules' key is accepted, and reads back as 'behaviorRules'")
+    void legacyRulesKeyIsStillAccepted() {
+        String legacyBody = """
+                {
+                  "behaviorGroups": [
+                    {
+                      "name": "Smalltalk",
+                      "rules": [ { "name": "Welcome", "actions": ["welcome"], "conditions": [] } ]
+                    }
+                  ]
+                }
+                """;
+
+        var created = new ResourceId[1];
+        assertCreate(legacyBody, ROOT_PATH, RESOURCE_URI, created);
+        try {
+            given().get(ROOT_PATH + created[0].id() + VERSION_STRING + created[0].version())
+                    .then().assertThat().statusCode(200)
+                    .body("behaviorGroups[0].behaviorRules[0].name", equalTo("Welcome"))
+                    .body("behaviorGroups[0].rules", nullValue());
+        } finally {
+            deleteResourceQuietly(ROOT_PATH, created[0].id(), created[0].version());
+        }
     }
 }

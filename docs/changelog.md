@@ -90,11 +90,19 @@ All five now answer `404` naming the conversation id.
 `ConversationNotFoundExceptionMapper` is new; the rest is a `requireSnapshot` guard
 and a null check in the right order.
 
-Deliberately **not** extended to `POST /agents/{id}` and `/stream`: those are the
-async paths, whose exception plumbing is a different problem, and no documentation
-sends anyone there with a dead id. They are no worse than before — the same 500, from
-a named exception instead of an NPE — and the streaming one already reports the
-failure as an SSE error event, which is the right contract once a stream has opened.
+`POST /agents/{id}` and `/rerun` were the same bug once more, and the file already
+said so twice: `sayInternal` carries two comments explaining that "say() is resumed
+through an AsyncResponse, so the exception never reaches [the mapper]" — one for the
+quota denial that used to surface as 500, one for backpressure. This was the third
+instance. Now caught explicitly, `404` with the message.
+
+The streaming twin reports it as a typed `conversation_not_found` **error event**
+rather than a status, which is deliberate: `buildKnownConditionOrOpaqueErrorEvent`
+exists precisely to map the conditions `sayStreaming` rejects synchronously onto
+machine-readable codes — `awaiting_approval`, `conversation_ended`,
+`agent_not_ready` — and its javadoc already listed the twin's 404 among them.
+Deviating for this one condition would have created a new inconsistency rather than
+removing one.
 
 ### A malformed configuration body was a `400` with no body
 

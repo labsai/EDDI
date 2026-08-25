@@ -260,6 +260,12 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
         if (e instanceof IConversationService.ConversationAwaitingApprovalException) {
             code = "awaiting_approval";
             message = e.getMessage();
+        } else if (e instanceof IConversationService.ConversationNotFoundException) {
+            // The twin answers 404 here. This message is a fixed template carrying
+            // only the caller's own (sanitized) conversationId, so it is echoed
+            // rather than replaced — no new disclosure.
+            code = "conversation_not_found";
+            message = e.getMessage();
         } else if (e instanceof IConversationService.ConversationEndedException) {
             code = "conversation_ended";
             message = "Conversation has ended";
