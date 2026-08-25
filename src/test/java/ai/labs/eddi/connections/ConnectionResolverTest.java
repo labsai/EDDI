@@ -26,6 +26,7 @@ import org.junit.jupiter.api.Test;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -196,17 +197,25 @@ class ConnectionResolverTest {
             // Not `new StaticAuth()`: headerName defaults to "Authorization", so an
             // author who never set one has a valid document that sends the credential
             // there. Only an absent block or an explicitly blanked name reach the guard.
-            for (StaticAuth auth : new StaticAuth[]{null, headerNamed("  "), headerNamed(null)}) {
+            // Labelled rather than looping over the objects themselves: StaticAuth
+            // inherits Object.toString(), so a failure message built from one names the
+            // identity hash and not which of the three cases broke.
+            Map<String, StaticAuth> cases = new LinkedHashMap<>();
+            cases.put("no staticAuth block", null);
+            cases.put("blank headerName", headerNamed("  "));
+            cases.put("null headerName", headerNamed(null));
+
+            for (var entry : cases.entrySet()) {
                 var connection = gnowbeConnection();
-                connection.setStaticAuth(auth);
+                connection.setStaticAuth(entry.getValue());
                 register(connection);
                 callerSupplies(Map.of("gnowbe", "key-id:secret"));
 
                 var error = assertThrows(ConnectionException.class,
-                        () -> resolver(true).resolve("${connection:gnowbe}", GNOWBE_TARGET, null));
+                        () -> resolver(true).resolve("${connection:gnowbe}", GNOWBE_TARGET, null), entry.getKey());
 
-                assertEquals(ConnectionException.Reason.INVALID_CONFIGURATION, error.getReason(), String.valueOf(auth));
-                assertTrue(error.getMessage().contains("headerName"), error.getMessage());
+                assertEquals(ConnectionException.Reason.INVALID_CONFIGURATION, error.getReason(), entry.getKey());
+                assertTrue(error.getMessage().contains("headerName"), entry.getKey() + ": " + error.getMessage());
             }
         }
 
