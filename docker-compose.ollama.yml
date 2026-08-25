@@ -28,6 +28,12 @@ services:
     depends_on:
       ollama:
         condition: service_healthy
+      # `ollama list` answers as soon as the server is up, which is well before a
+      # first-run model pull has finished — so without this EDDI accepts a
+      # conversation and the first message fails with "model not found".
+      # An empty OLLAMA_PULL_MODEL still satisfies it: the job echoes and exits 0.
+      ollama-pull:
+        condition: service_completed_successfully
 
   ollama:
     image: ollama/ollama:0.13.0
