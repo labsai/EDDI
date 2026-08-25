@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useRef, useEffect } from "react";
+import { useState, useCallback, useMemo, useRef, useEffect, useId } from "react";
 import { useTranslation } from "react-i18next";
 import {
   KeyRound,
@@ -277,33 +277,57 @@ function CreateSecretModal({
 // ─── VaultPopup ──────────────────────────────────────────────────────────────
 
 interface VaultPopupProps {
-  secrets: { keyName: string; description: string | null }[];
+  /**
+   * The keys to show, already filtered — by the parent, which also owns
+   * `highlightedIndex`.
+   *
+   * Passed in rather than filtered here again. Both sides used to apply the
+   * same predicate to the same list independently, and `highlightedIndex` is
+   * an index *into* that list: two copies of the filtering meant the number
+   * and the array it indexes were derived in different places, which is what
+   * let the keyboard handling drift apart from what was on screen.
+   */
+  filtered: { keyName: string; description: string | null }[];
   secretsLoading: boolean;
   vaultAvailable: boolean;
   filter: string;
   onFilterChange: (v: string) => void;
   highlightedIndex: number;
+  /** The parent's key handler — it owns the highlight, so it must see the keys. */
+  onKeyDown: (e: React.KeyboardEvent) => void;
   onSelect: (keyName: string) => void;
   onCreate: () => void;
-  onClose: () => void;
   vaultError?: string;
 }
 
 function VaultPopup({
-  secrets,
+  filtered,
   secretsLoading,
   vaultAvailable,
   filter,
   onFilterChange,
   highlightedIndex,
+  onKeyDown,
   onSelect,
   onCreate,
-  onClose,
   vaultError,
 }: VaultPopupProps) {
   const { t } = useTranslation();
   const filterRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+
+  /*
+   * Ids for the listbox relationship, generated rather than spelled out.
+   *
+   * Keyed by position, not by key name: nothing validates a vault key name —
+   * the create dialog only trims it — so a key called `my key` is reachable
+   * from this very UI, and an id with a space in it is one that
+   * `aria-activedescendant` can never resolve. A generated base also keeps
+   * two pickers on the same page from claiming the same id.
+   */
+  const baseId = useId();
+  const listId = `${baseId}-list`;
+  const optionId = (index: number) => `${baseId}-option-${index}`;
 
   // Auto-focus the filter input on open
   useEffect(() => {
@@ -316,40 +340,51 @@ function VaultPopup({
   useEffect(() => {
     if (highlightedIndex < 0 || !listRef.current) return;
     const items = listRef.current.querySelectorAll("[data-vault-item]");
-    items[highlightedIndex]?.scrollIntoView({ block: "nearest" });
-  }, [highlightedIndex]);
-
-  const filtered = useMemo(() => {
-    if (!filter.trim()) return secrets;
-    const q = filter.toLowerCase();
-    return secrets.filter(
-      (s) =>
-        s.keyName.toLowerCase().includes(q) ||
-        (s.description ?? "").toLowerCase().includes(q),
-    );
-  }, [secrets, filter]);
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Escape") {
-      e.preventDefault();
-      onClose();
-    } else if (e.key === "ArrowDown") {
-      e.preventDefault();
-      // Handled by parent — we need to bubble
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-    } else if (e.key === "Enter") {
-      e.preventDefault();
-      if (highlightedIndex >= 0 && highlightedIndex < filtered.length) {
-        onSelect(filtered[highlightedIndex]!.keyName);
-      }
+    const item = items[highlightedIndex];
+    // Feature-detected because `scrollIntoView` is not implemented everywhere
+    // — jsdom being the case that matters here. This line could not throw
+    // while the arrows were being swallowed, since nothing ever moved the
+    // highlight; making them work is what put it on a live path.
+    if (typeof item?.scrollIntoView === "function") {
+      item.scrollIntoView({ block: "nearest" });
     }
-  };
+  }, [highlightedIndex]);
 
   return (
     <div
       className="absolute inset-x-0 top-full z-50 mt-1 overflow-hidden rounded-lg border border-border bg-popover shadow-xl animate-in fade-in-0 zoom-in-95 slide-in-from-top-2 duration-150"
-      onKeyDown={handleKeyDown}
+      /*
+       * The parent's handler, not one of our own.
+       *
+       * Opening the popup moves focus into the filter input below, so the main
+       * input's `onKeyDown` — which owns `highlightedIndex` — stops receiving
+       * anything, and the popup is a sibling of that input rather than a child,
+       * so nothing reaches it by bubbling either. What lived here instead
+       * called `preventDefault()` on both arrows and left a comment saying the
+       * parent would handle them. Nothing did: the arrows were swallowed, the
+       * highlight never moved, and the list could only be used with a mouse.
+       *
+       * Scoped, because this container also sees every key bubbling from the
+       * option buttons and the create button. Passing those to the parent
+       * handler swallows their own Enter — it calls `preventDefault()` and then
+       * acts on the *highlight* instead — so tabbing to "Create new secret" and
+       * pressing Enter opened nothing and could select a key the user was not
+       * on. Same defect as the one the cards had.
+       *
+       * Escape is the exception on purpose: it means "close this popup" from
+       * anywhere inside it, including from a button.
+       */
+      onKeyDown={(e) => {
+        if (e.key === "Escape") {
+          onKeyDown(e);
+          return;
+        }
+        // Navigation belongs to the combobox alone. That is also what
+        // `aria-activedescendant` describes: a highlight that only means
+        // anything while focus is in the filter.
+        if (e.target !== filterRef.current) return;
+        onKeyDown(e);
+      }}
       data-testid="vault-popup"
     >
       {/* Search filter */}
@@ -363,12 +398,31 @@ function VaultPopup({
           placeholder={t("secretPicker.filterPlaceholder", "Search vault keys…")}
           className="h-6 flex-1 border-none bg-transparent text-xs text-foreground placeholder:text-muted-foreground/60 focus:outline-none"
           autoComplete="off"
+          /*
+           * The highlight is a background colour, which is nothing at all to a
+           * screen reader. `aria-activedescendant` is what makes the arrows
+           * announce anything: focus stays in this input while the referenced
+           * option is reported as the current one.
+           */
+          role="combobox"
+          aria-expanded
+          aria-controls={listId}
+          aria-activedescendant={
+            highlightedIndex >= 0 && highlightedIndex < filtered.length
+              ? optionId(highlightedIndex)
+              : undefined
+          }
           data-testid="vault-popup-filter"
         />
       </div>
 
       {/* Key list */}
-      <div ref={listRef} className="max-h-48 overflow-y-auto">
+      <div
+        ref={listRef}
+        id={listId}
+        role="listbox"
+        className="max-h-48 overflow-y-auto"
+      >
         {!vaultAvailable ? (
           <div className="flex items-center gap-2 px-3 py-3 text-xs text-muted-foreground">
             <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-500" />
@@ -399,6 +453,9 @@ function VaultPopup({
               key={secret.keyName}
               type="button"
               data-vault-item
+              id={optionId(idx)}
+              role="option"
+              aria-selected={idx === highlightedIndex}
               onClick={() => onSelect(secret.keyName)}
               className={`flex w-full items-start gap-2 px-3 py-2 text-start text-xs transition-colors ${
                 idx === highlightedIndex
@@ -850,7 +907,7 @@ export function SecretKeyPicker({
       {/* Vault suggestion popup */}
       {popupOpen && (
         <VaultPopup
-          secrets={secretList}
+          filtered={filteredForNav}
           secretsLoading={secretsLoading}
           vaultAvailable={vaultAvailable}
           filter={filter}
@@ -859,12 +916,12 @@ export function SecretKeyPicker({
             setHighlightedIndex(-1);
           }}
           highlightedIndex={highlightedIndex}
+          onKeyDown={handleInputKeyDown}
           onSelect={handleSelectKey}
           onCreate={() => {
             closePopup();
             setShowCreateDialog(true);
           }}
-          onClose={closePopup}
           vaultError={vaultError}
         />
       )}
