@@ -64,12 +64,11 @@ public class ConnectionConfiguration {
      * entropy heuristic — this is a write-boundary check on a small map, so it can
      * afford to be strict and say why.
      * <p>
-     * Entries are in <em>normalized</em> form: lower case, with {@code -},
-     * {@code .} and {@code _} removed, because that is the shape
+     * Entries are in <em>normalized</em> form — lower case, with {@code -},
+     * {@code .} and {@code _} removed — because that is the shape
      * {@link #validateExtraAuthParams()} compares against. An entry spelled the way
-     * the parameter appears on the wire ({@code code_verifier}) can never match,
-     * and the parameter it was meant to catch then passes validation and is
-     * appended to the authorization URL. Keep new entries stripped.
+     * the parameter travels on the wire ({@code code_verifier}) matches nothing at
+     * all, so keep new entries stripped.
      */
     private static final Set<String> CREDENTIAL_PARAM_NAMES = Set.of("apikey", "apitoken", "password", "passwd", "secret", "secretkey",
             "token", "accesstoken", "refreshtoken", "authorization", "auth", "credential", "credentials", "privatekey", "clientsecret",
@@ -247,6 +246,20 @@ public class ConnectionConfiguration {
         validateExtraAuthParams();
     }
 
+    /**
+     * Refuses a credential-shaped name among the extra parameters appended to the
+     * authorization URL.
+     * <p>
+     * The name is normalized before the lookup, so a denylisted parameter is caught
+     * however a config spells it: {@code code_verifier}, {@code Code-Verifier} and
+     * {@code codeverifier} are one name here. That normalization is also why
+     * {@link #CREDENTIAL_PARAM_NAMES} is written stripped — an entry in wire
+     * spelling matches nothing, which is how a {@code code_verifier} parameter
+     * reached the authorization URL, and with it the browser history, the
+     * {@code Referer} and every proxy log in front of the provider. That is the one
+     * place a PKCE verifier must not travel: it is the secret half of a pair whose
+     * whole point is that only the challenge is public.
+     */
     private void validateExtraAuthParams() {
         Map<String, String> params = oauth.getExtraAuthParams();
         if (params == null) {

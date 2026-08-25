@@ -29,8 +29,9 @@ covered exactly this case, which is presumably why the gap survived review.
 **Fix:** one canonical representation. The set now holds normalized forms only, with
 `codeverifier` added, and the dead clause is gone. The effective rule set is provably
 unchanged apart from that addition — every removed entry's stripped form was already
-present. The field's Javadoc now states the invariant and what breaks when it is
-violated, so the next name added in wire spelling does not silently reopen the hole.
+present. The field's Javadoc now states the invariant, and `validateExtraAuthParams()`
+carries what breaks when it is violated, so the next name added in wire spelling does not
+silently reopen the hole.
 
 **Test:** a `@ParameterizedTest` in `ConnectionConfigurationValidationTest` sweeps the
 four spellings of `code_verifier` plus the six other underscored wire spellings, pinning
