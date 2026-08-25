@@ -9,6 +9,7 @@ import {
   Globe,
   Menu,
   ChevronRight,
+  Link2,
   LogOut,
 } from "lucide-react";
 import { useTheme } from "./theme-provider";
@@ -55,6 +56,8 @@ function useBreadcrumbs() {
     capabilities: t("nav.capabilities", "Capabilities"),
     sync: t("nav.sync", "Sync"),
     gdpr: t("nav.gdpr", "GDPR"),
+    connections: t("nav.connections", "Connections"),
+    "linked-accounts": t("pages.linkedAccounts.title", "Linked accounts"),
     updates: t("nav.updates", "Updates"),
     wizard: t("wizard.title", "Agent Wizard"),
     agentview: t("nav.agents"),
@@ -346,6 +349,20 @@ export function TopBar({ onMenuClick, sidebarVisible }: TopBarProps) {
 
                 {/* Menu items */}
                 <div className="py-1">
+                  {/* The per-user half of connections lives here because there
+                      is nowhere else it could: the Manager has no profile area,
+                      and the sidebar's Connections entry is the admin config
+                      list, which most people cannot open. */}
+                  <Link
+                    to="/manage/linked-accounts"
+                    onClick={() => setUserMenuOpen(false)}
+                    data-testid="user-menu-linked-accounts"
+                    role="menuitem"
+                    className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-foreground transition-colors hover:bg-secondary"
+                  >
+                    <Link2 className="h-4 w-4" aria-hidden="true" />
+                    {t("pages.linkedAccounts.title", "Linked accounts")}
+                  </Link>
                   <button
                     onClick={() => {
                       setUserMenuOpen(false);

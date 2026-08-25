@@ -6,6 +6,7 @@ import { Cable, ChevronRight, ChevronLeft, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
+import { StepDots } from "@/components/shared/step-dots";
 import { useCreateChannel } from "@/hooks/use-channels";
 import {
   CHANNEL_TYPES,
@@ -108,15 +109,7 @@ export function CreateChannelDialog({
           </h2>
         </div>
 
-        {/* Step dots */}
-        <div className="flex items-center justify-center gap-2 py-2 mb-4">
-          {STEPS.map((s, i) => (
-            <div key={s} className="flex items-center gap-2">
-              <div className={`h-2 w-2 rounded-full transition-colors ${i <= stepIndex ? "bg-primary" : "bg-muted"}`} />
-              {i < STEPS.length - 1 && <div className={`h-px w-8 transition-colors ${i < stepIndex ? "bg-primary" : "bg-muted"}`} />}
-            </div>
-          ))}
-        </div>
+        <StepDots total={STEPS.length} current={stepIndex} />
 
         <div className="space-y-4 min-h-[200px]">
           {/* Step 1: Type & Name */}

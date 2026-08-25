@@ -136,6 +136,12 @@ export default defineConfig({
       "/managerresource": p(),
       "/managedagents": p(),
       "/channelstore": p(),
+      "/connectionstore": p(),
+      // The per-user grant routes. Same-origin matters here beyond convenience:
+      // `POST /connections/{name}/authorize` is answered with a `Set-Cookie`
+      // nonce that the provider's callback has to carry back, and the proxy is
+      // what makes the dev server the same origin as the backend.
+      "/connections": p(),
       "/integrations": p(),
       "/mcp": p(),
       "/openapi": p(),

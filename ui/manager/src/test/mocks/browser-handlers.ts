@@ -1,6 +1,6 @@
 import { http, passthrough } from "msw";
 import type { RequestHandler } from "msw";
-import { handlers, coordinatorHandlers, orphanHandlers, logAdminHandlers, secretsHandlers, variablesHandlers, auditHandlers, quotaHandlers, scheduleHandlers, gdprHandlers, capabilityHandlers, userMemoryHandlers, propertiesHandlers, triggerHandlers, backupSyncHandlers } from "./handlers";
+import { handlers, coordinatorHandlers, orphanHandlers, logAdminHandlers, secretsHandlers, variablesHandlers, auditHandlers, quotaHandlers, scheduleHandlers, gdprHandlers, capabilityHandlers, userMemoryHandlers, propertiesHandlers, triggerHandlers, backupSyncHandlers, connectionHandlers } from "./handlers";
 
 /**
  * URL masks the dev server owns. Anything matching these must reach the
@@ -59,4 +59,5 @@ export const browserHandlers: RequestHandler[] = [
   ...propertiesHandlers,
   ...triggerHandlers,
   ...backupSyncHandlers,
+  ...connectionHandlers,
 ];

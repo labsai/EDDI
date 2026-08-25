@@ -255,6 +255,14 @@ take.
   `react-markdown` + `remark-gfm` (it renders GitHub release notes) and talks to
   `api.github.com`, so syncing it is a real bundle and network decision, not a formality —
   measure with the esbuild command above before adding it.
+- **Two more shared components are deliberately unsynced**: `shared/chip-input.tsx` and
+  `shared/step-dots.tsx`, both added with Connections. Neither is a design decision anyone
+  makes in isolation — `ChipInput` is meaningful only inside a form that owns its `pending`
+  text (the prop exists so the parent holds everything about to be saved, which a preview
+  cannot demonstrate), and `StepDots` is three divs whose whole purpose is the `role="status"`
+  announcement, invisible in a static preview. `SecretKeyPicker`, which *is* a standalone
+  decision, was added to the surface in the same change. Revisit if a design ever needs to
+  lay out a wizard header.
 - **`.design-sync/` is type-checked** by `tsconfig.design-sync.json`, wired into `tsc -b`
   via `tsconfig.json`'s references. It maps `eddi-manager` → `ds-entry.tsx` so the previews
   resolve, and pulls in `src/vite-env.d.ts` for `import.meta.env` / `__APP_VERSION__`. A

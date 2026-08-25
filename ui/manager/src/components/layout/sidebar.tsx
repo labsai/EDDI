@@ -36,6 +36,7 @@ import {
   HandMetal,
   Sparkles,
   ArrowUpCircle,
+  Plug,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
@@ -89,6 +90,13 @@ const navSections = [
     labelKey: "nav.sectionAdmin",
     items: [
       { path: "/manage/secrets", icon: KeyRound, labelKey: "nav.secrets" },
+      // Shown to everybody, like the nine other admin-only entries around it.
+      // `navSections` is a static const and nothing here is role-gated, so
+      // hiding this one alone would be inconsistent — and it would also hide it
+      // from an admin whose roles have not arrived yet. The page explains a 403
+      // and degrades to the viewer's own linked accounts, which is a better
+      // answer than a nav entry that silently is not there.
+      { path: "/manage/connections", icon: Plug, labelKey: "nav.connections", fallback: "Connections" },
       { path: "/manage/variables", icon: Variable, labelKey: "nav.variables" },
       { path: "/manage/quotas", icon: SlidersHorizontal, labelKey: "nav.quotas" },
       { path: "/manage/schedules", icon: CalendarClock, labelKey: "nav.schedules" },

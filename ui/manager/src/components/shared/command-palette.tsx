@@ -17,6 +17,8 @@ import {
   MessagesSquare,
   ShieldCheck,
   Users,
+  Plug,
+  Link2,
   Search,
   Keyboard,
   Clock,
@@ -52,6 +54,8 @@ export function CommandPalette() {
     { path: "/manage/logs", label: t("nav.logs", "Logs"), icon: ScrollText, section: "pages" },
     { path: "/manage/audit", label: t("nav.audit", "Audit Trail"), icon: ShieldCheck, section: "pages" },
     { path: "/manage/userdata", label: t("userData.title", "User Data"), icon: Users, section: "pages" },
+    { path: "/manage/connections", label: t("nav.connections", "Connections"), icon: Plug, section: "pages" },
+    { path: "/manage/linked-accounts", label: t("pages.linkedAccounts.title", "Linked accounts"), icon: Link2, section: "pages" },
   ];
 
   // Global Ctrl+K / ⌘+K handler

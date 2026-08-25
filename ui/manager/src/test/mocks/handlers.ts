@@ -276,7 +276,7 @@ function isNotAnId(pathname: string): boolean {
  * be swallowed. `groupstore` was, silently, for as long as this list said only
  * `channelstore`.
  */
-const STORES_WITH_DEDICATED_DESCRIPTORS = ["channelstore", "groupstore"];
+const STORES_WITH_DEDICATED_DESCRIPTORS = ["channelstore", "groupstore", "connectionstore"];
 
 const RESOURCE_SCHEMAS: Record<string, object> = {
   behavior: {
@@ -5263,5 +5263,271 @@ export const backupSyncHandlers = [
       lastModified: new Date().toISOString(),
       availableActions: ["followup", "continue", "close"],
     });
+  }),
+];
+
+/* ─── Connections ────────────────────────────────────────────────────────────
+ *
+ * Two route groups with different audiences, mocked together because they are
+ * one feature: `/connectionstore/connections` is the admin config store, and
+ * `/connections` is the per-user grant lifecycle.
+ *
+ * **These handlers hold state.** `linkedAccounts` below is mutated by the
+ * authorize and disconnect mocks so that the one genuinely new flow in the app
+ * — leave for a provider, come back with a query parameter, refetch — actually
+ * round-trips in demo mode instead of pretending to. `server.resetHandlers()`
+ * does not reset module state, so a test that depends on a particular set of
+ * grants should say so with its own `server.use()` override rather than rely on
+ * the seed.
+ *
+ * The authorize mock returns a **same-origin** URL that lands back on the
+ * caller's own `returnTo` with `?connected=…`, standing in for the provider and
+ * the backend callback. A real provider URL here would navigate the demo out of
+ * the app to a third party, which is neither useful nor something the mocks
+ * should ever do.
+ */
+
+interface MockLinkedAccount {
+  connection: string;
+  status: "ACTIVE" | "EXPIRED" | "REVOKED" | "REFRESH_FAILED";
+  expiresAt: string | null;
+  scopes: string[] | null;
+  connectedAt: string | null;
+}
+
+const linkedAccounts = new Map<string, MockLinkedAccount>([
+  [
+    "jira",
+    {
+      connection: "jira",
+      status: "ACTIVE",
+      expiresAt: new Date(Date.now() + 40 * 60_000).toISOString(),
+      scopes: ["read:jira-work", "write:jira-work", "offline_access"],
+      connectedAt: new Date(Date.now() - 9 * 86400000).toISOString(),
+    },
+  ],
+  [
+    "google-drive",
+    {
+      connection: "google-drive",
+      status: "REFRESH_FAILED",
+      expiresAt: null,
+      scopes: ["https://www.googleapis.com/auth/drive.readonly"],
+      connectedAt: new Date(Date.now() - 60 * 86400000).toISOString(),
+    },
+  ],
+]);
+
+const mockConnections: Record<string, Record<string, unknown>> = {
+  conn1: {
+    name: "jira",
+    description: "Atlassian Jira, as the person asking",
+    authType: "OAUTH2_AUTHORIZATION_CODE",
+    binding: "PER_USER",
+    allowUnverifiedPrincipal: false,
+    oauth: {
+      authorizationUrl: "https://auth.atlassian.com/authorize",
+      tokenUrl: "https://auth.atlassian.com/oauth/token",
+      clientId: "0Xy1abcDEF",
+      clientSecret: "${vault:jira-client-secret}",
+      scopes: ["read:jira-work", "write:jira-work", "offline_access"],
+      extraAuthParams: { audience: "api.atlassian.com", prompt: "consent" },
+      usePkce: true,
+      clientAuthMethod: "client_secret_basic",
+      discoveryUrl: null,
+    },
+    staticAuth: null,
+    baseUrlAllowlist: ["https://api.atlassian.com"],
+    timeoutMs: null,
+  },
+  conn2: {
+    name: "google-drive",
+    description: "Each person's own Drive",
+    authType: "OAUTH2_AUTHORIZATION_CODE",
+    binding: "PER_USER",
+    allowUnverifiedPrincipal: false,
+    oauth: {
+      authorizationUrl: "https://accounts.google.com/o/oauth2/v2/auth",
+      tokenUrl: "https://oauth2.googleapis.com/token",
+      clientId: "1234.apps.googleusercontent.com",
+      clientSecret: "${vault:google-client-secret}",
+      scopes: ["https://www.googleapis.com/auth/drive.readonly"],
+      extraAuthParams: { access_type: "offline" },
+      usePkce: true,
+      clientAuthMethod: "client_secret_post",
+      discoveryUrl: "https://accounts.google.com/.well-known/openid-configuration",
+    },
+    staticAuth: null,
+    baseUrlAllowlist: [
+      "https://www.googleapis.com",
+      "https://drive.googleapis.com",
+    ],
+    timeoutMs: 8000,
+  },
+  conn3: {
+    name: "amplitude",
+    description: "Organisation-wide analytics key",
+    authType: "STATIC",
+    binding: "SERVICE",
+    allowUnverifiedPrincipal: false,
+    oauth: null,
+    staticAuth: {
+      headerName: "Authorization",
+      valueTemplate: "Bearer ${vault:amplitude-key}",
+      username: null,
+      passwordRef: null,
+    },
+    baseUrlAllowlist: ["https://amplitude.com"],
+    timeoutMs: null,
+  },
+  conn4: {
+    name: "billing-api",
+    description: "Service account for the billing system",
+    authType: "OAUTH2_CLIENT_CREDENTIALS",
+    binding: "SERVICE",
+    allowUnverifiedPrincipal: false,
+    oauth: {
+      authorizationUrl: null,
+      tokenUrl: "https://auth.billing.example.com/oauth/token",
+      clientId: "eddi-billing",
+      clientSecret: "${vault:billing-client-secret}",
+      scopes: ["invoices.read"],
+      extraAuthParams: {},
+      usePkce: true,
+      clientAuthMethod: "client_secret_basic",
+      discoveryUrl: null,
+    },
+    staticAuth: null,
+    baseUrlAllowlist: ["https://api.billing.example.com"],
+    timeoutMs: null,
+  },
+  conn5: {
+    name: "legacy-crm",
+    description: "HTTP Basic against the old CRM",
+    authType: "BASIC",
+    binding: "SERVICE",
+    allowUnverifiedPrincipal: false,
+    oauth: null,
+    staticAuth: {
+      headerName: "Authorization",
+      valueTemplate: null,
+      username: "eddi-service",
+      passwordRef: "${vault:legacy-crm-password}",
+    },
+    baseUrlAllowlist: ["https://crm.internal.example.com:8443"],
+    timeoutMs: null,
+  },
+};
+
+export const connectionHandlers = [
+  http.get("*/connectionstore/connections/descriptors", () => {
+    return HttpResponse.json(
+      Object.entries(mockConnections).map(([id, config], i) => ({
+        resource: `eddi://ai.labs.connection/connectionstore/connections/${id}?version=1`,
+        name: config.name as string,
+        description: (config.description as string) ?? "",
+        createdOn: Date.now() - (i + 3) * 86400000,
+        lastModifiedOn: Date.now() - (i + 1) * 3600000,
+      })),
+    );
+  }),
+
+  http.get("*/connectionstore/connections/jsonSchema", () => {
+    return HttpResponse.json({
+      $schema: "https://json-schema.org/draft/2020-12/schema",
+      type: "object",
+      title: "ConnectionConfiguration",
+      properties: {
+        name: { type: "string" },
+        authType: {
+          type: "string",
+          enum: [
+            "STATIC",
+            "BASIC",
+            "OAUTH2_CLIENT_CREDENTIALS",
+            "OAUTH2_AUTHORIZATION_CODE",
+          ],
+        },
+        binding: { type: "string", enum: ["SERVICE", "PER_USER"] },
+        baseUrlAllowlist: { type: "array", items: { type: "string" } },
+      },
+    });
+  }),
+
+  http.get("*/connectionstore/connections/:id", ({ params, request }) => {
+    const url = new URL(request.url);
+    // `/descriptors` and `/jsonSchema` are not ids. The two routes above are
+    // registered first and win, but this stands aside explicitly the way the
+    // resource stores do — a `server.use()` override that re-registers this one
+    // would otherwise answer both of them with a config document.
+    if (isNotAnId(url.pathname)) return;
+    const config = mockConnections[params.id as string];
+    if (!config) {
+      return new HttpResponse("No such connection", { status: 404 });
+    }
+    return HttpResponse.json(config);
+  }),
+
+  http.post("*/connectionstore/connections", () => {
+    const newId = `conn-${Date.now()}`;
+    return new HttpResponse(null, {
+      status: 201,
+      headers: { Location: `/connectionstore/connections/${newId}?version=1` },
+    });
+  }),
+
+  http.put("*/connectionstore/connections/:id", ({ params }) => {
+    return new HttpResponse(null, {
+      status: 200,
+      headers: {
+        Location: `/connectionstore/connections/${params.id}?version=2`,
+      },
+    });
+  }),
+
+  http.post("*/connectionstore/connections/:id", ({ params }) => {
+    return new HttpResponse(null, {
+      status: 201,
+      headers: {
+        Location: `/connectionstore/connections/${params.id}-copy?version=1`,
+      },
+    });
+  }),
+
+  http.delete("*/connectionstore/connections/:id", ({ params }) => {
+    // The backend deletes a connection's grants along with it — tokens must not
+    // outlive the connection that produced them — so the mock does too.
+    const config = mockConnections[params.id as string];
+    if (config) linkedAccounts.delete(config.name as string);
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  // ── Per-user grants ──
+
+  http.get("*/connections/mine", () => {
+    return HttpResponse.json([...linkedAccounts.values()]);
+  }),
+
+  http.post("*/connections/:name/authorize", ({ params, request }) => {
+    const url = new URL(request.url);
+    const name = params.name as string;
+    const returnTo = url.searchParams.get("returnTo") || "/manage/connections";
+    linkedAccounts.set(name, {
+      connection: name,
+      status: "ACTIVE",
+      expiresAt: new Date(Date.now() + 60 * 60_000).toISOString(),
+      scopes: null,
+      connectedAt: new Date().toISOString(),
+    });
+    return HttpResponse.json({
+      authorizationUrl: `${returnTo}?connected=${encodeURIComponent(name)}`,
+    });
+  }),
+
+  http.delete("*/connections/:name/grant", ({ params }) => {
+    linkedAccounts.delete(params.name as string);
+    // 204 whether or not a grant existed — whether a given user had linked a
+    // given connection is not something a caller learns by probing.
+    return new HttpResponse(null, { status: 204 });
   }),
 ];

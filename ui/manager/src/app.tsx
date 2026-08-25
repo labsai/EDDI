@@ -62,6 +62,15 @@ const TriggersPage = lazyPage(() => import("@/pages/triggers"), "TriggersPage");
 const CapabilitiesPage = lazyPage(() => import("@/pages/capabilities"), "CapabilitiesPage");
 const SyncPage = lazyPage(() => import("@/pages/sync-page"), "SyncPage");
 const ChannelsPage = lazyPage(() => import("@/pages/channels"), "ChannelsPage");
+const ConnectionsPage = lazyPage(() => import("@/pages/connections"), "ConnectionsPage");
+const ConnectionDetailPage = lazyPage(
+  () => import("@/pages/connection-detail"),
+  "ConnectionDetailPage",
+);
+const LinkedAccountsPage = lazyPage(
+  () => import("@/pages/linked-accounts"),
+  "LinkedAccountsPage",
+);
 const ChannelDetailPage = lazyPage(() => import("@/pages/channel-detail"), "ChannelDetailPage");
 const ApprovalsPage = lazyPage(() => import("@/pages/approvals"), "ApprovalsPage");
 const OperatorPage = lazyPage(() => import("@/pages/operator"), "OperatorPage");
@@ -177,6 +186,12 @@ export function App() {
             <Route path="/manage/sync" element={<SyncPage />} />
             <Route path="/manage/channels" element={<ChannelsPage />} />
             <Route path="/manage/channels/:id" element={<ChannelDetailPage />} />
+            <Route path="/manage/connections" element={<ConnectionsPage />} />
+            <Route path="/manage/connections/:id" element={<ConnectionDetailPage />} />
+            {/* Per-user, and deliberately not under /manage/connections: it needs
+                no eddi-admin role, and nesting it under the admin path would
+                suggest otherwise to anyone reading the route table. */}
+            <Route path="/manage/linked-accounts" element={<LinkedAccountsPage />} />
             <Route path="/manage/approvals" element={<ApprovalsPage />} />
             <Route path="/manage/updates" element={<UpdatesPage />} />
             {/* Redirects from old standalone user-data pages */}
