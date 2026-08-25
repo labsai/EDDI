@@ -501,7 +501,7 @@ public class ConversationService implements IConversationService {
         contextLogger.setLoggingContext(loggingContext);
 
         try {
-            var conversationMemorySnapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+            var conversationMemorySnapshot = requireSnapshot(conversationId);
             loggingContext.put(USER_ID, conversationMemorySnapshot.getUserId());
             contextLogger.setLoggingContext(loggingContext);
 
@@ -522,7 +522,7 @@ public class ConversationService implements IConversationService {
     public ConversationLogResult readConversationLog(String conversationId, String outputType, Integer logSize)
             throws ResourceStoreException, ResourceNotFoundException {
 
-        var memorySnapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+        var memorySnapshot = requireSnapshot(conversationId);
         var conversationLog = new ConversationLogGenerator(memorySnapshot).generate(logSize != null ? logSize : -1);
         outputType = outputType.toLowerCase();
 
@@ -955,7 +955,7 @@ public class ConversationService implements IConversationService {
         checkNotNull(conversationId, "conversationId");
 
         try {
-            var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+            var snapshot = requireSnapshot(conversationId);
             var loggingContext = contextLogger.createLoggingContext(snapshot.getEnvironment(), snapshot.getAgentId(), conversationId,
                     snapshot.getUserId());
             contextLogger.setLoggingContext(loggingContext);
@@ -964,6 +964,36 @@ public class ConversationService implements IConversationService {
         } finally {
             recordMetrics(timerConversationLoad, counterConversationLoad, startTime);
         }
+    }
+
+    /**
+     * The snapshot, or a 404 — never a {@code null} for the caller to dereference.
+     *
+     * <p>
+     * {@code loadConversationMemorySnapshot} answers {@code null} for a
+     * conversation that is not there, and the read paths went straight on to call
+     * {@code getEnvironment()} on it. So a deleted or mistyped conversation id
+     * produced a {@link NullPointerException}, which reached the client as
+     * {@code 500 Internal Server Error} plus an error id — from endpoints whose own
+     * {@code @APIResponse} promised a 404, and which the troubleshooting
+     * documentation tells people to call precisely when something has already gone
+     * wrong.
+     * </p>
+     *
+     * <p>
+     * Throws {@link ConversationNotFoundException} rather than the checked
+     * {@code ResourceNotFoundException} that {@code RestConversationStore}'s twin
+     * uses: this is the exception {@link #getConversationState} already raises for
+     * the same condition, and it needs no signature change on {@code say} /
+     * {@code sayStreaming}. Both map to 404.
+     * </p>
+     */
+    private ConversationMemorySnapshot requireSnapshot(String conversationId) throws ResourceStoreException, ResourceNotFoundException {
+        var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+        if (snapshot == null) {
+            throw new ConversationNotFoundException(String.format("No conversation found! (conversationId=%s)", sanitize(conversationId)));
+        }
+        return snapshot;
     }
 
     @Override
@@ -991,7 +1021,7 @@ public class ConversationService implements IConversationService {
             throws Exception {
 
         requireConversationAccess(conversationId);
-        var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+        var snapshot = requireSnapshot(conversationId);
         say(snapshot.getEnvironment(), snapshot.getAgentId(), conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData,
                 rerunOnly, responseHandler);
     }
@@ -1002,7 +1032,7 @@ public class ConversationService implements IConversationService {
             throws Exception {
 
         requireConversationAccess(conversationId);
-        var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+        var snapshot = requireSnapshot(conversationId);
         sayStreaming(snapshot.getEnvironment(), snapshot.getAgentId(), conversationId, returnDetailed, returnCurrentStepOnly, returningFields,
                 inputData, streamingHandler);
     }

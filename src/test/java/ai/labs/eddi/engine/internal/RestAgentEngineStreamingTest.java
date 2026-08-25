@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.lifecycle.TaskId;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
@@ -78,6 +79,39 @@ class RestAgentEngineStreamingTest {
             assertEquals("hello", method.invoke(streaming, "hello"));
             assertEquals("say \\\"hi\\\"", method.invoke(streaming, "say \"hi\""));
             assertEquals("line1\\nline2", method.invoke(streaming, "line1\nline2"));
+        }
+
+        /**
+         * The replace-chain this grew from covered five characters and left every other
+         * control character raw inside a JSON string, which is invalid per RFC 8259 §7
+         * — so a strict client cannot parse the event at all. None of the values
+         * reaching {@code escapeJson} are ours: a tool name comes from an LLM, an error
+         * summary from an exception message, a conversation id straight off the request
+         * path.
+         */
+        @Test
+        @DisplayName("escapes every control character, so the event stays parseable JSON")
+        void escapesAllControlCharacters() throws Exception {
+            Method method = RestAgentEngineStreaming.class.getDeclaredMethod("escapeJson", String.class);
+            method.setAccessible(true);
+
+            assertEquals("a\\u0000b", method.invoke(streaming, "a\u0000b"));
+            // Backspace and form-feed have their own two-character JSON escapes;
+            // the six-character form is only for the control characters that do
+            // not. (Spelling it out here on purpose: a literal backslash-u in a
+            // Java comment is processed by the lexer and fails to compile.)
+            assertEquals("a\\bb", method.invoke(streaming, "a\bb"));
+            assertEquals("a\\fb", method.invoke(streaming, "a\fb"));
+            assertEquals("a\\u001fb", method.invoke(streaming, "a\u001fb"));
+            // Legal JSON, but a line terminator in JavaScript — and this goes to a
+            // browser.
+            assertEquals("a\\u2028b", method.invoke(streaming, "a\u2028b"));
+            assertEquals("a\\u2029b", method.invoke(streaming, "a\u2029b"));
+
+            // The whole point: what comes out has to survive a real JSON parser.
+            String hostile = "conv\u0000\u0008\u001f\u2028\"x\\y";
+            String event = String.format("{\"message\":\"%s\"}", method.invoke(streaming, hostile));
+            assertEquals(hostile, new ObjectMapper().readTree(event).get("message").asText());
             assertEquals("col1\\tcol2", method.invoke(streaming, "col1\tcol2"));
             assertEquals("path\\\\file", method.invoke(streaming, "path\\file"));
         }

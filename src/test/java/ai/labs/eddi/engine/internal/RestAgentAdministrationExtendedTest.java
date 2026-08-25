@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
@@ -72,7 +73,7 @@ class RestAgentAdministrationExtendedTest {
         lenient().when(deploymentStore.readDeploymentInfos(any())).thenReturn(List.of());
         lenient().when(agentFactory.getAllLatestAgents(any())).thenReturn(List.of());
         lenient().when(tenantQuotaService.checkAgentQuota(any(), anyInt())).thenReturn(QuotaCheckResult.OK);
-        admin = new RestAgentAdministration(runtime, agentFactory, deploymentStore,
+        admin = new RestAgentAdministration(runtime, agentFactory, mock(IAgentStore.class), deploymentStore,
                 conversationMemoryStore, restConversationStore, documentDescriptorStore,
                 deploymentListener, scheduleStore, tenantQuotaService);
     }

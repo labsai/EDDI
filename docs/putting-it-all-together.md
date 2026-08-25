@@ -45,7 +45,7 @@ We'll need:
 **Purpose**: Teach the agent hotel-related language
 
 ```bash
-curl -X POST http://localhost:7070/regulardictionarystore/regulardictionaries \
+curl -X POST http://localhost:7070/dictionarystore/dictionaries \
   -H "Content-Type: application/json" \
   -d '{
     "language": "en",
@@ -89,7 +89,7 @@ curl -X POST http://localhost:7070/regulardictionarystore/regulardictionaries \
   }'
 ```
 
-**Returns**: `eddi://ai.labs.regulardictionary/regulardictionarystore/regulardictionaries/DICT_ID?version=1`
+**Returns**: `eddi://ai.labs.dictionary/dictionarystore/dictionaries/DICT_ID?version=1`
 
 **How it connects**: Parser will use this dictionary to convert "I want to book a hotel" → `["intent(book)", "entity(hotel)"]`
 
@@ -98,7 +98,7 @@ curl -X POST http://localhost:7070/regulardictionarystore/regulardictionaries \
 **Purpose**: Define conversation logic and when to trigger actions
 
 ```bash
-curl -X POST http://localhost:7070/behaviorstore/behaviorsets \
+curl -X POST http://localhost:7070/rulestore/rulesets \
   -H "Content-Type: application/json" \
   -d '{
     "behaviorGroups": [
@@ -169,7 +169,7 @@ curl -X POST http://localhost:7070/behaviorstore/behaviorsets \
   }'
 ```
 
-**Returns**: `eddi://ai.labs.behavior/behaviorstore/behaviorsets/BEHAVIOR_ID?version=1`
+**Returns**: `eddi://ai.labs.rules/rulestore/rulesets/BEHAVIOR_ID?version=1`
 
 **How it connects**:
 
@@ -209,7 +209,7 @@ curl -X POST http://localhost:7070/propertysetterstore/propertysetters \
 **Purpose**: Integrate with hotel booking API
 
 ```bash
-curl -X POST http://localhost:7070/httpcallsstore/httpcalls \
+curl -X POST http://localhost:7070/apicallstore/apicalls \
   -H "Content-Type: application/json" \
   -d '{
     "targetServerUrl": "https://api.hotels.example.com",
@@ -267,7 +267,7 @@ curl -X POST http://localhost:7070/httpcallsstore/httpcalls \
   }'
 ```
 
-**Returns**: `eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/HTTP_ID?version=1`
+**Returns**: `eddi://ai.labs.apicalls/apicallstore/apicalls/HTTP_ID?version=1`
 
 **How it connects**:
 
@@ -339,51 +339,59 @@ curl -X POST http://localhost:7070/outputstore/outputsets \
 **Purpose**: Bundle all components together
 
 ```bash
-curl -X POST http://localhost:7070/packagestore/packages \
+curl -X POST http://localhost:7070/workflowstore/workflows \
   -H "Content-Type: application/json" \
   -d '{
-    "packageExtensions": [
+    "workflowSteps": [
       {
-        "type": "eddi://ai.labs.parser.dictionaries.regular",
+        "type": "eddi://ai.labs.parser",
+        "config": {},
         "extensions": {
-          "uri": "eddi://ai.labs.regulardictionary/regulardictionarystore/regulardictionaries/DICT_ID?version=1"
+          "dictionaries": [
+            {
+              "type": "eddi://ai.labs.parser.dictionaries.regular",
+              "config": {
+                "uri": "eddi://ai.labs.dictionary/dictionarystore/dictionaries/DICT_ID?version=1"
+              }
+            }
+          ],
+          "corrections": []
         }
       },
       {
-        "type": "eddi://ai.labs.behavior",
-        "extensions": {
-          "uri": "eddi://ai.labs.behavior/behaviorstore/behaviorsets/BEHAVIOR_ID?version=1"
-        },
+        "type": "eddi://ai.labs.rules",
         "config": {
+          "uri": "eddi://ai.labs.rules/rulestore/rulesets/BEHAVIOR_ID?version=1",
           "appendActions": true
         }
       },
       {
         "type": "eddi://ai.labs.property",
-        "extensions": {
+        "config": {
           "uri": "eddi://ai.labs.property/propertysetterstore/propertysetters/PROPERTY_ID?version=1"
         }
       },
       {
-        "type": "eddi://ai.labs.httpcalls",
-        "extensions": {
-          "uri": "eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/HTTP_ID?version=1"
+        "type": "eddi://ai.labs.apicalls",
+        "config": {
+          "uri": "eddi://ai.labs.apicalls/apicallstore/apicalls/HTTP_ID?version=1"
         }
       },
       {
         "type": "eddi://ai.labs.output",
-        "extensions": {
+        "config": {
           "uri": "eddi://ai.labs.output/outputstore/outputsets/OUTPUT_ID?version=1"
         }
       },
       {
-        "type": "eddi://ai.labs.templating"
+        "type": "eddi://ai.labs.templating",
+        "config": {}
       }
     ]
   }'
 ```
 
-**Returns**: `eddi://ai.labs.package/packagestore/packages/WORKFLOW_ID?version=1`
+**Returns**: `eddi://ai.labs.workflow/workflowstore/workflows/WORKFLOW_ID?version=1`
 
 **How it connects**: Workflow defines the order of lifecycle tasks and loads all configurations
 
@@ -396,7 +404,7 @@ curl -X POST http://localhost:7070/agentstore/agents \
   -H "Content-Type: application/json" \
   -d '{
     "packages": [
-      "eddi://ai.labs.package/packagestore/packages/WORKFLOW_ID?version=1"
+      "eddi://ai.labs.workflow/workflowstore/workflows/WORKFLOW_ID?version=1"
     ]
   }'
 ```

@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.internal;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.api.IConversationService.ConversationNotFoundException;
 import ai.labs.eddi.engine.api.IConversationService.*;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictedException;
@@ -368,6 +369,29 @@ class RestAgentEngineTest {
             assertEquals("60", resumed.getHeaderString("Retry-After"));
             assertEquals(Map.of("error", "quota_exceeded", "message", "API rate limit (5/min) exceeded for tenant 'default'"),
                     resumed.getEntity());
+        }
+
+        @Test
+        @DisplayName("should resume with 404, not 500, when the conversation does not exist")
+        void conversationNotFound() throws Exception {
+            var asyncResponse = mock(AsyncResponse.class);
+            var inputData = new InputData("Hello", Map.of());
+
+            doThrow(new ConversationNotFoundException("No conversation found! (conversationId=conv-gone)"))
+                    .when(conversationService).say(anyString(), any(), any(), any(), any(), anyBoolean(), any());
+
+            restAgentEngine.sayWithinContext("conv-gone", false, false,
+                    List.of(), inputData, asyncResponse);
+
+            // Same shape as the quota branch above: say() is resumed via
+            // AsyncResponse, so ConversationNotFoundExceptionMapper never runs and
+            // this fell through to the generic handler as a 500 — while every GET
+            // on the same conversation already answered 404.
+            var captor = ArgumentCaptor.forClass(Response.class);
+            verify(asyncResponse).resume(captor.capture());
+            Response resumed = captor.getValue();
+            assertEquals(404, resumed.getStatus());
+            assertEquals("No conversation found! (conversationId=conv-gone)", resumed.getEntity());
         }
 
         @Test
