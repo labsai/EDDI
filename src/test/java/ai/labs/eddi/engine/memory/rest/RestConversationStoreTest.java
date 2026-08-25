@@ -7,7 +7,9 @@ package ai.labs.eddi.engine.memory.rest;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
-import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.datastore.IResourceStore.ResourceModifiedException;
+import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
+import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
@@ -159,7 +161,7 @@ class RestConversationStoreTest {
         void rawReadIsNotFound() throws Exception {
             when(conversationMemoryStore.loadConversationMemorySnapshot("gone")).thenReturn(null);
 
-            assertThrows(IResourceStore.ResourceNotFoundException.class,
+            assertThrows(ResourceNotFoundException.class,
                     () -> restConversationStore.readRawConversationLog("gone"));
         }
 
@@ -168,7 +170,7 @@ class RestConversationStoreTest {
         void simpleReadIsNotFound() throws Exception {
             when(conversationMemoryStore.loadConversationMemorySnapshot("gone")).thenReturn(null);
 
-            assertThrows(IResourceStore.ResourceNotFoundException.class,
+            assertThrows(ResourceNotFoundException.class,
                     () -> restConversationStore.readSimpleConversationLog("gone", false, true, null));
         }
 
@@ -177,7 +179,7 @@ class RestConversationStoreTest {
         void messageNamesTheConversation() throws Exception {
             when(conversationMemoryStore.loadConversationMemorySnapshot("gone")).thenReturn(null);
 
-            var thrown = assertThrows(IResourceStore.ResourceNotFoundException.class,
+            var thrown = assertThrows(ResourceNotFoundException.class,
                     () -> restConversationStore.readRawConversationLog("gone"));
 
             assertTrue(thrown.getMessage().contains("gone"), thrown.getMessage());
@@ -261,10 +263,10 @@ class RestConversationStoreTest {
         @Test
         @DisplayName("a concurrent modification is reported, not swallowed")
         void softDelete_concurrentModificationSurfaces() throws Exception {
-            doThrow(new IResourceStore.ResourceModifiedException("moved"))
+            doThrow(new ResourceModifiedException("moved"))
                     .when(conversationDescriptorStore).deleteDescriptor("conv-race", 0);
 
-            assertThrows(IResourceStore.ResourceStoreException.class,
+            assertThrows(ResourceStoreException.class,
                     () -> restConversationStore.deleteConversationLog("conv-race", false));
         }
 
@@ -472,7 +474,7 @@ class RestConversationStoreTest {
             when(conversationMemoryStore.getEndedConversationIds())
                     .thenReturn(List.of("conv-orphan"));
             when(documentDescriptorStore.readDescriptor("conv-orphan", 0))
-                    .thenThrow(new IResourceStore.ResourceNotFoundException("not found"));
+                    .thenThrow(new ResourceNotFoundException("not found"));
 
             Integer result = restConversationStore.permanentlyDeleteEndedConversationLogs(30);
 
@@ -1310,9 +1312,9 @@ class RestConversationStoreTest {
             status.setConversationId("conv-err");
 
             when(conversationDescriptorStore.readDescriptor("conv-err", 0))
-                    .thenThrow(new IResourceStore.ResourceStoreException("DB error"));
+                    .thenThrow(new ResourceStoreException("DB error"));
 
-            assertThrows(IResourceStore.ResourceStoreException.class,
+            assertThrows(ResourceStoreException.class,
                     () -> restConversationStore.endActiveConversations(List.of(status)));
         }
     }

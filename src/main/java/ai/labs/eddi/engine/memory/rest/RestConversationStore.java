@@ -6,7 +6,10 @@ package ai.labs.eddi.engine.memory.rest;
 
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
-import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.datastore.IResourceStore.IResourceId;
+import ai.labs.eddi.datastore.IResourceStore.ResourceModifiedException;
+import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
+import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
@@ -262,19 +265,19 @@ public class RestConversationStore implements IRestConversationStore {
 
             return retConversationDescriptors;
 
-        } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
+        } catch (ResourceStoreException | ResourceNotFoundException e) {
             throw sneakyThrow(e);
         }
     }
 
     private List<ConversationDescriptor> readConversationDescriptors(Integer index, Integer limit, String filter)
-            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+            throws ResourceStoreException, ResourceNotFoundException {
 
         return conversationDescriptorStore.readDescriptors(DESCRIPTOR_TYPE, filter, index, limit, false);
     }
 
-    private void populateDataToDescriptor(ConversationDescriptor conversationDescriptor, IResourceStore.IResourceId resourceId)
-            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+    private void populateDataToDescriptor(ConversationDescriptor conversationDescriptor, IResourceId resourceId)
+            throws ResourceStoreException, ResourceNotFoundException {
 
         try {
             var memorySnapshot = conversationMemoryStore.loadConversationMemorySnapshot(resourceId.getId());
@@ -298,7 +301,7 @@ public class RestConversationStore implements IRestConversationStore {
                 conversationDescriptor.setAgentName(documentDescriptor.getName());
             }
 
-        } catch (IResourceStore.ResourceNotFoundException e) {
+        } catch (ResourceNotFoundException e) {
             String message = "Resource referenced in descriptor does not exist (anymore) [%s, %s]. ";
             message += "Ignoring this resource.";
             log.warn(format(message, resourceId.getId(), resourceId.getVersion()));
@@ -323,7 +326,7 @@ public class RestConversationStore implements IRestConversationStore {
             // here, which JAX-RS renders as 204 No Content — indistinguishable from a
             // conversation that exists and happens to be empty.
             return redactRawPendingToolCallsForRead(requireSnapshot(conversationId));
-        } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
+        } catch (ResourceStoreException | ResourceNotFoundException e) {
             throw sneakyThrow(e);
         }
     }
@@ -339,7 +342,7 @@ public class RestConversationStore implements IRestConversationStore {
         try {
             return convertSimpleConversationMemory(requireSnapshot(conversationId), returnDetailed, returnCurrentStepOnly);
 
-        } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
+        } catch (ResourceStoreException | ResourceNotFoundException e) {
             throw sneakyThrow(e);
         }
     }
@@ -367,10 +370,10 @@ public class RestConversationStore implements IRestConversationStore {
      * </p>
      */
     private ConversationMemorySnapshot requireSnapshot(String conversationId)
-            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+            throws ResourceStoreException, ResourceNotFoundException {
         var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
         if (snapshot == null) {
-            throw new IResourceStore.ResourceNotFoundException(
+            throw new ResourceNotFoundException(
                     String.format("No conversation found! (conversationId=%s)", sanitize(conversationId)));
         }
         return snapshot;
@@ -378,7 +381,7 @@ public class RestConversationStore implements IRestConversationStore {
 
     @Override
     public void deleteConversationLog(String conversationId, Boolean deletePermanently)
-            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+            throws ResourceStoreException, ResourceNotFoundException {
         checkNotNull(conversationId, "conversationId");
         // Deletion is irreversible, so the gate runs before anything is touched —
         // the soft-delete path included, which still removes the conversation from
@@ -440,14 +443,14 @@ public class RestConversationStore implements IRestConversationStore {
      * data.
      * </p>
      */
-    private void softDelete(String conversationId) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+    private void softDelete(String conversationId) throws ResourceStoreException, ResourceNotFoundException {
         try {
             conversationDescriptorStore.deleteDescriptor(conversationId, CONVERSATION_DESCRIPTOR_VERSION);
             log.info(format("Conversation has been deleted (conversationId=%s)", sanitize(conversationId)));
-        } catch (IResourceStore.ResourceModifiedException e) {
+        } catch (ResourceModifiedException e) {
             // The descriptor moved under us — surface it rather than reporting a
             // deletion that did not happen.
-            throw new IResourceStore.ResourceStoreException(
+            throw new ResourceStoreException(
                     format("Could not delete conversation %s: its descriptor was modified concurrently", sanitize(conversationId)), e);
         }
     }
@@ -467,7 +470,7 @@ public class RestConversationStore implements IRestConversationStore {
                     log.info(format("Successfully deleted %s conversations, which were older than %s days", amountOfEndedConversations,
                             deleteEndedConversationsOnceOlderThanDays));
                 }
-            } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
+            } catch (ResourceStoreException | ResourceNotFoundException e) {
                 log.error(e.getLocalizedMessage(), e);
             }
             return null;
@@ -496,7 +499,7 @@ public class RestConversationStore implements IRestConversationStore {
 
     @Override
     public Integer permanentlyDeleteEndedConversationLogs(Integer deleteOlderThanDays)
-            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+            throws ResourceStoreException, ResourceNotFoundException {
 
         if (deleteOlderThanDays == null || deleteOlderThanDays < MIN_RETENTION_DAYS) {
             throw new BadRequestException(
@@ -518,7 +521,7 @@ public class RestConversationStore implements IRestConversationStore {
                     conversationMemoryStore.deleteConversationMemorySnapshot(endedConversationId);
                     amountOfEndedConversations++;
                 }
-            } catch (IResourceStore.ResourceNotFoundException e) {
+            } catch (ResourceNotFoundException e) {
                 conversationDescriptorStore.deleteAllDescriptor(endedConversationId);
                 deleteAttachmentsForConversation(endedConversationId);
                 conversationMemoryStore.deleteConversationMemorySnapshot(endedConversationId);
@@ -531,7 +534,7 @@ public class RestConversationStore implements IRestConversationStore {
 
     @Override
     public List<ConversationStatus> getActiveConversations(String agentId, Integer agentVersion)
-            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+            throws ResourceStoreException, ResourceNotFoundException {
         checkNotNull(agentId, "agentId");
         checkNotNull(agentVersion, "agentVersion");
 
@@ -582,7 +585,7 @@ public class RestConversationStore implements IRestConversationStore {
             }
 
             return Response.ok().build();
-        } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
+        } catch (ResourceStoreException | ResourceNotFoundException e) {
             throw sneakyThrow(e);
         }
     }

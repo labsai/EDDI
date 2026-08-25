@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.internal;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.api.IConversationService.ConversationNotFoundException;
 import ai.labs.eddi.engine.api.IConversationService.*;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictedException;
@@ -376,7 +377,7 @@ class RestAgentEngineTest {
             var asyncResponse = mock(AsyncResponse.class);
             var inputData = new InputData("Hello", Map.of());
 
-            doThrow(new IConversationService.ConversationNotFoundException("No conversation found! (conversationId=conv-gone)"))
+            doThrow(new ConversationNotFoundException("No conversation found! (conversationId=conv-gone)"))
                     .when(conversationService).say(anyString(), any(), any(), any(), any(), anyBoolean(), any());
 
             restAgentEngine.sayWithinContext("conv-gone", false, false,

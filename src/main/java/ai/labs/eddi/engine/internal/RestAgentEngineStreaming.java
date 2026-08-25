@@ -5,6 +5,12 @@
 package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.api.IConversationService.AgentMismatchException;
+import ai.labs.eddi.engine.api.IConversationService.AgentNotReadyException;
+import ai.labs.eddi.engine.api.IConversationService.ConversationAwaitingApprovalException;
+import ai.labs.eddi.engine.api.IConversationService.ConversationEndedException;
+import ai.labs.eddi.engine.api.IConversationService.ConversationNotFoundException;
+import ai.labs.eddi.engine.api.IConversationService.StreamingResponseHandler;
 import ai.labs.eddi.engine.api.IRestAgentEngineStreaming;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictedException;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
@@ -135,7 +141,7 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
 
         try {
             conversationService.sayStreaming(conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData,
-                    new IConversationService.StreamingResponseHandler() {
+                    new StreamingResponseHandler() {
                         @Override
                         public void onTaskStart(TaskId taskId, String taskType, int index) {
                             stream.send("task_start",
@@ -257,22 +263,22 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
     private String buildKnownConditionOrOpaqueErrorEvent(String context, Exception e) {
         String code;
         String message;
-        if (e instanceof IConversationService.ConversationAwaitingApprovalException) {
+        if (e instanceof ConversationAwaitingApprovalException) {
             code = "awaiting_approval";
             message = e.getMessage();
-        } else if (e instanceof IConversationService.ConversationNotFoundException) {
+        } else if (e instanceof ConversationNotFoundException) {
             // The twin answers 404 here. This message is a fixed template carrying
             // only the caller's own (sanitized) conversationId, so it is echoed
             // rather than replaced — no new disclosure.
             code = "conversation_not_found";
             message = e.getMessage();
-        } else if (e instanceof IConversationService.ConversationEndedException) {
+        } else if (e instanceof ConversationEndedException) {
             code = "conversation_ended";
             message = "Conversation has ended";
-        } else if (e instanceof IConversationService.AgentNotReadyException) {
+        } else if (e instanceof AgentNotReadyException) {
             code = "agent_not_ready";
             message = "Agent is not deployed or not ready";
-        } else if (e instanceof IConversationService.AgentMismatchException) {
+        } else if (e instanceof AgentMismatchException) {
             code = "agent_mismatch";
             message = "Agent version mismatch";
         } else if (e instanceof QuotaExceededException) {
