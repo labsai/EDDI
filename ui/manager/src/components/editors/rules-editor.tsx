@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import {
   ChevronDown,
@@ -23,6 +23,7 @@ export interface Rule {
   conditions: RuleCondition[];
 }
 
+/** A rule group as this editor works with it, and as it saves it. */
 export interface RulesGroup {
   name: string;
   executionStrategy?: string;
@@ -33,6 +34,41 @@ export interface RulesConfig {
   appendActions?: boolean;
   expressionsAsActions?: boolean;
   behaviorGroups: RulesGroup[];
+}
+
+/**
+ * A rule group as the *server* may send it — which is not the same shape.
+ *
+ * `RuleGroupConfiguration`'s accessors are `getRules`/`setRules`, so Jackson
+ * emitted `rules` while every authored artefact — the shipped reference config,
+ * the ZIP fixtures, the docs, and this editor — says `behaviorRules`. The
+ * backend accepted both on write, so the mismatch only ever bit on reads: a rule
+ * set posted as `behaviorRules` came back as `rules`, and this editor rendered
+ * every group as "No rules in this group" no matter what it held. Our own MSW
+ * handlers returned `behaviorRules`, so the suite agreed with the fiction rather
+ * than the server.
+ *
+ * The point of naming this shape rather than widening `RulesGroup`: the original
+ * bug was a type that described what we *wished* the server sent. Modelling the
+ * wire separately means the compiler, not a reader, is what stops the two being
+ * confused — `normalizeRulesConfig` is the only bridge between them.
+ *
+ * EDDI now emits `behaviorRules` too (labsai/EDDI#717). This stays so a current
+ * Manager keeps working against an older EDDI, and can go once no supported
+ * backend emits `rules`.
+ */
+export interface RulesGroupInput {
+  name: string;
+  executionStrategy?: string;
+  behaviorRules?: Rule[];
+  rules?: Rule[];
+}
+
+/** A rule set as the server may send it. See {@link RulesGroupInput}. */
+export interface RulesConfigInput {
+  appendActions?: boolean;
+  expressionsAsActions?: boolean;
+  behaviorGroups?: RulesGroupInput[];
 }
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -548,9 +584,32 @@ function RuleEditor({
 // ─── Main Component ──────────────────────────────────────────────────────────
 
 export interface RulesEditorProps {
-  data: RulesConfig;
+  /** Accepts either spelling — see {@link RulesGroupInput}. */
+  data: RulesConfigInput;
   onChange: (data: RulesConfig) => void;
   readOnly?: boolean;
+}
+
+/**
+ * The single bridge from {@link RulesConfigInput} to {@link RulesConfig}:
+ * collapses a rule set onto the `behaviorRules` spelling, whichever one the
+ * server sent.
+ *
+ * The legacy key is *dropped* rather than carried alongside: a group holding
+ * both would be serialised with both, and Jackson's last-one-wins would then
+ * decide which list survives a save by field order. Losing rules to that is a
+ * far worse outcome than losing a redundant key.
+ */
+function normalizeRulesConfig(data: RulesConfigInput): RulesConfig {
+  return {
+    ...data,
+    behaviorGroups: (data.behaviorGroups ?? []).map(
+      ({ rules, behaviorRules, ...rest }) => ({
+        ...rest,
+        behaviorRules: behaviorRules ?? rules ?? [],
+      })
+    ),
+  };
 }
 
 export function RulesEditor({
@@ -559,10 +618,17 @@ export function RulesEditor({
   readOnly,
 }: RulesEditorProps) {
   const { t } = useTranslation();
-  data = data ?? ({} as RulesConfig);
+  // Memoised, and applied before the useState below (which reads behaviorGroups
+  // to seed its expansion state) and before every read and write further down.
+  // Without the memo a legacy-shaped rule set yields a fresh object on every
+  // render, which invalidates the useCallbacks keyed on `data` every time.
+  const config = useMemo(
+    () => normalizeRulesConfig(data ?? {}),
+    [data]
+  );
   const [expandedGroups, setExpandedGroups] = useState<Record<number, boolean>>(
     () =>
-      Object.fromEntries((data.behaviorGroups ?? []).map((_, i) => [i, true]))
+      Object.fromEntries((config.behaviorGroups ?? []).map((_, i) => [i, true]))
   );
 
   const toggleGroup = useCallback((idx: number) => {
@@ -571,28 +637,28 @@ export function RulesEditor({
 
   const updateGroup = useCallback(
     (idx: number, group: RulesGroup) => {
-      const groups = [...(data.behaviorGroups ?? [])];
+      const groups = [...(config.behaviorGroups ?? [])];
       groups[idx] = group;
-      onChange({ ...data, behaviorGroups: groups });
+      onChange({ ...config, behaviorGroups: groups });
     },
-    [data, onChange]
+    [config, onChange]
   );
 
   const removeGroup = useCallback(
     (idx: number) => {
       onChange({
-        ...data,
-        behaviorGroups: (data.behaviorGroups ?? []).filter((_, i) => i !== idx),
+        ...config,
+        behaviorGroups: (config.behaviorGroups ?? []).filter((_, i) => i !== idx),
       });
     },
-    [data, onChange]
+    [config, onChange]
   );
 
   const addGroup = useCallback(() => {
     onChange({
-      ...data,
+      ...config,
       behaviorGroups: [
-        ...(data.behaviorGroups ?? []),
+        ...(config.behaviorGroups ?? []),
         {
           name: "",
           executionStrategy: "executeUntilFirstSuccess",
@@ -600,11 +666,11 @@ export function RulesEditor({
         },
       ],
     });
-  }, [data, onChange]);
+  }, [config, onChange]);
 
   const addRule = useCallback(
     (groupIdx: number) => {
-      const groups = [...(data.behaviorGroups ?? [])];
+      const groups = [...(config.behaviorGroups ?? [])];
       const group = groups[groupIdx];
       if (!group) return;
       groups[groupIdx] = {
@@ -614,9 +680,9 @@ export function RulesEditor({
           { name: "", actions: [], conditions: [] },
         ],
       };
-      onChange({ ...data, behaviorGroups: groups });
+      onChange({ ...config, behaviorGroups: groups });
     },
-    [data, onChange]
+    [config, onChange]
   );
 
   return (
@@ -626,9 +692,9 @@ export function RulesEditor({
         <label className="inline-flex items-center gap-2 text-sm text-foreground">
           <input
             type="checkbox"
-            checked={data.appendActions ?? false}
+            checked={config.appendActions ?? false}
             onChange={(e) =>
-              onChange({ ...data, appendActions: e.target.checked })
+              onChange({ ...config, appendActions: e.target.checked })
             }
             disabled={readOnly}
             className="h-4 w-4 rounded border-input accent-primary"
@@ -638,9 +704,9 @@ export function RulesEditor({
         <label className="inline-flex items-center gap-2 text-sm text-foreground">
           <input
             type="checkbox"
-            checked={data.expressionsAsActions ?? false}
+            checked={config.expressionsAsActions ?? false}
             onChange={(e) =>
-              onChange({ ...data, expressionsAsActions: e.target.checked })
+              onChange({ ...config, expressionsAsActions: e.target.checked })
             }
             disabled={readOnly}
             className="h-4 w-4 rounded border-input accent-primary"
@@ -669,13 +735,13 @@ export function RulesEditor({
           )}
         </div>
 
-        {(data.behaviorGroups ?? []).length === 0 && (
+        {(config.behaviorGroups ?? []).length === 0 && (
           <div className="rounded-lg border border-dashed py-8 text-center text-sm text-muted-foreground">
             {t("rulesEditor.noGroups", "No rules groups defined")}
           </div>
         )}
 
-        {(data.behaviorGroups ?? []).map((group, gi) => (
+        {(config.behaviorGroups ?? []).map((group, gi) => (
           <div
             key={gi}
             className="rounded-xl border bg-card shadow-sm"

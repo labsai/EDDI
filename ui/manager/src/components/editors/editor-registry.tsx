@@ -8,7 +8,7 @@
 import type { ReactNode } from "react";
 import {
   RulesEditor,
-  type RulesConfig,
+  type RulesConfigInput,
 } from "@/components/editors/rules-editor";
 import {
   LlmEditor,
@@ -62,7 +62,7 @@ export type EditorRenderFn = (
  */
 export const EDITOR_MAP: Record<string, EditorRenderFn> = {
   rules: (p, o, r) => (
-    <RulesEditor data={p as RulesConfig} onChange={o} readOnly={r} />
+    <RulesEditor data={p as RulesConfigInput} onChange={o} readOnly={r} />
   ),
   apicalls: (p, o, r) => (
     <ApiCallsEditor data={p as ApiCallsConfig} onChange={o} readOnly={r} />

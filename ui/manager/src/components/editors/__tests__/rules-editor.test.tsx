@@ -1,7 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen } from "@testing-library/react";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
-import { RulesEditor, type RulesConfig } from "@/components/editors/rules-editor";
+import {
+  RulesEditor,
+  type RulesConfig,
+  type RulesConfigInput,
+} from "@/components/editors/rules-editor";
 
 const emptyConfig: RulesConfig = {
   appendActions: false,
@@ -261,6 +265,72 @@ describe("RulesEditor", () => {
     }
     // camelCase mis-casing produced unloadable rulesets — must be gone
     expect(values).not.toContain("dynamicValueMatcher");
+  });
+
+  /**
+   * A rule set as EDDI serialised it before the wire name was fixed: the group's
+   * list arrives as `rules`, not `behaviorRules`.
+   *
+   * This is what Karol saw. The editor typed the field as `behaviorRules` only,
+   * so `group.behaviorRules ?? []` was always empty and every group rendered as
+   * "No rules in this group" — for every rule set on the server, not just ones
+   * created over the API. Nothing in the suite caught it because the MSW
+   * handlers returned the spelling the editor wanted rather than the one the
+   * server sent.
+   */
+  const legacyShapedConfig: RulesConfigInput = {
+    appendActions: true,
+    expressionsAsActions: false,
+    behaviorGroups: [
+      {
+        name: "Greeting Group",
+        executionStrategy: "executeUntilFirstSuccess",
+        rules: [
+          {
+            name: "Greet Rule",
+            actions: ["greet"],
+            conditions: [
+              {
+                type: "inputmatcher",
+                configs: { expressions: "hello", occurrence: "currentStep" },
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  };
+
+  it("renders rules that arrived under the legacy 'rules' key", () => {
+    renderWithProviders(
+      <RulesEditor data={legacyShapedConfig} onChange={onChange} />
+    );
+
+    expect(screen.queryByText(/No rules in this group/i)).not.toBeInTheDocument();
+    expect(screen.getByDisplayValue("Greet Rule")).toBeInTheDocument();
+  });
+
+  it("saves a legacy-shaped rule set back under one key, never both", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(
+      <RulesEditor data={legacyShapedConfig} onChange={onChange} />
+    );
+
+    // Any edit is enough; the point is the shape of what goes out.
+    await user.selectOptions(
+      screen.getByTestId("condition-type-select"),
+      "contentTypeMatcher"
+    );
+
+    const arg = onChange.mock.lastCall![0] as RulesConfig;
+    const group = arg.behaviorGroups[0]!;
+    expect(group.behaviorRules).toHaveLength(1);
+    // Asserted on the runtime keys, not the type: RulesConfig no longer declares
+    // `rules`, but types are erased, and a spread that carried the legacy key
+    // through would still reach the server. Both keys present would let
+    // Jackson's last-one-wins decide which list survives the save by field
+    // order — a way to lose rules silently.
+    expect(Object.keys(group)).not.toContain("rules");
   });
 
   it("emits backend-correct preset configs when switching to a new condition type", async () => {
