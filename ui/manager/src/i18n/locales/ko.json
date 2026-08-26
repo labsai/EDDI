@@ -4506,5 +4506,20 @@
     "confirmReconnect": "이 계정을 다시 연결할까요?",
     "confirmReconnectDesc": "이 계정은 정상 작동 중이라 고칠 것이 없습니다. 계속하면 EDDI를 벗어나 공급자의 로그인 페이지로 이동하고, 이전에 부여한 접근 권한이 대체됩니다.",
     "paramDuplicate": "다른 매개변수가 이미 이 이름을 사용하고 있습니다. 마지막 항목만 저장됩니다."
+  },
+  "extensionTypes": {
+    "parser": "입력 파서",
+    "behavior": "동작",
+    "rules": "규칙",
+    "property": "속성 설정기",
+    "apicalls": "API 호출",
+    "httpcallsLegacy": "API 호출(레거시)",
+    "llm": "LLM",
+    "output": "출력",
+    "templating": "템플릿",
+    "mcpcalls": "MCP 호출",
+    "workflow": "워크플로",
+    "dictionary": "사전",
+    "rag": "RAG"
   }
 }

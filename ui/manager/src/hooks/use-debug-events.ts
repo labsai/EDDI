@@ -297,6 +297,7 @@ const INTERNAL_INFRA_TASKS = new Set([
   "parser",
   "output",
   "httpcalls",
+  "apicalls",
   "mcpcalls",
   "ai.labs.expressions",
   "ai.labs.behavior_rules",
@@ -306,6 +307,7 @@ const INTERNAL_INFRA_TASKS = new Set([
   "ai.labs.parser",
   "ai.labs.output",
   "ai.labs.httpcalls",
+  "ai.labs.apicalls",
 ]);
 
 /** The one shared predicate for "is this pipeline task plumbing?". */

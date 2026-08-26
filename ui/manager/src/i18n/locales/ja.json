@@ -4506,5 +4506,20 @@
     "confirmReconnect": "このアカウントを連携し直しますか？",
     "confirmReconnectDesc": "このアカウントは正常に動作しているため、直すものはありません。続けると EDDI を離れてプロバイダーのサインイン画面に移動し、以前許可したアクセスが置き換わります。",
     "paramDuplicate": "この名前は別のパラメーターがすでに使用しています。保存されるのは最後の 1 つだけです。"
+  },
+  "extensionTypes": {
+    "parser": "入力パーサー",
+    "behavior": "ビヘイビア",
+    "rules": "ルール",
+    "property": "プロパティ設定",
+    "apicalls": "API 呼び出し",
+    "httpcallsLegacy": "API 呼び出し（旧形式）",
+    "llm": "LLM",
+    "output": "出力",
+    "templating": "テンプレート",
+    "mcpcalls": "MCP 呼び出し",
+    "workflow": "ワークフロー",
+    "dictionary": "辞書",
+    "rag": "RAG"
   }
 }

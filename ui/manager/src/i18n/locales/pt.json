@@ -4541,5 +4541,20 @@
     "confirmReconnect": "Conectar esta conta de novo?",
     "confirmReconnectDesc": "Esta conta está funcionando, então não há nada a reparar. Continuar leva você para fora do EDDI, até a página de login do provedor, e substitui o acesso que você concedeu antes.",
     "paramDuplicate": "Outro parâmetro já usa este nome. Apenas o último é guardado."
+  },
+  "extensionTypes": {
+    "parser": "Analisador de entrada",
+    "behavior": "Comportamento",
+    "rules": "Regras",
+    "property": "Definidor de propriedades",
+    "apicalls": "Chamadas à API",
+    "httpcallsLegacy": "Chamadas à API (legado)",
+    "llm": "LLM",
+    "output": "Saída",
+    "templating": "Modelos",
+    "mcpcalls": "Chamadas MCP",
+    "workflow": "Fluxo de trabalho",
+    "dictionary": "Dicionário",
+    "rag": "RAG"
   }
 }

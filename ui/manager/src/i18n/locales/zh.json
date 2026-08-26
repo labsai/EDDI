@@ -4506,5 +4506,20 @@
     "confirmReconnect": "重新关联此账户？",
     "confirmReconnectDesc": "该账户运行正常，无需修复。继续将带你离开 EDDI 前往服务商的登录页面，并替换你此前授予的访问权限。",
     "paramDuplicate": "已有另一个参数使用此名称。只会保存最后一个。"
+  },
+  "extensionTypes": {
+    "parser": "输入解析器",
+    "behavior": "行为",
+    "rules": "规则",
+    "property": "属性设置器",
+    "apicalls": "API 调用",
+    "httpcallsLegacy": "API 调用（旧版）",
+    "llm": "大语言模型",
+    "output": "输出",
+    "templating": "模板",
+    "mcpcalls": "MCP 调用",
+    "workflow": "工作流",
+    "dictionary": "字典",
+    "rag": "RAG"
   }
 }

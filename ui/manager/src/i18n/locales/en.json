@@ -4506,5 +4506,20 @@
     "confirmReconnect": "Connect this account again?",
     "confirmReconnectDesc": "This account is working, so there is nothing to repair. Continuing takes you out of EDDI to the provider's sign-in page and replaces the access you granted before.",
     "paramDuplicate": "Another parameter already uses this name. Only the last one is saved."
+  },
+  "extensionTypes": {
+    "parser": "Input Parser",
+    "behavior": "Behavior",
+    "rules": "Rules",
+    "property": "Property Setter",
+    "apicalls": "API Calls",
+    "httpcallsLegacy": "API Calls (legacy)",
+    "llm": "LLM",
+    "output": "Output",
+    "templating": "Templating",
+    "mcpcalls": "MCP Calls",
+    "workflow": "Workflow",
+    "dictionary": "Dictionary",
+    "rag": "RAG"
   }
 }

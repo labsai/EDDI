@@ -1,3 +1,4 @@
+import type { TFunction } from "i18next";
 import { Brain, FileCode, FileText, GitBranch, Globe, MessageSquareText, Plug, Puzzle, Settings } from "lucide-react";
 import { api } from "../api-client";
 
@@ -18,7 +19,10 @@ export interface ExtensionDescriptor {
 }
 
 export interface ExtensionTypeConfig {
+  /** English fallback, kept so a missing translation still reads sensibly. */
   label: string;
+  /** i18n key — these labels are rendered, so they must not ship as raw English. */
+  labelKey: string;
   icon: string;
   order: number;
   // Color is used in the orphans.tsx
@@ -56,25 +60,33 @@ export const EXTENSION_TYPE_INFO: Record<
   string,
   ExtensionTypeConfig
 > = {
-  "eddi://ai.labs.parser": { label: "Input Parser", icon: "FileText", order: 1, color: "text-sky-400" },
-  "eddi://ai.labs.behavior": { label: "Behavior", icon: "FileText", order: 2, color: "text-pink-400" },
-  "eddi://ai.labs.rules": { label: "Rules", icon: "GitBranch", order: 3, color: "text-blue-400" },
-  "eddi://ai.labs.property": { label: "Property Setter", icon: "Settings", order: 4, color: "text-teal-400" },
-  "eddi://ai.labs.httpcalls": { label: "HTTP Calls (legacy)", icon: "Globe", order: 5, color: "text-orange-400" },
-  "eddi://ai.labs.apicalls": { label: "HTTP Calls", icon: "Globe", order: 6, color: "text-orange-400" },
-  "eddi://ai.labs.llm": { label: "LLM", icon: "Brain", order: 7, color: "text-purple-400" },
-  "eddi://ai.labs.output": { label: "Output", icon: "MessageSquareText", order: 8, color: "text-emerald-400" },
-  "eddi://ai.labs.templating": { label: "Templating", icon: "FileCode", order: 9, color: "text-cyan-400" },
-  "eddi://ai.labs.output.template": { label: "Templating", icon: "FileCode", order: 10, color: "text-cyan-400" },
-  "eddi://ai.labs.mcpcalls": { label: "MCP Calls", icon: "Plug", order: 11, color: "text-rose-400" },
-  "eddi://ai.labs.workflow": { label: "Workflow", icon: "FileText", order: 12, color: "text-indigo-400" },
-  "eddi://ai.labs.dictionary": { label: "Dictionary", icon: "FileText", order: 13, color: "text-amber-400" },
-  "eddi://ai.labs.rag": { label: "RAG", icon: "FileText", order: 14, color: "text-purple-400" },
+  "eddi://ai.labs.parser": { label: "Input Parser", labelKey: "extensionTypes.parser", icon: "FileText", order: 1, color: "text-sky-400" },
+  "eddi://ai.labs.behavior": { label: "Behavior", labelKey: "extensionTypes.behavior", icon: "FileText", order: 2, color: "text-pink-400" },
+  "eddi://ai.labs.rules": { label: "Rules", labelKey: "extensionTypes.rules", icon: "GitBranch", order: 3, color: "text-blue-400" },
+  "eddi://ai.labs.property": { label: "Property Setter", labelKey: "extensionTypes.property", icon: "Settings", order: 4, color: "text-teal-400" },
+  "eddi://ai.labs.apicalls": { label: "API Calls", labelKey: "extensionTypes.apicalls", icon: "Globe", order: 5, color: "text-orange-400" },
+  "eddi://ai.labs.httpcalls": { label: "API Calls (legacy)", labelKey: "extensionTypes.httpcallsLegacy", icon: "Globe", order: 6, color: "text-orange-400" },
+  "eddi://ai.labs.llm": { label: "LLM", labelKey: "extensionTypes.llm", icon: "Brain", order: 7, color: "text-purple-400" },
+  "eddi://ai.labs.output": { label: "Output", labelKey: "extensionTypes.output", icon: "MessageSquareText", order: 8, color: "text-emerald-400" },
+  "eddi://ai.labs.templating": { label: "Templating", labelKey: "extensionTypes.templating", icon: "FileCode", order: 9, color: "text-cyan-400" },
+  "eddi://ai.labs.output.template": { label: "Templating", labelKey: "extensionTypes.templating", icon: "FileCode", order: 10, color: "text-cyan-400" },
+  "eddi://ai.labs.mcpcalls": { label: "MCP Calls", labelKey: "extensionTypes.mcpcalls", icon: "Plug", order: 11, color: "text-rose-400" },
+  "eddi://ai.labs.workflow": { label: "Workflow", labelKey: "extensionTypes.workflow", icon: "FileText", order: 12, color: "text-indigo-400" },
+  "eddi://ai.labs.dictionary": { label: "Dictionary", labelKey: "extensionTypes.dictionary", icon: "FileText", order: 13, color: "text-amber-400" },
+  "eddi://ai.labs.rag": { label: "RAG", labelKey: "extensionTypes.rag", icon: "FileText", order: 14, color: "text-purple-400" },
 };
 
-/** Get a human-readable label for an extension type */
-export function getExtensionLabel(type: string): string {
-  return EXTENSION_TYPE_INFO[type]?.label ?? type;
+/**
+ * A human-readable label for an extension type.
+ *
+ * Takes `t` rather than returning English: these labels reach the pipeline
+ * builder and the add-extension dialog, so an untranslated one is raw English
+ * on an Arabic or Japanese screen. The unknown-type fallback stays the raw
+ * type string, which is a diagnostic rather than prose.
+ */
+export function getExtensionLabel(type: string, t: TFunction): string {
+  const info = EXTENSION_TYPE_INFO[type];
+  return info ? t(info.labelKey, info.label) : type;
 }
 
 /**
@@ -117,9 +129,14 @@ export function getExtensionTypeConfig(
  */
 export const EXTENSION_TO_RESOURCE_SLUG: Record<string, string> = {
   "eddi://ai.labs.dictionary": "dictionary",
+  // Renamed step types appear under BOTH spellings: the backend registers each
+  // one twice, stored workflows carry whichever was current when they were
+  // saved, and a missing entry silently makes the step look store-less — the
+  // pipeline builder then offers no config to attach.
   "eddi://ai.labs.rules": "rules",
-  "eddi://ai.labs.httpcalls": "apicalls",
+  "eddi://ai.labs.behavior": "rules",
   "eddi://ai.labs.apicalls": "apicalls",
+  "eddi://ai.labs.httpcalls": "apicalls",
   "eddi://ai.labs.llm": "llm",
   "eddi://ai.labs.output": "output",
   "eddi://ai.labs.property": "propertysetter",

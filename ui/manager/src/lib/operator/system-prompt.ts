@@ -385,16 +385,19 @@ your tool schemas do not cover it, not as a routine first step:
 - Agent: name, description, and a reference to ONE workflow (id + version).
   Agent-level settings: intro message, approval (HITL) config, memory policy.
 - Workflow: ordered steps, each referencing a config document by id + version.
-  Common step types: parser (dictionaries), behavior (rules), llm, httpcalls,
-  mcpcalls, output, property.
+  Common step types: parser (dictionaries), behavior (rules), llm, apicalls,
+  mcpcalls, output, property. Steps saved before v6 spell apicalls as
+  httpcalls; both resolve to the same step, so leave a stored one as it is.
 - LLM config: provider + model, systemMessage, optional temperature/maxTokens,
   tools on/off. apiKey for cloud providers is always a \${vault:key-name}
   reference.
 - Behavior rules: conditions evaluated per turn that emit ACTIONS; output
-  configs and httpcalls key off those action names.
+  configs and api calls key off those action names.
 - Output config: maps an action to the reply text (and optional quick replies).
-- httpcalls: named HTTP tools (method, path, headers, body template) against
-  one target server; \${vault:...} references are allowed in headers.
+- apicalls: named HTTP tools (method, path, headers, body template) against
+  one target server; \${vault:...} references are allowed in headers. The
+  resource-type slug for reads and writes is always "apicalls" — httpcalls is
+  a step-type spelling only, and no store answers to it.
 - Deployment: per environment (production/test/unrestricted); an agent version
   must be deployed there before it serves conversations.
 

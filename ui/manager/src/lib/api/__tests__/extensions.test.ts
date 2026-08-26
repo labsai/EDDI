@@ -1,3 +1,4 @@
+import type { TFunction } from "i18next";
 import { describe, it, expect } from "vitest";
 import { Puzzle } from "lucide-react";
 import { RESOURCE_TYPES } from "../resources";
@@ -111,8 +112,25 @@ describe("EXTENSION_TO_RESOURCE_SLUG — completeness", () => {
     expect(EXTENSION_TO_RESOURCE_SLUG["eddi://ai.labs.rag"]).toBe("rag");
   });
 
-  it("maps legacy ai.labs.httpcalls → apicalls", () => {
+  /**
+   * Both spellings of a renamed step type must map to the one store. The
+   * backend registers each renamed task twice and reports whichever name the
+   * stored workflow used, so a missing entry makes the step look store-less
+   * and the pipeline builder offers no config to attach to it.
+   */
+  it("maps both spellings of the renamed api-calls step → apicalls", () => {
+    expect(EXTENSION_TO_RESOURCE_SLUG["eddi://ai.labs.apicalls"]).toBe("apicalls");
     expect(EXTENSION_TO_RESOURCE_SLUG["eddi://ai.labs.httpcalls"]).toBe("apicalls");
+  });
+
+  it("maps both spellings of the renamed rules step → rules", () => {
+    expect(EXTENSION_TO_RESOURCE_SLUG["eddi://ai.labs.rules"]).toBe("rules");
+    expect(EXTENSION_TO_RESOURCE_SLUG["eddi://ai.labs.behavior"]).toBe("rules");
+  });
+
+  it("labels the v6 api-calls step as current and the v5 spelling as legacy", () => {
+    expect(EXTENSION_TYPE_INFO["eddi://ai.labs.apicalls"]?.label).toBe("API Calls");
+    expect(EXTENSION_TYPE_INFO["eddi://ai.labs.httpcalls"]?.label).toBe("API Calls (legacy)");
   });
 
   it("hasResourceStore returns true for rag", () => {
@@ -151,8 +169,17 @@ describe("Fallbacks for unknown / bare-prefix inputs", () => {
   const knownPrefixed = Object.keys(EXTENSION_TYPE_INFO)[0]!;
   const knownBare = knownPrefixed.replace("eddi://", "");
 
+  // The labels resolve through i18n now, so the accessor needs a `t`. This
+  // stub returns the fallback, which is what a missing translation would.
+  const t = ((_key: string, fallback?: string) => fallback ?? _key) as unknown as TFunction;
+
   it("getExtensionLabel returns raw type for unknown", () => {
-    expect(getExtensionLabel("eddi://unknown")).toBe("eddi://unknown");
+    expect(getExtensionLabel("eddi://unknown", t)).toBe("eddi://unknown");
+  });
+
+  it("getExtensionLabel resolves a known type through i18n", () => {
+    expect(getExtensionLabel("eddi://ai.labs.apicalls", t)).toBe("API Calls");
+    expect(getExtensionLabel("eddi://ai.labs.httpcalls", t)).toBe("API Calls (legacy)");
   });
 
   it("getExtensionIcon returns Puzzle for unknown, resolves for known", () => {

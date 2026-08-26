@@ -292,7 +292,7 @@ export function AddExtensionDialog({
 
               {filtered.map((ext) => {
                 const Icon = getExtensionIcon(ext.type);
-                const label = getExtensionLabel(ext.type);
+                const label = getExtensionLabel(ext.type, t);
                 const hasStore = !!getResourceSlugForExtension(ext.type);
                 return (
                   <button
@@ -346,7 +346,7 @@ export function AddExtensionDialog({
                   return <SelIcon className="h-4 w-4 text-primary" />;
                 })()}
                 <span className="text-sm font-medium text-foreground">
-                  {getExtensionLabel(selectedType.type)}
+                  {getExtensionLabel(selectedType.type, t)}
                 </span>
               </div>
               <p className="mt-1 text-xs text-muted-foreground">

@@ -226,7 +226,7 @@ function SortableExtensionItem({
 
   const ext = item.extension;
   const Icon = getExtensionIcon(ext.type);
-  const label = getExtensionLabel(ext.type);
+  const label = getExtensionLabel(ext.type, t);
   const configUri = ext.config?.["uri"] as string | undefined;
   const parsed = configUri ? parseExtensionUri(configUri) : null;
 
