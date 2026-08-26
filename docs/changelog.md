@@ -7,6 +7,67 @@
 
 
 
+## 🐛 fix(tenancy): the per-tenant quota breakdown never reached Prometheus (2026-08-26)
+
+**Repo:** EDDI (`feat/grafana-full-metrics-dashboard`)
+
+While auditing every registered meter to build a Grafana dashboard, one documented
+metric dimension turned out not to exist in the exposition at all.
+
+### Why it failed
+
+A `PrometheusMeterRegistry` keeps only the **first** tag-key shape registered under
+a given metric name and silently drops every later one — no exception, no warning.
+`TenantQuotaService.init()` registered `eddi.tenant.quota.denied` with no tags, and
+each of the five denial paths then registered the same name with `tenant`+`type`.
+The untagged registration won, so `eddi_tenant_quota_denied_total{tenant,type}`
+never appeared at `/q/metrics`. The per-tenant breakdown promised in
+`docs/metrics.md` — and the "denied by type" panel on the operations dashboard —
+could not work.
+
+Proven directly against Micrometer 1.17.0 with
+`micrometer-registry-prometheus-simpleclient` (the registry Quarkus 3.38.3 pulls):
+register untagged then tagged, increment both, scrape, and only the untagged line
+comes back.
+
+### The fix
+
+The `quotaDeniedCounter` field, its two initialisations and its five
+`increment()` calls are gone. Every denial is now recorded once, tagged; the
+aggregate is `sum(rate(eddi_tenant_quota_denied_total[...]))` at query time. This
+is the shape `eddi.tenant.usage.*` already used.
+
+`quotaAllowedCounter` is untouched — it has a single untagged shape at every call
+site, so it never collided.
+
+### The new test
+
+`TenantQuotaServiceTest.PrometheusExpositionTests.deniedCounterIsExposedWithItsLabels`
+drives a real denial through a real `PrometheusMeterRegistry` and asserts the
+scraped line carries `tenant=` and `type=`. Verified the way the flake fix in the
+entry below was: reintroducing the untagged registration fails it with
+*"denial series lost its tenant label — a colliding untagged registration is
+shadowing it: eddi_tenant_quota_denied_total 0.0"*.
+
+The existing tests could not have caught this. Both use `SimpleMeterRegistry`,
+which tolerates the collision and reports both shapes happily — which is exactly
+why the bug survived. The new test is the only one that goes through a Prometheus
+scrape.
+
+### Not changed
+
+Neither existing assertion needed touching: one checks the tagged counter (still
+1.0), the other sums all counters of that name and asserts `>= 1.0` (now 1 instead
+of 2). 26 tests green.
+
+### Upgrade note
+
+Prometheus retains the old label-less samples for its retention window, so
+breakdown queries should filter with `{tenant!=""}` for a while after deploying.
+The dashboards do.
+
+---
+
 ## 🧪 fix(tenancy): the quota counters were tested against the wall clock (2026-08-25)
 
 **Repo:** EDDI (`fix/tenant-quota-minute-boundary-flake`)
