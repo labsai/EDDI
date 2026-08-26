@@ -7,6 +7,63 @@
 
 
 
+## 🩹 fix(install): ship the new dashboard through the installers, not just compose (2026-08-26)
+
+**Repo:** EDDI (`feat/grafana-full-metrics-dashboard`)
+
+Adding the Full Metrics Reference to `docker-compose.monitoring.yml` in the entry
+below was only half the deployment path. `install.sh` and `install.ps1` carry an
+explicit list of monitoring files to fetch for `--with-monitoring` /
+`-WithMonitoring`, and the new dashboard was not on it. Now it is.
+
+### Why this was a hard break, not a missing panel
+
+Every file in that list is bind-mounted **as a file** by the monitoring compose.
+When the source path does not exist, Docker creates a *directory* there, and the
+mount then fails at container init:
+
+```
+runc create failed: ... error mounting ".../eddi-full-metrics-dashboard.json"
+to rootfs at "/var/lib/grafana/dashboards/eddi-full-metrics.json":
+not a directory: Are you trying to mount a directory onto a file (or vice-versa)?
+```
+
+The Grafana container is left in state `Created` and never starts. So the whole
+monitoring stack would have been down for anyone installing from outside a git
+clone — not merely missing one dashboard. `gcp/provision-vm.sh` shells out to
+`install.sh --with-monitoring`, so it inherited the same break and is fixed by the
+same change.
+
+Reproduced both directions in a simulated install directory containing only the
+files the installer fetches: with the dashboard absent, Grafana fails to start with
+the error above and a root-owned directory is left at the mount path; with it
+present, all three dashboards provision and Grafana is healthy.
+
+The comments at both download sites understated this ("Grafana then fails to
+provision") and now say what actually happens, plus the invariant that caused it:
+**this list must stay in step with every file-type bind mount in
+`docker-compose.monitoring.yml`.**
+
+### Not changed — two Grafana surfaces that ship no dashboards at all
+
+Worth knowing, both pre-existing and neither touched here:
+
+- **`k8s/overlays/monitoring/monitoring-stack.yaml`** deploys Grafana with
+  `emptyDir` and no dashboard provisioning whatsoever — no ConfigMaps, no
+  provisioning mounts. None of the three dashboards reach a Kubernetes install
+  today; the file's own comment says as much. Fixing that means adding dashboard
+  ConfigMaps + a provisioning sidecar config, and the Full Metrics Reference is
+  **322 KB**, which is above the 262,144-byte ceiling on the
+  `kubectl.kubernetes.io/last-applied-configuration` annotation that client-side
+  `kubectl apply` writes — so it would need server-side apply or a Grafana
+  sidecar/PVC instead. Not attempted here, and not verified locally (no cluster in
+  this environment).
+- **`helm/eddi/values.yaml`** exposes `monitoring.grafana.enabled`, but the chart
+  has no Grafana template at all — the toggle is unimplemented, so there is nothing
+  to add a dashboard to.
+
+---
+
 ## 📊 feat(monitoring): a Grafana dashboard covering every meter EDDI registers (2026-08-26)
 
 **Repo:** EDDI (`feat/grafana-full-metrics-dashboard`)

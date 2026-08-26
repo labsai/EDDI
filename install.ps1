@@ -523,7 +523,8 @@ function Get-ComposeFiles {
             "docs/monitoring/grafana-provisioning/dashboards/dashboards.yml",
             "docs/monitoring/grafana-provisioning/datasources/datasources.yml",
             "docs/monitoring/eddi-grafana-dashboard.json",
-            "docs/monitoring/eddi-operations-dashboard.json"
+            "docs/monitoring/eddi-operations-dashboard.json",
+            "docs/monitoring/eddi-full-metrics-dashboard.json"
         )
         foreach ($mf in $monitoringFiles) {
             $mfTarget = Join-Path -Path $EddiDir -ChildPath $mf
@@ -544,9 +545,16 @@ function Get-ComposeFiles {
                 catch {
                     # Bind-mounted as a FILE by docker-compose.monitoring.yml, so a
                     # missing one is worse than it sounds: Docker creates a
-                    # *directory* at the mount path and Grafana then fails to
-                    # provision, including the dashboards that did download. Same
-                    # reasoning as the Keycloak realm below.
+                    # *directory* at the mount path and the Grafana container then
+                    # cannot start at all — the mount fails with "Are you trying to
+                    # mount a directory onto a file", leaving the container in state
+                    # Created and the whole monitoring stack down, not merely
+                    # missing one dashboard. Same reasoning as the Keycloak realm
+                    # below.
+                    #
+                    # This list must stay in step with every file-type bind mount in
+                    # docker-compose.monitoring.yml. Adding a dashboard there without
+                    # adding it here breaks -WithMonitoring outright.
                     # -Recurse as well as -Force: what is in the way is most
                     # likely a DIRECTORY left by a previous run's failed mount,
                     # and -Force alone will not remove one.

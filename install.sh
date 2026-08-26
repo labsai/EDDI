@@ -597,6 +597,7 @@ resolve_compose_files() {
       "docs/monitoring/grafana-provisioning/datasources/datasources.yml"
       "docs/monitoring/eddi-grafana-dashboard.json"
       "docs/monitoring/eddi-operations-dashboard.json"
+      "docs/monitoring/eddi-full-metrics-dashboard.json"
     )
     for mf in "${monitoring_files[@]}"; do
       local mf_target="$EDDI_DIR/$mf"
@@ -614,10 +615,17 @@ resolve_compose_files() {
         else
           # Every one of these is bind-mounted as a FILE by
           # docker-compose.monitoring.yml, so a missing one is worse than it
-          # sounds: Docker creates a *directory* at the mount path, and Grafana
-          # then fails to provision — including the dashboards that did
-          # download. Same reasoning as the Keycloak realm below; a half-built
-          # monitoring stack is not better than a refusal to build one.
+          # sounds: Docker creates a *directory* at the mount path and the
+          # Grafana container then cannot start at all — runc fails the mount
+          # with "Are you trying to mount a directory onto a file", the
+          # container is left in state Created, and the whole monitoring stack
+          # is down, not merely missing one dashboard. Same reasoning as the
+          # Keycloak realm below; a half-built monitoring stack is not better
+          # than a refusal to build one.
+          #
+          # This list must therefore stay in step with every file-type bind
+          # mount in docker-compose.monitoring.yml. Adding a dashboard there
+          # without adding it here breaks --with-monitoring outright.
           # -rf, not -f: the thing in the way is most likely a DIRECTORY that a
           # previous run's failed mount left behind, and `rm -f` cannot remove
           # one. Under `set -e` that turns this cleanup into the script's exit
