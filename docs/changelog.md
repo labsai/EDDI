@@ -7,6 +7,107 @@
 
 
 
+## 📊 feat(monitoring): a Grafana dashboard covering every meter EDDI registers (2026-08-26)
+
+**Repo:** EDDI (`feat/grafana-full-metrics-dashboard`)
+
+`docs/monitoring/eddi-full-metrics-dashboard.json` — "E.D.D.I — Full Metrics
+Reference" (`eddi-metrics-all`), 133 panels across 19 subsystem rows, covering all
+**144** registered meters. Mounted in `docker-compose.monitoring.yml`; the
+provisioning provider globs the directory, so no provisioning change was needed.
+
+The Operations Command Center stays the front door. This is the companion you open
+when the number you need is not on it.
+
+### Why it is generated, not hand-written
+
+The panel set is produced from the metric registration sites in the source, and the
+generator fails if any registered meter has no panel. Hand-maintaining 133 panels
+against a codebase that adds meters is how dashboards rot.
+
+### What the audit turned up
+
+Counting the meters was not straightforward, and each surprise changed the output:
+
+- **144, not 141.** Three meters register through `Metrics.globalRegistry` rather
+  than an injected `MeterRegistry` and are invisible to the obvious grep:
+  `eddi.llm.tool_context.evictions`, `eddi.operator.write.approval`,
+  `eddi.hitl.rule.matched`. A fourth, `eddi.coordinator.total_processed`, is a
+  `FunctionCounter.builder`.
+- **The existing dashboards covered 55 of them.** 86 meters — HITL, MCP, the model
+  cascade, Dream, capability registry, connections, agent identity, attachments,
+  the OpenAI-compatible adapter, team cadences, group deliberation — had no panel
+  anywhere.
+- **Two shipped panels queried series that do not exist** (see below).
+- **`eddi.tenant.quota.denied` was unobservable per-tenant.** Fixed in the entry
+  below.
+- **Two documented metric names were wrong.** `eddi_tool_cache_puts` does not
+  exist; the meter is `eddi.tool.cache.puts.by_tool`. And the `*_by_tool` hits and
+  misses meters are *separate meters*, not a `tool` dimension of the aggregate
+  ones — the guide implied otherwise.
+
+### Timers do not publish percentiles
+
+Only `eddi.pipeline.task.duration` calls `publishPercentileHistogram()`, so it is
+the only EDDI timer with a `_seconds_bucket` series and the only one where
+`histogram_quantile()` returns anything. Two shipped panels ignored this and were
+permanently empty — "No data", indistinguishable from an idle system:
+
+- `eddi-operations-dashboard.json` — "Processing Duration P50 / P95 / P99" over
+  `eddi_conversation_processing_duration_seconds_bucket`
+- `eddi-grafana-dashboard.json` — "Vault Resolve Latency" P99 over
+  `eddi_vault_resolve_duration_seconds_bucket`
+
+Both now chart mean (`_seconds_sum / _seconds_count`) and peak (`_seconds_max`),
+with a panel description saying why there is no percentile. `docs/metrics.md`
+carried the same bad query as a copy-paste example; it is corrected and the rule is
+now written down. The one panel that *did* use buckets correctly —
+"Task Duration (Avg / P99)" — was left alone.
+
+### Naming rules, verified rather than assumed
+
+Pinned by running the project's own registry (Micrometer 1.17.0 +
+`micrometer-registry-prometheus-simpleclient`) and reading the scrape, because
+guessing wrong produces a silently empty panel:
+
+- a counter already ending in `_total` is **not** doubled
+  (`eddi_group_cost_ceiling_hit_total` stays put), but one ending in `_count`
+  **does** gain it (`eddi_hitl_pause_count_total`)
+- dotted tag keys become underscores (`task.id` → `task_id`); camelCase keys do
+  not change (`authType` stays `authType`)
+
+### How it was verified
+
+Not just "the JSON parses":
+
+- every one of the 203 expressions executed against a real Prometheus — 0 parse
+  errors, across all three dashboards
+- a synthetic exporter built on the real Micrometer registry served all 144 meters
+  with representative tags; **191 of 203 queries returned data**, the only 12
+  blanks being Quarkus/JVM binders the exporter does not register
+- all three dashboards provisioned into Grafana 11.6.0 with no errors
+- rendered and inspected, which caught two things no validator would: KPI titles
+  truncated at three grid columns, and the `barchart` panels drawing one bar per
+  scrape timestamp instead of one per label (a range query where an instant query
+  was needed — now horizontal bar gauges, single hue, `move`/`tool`/`skill` on the
+  axis)
+
+### Design notes
+
+- Counters as rates, timers as mean + peak, gauges as-is; one unit per panel and no
+  dual axes.
+- Status colours (green/amber/red thresholds) only where the colour *means*
+  good/bad — the KPI gauges and error-rate tiles. Series identity everywhere else
+  is Grafana's categorical palette, never a status token.
+- Single-series panels carry no legend box; the title names the series.
+- Panel descriptions carry the operational reading, not a restatement of the title
+  — what a sustained non-zero rate on `eddi_tool_cache_bypassed_total`,
+  `eddi_audit_entries_dropped_total` or `eddi_counterweight_strict_downgraded_total`
+  actually means for the operator.
+- `$datasource` and `$job` template variables; all rows but `Overview` collapsed.
+
+---
+
 ## 🐛 fix(tenancy): the per-tenant quota breakdown never reached Prometheus (2026-08-26)
 
 **Repo:** EDDI (`feat/grafana-full-metrics-dashboard`)

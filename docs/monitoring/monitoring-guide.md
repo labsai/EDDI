@@ -60,9 +60,11 @@ docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d
 | `eddi_tool_ratelimit_allowed` | Counter | Allowed rate limit checks (by tool) |
 | `eddi_tool_ratelimit_denied` | Counter | Denied rate limit checks (by tool) |
 | `eddi_tool_ratelimit_remaining` | Gauge | Remaining rate limit budget |
-| `eddi_tool_cache_hits` | Counter | Tool cache hits (global + per-tool) |
-| `eddi_tool_cache_misses` | Counter | Tool cache misses (global + per-tool) |
-| `eddi_tool_cache_puts` | Counter | Tool cache put operations |
+| `eddi_tool_cache_hits` | Counter | Tool cache hits, aggregate (untagged) |
+| `eddi_tool_cache_misses` | Counter | Tool cache misses, aggregate (untagged) |
+| `eddi_tool_cache_hits_by_tool` | Counter | Same, tagged by `tool` — a separate meter, not a dimension of the above |
+| `eddi_tool_cache_misses_by_tool` | Counter | Same, tagged by `tool` |
+| `eddi_tool_cache_puts_by_tool` | Counter | Tool cache writes, tagged by `tool`. There is no untagged `..._puts` meter |
 | `eddi_tool_cache_size` | Gauge | Current cache entry count |
 | `eddi_tool_cache_get_duration` | Timer | Cache lookup latency |
 | `eddi_tool_cache_put_duration` | Timer | Cache write latency |
@@ -215,19 +217,29 @@ groups:
           description: "Tool {{ $labels.tool }} failing at {{ $value }}/s"
 ```
 
-## Grafana Dashboard
+## Grafana Dashboards
 
-Import `eddi-grafana-dashboard.json` from this directory:
+`docker-compose.monitoring.yml` provisions all three automatically. To load one by
+hand: Grafana → Dashboards → Import → upload the JSON → pick your Prometheus data
+source.
 
-1. Open Grafana → Dashboards → Import
-2. Upload `eddi-grafana-dashboard.json`
-3. Select your Prometheus data source
-4. Dashboard loads with 5 row groups:
-   - **Coordinator Health** — active conversations, queue depth, total processed
-   - **Tool Execution** — rate limits, cache efficiency, failures
-   - **Vault & Security** — resolve latency, error rate, cache hits
-   - **NATS Messaging** — publish/consume throughput (when enabled)
-   - **HTTP & JVM** — request rate, latency percentiles, heap usage (Quarkus built-in)
+| File | Dashboard | Shape |
+|------|-----------|-------|
+| `eddi-operations-dashboard.json` | Operations Command Center (`eddi-ops`) | KPI strip + 9 rows, 45 panels |
+| `eddi-full-metrics-dashboard.json` | Full Metrics Reference (`eddi-metrics-all`) | 19 subsystem rows, 133 panels — **every** meter EDDI registers |
+| `eddi-grafana-dashboard.json` | EDDI Observability (`eddi-observability`) | The original 5-group dashboard: Coordinator Health, Tool Execution, Vault & Security, NATS, HTTP & JVM |
+
+Start at **Operations Command Center** — it answers "is the platform healthy".
+Drop into **Full Metrics Reference** when the number you need is not there; it is
+generated from the metric registration sites in the source, so every meter has a
+panel. All its rows but `Overview` are collapsed, and a `data source` + `job`
+template variable pair scopes the whole thing.
+
+> **Percentile panels.** Only `eddi_pipeline_task_duration` publishes histogram
+> buckets, so it is the only EDDI timer where `histogram_quantile()` works. Every
+> other timer is charted as mean (`_seconds_sum / _seconds_count`) and peak
+> (`_seconds_max`). See [Naming: what the exposition actually looks
+> like](../metrics.md#naming-what-the-exposition-actually-looks-like).
 
 ## Production Checklist
 
