@@ -705,6 +705,7 @@ export const CapabilitiesSection = memo(function CapabilitiesSection({
                     type="button"
                     onClick={() => removeCapability(i)}
                     disabled={updateAgent.isPending}
+                    data-testid={`remove-capability-${i}`}
                     className="rounded p-1 text-muted-foreground hover:text-destructive transition-colors"
                   >
                     <X className="h-3.5 w-3.5" />
