@@ -215,7 +215,8 @@
     "on": "चालू",
     "removeItem": "{{item}} हटाएँ",
     "stepOf": "चरण {{current}} / {{total}}",
-    "versionShort": "v{{version}}"
+    "versionShort": "v{{version}}",
+    "resizePanel": "{{panel}} का आकार बदलें"
   },
   "agents": {
     "confirmDeleteDescription": "इस क्रिया को पूर्ववत नहीं किया जा सकता। एजेंट और इसका सारा डेटा स्थायी रूप से हटा दिया जाएगा।",

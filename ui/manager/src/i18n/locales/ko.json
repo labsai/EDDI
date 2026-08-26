@@ -215,7 +215,8 @@
     "on": "켜기",
     "removeItem": "{{item}} 제거",
     "stepOf": "{{total}}단계 중 {{current}}단계",
-    "versionShort": "v{{version}}"
+    "versionShort": "v{{version}}",
+    "resizePanel": "{{panel}} 크기 조절"
   },
   "agents": {
     "confirmDeleteDescription": "이 작업은 되돌릴 수 없습니다. 에이전트와 모든 데이터가 영구적으로 제거됩니다.",

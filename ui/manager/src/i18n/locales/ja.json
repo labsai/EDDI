@@ -215,7 +215,8 @@
     "on": "オン",
     "removeItem": "{{item}} を削除",
     "stepOf": "ステップ {{current}} / {{total}}",
-    "versionShort": "v{{version}}"
+    "versionShort": "v{{version}}",
+    "resizePanel": "{{panel}} のサイズを変更"
   },
   "agents": {
     "confirmDeleteDescription": "この操作は元に戻せません。エージェントとそのすべてのデータが完全に削除されます。",

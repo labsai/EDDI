@@ -215,7 +215,8 @@
     "on": "Activado",
     "removeItem": "Quitar {{item}}",
     "stepOf": "Paso {{current}} de {{total}}",
-    "versionShort": "v{{version}}"
+    "versionShort": "v{{version}}",
+    "resizePanel": "Redimensionar {{panel}}"
   },
   "agents": {
     "confirmDeleteDescription": "Esta acción no se puede deshacer. El agente y todos sus datos se eliminarán permanentemente.",

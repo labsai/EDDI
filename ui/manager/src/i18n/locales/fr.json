@@ -215,7 +215,8 @@
     "on": "Activé",
     "removeItem": "Retirer {{item}}",
     "stepOf": "Étape {{current}} sur {{total}}",
-    "versionShort": "v{{version}}"
+    "versionShort": "v{{version}}",
+    "resizePanel": "Redimensionner {{panel}}"
   },
   "agents": {
     "confirmDeleteDescription": "Cette action est irréversible. L'agent et toutes ses données seront définitivement supprimés.",

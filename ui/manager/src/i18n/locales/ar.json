@@ -215,7 +215,8 @@
     "on": "مفعّل",
     "removeItem": "إزالة {{item}}",
     "stepOf": "الخطوة {{current}} من {{total}}",
-    "versionShort": "الإصدار {{version}}"
+    "versionShort": "الإصدار {{version}}",
+    "resizePanel": "تغيير حجم {{panel}}"
   },
   "agents": {
     "confirmDeleteDescription": "لا يمكن التراجع عن هذا الإجراء. ستتم إزالة الوكيل وجميع بياناته نهائياً.",

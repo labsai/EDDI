@@ -7,6 +7,7 @@ import { getWorkflow } from "@/lib/api/workflows";
 import { PipelineRailroad } from "@/components/studio/pipeline-railroad";
 import { StudioEditorPanel, StudioEditorEmpty } from "@/components/studio/studio-editor-panel";
 import { ChatPanel } from "@/components/chat/chat-panel";
+import { ResizeHandle } from "@/components/ui/resize-handle";
 import { ErrorState } from "@/components/shared/error-state";
 import {
   ArrowLeft,
@@ -28,6 +29,15 @@ interface WorkflowStep {
   config: { uri?: string };
 }
 
+// ==================== Constants ====================
+
+const PIPELINE_MIN = 180;
+const PIPELINE_MAX = 400;
+const PIPELINE_DEFAULT = 256;
+const CHAT_MIN = 280;
+const CHAT_MAX = 600;
+const CHAT_DEFAULT = 384;
+
 // ==================== Component ====================
 
 export function AgentStudioPage() {
@@ -35,6 +45,21 @@ export function AgentStudioPage() {
   const { agentId } = useParams<{ agentId: string }>();
   const [selectedStageIndex, setSelectedStageIndex] = useState<number | null>(null);
   const [rightPanelOpen, setRightPanelOpen] = useState(true);
+
+  // Resizable panel widths. The handle reports a logical delta — positive means
+  // "this panel grows" — so RTL needs no special case here.
+  const [pipelineWidth, setPipelineWidth] = useState(PIPELINE_DEFAULT);
+  const [chatWidth, setChatWidth] = useState(CHAT_DEFAULT);
+
+  const handlePipelineResize = useCallback((delta: number) => {
+    setPipelineWidth((w) => Math.min(PIPELINE_MAX, Math.max(PIPELINE_MIN, w + delta)));
+  }, []);
+
+  const handleChatResize = useCallback((delta: number) => {
+    // The chat handle sits on the panel's leading edge, so a drag towards the
+    // panel shrinks it.
+    setChatWidth((w) => Math.min(CHAT_MAX, Math.max(CHAT_MIN, w - delta)));
+  }, []);
   const [mobileTab, setMobileTab] = useState<"pipeline" | "editor" | "chat">("pipeline");
 
   // Fetch agent descriptor for name — filter by ID to avoid fetching all agents
@@ -206,7 +231,10 @@ export function AgentStudioPage() {
       {/* Desktop: Three-panel layout */}
       <div className="flex flex-1 overflow-hidden">
         {/* Left: Pipeline Railroad */}
-        <div className="w-64 shrink-0 border-e border-border overflow-y-auto bg-card/30 hidden lg:block">
+        <div
+          className="shrink-0 border-e border-border overflow-y-auto bg-card/30 hidden lg:block"
+          style={{ width: pipelineWidth }}
+        >
           <div className="px-3 pt-3 pb-1">
             <h2 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/60">
               {t("studio.pipeline", "Pipeline")}
@@ -218,6 +246,17 @@ export function AgentStudioPage() {
             onSelectStage={handleSelectStage}
           />
         </div>
+
+        {/* Resize handle: Pipeline / Editor */}
+        <ResizeHandle
+          direction="horizontal"
+          onResize={handlePipelineResize}
+          label={t("studio.pipeline", "Pipeline")}
+          value={pipelineWidth}
+          min={PIPELINE_MIN}
+          max={PIPELINE_MAX}
+          className="hidden lg:block"
+        />
 
         {/* Center: Editor */}
         <div className="flex-1 flex flex-col overflow-hidden">
@@ -279,9 +318,23 @@ export function AgentStudioPage() {
 
         {/* Right: Chat + Debug */}
         {rightPanelOpen && (
-          <div className="w-96 shrink-0 border-s border-border overflow-hidden hidden md:flex md:flex-col min-h-0 min-w-0">
-            <ChatPanel embedded />
-          </div>
+          <>
+            <ResizeHandle
+              direction="horizontal"
+              onResize={handleChatResize}
+              label={t("studio.chat", "Chat")}
+              value={chatWidth}
+              min={CHAT_MIN}
+              max={CHAT_MAX}
+              className="hidden md:block"
+            />
+            <div
+              className="shrink-0 border-s border-border overflow-hidden hidden md:flex md:flex-col min-h-0 min-w-0"
+              style={{ width: chatWidth }}
+            >
+              <ChatPanel embedded />
+            </div>
+          </>
         )}
       </div>
 

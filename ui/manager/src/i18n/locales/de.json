@@ -215,7 +215,8 @@
     "on": "Ein",
     "removeItem": "{{item}} entfernen",
     "stepOf": "Schritt {{current}} von {{total}}",
-    "versionShort": "v{{version}}"
+    "versionShort": "v{{version}}",
+    "resizePanel": "{{panel}} in der Größe ändern"
   },
   "agents": {
     "confirmDeleteDescription": "Diese Aktion kann nicht rückgängig gemacht werden. Der Agent und alle seine Daten werden dauerhaft entfernt.",

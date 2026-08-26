@@ -215,7 +215,8 @@
     "on": "开启",
     "removeItem": "移除 {{item}}",
     "stepOf": "第 {{current}} 步，共 {{total}} 步",
-    "versionShort": "v{{version}}"
+    "versionShort": "v{{version}}",
+    "resizePanel": "调整{{panel}}大小"
   },
   "agents": {
     "confirmDeleteDescription": "此操作无法撤销。该智能体及其所有数据将被永久删除。",

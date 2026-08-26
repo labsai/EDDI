@@ -215,7 +215,8 @@
     "on": "เปิด",
     "removeItem": "นำ {{item}} ออก",
     "stepOf": "ขั้นที่ {{current}} จาก {{total}}",
-    "versionShort": "v{{version}}"
+    "versionShort": "v{{version}}",
+    "resizePanel": "ปรับขนาด {{panel}}"
   },
   "agents": {
     "confirmDeleteDescription": "การดำเนินการนี้ไม่สามารถย้อนกลับได้ เอเจนต์และข้อมูลทั้งหมดจะถูกลบอย่างถาวร",
