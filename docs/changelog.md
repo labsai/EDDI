@@ -125,7 +125,7 @@ Every file in that list is bind-mounted **as a file** by the monitoring compose.
 When the source path does not exist, Docker creates a *directory* there, and the
 mount then fails at container init:
 
-```
+```text
 runc create failed: ... error mounting ".../eddi-full-metrics-dashboard.json"
 to rootfs at "/var/lib/grafana/dashboards/eddi-full-metrics.json":
 not a directory: Are you trying to mount a directory onto a file (or vice-versa)?
