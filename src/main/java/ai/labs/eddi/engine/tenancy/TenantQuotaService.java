@@ -43,13 +43,23 @@ public class TenantQuotaService {
     String defaultTenantId;
 
     // Metrics
+    //
+    // There is deliberately no aggregate (untagged) counter for denials. A
+    // PrometheusMeterRegistry keeps only the first tag-key shape registered
+    // under a given name and silently drops every later one — no exception, no
+    // warning. Registering "eddi.tenant.quota.denied" with no tags here meant
+    // the tagged {tenant, type} increments below never reached /q/metrics at
+    // all, so the per-tenant breakdown documented in docs/metrics.md did not
+    // exist. Every denial is now recorded once, tagged; the aggregate is
+    // sum(rate(eddi_tenant_quota_denied_total[...])) at query time.
+    //
+    // "eddi.tenant.quota.allowed" has a single untagged shape everywhere and is
+    // therefore safe to hold as a field.
     private Counter quotaAllowedCounter;
-    private Counter quotaDeniedCounter;
 
     @PostConstruct
     void init() {
         quotaAllowedCounter = meterRegistry.counter("eddi.tenant.quota.allowed");
-        quotaDeniedCounter = meterRegistry.counter("eddi.tenant.quota.denied");
         LOGGER.info("Tenant quota service initialized");
     }
 
@@ -67,7 +77,6 @@ public class TenantQuotaService {
         this.meterRegistry = meterRegistry;
         this.defaultTenantId = defaultTenantId;
         this.quotaAllowedCounter = meterRegistry.counter("eddi.tenant.quota.allowed");
-        this.quotaDeniedCounter = meterRegistry.counter("eddi.tenant.quota.denied");
     }
 
     /**
@@ -106,7 +115,6 @@ public class TenantQuotaService {
             quotaAllowedCounter.increment();
             meterRegistry.counter("eddi.tenant.usage.conversations", "tenant", tenantId).increment();
         } else {
-            quotaDeniedCounter.increment();
             meterRegistry.counter("eddi.tenant.quota.denied", "tenant", tenantId, "type", "conversation").increment();
             LOGGER.warn(result.reason());
         }
@@ -141,7 +149,6 @@ public class TenantQuotaService {
             quotaAllowedCounter.increment();
             meterRegistry.counter("eddi.tenant.usage.api_calls", "tenant", tenantId).increment();
         } else {
-            quotaDeniedCounter.increment();
             meterRegistry.counter("eddi.tenant.quota.denied", "tenant", tenantId, "type", "api_call").increment();
             LOGGER.warn(result.reason());
         }
@@ -181,7 +188,6 @@ public class TenantQuotaService {
 
         int limit = quota.maxAgentsPerTenant();
         if (limit >= 0 && currentDistinctAgents >= limit) {
-            quotaDeniedCounter.increment();
             meterRegistry.counter("eddi.tenant.quota.denied", "tenant", tenantId, "type", "agent").increment();
             String reason = String.format("Agent limit (%d) reached for tenant '%s' — undeploy an agent before deploying another", limit,
                     tenantId);
@@ -222,7 +228,6 @@ public class TenantQuotaService {
         double currentCost = quotaStore.getMonthlyCost(tenantId);
         double limit = quota.maxMonthlyCostUsd();
         if (limit >= 0 && currentCost >= limit) {
-            quotaDeniedCounter.increment();
             meterRegistry.counter("eddi.tenant.quota.denied", "tenant", tenantId, "type", "cost").increment();
             String reason = String.format("Monthly cost budget ($%.2f) exceeded for tenant '%s'", limit, tenantId);
             LOGGER.warn(reason);
@@ -276,7 +281,6 @@ public class TenantQuotaService {
         meterRegistry.counter("eddi.tenant.usage.cost", "tenant", tenantId).increment(cost);
 
         if (!result.allowed()) {
-            quotaDeniedCounter.increment();
             meterRegistry.counter("eddi.tenant.quota.denied", "tenant", tenantId, "type", "cost").increment();
             LOGGER.warn(result.reason());
         }
