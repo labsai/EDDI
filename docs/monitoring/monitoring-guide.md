@@ -225,9 +225,9 @@ source.
 
 | File | Dashboard | Shape |
 |------|-----------|-------|
-| `eddi-operations-dashboard.json` | Operations Command Center (`eddi-ops`) | KPI strip + 9 rows, 45 panels |
+| `eddi-operations-dashboard.json` | Operations Command Center (`eddi-ops`) | KPI strip + 9 rows, 51 panels |
 | `eddi-full-metrics-dashboard.json` | Full Metrics Reference (`eddi-metrics-all`) | 19 subsystem rows, 133 panels — **every** meter EDDI registers |
-| `eddi-grafana-dashboard.json` | EDDI Observability (`eddi-observability`) | The original 5-group dashboard: Coordinator Health, Tool Execution, Vault & Security, NATS, HTTP & JVM |
+| `eddi-grafana-dashboard.json` | EDDI Observability (`eddi-observability`) | The original dashboard, 6 groups: Coordinator Health, Pipeline Tasks, Tool Execution, Vault & Security, NATS, HTTP & JVM |
 
 Start at **Operations Command Center** — it answers "is the platform healthy".
 Drop into **Full Metrics Reference** when the number you need is not there; it is

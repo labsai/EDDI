@@ -4,12 +4,14 @@ E.D.D.I exposes comprehensive metrics via [Micrometer](https://micrometer.io/) i
 
 ## Quick Start — Grafana Dashboards
 
-E.D.D.I ships two dashboards, both auto-provisioned into Grafana:
+E.D.D.I ships three dashboards, all auto-provisioned into Grafana by
+`docker-compose.monitoring.yml`:
 
-| Dashboard | UID | Shape | Use it for |
-|-----------|-----|-------|------------|
-| **Operations Command Center** | `eddi-ops` | 45 panels, KPI strip + 9 rows | The front door. Is the platform healthy, and if not, roughly where. |
-| **Full Metrics Reference** | `eddi-metrics-all` | 133 panels, 19 subsystem rows | Every meter E.D.D.I registers. Go here when the number you need is not on the ops dashboard. |
+| Dashboard | UID | File | Shape | Use it for |
+|-----------|-----|------|-------|------------|
+| **Operations Command Center** | `eddi-ops` | `eddi-operations-dashboard.json` | 51 panels, KPI strip + 9 rows | The front door. Is the platform healthy, and if not, roughly where. |
+| **Full Metrics Reference** | `eddi-metrics-all` | `eddi-full-metrics-dashboard.json` | 133 panels, 19 subsystem rows | Every meter E.D.D.I registers. Go here when the number you need is not on the ops dashboard. |
+| **EDDI Observability** | `eddi-observability` | `eddi-grafana-dashboard.json` | 16 panels, 6 rows | The original dashboard: Coordinator Health, Pipeline Tasks, Tool Execution, Vault & Security, NATS, HTTP & JVM. |
 
 The Full Metrics Reference covers **all 144 registered meters** — it is generated
 from the registration sites in the source, so a metric cannot be added to the

@@ -7,6 +7,38 @@
 
 
 
+## 📝 docs(monitoring): reconcile the dashboard inventory with what is provisioned (2026-08-27)
+
+**Repo:** EDDI (`feat/grafana-full-metrics-dashboard`)
+
+`docker-compose.monitoring.yml` bind-mounts **three** dashboards, but
+`docs/metrics.md` announced "two dashboards" and listed only `eddi-ops` and
+`eddi-metrics-all` — omitting `eddi-grafana-dashboard.json` (`eddi-observability`)
+entirely, even though Grafana provisions it. The table now lists all three with
+their UID *and* filename, so the inventory can be checked against the compose file
+without guessing which JSON is which.
+
+The panel count for the Operations Command Center was also wrong, and had been
+wrong on `main` before this branch: both docs said **45 panels**, the dashboard
+actually has **51**. Counted by unique panel id, recursing into collapsed rows, and
+cross-checked for duplicate ids (none) — the discrepancy comes from the
+`Platform Overview & HTTP Traffic` row being expanded, so its four children sit at
+the top level rather than inside `row.panels`. Corrected in both places.
+
+`docs/monitoring/monitoring-guide.md` already carried the correct three-dashboard
+inventory and identifiers, so only its panel count needed syncing. Its description
+of the observability dashboard was also corrected from "5-group" to the actual six
+rows, naming the `Pipeline Tasks` group it had dropped.
+
+### Not changed
+
+`README.md` still advertises a singular "Pre-built Grafana dashboard" linking to
+`eddi-grafana-dashboard.json` — the oldest and least useful of the three. Same
+class of staleness, but outside the two files this pass covered; worth a follow-up
+that points readers at the Operations Command Center instead.
+
+---
+
 ## 🩹 fix(install): `eddi update` refreshes monitoring assets, not just compose files (2026-08-27)
 
 **Repo:** EDDI (`feat/grafana-full-metrics-dashboard`)
