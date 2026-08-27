@@ -7,6 +7,109 @@
 
 
 
+## 🩹 fix(install): `eddi update` refreshes monitoring assets, not just compose files (2026-08-27)
+
+**Repo:** EDDI (`feat/grafana-full-metrics-dashboard`)
+
+The entry below fixed the *fresh install* path. The **upgrade** path was still
+broken, and worse: it would have taken working installations down.
+
+### Why
+
+The generated `eddi` CLI wrapper's `update` command refreshes only the files in
+`COMPOSE_FILES` and then runs `pull` + `up -d`. Nothing under `docs/monitoring/`
+was ever re-fetched. So on an existing monitored installation:
+
+1. `docker-compose.monitoring.yml` is refreshed and now carries the
+   `eddi-full-metrics-dashboard.json` bind mount.
+2. The dashboard itself is never downloaded.
+3. `up -d` recreates Grafana against a mount source that does not exist.
+
+Reproduced end to end against a simulated pre-branch installation with real
+Docker.
+
+### The failure has two shapes, and it is sticky
+
+Worth recording precisely, because the earlier entry overstated it as always
+fatal — the outcome depends on what the `grafana-data` volume already holds:
+
+- **Fresh volume:** Docker creates a directory at the host path, the container
+  *starts*, and Grafana provisions **2 of 3** dashboards. Nothing is logged at
+  `level=error`. Silent partial monitoring.
+- **Volume already holding a file there:** runc fails the mount
+  (`Are you trying to mount a directory onto a file`) and the container never
+  leaves state `Created` — the whole stack is down.
+
+And the first case poisons the second: it also creates a directory *inside* the
+named volume at `/var/lib/grafana/dashboards/eddi-full-metrics.json`. Once that
+exists, restoring the host file makes the mount fail in the **opposite**
+direction, so re-running the install script is **not** sufficient on its own.
+Verified remedy:
+
+```bash
+docker compose ... down
+docker run --rm -v <project>_grafana-data:/v alpine:3 \
+  rm -rf /v/dashboards/eddi-full-metrics.json
+docker compose ... up -d          # after the host file is back in place
+```
+
+Comments at both download sites in `install.sh` were corrected to describe both
+shapes rather than only the hard failure.
+
+### The fix
+
+Both wrappers now refresh the monitoring assets after the compose files and
+**before** `pull`/`up -d`, and abort rather than restart if an asset is missing
+and cannot be downloaded — the running stack is left untouched instead of being
+recreated into a broken mount. Assets that fail to download but already exist on
+disk are kept, as the compose refresh already does.
+
+- **`install.sh`** derives the list from the refreshed compose file
+  (`grep -oE './docs/monitoring/…\.(json|ya?ml)'`), so the next asset added to
+  `docker-compose.monitoring.yml` needs no wrapper change.
+- **`install.ps1`** could not do the same safely. Its wrapper is a `.cmd` batch
+  file generated from an expandable PowerShell here-string, where `` ` `` is an
+  escape character and `$` interpolates — batch's `for /f ... in (\`cmd\`)` form
+  is unusable there, and no Windows/PowerShell was available to test a nested
+  construct. Instead the asset list was hoisted to `$script:MonitoringFiles` (one
+  source of truth, used by the install-time download) and the file-type entries
+  are interpolated into the wrapper at generation time as a plain batch list, so
+  the wrapper does no parsing at runtime.
+
+### Limitation — existing installations still need the install script re-run
+
+`eddi update` does not refresh the wrapper itself, so an installation created
+before this change keeps its old wrapper and its `eddi update` remains broken. The
+fix reaches it only by re-running the install script, which regenerates the
+wrapper. Making the wrapper self-refresh was deliberately not attempted: it would
+not help any wrapper already on disk, and a running bash script that overwrites
+itself risks corrupting its own execution, since bash reads scripts incrementally.
+
+### Verified
+
+- Fixed `update` against a pre-branch install: all four monitoring files fetched,
+  assets landing **before** the `pull`/`up -d` calls (checked with a `docker`
+  stub), then a real run producing a healthy Grafana with all **3** dashboards.
+- Abort guard: with the asset absent and the source unreachable, exit code 1, no
+  `docker` invocation, no stray directory left behind.
+- Old wrapper, same starting state, real Docker: 2 of 3 dashboards and a
+  root-owned directory at the mount path — the regression this prevents.
+- Generated batch wrapper rendered and checked: every `goto`/`call` label
+  resolves, no backticks inside the here-string, no unintended `$`.
+
+### Noticed, not fixed (both pre-existing, out of scope)
+
+- `eddi update --with-monitoring` is advertised by the installer's wizard
+  (`install.sh`, monitoring step) but the wrapper's `update` only parses
+  `--eddi-version=`. The flag does nothing.
+- The `.cmd` wrapper's `uninstall` embeds `$_` unescaped inside the expandable
+  here-string, so it is interpolated at *generation* time (to empty) rather than
+  reaching the generated file. The PATH-cleanup `Where-Object` is therefore
+  almost certainly broken, leaving a stale PATH entry after uninstall. Unverified
+  — no PowerShell in this environment.
+
+---
+
 ## 🩹 fix(install): ship the new dashboard through the installers, not just compose (2026-08-26)
 
 **Repo:** EDDI (`feat/grafana-full-metrics-dashboard`)

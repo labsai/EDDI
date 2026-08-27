@@ -451,6 +451,25 @@ function Step-Ports {
 
 # -- Compose file management ------------------------------
 
+# Monitoring support files, in the order they are fetched. Single source of truth:
+# Get-ComposeFiles downloads these at install time, and Install-CliWrapper emits the
+# file-type ones into the generated wrapper so `eddi update` refreshes them too.
+#
+# This list must stay in step with every file-type bind mount in
+# docker-compose.monitoring.yml. When a bind-mount source is missing Docker creates
+# a *directory* at that path, which either silently drops the dashboard or fails the
+# mount outright depending on what the grafana-data volume already holds — and the
+# first case leaves a stale directory inside the volume that keeps failing the mount
+# even after the file is restored.
+$script:MonitoringFiles = @(
+    "docs/monitoring/prometheus.yml",
+    "docs/monitoring/grafana-provisioning/dashboards/dashboards.yml",
+    "docs/monitoring/grafana-provisioning/datasources/datasources.yml",
+    "docs/monitoring/eddi-grafana-dashboard.json",
+    "docs/monitoring/eddi-operations-dashboard.json",
+    "docs/monitoring/eddi-full-metrics-dashboard.json"
+)
+
 function Get-ComposeFiles {
     New-Item -ItemType Directory -Force -Path $EddiDir | Out-Null
 
@@ -518,15 +537,7 @@ function Get-ComposeFiles {
     if ($WithMonitoring) {
         Write-Information -MessageData ""
         Write-Information -MessageData "  Downloading monitoring configuration..."
-        $monitoringFiles = @(
-            "docs/monitoring/prometheus.yml",
-            "docs/monitoring/grafana-provisioning/dashboards/dashboards.yml",
-            "docs/monitoring/grafana-provisioning/datasources/datasources.yml",
-            "docs/monitoring/eddi-grafana-dashboard.json",
-            "docs/monitoring/eddi-operations-dashboard.json",
-            "docs/monitoring/eddi-full-metrics-dashboard.json"
-        )
-        foreach ($mf in $monitoringFiles) {
+        foreach ($mf in $script:MonitoringFiles) {
             $mfTarget = Join-Path -Path $EddiDir -ChildPath $mf
             $mfLocalFile = if ($ScriptDir) { Join-Path -Path $ScriptDir -ChildPath $mf } else { "" }
             $mfDir = Split-Path -Path $mfTarget -Parent
@@ -808,6 +819,13 @@ function Write-ConfigSummary {
 
 function Install-CliWrapper {
     $cliPath = Join-Path -Path $EddiDir -ChildPath "eddi.cmd"
+
+    # Individual files only — a directory mount cannot be fetched as a unit, but the
+    # files inside grafana-provisioning/* can be and are, which keeps the provisioning
+    # config current too. Emitted into the wrapper as a space-separated batch list so
+    # 'eddi update' needs no parsing of the compose file at runtime.
+    $monAssets = ($script:MonitoringFiles | Where-Object { $_ -match '\.(json|ya?ml)$' }) -join ' '
+
     $cliContent = @"
 @echo off
 setlocal EnableDelayedExpansion
@@ -893,12 +911,69 @@ for %%F in (%COMPOSE_FILES%) do (
         )
     )
 )
+
+rem Refreshing the compose files above can introduce new file-type bind mounts, so
+rem the monitoring assets have to be on disk BEFORE the containers are recreated.
+rem Refreshing compose on its own is what breaks a previously working Grafana:
+rem Docker creates a directory at the missing mount path, which either silently
+rem drops the dashboard or fails the mount outright depending on the grafana-data
+rem volume's contents. (No backticks in this here-string: PowerShell would eat
+rem them as escape characters.)
+set "MISSING_ASSETS="
+set "MON_COMPOSE="
+for %%F in (%COMPOSE_FILES%) do (
+    if /i "%%~nxF"=="docker-compose.monitoring.yml" set "MON_COMPOSE=%%F"
+)
+if defined MON_COMPOSE (
+    echo.
+    echo Refreshing monitoring assets...
+    for %%F in ("!MON_COMPOSE!") do set "MON_DIR=%%~dpF"
+    for %%A in ($monAssets) do call :refresh_asset "%%A"
+)
+if defined MISSING_ASSETS goto update_assets_missing
+
 echo.
 echo Pulling latest images...
 docker compose %FLAGS% pull
 docker compose %FLAGS% up -d
 echo EDDI updated.
 goto :eof
+
+:refresh_asset
+set "REL=%~1"
+set "RELWIN=!REL:/=\!"
+set "TGT=!MON_DIR!!RELWIN!"
+for %%X in ("!TGT!") do set "TGTDIR=%%~dpX"
+if not exist "!TGTDIR!" mkdir "!TGTDIR!" >nul 2>nul
+rem rmdir, not del: what is in the way is most likely a DIRECTORY left behind by an
+rem earlier failed mount, and del cannot remove one.
+if exist "!TGT!\" rmdir /s /q "!TGT!" >nul 2>nul
+curl -fsSL "%COMPOSE_BASE_URL%/!REL!" -o "!TGT!.tmp" 2>nul
+set "ASSET_OK="
+if exist "!TGT!.tmp" for %%S in ("!TGT!.tmp") do if %%~zS GTR 0 set "ASSET_OK=1"
+if defined ASSET_OK (
+    move /y "!TGT!.tmp" "!TGT!" >nul 2>nul
+    echo   Updating !REL!... ok
+) else (
+    del "!TGT!.tmp" 2>nul
+    if exist "!TGT!" (
+        echo   Updating !REL!... warning: keeping existing file
+    ) else (
+        echo   Updating !REL!... FAILED
+        set "MISSING_ASSETS=!MISSING_ASSETS! !REL!"
+    )
+)
+goto :eof
+
+:update_assets_missing
+echo.
+echo Aborting before restart. These files are bind-mounted by
+echo docker-compose.monitoring.yml but are not on disk and could not be downloaded:
+for %%A in (!MISSING_ASSETS!) do echo   - %%A
+echo Starting now would leave Grafana unable to mount them, so the running stack
+echo has been left untouched. Re-run once GitHub is reachable, or re-run the
+echo install script.
+exit /b 1
 
 :cmd_uninstall
 rem Sanity check: refuse to delete if EDDI_DIR doesn't contain .eddi
