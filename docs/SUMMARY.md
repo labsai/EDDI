@@ -74,6 +74,7 @@
 
 ## Deployment & Infrastructure
 
+- [Configuration Reference](configuration-reference.md)
 - [Docker](docker.md)
 - [Kubernetes](kubernetes.md)
 - [RedHat OpenShift](redhat-openshift.md)
@@ -92,3 +93,9 @@
 - [Build Reproducibility](build-reproducibility.md)
 - [Changelog](changelog.md)
 - [FAQs](how-to....md)
+
+## Archive
+
+Historical material, kept for provenance. Nothing here describes current behaviour.
+
+- [v6.0 Development Snapshot (archived)](archive/handoff-v6.0-snapshot.md)

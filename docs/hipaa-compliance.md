@@ -243,8 +243,10 @@ As the HIPAA-covered entity or business associate deploying EDDI:
 - [ ] **RBAC**: Assign minimum necessary roles to each operator
 - [ ] **Data Retention**: Review `eddi.conversations.deleteEndedConversationsOnceOlderThanDays`
       — reduce from 365 to minimum necessary
-- [ ] **User Memory Purge**: Configure `eddi.usermemory.auto-purge-days` if
-      PHI is stored in user memories
+- [ ] **User Memory Purge**: Configure `eddi.usermemories.deleteOlderThanDays`
+      if PHI is stored in user memories. It ships as `-1`, which disables the
+      sweep entirely — persistent user memories are kept forever until you set a
+      positive number of days
 - [ ] **Emergency Access**: Document emergency access procedure with
       two-person authorization
 - [ ] **Risk Assessment**: Complete HIPAA Security Risk Assessment for your

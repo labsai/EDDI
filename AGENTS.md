@@ -49,7 +49,8 @@ The [README "Maven Command Reference"](README.md#maven-command-reference) is the
 | `./mvnw compile` | Compile only (fast feedback) — run before every commit per §2 rule 6 |
 | `./mvnw test` | Unit tests (excludes `*IT.java`); JaCoCo report at `target/site/jacoco/index.html` |
 | `./mvnw test -Dtest=ClassName` | Run a single test class |
-| `./mvnw verify` | Full build **including** integration tests — requires Docker |
+| `./mvnw verify` | Compile + unit tests + package. **Integration tests do NOT run** — `skipITs` defaults to `true` |
+| `./mvnw verify -DskipITs=false` | Full build **including** integration tests — requires Docker. The command CI runs |
 | `./mvnw validate` · `./mvnw formatter:format` | Checkstyle check · auto-format with the project Eclipse formatter |
 
 > **Sandbox caveat:** integration tests (`*IT.java`) and any test that binds a loopback/HTTP socket need Docker and frequently cannot run in sandboxed agent environments — CI verifies those. Locally, rely on `./mvnw test` (unit tests) and treat a green CI run as the source of truth for the rest.

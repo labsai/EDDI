@@ -77,7 +77,7 @@ Client sends context with attachment_* keys
 1. **Context Extraction** — `AttachmentContextExtractor` parses `attachment_*` context keys into `Attachment` objects
 2. **Memory Storage** — Attachments are stored as `List<Attachment>` in the `attachments` memory key
 3. **Rule Matching** — `ContentTypeMatcher` condition matches on MIME types for routing
-4. **LLM Forwarding** — `MultimodalMessageEnhancer` converts attachments to langchain4j `ImageContent` and enhances the user message
+4. **LLM Forwarding** — `AttachmentForwarder` resolves each attachment's bytes, gates it on `ModelCapabilityService`, and converts it to the right langchain4j `Content` on the outgoing user message
 
 ---
 
@@ -198,19 +198,40 @@ All attachments are forwarded to the LLM in a single multimodal user message.
 
 ## LLM Multimodal Support
 
-The `MultimodalMessageEnhancer` automatically converts attachments to the appropriate langchain4j content type:
+`AttachmentForwarder` is the single place an attachment becomes langchain4j
+`Content` on the outgoing user message. For each attachment it resolves the
+bytes from whichever source supplied them (stored blob, URL, inline base64)
+under uniform per-file and aggregate byte caps, asks `ModelCapabilityService`
+what the configured provider/model can actually accept, and emits accordingly:
 
-| MIME Type | langchain4j Content | Provider Support |
+| MIME Type | Model has the capability | Model does not |
 |---|---|---|
-| `image/*` | `ImageContent` | OpenAI GPT-4o, Gemini, Claude 3, Ollama (LLaVA) |
-| `application/pdf` | Metadata text (future: `PdfFileContent`) | Gemini |
-| `audio/*` | Metadata text (future: `AudioContent`) | Gemini |
-| Other | Metadata text description | All (text-only) |
+| `image/*` | `ImageContent` — the URL is passed through when the provider fetches URLs itself, otherwise the bytes are downloaded and inlined as base64 | Metadata note |
+| `application/pdf` | Native `PdfFileContent` | PDFBox text extraction, inlined as `TextContent` |
+| `audio/*` | `AudioContent` | Metadata note |
+| text-like (`text/*`, JSON, XML, CSV, YAML) | Decoded and inlined as `TextContent` — **no capability required**, so this works on every model | — |
+| Anything else | Metadata note pointing the model at the `readAttachment` tool | Metadata note |
 
-For unsupported MIME types, a text description is injected so the LLM knows an attachment was present:
+Note the difference between the last two rows: a CSV is *read* into the prompt,
+whereas a `.zip` is only *announced*. The metadata note looks like this:
+
 ```
-[Attachment: report.csv (text/csv, 15240 bytes)]
+[Attachment: archive.zip (application/zip, 15240 bytes)]
 ```
+
+**Nothing is dropped silently.** Text extracted from a PDF is persisted to the
+`attachments:extracts` memory key so later turns can stitch it back into the
+history, and every drop, cap-skip and capability gate is appended to
+`attachments:errors` — which is where to look first when a model claims it
+cannot see a file you attached.
+
+### Observability
+
+| Metric | Type | Meaning |
+|---|---|---|
+| `eddi.attachment.forwarded` | Counter | Attachments converted to `Content` |
+| `eddi.attachment.reinlined` | Counter | Extracted text stitched back into conversation history |
+| `eddi.attachment.errors` | Counter | Drops, cap-skips and capability gates |
 
 ---
 
@@ -297,6 +318,6 @@ Two group-specific bounds: the per-turn cap (`eddi.attachments.max-per-turn`) ap
 ## Architecture Notes
 
 - **No inline storage**: Attachment payloads are never stored inline in conversation memory documents. Only metadata references are persisted.
-- **Transient base64**: The `base64Data` field is `transient` — it exists only during the pipeline turn. For persistence, use the upload endpoint with `IAttachmentStorage`.
-- **DB-agnostic**: The `IAttachmentStorage` SPI supports MongoDB (GridFS) and PostgreSQL (bytea) implementations.
-- **GDPR cleanup**: `IAttachmentStorage.deleteByConversation()` removes all attachments when a conversation is deleted.
+- **Transient base64**: The `base64Data` field is `transient` — it exists only during the pipeline turn. For persistence, use the upload endpoint with `IAttachmentStore`.
+- **DB-agnostic**: The `IAttachmentStore` SPI supports MongoDB (GridFS) and PostgreSQL (bytea) implementations.
+- **GDPR cleanup**: `IAttachmentStore.deleteByConversation()` removes all attachments when a conversation is deleted.

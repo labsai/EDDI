@@ -10,14 +10,18 @@ E.D.D.I ships three dashboards, all auto-provisioned into Grafana by
 | Dashboard | UID | File | Shape | Use it for |
 |-----------|-----|------|-------|------------|
 | **Operations Command Center** | `eddi-ops` | `eddi-operations-dashboard.json` | 51 panels, KPI strip + 9 rows | The front door. Is the platform healthy, and if not, roughly where. |
-| **Full Metrics Reference** | `eddi-metrics-all` | `eddi-full-metrics-dashboard.json` | 133 panels, 19 subsystem rows | Every meter E.D.D.I registers. Go here when the number you need is not on the ops dashboard. |
+| **Full Metrics Reference** | `eddi-metrics-all` | `eddi-full-metrics-dashboard.json` | 138 panels, 19 subsystem rows | Every meter E.D.D.I registers. Go here when the number you need is not on the ops dashboard. |
 | **EDDI Observability** | `eddi-observability` | `eddi-grafana-dashboard.json` | 16 panels, 6 rows | The original dashboard: Coordinator Health, Pipeline Tasks, Tool Execution, Vault & Security, NATS, HTTP & JVM. |
 
-The Full Metrics Reference covers **all 144 registered meters** — it is generated
-from the registration sites in the source, so a metric cannot be added to the
-codebase and silently go unwatched. All rows but the first are collapsed; open
-the subsystem you care about. Two template variables scope everything: the
-Prometheus **data source** and the scrape **job**.
+The Full Metrics Reference covers **every `eddi.*` meter the codebase
+registers**, and that is a checked property rather than an aspiration:
+`MetricsDashboardCoverageTest` scans the registration sites in `src/main/java`
+and fails the build if any meter has no panel. Add a meter without a panel and
+`./mvnw test` tells you, naming the meter and the file that registers it.
+
+All rows but the first are collapsed; open the subsystem you care about. Two
+template variables scope everything: the Prometheus **data source** and the
+scrape **job**.
 
 ### Enable Monitoring
 
@@ -286,6 +290,179 @@ sum(rate(eddi_tenant_quota_denied_total[5m]))
 gates (`checkAgentQuota`, `checkCostBudget`) deliberately do not touch it, so
 `allowed / (allowed + denied)` is not a true accept rate.
 
+### Coordinator Metrics
+
+```
+eddi_coordinator_active_conversations       # Conversations with a live queue (gauge)
+eddi_coordinator_queue_depth                # Total queued messages across all conversations (gauge)
+eddi_coordinator_total_processed_total      # Messages processed since start
+```
+
+`queue_depth` rising while `total_processed` flattens is the signature of a
+backlog: work is arriving faster than it drains.
+
+### Pipeline Metrics
+
+```
+eddi_pipeline_task_duration_seconds         # Per-task latency; tags: task.id, task.type
+eddi_pipeline_task_errors_total             # Per-task failures; tags: task.id, task.type, error.type
+```
+
+`eddi_pipeline_task_duration` is the **only** EDDI meter publishing histogram
+buckets, so it is the only one where `histogram_quantile` gives a real
+percentile. See [Timers do not publish percentiles](#timers-do-not-publish-percentiles).
+
+### Model Cascade Metrics
+
+Full guide: [model-cascade.md](model-cascade.md).
+
+```
+eddi_llm_cascade_executions_total           # Cascade runs started; tag: agentMode
+eddi_llm_cascade_escalations_total          # Moves to a costlier step; tag: reason (low_confidence|timeout|<error type>)
+eddi_llm_cascade_accepted_step_total        # Which step answered; tag: step
+eddi_llm_cascade_step_errors_total          # Per-step failures; tags: provider, type
+eddi_llm_cascade_ceiling_exceeded_total     # Run cut short; tag: kind (cost|duration)
+eddi_llm_cascade_tokens_total               # Tokens consumed; tag: provider
+eddi_llm_cascade_cost_total                 # Dollars spent; tag: provider
+eddi_llm_cascade_step_latency_seconds       # Per-step latency (timer); tag: provider
+eddi_llm_cascade_confidence                 # Confidence scores (timer used as a distribution)
+```
+
+**`accepted_step` is the metric that says whether cascading is working.** Mass at
+`step="0"` means the cheap model is carrying the load, which is the entire point.
+Mass at the last step means every turn pays for the cheap attempt *and* the
+expensive one.
+
+### Streaming Metrics
+
+```
+eddi_llm_streaming_downgraded_total         # Fell back to a single chunk; tag: reason
+eddi_llm_streaming_no_partials_total        # Provider streamed, but emitted no partial tokens
+eddi_llm_tool_context_evictions_total       # Exchanges dropped to fit the tool-context budget; tag: outcome (within_budget|still_over_budget)
+```
+
+`still_over_budget` means eviction ran and the context *remains* too large — the
+turn proceeds degraded. A persistent non-zero rate is a configuration problem,
+not a blip.
+
+### Attachment Metrics
+
+Full guide: [attachments-guide.md](attachments-guide.md).
+
+```
+eddi_attachment_forwarded_total             # Attachments converted to LLM content
+eddi_attachment_reinlined_total             # Extracted text stitched back into history
+eddi_attachment_errors_total                # Drops, cap-skips and capability gates
+```
+
+### HITL Metrics
+
+Full guide: [hitl.md](hitl.md).
+
+```
+eddi_hitl_pause_count_total                 # Turn-level pauses; tag: surface
+eddi_hitl_resume_count_total                # Turn-level resumes; tag: surface
+eddi_hitl_timeout_count_total               # Approvals that expired unanswered
+eddi_hitl_tool_pause_count_total            # Per-tool-call pauses
+eddi_hitl_tool_resume_count_total           # Per-tool-call resumes; tag: verdict
+eddi_hitl_tool_guard_count_total            # Guard evaluations; tag: guard
+eddi_hitl_rule_matched_total                # Approval rules that matched; tag: match
+eddi_mcp_hitl_pending_listed_total          # Pending approvals listed via MCP; tag: surface
+eddi_mcp_hitl_decision_total                # Decisions via MCP; tags: surface, verdict
+eddi_mcp_hitl_cancelled_total               # Cancellations via MCP; tag: surface
+```
+
+Pauses without matching resumes are approvals nobody answered. Alert on
+`eddi_hitl_pause_count_total - eddi_hitl_resume_count_total` growing without
+bound, not on either alone.
+
+### Platform Operator Metrics
+
+```
+eddi_operator_write_approval_total          # Gated operator writes; tag: decision
+eddi_operator_gate_verified                 # Write gate is verified and active (gauge, 1|0)
+eddi_operator_canary_total                  # Canary probes of the write gate
+eddi_operator_canary_duration_seconds       # Canary probe latency
+```
+
+`eddi_operator_gate_verified` dropping to `0` means the Platform Operator's
+human-approval gate is no longer proven — treat it as a security alert.
+
+### Prompt & Guardrail Metrics
+
+```
+eddi_snippets_cache_hits_total              # Prompt-snippet cache hits
+eddi_snippets_cache_misses_total            # Prompt-snippet cache misses
+eddi_counterweight_activation_count_total   # Counterweight activations; tag: level (normal|cautious|strict|unknown)
+eddi_counterweight_strict_downgraded_total  # strict downgraded because the model could not honour it
+eddi_identity_masking_applied_total         # Identity-masking passes applied
+```
+
+### Agent Identity & Signing Metrics
+
+```
+eddi_agent_identity_sign_count_total        # Agent configurations signed
+eddi_agent_identity_verify_success_total    # Signature verifications that passed
+eddi_agent_identity_verify_fail_total       # Signature verifications that failed
+eddi_agent_nonce_replay_rejected_total      # Requests rejected as replays
+eddi_agent_nonce_freshness_rejected_total   # Requests rejected as stale
+eddi_agent_nonce_clockskew_rejected_total   # Requests rejected for clock skew
+```
+
+Any sustained `verify_fail` or `replay_rejected` rate is an attack signal or a
+misconfigured peer — never routine.
+
+### Capability Registry Metrics
+
+Full guide: [capability-match-guide.md](capability-match-guide.md).
+
+```
+eddi_capability_query_count_total           # Capability lookups
+eddi_capability_query_time_seconds          # Lookup latency (timer)
+eddi_capability_miss_count_total            # Lookups matching no agent; tag: skill
+eddi_capability_strategy_applied_total      # Resolution strategy used; tag: strategy
+```
+
+`miss_count` tagged by `skill` names exactly which capability your agents cannot
+serve — the most directly actionable metric in this list.
+
+### Secrets Vault Metrics
+
+Full guide: [secrets-vault.md](secrets-vault.md).
+
+```
+eddi_vault_resolve_count_total              # Secret resolutions
+eddi_vault_store_count_total                # Secrets written
+eddi_vault_rotate_count_total               # Key rotations
+eddi_vault_delete_count_total               # Secrets deleted
+eddi_vault_errors_count_total               # Vault operation failures
+eddi_vault_cache_hits_total                 # Resolved-secret cache hits
+eddi_vault_cache_misses_total               # Resolved-secret cache misses
+eddi_vault_resolve_errors_total             # Resolution failures seen by SecretResolver
+eddi_vault_resolve_duration_seconds         # Resolution latency, provider side (timer)
+eddi_vault_resolve_time_seconds             # Resolution latency, resolver side (timer)
+eddi_vault_store_duration_seconds           # Write latency (timer)
+```
+
+### MCP & Integration Metrics
+
+```
+eddi_mcp_discovery_total                    # Remote tool discoveries; tag: outcome
+eddi_mcp_response_truncation_count_total    # Tool responses truncated to fit the context
+eddi_mcp_conversation_access_denied_total   # MCP conversation access refused; tag: tool
+eddi_openai_requests_total                  # OpenAI-compatible API requests; tags: mode, outcome
+eddi_openai_request_duration_seconds        # Request latency (timer)
+eddi_openai_conversations_created_total     # Conversations created via the /v1 adapter
+eddi_caller_identity_resolution_total       # Caller-identity resolutions; tags: outcome, reference
+```
+
+### Session & Listing Metrics
+
+```
+eddi_session_checkpoint_count_total         # Conversation memory checkpoints written
+eddi_conversations_listing_owner_scan_exhausted_total  # Conversation listing gave up scanning for an owner
+```
+
 ### Audit Ledger Metrics
 
 ```
@@ -423,21 +600,32 @@ groups:
 
 EDDI also exposes tool metrics via REST:
 
-```bash
-# Cache stats
-GET /langchain/tools/cache/stats
+All of them live under `/llm/tools` (`RestToolHistory`):
 
-# Rate limit info
-GET /langchain/tools/ratelimit/{toolName}
+```bash
+# Tool history for one conversation
+GET    /llm/tools/history/{conversationId}
+
+# Result cache
+GET    /llm/tools/cache/stats
+GET    /llm/tools/cache/ttl/{toolName}
+DELETE /llm/tools/cache
+
+# Rate limiting
+GET    /llm/tools/ratelimit/{toolName}
+POST   /llm/tools/ratelimit/{toolName}/reset
 
 # Cost tracking
-GET /langchain/tools/costs
-GET /langchain/tools/costs/conversation/{conversationId}
-GET /langchain/tools/costs/tool/{toolName}
-
-# Tool history
-GET /langchain/tools/history/{conversationId}
+GET    /llm/tools/costs
+GET    /llm/tools/costs/conversation/{conversationId}
+GET    /llm/tools/costs/tool/{toolName}
+POST   /llm/tools/costs/reset
 ```
+
+> The pre-v6 prefix `/langchain/tools` still answers, because
+> `LegacyPathRewriteFilter` rewrites it to `/llm/tools`. That is a compatibility
+> shim for existing clients, not a second spelling to write in new code — it can
+> be withdrawn, and it makes stale documentation look correct while it lives.
 
 ---
 

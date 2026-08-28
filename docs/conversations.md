@@ -56,7 +56,8 @@ In this section we will explain how to **send/receive messages** from an Agent. 
   "userId": "string",
   "environment": "string",
   "conversationState": "string",
-  "redoCacheSize": 0,
+  "undoAvailable": Boolean,
+  "redoAvailable": Boolean,
   "conversationOutputs": [
                 "input"    :    "string",
                 "expressions"    :    <arrayOfString>,
@@ -124,7 +125,8 @@ In this section we will explain how to **send/receive messages** from an Agent. 
   "userId": "anonymous-zj1p1GDtM5",
   "environment": "production",
   "conversationState": "READY",
-  "redoCacheSize": 0,
+  "undoAvailable": false,
+  "redoAvailable": false,
   "conversationOutputs": [
     {
       "input": "madrid",
@@ -318,7 +320,8 @@ Response Body
   "agentVersion": 1,
   "environment": "production",
   "conversationState": "READY",
-  "redoCacheSize": 0,
+  "undoAvailable": false,
+  "redoAvailable": false,
   "conversationSteps": [
     {
       "conversationStep": [
@@ -362,7 +365,8 @@ _Response Body_
   "agentVersion": 1,
   "environment": "production",
   "conversationState": "READY",
-  "redoCacheSize": 0,
+  "undoAvailable": false,
+  "redoAvailable": false,
   "conversationSteps": [
     {
       "conversationStep": [
@@ -567,21 +571,36 @@ Step 1 → Step 2 → Step 4
          ↓ redo cache cleared (Step 3 lost)
 ```
 
-### Checking Redo Cache Size
+### Checking Whether Undo / Redo Is Available
 
-The conversation response includes `redoCacheSize` field:
+There are two ways to ask, and they answer different questions.
+
+**`GET` the action's own path** — a bare JSON boolean, nothing else:
+
+```bash
+curl -X GET "http://localhost:7070/agents/CONV_ID/undo"   # → true | false
+curl -X GET "http://localhost:7070/agents/CONV_ID/redo"   # → true | false
+```
+
+`GET` asks; `POST` to the same path performs the action. That symmetry is easy
+to trip over — a `POST /agents/CONV_ID/undo` you meant as a check will actually
+undo the step.
+
+**Read the conversation snapshot**, which carries both flags alongside the rest
+of the state:
 
 ```json
 {
   "conversationId": "CONV_ID",
-  "redoCacheSize": 0,
-  "conversationState": "READY"
+  "conversationState": "READY",
+  "undoAvailable": true,
+  "redoAvailable": false
 }
 ```
 
-- `redoCacheSize: 0` - No undo has been performed, redo not available
-- `redoCacheSize: 1` - One undo performed, one redo available
-- `redoCacheSize: 2` - Two undos performed, two redos available
+These are **booleans, not depths**. The redo cache is a stack and can hold more
+than one step, but neither the REST contract nor the snapshot exposes how many —
+`redoAvailable: true` means "at least one", and that is all you can rely on.
 
 ### Use Cases
 

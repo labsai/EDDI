@@ -25,7 +25,7 @@
     {
       "id": 134,
       "type": "row",
-      "title": "Overview \u2014 is EDDI healthy right now?",
+      "title": "Overview — is EDDI healthy right now?",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -43,7 +43,7 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "`eddi_agents_deployed` \u2014 agents currently in a deployed state.",
+      "description": "`eddi_agents_deployed` — agents currently in a deployed state.",
       "gridPos": {
         "h": 5,
         "w": 3,
@@ -109,7 +109,7 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "`eddi_processing_conversation_count` \u2014 turns being processed right now.",
+      "description": "`eddi_processing_conversation_count` — turns being processed right now.",
       "gridPos": {
         "h": 5,
         "w": 3,
@@ -175,7 +175,7 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "Rate of `eddi_conversation_processing_count_total` \u2014 pipeline throughput.",
+      "description": "Rate of `eddi_conversation_processing_count_total` — pipeline throughput.",
       "gridPos": {
         "h": 5,
         "w": 3,
@@ -242,7 +242,7 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "success / (success + failure). Cached and rate-limited calls are excluded \u2014 they are neither a success nor a failure of the tool itself.",
+      "description": "success / (success + failure). Cached and rate-limited calls are excluded — they are neither a success nor a failure of the tool itself.",
       "gridPos": {
         "h": 5,
         "w": 3,
@@ -448,7 +448,7 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "`eddi_tool_costs_total` gauge \u2014 dollars accrued since process start.",
+      "description": "`eddi_tool_costs_total` gauge — dollars accrued since process start.",
       "gridPos": {
         "h": 5,
         "w": 3,
@@ -515,7 +515,7 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "`eddi_operator_gate_verified` \u2014 1 only while every provisioned operator version read back with a sound approval gate. 0 also means 'never reported', so a fresh deployment reads 0. This is the meter worth alerting on.",
+      "description": "`eddi_operator_gate_verified` — 1 only while every provisioned operator version read back with a sound approval gate. 0 also means 'never reported', so a fresh deployment reads 0. This is the meter worth alerting on.",
       "gridPos": {
         "h": 5,
         "w": 3,
@@ -723,7 +723,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`_seconds_sum / _seconds_count` for each lifecycle timer. These timers publish no histogram buckets, so a true percentile is not available \u2014 this is the interval mean.",
+          "description": "`_seconds_sum / _seconds_count` for each lifecycle timer. These timers publish no histogram buckets, so a true percentile is not available — this is the interval mean.",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -854,7 +854,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`_seconds_max` \u2014 the slowest single observation in each decay window.",
+          "description": "`_seconds_max` — the slowest single observation in each decay window.",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -1135,7 +1135,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_conversations_listing_owner_scan_exhausted_total` \u2014 a conversation listing gave up before filling the requested page. Sustained non-zero means the owner filter is scanning too much; the caller sees a short page.",
+          "description": "`eddi_conversations_listing_owner_scan_exhausted_total` — a conversation listing gave up before filling the requested page. Sustained non-zero means the owner filter is scanning too much; the caller sees a short page.",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -1210,7 +1210,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_session_checkpoint_count_total` by `action` \u2014 session fork/snapshot activity.",
+          "description": "`eddi_session_checkpoint_count_total` by `action` — session fork/snapshot activity.",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -1300,7 +1300,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_coordinator_queue_depth` \u2014 conversations waiting for a slot. Sustained growth means arrival outpaces processing.",
+          "description": "`eddi_coordinator_queue_depth` — conversations waiting for a slot. Sustained growth means arrival outpaces processing.",
           "gridPos": {
             "h": 7,
             "w": 8,
@@ -1623,7 +1623,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "Which lifecycle task is slow. Note the label is `task_type` \u2014 Micrometer converts the `task.type` tag key to an underscore.",
+          "description": "Which lifecycle task is slow. Note the label is `task_type` — Micrometer converts the `task.type` tag key to an underscore.",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -2279,7 +2279,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_tool_budget_exceeded_total` \u2014 a conversation hit its cost ceiling and the call was refused.",
+          "description": "`eddi_tool_budget_exceeded_total` — a conversation hit its cost ceiling and the call was refused.",
           "gridPos": {
             "h": 7,
             "w": 8,
@@ -2429,7 +2429,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "Rate of `eddi_tool_costs_total{tool}` \u2014 dollars per second, per tool.",
+          "description": "Rate of `eddi_tool_costs_total{tool}` — dollars per second, per tool.",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -2754,7 +2754,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_tool_cache_size` \u2014 live entry count.",
+          "description": "`eddi_tool_cache_size` — live entry count.",
           "gridPos": {
             "h": 6,
             "w": 10,
@@ -3057,7 +3057,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_tool_cache_bypassed_total` \u2014 caching was enabled but no identity could scope the entry, so both read and write were skipped. Sustained non-zero means calls arrive with neither a user id nor a conversation id and pay full tool cost every time. Investigate the caller rather than widening cache scope.",
+          "description": "`eddi_tool_cache_bypassed_total` — caching was enabled but no identity could scope the entry, so both read and write were skipped. Sustained non-zero means calls arrive with neither a user id nor a conversation id and pay full tool cost every time. Investigate the caller rather than widening cache scope.",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -3471,7 +3471,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_tool_ratelimit_remaining` \u2014 tokens left in the most constrained bucket for each tool. Approaching zero means the next call is about to be denied.",
+          "description": "`eddi_tool_ratelimit_remaining` — tokens left in the most constrained bucket for each tool. Approaching zero means the next call is about to be denied.",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -3544,7 +3544,7 @@
     {
       "id": 140,
       "type": "row",
-      "title": "LLM \u2014 Model Cascade & Streaming",
+      "title": "LLM — Model Cascade & Streaming",
       "collapsed": true,
       "gridPos": {
         "h": 1,
@@ -3561,7 +3561,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_llm_cascade_tokens_total` \u2014 tokens/sec.",
+          "description": "`eddi_llm_cascade_tokens_total` — tokens/sec.",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -3864,7 +3864,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_llm_streaming_downgraded_total` \u2014 a streaming request fell back to non-streaming (e.g. `reason=tools_enabled`).",
+          "description": "`eddi_llm_streaming_downgraded_total` — a streaming request fell back to non-streaming (e.g. `reason=tools_enabled`).",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -3940,7 +3940,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_llm_streaming_no_partials_total` \u2014 the stream produced no incremental tokens, so the user waited for a single block.",
+          "description": "`eddi_llm_streaming_no_partials_total` — the stream produced no incremental tokens, so the user waited for a single block.",
           "gridPos": {
             "h": 7,
             "w": 8,
@@ -4015,7 +4015,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_llm_tool_context_evictions_total` \u2014 tool-result exchanges dropped to fit the token budget, incremented by the number evicted. `outcome=still_over_budget` means eviction ran and the context is *still* too large, so the model is about to see a truncated history. Registered through `Metrics.globalRegistry`.",
+          "description": "`eddi_llm_tool_context_evictions_total` — tool-result exchanges dropped to fit the token budget, incremented by the number evicted. `outcome=still_over_budget` means eviction ran and the context is *still* too large, so the model is about to see a truncated history. Registered through `Metrics.globalRegistry`.",
           "gridPos": {
             "h": 7,
             "w": 16,
@@ -4033,6 +4033,386 @@
               "editorMode": "code",
               "range": true,
               "legendFormat": "{{outcome}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 153,
+          "type": "timeseries",
+          "title": "Cascade executions by agent mode",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "Cascade runs started, split by whether agent mode (tool calling) was in use. The denominator for every other panel in this row.",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 40
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (agentMode) (rate(eddi_llm_cascade_executions_total{job=~\"$job\"}[$__rate_interval]))",
+              "legendFormat": "agentMode={{agentMode}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 154,
+          "type": "timeseries",
+          "title": "Escalations by reason",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "Why the cascade moved to a more expensive model: low_confidence, timeout, or an error type. A cascade that never escalates is paying for steps it does not use; one that always escalates is paying twice for every turn.",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 12,
+            "y": 40
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (reason) (rate(eddi_llm_cascade_escalations_total{job=~\"$job\"}[$__rate_interval]))",
+              "legendFormat": "{{reason}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 155,
+          "type": "timeseries",
+          "title": "Accepted step (which model actually answered)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "Index of the cascade step whose answer was accepted. Mass at step 0 means the cheap model is carrying the load — the whole point of cascading. Mass at the last step means the cascade is pure overhead.",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 47
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (step) (rate(eddi_llm_cascade_accepted_step_total{job=~\"$job\"}[$__rate_interval]))",
+              "legendFormat": "step {{step}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 156,
+          "type": "timeseries",
+          "title": "Step errors by provider and type",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "Errors raised by an individual cascade step, tagged with the provider that failed. These are absorbed by escalation, so they do not surface as request failures — this panel is the only place they are visible.",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 12,
+            "y": 47
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (provider, type) (rate(eddi_llm_cascade_step_errors_total{job=~\"$job\"}[$__rate_interval]))",
+              "legendFormat": "{{provider}} / {{type}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 157,
+          "type": "timeseries",
+          "title": "Ceiling exceeded (cost / duration)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "Cascade runs cut short because the configured cost or duration ceiling was hit. Non-zero means users are receiving the best answer obtained so far rather than the best answer available.",
+          "gridPos": {
+            "h": 7,
+            "w": 24,
+            "x": 0,
+            "y": 54
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (kind) (rate(eddi_llm_cascade_ceiling_exceeded_total{job=~\"$job\"}[$__rate_interval]))",
+              "legendFormat": "{{kind}}",
+              "range": true,
+              "refId": "A"
             }
           ],
           "fieldConfig": {
@@ -4105,7 +4485,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`guardrail_toolresult_count_total` by `action` \u2014 what the guardrail did to the result.",
+          "description": "`guardrail_toolresult_count_total` by `action` — what the guardrail did to the result.",
           "gridPos": {
             "h": 7,
             "w": 8,
@@ -4181,7 +4561,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "\u2026and which tool source triggered it.",
+          "description": "…and which tool source triggered it.",
           "gridPos": {
             "h": 7,
             "w": 8,
@@ -4257,7 +4637,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_mcp_response_truncation_count_total` by `strategy` \u2014 oversized tool responses being cut down before they reach the model.",
+          "description": "`eddi_mcp_response_truncation_count_total` by `strategy` — oversized tool responses being cut down before they reach the model.",
           "gridPos": {
             "h": 7,
             "w": 8,
@@ -4409,7 +4789,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_counterweight_strict_downgraded_total` \u2014 a strict counterweight could not be honoured and was reduced. Worth alerting on if the strict level is a compliance control.",
+          "description": "`eddi_counterweight_strict_downgraded_total` — a strict counterweight could not be honoured and was reduced. Worth alerting on if the strict level is a compliance control.",
           "gridPos": {
             "h": 7,
             "w": 8,
@@ -4484,7 +4864,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_identity_masking_applied_total` \u2014 outbound payloads with identity masked.",
+          "description": "`eddi_identity_masking_applied_total` — outbound payloads with identity masked.",
           "gridPos": {
             "h": 7,
             "w": 8,
@@ -4660,7 +5040,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_hitl_timeout_count_total` \u2014 nobody answered in time and the timeout policy fired.",
+          "description": "`eddi_hitl_timeout_count_total` — nobody answered in time and the timeout policy fired.",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -4736,7 +5116,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_hitl_tool_pause_count_total` and `eddi_hitl_tool_resume_count_total{verdict}` \u2014 the per-tool-call approval gate.",
+          "description": "`eddi_hitl_tool_pause_count_total` and `eddi_hitl_tool_resume_count_total{verdict}` — the per-tool-call approval gate.",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -4823,7 +5203,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_hitl_rule_matched_total` by `match` \u2014 which `hitlConfig.toolApprovals` `requireApproval` pattern matched, counted once per distinct rule per gated call. A pattern that never appears here is dead config.",
+          "description": "`eddi_hitl_rule_matched_total` by `match` — which `hitlConfig.toolApprovals` `requireApproval` pattern matched, counted once per distinct rule per gated call. A pattern that never appears here is dead config.",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -4899,7 +5279,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_operator_write_approval_total` by `decision` (approved / rejected / timeout) \u2014 one per gated operator write the moment it resolves.",
+          "description": "`eddi_operator_write_approval_total` by `decision` (approved / rejected / timeout) — one per gated operator write the moment it resolves.",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -4975,7 +5355,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_hitl_tool_guard_count_total` by `guard` \u2014 a safety guard (e.g. `pause_cap`) stopped the gate rather than the human.",
+          "description": "`eddi_hitl_tool_guard_count_total` by `guard` — a safety guard (e.g. `pause_cap`) stopped the gate rather than the human.",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -5632,7 +6012,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_group_facilitator_moves_total` by `outcome` \u2014 `proposed` is every move the model asked for, `executed` the ones allowed, `rejected` the ones the bounded-move config refused. A large proposed/executed gap means the facilitator is repeatedly attempting moves it is not permitted to make.",
+          "description": "`eddi_group_facilitator_moves_total` by `outcome` — `proposed` is every move the model asked for, `executed` the ones allowed, `rejected` the ones the bounded-move config refused. A large proposed/executed gap means the facilitator is repeatedly attempting moves it is not permitted to make.",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -5856,7 +6236,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_group_cost_ceiling_hit_total` \u2014 a discussion was cut off by its budget. Already `_total`-suffixed in source, so Micrometer does not add another.",
+          "description": "`eddi_group_cost_ceiling_hit_total` — a discussion was cut off by its budget. Already `_total`-suffixed in source, so Micrometer does not add another.",
           "gridPos": {
             "h": 7,
             "w": 8,
@@ -5931,7 +6311,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_group_member_pause_skipped_count_total` \u2014 a HUMAN member's turn did not pause when it should have.",
+          "description": "`eddi_group_member_pause_skipped_count_total` — a HUMAN member's turn did not pause when it should have.",
           "gridPos": {
             "h": 7,
             "w": 8,
@@ -6006,7 +6386,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_team_cadence_runs_{started,skipped}_total` \u2014 scheduled standing-team cadences.",
+          "description": "`eddi_team_cadence_runs_{started,skipped}_total` — scheduled standing-team cadences.",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -6377,7 +6757,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_schedule_fire_deadlettered_total` \u2014 retries exhausted; the trigger will not run again without intervention.",
+          "description": "`eddi_schedule_fire_deadlettered_total` — retries exhausted; the trigger will not run again without intervention.",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -6452,7 +6832,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_schedule_claim_conflict_total` \u2014 two nodes raced for the same fire. A low rate is normal cluster behaviour; a high one means the poll interval is too tight.",
+          "description": "`eddi_schedule_claim_conflict_total` — two nodes raced for the same fire. A low rate is normal cluster behaviour; a high one means the poll interval is too tight.",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -6524,7 +6904,7 @@
     {
       "id": 145,
       "type": "row",
-      "title": "Persistent Memory \u2014 Dream & Summarization",
+      "title": "Persistent Memory — Dream & Summarization",
       "collapsed": true,
       "gridPos": {
         "h": 1,
@@ -6541,7 +6921,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`dream_*_total` \u2014 the DreamService consolidation pass.",
+          "description": "`dream_*_total` — the DreamService consolidation pass.",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -6726,7 +7106,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`dream_contradictions_found_total` \u2014 conflicting memory entries detected.",
+          "description": "`dream_contradictions_found_total` — conflicting memory entries detected.",
           "gridPos": {
             "h": 7,
             "w": 8,
@@ -6973,7 +7353,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`summarization_calls_total` / `summarization_errors_total` \u2014 the shared summarizer used by both Dream and conversation windowing.",
+          "description": "`summarization_calls_total` / `summarization_errors_total` — the shared summarizer used by both Dream and conversation windowing.",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -7060,7 +7440,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_snippets_cache_{hits,misses}_total` \u2014 Caffeine cache in `PromptSnippetService`.",
+          "description": "`eddi_snippets_cache_{hits,misses}_total` — Caffeine cache in `PromptSnippetService`.",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -7144,7 +7524,7 @@
     {
       "id": 146,
       "type": "row",
-      "title": "Integrations \u2014 MCP, A2A Identity, OpenAI-compatible API",
+      "title": "Integrations — MCP, A2A Identity, OpenAI-compatible API",
       "collapsed": true,
       "gridPos": {
         "h": 1,
@@ -7237,7 +7617,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_mcp_conversation_access_denied_total` \u2014 an MCP tool tried to reach a conversation it is not scoped to.",
+          "description": "`eddi_mcp_conversation_access_denied_total` — an MCP tool tried to reach a conversation it is not scoped to.",
           "gridPos": {
             "h": 7,
             "w": 8,
@@ -7388,7 +7768,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_agent_identity_*` \u2014 A2A peer message signing. A non-zero verify-fail rate is a security signal, not a performance one.",
+          "description": "`eddi_agent_identity_*` — A2A peer message signing. A non-zero verify-fail rate is a security signal, not a performance one.",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -7584,7 +7964,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_openai_requests_total` by `outcome` \u2014 the `/v1` adapter.",
+          "description": "`eddi_openai_requests_total` by `outcome` — the `/v1` adapter.",
           "gridPos": {
             "h": 7,
             "w": 8,
@@ -7660,7 +8040,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "\u2026by `mode` (streaming vs blocking).",
+          "description": "…by `mode` (streaming vs blocking).",
           "gridPos": {
             "h": 7,
             "w": 8,
@@ -7822,7 +8202,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_openai_conversations_created_total` \u2014 each new Open WebUI chat maps to a fresh EDDI conversation.",
+          "description": "`eddi_openai_conversations_created_total` — each new Open WebUI chat maps to a fresh EDDI conversation.",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -7897,7 +8277,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_attachment_*_total` \u2014 multimodal attachment handling.",
+          "description": "`eddi_attachment_*_total` — multimodal attachment handling.",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -8182,7 +8562,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_capability_miss_count_total` by `skill` \u2014 capabilities agents asked for and no registered agent could serve. This is a backlog of missing agents.",
+          "description": "`eddi_capability_miss_count_total` by `skill` — capabilities agents asked for and no registered agent could serve. This is a backlog of missing agents.",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -8254,7 +8634,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_capability_strategy_applied_total` by `strategy` \u2014 which matching strategy won.",
+          "description": "`eddi_capability_strategy_applied_total` by `strategy` — which matching strategy won.",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -8481,7 +8861,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`connection_resolve_time_seconds`. The tag key is `authType` in source and stays camelCase in Prometheus \u2014 only dots become underscores.",
+          "description": "`connection_resolve_time_seconds`. The tag key is `authType` in source and stays camelCase in Prometheus — only dots become underscores.",
           "gridPos": {
             "h": 7,
             "w": 8,
@@ -8557,7 +8937,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`connection_grant_missing_count_total` \u2014 a binding asked for a grant that is not configured. This is a config gap, not a runtime error.",
+          "description": "`connection_grant_missing_count_total` — a binding asked for a grant that is not configured. This is a config gap, not a runtime error.",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -8633,7 +9013,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_caller_identity_resolution_total` by `reference` \u2014 `token` vs `userId`.",
+          "description": "`eddi_caller_identity_resolution_total` by `reference` — `token` vs `userId`.",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -8709,7 +9089,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_caller_identity_resolution_total` by `outcome` \u2014 `${caller:token}` / `${caller:userId}` resolution. Failures fail closed, so a rising failure rate means HTTP calls are being refused rather than sent unauthenticated.",
+          "description": "`eddi_caller_identity_resolution_total` by `outcome` — `${caller:token}` / `${caller:userId}` resolution. Failures fail closed, so a rising failure rate means HTTP calls are being refused rather than sent unauthenticated.",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -8953,7 +9333,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_vault_errors_count_total` (provider) and `eddi_vault_resolve_errors_total` (resolver). A resolve error means a `${vault:...}` reference did not resolve \u2014 the dependent HTTP call or model provider is now failing.",
+          "description": "`eddi_vault_errors_count_total` (provider) and `eddi_vault_resolve_errors_total` (resolver). A resolve error means a `${vault:...}` reference did not resolve — the dependent HTTP call or model provider is now failing.",
           "gridPos": {
             "h": 6,
             "w": 10,
@@ -9358,7 +9738,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_tenant_quota_allowed_total` counts slot acquisitions only \u2014 the read-only gates (`checkAgentQuota`, `checkCostBudget`) deliberately do not touch it, so treat this as acquisitions vs all denials rather than a strict ratio.",
+          "description": "`eddi_tenant_quota_allowed_total` counts slot acquisitions only — the read-only gates (`checkAgentQuota`, `checkCostBudget`) deliberately do not touch it, so treat this as acquisitions vs all denials rather than a strict ratio.",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -9521,7 +9901,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "Who is hitting their limits. Filtered to tagged series \u2014 see the by-type panel.",
+          "description": "Who is hitting their limits. Filtered to tagged series — see the by-type panel.",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -9765,7 +10145,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_audit_entries_dropped_total` \u2014 the audit ledger shed an entry rather than grow the heap. Any sustained non-zero value is a compliance problem under the EU AI Act: the ledger is no longer a complete record. Alert on this.",
+          "description": "`eddi_audit_entries_dropped_total` — the audit ledger shed an entry rather than grow the heap. Any sustained non-zero value is a compliance problem under the EU AI Act: the ledger is no longer a complete record. Alert on this.",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -9854,7 +10234,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_operator_gate_verified` \u2014 1 only while every provisioned operator version read back with a sound approval gate.",
+          "description": "`eddi_operator_gate_verified` — 1 only while every provisioned operator version read back with a sound approval gate.",
           "gridPos": {
             "h": 6,
             "w": 4,
@@ -10353,7 +10733,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_nats_dead_letter_count_total` \u2014 a conversation message exhausted its retries.",
+          "description": "`eddi_nats_dead_letter_count_total` — a conversation message exhausted its retries.",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -11078,7 +11458,7 @@
   },
   "timepicker": {},
   "timezone": "browser",
-  "title": "E.D.D.I \u2014 Full Metrics Reference",
+  "title": "E.D.D.I — Full Metrics Reference",
   "uid": "eddi-metrics-all",
   "version": 1,
   "weekStart": "",

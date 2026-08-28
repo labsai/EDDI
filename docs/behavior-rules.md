@@ -364,19 +364,30 @@ The **`{id}`** is a path parameters that indicate which behavior rule you want t
 
 ### API Methods
 
-| HTTP Method | API Endpoint                                      | Request Body          | Response              |
-| ----------- | ------------------------------------------------- | --------------------- | --------------------- |
-| **DELETE**  | `/rulestore/rulesets/{id}`                | N/A                   | N/A                   |
-| **GET**     | `/rulestore/rulesets/{id}`                | N/A                   | **BehaviorSet model** |
-| **PUT**     | `/rulestore/rulesets/{id}`                | **BehaviorSet model** | N/A                   |
-| **GET**     | `/rulestore/rulesets/descriptors`         | N/A                   | **DocumentDescriptor[]** |
-| **POST**    | `/rulestore/rulesets`                     | **BehaviorSet model** | N/A                   |
-| **GET**     | `/rulestore/rulesets/{id}/currentversion` | N/A                   | **BehaviorSet model** |
-| **POST**    | `/rulestore/rulesets/{id}/currentversion` | **BehaviorSet model** | N/A                   |
+| HTTP Method | API Endpoint                                      | Request Body                | Response                             |
+| ----------- | ------------------------------------------------- | --------------------------- | ------------------------------------ |
+| **GET**     | `/rulestore/rulesets/descriptors`                 | N/A                         | **DocumentDescriptor[]**             |
+| **POST**    | `/rulestore/rulesets`                             | **RuleSetConfiguration**    | `201 Created` + `Location` and `X-Resource-URI` headers naming the new id and version |
+| **GET**     | `/rulestore/rulesets/{id}?version=N`              | N/A                         | **RuleSetConfiguration**             |
+| **PUT**     | `/rulestore/rulesets/{id}?version=N`              | **RuleSetConfiguration**    | `200 OK` + `Location` of the **new** version |
+| **POST**    | `/rulestore/rulesets/{id}?version=N`              | N/A                         | Duplicates the ruleset               |
+| **DELETE**  | `/rulestore/rulesets/{id}?version=N`              | N/A                         | N/A                                  |
+| **GET**     | `/rulestore/rulesets/{id}/currentversion`         | N/A                         | **`text/plain` integer** — the version number, *not* the ruleset |
+| **POST**    | `/rulestore/rulesets/{id}/currentversion`         | N/A                         | `303 See Other` → `/rulestore/rulesets/{id}?version=N` |
+
+> **`/currentversion` returns a version, not a document.** The `GET` answers with
+> a bare integer in `text/plain`, and the `POST` takes no body at all — it only
+> redirects you to the current version's URL. To fetch the ruleset itself, use
+> `GET /rulestore/rulesets/{id}?version=N`.
+>
+> Configurations are **immutable and versioned**: a `PUT` does not overwrite,
+> it creates version `N+1` and returns its `Location`. Omitting `?version=`
+> on a read gives you version 1, which is rarely what you want on a resource
+> that has been edited.
 
 ### Example
 
-We will demonstrate here the creation of a `BehaviorSet`
+We will demonstrate here the creation of a `RuleSetConfiguration`
 
 _Request URL_
 

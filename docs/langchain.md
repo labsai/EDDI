@@ -1060,7 +1060,7 @@ quiet: http, MCP, A2A and dynamic tools dispatch under their configured name, so
 a tool called `websearch` **was** priced and refused before `enforceBudget`
 existed. If you relied on such a ceiling, add the flag — every task carrying a
 ceiling without it is named once in a startup WARN. Cost is tracked and reported
-(`GET /llm/toolhistory/costs`, `eddi.tool.costs`) either way. The deployment-wide
+(`GET /llm/tools/costs`, `eddi.tool.costs`) either way. The deployment-wide
 default comes from `eddi.tools.budget.enforce-by-default` (default `false`).
 
 The check runs *before* each call and uses `<=`, so the call that crosses the

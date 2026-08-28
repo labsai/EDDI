@@ -479,7 +479,7 @@ public class WorkflowConfiguration {
 
 ### ToolExecutionService
 
-**Location**: `ai.labs.eddi.modules.langchain.tools.ToolExecutionService`
+**Location**: `ai.labs.eddi.modules.llm.tools.ToolExecutionService`
 
 **Purpose**: Unified execution pipeline for all AI agent tool invocations
 
@@ -526,7 +526,7 @@ The attachment subsystem handles binary file storage for multimodal conversation
 |-----------|---------|
 | **`IAttachmentStore`** | Interface for storing/loading binary attachments (GridFS for MongoDB, BLOB for PostgreSQL) |
 | **`MimeValidator`** | Magic-byte detection (16+ formats) and declared-vs-detected MIME compatibility checking |
-| **`MultimodalMessageEnhancer`** | Converts stored attachments into langchain4j `Content` objects (images → `ImageContent` via base64 data URI, others → text markers) |
+| **`AttachmentForwarder`** (`modules.llm.impl`) | The single place attachments become langchain4j `Content` on the outgoing user message. Resolves bytes from any source under uniform per-file/aggregate caps, gates on `ModelCapabilityService`, and emits `ImageContent` / native `PdfFileContent` / `AudioContent` / inlined text as the model allows — see [attachments-guide.md](attachments-guide.md#llm-multimodal-support) |
 
 ---
 
@@ -969,7 +969,7 @@ EDDI agents can sign their inter-agent messages using Ed25519 digital signatures
 
 **Key lifecycle:**
 
-1. **Key generation**: `POST /agentstore/{id}/signing/keys` → `AgentSigningService.generateKeyPair()` creates an Ed25519 keypair. Public key stored in `AgentConfiguration.identity.publicKey`, private key encrypted in the Secrets Vault
+1. **Key generation**: `AgentSigningService.generateKeyPair(tenantId, agentId)` creates an Ed25519 keypair. Public key stored in `AgentConfiguration.identity.publicKey`, private key encrypted in the Secrets Vault. **This is a service-level API with no REST endpoint** — keys are provisioned as part of agent creation, not by an operator call
 2. **Key rotation**: `AgentPublicKey` records support versioned keys with `validFromMs`/`validUntilMs` windows. Old and new keys overlap during rotation. Private keys use versioned vault paths (`agent-signing-key:{agentId}:v{version}`)
 3. **Signing**: When `security.signInterAgentMessages=true`, the `GroupConversationService` creates a `SignedEnvelope` for each agent response. The envelope contains the message payload, a UUID nonce, and an epoch timestamp. The canonical JSON form (RFC 8785 via `JacksonCanonicalizer`) is signed with Ed25519
 4. **Self-verification**: Immediately after signing, the service verifies its own signature against the agent's public key. If self-verification fails, the signature is discarded (fail-safe to unsigned)

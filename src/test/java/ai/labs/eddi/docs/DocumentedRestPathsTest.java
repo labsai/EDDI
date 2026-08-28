@@ -69,6 +69,8 @@ class DocumentedRestPathsTest {
         LEGACY_TO_V6.put("/langchainstore/langchains", "/llmstore/llms");
         LEGACY_TO_V6.put("/packagestore/packages", "/workflowstore/workflows");
         LEGACY_TO_V6.put("/botstore/bots", "/agentstore/agents");
+        LEGACY_TO_V6.put("/bottriggerstore/bottriggers", "/AgentTriggerStore/agenttriggers");
+        LEGACY_TO_V6.put("/langchain/tools", "/llm/tools");
     }
 
     /**
@@ -76,7 +78,7 @@ class DocumentedRestPathsTest {
      * of it. Repository-relative, forward-slashed.
      */
     private static Set<String> legacyChangeRecords() {
-        return Set.of("docs/changelog.md", "HANDOFF.md");
+        return Set.of("docs/changelog.md", "docs/archive/handoff-v6.0-snapshot.md");
     }
 
     private static final Set<String> SKIPPED_DIRS = Set.of("target", ".git", "node_modules", ".claude", ".mvn");
@@ -156,9 +158,16 @@ class DocumentedRestPathsTest {
      * deliberately, and shows up in review as what it is.
      */
     private static Set<String> allowedMentions() {
-        // AGENTS.md §5.5 explains that legacy URIs are auto-normalized on import,
-        // which cannot be written without naming one.
-        return Set.of("AGENTS.md → /botstore/bots");
+        return Set.of(
+                // AGENTS.md §5.5 explains that legacy URIs are auto-normalized on
+                // import, which cannot be written without naming one.
+                "AGENTS.md → /botstore/bots",
+                // metrics.md warns readers off this exact prefix. The warning is the
+                // reason the entry above it exists: six tool endpoints were documented
+                // under /langchain/tools, all of which answered — LegacyPathRewriteFilter
+                // rewrote them — so nothing looked wrong until you compared the page
+                // against RestToolHistory and found the base path had moved to /llm/tools.
+                "docs/metrics.md → /langchain/tools");
     }
 
     private static Path repoRoot() {

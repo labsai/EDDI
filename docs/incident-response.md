@@ -15,10 +15,26 @@ to a data breach involving the EDDI platform.
 
 ### Monitoring
 
-EDDI exposes metrics at `/q/metrics` (Prometheus format):
-- `eddi.conversations.active` — active conversation count
-- `eddi.tool.execution.count` — tool execution volume
-- `eddi.audit.entries.count` — audit ledger write rate
+EDDI exposes metrics at `/q/metrics` (Prometheus format). The names below are
+the Prometheus spellings — Micrometer replaces `.` with `_` and appends `_total`
+to counters, so `eddi.tool.execution.failure` is scraped as
+`eddi_tool_execution_failure_total`:
+
+- `eddi_processing_conversation_count` — conversations currently being processed
+  (gauge). A sustained rise with flat throughput means the coordinator is backing up
+- `eddi_coordinator_queue_depth` / `eddi_coordinator_active_conversations` — the
+  coordinator's own view of the same backlog
+- `eddi_tool_execution_success_total` / `eddi_tool_execution_failure_total` /
+  `eddi_tool_execution_ratelimited_total` — tool execution volume, tagged by
+  `tool`. A spike in one tool's `failure` or `ratelimited` is the usual first
+  sign of an outbound-integration incident
+- `eddi_audit_entries_dropped_total` — audit entries the ledger could **not**
+  write because its queue was full. This must stay at zero: a non-zero value
+  means the compliance trail has holes for the affected window
+- `eddi_vault_errors_count_total` — vault resolve/store failures
+
+There is no single "audit write rate" counter; use the ledger's own listing
+endpoint for volume, and the dropped counter above for integrity.
 
 ## 2. Assessment (First 4 Hours)
 
@@ -36,10 +52,14 @@ EDDI exposes metrics at `/q/metrics` (Prometheus format):
    GET /admin/gdpr/{userId}/export
    ```
 
-3. **Determine attack vector**: Check database logs for unauthorized access:
+3. **Determine attack vector**: Check application logs for unauthorized access:
    ```bash
-   GET /admin/logs?level=ERROR&limit=100
+   GET /administration/logs?level=ERROR&limit=100
    ```
+
+   `/administration/logs/history` queries persisted logs by `agentId`,
+   `conversationId`, `userId` or `instanceId`; `/administration/logs/stream`
+   tails them live over SSE.
 
 ### Risk Classification
 

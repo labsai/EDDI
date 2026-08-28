@@ -7,6 +7,154 @@
 
 
 
+## 📚 docs: repository-wide accuracy audit — fix what was wrong, enforce what was claimed (2026-08-28)
+
+**Repo:** EDDI (`claude/eddi-docs-review-04d1d7`)
+
+A full pass over every page in `docs/` plus the root markdown, cross-checking
+each factual claim against the source rather than against other documentation.
+The findings clustered into one shape: **documentation rots silently in exactly
+the places where a wrong answer still produces a plausible response.** A renamed
+class breaks the build. A renamed *property*, *metric* or *REST path* does not —
+`@ConfigProperty` resolves by string, Micrometer accepts any name, and
+`LegacyPathRewriteFilter` keeps pre-v6 paths answering — so the page keeps
+looking right until someone compares it to the code.
+
+### Fixed — things that could not work as written
+
+- **`docs/incident-response.md`** — this is a *breach runbook*, and every
+  identifier in its first two sections was wrong. `/admin/logs` → the real path
+  is `/administration/logs`. All three named metrics
+  (`eddi.conversations.active`, `eddi.tool.execution.count`,
+  `eddi.audit.entries.count`) are unregistered and return nothing; replaced with
+  the meters that exist, in their Prometheus spelling, each with a note on what
+  a bad value means. `eddi_audit_entries_dropped_total` in particular is the one
+  number that says the compliance trail has holes.
+- **`docs/metrics.md` + `docs/langchain.md`** — six tool endpoints documented
+  under `/langchain/tools`, the pre-v6 prefix. They *answered*, because
+  `LegacyPathRewriteFilter` rewrites them, which is precisely why nobody noticed:
+  the real base is `/llm/tools` (`RestToolHistory`). `GET /llm/toolhistory/costs`
+  in `langchain.md` was worse — no filter covers it, so it is a plain 404. Both
+  fixed, four previously-undocumented endpoints added
+  (`cache/ttl/{tool}`, `DELETE cache`, `ratelimit/{tool}/reset`, `costs/reset`),
+  and `/langchain/tools` added to `DocumentedRestPathsTest` so it cannot return.
+- **`docs/conversations.md`** — documented a `redoCacheSize` field, with three
+  bullet points interpreting its values. No such field has ever existed; the DTO
+  carries `undoAvailable`/`redoAvailable` booleans. Removed from four example
+  payloads and the response schema, and replaced with the two ways to actually
+  ask — including the trap that `GET` and `POST` on `/undo` are *ask* and *do*.
+- **`docs/hipaa-compliance.md`** — the retention checklist told operators to
+  configure `eddi.usermemory.auto-purge-days`, which does not exist. Real name:
+  `eddi.usermemories.deleteOlderThanDays`, and it ships as `-1`, meaning the
+  sweep is off. A compliance checklist naming a no-op property is worse than one
+  that says nothing.
+- **`docs/attachments-guide.md` + `docs/architecture.md`** — both described
+  `MultimodalMessageEnhancer`, deleted in 6.1.0 and replaced by
+  `AttachmentForwarder`. The capability table was stale with it: PDF and audio
+  were listed as "Metadata text (future: `PdfFileContent`/`AudioContent`)" when
+  both are implemented, and text-like files (JSON, XML, CSV, YAML) are decoded
+  and inlined rather than merely announced. Rewritten around what the forwarder
+  does, including `ModelCapabilityService` gating, the `attachments:extracts`
+  stitching, and the `attachments:errors` key — the first place to look when a
+  model claims it cannot see a file.
+- **`docs/behavior-rules.md`** — the REST table named the v5 `BehaviorSet`
+  model (now `RuleSetConfiguration`) and gave both `/currentversion` rows a
+  ruleset body. `GET` there returns a bare `text/plain` integer and `POST` takes
+  no body at all, redirecting `303` to `?version=N`. Corrected, with the
+  immutable-versioning behaviour of `PUT` spelled out.
+- **`docs/architecture.md`** — `POST /agentstore/{id}/signing/keys` does not
+  exist; agent key generation is a service-level API with no REST surface.
+- **Stale package paths** — `ai.labs.eddi.modules.langchain.tools.*` in
+  `security.md` and `architecture.md`; the package is `modules.llm.tools`.
+- **`README.md` + `AGENTS.md`** — both said `./mvnw verify` runs integration
+  tests. `pom.xml` sets `skipITs=true`, so it does not; CI runs
+  `-DskipITs=false`. Anyone following the documented "full build" was shipping
+  without ever running an IT locally.
+- **`docs/getting-started.md`** — v1 `docker-compose` syntax throughout (v2 is
+  `docker compose`, and the hyphenated binary is absent on current Docker), the
+  v5 word "packages" for workflows, the Manager described as an "Optional UI"
+  when it is bundled and served at `/manage`, a Maven prerequisite the wrapper
+  makes unnecessary, and a Kubernetes quickstart that ran `bash
+  k8s/create-secrets.sh` immediately after a `kubectl apply` from a URL — with no
+  checkout to run it from. All fixed, and a **Verifying It Works** section added:
+  the three checks CI runs against every published image, so the front door
+  finally has a success signal.
+
+### Fixed — claims with nothing behind them
+
+- **`docs/metrics.md`** claimed the Full Metrics dashboard "covers all 144
+  registered meters — it is generated from the registration sites in the source,
+  so a metric cannot be added to the codebase and silently go unwatched."
+  Nothing generated it and nothing checked it, and it was already false: five
+  `eddi.llm.cascade.*` counters were registered and on no panel — the exact
+  meters that say whether cascading saves money or pays twice per turn. Five
+  panels added (executions, escalations by reason, accepted step, step errors,
+  ceiling exceeded), and the claim replaced with one that is enforced.
+
+### Added
+
+- **`docs/configuration-reference.md`** — every one of the 118 `eddi.*`
+  properties, with default, environment-variable spelling and what it does.
+  **61 were previously documented nowhere at all**, including
+  `eddi.security.ssrf-protection.enabled` (off by default), every
+  `eddi.schedule.*` knob, all `eddi.shutdown.*` and all `eddi.nats.*`. The env
+  var rule is stated explicitly because it catches people out: `-` is *deleted*,
+  not converted (`eddi.vault.master-key` → `EDDI_VAULT_MASTERKEY`).
+- **`docs/scheduling.md`** — a Deployment Configuration section for the ten
+  `eddi.schedule.*` properties and the six schedule meters. The page explained
+  cluster-awareness without ever mentioning `lease-timeout` or `instance-id`,
+  which is what an operator needs; it now also states plainly that delivery is
+  at-least-once, so scheduled targets must be idempotent.
+- **`docs/metrics.md`** — 66 registered meters were missing from the metrics
+  reference. Thirteen new sections (Coordinator, Pipeline, Model Cascade,
+  Streaming, Attachments, HITL, Platform Operator, Prompt & Guardrail, Agent
+  Identity, Capability Registry, Vault, MCP & Integration, Session), each with
+  tag names and a note on how to read it. Coverage is now 135/135.
+- **`docs/security.md`** — the SSRF section described unconditional protection.
+  It *is* unconditional for tool URLs, but httpCall/MCP/A2A targets are gated
+  behind `eddi.security.ssrf-protection.enabled`, which defaults to `false` and
+  appeared in no document. Added, with the reason for the default (configured
+  targets legitimately reach internal hosts) and the condition under which it
+  must be turned on (any outbound URL influenced by conversation input).
+
+### Added — tests, so this does not recur
+
+Link rot and legacy paths already had guards (`DocumentationLinksTest`,
+`DocumentedRestPathsTest`). Configuration and metrics had none, which is why
+those were where the rot was.
+
+- **`MetricsDashboardCoverageTest`** — scans meter registration sites and fails
+  if a meter has no dashboard panel, or is absent from `docs/metrics.md`.
+- **`ConfigurationReferenceCoverageTest`** — asserts the reference is exhaustive
+  **and** that it invents nothing. The second direction matters as much: a
+  documented property nothing reads is a silent no-op, and the operator believes
+  the deployment is configured when it is not.
+- **`DocumentedRestPathsTest`** — `/langchain/tools` and
+  `/bottriggerstore/bottriggers` added to the legacy map.
+
+All three were mutation-checked: each was confirmed to fail when the fix it
+guards is reverted.
+
+### Moved
+
+- **`HANDOFF.md` → `docs/archive/handoff-v6.0-snapshot.md`** — 70 KB, last
+  updated 2026-03-30, self-declared "no longer actively maintained", and
+  referenced by nothing. It sat at the repository root, where AI coding
+  assistants load it, full of renamed classes and pre-v6 REST paths — it was
+  already exempted from `DocumentedRestPathsTest` for exactly that reason.
+  Archived rather than deleted so the reasoning stays recoverable, with a
+  `[!CAUTION]` header pointing at the changelog, `AGENTS.md` and
+  `architecture.md` instead.
+
+### Known, not addressed
+
+`docs/changelog.md` is 1.9 MB / ~500k tokens and is linked from `SUMMARY.md` as
+a browsable page. Splitting it per release would help both readers and agents,
+but every session appends to it under AGENTS.md §2 rule 8, so the split needs a
+deliberate decision about where new entries land rather than a drive-by change.
+
+---
+
 ## 📝 docs(monitoring): reconcile the dashboard inventory with what is provisioned (2026-08-27)
 
 **Repo:** EDDI (`feat/grafana-full-metrics-dashboard`)

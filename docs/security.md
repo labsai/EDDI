@@ -163,9 +163,36 @@ Set `eddi.caller-identity.enabled=false` to forbid the feature outright.
 
 ## SSRF Protection — `UrlValidationUtils`
 
-**Applies to:** PDF Reader, Web Scraper, and any future tool that fetches remote resources.
+**Applies to:** PDF Reader, Web Scraper, and any future tool that fetches remote
+resources — **always**, with no configuration.
 
 Server-Side Request Forgery (SSRF) occurs when an attacker tricks a server-side application into making requests to internal services. EDDI prevents this with `UrlValidationUtils.validateUrl(url)`:
+
+> ### ⚠️ Configured outbound calls are a separate, opt-in case
+>
+> The validation described in this section is unconditional for **tool** URLs,
+> because those are chosen by the LLM and therefore attacker-influenceable. It is
+> **not** applied by default to outbound calls whose target comes from *your own
+> configuration* — httpCalls, MCP servers and A2A peers — because those routinely
+> and legitimately address internal hosts (`http://billing.internal/api`), which
+> the validator would reject.
+>
+> Turn it on with:
+>
+> ```properties
+> eddi.security.ssrf-protection.enabled=true   # default: false
+> ```
+>
+> When enabled, `ApiCallExecutor`, `McpToolProviderManager` and
+> `A2AToolProviderManager` validate the **fully resolved** target — after
+> templating, global variables and vault references have been substituted — and
+> stop following redirects, so a `3xx` cannot bounce a permitted request onto an
+> internal host.
+>
+> **Enable it whenever any part of an httpCall URL can be influenced by
+> conversation input** (`{properties.x}`, `{memory.current.input}`, a context
+> variable). Leave it off only if every outbound target is a fixed literal and you
+> genuinely need to reach private addresses.
 
 ### Scheme Allowlist
 
@@ -211,7 +238,7 @@ Hostnames that indicate internal services are rejected:
 ### Usage
 
 ```java
-import static ai.labs.eddi.modules.langchain.tools.UrlValidationUtils.validateUrl;
+import static ai.labs.eddi.modules.llm.tools.UrlValidationUtils.validateUrl;
 
 // In any tool method that accepts a URL:
 validateUrl(url); // throws IllegalArgumentException if blocked
