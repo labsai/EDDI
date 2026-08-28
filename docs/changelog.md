@@ -361,7 +361,7 @@ The dashboards do.
 
 ---
 
-## ✨ feat(connections): a credential the caller hands over, so the agent cannot outreach the user (2026-08-25)
+## ✨ feat(connections): a credential the caller hands over, so an agent cannot exceed its user's permissions (2026-08-25)
 
 **Repo:** EDDI (branch for the Gnowbe connector)
 
