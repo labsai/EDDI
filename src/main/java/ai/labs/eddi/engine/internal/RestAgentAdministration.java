@@ -8,6 +8,8 @@ import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.configs.descriptors.model.AccessLevel;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.api.IRestAgentAdministration;
@@ -60,11 +62,14 @@ public class RestAgentAdministration implements IRestAgentAdministration {
 
     private static final Logger log = Logger.getLogger(RestAgentAdministration.class);
 
+    private final ResourceAccessGuard resourceAccessGuard;
+
     @Inject
     public RestAgentAdministration(IRuntime runtime, IAgentFactory agentFactory, IAgentStore agentStore, IDeploymentStore deploymentStore,
             IConversationMemoryStore conversationMemoryStore, IRestConversationStore restConversationStore,
             IDocumentDescriptorStore documentDescriptorStore, IDeploymentListener deploymentListener, IScheduleStore scheduleStore,
-            TenantQuotaService tenantQuotaService) {
+            TenantQuotaService tenantQuotaService, ResourceAccessGuard resourceAccessGuard) {
+        this.resourceAccessGuard = resourceAccessGuard;
         this.runtime = runtime;
         this.agentFactory = agentFactory;
         this.agentStore = agentStore;
@@ -84,6 +89,11 @@ public class RestAgentAdministration implements IRestAgentAdministration {
         RuntimeUtilities.checkNotNull(agentId, "agentId");
         RuntimeUtilities.checkNotNull(version, "version");
         RuntimeUtilities.checkNotNull(autoDeploy, "autoDeploy");
+
+        // Deploying is a change to the agent's live behaviour, so it takes EDIT — the
+        // same level as editing it. Before the quota gate below, because refusing an
+        // unauthorised deploy must not first consume the tenant's agent allowance.
+        resourceAccessGuard.requireAccess(agentId, AccessLevel.EDIT, "agent");
 
         // MUST sit before the try below, for the same reason as the quota gate: the
         // catch(Exception) there rethrows as InternalServerErrorException, which
@@ -319,6 +329,11 @@ public class RestAgentAdministration implements IRestAgentAdministration {
         RuntimeUtilities.checkNotNull(environment, "environment");
         RuntimeUtilities.checkNotNull(agentId, "agentId");
         RuntimeUtilities.checkNotNull(version, "version");
+
+        // Undeploying takes an agent offline for everyone using it, which is a change
+        // to the agent — EDIT, matching deploy. Without this any editor could take down
+        // any colleague's live agent.
+        resourceAccessGuard.requireAccess(agentId, AccessLevel.EDIT, "agent");
 
         try {
             do {

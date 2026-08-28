@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.agents.rest;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
@@ -64,7 +65,8 @@ class RestAgentStoreExtendedTest {
     void setUp() {
         openMocks(this);
         restAgentStore = new RestAgentStore(agentStore, restWorkflowStore,
-                documentDescriptorStore, jsonSchemaCreator, scheduleStore, capabilityRegistryService, deploymentStore);
+                documentDescriptorStore, jsonSchemaCreator, scheduleStore, capabilityRegistryService, deploymentStore,
+                mock(ResourceAccessGuard.class));
     }
 
     // ==================== readJsonSchema ====================

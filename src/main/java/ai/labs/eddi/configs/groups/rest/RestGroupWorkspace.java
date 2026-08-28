@@ -4,7 +4,9 @@
  */
 package ai.labs.eddi.configs.groups.rest;
 
+import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.groups.IGroupWorkspaceStore;
 import ai.labs.eddi.configs.groups.IRestGroupWorkspace;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionPhase;
@@ -59,21 +61,24 @@ public class RestGroupWorkspace implements IRestGroupWorkspace {
     private final IScheduleStore scheduleStore;
     private final TeamCadenceService teamCadenceService;
     private final SecurityIdentity identity;
+    private final ResourceAccessGuard accessGuard;
 
     @Inject
     public RestGroupWorkspace(IGroupWorkspaceStore workspaceStore, IAgentGroupStore groupStore,
-            IScheduleStore scheduleStore, TeamCadenceService teamCadenceService, SecurityIdentity identity) {
+            IScheduleStore scheduleStore, TeamCadenceService teamCadenceService, SecurityIdentity identity,
+            ResourceAccessGuard accessGuard) {
         this.workspaceStore = workspaceStore;
         this.groupStore = groupStore;
         this.scheduleStore = scheduleStore;
         this.teamCadenceService = teamCadenceService;
         this.identity = identity;
+        this.accessGuard = accessGuard;
     }
 
     @Override
     public Response readWorkspace(String groupId) {
         try {
-            requireGroupExists(groupId);
+            requireGroupAccess(groupId, AccessLevel.VIEW);
             GroupWorkspace workspace = workspaceStore.readOrCreate(groupId);
             teamCadenceService.reconcile(workspace);
             return Response.ok(workspace).build();
@@ -88,7 +93,7 @@ public class RestGroupWorkspace implements IRestGroupWorkspace {
     @Override
     public Response readBacklog(String groupId) {
         try {
-            requireGroupExists(groupId);
+            requireGroupAccess(groupId, AccessLevel.VIEW);
             GroupWorkspace workspace = workspaceStore.readOrCreate(groupId);
             teamCadenceService.reconcile(workspace);
             return Response.ok(workspace.getBacklog().getTasks()).build();
@@ -124,7 +129,7 @@ public class RestGroupWorkspace implements IRestGroupWorkspace {
                     .build();
         }
         try {
-            requireGroupExists(groupId);
+            requireGroupAccess(groupId, AccessLevel.EDIT);
             String subject = request.subject().trim();
             // Optimistic-concurrency retry (review finding): the cap and duplicate
             // checks run against THIS caller's snapshot; a plain whole-document
@@ -171,7 +176,7 @@ public class RestGroupWorkspace implements IRestGroupWorkspace {
                     .entity(Map.of("error", "cronExpression is required")).build();
         }
         try {
-            requireGroupExists(groupId);
+            requireGroupAccess(groupId, AccessLevel.EDIT);
             ZoneId zone = request.timeZone() != null && !request.timeZone().isBlank()
                     ? ZoneId.of(request.timeZone())
                     : ZoneId.of("UTC");
@@ -252,7 +257,7 @@ public class RestGroupWorkspace implements IRestGroupWorkspace {
     @Override
     public Response deleteCadence(String groupId, String cadenceId) {
         try {
-            requireGroupExists(groupId);
+            requireGroupAccess(groupId, AccessLevel.EDIT);
             GroupWorkspace workspace = workspaceStore.find(groupId);
             if (workspace == null) {
                 return Response.status(Response.Status.NOT_FOUND)
@@ -284,12 +289,23 @@ public class RestGroupWorkspace implements IRestGroupWorkspace {
         }
     }
 
-    /** 404 for a workspace under a group id that names no stored group config. */
-    private void requireGroupExists(String groupId) throws IResourceStore.ResourceNotFoundException,
+    /**
+     * 404 for a workspace under a group id that names no stored group config, and
+     * 403 when the caller may not reach that group.
+     * <p>
+     * A workspace has no descriptor of its own — its backlog, cadences and metrics
+     * belong to the group. So access is decided against the <em>group's</em>
+     * descriptor, which is what every one of these endpoints is really operating
+     * on. Existence is checked first deliberately: a caller who cannot see a group
+     * should not be able to distinguish "not yours" from "does not exist", and the
+     * group id is not a secret anyway once it appears in a URL the caller composed.
+     */
+    private void requireGroupAccess(String groupId, AccessLevel required) throws IResourceStore.ResourceNotFoundException,
             IResourceStore.ResourceStoreException {
         if (groupStore.getCurrentResourceId(groupId) == null) {
             throw new IResourceStore.ResourceNotFoundException("Group not found.");
         }
+        accessGuard.requireAccess(groupId, required, "group");
     }
 
     /**

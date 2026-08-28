@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.apicalls.rest;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.apicalls.IApiCallsStore;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
@@ -47,7 +48,7 @@ class RestApiCallsStoreDelegationTest {
     @BeforeEach
     void setUp() throws Exception {
         mocks = openMocks(this);
-        store = new RestApiCallsStore(httpCallsStore, documentDescriptorStore, jsonSchemaCreator);
+        store = new RestApiCallsStore(httpCallsStore, documentDescriptorStore, jsonSchemaCreator, mock(ResourceAccessGuard.class));
 
         // Access the restVersionInfo field to spy on it
         Field rvField = RestApiCallsStore.class.getDeclaredField("restVersionInfo");

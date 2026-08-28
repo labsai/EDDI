@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.channels.rest;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.channels.IChannelIntegrationStore;
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.channels.model.ChannelTarget;
@@ -48,7 +49,7 @@ class RestChannelIntegrationStoreCrudTest {
     void setUp() {
         channelStore = mock(IChannelIntegrationStore.class);
         documentDescriptorStore = mock(IDocumentDescriptorStore.class);
-        sut = new RestChannelIntegrationStore(channelStore, documentDescriptorStore);
+        sut = new RestChannelIntegrationStore(channelStore, documentDescriptorStore, mock(ResourceAccessGuard.class));
     }
 
     private static ChannelIntegrationConfiguration validConfig() {

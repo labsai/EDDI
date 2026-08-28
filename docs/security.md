@@ -74,6 +74,11 @@ docker run -e QUARKUS_OIDC_TENANT_ENABLED=true \
            labsai/eddi:latest
 ```
 
+> **Roles are deployment-wide.** `eddi-editor` grants authoring rights over
+> *every* configuration in the deployment. To scope agents, workflows and the
+> rest to the user or team that created them — and to share them deliberately —
+> see [Workspaces](workspaces.md).
+
 ### Auth Permissions
 
 When OIDC is enabled, the following permission rules apply (see `application.properties`):

@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.channels.IRestChannelIntegrationStore;
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.channels.model.ChannelTarget;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.datastore.IResourceStore;
@@ -55,8 +56,9 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
 
     @Inject
     public RestChannelIntegrationStore(IChannelIntegrationStore channelStore,
-            IDocumentDescriptorStore documentDescriptorStore) {
-        restVersionInfo = new RestVersionInfo<>(resourceURI, channelStore, documentDescriptorStore);
+            IDocumentDescriptorStore documentDescriptorStore,
+            ResourceAccessGuard resourceAccessGuard) {
+        restVersionInfo = new RestVersionInfo<>(resourceURI, channelStore, documentDescriptorStore, resourceAccessGuard);
         this.channelStore = channelStore;
         this.documentDescriptorStore = documentDescriptorStore;
     }
@@ -321,10 +323,14 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
                             && existing.getPlatformConfig() != null
                             && channelType.equalsIgnoreCase(existing.getChannelType())
                             && channelId.equals(existing.getPlatformConfig().get("channelId"))) {
+                        // The sweep is deliberately unscoped: a channelId collides with every
+                        // integration in the deployment, not only the caller's own, so scoping it
+                        // would let two workspaces both bind the same Slack channel and route each
+                        // other's messages. What the message must NOT do is name the conflicting
+                        // integration — that would turn a uniqueness check into an enumeration
+                        // oracle for other people's channel integrations.
                         throw new BadRequestException(
-                                "Another channel integration ('"
-                                        + (existing.getName() != null ? existing.getName() : resId.getId())
-                                        + "') already uses channelId '" + channelId
+                                "Another channel integration already uses channelId '" + channelId
                                         + "' for type '" + channelType + "'.");
                     }
                 } catch (BadRequestException e) {

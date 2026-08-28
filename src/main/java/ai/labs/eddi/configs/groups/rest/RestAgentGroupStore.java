@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.groups.rest;
 
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.IGroupWorkspaceStore;
 import ai.labs.eddi.configs.groups.IRestAgentGroupStore;
@@ -52,8 +53,9 @@ public class RestAgentGroupStore implements IRestAgentGroupStore {
 
     @Inject
     public RestAgentGroupStore(IAgentGroupStore groupStore, IDocumentDescriptorStore documentDescriptorStore, IJsonSchemaCreator jsonSchemaCreator,
-            IGroupWorkspaceStore workspaceStore, IScheduleStore scheduleStore) {
-        restVersionInfo = new RestVersionInfo<>(resourceURI, groupStore, documentDescriptorStore);
+            IGroupWorkspaceStore workspaceStore, IScheduleStore scheduleStore,
+            ResourceAccessGuard resourceAccessGuard) {
+        restVersionInfo = new RestVersionInfo<>(resourceURI, groupStore, documentDescriptorStore, resourceAccessGuard);
         this.groupStore = groupStore;
         this.documentDescriptorStore = documentDescriptorStore;
         this.jsonSchemaCreator = jsonSchemaCreator;

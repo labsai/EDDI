@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.configs.workflows.rest.RestWorkflowStore;
 import ai.labs.eddi.configs.rest.RestVersionInfo;
@@ -56,8 +57,9 @@ public class RestAgentStore implements IRestAgentStore {
     @Inject
     public RestAgentStore(IAgentStore agentStore, IRestWorkflowStore restWorkflowStore, IDocumentDescriptorStore documentDescriptorStore,
             IJsonSchemaCreator jsonSchemaCreator, IScheduleStore scheduleStore, CapabilityRegistryService capabilityRegistryService,
-            IDeploymentStore deploymentStore) {
-        restVersionInfo = new RestVersionInfo<>(resourceURI, agentStore, documentDescriptorStore);
+            IDeploymentStore deploymentStore,
+            ResourceAccessGuard resourceAccessGuard) {
+        restVersionInfo = new RestVersionInfo<>(resourceURI, agentStore, documentDescriptorStore, resourceAccessGuard);
         this.documentDescriptorStore = documentDescriptorStore;
         this.agentStore = agentStore;
         this.restWorkflowStore = restWorkflowStore;
@@ -195,6 +197,7 @@ public class RestAgentStore implements IRestAgentStore {
 
     @Override
     public Response duplicateAgent(String id, Integer version, Boolean deepCopy) {
+        restVersionInfo.requireViewAccess(id);
         restVersionInfo.validateParameters(id, version);
         try {
             AgentConfiguration agentConfig = agentStore.read(id, version);
@@ -257,6 +260,8 @@ public class RestAgentStore implements IRestAgentStore {
 
     @Override
     public Response deleteAgent(String id, Integer version, Boolean permanent, Boolean cascade) {
+        // Before the cascade, not after — see RestVersionInfo.requireOwnAccess.
+        restVersionInfo.requireOwnAccess(id);
         if (cascade) {
             // Cascade-delete all schedules for this Agent first
             try {

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.rag.rest;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.rag.mongo.RagStore;
@@ -82,7 +83,8 @@ class RagStoreLayeringTest {
         when(resourceStorage.newResource(any(RagConfiguration.class))).thenReturn(createdResource);
 
         ragStore = new RagStore(storageFactory, mock(IDocumentBuilder.class));
-        restRagStore = new RestRagStore(ragStore, mock(IDocumentDescriptorStore.class), mock(IJsonSchemaCreator.class));
+        restRagStore = new RestRagStore(ragStore, mock(IDocumentDescriptorStore.class), mock(IJsonSchemaCreator.class),
+                mock(ResourceAccessGuard.class));
     }
 
     private static RagConfiguration knowledgeBase(String chunkStrategy) {

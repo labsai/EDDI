@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.propertysetter.rest;
 
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.propertysetter.IPropertySetterStore;
 import ai.labs.eddi.configs.propertysetter.IRestPropertySetterStore;
 import ai.labs.eddi.configs.propertysetter.model.PropertySetterConfiguration;
@@ -31,8 +32,9 @@ public class RestPropertySetterStore implements IRestPropertySetterStore {
 
     @Inject
     public RestPropertySetterStore(IPropertySetterStore propertySetterStore, IDocumentDescriptorStore documentDescriptorStore,
-            IJsonSchemaCreator jsonSchemaCreator) {
-        restVersionInfo = new RestVersionInfo<>(resourceURI, propertySetterStore, documentDescriptorStore);
+            IJsonSchemaCreator jsonSchemaCreator,
+            ResourceAccessGuard resourceAccessGuard) {
+        restVersionInfo = new RestVersionInfo<>(resourceURI, propertySetterStore, documentDescriptorStore, resourceAccessGuard);
         this.propertySetterStore = propertySetterStore;
         this.jsonSchemaCreator = jsonSchemaCreator;
     }

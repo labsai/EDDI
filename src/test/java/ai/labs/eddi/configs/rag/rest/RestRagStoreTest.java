@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.rag.rest;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.rag.IRagStore;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
@@ -34,7 +35,7 @@ class RestRagStoreTest {
     @BeforeEach
     void setUp() {
         openMocks(this);
-        restRagStore = new RestRagStore(ragStore, documentDescriptorStore, jsonSchemaCreator);
+        restRagStore = new RestRagStore(ragStore, documentDescriptorStore, jsonSchemaCreator, mock(ResourceAccessGuard.class));
     }
 
     @Test

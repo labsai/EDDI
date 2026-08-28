@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.workflows.rest;
 
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
@@ -46,8 +47,9 @@ public class RestWorkflowStore implements IRestWorkflowStore {
 
     @Inject
     public RestWorkflowStore(IWorkflowStore workflowStore, ResourceClientLibrary resourceClientLibrary,
-            IDocumentDescriptorStore documentDescriptorStore, IJsonSchemaCreator jsonSchemaCreator) {
-        restVersionInfo = new RestVersionInfo<>(resourceURI, workflowStore, documentDescriptorStore);
+            IDocumentDescriptorStore documentDescriptorStore, IJsonSchemaCreator jsonSchemaCreator,
+            ResourceAccessGuard resourceAccessGuard) {
+        restVersionInfo = new RestVersionInfo<>(resourceURI, workflowStore, documentDescriptorStore, resourceAccessGuard);
         this.documentDescriptorStore = documentDescriptorStore;
         this.workflowStore = workflowStore;
         this.resourceClientLibrary = resourceClientLibrary;
@@ -158,6 +160,9 @@ public class RestWorkflowStore implements IRestWorkflowStore {
 
     @Override
     public Response deleteWorkflow(String id, Integer version, Boolean permanent, Boolean cascade) {
+        // Before the cascade, not after: restVersionInfo.delete() checks at the end,
+        // by which point the referenced resources would already be gone.
+        restVersionInfo.requireOwnAccess(id);
         if (cascade) {
             try {
                 WorkflowConfiguration workflowConfig = workflowStore.read(id, version);
@@ -244,6 +249,7 @@ public class RestWorkflowStore implements IRestWorkflowStore {
 
     @Override
     public Response duplicateWorkflow(String id, Integer version, Boolean deepCopy) {
+        restVersionInfo.requireViewAccess(id);
         restVersionInfo.validateParameters(id, version);
         try {
             WorkflowConfiguration workflowConfig = workflowStore.read(id, version);

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.output.rest;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.output.IOutputStore;
 import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
@@ -37,7 +38,7 @@ class RestOutputStoreTest {
         outputStore = mock(IOutputStore.class);
         documentDescriptorStore = mock(IDocumentDescriptorStore.class);
         jsonSchemaCreator = mock(IJsonSchemaCreator.class);
-        restStore = new RestOutputStore(outputStore, documentDescriptorStore, jsonSchemaCreator);
+        restStore = new RestOutputStore(outputStore, documentDescriptorStore, jsonSchemaCreator, mock(ResourceAccessGuard.class));
     }
 
     @Nested

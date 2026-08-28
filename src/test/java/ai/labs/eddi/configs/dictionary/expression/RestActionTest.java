@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.dictionary.expression;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.apicalls.IApiCallsStore;
 import ai.labs.eddi.configs.output.IOutputStore;
 import ai.labs.eddi.configs.rules.IRuleSetStore;
@@ -42,7 +43,7 @@ class RestActionTest {
         behaviorStore = mock(IRuleSetStore.class);
         httpCallsStore = mock(IApiCallsStore.class);
         outputStore = mock(IOutputStore.class);
-        restAction = new RestAction(workflowStore, behaviorStore, httpCallsStore, outputStore);
+        restAction = new RestAction(workflowStore, behaviorStore, httpCallsStore, outputStore, mock(ResourceAccessGuard.class));
     }
 
     @Test

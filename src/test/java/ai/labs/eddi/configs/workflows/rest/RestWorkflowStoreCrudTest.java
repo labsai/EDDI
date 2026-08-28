@@ -4,6 +4,9 @@
  */
 package ai.labs.eddi.configs.workflows.rest;
 
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.any;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
@@ -46,7 +49,8 @@ class RestWorkflowStoreCrudTest {
         resourceClientLibrary = mock(ResourceClientLibrary.class);
         documentDescriptorStore = mock(IDocumentDescriptorStore.class);
         jsonSchemaCreator = mock(IJsonSchemaCreator.class);
-        sut = new RestWorkflowStore(workflowStore, resourceClientLibrary, documentDescriptorStore, jsonSchemaCreator);
+        sut = new RestWorkflowStore(workflowStore, resourceClientLibrary, documentDescriptorStore, jsonSchemaCreator,
+                mock(ResourceAccessGuard.class));
     }
 
     private IResourceStore.IResourceId dummyResourceId(String id, int version) {
@@ -98,7 +102,7 @@ class RestWorkflowStoreCrudTest {
         @Test
         @DisplayName("should delegate to document descriptor store")
         void standard() throws Exception {
-            when(documentDescriptorStore.readDescriptors("ai.labs.workflow", "filter", 0, 20, false))
+            when(documentDescriptorStore.readDescriptors(eq("ai.labs.workflow"), eq("filter"), eq(0), eq(20), eq(false), any()))
                     .thenReturn(List.of(new DocumentDescriptor()));
 
             List<DocumentDescriptor> result = sut.readWorkflowDescriptors("filter", 0, 20);

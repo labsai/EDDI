@@ -35,7 +35,7 @@ class DescriptorStoreTest {
 
         when(storageFactory.create(eq("descriptors"), eq(documentBuilder), eq(String.class),
                 eq("resource"), eq("userId"), eq("name"), eq("agentName"),
-                eq("description"), eq("lastModifiedOn"), eq("deleted"), eq("originId")))
+                eq("description"), eq("lastModifiedOn"), eq("deleted"), eq("originId"), eq("accessIndex")))
                 .thenReturn(resourceStorage);
 
         store = new DescriptorStore<>(storageFactory, documentBuilder, String.class);
@@ -245,7 +245,7 @@ class DescriptorStoreTest {
     private static void verifyIndexHints(IResourceStorageFactory factory, String collectionName, IDocumentBuilder builder) {
         verify(factory).create(eq(collectionName), eq(builder), eq(String.class),
                 eq("resource"), eq("userId"), eq("name"), eq("agentName"),
-                eq("description"), eq("lastModifiedOn"), eq("deleted"), eq("originId"));
+                eq("description"), eq("lastModifiedOn"), eq("deleted"), eq("originId"), eq("accessIndex"));
     }
 
     // ==================== limit semantics ====================

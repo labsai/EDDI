@@ -7,6 +7,132 @@
 
 
 
+## 🔐 feat(security): per-user workspaces and resource sharing (2026-08-29)
+
+**Repo:** EDDI (`feat/multi-user-spaces-and-sharing`)
+
+Configuration resources — agents, workflows, rule sets, LLM configs, output sets,
+dictionaries, api calls, mcp calls, RAG, prompt snippets, channels, connections,
+agent groups — had **no ownership at all**. `DocumentDescriptor` inherits a
+`createdBy` field from `ResourceDescriptor` and nothing ever wrote it, so the
+authoring surface was one shared workspace gated only by
+`@RolesAllowed({"eddi-admin","eddi-editor"})`. Any editor could read, edit,
+undeploy and delete anyone's work, and `eddi-user` could `POST
+/agents/{anyId}/start`.
+
+Off by default (`eddi.workspaces.enabled=false`). Full operator guide:
+[`docs/workspaces.md`](workspaces.md).
+
+### The model
+
+**Spaces are the boundary, grants are the exception.** Every descriptor gains
+`ownerId`, `spaceId` (`user:<principal>` or `team:<keycloak group>`),
+`visibility` (`private` / `space` / `published`) and a list of `ResourceGrant`.
+A single ACL-per-resource model makes the common case tedious; a pure space model
+makes the common exception impossible.
+
+**`AccessLevel` is USE < VIEW < EDIT < OWN.** The `USE`/`VIEW` split is the one
+that earns its complexity: letting a colleague *talk to* an agent is a different
+act from letting them read its system prompt, tool list and vault references, and
+the first is by far the more common share. `EDIT` deliberately excludes delete and
+re-share — a teammate sharing a space can change a colleague's agent but not
+remove it.
+
+### Design decisions
+
+- **One materialised `accessIndex` field, not a query over structured fields.**
+  `IResourceFilter` ANDs groups and ORs within a group, and cannot nest — so the
+  real policy (`owner OR (space AND visibility=space) OR granted OR published`) is
+  not expressible as a query at all. Collapsing it to pipe-delimited tokens at
+  write time makes a listing one indexed OR-group. `DescriptorAccess` holds both
+  halves so it stays checkable that they agree; `DescriptorAccessTest` asserts
+  agreement across the whole matrix.
+- **Every identity predicate is anchored and escaped.** Both backends treat a
+  `String` filter as a **regular expression** — `MongoResourceStorage` builds
+  `Filters.regex`, `PostgresResourceStorage` emits `~`. An unescaped predicate for
+  `alice` also matches `malice`, and an unescaped `.` in an email matches any
+  character. `Subjects` escapes only the metacharacters PCRE and POSIX ERE agree
+  on: escaping an ordinary character is *undefined* in POSIX ERE, so escaping
+  defensively would be less portable, not more.
+- **Filtered in the query, not on the page.** `RestConversationStore` post-filters
+  conversations with a `MAX_OWNER_SCAN` budget because no predicate exists there.
+  Config listings must not repeat that: `accessIndex` joined
+  `DescriptorStore.INDEXED_FIELDS`, which matters especially because the
+  `descriptors` collection is shared with conversation descriptors and grows with
+  conversation volume.
+- **`AccessScope` is an explicit argument, never ambient state.** Internal callers
+  that operate below the access model — the export service, the orphan sweep, the
+  startup migration — write `unrestricted()` at the call site. Reading scope from
+  a thread-local would make "unfiltered" the behaviour of any path that forgot to
+  set it, which is the shape most fail-open authorization bugs have.
+- **Cascades check before they cascade.** `deleteAgent`/`deleteWorkflow` tear down
+  referenced resources *before* the guarded `restVersionInfo.delete`, so both now
+  call `requireOwnAccess` first. Checking only at the end would have let an
+  unauthorised caller destroy the graph on the way to being refused.
+- **Sharing walks the graph, and stops at what you do not own.**
+  `ConfigGraphResolver` resolves agent → workflows → steps → parser dictionaries;
+  a referenced resource the sharer only borrowed is skipped and named in the
+  response's `skipped` list rather than silently widened. Bounded at 500 resources
+  against cyclic configs, and the cut-off is logged rather than silent.
+- **The channel-uniqueness sweep stays global but stopped naming names.** A
+  `channelId` collides with every integration in the deployment, so scoping the
+  check would let two workspaces bind the same Slack channel. Its error message no
+  longer names the conflicting integration, which had turned a uniqueness check
+  into an enumeration oracle.
+
+### Enforcement surfaces
+
+`RestVersionInfo` (all fifteen types, inherited by the MCP admin tools),
+the store methods that bypass it for filter arguments (`readOutputSet`,
+`readOutputKeys`, `readExpressions`, `readSnippet`, the patch and duplicate
+paths), the workflow-fan-out helpers (`RestAction`, `RestExpression`,
+`RestOutputActions` — all keyed on the workflow the caller named), the group
+workspace endpoints (decided against the *group's* descriptor, since a workspace
+has none of its own), deploy/undeploy, and `POST /agents/{id}/start`.
+
+### Backward compatibility
+
+- Default off; `eddi.workspaces.enabled=true` with `authorization.enabled=false`
+  logs that it has no effect rather than denying everyone everything.
+- Ownership is **recorded** whenever authentication is on, independent of
+  enforcement, so an operator can accumulate attribution, verify it, and only then
+  enforce.
+- `WorkspaceAccessIndexMigration` backfills every pre-existing descriptor with the
+  `legacy` token. Required, not optional: neither backend can express "this field
+  is absent", so an unstamped descriptor would match no access predicate and
+  vanish from every listing. It deliberately **does not invent owners**.
+- `eddi.workspaces.legacy-visibility=shared` (default) keeps pre-existing
+  resources visible to everyone, so an upgrade hides nothing.
+
+### Keycloak
+
+`keycloak/eddi-realm.json` gains a `groups` protocol mapper on both clients, a
+sample `/engineering` group, and — unrelated but overdue — the **`eddi-approver`
+role, which `OwnershipValidator` and `HitlAccessGuard` have been checking for
+without it ever being defined in the shipped realm.**
+
+### Verification
+
+`./mvnw compile`, `./mvnw test-compile`, the repo-wide guards (`ImportStyleTest`,
+`DocumentationLinks`, `StrictBoundary*`, `ShippedRulesets`) and 49 new tests
+across `SubjectsTest`, `DescriptorAccessTest`, `ResourceAccessGuardTest`,
+`RestVersionInfoAccessTest` and `ResourceSharingServiceTest`.
+
+Two mutation checks confirm the tests are not vacuous: removing the token
+delimiters from `Subjects.tokenPattern` fails `doesNotMatchSubstring`, and
+defaulting a missing visibility to `published` fails
+`missingVisibilityDefaultsToSpace`.
+
+### Not done
+
+The EDDI-Manager UI (space switcher, owner column, share dialog, published
+catalog) is a separate repo and a separate change. Until it lands, sharing is
+driven through the REST endpoints above.
+
+---
+
+
+
 ## 🔐 refactor(engine): split the engine's config reads off the authoring surface (2026-08-29)
 
 **Repo:** EDDI (`feat/multi-user-spaces-and-sharing`)

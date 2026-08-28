@@ -4,6 +4,9 @@
  */
 package ai.labs.eddi.configs.agents.rest;
 
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.any;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
@@ -62,7 +65,7 @@ class RestAgentStoreExpandedTest {
         deploymentStore = mock(IDeploymentStore.class);
 
         sut = new RestAgentStore(agentStore, restWorkflowStore, documentDescriptorStore,
-                jsonSchemaCreator, scheduleStore, capabilityRegistryService, deploymentStore);
+                jsonSchemaCreator, scheduleStore, capabilityRegistryService, deploymentStore, mock(ResourceAccessGuard.class));
     }
 
     private IResourceStore.IResourceId dummyResourceId(String id, int version) {
@@ -114,7 +117,7 @@ class RestAgentStoreExpandedTest {
         @Test
         @DisplayName("should delegate to document descriptor store")
         void standard() throws Exception {
-            when(documentDescriptorStore.readDescriptors("ai.labs.agent", "filter", 0, 20, false))
+            when(documentDescriptorStore.readDescriptors(eq("ai.labs.agent"), eq("filter"), eq(0), eq(20), eq(false), any()))
                     .thenReturn(List.of(new DocumentDescriptor()));
 
             List<DocumentDescriptor> result = sut.readAgentDescriptors("filter", 0, 20);

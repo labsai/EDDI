@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.parser.rest;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.parser.IParserStore;
 import ai.labs.eddi.configs.parser.model.ParserConfiguration;
@@ -28,7 +29,7 @@ class RestParserStoreTest {
     void setUp() {
         parserStore = mock(IParserStore.class);
         var descriptorStore = mock(IDocumentDescriptorStore.class);
-        restStore = new RestParserStore(parserStore, descriptorStore);
+        restStore = new RestParserStore(parserStore, descriptorStore, mock(ResourceAccessGuard.class));
     }
 
     @Test

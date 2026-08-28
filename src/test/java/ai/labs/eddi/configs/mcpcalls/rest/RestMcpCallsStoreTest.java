@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.mcpcalls.rest;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.mcpcalls.model.McpToolDiscoveryRequest;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.mcpcalls.IMcpCallsStore;
@@ -39,7 +40,8 @@ class RestMcpCallsStoreTest {
         var documentDescriptorStore = mock(IDocumentDescriptorStore.class);
         jsonSchemaCreator = mock(IJsonSchemaCreator.class);
         mcpToolProviderManager = mock(McpToolProviderManager.class);
-        restStore = new RestMcpCallsStore(mcpCallsStore, documentDescriptorStore, jsonSchemaCreator, mcpToolProviderManager);
+        restStore = new RestMcpCallsStore(mcpCallsStore, documentDescriptorStore, jsonSchemaCreator, mcpToolProviderManager,
+                mock(ResourceAccessGuard.class));
     }
 
     @Nested

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.rest;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
@@ -28,6 +29,8 @@ class RestVersionInfoTest {
     private IResourceStore<Object> resourceStore;
     private IDocumentDescriptorStore documentDescriptorStore;
 
+    private ResourceAccessGuard accessGuard;
+
     private static final String RESOURCE_URI = "eddi://ai.labs.test/teststore/tests/";
     private static final String TEST_ID = "test-resource-id";
 
@@ -36,7 +39,8 @@ class RestVersionInfoTest {
     void setUp() {
         resourceStore = mock(IResourceStore.class);
         documentDescriptorStore = mock(IDocumentDescriptorStore.class);
-        restVersionInfo = new RestVersionInfo<>(RESOURCE_URI, resourceStore, documentDescriptorStore);
+        accessGuard = mock(ResourceAccessGuard.class);
+        restVersionInfo = new RestVersionInfo<>(RESOURCE_URI, resourceStore, documentDescriptorStore, accessGuard);
     }
 
     /**

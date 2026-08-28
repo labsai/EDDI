@@ -84,6 +84,10 @@
           ]
         },
         "clientRole": false
+      },
+      {
+        "name": "eddi-approver",
+        "description": "May decide pending human-in-the-loop approvals they do not own"
       }
     ]
   },
@@ -107,7 +111,21 @@
       "publicClient": false,
       "bearerOnly": true,
       "standardFlowEnabled": false,
-      "directAccessGrantsEnabled": false
+      "directAccessGrantsEnabled": false,
+      "protocolMappers": [
+        {
+          "name": "groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "config": {
+            "claim.name": "groups",
+            "full.path": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ]
     },
     {
       "clientId": "eddi-frontend",
@@ -166,6 +184,18 @@
             "id.token.claim": "false",
             "access.token.claim": "true"
           }
+        },
+        {
+          "name": "groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "config": {
+            "claim.name": "groups",
+            "full.path": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
         }
       ]
     }
@@ -188,6 +218,9 @@
       "realmRoles": [
         "eddi-admin",
         "eddi-editor"
+      ],
+      "groups": [
+        "/engineering"
       ]
     },
     {
@@ -225,6 +258,13 @@
       "realmRoles": [
         "eddi-user"
       ]
+    }
+  ],
+  "groups": [
+    {
+      "name": "engineering",
+      "path": "/engineering",
+      "subGroups": []
     }
   ]
 }
