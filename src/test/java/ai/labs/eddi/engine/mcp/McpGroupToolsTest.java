@@ -29,6 +29,10 @@ import java.net.URI;
 import java.util.List;
 import java.util.Map;
 
+import java.security.Principal;
+import io.smallrye.common.annotation.NonBlocking;
+import io.smallrye.common.annotation.Blocking;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -47,7 +51,7 @@ class McpGroupToolsTest {
 
     private static GroupTemplateService templateService() {
         var service = new GroupTemplateService(
-                new com.fasterxml.jackson.databind.ObjectMapper());
+                new ObjectMapper());
         service.loadTemplates();
         return service;
     }
@@ -60,7 +64,7 @@ class McpGroupToolsTest {
         workspaceStore = mock(IGroupWorkspaceStore.class);
         lenient().when(jsonSerialization.serialize(any())).thenReturn("{}");
 
-        var mockIdentity = mock(io.quarkus.security.identity.SecurityIdentity.class);
+        var mockIdentity = mock(SecurityIdentity.class);
         lenient().when(mockIdentity.isAnonymous()).thenReturn(true);
         // authorization disabled — OwnershipValidator's checks are no-ops, matching the
         // pre-existing tests. Ownership enforcement is covered separately below.
@@ -489,7 +493,7 @@ class McpGroupToolsTest {
         assertEquals(String.class, method.getReturnType(),
                 "discuss_with_group must keep a non-reactive return type; returning Uni/Multi would make "
                         + "quarkus-mcp-server schedule this blocking work on the Vert.x event loop");
-        assertNull(method.getAnnotation(io.smallrye.common.annotation.NonBlocking.class),
+        assertNull(method.getAnnotation(NonBlocking.class),
                 "discuss_with_group does blocking work and must never be marked @NonBlocking");
     }
 
@@ -498,7 +502,7 @@ class McpGroupToolsTest {
         var method = McpGroupTools.class.getMethod("start_group_discussion", String.class, String.class, String.class);
         assertEquals(String.class, method.getReturnType(),
                 "start_group_discussion must keep a non-reactive return type for the same reason");
-        assertNull(method.getAnnotation(io.smallrye.common.annotation.NonBlocking.class),
+        assertNull(method.getAnnotation(NonBlocking.class),
                 "start_group_discussion must never be marked @NonBlocking");
     }
 
@@ -517,7 +521,7 @@ class McpGroupToolsTest {
         for (Class<?> toolClass : List.of(McpGroupTools.class, McpHitlTools.class, McpConversationTools.class,
                 McpAdminTools.class, McpSetupTools.class, McpMemoryTools.class, McpDocTools.class, McpGdprTools.class)) {
             for (var method : toolClass.getDeclaredMethods()) {
-                assertNull(method.getAnnotation(io.smallrye.common.annotation.Blocking.class),
+                assertNull(method.getAnnotation(Blocking.class),
                         toolClass.getSimpleName() + "." + method.getName() + " carries @Blocking. It is redundant "
                                 + "(a non-reactive return type already resolves to WORKER_THREAD) and Quarkus 3.38's "
                                 + "ExecutionModelAnnotationsProcessor rejects it, breaking quarkus:dev.");
@@ -534,7 +538,7 @@ class McpGroupToolsTest {
     private McpGroupTools toolsAsUser(String callerId, String role) {
         var identity = mock(SecurityIdentity.class);
         lenient().when(identity.isAnonymous()).thenReturn(false);
-        var principal = mock(java.security.Principal.class);
+        var principal = mock(Principal.class);
         lenient().when(principal.getName()).thenReturn(callerId);
         lenient().when(identity.getPrincipal()).thenReturn(principal);
         lenient().when(identity.hasRole(role)).thenReturn(true);
@@ -549,7 +553,7 @@ class McpGroupToolsTest {
     private McpGroupTools toolsAsAdmin(String callerId) {
         var identity = mock(SecurityIdentity.class);
         lenient().when(identity.isAnonymous()).thenReturn(false);
-        var principal = mock(java.security.Principal.class);
+        var principal = mock(Principal.class);
         lenient().when(principal.getName()).thenReturn(callerId);
         lenient().when(identity.getPrincipal()).thenReturn(principal);
         lenient().when(identity.hasRole(anyString())).thenReturn(true);

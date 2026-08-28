@@ -30,6 +30,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import jakarta.ws.rs.NotFoundException;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -322,7 +323,7 @@ class McpHitlToolsCoverageTest {
     @Test
     void getGroupApprovalStatus_jaxrsNotFound_returnsNotFound() throws Exception {
         when(groupConversationService.readGroupConversation("gc1"))
-                .thenThrow(new jakarta.ws.rs.NotFoundException("gone"));
+                .thenThrow(new NotFoundException("gone"));
         String out = tools.getGroupApprovalStatus("g1", "gc1", "summary");
         assertTrue(out.contains("\"errorCode\":\"NOT_FOUND\""), out);
     }
@@ -408,7 +409,7 @@ class McpHitlToolsCoverageTest {
     @Test
     void approveGroup_jaxrsNotFound_returnsNotFound() throws Exception {
         when(groupConversationService.resumeDiscussion(eq("gc1"), any(), isNull()))
-                .thenThrow(new jakarta.ws.rs.NotFoundException("gone"));
+                .thenThrow(new NotFoundException("gone"));
         String out = tools.approveGroupPhase("g1", "gc1", "APPROVED", null, null);
         assertTrue(out.contains("\"errorCode\":\"NOT_FOUND\""), out);
     }
@@ -507,7 +508,7 @@ class McpHitlToolsCoverageTest {
     @Test
     void cancelGroup_jaxrsNotFound_returnsNotFound() throws Exception {
         when(groupConversationService.cancelDiscussion(eq("gc1"), any()))
-                .thenThrow(new jakarta.ws.rs.NotFoundException("gone"));
+                .thenThrow(new NotFoundException("gone"));
         String out = tools.cancelGroupDiscussion("g1", "gc1");
         assertTrue(out.contains("\"errorCode\":\"NOT_FOUND\""), out);
     }

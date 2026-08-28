@@ -28,6 +28,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 
+import com.mongodb.client.FindIterable;
 import static ai.labs.eddi.engine.model.Context.ContextType.valueOf;
 import static ai.labs.eddi.engine.memory.model.ConversationState.ENDED;
 
@@ -273,7 +274,7 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     }
 
     private List<PendingApprovalSummary> collectPendingSummaries(
-                                                                 com.mongodb.client.FindIterable<ConversationMemorySnapshot> snapshots) {
+                                                                 FindIterable<ConversationMemorySnapshot> snapshots) {
         List<PendingApprovalSummary> out = new ArrayList<>();
         snapshots.forEach(snapshot -> {
             var summary = new PendingApprovalSummary(

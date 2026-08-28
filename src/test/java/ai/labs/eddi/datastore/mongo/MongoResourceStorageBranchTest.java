@@ -22,6 +22,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 import java.util.function.Consumer;
 
+import org.bson.BsonDocument;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -151,7 +152,7 @@ class MongoResourceStorageBranchTest {
 
             Document doc = new Document("_id", new ObjectId(VALID_ID)).append("_version", 1);
             FindIterable<Document> iterable = mock(FindIterable.class);
-            when(currentCollection.find(any(org.bson.BsonDocument.class))).thenReturn(iterable);
+            when(currentCollection.find(any(BsonDocument.class))).thenReturn(iterable);
             when(iterable.sort(any(Document.class))).thenReturn(iterable);
             when(iterable.limit(anyInt())).thenReturn(iterable);
             when(iterable.skip(anyInt())).thenReturn(iterable);
@@ -181,7 +182,7 @@ class MongoResourceStorageBranchTest {
             when(qfs.getConnectingType()).thenReturn(IResourceFilter.QueryFilters.ConnectingType.OR);
 
             FindIterable<Document> iterable = mock(FindIterable.class);
-            when(currentCollection.find(any(org.bson.BsonDocument.class))).thenReturn(iterable);
+            when(currentCollection.find(any(BsonDocument.class))).thenReturn(iterable);
             when(iterable.sort(any(Document.class))).thenReturn(iterable);
             when(iterable.limit(anyInt())).thenReturn(iterable);
             when(iterable.skip(anyInt())).thenReturn(iterable);
@@ -205,7 +206,7 @@ class MongoResourceStorageBranchTest {
             when(qfs.getConnectingType()).thenReturn(IResourceFilter.QueryFilters.ConnectingType.AND);
 
             FindIterable<Document> iterable = mock(FindIterable.class);
-            when(currentCollection.find(any(org.bson.BsonDocument.class))).thenReturn(iterable);
+            when(currentCollection.find(any(BsonDocument.class))).thenReturn(iterable);
             when(iterable.sort(any(Document.class))).thenReturn(iterable);
             when(iterable.limit(anyInt())).thenReturn(iterable);
             when(iterable.skip(anyInt())).thenReturn(iterable);

@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.lifecycle.model;
 import java.util.Locale;
 import java.util.Map;
+import com.fasterxml.jackson.annotation.JsonCreator;
 
 /**
  * Human decision on a paused conversation or group discussion.
@@ -29,7 +30,7 @@ public class HitlDecision {
          * surface reports as the friendly "must include a 'verdict'" 400 — so no
          * request-local deserializer is needed to soften the error.
          */
-        @com.fasterxml.jackson.annotation.JsonCreator
+        @JsonCreator
         public static HitlVerdict fromString(String value) {
             if (value == null) {
                 return null;

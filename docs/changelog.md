@@ -7,6 +7,71 @@
 
 
 
+## 🧹 refactor(style): make ImportStyleTest enforce the rule it documents (2026-08-28)
+
+**Repo:** EDDI (`claude/code-review-test-coverage-59bf99`)
+
+`ImportStyleTest` guards AGENTS.md §4.7 ("never inline a fully-qualified name"), but
+its `INLINE_FQN` pattern only matched four package roots —
+`ai.labs.eddi|java.util|java.time|java.nio.file`. Every third-party FQN was invisible
+to it, so the rule was enforced on about a tenth of the surface it claims to cover.
+
+Measured blind spot: **381 inline FQNs across 118 files**, for roots the project
+actually depends on — `jakarta`, `javax`, `org.eclipse`, `org.jboss`, `com.fasterxml`,
+`io.quarkus`, `io.smallrye`, `io.micrometer`, `io.nats`, `org.bson`, `com.mongodb`,
+`org.postgresql`, `dev.langchain4j`, plus the JDK's `java.io`, `java.net`, `java.lang`
+and `java.security`. Examples: `jakarta.ws.rs.NotFoundException` in `McpHitlTools`,
+`io.micrometer.core.instrument.Counter` as a field type in `AuditLedgerService`,
+`org.eclipse.microprofile.openapi.models.tags.Tag::getName` in `OpenApiTagSortFilter`.
+
+Essentially none were the disambiguation case §4.7 permits — they were simply missing
+imports. Rather than park 118 files in an allowlist (the test's own doc argues an
+`ALLOWED` entry should be "a deliberate, reviewable act rather than silent drift", and
+an allowlist that never shrinks is exactly the drift it warns about), the pattern is
+widened to an explicit root list and the violations are fixed.
+
+The root list stays explicit rather than a general lowercase-dotted-path shape,
+because a generic pattern also matches method chains and builder idioms on a
+lowercase receiver, which are not FQNs at all.
+
+### One genuine collision found, and allowlisted
+
+`NatsConversationCoordinator` imports `io.nats.client.api.*`, which brings in
+`io.nats.client.api.Error`. Its `catch (RuntimeException | java.lang.Error e)` clauses
+mean the JDK type, and the inline FQN is load-bearing: rewriting it to `Error` makes
+the reference ambiguous and the file stops compiling. An explicit
+`import java.lang.Error` resolves it but is a redundant import (`java.lang` is
+implicit) that Checkstyle flags — so the inline FQN really is the only clean spelling.
+Added to `ALLOWED` with that reasoning recorded.
+
+Worth noting how this surfaced: the automated rewrite's conflict check only consulted
+*single-type* imports, so a name introduced by a wildcard import was invisible to it.
+The compiler caught it. Anyone repeating this exercise should expect wildcard imports
+to hide exactly this class of collision.
+
+### Verification
+
+Clean `test-compile` (not incremental — a type-level refactor reuses stale `.class`
+files otherwise), `ImportStyleTest` green against the widened pattern, and the full
+unit suite re-run against the pre-change baseline of 20,295 tests / 8 failures /
+193 errors (all environmental: loopback sockets, Docker, network). Checkstyle is
+unchanged at its pre-existing violation count — the one violation this work did
+introduce, a redundant `import java.lang.Error`, is gone with the revert above.
+
+No behaviour changes: every edit replaces an inline FQN with the identical type named
+by a top-level import, or moves an import line.
+
+Branch totals after both commits: **20,311 tests** (+16 over the baseline: 13 new
+MCP discovery tests, 3 new SSRF tests), same 8 failures / 193 errors, and an
+*identical* set of failing classes - so nothing regressed. Coverage moved
+89.91% -> 90.01% instruction and 79.24% -> 79.38% branch, with
+`McpToolsProvider` going 31.1% -> **93.5%** (branches missed 41 -> 10) and
+`SourceUrlValidator` landing at 96.3%.
+
+---
+
+
+
 ## 🔍 fix(review): close an SSRF gap, and two tests that passed for the wrong reason (2026-08-28)
 
 **Repo:** EDDI (`claude/code-review-test-coverage-59bf99`)

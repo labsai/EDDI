@@ -9,6 +9,7 @@ import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import com.fasterxml.jackson.annotation.JsonAlias;
 
 /**
  * @author ginccc
@@ -58,7 +59,7 @@ public class WorkflowConfiguration {
     // schemas (ZIP files / MongoDB)
     // where the property was natively named "workflowExtensions" instead of
     // "workflowSteps".
-    @com.fasterxml.jackson.annotation.JsonAlias("workflowExtensions")
+    @JsonAlias("workflowExtensions")
     public void setWorkflowSteps(List<WorkflowStep> workflowSteps) {
         this.workflowSteps = workflowSteps;
     }

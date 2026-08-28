@@ -11,6 +11,7 @@ import ai.labs.eddi.modules.nlp.expressions.value.Value;
 import jakarta.enterprise.context.ApplicationScoped;
 import java.util.Hashtable;
 
+import org.jboss.logging.Logger;
 import static ai.labs.eddi.utils.CharacterUtilities.isNumber;
 
 /**
@@ -63,5 +64,5 @@ public class ExpressionFactory implements IExpressionFactory {
         return exp;
     }
 
-    private static final org.jboss.logging.Logger log = org.jboss.logging.Logger.getLogger(ExpressionFactory.class);
+    private static final Logger log = Logger.getLogger(ExpressionFactory.class);
 }

@@ -58,6 +58,8 @@ import java.time.Instant;
 import java.util.*;
 import java.util.Map;
 import java.util.regex.Pattern;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.core.JsonProcessingException;
 
 /**
  * Service that encapsulates the business logic for setting up EDDI agents. Used
@@ -1609,10 +1611,10 @@ public class AgentSetupService {
         }
 
         try {
-            String jsonSchema = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(schema);
+            String jsonSchema = new ObjectMapper().writeValueAsString(schema);
             return "Response with one single valid JSON Object (without wrapping it in "
                     + "any formatting or markdown). Always use the following json structure as response:" + jsonSchema;
-        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+        } catch (JsonProcessingException e) {
             throw new RuntimeException("Failed to serialize JSON schema", e);
         }
     }

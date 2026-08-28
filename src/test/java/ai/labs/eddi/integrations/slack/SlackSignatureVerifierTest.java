@@ -13,6 +13,8 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Set;
 
+import javax.crypto.spec.SecretKeySpec;
+import javax.crypto.Mac;
 import static org.junit.jupiter.api.Assertions.*;
 
 class SlackSignatureVerifierTest {
@@ -171,8 +173,8 @@ class SlackSignatureVerifierTest {
      */
     private static String computeHmac(String secret, String baseString) {
         try {
-            var mac = javax.crypto.Mac.getInstance("HmacSHA256");
-            mac.init(new javax.crypto.spec.SecretKeySpec(
+            var mac = Mac.getInstance("HmacSHA256");
+            mac.init(new SecretKeySpec(
                     secret.getBytes(java.nio.charset.StandardCharsets.UTF_8), "HmacSHA256"));
             byte[] hash = mac.doFinal(baseString.getBytes(java.nio.charset.StandardCharsets.UTF_8));
 

@@ -40,6 +40,7 @@ import java.util.Map;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 
+import jakarta.ws.rs.NotFoundException;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -327,7 +328,7 @@ class RestAgentEngineTest {
             restAgentEngine.sayWithinContext("conv-1", false, false,
                     List.of(), inputData, asyncResponse);
 
-            verify(asyncResponse).resume(any(jakarta.ws.rs.NotFoundException.class));
+            verify(asyncResponse).resume(any(NotFoundException.class));
         }
 
         @Test
@@ -406,7 +407,7 @@ class RestAgentEngineTest {
             restAgentEngine.sayWithinContext("conv-1", false, false,
                     List.of(), inputData, asyncResponse);
 
-            verify(asyncResponse).resume(any(jakarta.ws.rs.NotFoundException.class));
+            verify(asyncResponse).resume(any(NotFoundException.class));
         }
 
         @Test

@@ -160,7 +160,7 @@ public class MongoSecretPersistence implements ISecretPersistence {
                     Updates.setOnInsert(FIELD_CREATED_AT, instantToString(secret.getCreatedAt())));
 
             secretsCollection.updateOne(filter, update, new UpdateOptions().upsert(true));
-        } catch (com.mongodb.MongoException e) {
+        } catch (MongoException e) {
             throw new PersistenceException("Failed to upsert secret " + secret.getTenantId() + "/" + secret.getKeyName(), e);
         }
     }
@@ -170,7 +170,7 @@ public class MongoSecretPersistence implements ISecretPersistence {
         try {
             var doc = secretsCollection.find(and(eq(FIELD_TENANT_ID, tenantId), eq(FIELD_KEY_NAME, keyName))).first();
             return doc != null ? Optional.of(documentToSecret(doc)) : Optional.empty();
-        } catch (com.mongodb.MongoException e) {
+        } catch (MongoException e) {
             throw new PersistenceException("Failed to find secret " + tenantId + "/" + keyName, e);
         }
     }
@@ -180,7 +180,7 @@ public class MongoSecretPersistence implements ISecretPersistence {
         try {
             var result = secretsCollection.deleteOne(and(eq(FIELD_TENANT_ID, tenantId), eq(FIELD_KEY_NAME, keyName)));
             return result.getDeletedCount() > 0;
-        } catch (com.mongodb.MongoException e) {
+        } catch (MongoException e) {
             throw new PersistenceException("Failed to delete secret " + tenantId + "/" + keyName, e);
         }
     }
@@ -193,7 +193,7 @@ public class MongoSecretPersistence implements ISecretPersistence {
                 secrets.add(documentToSecret(doc));
             }
             return secrets;
-        } catch (com.mongodb.MongoException e) {
+        } catch (MongoException e) {
             throw new PersistenceException("Failed to list secrets for tenant " + tenantId, e);
         }
     }
@@ -320,7 +320,7 @@ public class MongoSecretPersistence implements ISecretPersistence {
                 deks.add(documentToDek(doc));
             }
             return deks;
-        } catch (com.mongodb.MongoException e) {
+        } catch (MongoException e) {
             throw new PersistenceException("Failed to list all DEKs", e);
         }
     }
@@ -332,7 +332,7 @@ public class MongoSecretPersistence implements ISecretPersistence {
         try {
             var doc = metaCollection.find(eq("key", key)).first();
             return doc != null ? doc.getString("value") : null;
-        } catch (com.mongodb.MongoException e) {
+        } catch (MongoException e) {
             throw new PersistenceException("Failed to read meta value: " + key, e);
         }
     }
@@ -345,7 +345,7 @@ public class MongoSecretPersistence implements ISecretPersistence {
                     Updates.set("value", value),
                     Updates.setOnInsert("key", key));
             metaCollection.updateOne(filter, update, new UpdateOptions().upsert(true));
-        } catch (com.mongodb.MongoException e) {
+        } catch (MongoException e) {
             throw new PersistenceException("Failed to write meta value: " + key, e);
         }
     }
