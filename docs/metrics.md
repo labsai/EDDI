@@ -212,15 +212,26 @@ sum(rate(eddi_tool_ratelimit_allowed_total[5m]))
 
 ```text
 eddi_tool_calls_total                       # Total tool calls
-eddi_tool_costs_total                       # Total cumulative cost (gauge)
+eddi_tool_costs_total                       # Cumulative cost
 eddi_tool_budget_exceeded_total             # Budget exceeded events
 ```
 
-Per-tool breakdown:
+Per-tool breakdown — note the `_total`, which the exposition adds to every
+counter. `eddi_tool_calls{tool="weather"}` without it matches no series and
+returns an empty result rather than an error:
+
 ```text
-eddi_tool_calls{tool="weather"}             # Calls per tool
-eddi_tool_costs{tool="weather"}             # Cost per tool
+eddi_tool_calls_total{tool="weather"}       # Calls per tool
+eddi_tool_costs_total{tool="weather"}       # Cost per tool
 ```
+
+> **`eddi_tool_costs_total` is two meters under one name.** The code registers a
+> counter `eddi.tool.costs` (tagged by `tool`) *and* a gauge
+> `eddi.tool.costs.total`. Micrometer appends `_total` to the counter and leaves
+> the gauge alone, so both land on `eddi_tool_costs_total`. Treat a query on that
+> name as ambiguous until the collision is resolved in the code: use the
+> `tool`-tagged series for per-tool cost, and prefer
+> `GET /llm/tools/costs` when you need the authoritative total.
 
 ### Group Discussion Metrics
 

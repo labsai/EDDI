@@ -151,8 +151,8 @@ def main():
         sys.exit("Run this from the repository root.")
 
     size = normalised_size(LIVE)
-    print("docs/changelog.md is %,d bytes (cap %,d, rotate target %,d)"
-          .replace(",", "") % (size, CAP_BYTES, TARGET_BYTES))
+    print(f"docs/changelog.md is {size:,} bytes "
+          f"(cap {CAP_BYTES:,}, rotate target {TARGET_BYTES:,})")
 
     if args.check:
         print("OVER CAP — rotation needed" if size > CAP_BYTES else "under cap — no rotation needed")
@@ -219,8 +219,7 @@ def main():
           + "\n---\n\n"
           + "\n".join(b for _, b in registers))
 
-    print("moved %d entries; docs/changelog.md is now %,d bytes"
-          .replace(",", "") % (len(move), normalised_size(LIVE)))
+    print(f"moved {len(move)} entries; docs/changelog.md is now {normalised_size(LIVE):,} bytes")
     print("Remember to add docs/changelog/<new files> to docs/SUMMARY.md.")
     return 0
 

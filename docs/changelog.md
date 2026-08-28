@@ -49,6 +49,71 @@ bottom of this file and are never archived.
 
 ---
 
+## 🔬 test(metrics): the coverage test was vacuous for four meters (2026-08-28)
+
+**Repo:** EDDI (`docs/accuracy-audit`)
+
+A self-review of the accuracy-audit branch, looking for the same class of defect
+in the work that the branch was written to remove. It found one, in the test
+added to prevent it.
+
+### The coverage test compared the wrong name
+
+`MetricsDashboardCoverageTest` matched the meter's dotted name with `.` replaced
+by `_`, as a substring. That is satisfiable by a *different, longer* meter:
+`eddi_tool_cache_hits` is a substring of `eddi_tool_cache_hits_by_tool`, so
+charting only the by-tool variant satisfied a check for the plain counter. Four
+meters were exposed to this, and **`eddi.tool.costs` was passing that way for
+real** — it had no independent occurrence anywhere on the dashboard.
+
+The fix compares the name a meter is actually *scraped* under: Micrometer
+appends `_total` to counters and `_seconds` to timers and leaves gauges alone
+(with no second `_total` for the meters registered in snake_case with one
+already). `eddi_tool_cache_hits_total` is not a substring of
+`eddi_tool_cache_hits_by_tool_total`, so the ambiguity is gone rather than
+narrowed. Mutation-checked with exactly the case that used to slip through.
+
+### What that vacuity was hiding
+
+**`eddi_tool_costs_total` is two meters under one name.** `ToolCostTracker`
+registers a counter `eddi.tool.costs` (tagged by `tool`) at line 205 and a gauge
+`eddi.tool.costs.total` at line 60. The exposition appends `_total` to the
+counter and leaves the gauge alone, so both resolve to `eddi_tool_costs_total`.
+This is a collision in the application code, not in the documentation, and
+renaming a meter changes a published contract — so it is documented here and
+left for a separate decision rather than fixed in a documentation branch.
+`metrics.md` now says the name is ambiguous and points at `GET /llm/tools/costs`
+for an authoritative total.
+
+Also corrected, and pre-existing: the per-tool examples read
+`eddi_tool_calls{tool="weather"}` and `eddi_tool_costs{tool="weather"}`. Both are
+counters, so both are scraped with `_total`; the queries as written match no
+series and return an empty result rather than an error.
+
+### Two smaller defects of my own
+
+- **`archiveTableOf` used an unanchored `indexOf("## Archive")`.** `"### Archive"`
+  contains `"## Archive"` at offset 1, so a sub-heading inside an entry could
+  have been taken for the section — and this file already contains entries that
+  discuss the `## Archive` table by name. Now anchored to a line start.
+- **`rotate-changelog.py` printed `cap 256000 rotate target 204800`.** A
+  `"...%,d...".replace(",", "")` idiom, used to strip Java-style thousands
+  separators that Python does not support, also stripped the comma from the
+  prose. Replaced with f-string `{:,}` formatting, which does the thing that hack
+  was imitating.
+
+### What the review checked and found clean
+
+- **109 of the 118 documented defaults** cross-checked against
+  `application.properties` and `@ConfigProperty`: no mismatches. The nine
+  unchecked have no default in code.
+- All 10 `eddi.schedule.*` values and all 6 schedule meters in `scheduling.md`.
+- Every documented metric name against its meter's *type*, catching any counter
+  documented without `_total` or gauge documented with one — the two per-tool
+  lines above were the only hits.
+
+---
+
 ## 🔧 docs: address the PR #722 review — the env-var rule was wrong (2026-08-28)
 
 **Repo:** EDDI (`docs/accuracy-audit`)

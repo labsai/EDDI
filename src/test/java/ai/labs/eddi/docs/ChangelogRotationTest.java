@@ -179,9 +179,14 @@ class ChangelogRotationTest {
      * mentions an archive path from standing in for the table row.
      */
     private static String archiveTableOf(String live) {
-        int start = live.indexOf("## Archive");
-        assertTrue(start >= 0, "docs/changelog.md has no '## Archive' section — the archives it "
-                + "points at are unreachable, and this test cannot check the index that does not exist.");
+        // Anchored to a line start, because "### Archive" contains "## Archive"
+        // at offset 1 — an unanchored indexOf would accept a sub-heading inside
+        // an entry as the section, and this file already contains entries that
+        // discuss the "## Archive" table by name.
+        Matcher heading = Pattern.compile("^## Archive\\s*$", Pattern.MULTILINE).matcher(live);
+        assertTrue(heading.find(), "docs/changelog.md has no '## Archive' section — the archives it "
+                + "points at are unreachable, and this test cannot check an index that does not exist.");
+        int start = heading.start();
         int end = live.indexOf("\n## ", start + 1);
         return end < 0 ? live.substring(start) : live.substring(start, end);
     }
