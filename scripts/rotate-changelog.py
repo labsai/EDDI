@@ -72,6 +72,19 @@ def write(path, text):
     io.open(path, "w", encoding="utf-8", newline="\n").write(text)
 
 
+def normalised_size(path):
+    """Byte length with CRLF normalised to LF — what git stores, and what
+    ChangelogRotationTest measures.
+
+    Markdown has no `eol` setting in .gitattributes, so a Windows checkout is
+    CRLF and Linux is LF: about 5% apart on a file this size, for identical
+    content. Measuring the working copy would make the cap and the Archive
+    table's sizes differ per platform, so the table would churn on every
+    rotation depending on who ran it.
+    """
+    return len(read(path).replace("\r\n", "\n").encode("utf-8"))
+
+
 def split_sections(text):
     """(header, [(heading, body)], [(register_heading, body)])."""
     lines = text.split("\n")
@@ -118,7 +131,7 @@ def rebuild_archive_table(header):
             count = sum(1 for l in read(path).split("\n") if l.startswith("## "))
             pretty = datetime.date.fromisoformat(m.group(1) + "-01").strftime("%B %Y")
             rows.append("| [%s](changelog/%s) | %d | %.0f KB |"
-                        % (pretty, name, count, os.path.getsize(path) / 1024))
+                        % (pretty, name, count, normalised_size(path) / 1024))
     if not rows:
         return header
     if not ARCHIVE_ROW.search(header):
@@ -137,7 +150,7 @@ def main():
     if not os.path.isfile("pom.xml"):
         sys.exit("Run this from the repository root.")
 
-    size = os.path.getsize(LIVE)
+    size = normalised_size(LIVE)
     print("docs/changelog.md is %,d bytes (cap %,d, rotate target %,d)"
           .replace(",", "") % (size, CAP_BYTES, TARGET_BYTES))
 
@@ -207,7 +220,7 @@ def main():
           + "\n".join(b for _, b in registers))
 
     print("moved %d entries; docs/changelog.md is now %,d bytes"
-          .replace(",", "") % (len(move), os.path.getsize(LIVE)))
+          .replace(",", "") % (len(move), normalised_size(LIVE)))
     print("Remember to add docs/changelog/<new files> to docs/SUMMARY.md.")
     return 0
 

@@ -113,6 +113,17 @@ table from what is on disk, and refuses to run from anywhere but the repository
 root. `--check` reports without changing anything. It was used to perform the
 final rotation in this commit, which is also how it was tested.
 
+### Line endings
+
+The cap is measured on content with CRLF normalised to LF, not on
+`Files.size()`. Markdown carries no `eol` setting in `.gitattributes`, so a
+Windows checkout is CRLF and the Linux CI runner is LF — about 5% apart on a file
+this size, for byte-identical content. Measuring the working copy would have made
+the cap mean something different per platform, and the first symptom would have
+been a Windows developer told to rotate a changelog CI was perfectly happy with.
+`rotate-changelog.py` measures the same way, so the Archive table's sizes do not
+churn depending on who ran it.
+
 ### Wiring
 
 - `SUMMARY.md` — the six archives listed under Changelog, so

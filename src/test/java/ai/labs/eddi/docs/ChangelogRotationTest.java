@@ -64,7 +64,7 @@ class ChangelogRotationTest {
     @DisplayName("the live changelog stays under the rotation cap")
     void liveChangelogIsUnderCap() {
         Path root = repoRoot();
-        long size = sizeOf(root.resolve(LIVE));
+        long size = normalisedSize(root.resolve(LIVE));
 
         assertTrue(size <= LIVE_CAP_BYTES, String.format(
                 "docs/changelog.md is %,d bytes, over the %,d-byte cap.%n"
@@ -143,12 +143,20 @@ class ChangelogRotationTest {
         }
     }
 
-    private static long sizeOf(Path file) {
-        try {
-            return Files.size(file);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
+    /**
+     * The file's size with {@code \r\n} normalised to {@code \n}, which is what git
+     * stores.
+     * <p>
+     * {@code Files.size} would measure the working copy instead. Markdown carries
+     * no {@code eol} setting in {@code .gitattributes}, so a Windows checkout has
+     * CRLF and the Linux CI runner has LF — about 5% apart on a file this size, on
+     * identical content. Measuring the working copy would therefore make the cap
+     * mean something different per platform, and the first symptom would be a
+     * Windows developer being told to rotate a changelog that CI is perfectly happy
+     * with.
+     */
+    private static long normalisedSize(Path file) {
+        return read(file).replace("\r\n", "\n").getBytes(StandardCharsets.UTF_8).length;
     }
 
     private static Path repoRoot() {
