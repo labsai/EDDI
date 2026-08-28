@@ -127,10 +127,10 @@ First, you need to set up a `AgentTrigger`.
 
 | HTTP Method | API Endpoint                                | Request Body         | Response             |
 | ----------- | ------------------------------------------- | -------------------- | -------------------- |
-| DELETE      | `/agenttriggerstore/agenttriggers/{intent}` | N/A                  | N/A                  |
-| GET         | `/agenttriggerstore/agenttriggers/{intent}` | N/A                  | Agent Triggers-model |
-| PUT         | `/agenttriggerstore/agenttriggers/{intent}` | Agent Triggers-model | N/A                  |
-| POST        | `/agenttriggerstore/agenttriggers`          | Agent Triggers-model | N/A                  |
+| DELETE      | `/AgentTriggerStore/agenttriggers/{intent}` | N/A                  | N/A                  |
+| GET         | `/AgentTriggerStore/agenttriggers/{intent}` | N/A                  | Agent Triggers-model |
+| PUT         | `/AgentTriggerStore/agenttriggers/{intent}` | Agent Triggers-model | N/A                  |
+| POST        | `/AgentTriggerStore/agenttriggers`          | Agent Triggers-model | N/A                  |
 
 ## Triggering a ManagedAgent
 
@@ -161,7 +161,7 @@ To trigger a managed agent you will have to call the following API endpoints.
 
 _Request URL:_
 
-`POST` `http://localhost:7070/agenttriggerstore/agenttriggers`
+`POST` `http://localhost:7070/AgentTriggerStore/agenttriggers`
 
 _Request Body_
 

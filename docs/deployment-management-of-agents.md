@@ -41,19 +41,21 @@ Deployment management provides:
    → Old version still available if specified
 
 5. UNDEPLOY Agent
-   POST /administration/production/undeploy/agent123
+   POST /administration/production/undeploy/agent123?version=1
    → Agent stops processing new conversations
 ```
 
 ### Auto-Deploy Feature
 
-- **`autoDeploy=true`**: Automatically deploy new versions when agent is updated
-- **`autoDeploy=false`**: Manual deployment required for each version
+- **`autoDeploy=true`** (the default): the deployment is persisted, so this exact agent version is deployed again automatically after a restart
+- **`autoDeploy=false`**: the agent is deployed into the running instance only — nothing is persisted, so the deployment is gone after a restart
+
+Neither value deploys a new version created by an agent update: a new version always needs its own explicit deploy call.
 
 This is useful for:
 
-- **Development**: Auto-deploy to `test` for rapid iteration
-- **Production**: Manual deployment to `production` for controlled releases
+- **Development**: `autoDeploy=false` in `test`, so a throwaway version does not survive the next restart
+- **Production**: `autoDeploy=true` in `production`, so the deployed version comes back up with the instance
 
 ### Checking Deployment Status
 
@@ -109,6 +111,7 @@ The undeployment of a specific agent is done through a **`POST`** to **`/adminis
 | API endpoint  | `/administration/{environment}/undeploy/{agentId}`                                       |
 | {environment} | (`Path parameter`):`String` deployment environment: `production` (default) or `test`             |
 | {agentId}     | (`Path parameter`):`String` id of the agent that you wish to **undeploy**.               |
+| version       | (`Query parameter`, **required**):`Integer` version of the agent that you wish to **undeploy**. |
 
 ### Example :
 
@@ -139,7 +142,7 @@ Deployment status of an Agent REST API Endpoint
 | Api endpoint  | `/administration/{environment}/deploymentstatus/{agentId}`                                        |
 | {environment} | (`Path parameter`):`String` deployment environment: `production` (default) or `test`             |
 | {agentId}     | (`Path parameter`):`String` id of the agent that you wish to **check** its **deployment status**. |
-| Response      | `NOT_FOUND`, `IN_PROGRESS`, `ERROR` and `READY`.                                                  |
+| Response      | JSON `{"status": ...}`, where `status` is one of `NOT_FOUND`, `IN_PROGRESS`, `ERROR` and `READY`. Add `?format=text` for the bare status word as plain text (deprecated). |
 
 ### Example*:*
 
@@ -149,7 +152,7 @@ _Request URL_
 
 _Response Body_
 
-`READY`
+`{"status":"READY"}`
 
 _Response Code_
 
@@ -276,7 +279,7 @@ DELETE /workflowstore/workflows/{id}?version={version}&cascade=true&permanent=tr
 If the agent is currently deployed, you should **undeploy** it first:
 
 ```
-POST /administration/production/undeploy/{agentId}?endAllActiveConversations=true
+POST /administration/production/undeploy/{agentId}?version=1&endAllActiveConversations=true
 → 202 Accepted
 
 DELETE /agentstore/agents/{agentId}?version=1&cascade=true&permanent=true
@@ -313,13 +316,13 @@ Returns a report listing all unreferenced resources across all stores (workflows
   "orphans": [
     {
       "resourceUri": "eddi://ai.labs.workflow/workflowstore/workflows/abc123?version=1",
-      "type": "ai.labs.package",
+      "type": "ai.labs.workflow",
       "name": "Unused Workflow",
       "deleted": false
     },
     {
       "resourceUri": "eddi://ai.labs.rules/rulestore/rulesets/def456?version=1",
-      "type": "ai.labs.behavior",
+      "type": "ai.labs.rules",
       "name": "Old Behavior Set",
       "deleted": true
     }

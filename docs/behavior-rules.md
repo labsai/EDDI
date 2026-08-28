@@ -29,7 +29,7 @@ Behavior Rules examine the conversation memory (including parsed input, context 
 
 ## Behavior Rules Structure
 
-`Behavior Rules` are very flexible in structure to cover most use cases that you will come across. `Behavior Rules` are clustered in `Groups`. `Behavior Rules` are executed sequentially within each `Group`. As soon as one `Behavior Rule` succeeds, all remaining `Behavior Rules` in this `Group` will be skipped.
+`Behavior Rules` are very flexible in structure to cover most use cases that you will come across. `Behavior Rules` are clustered in `Groups`. `Behavior Rules` are executed sequentially within each `Group`. By default, as soon as one `Behavior Rule` succeeds, all remaining `Behavior Rules` in this `Group` will be skipped. A `Group` may override this with the optional `executionStrategy` field (default `executeUntilFirstSuccess`): with `"executionStrategy": "executeAll"`, every rule in the group whose conditions match fires and contributes its actions. Any other value fails ruleset deserialization.
 
 ## **Groups**
 
@@ -381,9 +381,11 @@ The **`{id}`** is a path parameters that indicate which behavior rule you want t
 > `GET /rulestore/rulesets/{id}?version=N`.
 >
 > Configurations are **immutable and versioned**: a `PUT` does not overwrite,
-> it creates version `N+1` and returns its `Location`. Omitting `?version=`
-> on a read gives you version 1, which is rarely what you want on a resource
-> that has been edited.
+> it creates version `N+1` and returns its `Location`. `?version=` is mandatory
+> on every read — omitting it fails the request with
+> `Argument must not be null (version)`. Use
+> `GET /rulestore/rulesets/{id}/currentversion` to look up the current version
+> number first.
 
 ### Example
 

@@ -8,11 +8,11 @@
 
 ```
 Agent (.agent.json)
-  └─ Workflow 1 (.package.json)
+  └─ Workflow 1 (.workflow.json)
       ├─ Extension 1: Behavior Rules (eddi://ai.labs.behavior)
       ├─ Extension 2: HTTP Calls (eddi://ai.labs.httpcalls)
       └─ Extension 3: Output Sets (eddi://ai.labs.output)
-  └─ Workflow 2 (.package.json)
+  └─ Workflow 2 (.workflow.json)
       ├─ Extension 1: Dictionary (eddi://ai.labs.parser.dictionaries.regular)
       └─ Extension 2: LangChain (eddi://ai.labs.llm)
 ```
@@ -95,57 +95,51 @@ _Response Body_
 ```javascript
 [
   {
-    type: "ai.labs.parser",
+    type: "eddi://ai.labs.parser",
     displayName: "Input Parser",
     configs: {
       includeUnknown: {
         displayName: "Include Unknown Expressions",
         fieldType: "BOOLEAN",
         defaultValue: true,
-        optional: true,
+        isOptional: true,
       },
       includeUnused: {
         displayName: "Include Unused Expressions",
         fieldType: "BOOLEAN",
         defaultValue: true,
-        optional: true,
+        isOptional: true,
       },
       appendExpressions: {
         displayName: "Append Expressions",
         fieldType: "BOOLEAN",
         defaultValue: true,
-        optional: true,
+        isOptional: true,
       },
     },
     extensions: {
       corrections: [
         {
-          type: "ai.labs.parser.corrections.levenshtein",
+          type: "eddi://ai.labs.parser.corrections.levenshtein",
           displayName: "Damerau Levenshtein Correction",
           configs: {
             distance: {
               displayName: "Distance",
               fieldType: "INT",
               defaultValue: 2,
-              optional: true,
+              isOptional: true,
             },
           },
           extensions: {},
         },
         {
-          type: "ai.labs.parser.corrections.stemming",
-          displayName: "Grammar Stemming Correction",
-          configs: {},
-          extensions: {},
-        },
-        {
-          type: "ai.labs.parser.corrections.phonetic",
+          type: "eddi://ai.labs.parser.corrections.phonetic",
           displayName: "Phonetic Matching Correction",
           configs: {},
           extensions: {},
         },
         {
-          type: "ai.labs.parser.corrections.mergedTerms",
+          type: "eddi://ai.labs.parser.corrections.mergedTerms",
           displayName: "Merged Terms Correction",
           configs: {},
           extensions: {},
@@ -153,38 +147,38 @@ _Response Body_
       ],
       normalizer: [
         {
-          type: "ai.labs.parser.normalizers.punctuation",
+          type: "eddi://ai.labs.parser.normalizers.punctuation",
           displayName: "Punctuation Normalizer",
           configs: {
             removePunctuation: {
               displayName: "Remove Punctuation",
               fieldType: "BOOLEAN",
               defaultValue: false,
-              optional: true,
+              isOptional: true,
             },
             punctuationRegexPattern: {
               displayName: "Punctuation RegEx Pattern",
               fieldType: "STRING",
               defaultValue: "!?:.,;",
-              optional: true,
+              isOptional: true,
             },
           },
           extensions: {},
         },
         {
-          type: "ai.labs.parser.normalizers.specialCharacter",
+          type: "eddi://ai.labs.parser.normalizers.specialCharacter",
           displayName: "Convert Special Character Normalizer",
           configs: {},
           extensions: {},
         },
         {
-          type: "ai.labs.parser.normalizers.contractedWords",
+          type: "eddi://ai.labs.parser.normalizers.contractedWords",
           displayName: "Contracted Word Normalizer",
           configs: {},
           extensions: {},
         },
         {
-          type: "ai.labs.parser.normalizers.allowedCharacter",
+          type: "eddi://ai.labs.parser.normalizers.allowedCharacter",
           displayName: "Remove Undefined Character Normalizer",
           configs: {},
           extensions: {},
@@ -192,49 +186,49 @@ _Response Body_
       ],
       dictionaries: [
         {
-          type: "ai.labs.parser.dictionaries.integer",
+          type: "eddi://ai.labs.parser.dictionaries.integer",
           displayName: "Integer Dictionary",
           configs: {},
           extensions: {},
         },
         {
-          type: "ai.labs.parser.dictionaries.decimal",
+          type: "eddi://ai.labs.parser.dictionaries.decimal",
           displayName: "Decimal Dictionary",
           configs: {},
           extensions: {},
         },
         {
-          type: "ai.labs.parser.dictionaries.ordinalNumber",
+          type: "eddi://ai.labs.parser.dictionaries.ordinalNumber",
           displayName: "Ordinal Numbers Dictionary",
           configs: {},
           extensions: {},
         },
         {
-          type: "ai.labs.parser.dictionaries.punctuation",
+          type: "eddi://ai.labs.parser.dictionaries.punctuation",
           displayName: "Punctuation Dictionary",
           configs: {},
           extensions: {},
         },
         {
-          type: "ai.labs.parser.dictionaries.time",
+          type: "eddi://ai.labs.parser.dictionaries.time",
           displayName: "Time Expression Dictionary",
           configs: {},
           extensions: {},
         },
         {
-          type: "ai.labs.parser.dictionaries.email",
+          type: "eddi://ai.labs.parser.dictionaries.email",
           displayName: "Email Dictionary",
           configs: {},
           extensions: {},
         },
         {
-          type: "ai.labs.parser.dictionaries.regular",
+          type: "eddi://ai.labs.parser.dictionaries.regular",
           displayName: "Regular Dictionary",
           configs: {
             uri: {
               displayName: "Resource URI",
               fieldType: "URI",
-              optional: false,
+              isOptional: false,
             },
           },
           extensions: {},
@@ -243,79 +237,61 @@ _Response Body_
     },
   },
   {
-    type: "ai.labs.behavior",
+    type: "eddi://ai.labs.behavior",
     displayName: "Behavior Rules",
     configs: {
       appendActions: {
         displayName: "Append Actions",
         fieldType: "BOOLEAN",
         defaultValue: true,
-        optional: false,
+        isOptional: true,
+      },
+      expressionsAsActions: {
+        displayName: "Expressions as Actions",
+        fieldType: "BOOLEAN",
+        defaultValue: false,
+        isOptional: true,
       },
       uri: {
         displayName: "Resource URI",
         fieldType: "URI",
-        optional: false,
+        isOptional: false,
       },
     },
     extensions: {},
   },
   {
-    type: "ai.labs.output",
+    type: "eddi://ai.labs.output",
     displayName: "Output Generation",
     configs: {
       uri: {
         displayName: "Resource URI",
         fieldType: "URI",
-        optional: false,
+        isOptional: false,
       },
     },
     extensions: {},
   },
   {
-    type: "ai.labs.templating",
+    type: "eddi://ai.labs.templating",
     displayName: "Templating",
     configs: {},
     extensions: {},
   },
   {
-    type: "ai.labs.property",
+    type: "eddi://ai.labs.property",
     displayName: "Property Extraction",
     configs: {},
     extensions: {},
   },
   {
-    type: "ai.labs.callback",
-    displayName: "External Callback",
-    configs: {
-      callbackUri: {
-        displayName: "Callback URI",
-        fieldType: "URI",
-        optional: false,
-      },
-      callOnActions: {
-        displayName: "Call on Actions",
-        fieldType: "STRING",
-        defaultValue: "",
-        optional: true,
-      },
-      timeoutInMillis: {
-        displayName: "Timeout in Milliseconds",
-        fieldType: "URI",
-        defaultValue: 10000,
-        optional: true,
-      },
-    },
-    extensions: {},
-  },
-  {
-    type: "ai.labs.httpcalls",
+    type: "eddi://ai.labs.httpcalls",
     displayName: "Http Calls",
     configs: {
       uri: {
         displayName: "Resource URI",
         fieldType: "URI",
-        optional: false,
+        isOptional: false,
       },
     },
     extensions: {},

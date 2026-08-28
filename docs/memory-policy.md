@@ -12,12 +12,10 @@ Memory Policy is configured at the agent level in the agent configuration JSON:
 
 ```json
 {
-  "agentConfiguration": {
-    "memoryPolicy": {
-      "strictWriteDiscipline": {
-        "enabled": true,
-        "onFailure": "digest"
-      }
+  "memoryPolicy": {
+    "strictWriteDiscipline": {
+      "enabled": true,
+      "onFailure": "digest"
     }
   }
 }
@@ -27,16 +25,16 @@ Memory Policy is configured at the agent level in the agent configuration JSON:
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `enabled` | boolean | `false` | Enable strict write discipline |
-| `onFailure` | string | `"keep_all"` | What to do with failed task output |
+| `enabled` | boolean | `false` | Enable strict write discipline — while this is `false`, `onFailure` has no effect |
+| `onFailure` | string | `"digest"` | What to do with failed task output |
 
 ### Failure Modes
 
 | Mode | Behavior |
 |------|----------|
-| `digest` | Failed task output is marked uncommitted (hidden from LLM). A concise error digest is injected so the LLM knows what failed and can adapt. **Recommended.** |
+| `digest` | Default mode — failed task output is marked uncommitted (hidden from LLM). A concise error digest is injected so the LLM knows what failed and can adapt. **Recommended.** |
 | `exclude_all` | Failed task output is marked uncommitted. No error digest is injected. The LLM sees nothing about the failure. |
-| `keep_all` | Default behavior — failed task output remains committed and visible to the LLM. Backwards-compatible. |
+| `keep_all` | Opt-in backwards-compatible mode — failed task output remains committed and visible to the LLM. |
 
 ## How It Works
 
@@ -86,7 +84,7 @@ The error digest is stored as a special output type:
 ```json
 {
   "type": "errorDigest",
-  "taskId": "ai.labs.apicalls",
+  "taskId": "ai.labs.httpcalls",
   "text": "API call to payment-service failed: HTTP 500"
 }
 ```
@@ -105,9 +103,9 @@ When a task fails with strict write discipline enabled, the action `task_failed_
       "actions": ["fallback_response"],
       "conditions": [
         {
-          "type": "actionMatcher",
-          "values": {
-            "actions": "task_failed_ai.labs.apicalls"
+          "type": "actionmatcher",
+          "configs": {
+            "actions": "task_failed_ai.labs.httpcalls"
           }
         }
       ]
@@ -121,7 +119,7 @@ When a task fails with strict write discipline enabled, the action `task_failed_
 1. **Enable `digest` mode for production agents** — It prevents LLM context pollution while preserving observability
 2. **Use behavior rules for graceful degradation** — React to `task_failed_*` actions to provide fallback responses
 3. **Monitor error digests** — They appear in conversation memory for debugging even though the LLM only sees the summary
-4. **Leave `keep_all` for development** — Full error output is useful during agent development and debugging
+4. **Set `keep_all` for development** — Full error output is useful during agent development and debugging
 
 ## See Also
 

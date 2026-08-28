@@ -256,16 +256,10 @@ curl -X POST http://localhost:7070/dictionarystore/dictionaries \
 
 **Response:** HTTP `201 Created`
 
-The response's `Location` header contains the URI of the created dictionary:
+The response's `Location` header contains the reference URI of the created dictionary:
 
 ```
-Location: http://localhost:7070/dictionarystore/dictionaries/DICT_ID?version=1
-```
-
-This gives you the reference URI:
-
-```
-eddi://ai.labs.dictionary/dictionarystore/dictionaries/DICT_ID?version=1
+Location: eddi://ai.labs.dictionary/dictionarystore/dictionaries/DICT_ID?version=1
 ```
 
 **Key Points:**
@@ -359,16 +353,10 @@ curl -X POST http://localhost:7070/parserstore/parsers \
 
 **Response:** HTTP `201 Created`
 
-The response's `Location` header contains the parser URI:
+The response's `Location` header contains the parser reference URI:
 
 ```
-Location: http://localhost:7070/parserstore/parsers/PARSER_ID?version=1
-```
-
-This gives you the parser reference:
-
-```
-eddi://ai.labs.parser/parserstore/parsers/PARSER_ID?version=1
+Location: eddi://ai.labs.parser/parserstore/parsers/PARSER_ID?version=1
 ```
 
 ### Dictionary Types Reference

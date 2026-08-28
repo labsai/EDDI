@@ -328,7 +328,7 @@ Extensions are the **actual agent logic**:
       "actions": ["fetch_weather"],
       "request": {
         "method": "GET",
-        "path": "/current?location=${context.userLocation}"
+        "path": "/current?location={context.userLocation}"
       },
       "postResponse": {
         "propertyInstructions": [
@@ -371,7 +371,7 @@ When adding a new feature, use this guide to decide where configuration belongs:
 
 | Question | Config Level | Example |
 |---|---|---|
-| Does it affect the entire agent across all conversations? | **Agent level** (`AgentConfiguration`) | `enableMemoryTools`, `enableStreaming` |
+| Does it affect the entire agent across all conversations? | **Agent level** (`AgentConfiguration`) | `enableMemoryTools`, `a2aEnabled` |
 | Does it control how a pipeline step behaves? | **Extension level** (e.g., `langchain.json`, `property.json`) | LLM parameters, property instructions |
 | Does it define which extensions run and in what order? | **Workflow level** (`workflow.json`) | Extension types and URIs |
 | Is it a user-facing runtime setting? | **Agent level** | User memory config, audit settings |
@@ -399,7 +399,7 @@ When adding a new feature, use this guide to decide where configuration belongs:
 
 ### ConversationCoordinator
 
-**Location**: `ai.labs.eddi.engine.runtime.internal.ConversationCoordinator`
+**Location**: `ai.labs.eddi.engine.runtime.IConversationCoordinator`, implemented by `InMemoryConversationCoordinator` and `NatsConversationCoordinator` in `ai.labs.eddi.engine.runtime.internal` (which one is active depends on deployment configuration)
 
 **Purpose**: Ensures proper message ordering and concurrency control
 
@@ -656,7 +656,7 @@ The attachment subsystem handles binary file storage for multimodal conversation
 
 - **Vertical**: Handles thousands of concurrent conversations per instance
 - **Horizontal**: Stateless design allows infinite horizontal scaling
-- **Agenttleneck**: MongoDB becomes agenttleneck; use replica sets and sharding
+- **Bottleneck**: MongoDB becomes the bottleneck; use replica sets and sharding
 
 ---
 
@@ -777,8 +777,8 @@ Each workflow runs its extensions in order: **Parser → Behavior → Property �
 
 | Extension Type | Input | Output | Key Feature |
 |---|---|---|---|
-| **Parser** | Raw user text | Expressions (semantic representation) | `expressionsAsActions: true` — parser expressions become actions |
-| **Behavior Rules** | Actions and expressions | New actions that drive subsequent tasks | IF-THEN condition engine — the routing logic |
+| **Parser** | Raw user text | Expressions (semantic representation) | Dictionaries, normalizer and corrections; `appendExpressions`, `includeUnused`, `includeUnknown` |
+| **Behavior Rules** | Actions and expressions | New actions that drive subsequent tasks | IF-THEN condition engine — the routing logic; `expressionsAsActions: true` (in the behavior step's `config`, alongside `appendActions` and `uri`) makes parser expressions become actions |
 | **Property Setter** | Current memory data | Stored properties (conversation-scoped or long-term) | Slot-filling using `{memory.current.input}` templates |
 | **HTTP Calls** | Actions, template variables | Response data stored in memory | Pre/post request property instructions, retry support |
 | **LLM** | Conversation memory, system prompt, tools | LLM response text | Legacy chat (simple) or Agent mode (tool-calling loop) |
@@ -835,7 +835,7 @@ A `GroupConversationService` orchestrates discussions through configurable phase
 
 **Key capabilities:**
 
-- **6 built-in discussion styles**: Round Table, Peer Review, Devil's Advocate, Delphi, Debate, and Task Force — each with distinct phase flows and turn-taking rules. Task Force uses a 4-phase pipeline (PLAN→EXECUTE→VERIFY→SYNTHESIS) for structured task decomposition and parallel execution
+- **7 built-in discussion styles**: Round Table, Peer Review, Devil's Advocate, Delphi, Debate, Task Force, and Negotiation — each with distinct phase flows and turn-taking rules. Task Force uses a 4-phase pipeline (PLAN→EXECUTE→VERIFY→SYNTHESIS) for structured task decomposition and parallel execution; Negotiation trades rather than wins (positions & interests → opening proposals → bargaining with a concession ledger → arbitration → synthesis)
 - **Custom phases**: Define your own phase sequences with configurable context scopes (independent, full transcript, anonymous, own-feedback-only)
 - **Group-of-groups**: Members can themselves be groups, enabling hierarchical multi-agent composition with configurable depth limits
 - **Fault tolerance**: Per-agent timeouts, configurable failure policies (skip, retry, abort), and graceful degradation when members are unavailable
@@ -959,7 +959,7 @@ Master Key (env var EDDI_VAULT_MASTER_KEY)
                            └→ Secret plaintext
 ```
 
-- **Per-deployment salt**: `VaultSaltManager` generates and stores a unique 32-byte salt per EDDI instance
+- **Per-deployment salt**: `VaultSaltManager` generates and stores a unique 16-byte salt per EDDI instance
 - **Envelope encryption**: Rotating the master key re-wraps KEK→DEK without touching individual secrets
 - **Export scrubbing**: Agent export/sync automatically strips secrets from ZIP files
 
@@ -984,10 +984,10 @@ EDDI agents can sign their inter-agent messages using Ed25519 digital signatures
 | **Dev mode** | No | Allowed — info log on startup |
 | **Dev mode** | Yes | Full auth with configured Keycloak |
 | **Production** | No + no opt-out | `AuthStartupGuard` **fails startup** with clear error |
-| **Production** | No + explicit opt-out | Starts, but logs ERROR every 60s as a constant reminder |
+| **Production** | No + explicit opt-out | Starts, but logs an ERROR at startup and a WARN reminder every hour |
 | **Production** | Yes | Full OIDC with Keycloak multi-tenant support |
 
-The escape hatch (`EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true`) exists for air-gapped deployments and quick demos. The periodic ERROR log ensures operators remain aware.
+The escape hatch (`EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true`) exists for air-gapped deployments and quick demos. The hourly WARN reminder ensures operators remain aware.
 
 ### CI Security Scanning
 
@@ -1003,8 +1003,12 @@ The escape hatch (`EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true`) exists for air-gap
 Production response headers (configured via `application.properties`):
 - `X-Content-Type-Options: nosniff`
 - `X-Frame-Options: DENY`
+- `Referrer-Policy: strict-origin-when-cross-origin`
+- `X-XSS-Protection: 0`
+- `Permissions-Policy: camera=(), microphone=(), geolocation=()`
 - `Content-Security-Policy: default-src 'self'; ...`
-- `Strict-Transport-Security: max-age=31536000` (when TLS is configured)
+
+`Strict-Transport-Security` is **not** set by EDDI — configure it at your TLS terminator / ingress.
 
 ## Related Documentation
 

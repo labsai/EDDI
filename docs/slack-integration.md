@@ -36,13 +36,13 @@ Add these **Bot Token Scopes**:
 Store your Slack credentials in EDDI's Secrets Vault:
 
 ```bash
-curl -X POST http://localhost:7070/secretstore/keys \
+curl -X PUT http://localhost:7070/secretstore/secrets/default/slack-bot-token \
   -H "Content-Type: application/json" \
-  -d '{"keyName":"slack-bot-token","secretValue":"xoxb-your-token-here"}'
+  -d '{"value":"xoxb-your-token-here","description":"Slack bot token"}'
 
-curl -X POST http://localhost:7070/secretstore/keys \
+curl -X PUT http://localhost:7070/secretstore/secrets/default/slack-signing-secret \
   -H "Content-Type: application/json" \
-  -d '{"keyName":"slack-signing-secret","secretValue":"your-signing-secret"}'
+  -d '{"value":"your-signing-secret","description":"Slack signing secret"}'
 ```
 
 ### 5. Configure Channel Integration
@@ -271,12 +271,13 @@ Each style produces a distinct phase flow, but all use the same header+thread UX
 
 | Style | Phases | Slack Behavior |
 |-------|--------|---------------|
-| **ROUND TABLE** | Opinion → Synthesis | Each agent posts a channel header; moderator synthesizes |
+| **ROUND TABLE** | Initial Opinions → Discussion (×`maxRounds`-1, default 1) → Synthesis | Each agent posts a channel header; moderator synthesizes |
 | **PEER REVIEW** | Opinion → Critique → Revision → Synthesis | Peer feedback threads under the target agent's header |
 | **DEVIL'S ADVOCATE** | Opinion → Challenge → Defense → Synthesis | Challenger threads under the original agent's header |
 | **DEBATE** | Pro Arguments → Con Arguments → Rebuttals → Judge | PRO and CON agents post separate headers; rebuttals thread under opponents |
 | **DELPHI** | Anonymous Round 1 → Round 2 (convergence) → Synthesis | Each round's opinions post as headers; convergence visible across rounds |
 | **TASK FORCE** | Plan → Execute → Verify → Synthesis | Moderator posts plan; agents post task results; verifiers thread under targets; synthesis |
+| **NEGOTIATION** | Positions & Interests → Opening Proposals → Bargaining → Arbitration (skipped once agreement is reached) → Synthesis | Each agent posts its position and proposals as channel headers; moderator arbitrates and synthesizes |
 
 #### TASK_FORCE Events in Slack
 

@@ -117,7 +117,8 @@ public enum ConversationState {
     IN_PROGRESS,     // Currently processing a message
     EXECUTION_INTERRUPTED,  // Processing was interrupted
     ERROR,           // An error occurred
-    ENDED            // Conversation has ended
+    ENDED,           // Conversation has ended
+    AWAITING_HUMAN   // Paused awaiting human approval (HITL) — see hitl.md
 }
 ```
 
@@ -193,25 +194,25 @@ memory.getCurrentStep().storeData(
 You said: {memory.current.input}
 
 <!-- Access previous step data -->
-Previously, you mentioned: {memory.previous.userPreference}
+Previously, you mentioned: {memory.last.userPreference}
 
 <!-- Access context data -->
-Welcome, {memory.current.context.userName}!
+Welcome, {context.userName}!
 
 <!-- Access HTTP call response -->
 The weather is: {memory.current.httpCalls.weatherResponse.temperature}
 
 <!-- Access LLM response -->
-AI says: {memory.current.llmResponse}
+AI says: {memory.current.output}
 ```
 
 ### In HTTP Call Body Templates
 
 ```json
 {
-  "userId": "{memory.current.context.userId}",
+  "userId": "{context.userId}",
   "message": "{memory.current.input}",
-  "conversationId": "{memory.conversationId}"
+  "conversationId": "{conversationInfo.conversationId}"
 }
 ```
 
@@ -315,7 +316,6 @@ When calling LLMs, you can control how much history is sent:
 ```json
 {
   "parameters": {
-    "sendConversation": "true",
     "includeFirstAgentMessage": "true",
     "logSizeLimit": "10"
   }
@@ -327,13 +327,13 @@ When calling LLMs, you can control how much history is sent:
 Pass data from your application via context instead of hardcoding:
 
 ```javascript
-// API Request
-POST /agents/prod/myagent/conversation123
+// API Request — the conversationId comes from POST /agents/{agentId}/start
+POST /agents/conversation123
 {
   "input": "What's my order status?",
   "context": {
-    "userId": "user-789",
-    "sessionId": "session-xyz"
+    "userId": { "type": "string", "value": "user-789" },
+    "sessionId": { "type": "string", "value": "session-xyz" }
   }
 }
 ```
@@ -351,11 +351,11 @@ Let's trace how memory flows through a complete conversation step:
 ### 1. User Request
 
 ```http
-POST /agents/prod/weatheragent/conv-123
+POST /agents/conv-123
 {
   "input": "What's the weather in Paris?",
   "context": {
-    "userId": "john-doe"
+    "userId": { "type": "string", "value": "john-doe" }
   }
 }
 ```

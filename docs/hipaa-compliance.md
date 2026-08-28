@@ -15,7 +15,7 @@ GDPR/CCPA operations, see [gdpr-compliance.md](gdpr-compliance.md).
 
 | HIPAA Safeguard | EDDI Feature | Status |
 |---|---|---|
-| **Access Control** (§164.312(a)) | Keycloak OIDC + RBAC roles (`admin`, `editor`, `viewer`) | ✅ Built-in |
+| **Access Control** (§164.312(a)) | Keycloak OIDC + RBAC roles (`eddi-admin`, `eddi-editor`, `eddi-user`, `eddi-viewer`, `eddi-approver`) — enumerated per endpoint, no hierarchy | ✅ Built-in |
 | **Audit Controls** (§164.312(b)) | HMAC-signed immutable audit ledger | ✅ Built-in |
 | **Integrity Controls** (§164.312(c)) | HMAC tamper detection on all audit entries | ✅ Built-in |
 | **Person Authentication** (§164.312(d)) | Keycloak with JWT/OIDC, MFA-capable | ✅ Built-in |

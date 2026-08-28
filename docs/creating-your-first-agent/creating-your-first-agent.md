@@ -128,7 +128,7 @@ Otherwise via REST:
 2.  Since deployment could take a while it has been made **asynchronous**.
 3.  Make a **`GET`** to `/administration/production/deploymentstatus/`**`<UNIQUE_AGENT_ID>`**`?version=`**`<AGENT_VERSION>`** to find out the status of deployment.
 
-**`NOT_FOUND`**, **`IN_PROGRESS`**, **`ERROR` and `READY`** is what you can expect to be returned in the body.
+The body is JSON, e.g. `{"status":"READY"}`, where `status` is one of **`NOT_FOUND`**, **`IN_PROGRESS`**, **`ERROR`** and **`READY`**. Append `?format=text` if you want the bare status word as plain text (deprecated).
 
 1. As soon as the Agent is deployed and has `READY` status, make a **`POST`** to `/agents/`**`<UNIQUE_AGENT_ID>`**/start
    1. You will receive a `201` with the `URI` for the newly created Conversation, like this:
@@ -136,7 +136,7 @@ Otherwise via REST:
 
          `eddi://ai.labs.conversation/conversationstore/conversations/`**`<UNIQUE_CONVERSATION_ID>`**
 
-2. Now it's time to start talking to our Agent 1. Make a **`POST`** to `/agents/`**`<UNIQUE_AGENT_ID>`**/start`/`**`<UNIQUE_CONVERSATION_ID>`**
+2. Now it's time to start talking to our Agent 1. Make a **`POST`** to `/agents/`**`<UNIQUE_CONVERSATION_ID>`** (once the conversation exists, the agent id is no longer part of the path)
 
 **Option 1:** is to hand over the input text as `contentType text/plain`. Include the User Input in the body as `text/plain` (e.g. Hello)&#x20;
 
@@ -150,7 +150,7 @@ Otherwise via REST:
 
 1. You have two query params you can use to config the returned output 1. `returnDetailed` - default is false - will return all sub results of the entire conversation steps, otherwise only public ones such as input, action, output & quickreplies 2. `returnCurrentStepOnly` - default is true - will return only the latest conversation step that has just been processed, otherwise returns all conversation steps since the beginning of this conversation
 2. The output from the agent will be returned as JSON
-3. If you are interested in fetching the **`conversationmemory`** at any given time, make a **`GET`** to `/agents/`**`<UNIQUE_AGENT_ID>`**/start`/`**`<UNIQUE_CONVERSATION_ID>`**`?returnDetailed=true` (the query param is optional, default is false)
+3. If you are interested in fetching the **`conversationmemory`** at any given time, make a **`GET`** to `/agents/`**`<UNIQUE_CONVERSATION_ID>`**`?returnDetailed=true` (the query param is optional, default is false)
 
 > If you made it till here, CONGRATULATIONS, you have created your first Agent with **EDDI** !
 

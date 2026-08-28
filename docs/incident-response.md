@@ -29,8 +29,14 @@ to counters, so `eddi.tool.execution.failure` is scraped as
   `tool`. A spike in one tool's `failure` or `ratelimited` is the usual first
   sign of an outbound-integration incident
 - `eddi_audit_entries_dropped_total` — audit entries the ledger could **not**
-  write because its queue was full. This must stay at zero: a non-zero value
-  means the compliance trail has holes for the affected window
+  write, either because its bounded queue was full or after `MAX_FLUSH_RETRIES`
+  (3) consecutive audit-store write failures. This must stay at zero, and it has
+  two different causes: check the store's health, not just queue pressure.
+  Entries dropped on the flush path are written to the dead-letter sink
+  (`eddi.audit.dead-letter-path`, default
+  `/opt/eddi/data/eddi-audit-deadletter.jsonl`) and can be recovered as evidence;
+  an entry refused at ingest because the queue was full is genuinely lost, so the
+  compliance trail has holes for the affected window
 - `eddi_vault_errors_count_total` — vault resolve/store failures
 
 There is no single "audit write rate" counter; use the ledger's own listing

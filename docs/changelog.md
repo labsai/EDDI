@@ -49,6 +49,82 @@ bottom of this file and are never archived.
 
 ---
 
+## 🔎 docs: a 196-agent audit of every page against source (2026-08-29)
+
+**Repo:** EDDI (`docs/accuracy-audit`)
+
+A fourth review of this branch, this time fanned out: sixteen agents each took a
+cluster of pages and verified every checkable claim against `src/`, then every
+candidate finding was handed to an independent agent whose job was to refute it.
+179 candidates, 168 survived. Eighteen more agents applied the survivors —
+re-verifying each one first — and eighteen others re-read the resulting diffs.
+
+The headline is that **the flagship tutorial's last step did not work**.
+"Now it's time to start talking to our Agent" told the reader to
+`POST /agents/<AGENT_ID>/start/<CONVERSATION_ID>`. `@Path("/{agentId}/start")`
+is terminal; the message endpoint is `POST /agents/{conversationId}` and the
+agent id is not in the path at all. Both tutorial pages carried it, for the
+message POST and the conversation-memory GET alike, so the culmination of
+"Create your first Agent" 404s. Three prior review rounds on this branch missed
+it — including a mechanical REST sweep of mine, which accepted any documented
+path that *extended* a real route. `/agents/{}/start` is real, so the longer
+path looked fine.
+
+### What else the sweep found
+
+- `POST /agents/{id}/say` (`hitl.md`) — no `/say` segment exists.
+- `/agents/{env}/{agentId}/{conversationId}` (`conversation-memory.md`) — the v5
+  shape. `LegacyPathRewriteFilter` rewrites the environment *name*, not the shape.
+- `"type": "LANGCHAIN"` (`langchain.md`) — the type field is the model provider.
+- `corrections.stemming` — no such provider (levenshtein, mergedTerms, phonetic).
+- The `Location` header on a config create carries the `eddi://` resource URI,
+  not an HTTP URL — `RestVersionInfo.create` builds it from `resourceURI`.
+- `optional:` → `isOptional:` in the extension descriptor response, and
+  `.package.json` → `.workflow.json`.
+- A `//` comment inside a copy-paste-ready config block: configuration parses
+  with `FAIL_ON_UNKNOWN_PROPERTIES` and no Jackson comment support, so it 400s.
+- A dead `#conversation-log` anchor, and `langchain.md` claiming twelve providers
+  while listing eleven.
+
+### Four fixes that introduced new errors
+
+The diff-review stage paid for itself. Four "corrections" were wrong and were
+themselves corrected:
+
+- **`attachments-guide.md`** claimed attachment metadata is *not* in the template
+  model. `{memory.current.attachments}` genuinely renders empty, but
+  `MemoryItemConverter` publishes the request context, so
+  `{context.attachment_0.url}` resolves. The blanket claim was too strong.
+- **`audit-ledger.md`** said entries past `eddi.audit.max-queue-size` are
+  dead-lettered. `reserveQueueSlot` **drops** them; only the flush-retry path
+  dead-letters — as the same page's Failure Handling paragraph already said.
+- **`compliance-data-flow.md`** said the HITL journal holds tool-call arguments.
+  `JournalEntry` persists `resultCapped` and no argument payload.
+- **`log-administration.md`** said the ring buffer holds DEBUG/TRACE that the
+  default filter hides. EDDI sets no `quarkus.log.min-level`, so the root logger
+  is INFO and those records are never emitted at all;
+  `quarkus.log.console.level=DEBUG` is a handler setting and does not lower it.
+
+### On trusting the machinery
+
+168 of 179 findings "confirmed" is a 94% pass rate, which is not a quality
+signal — it is a reason to check. Three claims were re-verified by hand before
+anything was applied: two held exactly, and one
+(`/administration/operator/{canary-result,gate-status}`) was brace-expansion
+shorthand that a checker had misparsed. Two of this session's own checkers were
+wrong before the docs were: an anchor validator reported 52 broken links because
+it collapsed repeated spaces and trimmed leading hyphens, which GitHub's slug
+rule does neither of; and an enum extractor found 148 constants instead of 502
+because a non-greedy brace match truncated every enum body.
+
+### Sweeps now clean across all 69 pages
+
+Link fragments (a class `DocumentationLinksTest` never checked, since it strips
+`#anchor` before resolving), JSON validity, enum values against the real Java
+constants, HTTP verb/path pairing, and `Type.method()` references — all zero.
+
+---
+
 ## 🔬 test(metrics): the coverage test was vacuous for four meters (2026-08-28)
 
 **Repo:** EDDI (`docs/accuracy-audit`)

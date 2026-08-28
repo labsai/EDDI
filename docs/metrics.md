@@ -40,7 +40,7 @@ docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d
 | Prometheus | http://localhost:9090       | —              |
 | Metrics    | http://localhost:7070/q/metrics | —          |
 
-The dashboard appears automatically as the Grafana home page. Anonymous viewer access is enabled by default.
+Log in to Grafana with `admin` / `admin`, then open **Dashboards → EDDI** — the provisioned folder holding all three. Grafana's built-in Home is still the landing page; anonymous access is not enabled.
 
 ### Dashboard Sections
 
@@ -336,7 +336,7 @@ eddi_llm_cascade_ceiling_exceeded_total     # Run cut short; tag: kind (cost|dur
 eddi_llm_cascade_tokens_total               # Tokens consumed; tag: provider
 eddi_llm_cascade_cost_total                 # Dollars spent; tag: provider
 eddi_llm_cascade_step_latency_seconds       # Per-step latency (timer); tag: provider
-eddi_llm_cascade_confidence                 # Confidence scores (timer used as a distribution)
+eddi_llm_cascade_confidence                 # Confidence scores (distribution summary — `_count`/`_sum`/`_max`, no `_seconds`)
 ```
 
 **`accepted_step` is the metric that says whether cascading is working.** Mass at
@@ -518,7 +518,7 @@ http_server_requests_seconds{method,uri,status}
 
 ### Database Connection Pool (auto-exposed)
 
-**MongoDB** (when `eddi.datastore.type=mongo`):
+**MongoDB** (when `eddi.datastore.type=mongodb`):
 ```text
 mongodb_driver_pool_size
 mongodb_driver_pool_checkedout

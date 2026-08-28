@@ -103,11 +103,15 @@ an AI system. Include this in your application's UI or terms of service.
 | Human ability to understand AI outputs | Audit ledger (full prompt + response trail) | ✅ Available |
 | Human ability to override AI decisions | Behavior rules (action routing) | ✅ Available |
 | Human ability to stop the AI system | Agent undeploy, conversation end | ✅ Available |
-| Human-in-the-loop for high-risk decisions | HITL framework (planned Phase 9b) | ⚠️ Planned |
+| Human-in-the-loop for high-risk decisions | HITL framework (`hitlConfig`, `PAUSE_CONVERSATION`, `POST /agents/{conversationId}/resume`) | ✅ Available |
 
-**Deployer action for high-risk agents**: Configure behavior rules that
-require human approval for consequential decisions. Use the `managed_agent`
-pattern to route high-stakes outputs through a human review queue.
+**Deployer action for high-risk agents**: Configure human approval for
+consequential decisions with one of the two HITL gates — emit
+`PAUSE_CONVERSATION` from a behavior rule to gate a whole turn, or set
+`hitlConfig.toolApprovals.requireApproval` on the agent to gate individual LLM
+tool calls. Either way the conversation enters `AWAITING_HUMAN` and a reviewer
+submits the APPROVED/REJECTED decision through
+`POST /agents/{conversationId}/resume`. Full reference: [`hitl.md`](hitl.md).
 
 ### Articles 17/19 — Quality Management & Logging
 

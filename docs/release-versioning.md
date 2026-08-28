@@ -157,12 +157,12 @@ For documentation, config, or non-code commits, add `[skip docker]` to the commi
 git commit -m "docs: update README [skip docker]"
 ```
 
-This skips the Docker build and smoke test jobs, but **tests still run**.
+This skips the Docker build and smoke test jobs, but **tests still run** — unless the commit touches no path in the `code` filter, in which case `build-and-test` is skipped as well.
 
 | Commit message | Tests | Docker build | Smoke test |
 |---|---|---|---|
 | `feat: add new API endpoint` | ✅ | ✅ | ✅ |
-| `docs: update changelog [skip docker]` | ✅ | ❌ | ❌ |
+| `docs: update changelog [skip docker]` | ❌ (docs-only paths skip `build-and-test` too) | ❌ | ❌ |
 | Any tag push (`6.3.0-RC1`) | ✅ | ✅ (always) | ✅ |
 
 > `[skip docker]` is ignored on tag pushes — releases always build Docker images.
@@ -198,7 +198,7 @@ The entire pipeline lives in a single file: [`.github/workflows/ci.yml`](../.git
 
 | Job | Runs on | Condition | Duration |
 |---|---|---|---|
-| **build-and-test** | Every push/PR/tag | Always | ~3-5 min |
+| **build-and-test** | Every push/PR/tag | When changed paths match the `code` filter (`src/**`, `pom.xml`, `.github/workflows/**`, `Dockerfile*`, `docker-compose*.yml`, `.dockerignore`, `k8s/**`, `helm/**`, `mvnw*`, `.mvn/**`); always on tags | ~3-5 min |
 | **docker** | Push to `main` or a tag matching `[0-9]*` | `[skip docker]` to skip (ignored on tags) | ~3-4 min |
 | **smoke-test** | After `docker` succeeds | Same as docker | ~1-2 min |
 | **preflight-check** | Pull requests only | Always on PRs | ~5-7 min |

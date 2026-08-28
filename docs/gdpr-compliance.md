@@ -33,10 +33,17 @@ The response includes per-store counts:
 
 **What happens:**
 1. User memories — **permanently deleted**
-2. Conversation snapshots — **permanently deleted**
-3. Managed conversation mappings — **permanently deleted**
-4. Database logs — userId **pseudonymized** (SHA-256 hash)
-5. Audit ledger — userId **pseudonymized** (SHA-256 hash)
+2. Binary attachments of the user's conversations — **permanently deleted**
+3. HITL tool execution journal entries — **permanently deleted**
+4. Conversation descriptors — **permanently deleted**
+5. Conversation memory checkpoints — **permanently deleted**
+6. Conversation snapshots — **permanently deleted**
+7. Managed conversation mappings — **permanently deleted** (and evicted from their cache)
+8. Group conversation transcripts — **permanently deleted**
+9. Shared artifacts owned by the user — **permanently deleted**
+10. Schedules owned by the user — **permanently deleted**
+11. Database logs — userId **pseudonymized** (SHA-256 hash)
+12. Audit ledger — userId **pseudonymized** (SHA-256 hash)
 
 ### 2. Right of Access (GDPR Art. 15) / Data Portability (Art. 20) / Right to Know (CCPA §1798.100)
 
@@ -51,6 +58,9 @@ The export includes all user data in a structured, machine-readable JSON format:
 - All conversation transcripts (with full chat history)
 - All managed conversation mappings (intent→conversation bindings)
 - All audit processing records (capped at 10,000 entries)
+- Attachment metadata (conversation, storage reference, file name, MIME type, size) —
+  the binaries themselves are not inlined and must be fetched via the attachment
+  download API
 
 **Via MCP:** Use the `export_user_data` tool.
 

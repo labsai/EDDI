@@ -7,16 +7,19 @@
 ### Send an Image via URL
 
 ```bash
-POST /agents/{conversationId}/say?message=What%20is%20in%20this%20image?
+POST /agents/{conversationId}
 Content-Type: application/json
 
 {
-  "attachment_0": {
-    "type": "object",
-    "value": {
-      "mimeType": "image/png",
-      "url": "https://example.com/photo.png",
-      "fileName": "photo.png"
+  "input": "What is in this image?",
+  "context": {
+    "attachment_0": {
+      "type": "object",
+      "value": {
+        "mimeType": "image/png",
+        "url": "https://example.com/photo.png",
+        "fileName": "photo.png"
+      }
     }
   }
 }
@@ -25,16 +28,19 @@ Content-Type: application/json
 ### Send an Image via Base64
 
 ```bash
-POST /agents/{conversationId}/say?message=Describe%20this%20icon
+POST /agents/{conversationId}
 Content-Type: application/json
 
 {
-  "attachment_0": {
-    "type": "object",
-    "value": {
-      "mimeType": "image/png",
-      "data": "iVBORw0KGgoAAAANSUhEUgAAAAE...",
-      "fileName": "icon.png"
+  "input": "Describe this icon",
+  "context": {
+    "attachment_0": {
+      "type": "object",
+      "value": {
+        "mimeType": "image/png",
+        "data": "iVBORw0KGgoAAAANSUhEUgAAAAE...",
+        "fileName": "icon.png"
+      }
     }
   }
 }
@@ -143,13 +149,24 @@ Content-Type: multipart/form-data
 }
 ```
 
-The returned `storageRef` can then be used in subsequent conversation turns by setting it as the `url` in an attachment context key. The storage backend (GridFS or PostgreSQL) is selected automatically based on the configured datastore.
+The returned `storageRef` can then be used in subsequent conversation turns by setting it as the `storageRef` field in an attachment context key. It takes precedence over `url` and `data`, and the authoritative `mimeType` and `sizeBytes` are resolved server-side from the store, so they need not be supplied:
+
+```json
+{
+  "attachment_0": {
+    "type": "object",
+    "value": { "storageRef": "gridfs://68abc123def456", "fileName": "report.pdf" }
+  }
+}
+```
+
+The storage backend (GridFS or PostgreSQL) is selected automatically based on the configured datastore.
 
 | Response Code | Meaning |
 |---|---|
 | `201` | File stored successfully |
-| `400` | No file provided |
-| `503` | No attachment storage configured |
+| `400` | No file provided, file exceeds `eddi.attachments.max-size-bytes`, or the store rejected the file |
+| `500` | Storage or I/O error |
 
 ---
 
@@ -169,12 +186,13 @@ Attachment context keys must match the pattern `attachment_*`:
 
 | Field | Required | Description |
 |---|---|---|
-| `mimeType` | Yes | MIME type (e.g., `image/png`, `application/pdf`) |
-| `url` | One of url/data | External URL reference |
-| `data` | One of url/data | Base64-encoded content |
+| `storageRef` | One of storageRef/url/data | Reference to a previously uploaded blob (see Path C) |
+| `mimeType` | Yes, unless `storageRef` is used | MIME type (e.g., `image/png`, `application/pdf`) |
+| `url` | One of storageRef/url/data | External URL reference |
+| `data` | One of storageRef/url/data | Base64-encoded content |
 | `fileName` | No | Original filename (for metadata/logging) |
 
-If both `url` and `data` are present, `url` takes precedence.
+`storageRef` has the highest precedence; if both `url` and `data` are present, `url` takes precedence.
 
 ---
 
@@ -300,13 +318,11 @@ Use `contentTypeMatcher` to create different workflows based on attachment type:
 
 ## Template Access
 
-Attachments are available in templates via the memory namespace:
+`{memory.current.attachments}` renders as an empty string. Attachments are written to the current step's data store under the `attachments` memory key (`storeData`), while `{memory.current.*}` resolves against the step's `ConversationOutput` — a different map.
 
-```
-Current step attachments: {memory.current.attachments}
-```
+The `attachment_*` **context** keys are a different matter: `MemoryItemConverter` publishes the request context into the template model, so `{context.attachment_0.mimeType}`, `{context.attachment_0.url}` and `{context.attachment_0.fileName}` do resolve for attachments supplied that way.
 
-This can be useful for logging, debugging, or constructing custom prompts that reference attachment metadata.
+To act on attachments, read the `attachments` memory key from a task, or match on them declaratively with `contentTypeMatcher` in a behavior rule.
 
 ---
 

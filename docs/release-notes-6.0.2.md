@@ -26,7 +26,7 @@
 
 ### HTTP & Protocol
 - **Security response headers** — `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`, `Content-Security-Policy`
-- **Qute strict rendering** — Templates fail loudly on missing variables in production
+- **Qute strict rendering** — Templates fail loudly on missing variables in production *(since reverted — strict rendering is now off in every profile and a missing property renders as an empty string)*
 - **Jackson 3.x ban** — `maven-enforcer-plugin` rule prevents accidental introduction via transitive dependencies
 - **Log injection prevention** — `sanitizeForLog()` applied to all user-controlled identifiers in log statements
 

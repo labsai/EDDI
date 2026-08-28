@@ -23,8 +23,14 @@ Returns recent log entries from the in-memory ring buffer. These are fast to que
 |-----------|------|---------|-------------|
 | `agentId` | string | — | Filter by agent ID |
 | `conversationId` | string | — | Filter by conversation ID |
-| `level` | string | — | Minimum log level (`TRACE`, `DEBUG`, `INFO`, `WARN`, `ERROR`). Returns entries **at or above** this level |
-| `limit` | integer | `200` | Maximum number of entries to return |
+| `level` | string | `INFO` | Minimum log level (`TRACE`, `DEBUG`, `INFO`, `WARN`, `ERROR`). Returns entries **at or above** this level |
+| `limit` | integer | `100` | Maximum number of entries to return |
+
+> The ring buffer only ever holds what the log manager actually emits. EDDI sets no
+> `quarkus.log.level` or `quarkus.log.min-level`, so the root logger is `INFO` and no
+> `DEBUG`/`TRACE` record reaches the buffer at all — passing `level=DEBUG` returns nothing
+> extra. To capture them, raise `quarkus.log.min-level` (and the category level) first.
+> `quarkus.log.console.level=DEBUG` is a *handler* setting and does not lower the logger.
 
 **Example:**
 
@@ -71,7 +77,7 @@ Returns historical logs from the database. These survive restarts and work acros
 | `userId` | string | — | Filter by user ID |
 | `instanceId` | string | — | Filter by EDDI instance ID (useful in multi-instance deployments) |
 | `skip` | integer | `0` | Number of entries to skip (pagination) |
-| `limit` | integer | `50` | Maximum entries to return |
+| `limit` | integer | `100` | Maximum entries to return |
 
 **Example:**
 
@@ -94,7 +100,7 @@ Opens a Server-Sent Events (SSE) connection for real-time log tailing. Supports 
 |-----------|------|---------|-------------|
 | `agentId` | string | — | Filter by agent ID |
 | `conversationId` | string | — | Filter by conversation ID |
-| `level` | string | — | Minimum log level (same semantics as recent logs) |
+| `level` | string | `INFO` | Minimum log level (same semantics as recent logs) |
 
 **Example:**
 

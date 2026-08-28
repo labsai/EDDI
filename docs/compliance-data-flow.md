@@ -73,6 +73,12 @@
 | **Conversation Memory** | ✅ userId, chat content | TDE (deployer) | 365 days default (configurable) | ✅ GDPR cascade | Primary PII store |
 | **User Memory** | ✅ userId, structured facts | TDE (deployer) | Until deleted | ✅ GDPR cascade | Cross-conversation state |
 | **Managed Conversations** | ✅ userId, intent mappings | TDE (deployer) | Until deleted | ✅ GDPR cascade | Routing metadata |
+| **Attachments** | ✅ user-uploaded images, PDFs, audio | TDE (deployer) | With owning conversation | ✅ GDPR cascade | GridFS or PostgreSQL blobs; potential PHI |
+| **Conversation Checkpoints** | ✅ copy of conversation properties | TDE (deployer) | With owning conversation | ✅ GDPR cascade | Same PII as the conversation |
+| **Group Conversations** | ✅ multi-agent transcripts | TDE (deployer) | Until deleted | ✅ GDPR cascade | Group discussion content |
+| **Shared Artifacts** | ✅ user/agent-authored content | TDE (deployer) | Until deleted | ✅ GDPR cascade | Owned by the creating user |
+| **HITL Tool Journal** | ✅ tool name, capped tool result, approver identity | TDE (deployer) | With owning conversation | ✅ GDPR cascade | Human-approval audit trail |
+| **Schedules** | ✅ userId, trigger payloads | TDE (deployer) | Until deleted | ✅ GDPR cascade | Owned by the creating user |
 | **Audit Ledger** | ✅ userId (pseudonymized on erasure) | TDE (deployer) + HMAC | Indefinite | ❌ Pseudonymized only | EU AI Act Art. 17/19 |
 | **Database Logs** | ✅ userId (pseudonymized on erasure) | TDE (deployer) | Configurable | ❌ Pseudonymized only | Operational data |
 | **Secrets Vault** | ❌ API keys only | AES-256-GCM (application-level) | Until rotated/deleted | ✅ Via REST API | Credentials only |
@@ -125,15 +131,25 @@ User Input (may contain PII)
 When `DELETE /admin/gdpr/{userId}` is called:
 
 ```
-1. User Memories ──────────────── PERMANENTLY DELETED
-2. Conversation Snapshots ─────── PERMANENTLY DELETED
-3. Managed Conversation Maps ──── PERMANENTLY DELETED
-4. Database Logs ──────────────── userId → SHA-256 PSEUDONYMIZED
-5. Audit Ledger ───────────────── userId → SHA-256 PSEUDONYMIZED
-6. Audit Ledger Event ─────────── GDPR_ERASURE entry written (immutable)
+ 1. User Memories ─────────────── PERMANENTLY DELETED
+ 2. Attachments (binary blobs) ── PERMANENTLY DELETED
+ 3. HITL Tool Journal ─────────── PERMANENTLY DELETED
+ 4. Conversation Descriptors ──── PERMANENTLY DELETED
+ 5. Conversation Checkpoints ──── PERMANENTLY DELETED
+ 6. Conversation Snapshots ────── PERMANENTLY DELETED
+ 7. Managed Conversation Maps ─── PERMANENTLY DELETED (cache invalidated)
+ 8. Group Conversations ───────── PERMANENTLY DELETED
+ 9. Shared Artifacts ──────────── PERMANENTLY DELETED
+10. Schedules ────────────────── PERMANENTLY DELETED
+11. Database Logs ────────────── userId → SHA-256 PSEUDONYMIZED
+12. Audit Ledger ─────────────── userId → SHA-256 PSEUDONYMIZED
+    Audit Ledger Event ───────── GDPR_ERASURE entry written (immutable)
 ```
 
-Steps 4–5 retain operational and compliance data but make re-identification
+Steps 2–5 run before the conversation snapshots are deleted because they
+reference conversation IDs that the bulk delete removes.
+
+Steps 11–12 retain operational and compliance data but make re-identification
 impossible without the original userId.
 
 ---
