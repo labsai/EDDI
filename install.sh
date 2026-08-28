@@ -597,6 +597,7 @@ resolve_compose_files() {
       "docs/monitoring/grafana-provisioning/datasources/datasources.yml"
       "docs/monitoring/eddi-grafana-dashboard.json"
       "docs/monitoring/eddi-operations-dashboard.json"
+      "docs/monitoring/eddi-full-metrics-dashboard.json"
     )
     for mf in "${monitoring_files[@]}"; do
       local mf_target="$EDDI_DIR/$mf"
@@ -614,10 +615,21 @@ resolve_compose_files() {
         else
           # Every one of these is bind-mounted as a FILE by
           # docker-compose.monitoring.yml, so a missing one is worse than it
-          # sounds: Docker creates a *directory* at the mount path, and Grafana
-          # then fails to provision — including the dashboards that did
-          # download. Same reasoning as the Keycloak realm below; a half-built
-          # monitoring stack is not better than a refusal to build one.
+          # sounds: Docker creates a *directory* at the mount path. What happens
+          # next depends on the grafana-data volume, and neither outcome is
+          # acceptable — on a fresh volume the container starts and the dashboard
+          # is silently absent with nothing logged, and on a volume that already
+          # holds a file there runc fails the mount ("Are you trying to mount a
+          # directory onto a file") and the container never leaves state Created.
+          # The first case also poisons the volume: it creates a directory inside
+          # it, after which restoring the host file fails the mount in the
+          # opposite direction until that stale directory is deleted. Same
+          # reasoning as the Keycloak realm below; a half-built monitoring stack
+          # is not better than a refusal to build one.
+          #
+          # This list must therefore stay in step with every file-type bind
+          # mount in docker-compose.monitoring.yml. Adding a dashboard there
+          # without adding it here breaks --with-monitoring outright.
           # -rf, not -f: the thing in the way is most likely a DIRECTORY that a
           # previous run's failed mount left behind, and `rm -f` cannot remove
           # one. Under `set -e` that turns this cleanup into the script's exit
@@ -1277,6 +1289,71 @@ case "${1:-help}" in
         echo "⚠️  (keeping existing file)"
       fi
     done
+
+    # Refreshing the compose files above can introduce new file-type bind
+    # mounts. When a bind-mount source is missing Docker creates a *directory*
+    # at that path, which either silently drops the dashboard or fails the mount
+    # outright depending on what the grafana-data volume already holds — and in
+    # the first case leaves a stale directory inside the volume that keeps
+    # failing the mount even after the host file is restored. So any monitoring
+    # asset added upstream has to be on disk BEFORE `up -d`: refreshing the
+    # compose files on their own is what breaks a previously working Grafana.
+    #
+    # The list is read out of the refreshed compose file instead of hardcoded
+    # here, so the next asset added to docker-compose.monitoring.yml needs no
+    # change to this wrapper. Only file-type mounts are fetched; the
+    # grafana-provisioning/* mounts are directories, which cannot be downloaded
+    # and do not fail the mount when their contents are stale.
+    monitoring_compose=""
+    for f in "${COMPOSE_FILE_LIST[@]}"; do
+      if [[ "$(basename "$f")" == "docker-compose.monitoring.yml" ]]; then
+        monitoring_compose="$f"
+      fi
+    done
+
+    if [[ -n "$monitoring_compose" && -f "$monitoring_compose" ]]; then
+      echo ""
+      echo "Refreshing monitoring assets..."
+      compose_dir=$(cd "$(dirname "$monitoring_compose")" && pwd)
+      missing_assets=""
+      while read -r rel_path; do
+        [[ -n "$rel_path" ]] || continue
+        asset="${rel_path#./}"
+        target="${compose_dir}/${asset}"
+        mkdir -p "$(dirname "$target")"
+        # -rf, not -f: what is in the way is most likely a DIRECTORY left behind
+        # by an earlier failed mount, and `rm -f` cannot remove one.
+        if [[ -d "$target" ]]; then
+          rm -rf "$target"
+        fi
+        tmp_asset="${target}.tmp"
+        echo -n "  Updating ${asset}... "
+        if curl -fsSL "${COMPOSE_BASE_URL}/${asset}" -o "$tmp_asset" 2>/dev/null && [[ -s "$tmp_asset" ]]; then
+          mv -f "$tmp_asset" "$target"
+          echo "✅"
+        elif [[ -f "$target" ]]; then
+          rm -f "$tmp_asset"
+          echo "⚠️  (keeping existing file)"
+        else
+          rm -f "$tmp_asset"
+          echo "❌"
+          missing_assets="${missing_assets} ${asset}"
+        fi
+      done < <(grep -oE '\./docs/monitoring/[A-Za-z0-9._/-]+\.(json|ya?ml)' "$monitoring_compose" | sort -u || true)
+
+      if [[ -n "$missing_assets" ]]; then
+        echo ""
+        echo "Aborting before restart. These files are bind-mounted by" >&2
+        echo "docker-compose.monitoring.yml but are not on disk and could not be" >&2
+        echo "downloaded:" >&2
+        for a in $missing_assets; do echo "  - $a" >&2; done
+        echo "Starting now would leave Grafana unable to mount them, so the" >&2
+        echo "running stack has been left untouched. Re-run once GitHub is" >&2
+        echo "reachable, or re-run the install script." >&2
+        exit 1
+      fi
+    fi
+
     echo ""
     echo "Pulling images..."
     docker compose "${compose_args[@]}" pull

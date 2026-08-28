@@ -23,6 +23,7 @@ import org.bson.Document;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
+import java.time.Clock;
 import java.time.Instant;
 import java.time.YearMonth;
 import java.time.ZoneOffset;
@@ -72,6 +73,23 @@ public class MongoTenantQuotaStore implements ITenantQuotaStore {
     private final MongoCollection<Document> quotas;
     private final MongoCollection<Document> usage;
 
+    /**
+     * The source of "now" for every rolling window.
+     * <p>
+     * A field rather than {@code Instant.now()} at each use because the windows are
+     * wall-clock aligned — {@code truncatedTo(MINUTES)}, {@code truncatedTo(DAYS)},
+     * {@code YearMonth.now()} — so a test that increments a counter twice is
+     * asserting that both calls landed in the same window, and nothing made that
+     * true. Two calls milliseconds apart straddle a minute boundary roughly once
+     * every six hundred runs, and the counter reads 1 where the test expects 2.
+     * That is not a rare correctness question, it is a rare scheduling one, and it
+     * failed CI.
+     * <p>
+     * Production always gets {@link Clock#systemUTC()}. Only tests pass anything
+     * else.
+     */
+    private final Clock clock;
+
     @Inject
     public MongoTenantQuotaStore(MongoDatabase database,
             @ConfigProperty(name = "eddi.tenant.default-id", defaultValue = "default") String defaultTenantId,
@@ -83,6 +101,7 @@ public class MongoTenantQuotaStore implements ITenantQuotaStore {
 
         this.quotas = database.getCollection(QUOTAS_COLLECTION);
         this.usage = database.getCollection(USAGE_COLLECTION);
+        this.clock = Clock.systemUTC();
 
         ensureUniqueTenantIdIndex(quotas, QUOTAS_COLLECTION);
         ensureUniqueTenantIdIndex(usage, USAGE_COLLECTION);
@@ -109,8 +128,21 @@ public class MongoTenantQuotaStore implements ITenantQuotaStore {
      * Test-only constructor — no CDI injection, no bootstrap.
      */
     MongoTenantQuotaStore(MongoDatabase database) {
+        this(database, Clock.systemUTC());
+    }
+
+    /**
+     * Test-only constructor taking the clock, so a test can pin "now".
+     * <p>
+     * A fixed clock is the difference between asserting that two increments landed
+     * in one window and hoping they did. Tests that need a window to expire set the
+     * stored {@code dayStart}/{@code minuteStart} to a stale value directly, which
+     * is both deterministic and closer to what the rollover path actually reads.
+     */
+    MongoTenantQuotaStore(MongoDatabase database, Clock clock) {
         this.quotas = database.getCollection(QUOTAS_COLLECTION);
         this.usage = database.getCollection(USAGE_COLLECTION);
+        this.clock = clock;
 
         ensureUniqueTenantIdIndex(quotas, QUOTAS_COLLECTION);
         ensureUniqueTenantIdIndex(usage, USAGE_COLLECTION);
@@ -204,7 +236,7 @@ public class MongoTenantQuotaStore implements ITenantQuotaStore {
             return QuotaCheckResult.OK;
         }
 
-        long dayStart = Instant.now().truncatedTo(ChronoUnit.DAYS).toEpochMilli();
+        long dayStart = clock.instant().truncatedTo(ChronoUnit.DAYS).toEpochMilli();
 
         if (tryConsumeSlot(tenantId, FIELD_CONVERSATIONS_TODAY, FIELD_DAY_START, dayStart, limit)) {
             return QuotaCheckResult.OK;
@@ -225,7 +257,7 @@ public class MongoTenantQuotaStore implements ITenantQuotaStore {
             return QuotaCheckResult.OK;
         }
 
-        long minuteStart = Instant.now().truncatedTo(ChronoUnit.MINUTES).toEpochMilli();
+        long minuteStart = clock.instant().truncatedTo(ChronoUnit.MINUTES).toEpochMilli();
 
         if (tryConsumeSlot(tenantId, FIELD_API_CALLS_THIS_MINUTE, FIELD_MINUTE_START, minuteStart, limit)) {
             return QuotaCheckResult.OK;
@@ -242,7 +274,7 @@ public class MongoTenantQuotaStore implements ITenantQuotaStore {
 
     @Override
     public QuotaCheckResult tryAddCost(String tenantId, double cost, double limit) {
-        String monthKey = YearMonth.now(ZoneOffset.UTC).toString();
+        String monthKey = YearMonth.now(clock.withZone(ZoneOffset.UTC)).toString();
 
         // Fast path: the document already carries the current month.
         Document result = addCostWithinMonth(tenantId, monthKey, cost);
@@ -291,7 +323,7 @@ public class MongoTenantQuotaStore implements ITenantQuotaStore {
      * a second insert.
      */
     private void ensureUsageDocument(String tenantId) {
-        long now = Instant.now().toEpochMilli();
+        long now = clock.instant().toEpochMilli();
         usage.updateOne(
                 Filters.eq(FIELD_TENANT_ID, tenantId),
                 Updates.combine(
@@ -368,7 +400,7 @@ public class MongoTenantQuotaStore implements ITenantQuotaStore {
         if (doc == null) {
             return 0.0;
         }
-        YearMonth currentMonth = YearMonth.now(ZoneOffset.UTC);
+        YearMonth currentMonth = YearMonth.now(clock.withZone(ZoneOffset.UTC));
         String monthKey = doc.getString(FIELD_COST_MONTH);
         if (monthKey == null || !monthKey.equals(currentMonth.toString())) {
             return 0.0; // Stale month
@@ -397,13 +429,13 @@ public class MongoTenantQuotaStore implements ITenantQuotaStore {
     private UsageSnapshot toSnapshot(String tenantId, Document doc) {
         Instant minuteStart = doc.getLong("minuteStart") != null
                 ? Instant.ofEpochMilli(doc.getLong("minuteStart"))
-                : Instant.now();
+                : clock.instant();
         Instant dayStart = doc.getLong("dayStart") != null
                 ? Instant.ofEpochMilli(doc.getLong("dayStart"))
-                : Instant.now();
+                : clock.instant();
         YearMonth costMonth = doc.getString("costMonth") != null
                 ? YearMonth.parse(doc.getString("costMonth"))
-                : YearMonth.now(ZoneOffset.UTC);
+                : YearMonth.now(clock.withZone(ZoneOffset.UTC));
         return new UsageSnapshot(
                 tenantId,
                 doc.getInteger("conversationsToday", 0),

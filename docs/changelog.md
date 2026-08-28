@@ -7,6 +7,360 @@
 
 
 
+## 📝 docs(monitoring): reconcile the dashboard inventory with what is provisioned (2026-08-27)
+
+**Repo:** EDDI (`feat/grafana-full-metrics-dashboard`)
+
+`docker-compose.monitoring.yml` bind-mounts **three** dashboards, but
+`docs/metrics.md` announced "two dashboards" and listed only `eddi-ops` and
+`eddi-metrics-all` — omitting `eddi-grafana-dashboard.json` (`eddi-observability`)
+entirely, even though Grafana provisions it. The table now lists all three with
+their UID *and* filename, so the inventory can be checked against the compose file
+without guessing which JSON is which.
+
+The panel count for the Operations Command Center was also wrong, and had been
+wrong on `main` before this branch: both docs said **45 panels**, the dashboard
+actually has **51**. Counted by unique panel id, recursing into collapsed rows, and
+cross-checked for duplicate ids (none) — the discrepancy comes from the
+`Platform Overview & HTTP Traffic` row being expanded, so its four children sit at
+the top level rather than inside `row.panels`. Corrected in both places.
+
+`docs/monitoring/monitoring-guide.md` already carried the correct three-dashboard
+inventory and identifiers, so only its panel count needed syncing. Its description
+of the observability dashboard was also corrected from "5-group" to the actual six
+rows, naming the `Pipeline Tasks` group it had dropped.
+
+### Not changed
+
+`README.md` still advertises a singular "Pre-built Grafana dashboard" linking to
+`eddi-grafana-dashboard.json` — the oldest and least useful of the three. Same
+class of staleness, but outside the two files this pass covered; worth a follow-up
+that points readers at the Operations Command Center instead.
+
+---
+
+## 🩹 fix(install): `eddi update` refreshes monitoring assets, not just compose files (2026-08-27)
+
+**Repo:** EDDI (`feat/grafana-full-metrics-dashboard`)
+
+The entry below fixed the *fresh install* path. The **upgrade** path was still
+broken, and worse: it would have taken working installations down.
+
+### Why
+
+The generated `eddi` CLI wrapper's `update` command refreshes only the files in
+`COMPOSE_FILES` and then runs `pull` + `up -d`. Nothing under `docs/monitoring/`
+was ever re-fetched. So on an existing monitored installation:
+
+1. `docker-compose.monitoring.yml` is refreshed and now carries the
+   `eddi-full-metrics-dashboard.json` bind mount.
+2. The dashboard itself is never downloaded.
+3. `up -d` recreates Grafana against a mount source that does not exist.
+
+Reproduced end to end against a simulated pre-branch installation with real
+Docker.
+
+### The failure has two shapes, and it is sticky
+
+Worth recording precisely, because the earlier entry overstated it as always
+fatal — the outcome depends on what the `grafana-data` volume already holds:
+
+- **Fresh volume:** Docker creates a directory at the host path, the container
+  *starts*, and Grafana provisions **2 of 3** dashboards. Nothing is logged at
+  `level=error`. Silent partial monitoring.
+- **Volume already holding a file there:** runc fails the mount
+  (`Are you trying to mount a directory onto a file`) and the container never
+  leaves state `Created` — the whole stack is down.
+
+And the first case poisons the second: it also creates a directory *inside* the
+named volume at `/var/lib/grafana/dashboards/eddi-full-metrics.json`. Once that
+exists, restoring the host file makes the mount fail in the **opposite**
+direction, so re-running the install script is **not** sufficient on its own.
+Verified remedy:
+
+```bash
+docker compose ... down
+docker run --rm -v <project>_grafana-data:/v alpine:3 \
+  rm -rf /v/dashboards/eddi-full-metrics.json
+docker compose ... up -d          # after the host file is back in place
+```
+
+Comments at both download sites in `install.sh` were corrected to describe both
+shapes rather than only the hard failure.
+
+### The fix
+
+Both wrappers now refresh the monitoring assets after the compose files and
+**before** `pull`/`up -d`, and abort rather than restart if an asset is missing
+and cannot be downloaded — the running stack is left untouched instead of being
+recreated into a broken mount. Assets that fail to download but already exist on
+disk are kept, as the compose refresh already does.
+
+- **`install.sh`** derives the list from the refreshed compose file
+  (`grep -oE './docs/monitoring/…\.(json|ya?ml)'`), so the next asset added to
+  `docker-compose.monitoring.yml` needs no wrapper change.
+- **`install.ps1`** could not do the same safely. Its wrapper is a `.cmd` batch
+  file generated from an expandable PowerShell here-string, where `` ` `` is an
+  escape character and `$` interpolates — batch's `for /f ... in (\`cmd\`)` form
+  is unusable there, and no Windows/PowerShell was available to test a nested
+  construct. Instead the asset list was hoisted to `$script:MonitoringFiles` (one
+  source of truth, used by the install-time download) and the file-type entries
+  are interpolated into the wrapper at generation time as a plain batch list, so
+  the wrapper does no parsing at runtime.
+
+### Limitation — existing installations still need the install script re-run
+
+`eddi update` does not refresh the wrapper itself, so an installation created
+before this change keeps its old wrapper and its `eddi update` remains broken. The
+fix reaches it only by re-running the install script, which regenerates the
+wrapper. Making the wrapper self-refresh was deliberately not attempted: it would
+not help any wrapper already on disk, and a running bash script that overwrites
+itself risks corrupting its own execution, since bash reads scripts incrementally.
+
+### Verified
+
+- Fixed `update` against a pre-branch install: all four monitoring files fetched,
+  assets landing **before** the `pull`/`up -d` calls (checked with a `docker`
+  stub), then a real run producing a healthy Grafana with all **3** dashboards.
+- Abort guard: with the asset absent and the source unreachable, exit code 1, no
+  `docker` invocation, no stray directory left behind.
+- Old wrapper, same starting state, real Docker: 2 of 3 dashboards and a
+  root-owned directory at the mount path — the regression this prevents.
+- Generated batch wrapper rendered and checked: every `goto`/`call` label
+  resolves, no backticks inside the here-string, no unintended `$`.
+
+### Noticed, not fixed (both pre-existing, out of scope)
+
+- `eddi update --with-monitoring` is advertised by the installer's wizard
+  (`install.sh`, monitoring step) but the wrapper's `update` only parses
+  `--eddi-version=`. The flag does nothing.
+- The `.cmd` wrapper's `uninstall` embeds `$_` unescaped inside the expandable
+  here-string, so it is interpolated at *generation* time (to empty) rather than
+  reaching the generated file. The PATH-cleanup `Where-Object` is therefore
+  almost certainly broken, leaving a stale PATH entry after uninstall. Unverified
+  — no PowerShell in this environment.
+
+---
+
+## 🩹 fix(install): ship the new dashboard through the installers, not just compose (2026-08-26)
+
+**Repo:** EDDI (`feat/grafana-full-metrics-dashboard`)
+
+Adding the Full Metrics Reference to `docker-compose.monitoring.yml` in the entry
+below was only half the deployment path. `install.sh` and `install.ps1` carry an
+explicit list of monitoring files to fetch for `--with-monitoring` /
+`-WithMonitoring`, and the new dashboard was not on it. Now it is.
+
+### Why this was a hard break, not a missing panel
+
+Every file in that list is bind-mounted **as a file** by the monitoring compose.
+When the source path does not exist, Docker creates a *directory* there, and the
+mount then fails at container init:
+
+```text
+runc create failed: ... error mounting ".../eddi-full-metrics-dashboard.json"
+to rootfs at "/var/lib/grafana/dashboards/eddi-full-metrics.json":
+not a directory: Are you trying to mount a directory onto a file (or vice-versa)?
+```
+
+The Grafana container is left in state `Created` and never starts. So the whole
+monitoring stack would have been down for anyone installing from outside a git
+clone — not merely missing one dashboard. `gcp/provision-vm.sh` shells out to
+`install.sh --with-monitoring`, so it inherited the same break and is fixed by the
+same change.
+
+Reproduced both directions in a simulated install directory containing only the
+files the installer fetches: with the dashboard absent, Grafana fails to start with
+the error above and a root-owned directory is left at the mount path; with it
+present, all three dashboards provision and Grafana is healthy.
+
+The comments at both download sites understated this ("Grafana then fails to
+provision") and now say what actually happens, plus the invariant that caused it:
+**this list must stay in step with every file-type bind mount in
+`docker-compose.monitoring.yml`.**
+
+### Not changed — two Grafana surfaces that ship no dashboards at all
+
+Worth knowing, both pre-existing and neither touched here:
+
+- **`k8s/overlays/monitoring/monitoring-stack.yaml`** deploys Grafana with
+  `emptyDir` and no dashboard provisioning whatsoever — no ConfigMaps, no
+  provisioning mounts. None of the three dashboards reach a Kubernetes install
+  today; the file's own comment says as much. Fixing that means adding dashboard
+  ConfigMaps + a provisioning sidecar config, and the Full Metrics Reference is
+  **322 KB**, which is above the 262,144-byte ceiling on the
+  `kubectl.kubernetes.io/last-applied-configuration` annotation that client-side
+  `kubectl apply` writes — so it would need server-side apply or a Grafana
+  sidecar/PVC instead. Not attempted here, and not verified locally (no cluster in
+  this environment).
+- **`helm/eddi/values.yaml`** exposes `monitoring.grafana.enabled`, but the chart
+  has no Grafana template at all — the toggle is unimplemented, so there is nothing
+  to add a dashboard to.
+
+---
+
+## 📊 feat(monitoring): a Grafana dashboard covering every meter EDDI registers (2026-08-26)
+
+**Repo:** EDDI (`feat/grafana-full-metrics-dashboard`)
+
+`docs/monitoring/eddi-full-metrics-dashboard.json` — "E.D.D.I — Full Metrics
+Reference" (`eddi-metrics-all`), 133 panels across 19 subsystem rows, covering all
+**144** registered meters. Mounted in `docker-compose.monitoring.yml`; the
+provisioning provider globs the directory, so no provisioning change was needed.
+
+The Operations Command Center stays the front door. This is the companion you open
+when the number you need is not on it.
+
+### Why it is generated, not hand-written
+
+The panel set is produced from the metric registration sites in the source, and the
+generator fails if any registered meter has no panel. Hand-maintaining 133 panels
+against a codebase that adds meters is how dashboards rot.
+
+### What the audit turned up
+
+Counting the meters was not straightforward, and each surprise changed the output:
+
+- **144, not 141.** Three meters register through `Metrics.globalRegistry` rather
+  than an injected `MeterRegistry` and are invisible to the obvious grep:
+  `eddi.llm.tool_context.evictions`, `eddi.operator.write.approval`,
+  `eddi.hitl.rule.matched`. A fourth, `eddi.coordinator.total_processed`, is a
+  `FunctionCounter.builder`.
+- **The existing dashboards covered 55 of them.** 86 meters — HITL, MCP, the model
+  cascade, Dream, capability registry, connections, agent identity, attachments,
+  the OpenAI-compatible adapter, team cadences, group deliberation — had no panel
+  anywhere.
+- **Two shipped panels queried series that do not exist** (see below).
+- **`eddi.tenant.quota.denied` was unobservable per-tenant.** Fixed in the entry
+  below.
+- **Two documented metric names were wrong.** `eddi_tool_cache_puts` does not
+  exist; the meter is `eddi.tool.cache.puts.by_tool`. And the `*_by_tool` hits and
+  misses meters are *separate meters*, not a `tool` dimension of the aggregate
+  ones — the guide implied otherwise.
+
+### Timers do not publish percentiles
+
+Only `eddi.pipeline.task.duration` calls `publishPercentileHistogram()`, so it is
+the only EDDI timer with a `_seconds_bucket` series and the only one where
+`histogram_quantile()` returns anything. Two shipped panels ignored this and were
+permanently empty — "No data", indistinguishable from an idle system:
+
+- `eddi-operations-dashboard.json` — "Processing Duration P50 / P95 / P99" over
+  `eddi_conversation_processing_duration_seconds_bucket`
+- `eddi-grafana-dashboard.json` — "Vault Resolve Latency" P99 over
+  `eddi_vault_resolve_duration_seconds_bucket`
+
+Both now chart mean (`_seconds_sum / _seconds_count`) and peak (`_seconds_max`),
+with a panel description saying why there is no percentile. `docs/metrics.md`
+carried the same bad query as a copy-paste example; it is corrected and the rule is
+now written down. The one panel that *did* use buckets correctly —
+"Task Duration (Avg / P99)" — was left alone.
+
+### Naming rules, verified rather than assumed
+
+Pinned by running the project's own registry (Micrometer 1.17.0 +
+`micrometer-registry-prometheus-simpleclient`) and reading the scrape, because
+guessing wrong produces a silently empty panel:
+
+- a counter already ending in `_total` is **not** doubled
+  (`eddi_group_cost_ceiling_hit_total` stays put), but one ending in `_count`
+  **does** gain it (`eddi_hitl_pause_count_total`)
+- dotted tag keys become underscores (`task.id` → `task_id`); camelCase keys do
+  not change (`authType` stays `authType`)
+
+### How it was verified
+
+Not just "the JSON parses":
+
+- every one of the 203 expressions executed against a real Prometheus — 0 parse
+  errors, across all three dashboards
+- a synthetic exporter built on the real Micrometer registry served all 144 meters
+  with representative tags; **191 of 203 queries returned data**, the only 12
+  blanks being Quarkus/JVM binders the exporter does not register
+- all three dashboards provisioned into Grafana 11.6.0 with no errors
+- rendered and inspected, which caught two things no validator would: KPI titles
+  truncated at three grid columns, and the `barchart` panels drawing one bar per
+  scrape timestamp instead of one per label (a range query where an instant query
+  was needed — now horizontal bar gauges, single hue, `move`/`tool`/`skill` on the
+  axis)
+
+### Design notes
+
+- Counters as rates, timers as mean + peak, gauges as-is; one unit per panel and no
+  dual axes.
+- Status colours (green/amber/red thresholds) only where the colour *means*
+  good/bad — the KPI gauges and error-rate tiles. Series identity everywhere else
+  is Grafana's categorical palette, never a status token.
+- Single-series panels carry no legend box; the title names the series.
+- Panel descriptions carry the operational reading, not a restatement of the title
+  — what a sustained non-zero rate on `eddi_tool_cache_bypassed_total`,
+  `eddi_audit_entries_dropped_total` or `eddi_counterweight_strict_downgraded_total`
+  actually means for the operator.
+- `$datasource` and `$job` template variables; all rows but `Overview` collapsed.
+
+---
+
+## 🐛 fix(tenancy): the per-tenant quota breakdown never reached Prometheus (2026-08-26)
+
+**Repo:** EDDI (`feat/grafana-full-metrics-dashboard`)
+
+While auditing every registered meter to build a Grafana dashboard, one documented
+metric dimension turned out not to exist in the exposition at all.
+
+### Why it failed
+
+A `PrometheusMeterRegistry` keeps only the **first** tag-key shape registered under
+a given metric name and silently drops every later one — no exception, no warning.
+`TenantQuotaService.init()` registered `eddi.tenant.quota.denied` with no tags, and
+each of the five denial paths then registered the same name with `tenant`+`type`.
+The untagged registration won, so `eddi_tenant_quota_denied_total{tenant,type}`
+never appeared at `/q/metrics`. The per-tenant breakdown promised in
+`docs/metrics.md` — and the "denied by type" panel on the operations dashboard —
+could not work.
+
+Proven directly against Micrometer 1.17.0 with
+`micrometer-registry-prometheus-simpleclient` (the registry Quarkus 3.38.3 pulls):
+register untagged then tagged, increment both, scrape, and only the untagged line
+comes back.
+
+### The fix
+
+The `quotaDeniedCounter` field, its two initialisations and its five
+`increment()` calls are gone. Every denial is now recorded once, tagged; the
+aggregate is `sum(rate(eddi_tenant_quota_denied_total[...]))` at query time. This
+is the shape `eddi.tenant.usage.*` already used.
+
+`quotaAllowedCounter` is untouched — it has a single untagged shape at every call
+site, so it never collided.
+
+### The new test
+
+`TenantQuotaServiceTest.PrometheusExpositionTests.deniedCounterIsExposedWithItsLabels`
+drives a real denial through a real `PrometheusMeterRegistry` and asserts the
+scraped line carries `tenant=` and `type=`. Verified the way the flake fix in the
+entry below was: reintroducing the untagged registration fails it with
+*"denial series lost its tenant label — a colliding untagged registration is
+shadowing it: eddi_tenant_quota_denied_total 0.0"*.
+
+The existing tests could not have caught this. Both use `SimpleMeterRegistry`,
+which tolerates the collision and reports both shapes happily — which is exactly
+why the bug survived. The new test is the only one that goes through a Prometheus
+scrape.
+
+### Not changed
+
+Neither existing assertion needed touching: one checks the tagged counter (still
+1.0), the other sums all counters of that name and asserts `>= 1.0` (now 1 instead
+of 2). 26 tests green.
+
+### Upgrade note
+
+Prometheus retains the old label-less samples for its retention window, so
+breakdown queries should filter with `{tenant!=""}` for a while after deploying.
+The dashboards do.
+
+---
+
 ## ✨ feat(connections): a credential the caller hands over, so the agent cannot outreach the user (2026-08-25)
 
 **Repo:** EDDI (branch for the Gnowbe connector)
@@ -100,6 +454,56 @@ The redaction of a connection-owned outbound header still rests on the header *n
 tests, but a connection whose `headerName` escapes that vocabulary would have its credential written
 to the stored request record in plaintext. Redacting by provenance — the resolver knows the header is
 connection-owned — is the durable fix and is not in this change.
+
+---
+
+## 🧪 fix(tenancy): the quota counters were tested against the wall clock (2026-08-25)
+
+**Repo:** EDDI (`fix/tenant-quota-minute-boundary-flake`)
+
+`MongoTenantQuotaStoreContainerTest.allThreeCountersInterleaved` failed CI on a PR that
+touched nothing in this package: `expected: <2> but was: <1>`. Not a regression — a latent
+flake that had been there since the tests were written.
+
+### Why it failed
+
+The quota counters live in wall-clock-aligned windows. `tryIncrementApiCalls` derives its
+window as `Instant.now().truncatedTo(ChronoUnit.MINUTES)` and `rollWindowIfExpired` resets
+the counter when that value changes. So a test that increments twice and asserts 2 is really
+asserting that both calls landed in the same minute — and nothing made that true. Two calls
+milliseconds apart straddle `:00` roughly once every six hundred runs.
+
+The day and month windows have the same shape, so `conversationsToday` and the cost month
+carried the same hazard at lower odds.
+
+### The fix
+
+`Clock` injected into `MongoTenantQuotaStore` and `PostgresTenantQuotaStore`, defaulting to
+`Clock.systemUTC()` in the CDI constructor so production behaviour is unchanged. Every
+`Instant.now()` and `YearMonth.now(ZoneOffset.UTC)` in both stores now reads that field —
+5 + 3 in Mongo, 6 + 3 in Postgres.
+
+`MongoTenantQuotaStoreContainerTest` and `TenantQuotaStoreParityTest` pin the clock at
+`2026-06-15T12:30:30Z`, deliberately mid-window on every axis so no assertion can pass by
+sitting exactly on a boundary. `InMemoryTenantQuotaStore` needs no clock: it has no window
+logic at all, which is why the parity test never flaked on that arm.
+
+`TenantQuotaStoreParityTest` was exposed the same way — it increments `limit` times and
+asserts the counter equals `limit` — so it is fixed here too rather than left to fail later.
+
+### The new test
+
+`minuteBoundaryRollsTheCounter` steps a clock from `12:30:59Z` to `12:31:00Z` between two
+increments and asserts the counter rolls to 1 rather than reaching 2. That converts the
+hazard into an assertion of the intended behaviour, and it pins the wiring: reverting a
+single `clock.instant()` to `Instant.now()` fails it with `expected: <1> but was: <2>`,
+which is how the fix was verified rather than assumed.
+
+### Not changed
+
+The rollover tests still force expiry by writing `dayStart`/`minuteStart` to `0L` directly.
+That is both deterministic and closer to what the rollover path actually reads, so a clock
+was not the right tool there.
 
 ---
 
