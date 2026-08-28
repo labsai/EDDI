@@ -953,7 +953,7 @@ set `toolResponseLimits`, or raise `maxToolContextTokens`.
 
 ```json
 {
-  "type": "LANGCHAIN",
+  "type": "openai",
   "parameters": { "modelName": "gpt-4o" },
   "enableBuiltInTools": true,
   "builtInToolsWhitelist": ["websearch", "webscraper"],
@@ -1446,7 +1446,7 @@ This means:
 The LLM Lifecycle Task provides a flexible, unified interface for integrating LLMs into EDDI agents:
 
 1. ✅ **Simple by Default** - Start with basic chat, add tools when needed
-2. ✅ **12 Provider Support** - OpenAI, Anthropic, Google, Mistral, Azure, Bedrock, Oracle, Ollama, Hugging Face, Jlama + OpenAI-compatible (DeepSeek, Cohere)
+2. ✅ **12 Provider Support** - OpenAI, Anthropic, Google Gemini, Google Vertex AI, Mistral, Azure, Bedrock, Oracle, Ollama, Hugging Face, Jlama + OpenAI-compatible (DeepSeek, Cohere)
 3. ✅ **Built-in Tools** - 8 tools available when you enable agent mode
 4. ✅ **Tool Execution Pipeline** - Rate limiting, caching, cost tracking for every tool call
 5. ✅ **Security Hardened** - SSRF protection, sandboxed math evaluation, input validation

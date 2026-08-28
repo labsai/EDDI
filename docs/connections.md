@@ -37,7 +37,7 @@ More concretely, three things were impossible:
 
 ### A static API key
 
-```json
+```http
 POST /connectionstore/connections
 {
   "name": "amplitude",
@@ -340,7 +340,8 @@ the database.
 Enforcement lives in the two places where it costs nothing and lands on someone
 who can act:
 
-* **The write boundary.** `POST`/`PUT /connectionstore/connections` answers **400**
+* **The write boundary.** `POST /connectionstore/connections` and
+  `PUT /connectionstore/connections/{id}` answer **400**
   for a `PER_USER` connection when `authorization.enabled=false`, and **400** for an
   OAuth connection when the vault is inert. The administrator who wrote it is still
   looking at it.

@@ -317,7 +317,7 @@ When calling LLMs, you can control how much history is sent:
   "parameters": {
     "sendConversation": "true",
     "includeFirstAgentMessage": "true",
-    "logSizeLimit": "10" // Only last 10 messages
+    "logSizeLimit": "10"
   }
 }
 ```
@@ -350,7 +350,7 @@ Let's trace how memory flows through a complete conversation step:
 
 ### 1. User Request
 
-```json
+```http
 POST /agents/prod/weatheragent/conv-123
 {
   "input": "What's the weather in Paris?",

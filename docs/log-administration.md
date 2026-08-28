@@ -5,7 +5,7 @@
 
 EDDI provides a built-in log management API for platform-wide observability. It captures all application log records into an in-memory ring buffer and optionally persists them to the database for cross-restart history.
 
-> **Note:** This API provides _system-level application logs_ (JUL/JBoss log records). For conversation message history (user/assistant messages), use the [Conversation Log endpoint](#conversation-log) instead.
+> **Note:** This API provides _system-level application logs_ (JUL/JBoss log records). For conversation message history (user/assistant messages), use the [Conversation Log endpoint](conversations.md) (`GET /agents/{conversationId}/log`) instead.
 
 ---
 
