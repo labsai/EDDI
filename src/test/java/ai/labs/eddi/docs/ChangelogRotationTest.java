@@ -14,7 +14,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.TreeSet;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
@@ -57,8 +56,33 @@ class ChangelogRotationTest {
      */
     private static final long WARN_AT_BYTES = (LIVE_CAP_BYTES * 9) / 10;
 
-    /** An archive filename: exactly {@code YYYY-MM.md}. */
-    private static final Pattern ARCHIVE_NAME = Pattern.compile("^(\\d{4})-(\\d{2})\\.md$");
+    /**
+     * An archive filename: exactly {@code YYYY-MM.md}, with the month validated by
+     * the pattern rather than by parsing.
+     * <p>
+     * {@code (0[1-9]|1[0-2])} says "a real month" declaratively. The earlier
+     * {@code (\d{2})} plus {@code Integer.parseInt} said the same thing in two
+     * steps, one of which static analysis reads — correctly, in general — as an
+     * unguarded {@code NumberFormatException}. It could not actually throw here,
+     * because the regex had already established two digits, but a validation that
+     * has to be reasoned about to be dismissed is worse than one that cannot fail.
+     */
+    private static final Pattern ARCHIVE_NAME = Pattern.compile("^(\\d{4})-(0[1-9]|1[0-2])\\.md$");
+
+    /**
+     * A row of the {@code ## Archive} table linking one archive.
+     * <p>
+     * Matching the whole file for {@code changelog/<name>} was too loose: a
+     * changelog *entry* that happens to mention an archive path would satisfy it
+     * while the table itself omitted the file. That is precisely the drift this
+     * test exists to catch, and this very changelog contains entries discussing
+     * {@code docs/changelog/} paths — so the loose form was one edit away from
+     * passing vacuously.
+     */
+    private static Pattern archiveTableRow(String fileName) {
+        return Pattern.compile("^\\|.*\\]\\(changelog/" + Pattern.quote(fileName) + "\\).*\\|\\s*$",
+                Pattern.MULTILINE);
+    }
 
     @Test
     @DisplayName("the live changelog stays under the rotation cap")
@@ -89,24 +113,19 @@ class ChangelogRotationTest {
             return; // nothing rotated yet
         }
 
-        String live = read(root.resolve(LIVE));
+        String archiveTable = archiveTableOf(read(root.resolve(LIVE)));
         var problems = new TreeSet<String>();
 
         for (Path file : listMarkdown(archives)) {
             String name = file.getFileName().toString();
-            Matcher m = ARCHIVE_NAME.matcher(name);
-            if (!m.matches()) {
-                problems.add(name + " — archives must be named YYYY-MM.md, one per month");
+            if (!ARCHIVE_NAME.matcher(name).matches()) {
+                problems.add(name + " — archives must be named YYYY-MM.md, with a real month");
                 continue;
             }
-            int month = Integer.parseInt(m.group(2));
-            if (month < 1 || month > 12) {
-                problems.add(name + " — month " + m.group(2) + " is not a month");
-            }
-            // The Archive table is the only way a reader finds these; an
-            // unlisted file is rotated-away-and-lost rather than archived.
-            if (!live.contains("changelog/" + name)) {
-                problems.add(name + " — not linked from the Archive table in docs/changelog.md");
+            // The Archive table is the only way a reader finds these; a file
+            // missing from it is rotated-away-and-lost rather than archived.
+            if (!archiveTableRow(name).matcher(archiveTable).find()) {
+                problems.add(name + " — no row for it in the ## Archive table of docs/changelog.md");
             }
         }
 
@@ -130,6 +149,19 @@ class ChangelogRotationTest {
                 "These are running registers that sessions append to, not dated entries — rotating them "
                         + "into an archive silently retires them, because nobody appends to an archive:\n  "
                         + String.join("\n  ", missing));
+    }
+
+    /**
+     * The {@code ## Archive} section of the live file, up to the next {@code ##}
+     * heading. Restricting the search to it is what stops a changelog entry that
+     * mentions an archive path from standing in for the table row.
+     */
+    private static String archiveTableOf(String live) {
+        int start = live.indexOf("## Archive");
+        assertTrue(start >= 0, "docs/changelog.md has no '## Archive' section — the archives it "
+                + "points at are unreachable, and this test cannot check the index that does not exist.");
+        int end = live.indexOf("\n## ", start + 1);
+        return end < 0 ? live.substring(start) : live.substring(start, end);
     }
 
     private static List<Path> listMarkdown(Path dir) {

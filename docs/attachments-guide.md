@@ -46,30 +46,33 @@ The image is automatically forwarded to the LLM as multimodal content. The LLM "
 
 ## How It Works
 
-```
+```text
 Client sends context with attachment_* keys
-           │
-           ▼
-┌──────────────────────────────────┐
-│  Conversation.prepareLifecycleData()  │
-│                                       │
-│  AttachmentContextExtractor parses    │
-│  attachment_0, attachment_1, ...      │
-│  into List<Attachment> objects        │
-│                                       │
-│  Stored in memory: "attachments"      │
-└──────────────┬───────────────────┘
-               │
-    ┌──────────┼──────────┐
-    ▼          ▼          ▼
-┌────────┐ ┌────────┐ ┌────────────┐
-│BehaviorRules│ │LlmTask│ │Other Tasks │
-│             │ │       │ │            │
-│ContentType- │ │Multi- │ │Read from   │
-│Matcher      │ │modal  │ │memory key  │
-│condition    │ │Message│ │"attachments"│
-│             │ │Enhancer││            │
-└────────┘ └────────┘ └────────────┘
+                          │
+                          ▼
+        ┌─────────────────────────────────────┐
+        │ Conversation.prepareLifecycleData() │
+        │                                     │
+        │ AttachmentContextExtractor parses   │
+        │ attachment_0, attachment_1, ...     │
+        │ into List<Attachment> objects       │
+        │                                     │
+        │ Stored in memory: "attachments"     │
+        └───────────────────────┬─────────────┘
+                                │
+         ┌──────────────────────┼─────────────────────┐
+         ▼                      ▼                     ▼
+┌──────────────────┐  ┌───────────────────┐  ┌──────────────────┐
+│ BehaviorRules    │  │ LlmTask           │  │ Other Tasks      │
+│                  │  │                   │  │                  │
+│ ContentType-     │  │ AttachmentFor-    │  │ Read from the    │
+│ Matcher matches  │  │ warder resolves   │  │ "attachments"    │
+│ on MIME type,    │  │ bytes, gates on   │  │ memory key       │
+│ so a PDF and an  │  │ ModelCapability-  │  │ directly         │
+│ image can take   │  │ Service, emits    │  │                  │
+│ different paths  │  │ langchain4j       │  │                  │
+│                  │  │ Content           │  │                  │
+└──────────────────┘  └───────────────────┘  └──────────────────┘
 ```
 
 ### Pipeline Stages

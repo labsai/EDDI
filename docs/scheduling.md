@@ -255,7 +255,7 @@ target must be written:
 Individual schedules are configuration documents; the *poller* that runs them is
 tuned deployment-wide in `application.properties` (or the matching environment
 variables — Quarkus maps `eddi.schedule.poll-interval` to
-`EDDI_SCHEDULE_POLLINTERVAL`).
+`EDDI_SCHEDULE_POLL_INTERVAL` — every non-alphanumeric character becomes `_`).
 
 | Property | Default | What it controls |
 |---|---|---|

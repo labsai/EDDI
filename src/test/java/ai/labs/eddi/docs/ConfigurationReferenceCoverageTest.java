@@ -17,6 +17,7 @@ import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
@@ -128,6 +129,78 @@ class ConfigurationReferenceCoverageTest {
                         + String.join("\n  ", invented));
     }
 
+    @Test
+    @DisplayName("every EDDI_* environment variable named in the docs is a real property's mapping")
+    void documentedEnvironmentVariablesMapToRealProperties() {
+        Path root = repoRoot();
+
+        // MicroProfile Config derives the environment variable by uppercasing the
+        // property and replacing every character that is not a letter or digit
+        // with '_'. BOTH '.' and '-' are replaced.
+        var valid = new TreeSet<String>();
+        for (String property : collectProperties(root).keySet()) {
+            valid.add(property.replaceAll("[^A-Za-z0-9]", "_").toUpperCase(Locale.ROOT));
+        }
+
+        var wrong = new TreeSet<String>();
+        for (Path file : documentationFiles(root)) {
+            String relative = root.relativize(file).toString().replace('\\', '/');
+            if (relative.startsWith("docs/changelog")) {
+                continue; // historical entries quote whatever was true at the time
+            }
+            String[] lines = read(file).split("\r?\n", -1);
+            for (int i = 0; i < lines.length; i++) {
+                Matcher m = ENV_VAR.matcher(lines[i]);
+                while (m.find()) {
+                    String name = m.group(1);
+                    if (valid.contains(name) || DOCUMENTED_NON_PROPERTY_ENV.contains(name)
+                            || COUNTER_EXAMPLES.contains(name)) {
+                        continue;
+                    }
+                    wrong.add(String.format("%s:%d %s", relative, i + 1, name));
+                }
+            }
+        }
+
+        assertTrue(wrong.isEmpty(),
+                "These EDDI_* names do not map to any property the code reads. Setting one is not an "
+                        + "error — the property keeps its default and the service starts normally — so the "
+                        + "operator believes the deployment is configured when it is not. The rule is: "
+                        + "uppercase, and replace every non-alphanumeric character (both '.' AND '-') with "
+                        + "'_'.\n  " + String.join("\n  ", wrong));
+    }
+
+    /** An {@code EDDI_*} token, however it is quoted in the prose. */
+    private static final Pattern ENV_VAR = Pattern.compile("\\b(EDDI_[A-Z0-9_]+)\\b");
+
+    /**
+     * {@code EDDI_*} names that are not Quarkus property mappings at all, and so
+     * are outside what this test can check: Compose and installer variables
+     * ({@code EDDI_VERSION} selects the image tag in {@code docker-compose.yml}),
+     * shell locals in {@code install.sh}, and NATS stream names that merely look
+     * like environment variables.
+     */
+    private static final Set<String> DOCUMENTED_NON_PROPERTY_ENV = Set.of(
+            "EDDI_VERSION",
+            "EDDI_CONVERSATIONS", "EDDI_DEAD_LETTERS", "EDDI_IT_CONVERSATIONS", "EDDI_IT_DEAD_LETTERS",
+            "EDDI_API_KEY", "EDDI_API_URL", "EDDI_URL", "EDDI_PORT", "EDDI_HTTPS_PORT", "EDDI_DOMAIN",
+            "EDDI_SCHEME", "EDDI_DIR", "EDDI_CONFIG", "EDDI_NAMESPACE", "EDDI_BRANCH", "EDDI_RELEASE",
+            "EDDI_CLI", "EDDI_REPO_ROOT", "EDDI_ALREADY_RUNNING", "EDDI_URI_PATTERN", "EDDI_AUTH",
+            "EDDI_DEMO_LLM_API_KEY", "EDDI_DEMO_LLM_MODEL", "EDDI_DEMO_LLM_TYPE");
+
+    /**
+     * Names a document quotes deliberately because they do <em>not</em> work.
+     * <p>
+     * {@code configuration-reference.md} warns that {@code EDDI_VAULT_MASTERKEY} —
+     * the dash deleted rather than replaced — binds nothing and leaves the vault
+     * inactive, and {@code gdpr-compliance.md} tells operators to remove
+     * {@code EDDI_AUDIT_RETENTIONDAYS}, whose property was deleted after it turned
+     * out nothing ever read it. Both warnings have to be able to name the thing
+     * they are about, so this set is where "documented because it is wrong" lives —
+     * it is not a place to park a name you have not checked.
+     */
+    private static final Set<String> COUNTER_EXAMPLES = Set.of("EDDI_VAULT_MASTERKEY", "EDDI_AUDIT_RETENTIONDAYS");
+
     /** Property name → a short note on where the code reads it. */
     private static TreeMap<String, String> collectProperties(Path root) {
         var found = new TreeMap<String, String>();
@@ -163,6 +236,41 @@ class ConfigurationReferenceCoverageTest {
         assertTrue(Files.isRegularFile(root.resolve("pom.xml")),
                 "expected the working directory to be the project root, was " + root);
         return root;
+    }
+
+    /**
+     * Every markdown file under {@code docs/}, plus the root README and AGENTS.md.
+     */
+    private static List<Path> documentationFiles(Path root) {
+        List<Path> found = new ArrayList<>(markdownUnder(root.resolve("docs")));
+        for (String name : List.of("README.md", "AGENTS.md")) {
+            Path file = root.resolve(name);
+            if (Files.isRegularFile(file)) {
+                found.add(file);
+            }
+        }
+        return found;
+    }
+
+    private static List<Path> markdownUnder(Path base) {
+        List<Path> found = new ArrayList<>();
+        if (!Files.isDirectory(base)) {
+            return found;
+        }
+        try {
+            Files.walkFileTree(base, new SimpleFileVisitor<>() {
+                @Override
+                public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+                    if (attrs.isRegularFile() && file.getFileName().toString().endsWith(".md")) {
+                        found.add(file);
+                    }
+                    return FileVisitResult.CONTINUE;
+                }
+            });
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+        return found;
     }
 
     private static List<Path> javaSources(Path base) {

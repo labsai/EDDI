@@ -138,7 +138,7 @@ because a `SimpleMeterRegistry` tolerates the collision and will not catch it.
 
 ### Conversation Metrics
 
-```
+```text
 eddi_conversation_start_count_total         # Conversations started
 eddi_conversation_end_count_total           # Conversations ended
 eddi_conversation_processing_count_total    # Messages processed
@@ -157,7 +157,7 @@ eddi_conversation_redo_duration_seconds     # Redo latency (timer)
 
 ### Tool Execution Metrics
 
-```
+```text
 eddi_tool_execution_success_total           # Successful executions
 eddi_tool_execution_failure_total           # Failed executions
 eddi_tool_execution_cached_total            # Cache-served executions
@@ -172,7 +172,7 @@ rate(eddi_tool_execution_success_total{tool="weather"}[5m])
 
 ### Tool Cache Metrics
 
-```
+```text
 eddi_tool_cache_hits_total                  # Cache hits
 eddi_tool_cache_misses_total                # Cache misses
 eddi_tool_cache_puts_by_tool_total{tool}    # Cache puts (per tool; there is no untagged variant)
@@ -193,7 +193,7 @@ eddi_tool_cache_bypassed_total              # Calls that skipped the cache (per 
 
 ### Rate Limiting Metrics
 
-```
+```text
 eddi_tool_ratelimit_allowed_total{tool="..."}  # Allowed calls (per tool)
 eddi_tool_ratelimit_denied_total{tool="..."}   # Denied calls (per tool)
 eddi_tool_ratelimit_remaining                  # Remaining capacity (gauge)
@@ -210,21 +210,21 @@ sum(rate(eddi_tool_ratelimit_allowed_total[5m]))
 
 ### Cost Tracking Metrics
 
-```
+```text
 eddi_tool_calls_total                       # Total tool calls
 eddi_tool_costs_total                       # Total cumulative cost (gauge)
 eddi_tool_budget_exceeded_total             # Budget exceeded events
 ```
 
 Per-tool breakdown:
-```
+```text
 eddi_tool_calls{tool="weather"}             # Calls per tool
 eddi_tool_costs{tool="weather"}             # Cost per tool
 ```
 
 ### Group Discussion Metrics
 
-```
+```text
 eddi_group_discussion_count_total           # Discussions started
 eddi_group_discussion_failure_count_total   # Discussions failed
 eddi_group_discussion_duration_seconds      # Duration (timer)
@@ -239,7 +239,7 @@ eddi_group_close_count_total                # Conversations closed to further ro
 
 ### Standing Team (Cadence) Metrics
 
-```
+```text
 eddi_team_cadence_runs_started_total        # Cadence fires that started a discussion
 eddi_team_cadence_runs_skipped_total        # Fires skipped (run still in flight, empty backlog, claim lost)
 eddi_team_cadence_writebacks_total          # Completed runs written back to the backlog
@@ -248,7 +248,7 @@ eddi_team_cadence_claims_reclaimed_total    # Stale claims reclaimed after claim
 
 ### Scheduled Trigger Metrics
 
-```
+```text
 eddi_schedule_poll_count_total              # Poll cycles
 eddi_schedule_fire_count_total              # Schedules fired
 eddi_schedule_fire_failed_total             # Fire failures
@@ -259,7 +259,7 @@ eddi_schedule_fire_duration_seconds         # Fire latency (timer)
 
 ### Tenant Quota Metrics
 
-```
+```text
 eddi_tenant_quota_allowed_total             # Slot acquisitions granted (untagged)
 eddi_tenant_quota_denied_total{tenant,type} # Quota denials, always tagged
 eddi_tenant_usage_conversations_total       # Conversation usage (per tenant)
@@ -292,7 +292,7 @@ gates (`checkAgentQuota`, `checkCostBudget`) deliberately do not touch it, so
 
 ### Coordinator Metrics
 
-```
+```text
 eddi_coordinator_active_conversations       # Conversations with a live queue (gauge)
 eddi_coordinator_queue_depth                # Total queued messages across all conversations (gauge)
 eddi_coordinator_total_processed_total      # Messages processed since start
@@ -303,7 +303,7 @@ backlog: work is arriving faster than it drains.
 
 ### Pipeline Metrics
 
-```
+```text
 eddi_pipeline_task_duration_seconds         # Per-task latency; tags: task.id, task.type
 eddi_pipeline_task_errors_total             # Per-task failures; tags: task.id, task.type, error.type
 ```
@@ -316,7 +316,7 @@ percentile. See [Timers do not publish percentiles](#timers-do-not-publish-perce
 
 Full guide: [model-cascade.md](model-cascade.md).
 
-```
+```text
 eddi_llm_cascade_executions_total           # Cascade runs started; tag: agentMode
 eddi_llm_cascade_escalations_total          # Moves to a costlier step; tag: reason (low_confidence|timeout|<error type>)
 eddi_llm_cascade_accepted_step_total        # Which step answered; tag: step
@@ -335,7 +335,7 @@ expensive one.
 
 ### Streaming Metrics
 
-```
+```text
 eddi_llm_streaming_downgraded_total         # Fell back to a single chunk; tag: reason
 eddi_llm_streaming_no_partials_total        # Provider streamed, but emitted no partial tokens
 eddi_llm_tool_context_evictions_total       # Exchanges dropped to fit the tool-context budget; tag: outcome (within_budget|still_over_budget)
@@ -349,7 +349,7 @@ not a blip.
 
 Full guide: [attachments-guide.md](attachments-guide.md).
 
-```
+```text
 eddi_attachment_forwarded_total             # Attachments converted to LLM content
 eddi_attachment_reinlined_total             # Extracted text stitched back into history
 eddi_attachment_errors_total                # Drops, cap-skips and capability gates
@@ -359,7 +359,7 @@ eddi_attachment_errors_total                # Drops, cap-skips and capability ga
 
 Full guide: [hitl.md](hitl.md).
 
-```
+```text
 eddi_hitl_pause_count_total                 # Turn-level pauses; tag: surface
 eddi_hitl_resume_count_total                # Turn-level resumes; tag: surface
 eddi_hitl_timeout_count_total               # Approvals that expired unanswered
@@ -378,7 +378,7 @@ bound, not on either alone.
 
 ### Platform Operator Metrics
 
-```
+```text
 eddi_operator_write_approval_total          # Gated operator writes; tag: decision
 eddi_operator_gate_verified                 # Write gate is verified and active (gauge, 1|0)
 eddi_operator_canary_total                  # Canary probes of the write gate
@@ -390,7 +390,7 @@ human-approval gate is no longer proven — treat it as a security alert.
 
 ### Prompt & Guardrail Metrics
 
-```
+```text
 eddi_snippets_cache_hits_total              # Prompt-snippet cache hits
 eddi_snippets_cache_misses_total            # Prompt-snippet cache misses
 eddi_counterweight_activation_count_total   # Counterweight activations; tag: level (normal|cautious|strict|unknown)
@@ -400,7 +400,7 @@ eddi_identity_masking_applied_total         # Identity-masking passes applied
 
 ### Agent Identity & Signing Metrics
 
-```
+```text
 eddi_agent_identity_sign_count_total        # Agent configurations signed
 eddi_agent_identity_verify_success_total    # Signature verifications that passed
 eddi_agent_identity_verify_fail_total       # Signature verifications that failed
@@ -416,7 +416,7 @@ misconfigured peer — never routine.
 
 Full guide: [capability-match-guide.md](capability-match-guide.md).
 
-```
+```text
 eddi_capability_query_count_total           # Capability lookups
 eddi_capability_query_time_seconds          # Lookup latency (timer)
 eddi_capability_miss_count_total            # Lookups matching no agent; tag: skill
@@ -430,7 +430,7 @@ serve — the most directly actionable metric in this list.
 
 Full guide: [secrets-vault.md](secrets-vault.md).
 
-```
+```text
 eddi_vault_resolve_count_total              # Secret resolutions
 eddi_vault_store_count_total                # Secrets written
 eddi_vault_rotate_count_total               # Key rotations
@@ -446,7 +446,7 @@ eddi_vault_store_duration_seconds           # Write latency (timer)
 
 ### MCP & Integration Metrics
 
-```
+```text
 eddi_mcp_discovery_total                    # Remote tool discoveries; tag: outcome
 eddi_mcp_response_truncation_count_total    # Tool responses truncated to fit the context
 eddi_mcp_conversation_access_denied_total   # MCP conversation access refused; tag: tool
@@ -458,20 +458,20 @@ eddi_caller_identity_resolution_total       # Caller-identity resolutions; tags:
 
 ### Session & Listing Metrics
 
-```
+```text
 eddi_session_checkpoint_count_total         # Conversation memory checkpoints written
 eddi_conversations_listing_owner_scan_exhausted_total  # Conversation listing gave up scanning for an owner
 ```
 
 ### Audit Ledger Metrics
 
-```
+```text
 eddi_audit_entries_dropped_total            # Audit entries dropped (compliance-critical)
 ```
 
 ### Deployed Agents
 
-```
+```text
 eddi_agents_deployed                        # Currently deployed agents (gauge)
 ```
 
@@ -479,7 +479,7 @@ eddi_agents_deployed                        # Currently deployed agents (gauge)
 
 > Only active when using the NATS messaging profile. Shows nothing under in-memory messaging.
 
-```
+```text
 eddi_nats_publish_count_total               # Messages published
 eddi_nats_consume_count_total               # Messages consumed
 eddi_nats_dead_letter_count_total           # Dead letters
@@ -491,7 +491,7 @@ eddi_nats_consume_duration_seconds          # Consume latency (timer)
 
 Standard Micrometer metrics for Quarkus:
 
-```
+```text
 jvm_memory_used_bytes{area="heap|nonheap"}
 jvm_memory_committed_bytes{area="heap|nonheap"}
 jvm_memory_max_bytes{area="heap"}
@@ -508,14 +508,14 @@ http_server_requests_seconds{method,uri,status}
 ### Database Connection Pool (auto-exposed)
 
 **MongoDB** (when `eddi.datastore.type=mongo`):
-```
+```text
 mongodb_driver_pool_size
 mongodb_driver_pool_checkedout
 mongodb_driver_pool_waitqueuesize
 ```
 
 **PostgreSQL / Agroal** (when `eddi.datastore.type=postgres`):
-```
+```text
 agroal_active_count
 agroal_available_count
 agroal_awaiting_count

@@ -49,6 +49,66 @@ bottom of this file and are never archived.
 
 ---
 
+## 🔧 docs: address the PR #722 review — the env-var rule was wrong (2026-08-28)
+
+**Repo:** EDDI (`docs/accuracy-audit`)
+
+Five review findings on the accuracy-audit PR. One was a genuine error in the
+headline new document, and worth recording because it is the same failure mode
+the PR was written about.
+
+### The environment-variable conversion rule was wrong
+
+`configuration-reference.md` stated that MicroProfile Config "uppercases the
+name, turns `.` into `_`, and **deletes `-` entirely**", and gave four worked
+examples on that basis. **Both `.` and `-` are replaced with `_`.** The repository
+had said so all along — `EDDI_VAULT_MASTER_KEY`, `EDDI_MCP_ALLOW_UNAUTHENTICATED`
+and `EDDI_OPENAI_COMPAT_API_KEY` are the spellings in `docker-compose.yml`,
+`k8s/` and `AuditHmac`'s own javadoc — and the audit did not check the reference
+against them.
+
+This is worse than an ordinary typo because **an unrecognised environment
+variable is not an error**. The property keeps its default and the service starts
+normally, so `EDDI_VAULT_MASTERKEY` leaves the vault inactive and `scope:
+"secret"` properties silently fall back to plaintext, with nothing in the startup
+log naming the variable that was set. The corrected section now leads with that
+consequence rather than the rule.
+
+`ConfigurationReferenceCoverageTest` gained a third assertion: every `EDDI_*`
+token in the documentation must be the mechanical transform of a real property.
+It found two more instances the review had not — `EDDI_VERSION` (a Compose image
+tag, not a property) and `EDDI_AUDIT_RETENTIONDAYS` (deliberately named in the
+note explaining its removal) — both now classified explicitly rather than left
+ambiguous. The lesson is narrow and general: a reference that is checked for
+*coverage* is not thereby checked for *correctness*.
+
+### The rest
+
+- **`attachments-guide.md` pipeline diagram** still named the deleted
+  `MultimodalMessageEnhancer`, split across four lines as `Multi-`/`modal`/
+  `Message`/`Enhancer` — which is why the string search that cleaned up the prose
+  never saw it. Redrawn around `AttachmentForwarder`; while there, the box
+  borders were 36 and 41 characters wide on the same box, so the whole diagram
+  is now aligned and its connectors centred.
+- **`ChangelogRotationTest` accepted a prose mention in place of a table row.**
+  `live.contains("changelog/" + name)` matched anywhere in the file, and this
+  changelog contains entries that discuss `docs/changelog/` paths — so the check
+  was one edit away from passing vacuously on the drift it exists to catch. It
+  now matches a Markdown row inside the `## Archive` section only.
+- **Month validation is declarative.** `(\d{2})` plus `Integer.parseInt` reads to
+  static analysis as an unguarded `NumberFormatException`. It could not throw,
+  because the regex had already established two digits, but a validation that has
+  to be reasoned about to be dismissed is worse than one that cannot fail:
+  `(0[1-9]|1[0-2])`.
+- **`metrics.md` fenced blocks** carry a `text` language identifier
+  (markdownlint MD040). Applied to all 29 bare fences, not only the 13 added by
+  this PR, so the file is consistent rather than half-converted.
+
+All three tightened assertions were mutation-checked against the specific hole
+each closes.
+
+---
+
 ## 🗂️ docs(changelog): split the 1.9 MB working changelog, and cap it so it stays split (2026-08-28)
 
 **Repo:** EDDI (`claude/eddi-docs-review-04d1d7`)

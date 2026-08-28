@@ -16,24 +16,30 @@ Three interchangeable mechanisms, in ascending order of precedence:
 | Where | Form | Use it for |
 |---|---|---|
 | `src/main/resources/application.properties` | `eddi.schedule.poll-interval=15s` | Source builds and the shipped defaults |
-| Environment variable | `EDDI_SCHEDULE_POLLINTERVAL=15s` | Docker, Compose, Kubernetes — the normal path |
+| Environment variable | `EDDI_SCHEDULE_POLL_INTERVAL=15s` | Docker, Compose, Kubernetes — the normal path |
 | JVM system property | `-Deddi.schedule.poll-interval=15s` | One-off local overrides |
 
-**The environment-variable spelling is mechanical**, and the rule catches people
-out: MicroProfile Config uppercases the name, turns `.` into `_`, and **deletes
-`-` entirely** rather than converting it. So:
+**The environment-variable spelling is mechanical:** uppercase the property name
+and replace **every character that is not a letter or a digit** with `_`. Both
+`.` and `-` are replaced — neither is dropped.
 
-```
-eddi.schedule.poll-interval        →  EDDI_SCHEDULE_POLLINTERVAL
-eddi.vault.master-key              →  EDDI_VAULT_MASTERKEY
-eddi.openai-compat.api-key         →  EDDI_OPENAICOMPAT_APIKEY
-eddi.tools.websearch.google.api-key →  EDDI_TOOLS_WEBSEARCH_GOOGLE_APIKEY
+```text
+eddi.schedule.poll-interval         →  EDDI_SCHEDULE_POLL_INTERVAL
+eddi.vault.master-key               →  EDDI_VAULT_MASTER_KEY
+eddi.openai-compat.api-key          →  EDDI_OPENAI_COMPAT_API_KEY
+eddi.tools.websearch.google.api-key →  EDDI_TOOLS_WEBSEARCH_GOOGLE_API_KEY
 ```
 
-`EDDI_VAULT_MASTER_KEY` (with the extra underscore) also works, because
-MicroProfile tries several transformations — but `EDDI_SCHEDULE_POLL_INTERVAL`
-is *not* guaranteed to, so prefer the mechanical form above and you will never
-have to think about it.
+> **Getting this wrong fails silently.** An unrecognised environment variable is
+> not an error — the property simply keeps its default and the service starts
+> normally. `EDDI_VAULT_MASTERKEY` (dash deleted rather than replaced) leaves
+> `eddi.vault.master-key` empty, which means the vault is inactive and
+> `scope: "secret"` properties fall back to plaintext. Nothing in the startup log
+> mentions the variable you set.
+>
+> To check what actually bound, read the value back from the Dev UI at `/q/dev`,
+> or compare against the spellings already used in `docker-compose.yml`,
+> `.env.example` and `k8s/`.
 
 Quarkus profiles prefix the key: `%dev.eddi.usermemories.deleteOlderThanDays=-1`
 applies in dev mode only.
