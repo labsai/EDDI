@@ -74,20 +74,20 @@ The wizard guides you through choosing a database (MongoDB or PostgreSQL), optio
 
 ### Option 1 - EDDI with Docker (Manual)
 
-There are two ways to use `Docker` with **EDDI**, either with **`docker compose`** or launch the container manually.
+There are two ways to run **EDDI** under Docker: with **Docker Compose**, or by launching the containers manually.
 
-_**Prerequisite**: You need an up and running `Docker` environment. (For references, see:_ [https://docs.docker.com/learn/](https://docs.docker.com/learn/))
+> **Prerequisite:** a working Docker installation — see the [Docker documentation](https://docs.docker.com/learn/). Compose v2 ships as the `docker compose` subcommand; the standalone `docker-compose` binary is end-of-life and is not used here.
 
-### Use docker-compose (recommended)
+### Use Docker Compose (recommended)
 
-1. `Checkout` the `docker compose` file from `Github`:[`https://github.com/labsai/EDDI/blob/main/docker-compose.yml`](https://github.com/labsai/EDDI/blob/main/docker-compose.yml)
-2. Run Docker Command:
+1. Download [`docker-compose.yml`](https://github.com/labsai/EDDI/blob/main/docker-compose.yml) from GitHub, into an empty directory
+2. Start it:
 
+   ```bash
+   docker compose up
    ```
-    docker compose up
-   ```
 
-### Use launch docker containers manually
+### Launch the containers manually
 
 1.  Create a shared network
 
@@ -196,7 +196,7 @@ docker pull labsai/eddi
 
 ### Run Docker image
 
-For production, launch standalone mongodb and then start an eddi instance as defined in the docker-compose file
+For production, launch a standalone MongoDB and then start an EDDI instance as defined in `docker-compose.yml`
 
 ```bash
 docker compose up
