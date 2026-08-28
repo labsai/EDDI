@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.backup.impl;
 
+import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import org.jboss.logging.Logger;
 
 import java.net.InetAddress;
@@ -88,12 +89,29 @@ public final class SourceUrlValidator {
         return false;
     }
 
+    /**
+     * Delegates the address decision to
+     * {@link UrlValidationUtils#isPrivateAddress}, the codebase's single definition
+     * of an unsafe outbound address.
+     * <p>
+     * This used to be a second, local copy built from the four JDK predicates
+     * ({@code isSiteLocalAddress}, {@code isLoopbackAddress},
+     * {@code isLinkLocalAddress}, {@code isAnyLocalAddress}). Those do not cover
+     * RFC 4193 IPv6 ULA ({@code fc00::/7} - {@code isSiteLocalAddress} only matches
+     * the deprecated {@code fec0::/10}) or RFC 6598 CGNAT ({@code 100.64.0.0/10},
+     * used by Tailscale and some k8s pod CIDRs). The sync endpoints are open to
+     * {@code eddi-editor}, so that gap let a lower-privileged role reach internal
+     * hosts the rest of the codebase already refused.
+     * <p>
+     * The messages here are deliberately kept rather than delegating to
+     * {@code validateUrl} wholesale: this validator's HTTPS-in-production rule has
+     * no equivalent there, and its wording is what the sync UI shows the operator.
+     */
     private static boolean isPrivateIp(String host) {
         try {
             InetAddress[] addresses = InetAddress.getAllByName(host);
             for (InetAddress addr : addresses) {
-                if (addr.isSiteLocalAddress() || addr.isLoopbackAddress()
-                        || addr.isLinkLocalAddress() || addr.isAnyLocalAddress()) {
+                if (UrlValidationUtils.isPrivateAddress(addr)) {
                     return true;
                 }
             }
