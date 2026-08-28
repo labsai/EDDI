@@ -14,6 +14,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.TreeSet;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
@@ -84,6 +85,9 @@ class ChangelogRotationTest {
                 Pattern.MULTILINE);
     }
 
+    /** Every archive a row of the table links to, whatever it is called. */
+    private static final Pattern ARCHIVE_LINK = Pattern.compile("\\]\\(changelog/([^)]+)\\)");
+
     @Test
     @DisplayName("the live changelog stays under the rotation cap")
     void liveChangelogIsUnderCap() {
@@ -116,16 +120,34 @@ class ChangelogRotationTest {
         String archiveTable = archiveTableOf(read(root.resolve(LIVE)));
         var problems = new TreeSet<String>();
 
+        // Disk → table. A file missing from the index is rotated-away-and-lost
+        // rather than archived: the table is the only way a reader finds it.
+        var onDisk = new TreeSet<String>();
         for (Path file : listMarkdown(archives)) {
             String name = file.getFileName().toString();
+            onDisk.add(name);
             if (!ARCHIVE_NAME.matcher(name).matches()) {
                 problems.add(name + " — archives must be named YYYY-MM.md, with a real month");
                 continue;
             }
-            // The Archive table is the only way a reader finds these; a file
-            // missing from it is rotated-away-and-lost rather than archived.
             if (!archiveTableRow(name).matcher(archiveTable).find()) {
                 problems.add(name + " — no row for it in the ## Archive table of docs/changelog.md");
+            }
+        }
+
+        // Table → disk. The other direction, which is not symmetric with the
+        // first: a row naming a file that no longer exists is a dead link in the
+        // live changelog. DocumentationLinksTest does fail on it, but reports it
+        // as a generic unresolved link, which says nothing about the index being
+        // stale — and it cannot catch a row naming a file that exists under a
+        // name no rotation would ever produce.
+        Matcher indexed = ARCHIVE_LINK.matcher(archiveTable);
+        while (indexed.find()) {
+            String name = indexed.group(1);
+            if (!ARCHIVE_NAME.matcher(name).matches()) {
+                problems.add(name + " — indexed in the ## Archive table, but not a YYYY-MM.md archive name");
+            } else if (!onDisk.contains(name)) {
+                problems.add(name + " — a row in the ## Archive table points at it, but the file does not exist");
             }
         }
 

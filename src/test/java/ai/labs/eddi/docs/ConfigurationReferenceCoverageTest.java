@@ -23,6 +23,7 @@ import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -145,7 +146,7 @@ class ConfigurationReferenceCoverageTest {
         var wrong = new TreeSet<String>();
         for (Path file : documentationFiles(root)) {
             String relative = root.relativize(file).toString().replace('\\', '/');
-            if (relative.startsWith("docs/changelog")) {
+            if (isChangelog(relative)) {
                 continue; // historical entries quote whatever was true at the time
             }
             String[] lines = read(file).split("\r?\n", -1);
@@ -239,15 +240,37 @@ class ConfigurationReferenceCoverageTest {
     }
 
     /**
-     * Every markdown file under {@code docs/}, plus the root README and AGENTS.md.
+     * The changelog — the live file or an archive — and nothing that merely starts
+     * with the same letters.
+     * <p>
+     * A plain {@code startsWith("docs/changelog")} prefix would also skip a
+     * {@code docs/changelog-notes.md}, an ordinary page that should be checked like
+     * any other. Exempting more than intended is the failure mode that matters for
+     * an exemption, because the test goes on passing.
+     */
+    private static boolean isChangelog(String relative) {
+        return relative.equals("docs/changelog.md") || relative.startsWith("docs/changelog/");
+    }
+
+    /**
+     * Every markdown file under {@code docs/}, plus <em>every</em> markdown file at
+     * the repository root.
+     * <p>
+     * Naming {@code README.md} and {@code AGENTS.md} explicitly left
+     * {@code PRIVACY.md}, {@code CONTRIBUTING.md}, {@code SECURITY.md} and the rest
+     * unchecked — and {@code PRIVACY.md} is a 30 KB operator-facing document,
+     * exactly the sort of page that quotes a configuration name. None of them names
+     * an {@code EDDI_*} variable today, which is precisely why the allow-list would
+     * have gone on looking correct indefinitely.
      */
     private static List<Path> documentationFiles(Path root) {
         List<Path> found = new ArrayList<>(markdownUnder(root.resolve("docs")));
-        for (String name : List.of("README.md", "AGENTS.md")) {
-            Path file = root.resolve(name);
-            if (Files.isRegularFile(file)) {
-                found.add(file);
-            }
+        try (Stream<Path> rootFiles = Files.list(root)) {
+            rootFiles.filter(Files::isRegularFile)
+                    .filter(p -> p.getFileName().toString().endsWith(".md"))
+                    .forEach(found::add);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
         }
         return found;
     }

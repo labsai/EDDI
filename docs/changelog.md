@@ -107,6 +107,27 @@ ambiguous. The lesson is narrow and general: a reference that is checked for
 All three tightened assertions were mutation-checked against the specific hole
 each closes.
 
+### Second review round
+
+Two further findings, both about the new tests checking less than they appear to:
+
+- **`ChangelogRotationTest` validated the archive index in one direction only.**
+  Every file on disk had to have a table row; a row pointing at a *deleted*
+  archive passed. `DocumentationLinksTest` does fail on that — it is a dead
+  relative link — but reports it as a generic unresolved link, which tells the
+  reader nothing about the index being stale, and it cannot catch a row naming a
+  file that exists under a name no rotation would produce. Both directions are
+  now checked here, where the invariant lives.
+- **`ConfigurationReferenceCoverageTest` scanned less than the PR claimed.**
+  `startsWith("docs/changelog")` would also have exempted a
+  `docs/changelog-notes.md`, and the file list named `README.md` and `AGENTS.md`
+  explicitly, leaving `PRIVACY.md`, `CONTRIBUTING.md` and `SECURITY.md`
+  unchecked — `PRIVACY.md` being a 30 KB operator-facing document, exactly where
+  a configuration name gets quoted. None of them names an `EDDI_*` variable
+  today, which is why an allow-list would have gone on looking correct
+  indefinitely. Now: exact match on the live changelog, prefix on the archive
+  directory, and every root `*.md` enumerated.
+
 ---
 
 ## 🗂️ docs(changelog): split the 1.9 MB working changelog, and cap it so it stays split (2026-08-28)
