@@ -4,8 +4,8 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
-import ai.labs.eddi.configs.agents.IRestAgentStore;
-import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
+import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
@@ -29,7 +29,7 @@ import static org.mockito.Mockito.*;
 class McpToolsProviderTest {
 
     private McpToolsProvider provider(McpToolProviderManager manager) {
-        return new McpToolsProvider(mock(IRestAgentStore.class), mock(IRestWorkflowStore.class),
+        return new McpToolsProvider(mock(IAgentStore.class), mock(IWorkflowStore.class),
                 mock(IResourceClientLibrary.class), manager);
     }
 
@@ -46,8 +46,8 @@ class McpToolsProviderTest {
 
     @Test
     void contribute_explicitlyDisabled_returnsEmptyWithoutDiscovering() {
-        var restAgentStore = mock(IRestAgentStore.class);
-        var provider = new McpToolsProvider(restAgentStore, mock(IRestWorkflowStore.class),
+        var restAgentStore = mock(IAgentStore.class);
+        var provider = new McpToolsProvider(restAgentStore, mock(IWorkflowStore.class),
                 mock(IResourceClientLibrary.class), mock(McpToolProviderManager.class));
 
         var contribution = provider.contribute(context(false));

@@ -7,6 +7,58 @@
 
 
 
+## 🔐 refactor(engine): split the engine's config reads off the authoring surface (2026-08-29)
+
+**Repo:** EDDI (`feat/multi-user-spaces-and-sharing`)
+
+Prerequisite for per-user workspaces, and worth doing on its own merits. Two
+populations were reading configuration through the same beans and needed opposite
+answers from them.
+
+`ResourceClientLibrary.getResource` — the engine resolving an `eddi://` reference
+mid-turn — went through the `IRest*Store` facades, as did `AgentStoreService`,
+`WorkflowStoreService`, `WorkflowTraversal`, `AgentCardService` and
+`ChannelTargetRouter`. The identity on a conversation turn is **whoever is
+chatting**, who in general does not own the agent they are talking to. Any
+ownership check placed on the authoring surface would therefore have failed every
+turn on every shared agent — the agent would not have been able to load its own
+rule set.
+
+All of those now read `IResourceStore` beans directly. What stayed on the facades
+is exactly the set of operations a *person* performs: `duplicateResource` and
+`deleteResource` (the cascade behind `RestWorkflowStore` and the orphan purge
+behind `RestOrphanAdmin`). The class comment states the rule so the split does not
+silently erode: **a read added here belongs on the store side, a mutation on the
+facade side.**
+
+### Design decisions
+
+- **`AgentOrchestrator` lost a parameter rather than gaining a type.** It already
+  injected `IAgentStore`; the separate `IRestAgentStore` it passed down to
+  `HttpCallToolsProvider` and `McpToolsProvider` was redundant once those take the
+  store. Dropping it beats keeping two parameters of the same type.
+- **`AgentCardService.listA2AAgents` lists through `IDocumentDescriptorStore`
+  unrestricted, deliberately.** An Agent Card is published to A2A *peers* — remote
+  systems, not EDDI users — so there is no caller workspace to scope to. Its gate
+  is `isA2aEnabled()` plus whatever authenticates the A2A endpoints.
+- **The store reads throw checked exceptions the facades swallowed.**
+  `readFromStore` rethrows via `SneakyThrow`, exactly as the facades did, so
+  `WorkflowTraversal`'s degrade-and-continue behaviour on a missing reference is
+  unchanged.
+
+### Verification
+
+`./mvnw compile`, `./mvnw test-compile`, and 637 tests across the touched areas
+(`ResourceClientLibraryTest`, `AgentOrchestrator*`, `WorkflowTraversal*`,
+`RagContextProvider*`, `ChannelTargetRouter*`, `AgentCardServiceTest`,
+`DocumentDescriptorFilterTest`) — all green. `ResourceClientLibraryTest` now mocks
+both sides and asserts the split: reads verify against the stores, duplicate/delete
+against the facades.
+
+---
+
+
+
 ## 📝 docs(monitoring): reconcile the dashboard inventory with what is provisioned (2026-08-27)
 
 **Repo:** EDDI (`feat/grafana-full-metrics-dashboard`)

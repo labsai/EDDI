@@ -4,6 +4,15 @@
  */
 package ai.labs.eddi.engine.runtime.client.configuration;
 
+import ai.labs.eddi.configs.apicalls.IApiCallsStore;
+import ai.labs.eddi.configs.dictionary.IDictionaryStore;
+import ai.labs.eddi.configs.llm.ILlmStore;
+import ai.labs.eddi.configs.mcpcalls.IMcpCallsStore;
+import ai.labs.eddi.configs.output.IOutputStore;
+import ai.labs.eddi.configs.parser.IParserStore;
+import ai.labs.eddi.configs.propertysetter.IPropertySetterStore;
+import ai.labs.eddi.configs.rag.IRagStore;
+import ai.labs.eddi.configs.rules.IRuleSetStore;
 import ai.labs.eddi.configs.rules.IRestRuleSetStore;
 import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
 import ai.labs.eddi.configs.llm.IRestLlmStore;
@@ -32,15 +41,30 @@ import static org.mockito.Mockito.*;
  */
 class ResourceClientLibraryTest {
 
-    private IRestParserStore parserStore;
-    private IRestDictionaryStore dictionaryStore;
-    private IRestRuleSetStore ruleSetStore;
-    private IRestApiCallsStore apiCallsStore;
-    private IRestLlmStore llmStore;
-    private IRestOutputStore outputStore;
-    private IRestPropertySetterStore propertySetterStore;
-    private IRestMcpCallsStore mcpCallsStore;
-    private IRestRagStore ragStore;
+    // Reads resolve against the stores (the engine's path, below ownership
+    // enforcement); duplicate/delete resolve against the REST facades (the
+    // authoring
+    // path, which ResourceAccessGuard sees). The split is the point of these tests.
+    private IParserStore parserStore;
+    private IDictionaryStore dictionaryStore;
+    private IRuleSetStore ruleSetStore;
+    private IApiCallsStore apiCallsStore;
+    private ILlmStore llmStore;
+    private IOutputStore outputStore;
+    private IPropertySetterStore propertySetterStore;
+    private IMcpCallsStore mcpCallsStore;
+    private IRagStore ragStore;
+
+    private IRestParserStore restParserStore;
+    private IRestDictionaryStore restDictionaryStore;
+    private IRestRuleSetStore restRuleSetStore;
+    private IRestApiCallsStore restApiCallsStore;
+    private IRestLlmStore restLlmStore;
+    private IRestOutputStore restOutputStore;
+    private IRestPropertySetterStore restPropertySetterStore;
+    private IRestMcpCallsStore restMcpCallsStore;
+    private IRestRagStore restRagStore;
+
     private ResourceClientLibrary library;
 
     // Valid hex ID (>= 18 hex chars for RestUtilities.isValidId)
@@ -48,17 +72,30 @@ class ResourceClientLibraryTest {
 
     @BeforeEach
     void setUp() {
-        parserStore = mock(IRestParserStore.class);
-        dictionaryStore = mock(IRestDictionaryStore.class);
-        ruleSetStore = mock(IRestRuleSetStore.class);
-        apiCallsStore = mock(IRestApiCallsStore.class);
-        llmStore = mock(IRestLlmStore.class);
-        outputStore = mock(IRestOutputStore.class);
-        propertySetterStore = mock(IRestPropertySetterStore.class);
-        mcpCallsStore = mock(IRestMcpCallsStore.class);
-        ragStore = mock(IRestRagStore.class);
+        parserStore = mock(IParserStore.class);
+        dictionaryStore = mock(IDictionaryStore.class);
+        ruleSetStore = mock(IRuleSetStore.class);
+        apiCallsStore = mock(IApiCallsStore.class);
+        llmStore = mock(ILlmStore.class);
+        outputStore = mock(IOutputStore.class);
+        propertySetterStore = mock(IPropertySetterStore.class);
+        mcpCallsStore = mock(IMcpCallsStore.class);
+        ragStore = mock(IRagStore.class);
+
+        restParserStore = mock(IRestParserStore.class);
+        restDictionaryStore = mock(IRestDictionaryStore.class);
+        restRuleSetStore = mock(IRestRuleSetStore.class);
+        restApiCallsStore = mock(IRestApiCallsStore.class);
+        restLlmStore = mock(IRestLlmStore.class);
+        restOutputStore = mock(IRestOutputStore.class);
+        restPropertySetterStore = mock(IRestPropertySetterStore.class);
+        restMcpCallsStore = mock(IRestMcpCallsStore.class);
+        restRagStore = mock(IRestRagStore.class);
+
         library = new ResourceClientLibrary(parserStore, dictionaryStore, ruleSetStore,
-                apiCallsStore, llmStore, outputStore, propertySetterStore, mcpCallsStore, ragStore);
+                apiCallsStore, llmStore, outputStore, propertySetterStore, mcpCallsStore, ragStore,
+                restParserStore, restDictionaryStore, restRuleSetStore, restApiCallsStore, restLlmStore,
+                restOutputStore, restPropertySetterStore, restMcpCallsStore, restRagStore);
     }
 
     @Nested
@@ -72,7 +109,7 @@ class ResourceClientLibraryTest {
                     URI.create("eddi://ai.labs.parser/parserstore/parsers/" + VALID_ID + "?version=1"),
                     Object.class);
 
-            verify(parserStore).readParser(eq(VALID_ID), eq(1));
+            verify(parserStore).read(eq(VALID_ID), eq(1));
         }
 
         @Test
@@ -82,7 +119,7 @@ class ResourceClientLibraryTest {
                     URI.create("eddi://ai.labs.llm/llmstore/llms/" + VALID_ID + "?version=1"),
                     Object.class);
 
-            verify(llmStore).readLlm(eq(VALID_ID), eq(1));
+            verify(llmStore).read(eq(VALID_ID), eq(1));
         }
 
         @Test
@@ -92,7 +129,7 @@ class ResourceClientLibraryTest {
                     URI.create("eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/" + VALID_ID + "?version=1"),
                     Object.class);
 
-            verify(apiCallsStore).readApiCalls(eq(VALID_ID), eq(1));
+            verify(apiCallsStore).read(eq(VALID_ID), eq(1));
         }
 
         @Test
@@ -102,7 +139,7 @@ class ResourceClientLibraryTest {
                     URI.create("eddi://ai.labs.behavior/behaviorstore/behaviors/" + VALID_ID + "?version=1"),
                     Object.class);
 
-            verify(ruleSetStore).readRuleSet(eq(VALID_ID), eq(1));
+            verify(ruleSetStore).read(eq(VALID_ID), eq(1));
         }
 
         @Test
@@ -112,7 +149,7 @@ class ResourceClientLibraryTest {
                     URI.create("eddi://ai.labs.mcpcalls/mcpcallsstore/mcpcalls/" + VALID_ID + "?version=1"),
                     Object.class);
 
-            verify(mcpCallsStore).readMcpCalls(eq(VALID_ID), eq(1));
+            verify(mcpCallsStore).read(eq(VALID_ID), eq(1));
         }
 
         @Test
@@ -122,7 +159,7 @@ class ResourceClientLibraryTest {
                     URI.create("eddi://ai.labs.rag/ragstore/rags/" + VALID_ID + "?version=1"),
                     Object.class);
 
-            verify(ragStore).readRag(eq(VALID_ID), eq(1));
+            verify(ragStore).read(eq(VALID_ID), eq(1));
         }
 
         @Test
@@ -132,7 +169,7 @@ class ResourceClientLibraryTest {
                     URI.create("eddi://ai.labs.property/propertystore/properties/" + VALID_ID + "?version=1"),
                     Object.class);
 
-            verify(propertySetterStore).readPropertySetter(eq(VALID_ID), eq(1));
+            verify(propertySetterStore).read(eq(VALID_ID), eq(1));
         }
 
         @Test
@@ -142,7 +179,7 @@ class ResourceClientLibraryTest {
                     URI.create("eddi://ai.labs.output/outputstore/outputsets/" + VALID_ID + "?version=1"),
                     Object.class);
 
-            verify(outputStore).readOutputSet(eq(VALID_ID), eq(1), eq(""), eq(""), eq(0), eq(0));
+            verify(outputStore).read(eq(VALID_ID), eq(1), eq(""), eq(""), eq(0), eq(0));
         }
 
         @Test
@@ -162,7 +199,7 @@ class ResourceClientLibraryTest {
                     URI.create("eddi://ai.labs.rules/rulestore/rules/" + VALID_ID + "?version=1"),
                     Object.class);
 
-            verify(ruleSetStore).readRuleSet(eq(VALID_ID), eq(1));
+            verify(ruleSetStore).read(eq(VALID_ID), eq(1));
         }
 
         @Test
@@ -172,7 +209,7 @@ class ResourceClientLibraryTest {
                     URI.create("eddi://ai.labs.dictionary/dictionarystore/dictionaries/" + VALID_ID + "?version=1"),
                     Object.class);
 
-            verify(dictionaryStore).readRegularDictionary(eq(VALID_ID), eq(1), eq(""), eq(""), eq(0), eq(0));
+            verify(dictionaryStore).read(eq(VALID_ID), eq(1));
         }
     }
 
@@ -183,7 +220,7 @@ class ResourceClientLibraryTest {
         @Test
         @DisplayName("should delegate to correct store")
         void delegatesToStore() throws Exception {
-            when(parserStore.duplicateParser(anyString(), any())).thenReturn(Response.ok().build());
+            when(restParserStore.duplicateParser(anyString(), any())).thenReturn(Response.ok().build());
 
             Response result = library.duplicateResource(
                     URI.create("eddi://ai.labs.parser/parserstore/parsers/" + VALID_ID + "?version=1"));
@@ -207,7 +244,7 @@ class ResourceClientLibraryTest {
         @Test
         @DisplayName("should delegate to correct store")
         void delegatesToStore() throws Exception {
-            when(llmStore.deleteLlm(anyString(), any(), anyBoolean())).thenReturn(Response.ok().build());
+            when(restLlmStore.deleteLlm(anyString(), any(), anyBoolean())).thenReturn(Response.ok().build());
 
             Response result = library.deleteResource(
                     URI.create("eddi://ai.labs.llm/llmstore/llms/" + VALID_ID + "?version=1"), false);
@@ -227,12 +264,12 @@ class ResourceClientLibraryTest {
         @Test
         @DisplayName("should pass permanent flag")
         void passesPermanentFlag() throws Exception {
-            when(ragStore.deleteRag(anyString(), any(), anyBoolean())).thenReturn(Response.ok().build());
+            when(restRagStore.deleteRag(anyString(), any(), anyBoolean())).thenReturn(Response.ok().build());
 
             library.deleteResource(
                     URI.create("eddi://ai.labs.rag/ragstore/rags/" + VALID_ID + "?version=1"), true);
 
-            verify(ragStore).deleteRag(eq(VALID_ID), eq(1), eq(true));
+            verify(restRagStore).deleteRag(eq(VALID_ID), eq(1), eq(true));
         }
     }
 }

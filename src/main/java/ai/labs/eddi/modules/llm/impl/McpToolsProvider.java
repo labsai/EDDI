@@ -4,9 +4,9 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
-import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.mcpcalls.model.McpCallsConfiguration;
-import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
+import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
@@ -53,15 +53,15 @@ class McpToolsProvider implements ToolSourceProvider {
     private static final Logger LOGGER = Logger.getLogger(McpToolsProvider.class);
     private static final String MCPCALLS_TYPE = "eddi://ai.labs.mcpcalls";
 
-    private final IRestAgentStore restAgentStore;
-    private final IRestWorkflowStore restWorkflowStore;
+    private final IAgentStore agentStore;
+    private final IWorkflowStore workflowStore;
     private final IResourceClientLibrary resourceClientLibrary;
     private final McpToolProviderManager mcpToolProviderManager;
 
-    McpToolsProvider(IRestAgentStore restAgentStore, IRestWorkflowStore restWorkflowStore,
+    McpToolsProvider(IAgentStore agentStore, IWorkflowStore workflowStore,
             IResourceClientLibrary resourceClientLibrary, McpToolProviderManager mcpToolProviderManager) {
-        this.restAgentStore = restAgentStore;
-        this.restWorkflowStore = restWorkflowStore;
+        this.agentStore = agentStore;
+        this.workflowStore = workflowStore;
         this.resourceClientLibrary = resourceClientLibrary;
         this.mcpToolProviderManager = mcpToolProviderManager;
     }
@@ -137,7 +137,7 @@ class McpToolsProvider implements ToolSourceProvider {
         try {
             LOGGER.infof("Discovering mcpcalls tools for agent: %s v%s", memory.getAgentId(), memory.getAgentVersion());
 
-            var stepConfigs = WorkflowTraversal.discoverConfigs(memory, MCPCALLS_TYPE, McpCallsConfiguration.class, restAgentStore, restWorkflowStore,
+            var stepConfigs = WorkflowTraversal.discoverConfigs(memory, MCPCALLS_TYPE, McpCallsConfiguration.class, agentStore, workflowStore,
                     resourceClientLibrary);
 
             for (var stepConfig : stepConfigs) {

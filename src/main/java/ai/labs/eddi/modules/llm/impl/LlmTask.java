@@ -4,12 +4,12 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
-import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.apicalls.model.ApiCall;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
-import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
+import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor;
 import ai.labs.eddi.engine.hitl.tools.TaskToolApprovalsResolver;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
@@ -126,8 +126,8 @@ public class LlmTask implements ILifecycleTask {
 
     // Retained for httpCall RAG discovery + execution (Phase 8c-0)
     private final IApiCallExecutor apiCallExecutor;
-    private final IRestAgentStore restAgentStore;
-    private final IRestWorkflowStore restWorkflowStore;
+    private final IAgentStore agentStore;
+    private final IWorkflowStore workflowStore;
 
     /**
      * Tool-level HITL kill-switch. When false the tool-approval gate is inert
@@ -165,7 +165,7 @@ public class LlmTask implements ILifecycleTask {
     @Inject
     public LlmTask(IResourceClientLibrary resourceClientLibrary, IDataFactory dataFactory, IMemoryItemConverter memoryItemConverter,
             ITemplatingEngine templatingEngine, IJsonSerialization jsonSerialization, PrePostUtils prePostUtils, ChatModelRegistry chatModelRegistry,
-            IApiCallExecutor apiCallExecutor, IRestAgentStore restAgentStore, IRestWorkflowStore restWorkflowStore,
+            IApiCallExecutor apiCallExecutor, IAgentStore agentStore, IWorkflowStore workflowStore,
             RagContextProvider ragContextProvider, TokenCounterFactory tokenCounterFactory,
             ConversationSummarizer conversationSummarizer,
             PromptSnippetService promptSnippetService,
@@ -190,8 +190,8 @@ public class LlmTask implements ILifecycleTask {
         this.ragContextProvider = ragContextProvider;
         this.tokenCounterFactory = tokenCounterFactory;
         this.apiCallExecutor = apiCallExecutor;
-        this.restAgentStore = restAgentStore;
-        this.restWorkflowStore = restWorkflowStore;
+        this.agentStore = agentStore;
+        this.workflowStore = workflowStore;
         this.conversationSummarizer = conversationSummarizer;
         this.promptSnippetService = promptSnippetService;
         this.globalVariableResolver = globalVariableResolver;
@@ -1532,7 +1532,7 @@ public class LlmTask implements ILifecycleTask {
     private String executeHttpCallRag(IConversationMemory memory, String httpCallName, String userInput, Map<String, Object> templateDataObjects) {
 
         // Discover all httpCall configs from the workflow
-        var stepConfigs = WorkflowTraversal.discoverConfigs(memory, HTTPCALLS_TYPE, ApiCallsConfiguration.class, restAgentStore, restWorkflowStore,
+        var stepConfigs = WorkflowTraversal.discoverConfigs(memory, HTTPCALLS_TYPE, ApiCallsConfiguration.class, agentStore, workflowStore,
                 resourceClientLibrary);
 
         // Search for the named ApiCall across all httpCall configurations

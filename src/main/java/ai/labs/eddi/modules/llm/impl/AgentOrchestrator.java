@@ -6,14 +6,13 @@ package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
-import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.engine.hitl.tools.ChatTranscriptCodec;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalGate;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
-import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
+import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.engine.api.IConversationService;
@@ -351,7 +350,7 @@ class AgentOrchestrator implements IAgentOrchestrator {
             WebScraperTool webScraperTool, TextSummarizerTool textSummarizerTool, PdfReaderTool pdfReaderTool, WeatherTool weatherTool,
             FetchToolResponsePageTool fetchToolResponsePageTool,
             ToolExecutionService toolExecutionService, McpToolProviderManager mcpToolProviderManager, A2AToolProviderManager a2aToolProviderManager,
-            IRestAgentStore restAgentStore, IRestWorkflowStore restWorkflowStore, IResourceClientLibrary resourceClientLibrary,
+            IWorkflowStore workflowStore, IResourceClientLibrary resourceClientLibrary,
             IApiCallExecutor apiCallExecutor, IJsonSerialization jsonSerialization, IMemoryItemConverter memoryItemConverter,
             IUserMemoryStore userMemoryStore, ToolResponseTruncator toolResponseTruncator, TenantQuotaService tenantQuotaService,
             MemorySnapshotService memorySnapshotService,
@@ -360,7 +359,7 @@ class AgentOrchestrator implements IAgentOrchestrator {
             IHitlToolJournalStore journalStore, ConversationHistoryBuilder conversationHistoryBuilder,
             TokenCounterFactory tokenCounterFactory) {
         this(calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool, webScraperTool, textSummarizerTool, pdfReaderTool, weatherTool,
-                fetchToolResponsePageTool, toolExecutionService, mcpToolProviderManager, a2aToolProviderManager, restAgentStore, restWorkflowStore,
+                fetchToolResponsePageTool, toolExecutionService, mcpToolProviderManager, a2aToolProviderManager, workflowStore,
                 resourceClientLibrary, apiCallExecutor, jsonSerialization, memoryItemConverter, userMemoryStore, toolResponseTruncator,
                 tenantQuotaService, memorySnapshotService, agentSetupService, capabilityRegistryService, conversationService, agentFactory,
                 agentStore, journalStore, conversationHistoryBuilder, tokenCounterFactory, new ToolResultGuardrail(null));
@@ -371,7 +370,7 @@ class AgentOrchestrator implements IAgentOrchestrator {
             WebScraperTool webScraperTool, TextSummarizerTool textSummarizerTool, PdfReaderTool pdfReaderTool, WeatherTool weatherTool,
             FetchToolResponsePageTool fetchToolResponsePageTool,
             ToolExecutionService toolExecutionService, McpToolProviderManager mcpToolProviderManager, A2AToolProviderManager a2aToolProviderManager,
-            IRestAgentStore restAgentStore, IRestWorkflowStore restWorkflowStore, IResourceClientLibrary resourceClientLibrary,
+            IWorkflowStore workflowStore, IResourceClientLibrary resourceClientLibrary,
             IApiCallExecutor apiCallExecutor, IJsonSerialization jsonSerialization, IMemoryItemConverter memoryItemConverter,
             IUserMemoryStore userMemoryStore, ToolResponseTruncator toolResponseTruncator, TenantQuotaService tenantQuotaService,
             MemorySnapshotService memorySnapshotService,
@@ -403,9 +402,9 @@ class AgentOrchestrator implements IAgentOrchestrator {
         this.conversationHistoryBuilder = conversationHistoryBuilder;
         this.toolContextBudgetGuard = new ToolContextBudget(tokenCounterFactory);
         this.toolResultGuardrail = toolResultGuardrail;
-        this.httpCallToolsProvider = new HttpCallToolsProvider(restAgentStore, restWorkflowStore, resourceClientLibrary,
+        this.httpCallToolsProvider = new HttpCallToolsProvider(agentStore, workflowStore, resourceClientLibrary,
                 apiCallExecutor, jsonSerialization, memoryItemConverter);
-        this.mcpToolsProvider = new McpToolsProvider(restAgentStore, restWorkflowStore, resourceClientLibrary, mcpToolProviderManager);
+        this.mcpToolsProvider = new McpToolsProvider(agentStore, workflowStore, resourceClientLibrary, mcpToolProviderManager);
         this.toolLoopRunner = new ToolLoopRunner(toolExecutionService, toolResponseTruncator, tenantQuotaService,
                 memorySnapshotService, toolApprovalGate, gateSupport, toolContextBudgetGuard, toolResultGuardrail);
         this.toolLoopResumer = new ToolLoopResumer(this, toolLoopRunner, gateSupport, chatTranscriptCodec, journalStore);
