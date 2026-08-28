@@ -63,7 +63,7 @@ The [README "Maven Command Reference"](README.md#maven-command-reference) is the
 
 1. **Read the key docs**:
    - [`docs/project-philosophy.md`](docs/project-philosophy.md) — **Supreme directive.** 9 architectural pillars governing all EDDI development
-   - [`docs/changelog.md`](docs/changelog.md) — **Read the most recent entries first** (newest are at the top). Running log of changes, decisions, and reasoning across all repos and sessions. It is long (hundreds of entries) — skim the top 2–3 entries for current context rather than reading the whole file.
+   - [`docs/changelog.md`](docs/changelog.md) — **Read the most recent entries first** (newest are at the top). Running log of changes, decisions, and reasoning across all repos and sessions. It holds only recent work, capped at 250 KB; older entries are archived per month under [`docs/changelog/`](docs/changelog/) and are indexed in an Archive table at the top of the live file. Skim the top 2–3 entries for current context — do not read the archives unless you are chasing a specific past decision.
    - [`docs/architecture.md`](docs/architecture.md) — Architecture overview, configuration model, pipeline, and DB-agnostic design
    - If working on **EDDI-Manager**: also read `EDDI-Manager/AGENTS.md` in the Manager repo
 2. **Check git status**: Run `git status` and `git log -5 --oneline` to see current branch state and recent work.
@@ -93,7 +93,12 @@ The [README "Maven Command Reference"](README.md#maven-command-reference) is the
    - Run `git log --stat -1` after committing to confirm the commit only contains your files
 6. **Each commit must build**: Run `./mvnw compile` (or `./mvnw test` for backend) before committing. Never commit broken code.
 7. **Verify factual claims against authoritative sources**: When writing documentation about the project's technology stack, dependencies, or CI configuration, **always verify against the canonical source** (`pom.xml` for dependencies, `ci.yml` for CI behavior, `Dockerfile` for container config). **Never infer from codebase grep results** — migration code, comments about "previous implementations," and backward-compatibility references describe what the project *used to* use, not what it currently uses. If a term appears 40 times in the codebase but zero times in `pom.xml`, the project does not use it.
-8. **Update the changelog immediately before committing**: Edit [`docs/changelog.md`](docs/changelog.md) and include it in the commit that contains the changes being documented. The changelog must land on the **same branch** as the work it documents — never on a different branch after the fact. Each entry should include:
+8. **Update the changelog immediately before committing**: Edit [`docs/changelog.md`](docs/changelog.md) and include it in the commit that contains the changes being documented. The changelog must land on the **same branch** as the work it documents — never on a different branch after the fact.
+   - **Add the entry directly below the `---` that closes the header**, above the most recent existing entry. Never append to a file under `docs/changelog/` — those are archives, and nothing reads them for current context.
+   - **The live file is capped at 250 KB**, enforced by `ChangelogRotationTest`. This rule is why the cap exists: it obliges every session to add and never to remove, which once grew a single file to 1.9 MB (~500k tokens). If the test fails, **rotate — do not raise the cap**: run `python scripts/rotate-changelog.py`, which moves the oldest entries into `docs/changelog/<YYYY-MM>.md` by date, re-depths their relative links (leaving code spans alone), and regenerates the Archive table. Add any newly created archive file to `docs/SUMMARY.md`.
+   - **`## Decision Log` and `## Regression Notes` at the bottom are running registers, not entries.** They are never rotated out; append rows to them in place.
+
+   Each entry should include:
    - Date and short title
    - Repo and branch
    - What changed (files + reasoning)

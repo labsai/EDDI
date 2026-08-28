@@ -92,6 +92,12 @@
 - [Code Review Standards](code-review-standards.md)
 - [Build Reproducibility](build-reproducibility.md)
 - [Changelog](changelog.md)
+  - [August 2026](changelog/2026-08.md)
+  - [July 2026](changelog/2026-07.md)
+  - [June 2026](changelog/2026-06.md)
+  - [May 2026](changelog/2026-05.md)
+  - [April 2026](changelog/2026-04.md)
+  - [March 2026](changelog/2026-03.md)
 - [FAQs](how-to....md)
 
 ## Archive

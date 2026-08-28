@@ -75,10 +75,29 @@ class DocumentedRestPathsTest {
 
     /**
      * Documents whose subject IS the rename, so they have to spell out both sides
-     * of it. Repository-relative, forward-slashed.
+     * of it. Repository-relative, forward-slashed; a trailing {@code /} matches
+     * everything beneath it.
+     * <p>
+     * {@code docs/changelog/} is a prefix rather than a list of files because the
+     * changelog rotates: entries move out of {@code docs/changelog.md} into a new
+     * {@code <YYYY-MM>.md} each time the live file fills up. Naming the months
+     * individually would mean this test starts failing on a routine rotation, at
+     * which point somebody deletes the assertion rather than the offending path.
      */
     private static Set<String> legacyChangeRecords() {
-        return Set.of("docs/changelog.md", "docs/archive/handoff-v6.0-snapshot.md");
+        return Set.of("docs/changelog.md", "docs/changelog/", "docs/archive/handoff-v6.0-snapshot.md");
+    }
+
+    /**
+     * True when {@code relative} is exempt, directly or under an exempt directory.
+     */
+    private static boolean isChangeRecord(String relative) {
+        for (String exempt : legacyChangeRecords()) {
+            if (exempt.endsWith("/") ? relative.startsWith(exempt) : relative.equals(exempt)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static final Set<String> SKIPPED_DIRS = Set.of("target", ".git", "node_modules", ".claude", ".mvn");
@@ -100,7 +119,7 @@ class DocumentedRestPathsTest {
 
         for (Path file : markdownFiles(root)) {
             String relative = root.relativize(file).toString().replace('\\', '/');
-            if (legacyChangeRecords().contains(relative)) {
+            if (isChangeRecord(relative)) {
                 continue;
             }
 
@@ -125,7 +144,7 @@ class DocumentedRestPathsTest {
 
         for (Path file : markdownFiles(root)) {
             String relative = root.relativize(file).toString().replace('\\', '/');
-            if (legacyChangeRecords().contains(relative)) {
+            if (isChangeRecord(relative)) {
                 continue;
             }
 
