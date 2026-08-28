@@ -183,6 +183,12 @@ server holds per-user state, that matters; if it is stateless, it does not.
 A literal key is accepted: it sits in plaintext in MongoDB and in any export that
 outruns scrubbing.
 
+> **Use `https://` for any server you send a credential to.** The URL validator
+> accepts `http://` and `https://` alike, and nothing refuses to attach a bearer
+> token to a cleartext connection — so an `apiKey` against an `http://` server is
+> transmitted in the clear, and EDDI will not warn you. Reserve `http://` for a
+> loopback server with no credential.
+
 Rotating a vault secret now evicts cached MCP clients immediately. Before that,
 the client cache was keyed on a hash of the *unresolved* reference and the
 credential was resolved once per client, so a rotated secret kept presenting the

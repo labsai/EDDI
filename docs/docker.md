@@ -39,12 +39,18 @@ Start MongoDB:
 docker run --name mongodb -d mongo:6.0
 ```
 
-Start EDDI (without auth):
+Start EDDI (without auth) — **local development only:**
+
+> ⚠️ These three opt-outs disable authentication on *every* endpoint, including
+> `/secretstore` (the vault) and `/mcp` (agent CRUD). The port is bound to
+> `127.0.0.1` below so the container is not reachable from the network. Do not
+> publish it on `0.0.0.0`, and do not use this form on a shared or cloud host.
+> For anything beyond your own machine, use the authenticated example below.
 
 ```bash
 docker run --name eddi \
   --link mongodb:mongodb \
-  -p 7070:7070 \
+  -p 127.0.0.1:7070:7070 \
   -e EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true \
   -e EDDI_MCP_ALLOW_UNAUTHENTICATED=true \
   -e EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED=true \

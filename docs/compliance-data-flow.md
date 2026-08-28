@@ -149,8 +149,18 @@ When `DELETE /admin/gdpr/{userId}` is called:
 Steps 2–5 run before the conversation snapshots are deleted because they
 reference conversation IDs that the bulk delete removes.
 
-Steps 11–12 retain operational and compliance data but make re-identification
-impossible without the original userId.
+Steps 11–12 retain operational and compliance data with the `userId` replaced by
+`AuditHmac.pseudonymFor(userId)` — a prefix plus the hex SHA-256 of the identifier.
+
+> **This is pseudonymisation, not anonymisation, and the distinction is legal as
+> well as technical.** The digest is deterministic and unsalted, so anyone holding
+> a list of candidate user IDs can hash each one and match it against the stored
+> value. It defeats casual browsing of the audit trail; it does not defeat an
+> adversary who can enumerate or guess identifiers.
+>
+> Under GDPR Art. 4(5) pseudonymised data remains **personal data** and stays in
+> scope. Do not treat these records as anonymised, and do not disclose them on
+> that basis.
 
 ---
 

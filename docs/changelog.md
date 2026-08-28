@@ -117,6 +117,34 @@ it collapsed repeated spaces and trimmed leading hyphens, which GitHub's slug
 rule does neither of; and an enum extractor found 148 constants instead of 502
 because a non-greedy brace match truncated every enum body.
 
+### Security review round
+
+CodeRabbit raised five Major security findings on the audited diff. All five held:
+
+- **`compliance-data-flow.md` claimed erasure makes re-identification
+  "impossible".** `AuditHmac.pseudonymFor` is a prefix plus *unsalted*
+  `sha256Hex(userId)` — deterministic and unkeyed, so anyone with a candidate
+  list can hash and match. The page now says plainly that this is
+  pseudonymisation, not anonymisation, and that under GDPR Art. 4(5) the records
+  remain personal data and stay in scope. On a compliance page the original
+  wording was the dangerous kind of wrong: it invites an operator to disclose
+  records as anonymised.
+- **`docker.md`'s no-auth example published `7070` on every interface** with
+  `/secretstore` and `/mcp` open. Bound to `127.0.0.1` with the consequence
+  spelled out.
+- **`redhat-openshift.md` carried the auth opt-outs in its *production*
+  example.** Replaced with OIDC configuration; the opt-outs exist so a local
+  container can boot past `AuthStartupGuard`, not for production.
+- **`kubernetes.md` wrote the vault master key to `/tmp` at the default umask** —
+  world-readable on most images, and left behind if `kubectl` failed. Now
+  `umask 077` inside a subshell with a cleanup trap. That text was added earlier
+  in this same branch, so the review caught a defect this work introduced.
+- **`mcp-client.md`** — `McpToolProviderManager` validates only that the scheme
+  is `http` or `https`, and the transport attaches the resolved `apiKey` as a
+  bearer either way, so a credential can go out in cleartext with no warning.
+  Documented as a hazard. **The code gap is real and left for a separate change**
+  — a docs branch is the wrong place to alter security behaviour.
+
 ### Sweeps now clean across all 69 pages
 
 Link fragments (a class `DocumentationLinksTest` never checked, since it strips

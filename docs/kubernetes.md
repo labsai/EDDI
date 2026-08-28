@@ -25,12 +25,15 @@ Then generate and store a vault master key:
 # rather than environment variables, so the Secret holds exactly one key:
 # "application-secrets.properties".
 kubectl delete secret eddi-secrets -n eddi --ignore-not-found
-printf 'eddi.vault.master-key=%s\n' "$(openssl rand -base64 24)" \
-  > /tmp/application-secrets.properties
-kubectl create secret generic eddi-secrets \
-  --namespace=eddi \
-  --from-file=/tmp/application-secrets.properties
-shred -u /tmp/application-secrets.properties
+# umask first: the file holds the master key, and the default mode is
+# world-readable on most images. The trap removes it even if kubectl fails.
+( umask 077
+  trap 'shred -u /tmp/application-secrets.properties 2>/dev/null' EXIT
+  printf 'eddi.vault.master-key=%s\n' "$(openssl rand -base64 24)" \
+    > /tmp/application-secrets.properties
+  kubectl create secret generic eddi-secrets \
+    --namespace=eddi \
+    --from-file=/tmp/application-secrets.properties )
 
 # Restart EDDI to pick up the key
 kubectl rollout restart deployment/eddi -n eddi
