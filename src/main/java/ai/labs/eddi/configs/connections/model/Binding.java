@@ -26,5 +26,28 @@ public enum Binding {
      * identity is only self-asserted — rather than falling back to the service
      * grant, because sending the wrong authority is worse than sending none.
      */
-    PER_USER
+    PER_USER,
+
+    /**
+     * A credential the caller hands to EDDI on the request itself, for a platform
+     * that has already authenticated the user and passes their credential inward.
+     * EDDI stores nothing: the value rides {@code CallerIdentity} for the turn and
+     * is never written to the conversation store, an export, or the debugger.
+     * <p>
+     * The reason to choose this over {@link #SERVICE} is authority, not
+     * convenience. An agent holding one shared key can reach everything that key
+     * can, and only the agent's own reasoning stands between a user and data they
+     * should not see. A caller-supplied credential makes the target platform's
+     * authorization the boundary — the agent cannot do what the user cannot do —
+     * without EDDI modelling that platform's permissions at all.
+     * <p>
+     * Distinct from {@link #PER_USER}, which also acts as the user but holds the
+     * grant: that one needs an OAuth consent screen and a stored refresh token,
+     * neither of which exists when the credential simply arrives with the request.
+     * Distinct too from {@code ${caller:token}}, which relays EDDI's <em>own</em>
+     * credential and only ever back to the origin the caller addressed; this one
+     * carries a credential for a different system entirely, to wherever the
+     * connection's {@code baseUrlAllowlist} permits.
+     */
+    CALLER_SUPPLIED
 }

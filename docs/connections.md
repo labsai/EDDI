@@ -116,6 +116,68 @@ The first call mints the grant; there is no human step.
 
 Each user links their own account once (see [below](#per-user-accounts)).
 
+### A credential the caller hands over
+
+For a platform that has already authenticated the user and passes their own
+credential inward on every request. EDDI stores nothing — the connection says only
+which header the credential goes in and where it may be sent.
+
+```json
+{
+  "name": "gnowbe",
+  "authType": "STATIC",
+  "binding": "CALLER_SUPPLIED",
+  "staticAuth": { "headerName": "x-api-key" },
+  "baseUrlAllowlist": ["https://api.gnowbe.com"]
+}
+```
+
+Note the absence of `valueTemplate`: the caller supplies the value, so a stored one
+is refused at save time rather than left to race theirs. `username` and
+`passwordRef` are refused for the same reason, and `authType` must be `STATIC` —
+there is nothing for EDDI to encode, exchange or refresh.
+
+The caller attaches it per request, once per connection:
+
+```
+X-EDDI-Connection-Credential: gnowbe key-id:secret
+```
+
+The connection name runs up to the first space; everything after it is the whole
+header value to send, so a value containing spaces (`Bearer abc`) needs no escaping.
+
+**Why choose this over a service key.** Authority, not convenience. An agent holding
+one org-wide key can reach everything that key can, and only the agent's own
+reasoning stands between a user and data they should not see. A caller-supplied
+credential makes the target platform's authorization the boundary — the agent cannot
+do what the user cannot do — without EDDI modelling that platform's permissions at
+all.
+
+**It is not `${caller:token}`.** That relays EDDI's *own* credential, and only ever
+back to the origin the caller addressed. This carries a credential for a different
+system entirely, to wherever `baseUrlAllowlist` permits. The same-origin rule on
+`${caller:token}` stays exactly as strict as it is; do not read this as loosening it.
+
+**It is not a client-supplied principal either.** EDDI derives no identity from the
+credential and looks nothing up by it. The credential authenticates at the target or
+it does not — which is why this binding needs no verified principal, and works in the
+common topology where an integrating backend calls EDDI as one service account with
+each end user's key attached.
+
+**Fail closed, including on resume.** A request that carries no credential for the
+connection is refused (`NO_CALLER_CREDENTIAL`, HTTP 400) rather than sent
+unauthenticated. That includes
+`POST /agents/{conversationId}/resume`: the credential lives for one request and does
+not survive a HITL pause, so the system releasing an approved tool call must attach it
+again. Where approvals surface in the integrating platform's own UI — and its backend
+makes the resume call — this is the request it was already going to send.
+
+**Withheld from discovery.** An MCP `initialize`/`tools/list` handshake or an A2A
+agent-card fetch is cached and replayed for every conversation that follows, so a
+`CALLER_SUPPLIED` connection resolves to nothing there. Whichever caller happened to
+trigger the handshake would otherwise pin their credential, and their permissions,
+onto everybody after them — the same rule `PER_USER` follows.
+
 `binding` and `authType` constrain each other in **both** directions, and both
 rules are enforced at save time. `PER_USER` requires
 `OAUTH2_AUTHORIZATION_CODE`, because nothing else produces a grant per end user.
@@ -134,7 +196,7 @@ as "not connected". Use `OAUTH2_CLIENT_CREDENTIALS` for a service account.
 | --- | --- |
 | `name` | What `${connection:name}` refers to |
 | `authType` | `STATIC`, `BASIC`, `OAUTH2_CLIENT_CREDENTIALS`, `OAUTH2_AUTHORIZATION_CODE` |
-| `binding` | `SERVICE` (one grant for everyone) or `PER_USER` (the caller's own) |
+| `binding` | `SERVICE` (one grant for everyone), `PER_USER` (the caller's own, stored), or `CALLER_SUPPLIED` (the caller's own, handed over per request) |
 | `allowUnverifiedPrincipal` | `PER_USER` only. Accept a user id EDDI never authenticated, on the grounds that a front proxy did. Default `false` — see [Whose identity counts](#whose-identity-counts) |
 | `staticAuth` | Header name plus a reference-only value template |
 | `oauth` | Endpoints, client id, a **vaulted** client secret, scopes |
