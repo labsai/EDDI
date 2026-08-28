@@ -23,6 +23,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 
+import io.micrometer.core.instrument.Counter;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -78,7 +79,7 @@ class RestOperatorMetricsTest {
         assertThrows(BadRequestException.class, () -> rest.reportCanaryResult(new OperatorCanaryReport("PASS", 100L)));
         assertThrows(BadRequestException.class, () -> rest.reportCanaryResult(new OperatorCanaryReport("", 100L)));
         assertThrows(BadRequestException.class, () -> rest.reportCanaryResult(new OperatorCanaryReport(null, 100L)));
-        assertEquals(0.0, registry.find("eddi.operator.canary").counters().stream().mapToDouble(io.micrometer.core.instrument.Counter::count)
+        assertEquals(0.0, registry.find("eddi.operator.canary").counters().stream().mapToDouble(Counter::count)
                 .sum());
     }
 

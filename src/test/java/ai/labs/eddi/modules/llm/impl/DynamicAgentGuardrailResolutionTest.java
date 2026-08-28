@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Test;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -68,7 +69,7 @@ class DynamicAgentGuardrailResolutionTest {
 
     /** The same policy as it comes back from the store: a plain map. */
     private static Map<String, Object> asStoredMap(DynamicAgentConfig config) {
-        return MAPPER.convertValue(config, new com.fasterxml.jackson.core.type.TypeReference<>() {
+        return MAPPER.convertValue(config, new TypeReference<>() {
         });
     }
 

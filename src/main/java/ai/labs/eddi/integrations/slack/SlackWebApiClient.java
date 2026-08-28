@@ -20,6 +20,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.io.IOException;
 
 /**
  * Lightweight Slack Web API client using {@link HttpClient}. No external SDK
@@ -204,7 +205,7 @@ public class SlackWebApiClient {
 
         } catch (SlackDeliveryException e) {
             throw e; // re-throw — don't wrap in another exception
-        } catch (java.io.IOException e) {
+        } catch (IOException e) {
             throw new SlackDeliveryException("Network error calling Slack API: " + e.getMessage(), e);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();

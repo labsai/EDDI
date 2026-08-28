@@ -28,6 +28,7 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -193,7 +194,7 @@ class RestConversationStoreOwnershipTest {
         when(conversationDescriptorStore.readDescriptors(anyString(), any(), anyInt(), anyInt(), anyBoolean()))
                 .thenReturn(List.of(descriptor("conv-foreign-a", INTRUDER), descriptor("conv-foreign-b", INTRUDER)));
 
-        var registry = new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
+        var registry = new SimpleMeterRegistry();
         var store = asOwner();
         store.meterRegistry = registry;
 

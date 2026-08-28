@@ -13,6 +13,7 @@ import java.io.StringWriter;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
 
+import java.net.ConnectException;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -85,7 +86,7 @@ class LogRecordRedactorTest {
     @DisplayName("a throwable message carrying a credentialed URL is replaced, keeping its type and trace")
     void redactsThrowableMessage() {
         ExtLogRecord record = extRecord("MCP handshake failed");
-        var original = new java.net.ConnectException("failed to connect to https://mcp.example.com?apiKey=" + KEY);
+        var original = new ConnectException("failed to connect to https://mcp.example.com?apiKey=" + KEY);
         record.setThrown(original);
 
         assertTrue(LogRecordRedactor.redactInPlace(record));

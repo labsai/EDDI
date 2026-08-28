@@ -28,10 +28,12 @@ import java.io.IOException;
 import java.util.Collections;
 import java.util.List;
 
+import ai.labs.eddi.configs.rest.StrictConfigurationParser;
+import java.net.URI;
+import io.quarkus.security.identity.SecurityIdentity;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
-import ai.labs.eddi.configs.rest.StrictConfigurationParser;
 
 /**
  * Unit tests for McpAdminTools — MCP tools for Agent administration.
@@ -65,7 +67,7 @@ class McpAdminToolsTest {
         var schedulePollerService = mock(SchedulePollerService.class);
 
         lenient().when(jsonSerialization.serialize(any())).thenReturn("{}");
-        var mockIdentity = mock(io.quarkus.security.identity.SecurityIdentity.class);
+        var mockIdentity = mock(SecurityIdentity.class);
         lenient().when(mockIdentity.isAnonymous()).thenReturn(true);
         tools = new McpAdminTools(restInterfaceFactory, agentAdmin, jsonSerialization, strictConfigurationParser(), scheduleStore,
                 scheduleFireExecutor, schedulePollerService,
@@ -181,7 +183,7 @@ class McpAdminToolsTest {
     @Test
     void createAgent_createsAndPatchesDescriptor() throws IOException {
         when(AgentStore.createAgent(any(AgentConfiguration.class)))
-                .thenReturn(Response.created(java.net.URI.create("/agentstore/agents/" + AGENT_ID + "?version=1")).build());
+                .thenReturn(Response.created(URI.create("/agentstore/agents/" + AGENT_ID + "?version=1")).build());
         when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"created\",\"agentId\":\"test-agent-id\",\"name\":\"My Agent\"}");
 
         String result = tools.createAgent("My Agent", "Test description", null);
@@ -204,7 +206,7 @@ class McpAdminToolsTest {
     @Test
     void createAgent_withWorkflowUris() throws IOException {
         when(AgentStore.createAgent(any(AgentConfiguration.class)))
-                .thenReturn(Response.created(java.net.URI.create("/agentstore/agents/" + AGENT_ID + "?version=1")).build());
+                .thenReturn(Response.created(URI.create("/agentstore/agents/" + AGENT_ID + "?version=1")).build());
         when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"created\"}");
 
         tools.createAgent("Agent", null, "eddi://ai.labs.workflow/workflowstore/workflows/pkg1?version=1");
@@ -217,7 +219,7 @@ class McpAdminToolsTest {
     @Test
     void createAgent_descriptorPatchFailure_stillReturnsSuccess() throws IOException {
         when(AgentStore.createAgent(any(AgentConfiguration.class)))
-                .thenReturn(Response.created(java.net.URI.create("/agentstore/agents/" + AGENT_ID + "?version=1")).build());
+                .thenReturn(Response.created(URI.create("/agentstore/agents/" + AGENT_ID + "?version=1")).build());
         doThrow(new RuntimeException("Patch failed")).when(descriptorStore).patchDescriptor(any(), anyInt(), any());
         when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"created\"}");
 

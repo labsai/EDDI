@@ -144,7 +144,7 @@ class EngineModelsTest {
 
     @Test
     void logEntry_jacksonRoundTrip() throws Exception {
-        var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        var mapper = new ObjectMapper();
         var entry = new LogEntry(1700000000L, "ERROR", "logger",
                 "Something failed", "test", "a1", 1,
                 "c1", "u1", "i1");
@@ -157,7 +157,7 @@ class EngineModelsTest {
 
     @Test
     void logEntry_jsonExcludesNulls() throws Exception {
-        var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        var mapper = new ObjectMapper();
         var entry = new LogEntry(0L, "INFO", "log", "msg",
                 null, null, null, null, null, null);
         var json = mapper.writeValueAsString(entry);

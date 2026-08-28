@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.Map;
 
+import java.net.URI;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
@@ -190,7 +191,7 @@ class AgentConfigurationTest {
         @Test
         void setters() {
             var cc = new AgentConfiguration.ChannelConnector();
-            cc.setType(java.net.URI.create("eddi://channel/slack"));
+            cc.setType(URI.create("eddi://channel/slack"));
             cc.setConfig(Map.of("token", "xoxb-123"));
             assertEquals("eddi://channel/slack", cc.getType().toString());
             assertEquals("xoxb-123", cc.getConfig().get("token"));

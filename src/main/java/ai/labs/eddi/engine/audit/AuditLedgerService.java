@@ -9,7 +9,6 @@ import ai.labs.eddi.configs.agents.AgentSigningService;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 
-import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.nats.client.Connection;
@@ -21,7 +20,6 @@ import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
-
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -33,6 +31,8 @@ import java.nio.charset.StandardCharsets;
 import com.fasterxml.jackson.core.type.TypeReference;
 import ai.labs.eddi.utils.LogSanitizer;
 import java.util.Map;
+import io.micrometer.core.instrument.Counter;
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
  * Async batch writer for the immutable audit ledger.
@@ -109,7 +109,7 @@ public class AuditLedgerService {
     private final boolean enabled;
     private final int flushIntervalSeconds;
     private final Optional<String> masterKeyConfig;
-    private final io.micrometer.core.instrument.Counter droppedCounter;
+    private final Counter droppedCounter;
     private final Instance<Connection> natsConnectionInstance;
     private final String deadLetterPath;
     private final boolean agentSigningEnabled;
