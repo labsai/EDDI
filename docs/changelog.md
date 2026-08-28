@@ -145,6 +145,30 @@ CodeRabbit raised five Major security findings on the audited diff. All five hel
   Documented as a hazard. **The code gap is real and left for a separate change**
   — a docs branch is the wrong place to alter security behaviour.
 
+### The temp-file recipe, hardened in all four places it appears
+
+The `umask 077` fix above was itself reviewed, and two more problems held:
+
+- **`/tmp/application-secrets.properties` is a predictable name** (CWE-377).
+  `umask` sets the mode of a file you create; it does not stop another local
+  user pre-creating that path or pointing it at a symlink first. Now `mktemp`,
+  which returns an unpredictable name already at `0600`.
+- **Nothing checked `openssl rand`** (CWE-252). On failure the `printf` still
+  wrote `eddi.vault.master-key=`, producing a Secret with an *empty* key — which
+  leaves the vault inert and secrets in plaintext, silently. Now fails closed.
+
+One detail the review's suggested fix would have broken: passing the `mktemp`
+path bare to `--from-file` names the Secret key after the temp file, and the
+Deployment mounts exactly `application-secrets.properties`. The `key=path` form
+is required, which is what `k8s/create-secrets.sh` already does — these copies
+now match the script rather than diverging from it.
+
+The same recipe appeared in **four** files (`docs/kubernetes.md` twice,
+`docs/getting-started.md`, `k8s/base/eddi-secret.yaml`, `k8s/quickstart.yaml`);
+all are corrected. Repairing `getting-started.md` also removed a literal newline
+that had crept into the `printf` format string. The three shell blocks pass
+`bash -n`, and both manifests still parse.
+
 ### Sweeps now clean across all 69 pages
 
 Link fragments (a class `DocumentationLinksTest` never checked, since it strips

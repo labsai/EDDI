@@ -25,15 +25,22 @@ Then generate and store a vault master key:
 # rather than environment variables, so the Secret holds exactly one key:
 # "application-secrets.properties".
 kubectl delete secret eddi-secrets -n eddi --ignore-not-found
-# umask first: the file holds the master key, and the default mode is
-# world-readable on most images. The trap removes it even if kubectl fails.
-( umask 077
-  trap 'shred -u /tmp/application-secrets.properties 2>/dev/null' EXIT
-  printf 'eddi.vault.master-key=%s\n' "$(openssl rand -base64 24)" \
-    > /tmp/application-secrets.properties
-  kubectl create secret generic eddi-secrets \
-    --namespace=eddi \
-    --from-file=/tmp/application-secrets.properties )
+set -euo pipefail
+
+# mktemp gives an unpredictable name created 0600, so it cannot be pre-created
+# or symlinked by another local user.
+secrets_file=$(mktemp "${TMPDIR:-/tmp}/eddi-secrets.XXXXXX")
+trap 'shred -u "$secrets_file" 2>/dev/null || rm -f "$secrets_file"' EXIT
+
+key=$(openssl rand -base64 24)
+[ -n "$key" ] || { echo "vault key generation failed" >&2; exit 1; }
+printf 'eddi.vault.master-key=%s\n' "$key" > "$secrets_file"
+
+# The key name must be application-secrets.properties — that is the filename the
+# Deployment mounts. Passing the temp path bare would name the key after it.
+kubectl create secret generic eddi-secrets \
+  --namespace=eddi \
+  --from-file=application-secrets.properties="$secrets_file"
 
 # Restart EDDI to pick up the key
 kubectl rollout restart deployment/eddi -n eddi
@@ -169,12 +176,24 @@ Three ways to manage it:
 2. **Manual kubectl** — the Secret holds one key, `application-secrets.properties`,
    which the Deployment mounts as a file and loads via `QUARKUS_CONFIG_LOCATIONS`:
    ```bash
-   printf 'eddi.vault.master-key=%s\n' "$(openssl rand -base64 24)" \
-     > /tmp/application-secrets.properties
+   set -euo pipefail
+
+   # mktemp gives an unpredictable name created 0600, so another local user
+   # cannot pre-create the path or point it at a symlink.
+   secrets_file=$(mktemp "${TMPDIR:-/tmp}/eddi-secrets.XXXXXX")
+   trap 'shred -u "$secrets_file" 2>/dev/null || rm -f "$secrets_file"' EXIT
+
+   # Fail closed: an empty key would create a Secret that silently leaves the
+   # vault inert and secrets in plaintext.
+   key=$(openssl rand -base64 24)
+   [ -n "$key" ] || { echo "vault key generation failed" >&2; exit 1; }
+   printf 'eddi.vault.master-key=%s\n' "$key" > "$secrets_file"
+
+   # The Secret key must be named application-secrets.properties — that is the
+   # filename the Deployment mounts. A bare temp path would name it otherwise.
    kubectl create secret generic eddi-secrets \
      --namespace=eddi \
-     --from-file=/tmp/application-secrets.properties
-   shred -u /tmp/application-secrets.properties
+     --from-file=application-secrets.properties="$secrets_file"
    ```
 
 3. **External secrets** (production): Use [External Secrets Operator](https://external-secrets.io/) to sync from AWS Secrets Manager, HashiCorp Vault, Azure Key Vault, etc.

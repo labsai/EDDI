@@ -132,10 +132,25 @@ mounted *file*, not environment variables, because env is readable through
 `/proc/<pid>/environ` and leaks into crash dumps:
 
 ```bash
-printf 'eddi.vault.master-key=%s
-' "$(openssl rand -base64 24)" > /tmp/application-secrets.properties
-kubectl create secret generic eddi-secrets -n eddi --from-file=/tmp/application-secrets.properties
-shred -u /tmp/application-secrets.properties
+set -euo pipefail
+
+# mktemp gives an unpredictable name created 0600, so another local user
+# cannot pre-create the path or point it at a symlink.
+secrets_file=$(mktemp "${TMPDIR:-/tmp}/eddi-secrets.XXXXXX")
+trap 'shred -u "$secrets_file" 2>/dev/null || rm -f "$secrets_file"' EXIT
+
+# Fail closed: an empty key would create a Secret that silently leaves the
+# vault inert and secrets in plaintext.
+key=$(openssl rand -base64 24)
+[ -n "$key" ] || { echo "vault key generation failed" >&2; exit 1; }
+printf 'eddi.vault.master-key=%s\n' "$key" > "$secrets_file"
+
+# The Secret key must be named application-secrets.properties — that is the
+# filename the Deployment mounts. A bare temp path would name it otherwise.
+kubectl create secret generic eddi-secrets \
+  --namespace=eddi \
+  --from-file=application-secrets.properties="$secrets_file"
+
 kubectl rollout restart deployment/eddi -n eddi
 ```
 
