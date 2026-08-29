@@ -31,6 +31,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.when;
 
 /**
@@ -253,6 +255,152 @@ class ResourceAccessGuardTest {
             var g = guard(identity("root", "eddi-admin"), settings, mock(IDocumentDescriptorStore.class));
 
             assertEquals(1, g.redactForCaller(publishedWithGrants()).getGrants().size());
+        }
+
+        @Test
+        @DisplayName("a version read redacts on the level it was gated with, not on the version in hand")
+        void versionedReadUsesTheGatedLevel() {
+            // Sharing writes land on the CURRENT version, so an older version's
+            // descriptor can still name a previous owner and carry that era's grants.
+            // Deciding redaction against it would hand the grant list to somebody who no
+            // longer owns the resource — two different answers to "does this caller own
+            // it" inside one request.
+            var g = guard(identity("carol"), settings, mock(IDocumentDescriptorStore.class));
+            var staleVersionStillNamingCarol = ownedBy("carol");
+            staleVersionStillNamingCarol.setVisibility(ResourceVisibility.published.wireName());
+            staleVersionStillNamingCarol.setGrants(
+                    List.of(new ResourceGrant(Subjects.user("bob"), AccessLevel.USE.name(), "carol", new Date(0))));
+            DescriptorAccess.rebuildIndex(staleVersionStillNamingCarol);
+
+            // What the CURRENT descriptor said: carol may read it, and no more.
+            var redacted = g.redactUnlessOwner(staleVersionStillNamingCarol, AccessLevel.VIEW);
+
+            assertNull(redacted.getGrants(), "the old version's owner field must not decide this");
+            assertNull(redacted.getAccessIndex());
+        }
+
+        @Test
+        @DisplayName("a caller gated at OWN keeps the grants")
+        void gatedOwnerKeepsGrants() {
+            var g = guard(identity("carol"), settings, mock(IDocumentDescriptorStore.class));
+
+            assertEquals(1, g.redactUnlessOwner(publishedWithGrants(), AccessLevel.OWN).getGrants().size());
+        }
+
+        @Test
+        @DisplayName("a null level redacts — an unanswerable question is not a yes")
+        void unknownLevelRedacts() {
+            var g = guard(identity("carol"), settings, mock(IDocumentDescriptorStore.class));
+
+            assertNull(g.redactUnlessOwner(publishedWithGrants(), null).getGrants());
+        }
+    }
+
+    @Nested
+    @DisplayName("requireAccess reports the level it granted")
+    class GrantedLevel {
+
+        private final WorkspaceSettings settings = settings(true, true, WorkspaceSettings.LEGACY_SHARED);
+
+        @Test
+        @DisplayName("an owner asking for VIEW is told they hold OWN, not merely enough")
+        void reportsOwn() throws Exception {
+            // The return value is what a redaction decision downstream is made on, so
+            // "sufficient for what you asked" is the wrong answer — it would strip an
+            // owner's own grant list off a versioned read.
+            var store = mock(IDocumentDescriptorStore.class);
+            when(store.readCurrentDescriptor(RESOURCE_ID)).thenReturn(ownedBy("alice"));
+
+            var granted = guard(identity("alice"), settings, store).requireAccess(RESOURCE_ID, AccessLevel.VIEW, "agent");
+
+            assertEquals(AccessLevel.OWN, granted);
+        }
+
+        @Test
+        @DisplayName("seeing everything reports OWN without reading the store at all")
+        void adminReportsOwn() throws Exception {
+            var store = mock(IDocumentDescriptorStore.class);
+
+            var granted = guard(identity("root", "eddi-admin"), settings, store)
+                    .requireAccess(RESOURCE_ID, AccessLevel.OWN, "agent");
+
+            assertEquals(AccessLevel.OWN, granted);
+            verify(store, never()).readCurrentDescriptor(anyString());
+        }
+
+        @Test
+        @DisplayName("a resource with no descriptor reports only what was asked, never OWN")
+        void legacyFallbackReportsTheRequestedLevel() throws Exception {
+            // Reporting OWN here would let a caller redact-check their way into a grant
+            // list on a resource whose owner could not be established at all.
+            var store = mock(IDocumentDescriptorStore.class);
+            when(store.readCurrentDescriptor(RESOURCE_ID)).thenThrow(new IResourceStore.ResourceNotFoundException("none"));
+
+            var granted = guard(identity("alice"), settings, store).requireAccess(RESOURCE_ID, AccessLevel.VIEW, "agent");
+
+            assertEquals(AccessLevel.VIEW, granted);
+        }
+    }
+
+    @Nested
+    @DisplayName("use access on a target that is not an agent")
+    class NonAgentUse {
+
+        private final WorkspaceSettings settings = settings(true, true, WorkspaceSettings.LEGACY_SHARED);
+
+        private DocumentDescriptor privateTo(String owner) {
+            var d = ownedBy(owner);
+            d.setVisibility(ResourceVisibility.privateAccess.wireName());
+            return DescriptorAccess.rebuildIndex(d);
+        }
+
+        @Test
+        @DisplayName("refuses a group the caller cannot reach, and calls it a group")
+        void refusesUnreachableGroup() throws Exception {
+            // A channel target can be a GROUP, and a group is a guarded descriptor like
+            // any other. Checking only AGENT targets left that whole branch open. The
+            // label matters too: a refusal naming the wrong resource type sends the
+            // caller to ask the wrong owner.
+            var store = mock(IDocumentDescriptorStore.class);
+            when(store.readCurrentDescriptor(RESOURCE_ID)).thenReturn(privateTo("alice"));
+
+            var refusal = assertThrows(ForbiddenException.class,
+                    () -> guard(identity("bob"), settings, store).requireUseAccess(RESOURCE_ID, "group"));
+
+            assertTrue(refusal.getMessage().contains("group"), "the refusal must name what the caller cannot reach");
+            assertFalse(refusal.getMessage().contains("agent"));
+        }
+
+        @Test
+        @DisplayName("admits a member of the target's own space")
+        void admitsSpaceMember() throws Exception {
+            var store = mock(IDocumentDescriptorStore.class);
+            when(store.readCurrentDescriptor(RESOURCE_ID)).thenReturn(ownedBy("alice"));
+
+            assertDoesNotThrow(() -> guard(identity("alice"), settings, store).requireUseAccess(RESOURCE_ID, "group"));
+        }
+
+        @Test
+        @DisplayName("an unaddressed target is not this check's business to refuse")
+        void blankIdPasses() {
+            // The operation addressing nothing fails on its own terms; refusing here
+            // would turn a malformed request into a confusing authorisation error.
+            var g = guard(identity("bob"), settings, mock(IDocumentDescriptorStore.class));
+
+            assertDoesNotThrow(() -> g.requireUseAccess("  ", "group"));
+            assertDoesNotThrow(() -> g.requireUseAccess(null, "group"));
+        }
+
+        @Test
+        @DisplayName("requireAgentUseAccess still refuses as an agent")
+        void agentLabelUnchanged() throws Exception {
+            var store = mock(IDocumentDescriptorStore.class);
+            when(store.readCurrentDescriptor(RESOURCE_ID)).thenReturn(privateTo("alice"));
+
+            var refusal = assertThrows(ForbiddenException.class,
+                    () -> guard(identity("bob"), settings, store).requireAgentUseAccess(RESOURCE_ID));
+
+            assertTrue(refusal.getMessage().contains("agent"));
         }
     }
 
