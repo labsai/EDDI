@@ -181,6 +181,35 @@ nothing rather than granting it, and it narrows an administrator's view too. It
 is a query parameter rather than a client-side filter because page 2 of
 "everything" is not page 2 of "this space".
 
+### What a listing tells a client it may do
+
+Every descriptor a listing returns carries `callerLevel` — `USE`, `VIEW`,
+`EDIT` or `OWN` — describing what **the caller who asked** may do with that
+resource.
+
+```json
+{ "name": "Support Agent", "ownerId": "alice@example.com",
+  "spaceId": "team:engineering", "visibility": "space", "callerLevel": "USE" }
+```
+
+It is per-request, not per-resource: the same document serialises differently
+for two people. A client needs it because nothing else in the payload answers
+the question — the grant list is disclosed to the owner only, so a recipient
+otherwise cannot tell an agent they may edit from one they may only talk to, and
+the alternative is offering every action and letting the server refuse.
+
+Three properties are worth knowing:
+
+- **Absent when enforcement is off.** Everyone may do everything then, so a
+  level would be true and useless. Omitting it keeps a listing byte-identical to
+  a deployment that has never heard of workspaces.
+- **Never stored.** A value stamped for one caller would be wrong for every
+  other, so the persistence mapper drops it — not by convention, but by a
+  registered Jackson mix-in, because several paths read a descriptor and write
+  it back.
+- **Never accepted.** It is read-only on the wire, so nothing a client sends can
+  assert its own access level.
+
 ---
 
 ## What changes for users when you enable it

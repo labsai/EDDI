@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.everyItem;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.notNullValue;
@@ -180,6 +181,21 @@ public class WorkspacesIT extends BaseIntegrationIT {
                 .then()
                 .statusCode(200)
                 .body("principal", nullValue());
+    }
+
+    @Test
+    @DisplayName("no caller level is stamped while workspaces are off")
+    void noCallerLevelWhenDisabled() {
+        // The compatibility property, asserted on the wire: with enforcement off a
+        // listing is byte-identical to a deployment that has never heard of
+        // workspaces. A client that started drawing per-row permissions from this
+        // field would otherwise change behaviour on a deployment that did not opt in.
+        given()
+                .queryParam("limit", 5)
+                .when().get(AGENT_DESCRIPTORS)
+                .then()
+                .statusCode(200)
+                .body("callerLevel", everyItem(nullValue()));
     }
 
     @Test

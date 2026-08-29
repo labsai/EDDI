@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.configs.descriptors.model;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 import java.util.List;
 
 /**
@@ -19,6 +21,7 @@ public class DocumentDescriptor extends ResourceDescriptor {
     private String visibility;
     private List<ResourceGrant> grants;
     private String accessIndex;
+    private String callerLevel;
 
     public String getName() {
         return name;
@@ -116,6 +119,46 @@ public class DocumentDescriptor extends ResourceDescriptor {
 
     public void setAccessIndex(String accessIndex) {
         this.accessIndex = accessIndex;
+    }
+
+    /**
+     * What the <em>calling</em> user may do with this resource — {@code USE},
+     * {@code VIEW}, {@code EDIT} or {@code OWN} — or {@code null} when workspaces
+     * are not being enforced.
+     *
+     * <h3>Per-request, not per-resource</h3> Every other field here describes the
+     * resource. This one describes the relationship between the resource and
+     * whoever asked, so the same document serialises differently for two callers.
+     * It exists because a client cannot work it out: the grant list is disclosed at
+     * {@code OWN} only, so a listing gives a recipient no way to tell whether they
+     * may edit a row, delete it, or merely converse with it — and the alternative
+     * is offering every action and letting the server refuse, which teaches the
+     * user the product is broken rather than that the resource is not theirs.
+     *
+     * <h3>Derived, and deliberately hard to persist by accident</h3> It is stamped
+     * on the way out by {@code ResourceAccessGuard} and is <b>never</b> stored:
+     * {@code PersistenceMapperProducer} registers a mix-in that drops it, so a
+     * descriptor that is read, stamped and written back cannot carry one caller's
+     * access level into another caller's read. It is also {@code READ_ONLY}, so
+     * nothing a client sends can set it.
+     * <p>
+     * Null when enforcement is off, rather than {@code OWN}. Everyone may do
+     * everything in that state, so a level would be true but meaningless — and
+     * omitting it keeps the wire identical to a deployment that has never heard of
+     * workspaces, which is the property this whole feature is built to preserve.
+     */
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    public String getCallerLevel() {
+        return callerLevel;
+    }
+
+    public void setCallerLevel(String callerLevel) {
+        this.callerLevel = callerLevel;
+    }
+
+    /** The parsed caller level, or {@code null} when unset or unrecognised. */
+    public AccessLevel callerAccessLevel() {
+        return AccessLevel.parseOrNull(callerLevel);
     }
 
     /** The parsed visibility, or {@code null} when unset or unrecognised. */

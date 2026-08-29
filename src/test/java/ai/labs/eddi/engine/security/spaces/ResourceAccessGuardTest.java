@@ -25,6 +25,7 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -293,6 +294,115 @@ class ResourceAccessGuardTest {
             var g = guard(identity("carol"), settings, mock(IDocumentDescriptorStore.class));
 
             assertNull(g.redactUnlessOwner(publishedWithGrants(), null).getGrants());
+        }
+    }
+
+    @Nested
+    @DisplayName("callerLevel on a descriptor going out")
+    class CallerLevel {
+
+        private final WorkspaceSettings enforcing = settings(true, true, WorkspaceSettings.LEGACY_SHARED);
+        private final WorkspaceSettings notEnforcing = settings(false, true, WorkspaceSettings.LEGACY_SHARED);
+
+        private DocumentDescriptor published(String owner) {
+            var d = ownedBy(owner);
+            d.setVisibility(ResourceVisibility.published.wireName());
+            return DescriptorAccess.rebuildIndex(d);
+        }
+
+        @Test
+        @DisplayName("an owner is told they own it")
+        void ownerGetsOwn() {
+            var g = guard(identity("alice"), enforcing, mock(IDocumentDescriptorStore.class));
+
+            var d = g.redactForCaller(ownedBy("alice"));
+
+            assertEquals(AccessLevel.OWN.name(), d.getCallerLevel());
+        }
+
+        @Test
+        @DisplayName("a stranger reading a published resource is told VIEW, not OWN")
+        void publishedStrangerGetsView() {
+            // The whole point of the field: without it this row looks identical to
+            // one the caller owns, so a client offers Delete and Share on somebody
+            // else's agent and learns what it may do from a 403.
+            var g = guard(identity("carol"), enforcing, mock(IDocumentDescriptorStore.class));
+
+            var d = g.redactForCaller(published("alice"));
+
+            assertEquals(AccessLevel.VIEW.name(), d.getCallerLevel());
+            assertNull(d.getGrants(), "and still no grant list");
+        }
+
+        @Test
+        @DisplayName("a caller who may do nothing is told nothing, not USE")
+        void noAccessGetsNull() {
+            var privateToAlice = ownedBy("alice");
+            privateToAlice.setVisibility(ResourceVisibility.privateAccess.wireName());
+            DescriptorAccess.rebuildIndex(privateToAlice);
+            var g = guard(identity("bob"), enforcing, mock(IDocumentDescriptorStore.class));
+
+            var d = g.redactForCaller(privateToAlice);
+
+            assertNull(d.getCallerLevel());
+        }
+
+        @Test
+        @DisplayName("an administrator is told OWN")
+        void adminGetsOwn() {
+            var g = guard(identity("root", "eddi-admin"), enforcing, mock(IDocumentDescriptorStore.class));
+
+            assertEquals(AccessLevel.OWN.name(), g.redactForCaller(published("alice")).getCallerLevel());
+        }
+
+        @Test
+        @DisplayName("nothing is stamped while enforcement is off")
+        void absentWhenNotEnforcing() {
+            // Everyone may do everything then, so a level would be true and useless —
+            // and omitting it keeps the listing byte-identical to a deployment that
+            // has never heard of workspaces.
+            var g = guard(identity("carol"), notEnforcing, mock(IDocumentDescriptorStore.class));
+
+            var d = g.redactForCaller(published("alice"));
+
+            assertNull(d.getCallerLevel());
+            assertNotNull(d.getGrants() == null ? d.getOwnerId() : d.getOwnerId(), "owner still travels");
+        }
+
+        @Test
+        @DisplayName("a versioned read stamps the level it was gated with")
+        void versionedReadStampsTheGatedLevel() {
+            // Same reason the redaction uses it: the version in hand may name an
+            // owner who no longer owns the resource.
+            var g = guard(identity("carol"), enforcing, mock(IDocumentDescriptorStore.class));
+
+            var d = g.redactUnlessOwner(ownedBy("carol"), AccessLevel.VIEW);
+
+            assertEquals(AccessLevel.VIEW.name(), d.getCallerLevel());
+            assertNull(d.getGrants());
+        }
+
+        @Test
+        @DisplayName("a stamp never survives into the next caller's read")
+        void previousStampIsOverwritten() {
+            // Descriptors are deserialised fresh per read, so this cannot happen
+            // today — but it is one cached instance away from happening, and the
+            // failure would be a silent privilege report rather than an error.
+            var alreadyStamped = published("alice");
+            alreadyStamped.setCallerLevel(AccessLevel.OWN.name());
+            var g = guard(identity("carol"), enforcing, mock(IDocumentDescriptorStore.class));
+
+            assertEquals(AccessLevel.VIEW.name(), g.redactForCaller(alreadyStamped).getCallerLevel());
+        }
+
+        @Test
+        @DisplayName("a stamp is cleared rather than kept when enforcement is off")
+        void staleStampClearedWhenNotEnforcing() {
+            var alreadyStamped = published("alice");
+            alreadyStamped.setCallerLevel(AccessLevel.OWN.name());
+            var g = guard(identity("carol"), notEnforcing, mock(IDocumentDescriptorStore.class));
+
+            assertNull(g.redactForCaller(alreadyStamped).getCallerLevel());
         }
     }
 

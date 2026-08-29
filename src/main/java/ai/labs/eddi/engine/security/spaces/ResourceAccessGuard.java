@@ -327,10 +327,10 @@ public class ResourceAccessGuard {
      * @return the same descriptor, for chaining
      */
     public DocumentDescriptor redactForCaller(DocumentDescriptor descriptor) {
-        if (descriptor == null || seesEverything() || canAccess(descriptor, AccessLevel.OWN)) {
-            return descriptor;
+        if (descriptor == null) {
+            return null;
         }
-        return redact(descriptor);
+        return applyCallerLevel(descriptor, effectiveLevel(descriptor));
     }
 
     /**
@@ -347,13 +347,35 @@ public class ResourceAccessGuard {
      * @return the same descriptor, for chaining
      */
     public DocumentDescriptor redactUnlessOwner(DocumentDescriptor descriptor, AccessLevel callerLevel) {
-        if (descriptor == null || seesEverything() || (callerLevel != null && callerLevel.includes(AccessLevel.OWN))) {
-            return descriptor;
+        if (descriptor == null) {
+            return null;
         }
-        return redact(descriptor);
+        return applyCallerLevel(descriptor, seesEverything() ? AccessLevel.OWN : callerLevel);
     }
 
-    private static DocumentDescriptor redact(DocumentDescriptor descriptor) {
+    /**
+     * Stamps what the caller may do, and removes what they may not read.
+     *
+     * <h3>Why the level is reported at all</h3> Without it a listing gives a
+     * recipient no way to tell an agent they may edit from one they may only talk
+     * to — the grant list is disclosed at {@code OWN} only, and {@code ownerId}
+     * alone does not answer it. A client would then have to offer every action and
+     * let the server refuse, which reads as the product being broken rather than as
+     * the resource not being theirs.
+     *
+     * <h3>Why it is null when nothing is enforced</h3> Everyone may do everything
+     * in that state, so a level would be true and useless. Omitting it keeps a
+     * listing byte-identical to a deployment that has never heard of workspaces,
+     * which is the compatibility property this feature is built around — and a
+     * client that wants to know asks {@code GET /workspaces} once instead of
+     * inferring it per row.
+     */
+    private DocumentDescriptor applyCallerLevel(DocumentDescriptor descriptor, AccessLevel granted) {
+        descriptor.setCallerLevel(settings.isEnforcing() && granted != null ? granted.name() : null);
+
+        if (granted != null && granted.includes(AccessLevel.OWN)) {
+            return descriptor;
+        }
         descriptor.setGrants(null);
         descriptor.setAccessIndex(null);
         return descriptor;

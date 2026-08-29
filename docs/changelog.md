@@ -7,6 +7,66 @@
 
 
 
+## 🪪 feat(workspaces): report the caller's access level on listed descriptors (2026-08-29)
+
+**Repo:** EDDI (`feat/multi-user-spaces-and-sharing`)
+
+Closing the gap the last review left open as a decision.
+
+### The gap
+
+A listing gave a recipient no way to tell what they could do with a row. The
+grant list is disclosed at `OWN` only — deliberately, since a published
+resource is readable by everyone and its grant audience is a list of real
+principal and team names — and `ownerId` alone does not answer it either: a
+resource shared with your team at `USE` and one shared at `EDIT` look identical.
+
+So the Manager offered every action on every row and let the server refuse. A
+colleague who shared an agent so you could *talk to* it produced a card with
+Share, Delete and Export on it, all of which 403. That reads as the product
+being broken rather than as the resource not being yours.
+
+### `callerLevel`
+
+`DocumentDescriptor` now carries the level the calling user holds, stamped by
+`ResourceAccessGuard` on the way out. It is unlike every other field on that
+class: it describes the *relationship* between the resource and whoever asked,
+so the same document serialises differently for two callers.
+
+That makes it dangerous in a way the other fields are not, and two properties
+are enforced rather than documented:
+
+- **It can never be stored.** `patchDescriptor` and
+  `ResourceSharingService.writeBack` both read a descriptor and write it back.
+  `redactForCaller` already documented that it must not be called on something
+  about to be written — but documenting is not preventing, and persisting one
+  caller's level would tell every later reader they hold whatever the last
+  writer happened to hold, an escalation nothing logs. A Jackson mix-in on the
+  persistence mapper drops it. Both storage backends reach storage through that
+  one mapper, so one registration covers MongoDB and PostgreSQL.
+- **It can never be set by a client.** `@JsonProperty(access = READ_ONLY)`, so a
+  PATCH body cannot assert its own access level into a read-modify-write.
+
+**Null when enforcement is off**, rather than `OWN`. Everyone may do everything
+in that state, so a level would be true and meaningless — and omitting it keeps
+a listing byte-identical to a deployment that has never heard of workspaces,
+which is the compatibility property this whole feature is built around. A client
+that wants to know asks `GET /workspaces` once instead of inferring it per row.
+
+### Verified by reverting, twice
+
+The first version of `PersistenceMixinsTest` built its own mapper by calling
+`PersistenceMixins.register(...)`. That tested the mix-in worked and **not** that
+anything used it: deleting the registration from `PersistenceMapperProducer`
+left the suite green. It now goes through the real producer, and both
+guarantees were re-checked by reverting them — the storage one fails with the
+stamped JSON in the message, the read-only one with `expected: <null> but was:
+<OWN>`.
+
+---
+
+
+
 ## 🔒 fix(security): close two standing bypasses of the USE gate; add a workspace capability endpoint (2026-08-29)
 
 **Repo:** EDDI (`feat/multi-user-spaces-and-sharing`)
