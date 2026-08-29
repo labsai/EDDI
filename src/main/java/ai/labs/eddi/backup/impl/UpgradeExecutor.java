@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.backup.impl;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.backup.IResourceSource;
 import ai.labs.eddi.backup.IResourceSource.*;
 import ai.labs.eddi.backup.model.ImportPreview;
@@ -82,13 +83,17 @@ public class UpgradeExecutor {
     private final StructuralMatcher structuralMatcher;
     private final IDocumentDescriptorStore documentDescriptorStore;
 
+    private final ResourceAccessGuard resourceAccessGuard;
+
     @Inject
     public UpgradeExecutor(IRestAgentStore agentStore,
             IRestWorkflowStore workflowStore,
             IRestPromptSnippetStore snippetStore,
             IJsonSerialization jsonSerialization,
             StructuralMatcher structuralMatcher,
-            IDocumentDescriptorStore documentDescriptorStore) {
+            IDocumentDescriptorStore documentDescriptorStore,
+            ResourceAccessGuard resourceAccessGuard) {
+        this.resourceAccessGuard = resourceAccessGuard;
         this.agentStore = agentStore;
         this.workflowStore = workflowStore;
         this.snippetStore = snippetStore;
@@ -402,9 +407,10 @@ public class UpgradeExecutor {
         URI createdUri = RestUtilities.createURI(ops.resourceUri(), resourceId.getId(), ops.versionQueryParam(), resourceId.getVersion());
 
         // Create the DocumentDescriptor that the DocumentDescriptorFilter would
-        // normally create on a 201 response.
-        documentDescriptorStore.createDescriptor(
-                resourceId.getId(), resourceId.getVersion(), createDocumentDescriptor(createdUri));
+        // normally create on a 201 response — including the ownership stamp, or a
+        // resource created by an upgrade would be unowned and unlistable.
+        documentDescriptorStore.createDescriptor(resourceId.getId(), resourceId.getVersion(),
+                resourceAccessGuard.stampNewDescriptor(createDocumentDescriptor(createdUri)));
 
         return createdUri;
     }
@@ -423,9 +429,9 @@ public class UpgradeExecutor {
                     IRestWorkflowStore.versionQueryParam, resourceId.getVersion());
 
             // Create the DocumentDescriptor that the DocumentDescriptorFilter would
-            // normally create on a 201 response.
-            documentDescriptorStore.createDescriptor(
-                    resourceId.getId(), resourceId.getVersion(), createDocumentDescriptor(createdUri));
+            // normally create on a 201 response — ownership stamp included.
+            documentDescriptorStore.createDescriptor(resourceId.getId(), resourceId.getVersion(),
+                    resourceAccessGuard.stampNewDescriptor(createDocumentDescriptor(createdUri)));
 
             return createdUri;
         } catch (Exception e) {

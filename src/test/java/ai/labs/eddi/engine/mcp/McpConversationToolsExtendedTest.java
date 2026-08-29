@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.mcp;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.IRestDocumentDescriptorStore;
@@ -100,7 +101,7 @@ class McpConversationToolsExtendedTest {
         tools = new McpConversationTools(conversationService, agentAdmin, agentStore,
                 restInterfaceFactory, jsonSerialization, boundedLogStore, auditStore,
                 agentTriggerStore, userConversationStore, restAgentEngine,
-                mockIdentity, conversationAccessGuard, false);
+                mockIdentity, conversationAccessGuard, mock(ResourceAccessGuard.class), false);
     }
 
     // ==================== listConversations ====================
@@ -188,7 +189,7 @@ class McpConversationToolsExtendedTest {
         var localTools = new McpConversationTools(conversationService, agentAdmin, agentStore,
                 failingFactory, jsonSerialization, boundedLogStore, auditStore,
                 agentTriggerStore, userConversationStore, restAgentEngine,
-                mockIdentity, conversationAccessGuard, false);
+                mockIdentity, conversationAccessGuard, mock(ResourceAccessGuard.class), false);
 
         String result = localTools.listConversations(AGENT_ID, null, null, null);
 

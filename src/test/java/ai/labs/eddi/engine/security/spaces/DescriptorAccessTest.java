@@ -171,15 +171,71 @@ class DescriptorAccessTest {
                     "listing and reading disagreed for index=" + d.getAccessIndex() + " caller=" + caller.selfPrincipals());
         }
 
+        /**
+         * The full cross-product, including the owner-less rows.
+         * <p>
+         * The earlier version of this test always set an owner, which is exactly the
+         * axis on which the two halves diverged: a descriptor with no owner, a real
+         * space and {@code private} visibility produced an empty token set, fell back
+         * to the {@code legacy} token — admitted to everyone — while
+         * {@link DescriptorAccess#effectiveLevel} granted nobody anything. Listed to
+         * everyone, readable by no one, leaking its name, description and ACL. A
+         * crafted import can produce that shape, so it is not hypothetical.
+         */
         @Test
-        @DisplayName("across the whole visibility/ownership matrix")
+        @DisplayName("across the whole owner / space / visibility / grant / caller / policy cross-product")
         void matrix() {
-            for (ResourceVisibility visibility : ResourceVisibility.values()) {
-                for (String space : List.of(Subjects.personalSpace("alice"), Subjects.teamSpace("engineering"))) {
-                    var d = descriptor("alice", space, visibility);
-                    for (CallerSpaces caller : List.of(ALICE, BOB, CAROL_IN_TEAM, CallerSpaces.ANONYMOUS)) {
-                        assertAgrees(d, caller, true);
+            List<String> owners = new ArrayList<>();
+            owners.add("alice");
+            owners.add(null);
+
+            List<String> spaces = new ArrayList<>();
+            spaces.add(Subjects.personalSpace("alice"));
+            spaces.add(Subjects.teamSpace("engineering"));
+            spaces.add(Subjects.LEGACY);
+            spaces.add(null);
+
+            int checked = 0;
+            for (String owner : owners) {
+                for (String space : spaces) {
+                    for (ResourceVisibility visibility : ResourceVisibility.values()) {
+                        for (int grantShape = 0; grantShape < 5; grantShape++) {
+                            var d = descriptor(owner, space, visibility);
+                            applyGrantShape(d, grantShape);
+                            for (CallerSpaces caller : List.of(ALICE, BOB, CAROL_IN_TEAM, CallerSpaces.ANONYMOUS)) {
+                                for (boolean admitLegacy : List.of(true, false)) {
+                                    assertAgrees(d, caller, admitLegacy);
+                                    checked++;
+                                }
+                            }
+                        }
                     }
+                }
+            }
+            assertTrue(checked >= 900, "the sweep must actually be a sweep; checked " + checked);
+        }
+
+        /** The grant shapes that have ever produced a surprising level. */
+        private void applyGrantShape(DocumentDescriptor d, int shape) {
+            switch (shape) {
+                case 1 -> grant(d, Subjects.user("bob"), AccessLevel.USE);
+                case 2 -> grant(d, Subjects.team("engineering"), AccessLevel.VIEW);
+                case 3 -> {
+                    // A grant with no subject at all.
+                    List<ResourceGrant> grants = new ArrayList<>();
+                    grants.add(new ResourceGrant(null, AccessLevel.OWN.name(), "alice", new Date(0)));
+                    d.setGrants(grants);
+                    DescriptorAccess.rebuildIndex(d);
+                }
+                case 4 -> {
+                    // A level written by a newer version of EDDI.
+                    List<ResourceGrant> grants = new ArrayList<>();
+                    grants.add(new ResourceGrant(Subjects.user("bob"), "SUPERUSER", "alice", new Date(0)));
+                    d.setGrants(grants);
+                    DescriptorAccess.rebuildIndex(d);
+                }
+                default -> {
+                    // no grants
                 }
             }
         }
@@ -209,6 +265,56 @@ class DescriptorAccessTest {
             var d = descriptor(null, Subjects.teamSpace("engineering"), ResourceVisibility.privateAccess);
             assertTrue(d.getAccessIndex() != null && d.getAccessIndex().length() > 1,
                     "an empty index would match nothing at all — worse than being admin-only");
+        }
+    }
+
+    @Nested
+    @DisplayName("ownership does not travel between deployments")
+    class StripOwnership {
+
+        @Test
+        @DisplayName("everything about who owns it and who it is shared with is removed")
+        void stripsAllOwnership() {
+            var d = descriptor("alice", Subjects.teamSpace("engineering"), ResourceVisibility.published);
+            grant(d, Subjects.user("bob"), AccessLevel.OWN);
+            d.setName("My agent");
+            d.setDescription("does things");
+
+            DescriptorAccess.stripOwnership(d);
+
+            assertNull(d.getOwnerId());
+            assertNull(d.getSpaceId());
+            assertNull(d.getVisibility());
+            assertNull(d.getGrants());
+            assertNull(d.getAccessIndex());
+        }
+
+        @Test
+        @DisplayName("what the resource IS survives — only who it belongs to is dropped")
+        void keepsIdentityOfTheResource() {
+            var d = descriptor("alice", Subjects.personalSpace("alice"), ResourceVisibility.space);
+            d.setName("My agent");
+            d.setDescription("does things");
+            d.setOriginId("origin-1");
+
+            DescriptorAccess.stripOwnership(d);
+
+            assertEquals("My agent", d.getName());
+            assertEquals("does things", d.getDescription());
+            assertEquals("origin-1", d.getOriginId());
+        }
+
+        @Test
+        @DisplayName("a stripped descriptor reads as legacy, not as published")
+        void strippedIsLegacyNotPublished() {
+            var d = descriptor("alice", Subjects.personalSpace("alice"), ResourceVisibility.published);
+            DescriptorAccess.stripOwnership(d);
+
+            // The point: an archive that arrived claiming `published` must not still be
+            // published after stripping. It becomes unowned, and the operator's
+            // legacy-visibility policy decides — until the importer re-stamps it.
+            assertTrue(DescriptorAccess.isUnowned(d));
+            assertNull(DescriptorAccess.effectiveLevel(d, BOB, false));
         }
     }
 }

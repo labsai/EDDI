@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.templating.rest;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.memory.ConversationMemoryUtilities;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
@@ -40,12 +41,19 @@ public class RestTemplatePreview implements IRestTemplatePreview {
     private final PromptSnippetService promptSnippetService;
     private final ConversationAccessGuard conversationAccessGuard;
 
+    private final ResourceAccessGuard resourceAccessGuard;
+
+    /** Stand-in for a snippet body the caller may not read. */
+    private static final String REDACTED = "<redacted>";
+
     @Inject
     public RestTemplatePreview(ITemplatingEngine templatingEngine,
             IConversationMemoryStore conversationMemoryStore,
             IMemoryItemConverter memoryItemConverter,
             PromptSnippetService promptSnippetService,
-            ConversationAccessGuard conversationAccessGuard) {
+            ConversationAccessGuard conversationAccessGuard,
+            ResourceAccessGuard resourceAccessGuard) {
+        this.resourceAccessGuard = resourceAccessGuard;
         this.templatingEngine = templatingEngine;
         this.conversationMemoryStore = conversationMemoryStore;
         this.memoryItemConverter = memoryItemConverter;
@@ -81,6 +89,19 @@ public class RestTemplatePreview implements IRestTemplatePreview {
         List<String> availableVariables = new ArrayList<>();
         Map<String, Object> variableValues = new LinkedHashMap<>();
         flattenKeys("", templateData, availableVariables, variableValues, 4);
+
+        // Snippet NAMES stay — a preview is useless if it cannot tell you which
+        // {snippets.x} references resolve — but their CONTENTS are removed unless the
+        // caller sees everything anyway. Snippets are one of the guarded configuration
+        // types, and rendering every one of them into this response would hand any
+        // editor the full text of every colleague's prompt building blocks through an
+        // endpoint that takes an arbitrary template.
+        //
+        // The resolved template below is unaffected: it renders only what the caller's
+        // own template actually references, which is their own composition.
+        if (!snippets.isEmpty() && !resourceAccessGuard.seesEverything()) {
+            variableValues.replaceAll((key, value) -> key.startsWith("snippets.") ? REDACTED : value);
+        }
 
         // Resolve template
         try {

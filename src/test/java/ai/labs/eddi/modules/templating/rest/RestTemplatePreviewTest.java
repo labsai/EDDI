@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.templating.rest;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
@@ -55,7 +56,7 @@ class RestTemplatePreviewTest {
 
         restTemplatePreview = new RestTemplatePreview(
                 templatingEngine, conversationMemoryStore,
-                memoryItemConverter, promptSnippetService, conversationAccessGuard);
+                memoryItemConverter, promptSnippetService, conversationAccessGuard, mock(ResourceAccessGuard.class));
     }
 
     // ==================== Null / Blank Input ====================

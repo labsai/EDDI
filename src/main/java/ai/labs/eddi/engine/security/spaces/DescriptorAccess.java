@@ -28,9 +28,11 @@ import java.util.Set;
  * write, so a descriptor written before this code existed has none. A listing
  * may therefore <em>omit</em> a resource whose {@link #effectiveLevel} would
  * admit it, until that descriptor is next written or
- * {@code WorkspaceBackfillMigration} runs. The reverse — listed but not
+ * {@code WorkspaceAccessIndexMigration} runs. The reverse — listed but not
  * readable — would be a leak, and cannot happen: every token the index contains
- * is one {@link #effectiveLevel} also honours.
+ * is one {@link #effectiveLevel} also honours, and a descriptor that grants
+ * nobody anything is indexed under {@link Subjects#TOKEN_NONE}, which
+ * {@link #admittingTokens} never emits.
  *
  * @author ginccc
  */
@@ -58,15 +60,22 @@ public final class DescriptorAccess {
             return null;
         }
 
-        if (isUnowned(descriptor)) {
+        AccessLevel best = null;
+
+        if (isUnowned(descriptor) && admitLegacy) {
             // Legacy data: no owner, no space, nothing to compare against. Treated the way
             // OwnershipValidator.requireOwnerOrAdmin already treats an unowned resource, so
             // an upgrade does not hide every pre-existing agent — but an operator can close
             // it by setting eddi.workspaces.legacy-visibility=admin-only.
-            return admitLegacy ? AccessLevel.OWN : null;
+            //
+            // A contribution rather than a short-circuit, deliberately: buildIndex emits
+            // the grant and `all` tokens for an unowned descriptor too, so returning early
+            // here would list a resource to a grantee that this method then refused. It
+            // also means an explicit grant on a legacy resource keeps working under
+            // legacy-visibility=admin-only, which is what lets an administrator hand out
+            // access to pre-existing resources without first transferring ownership.
+            best = AccessLevel.OWN;
         }
-
-        AccessLevel best = null;
 
         String ownerId = descriptor.getOwnerId();
         boolean callerIsOwner = ownerId != null && !ownerId.isBlank() && caller.isSelf(ownerId);
@@ -143,6 +152,41 @@ public final class DescriptorAccess {
         return descriptor;
     }
 
+    /**
+     * Removes everything about who a resource belongs to and who it is shared with,
+     * leaving name, description, timestamps and origin id intact.
+     *
+     * <h3>Ownership does not travel between instances</h3> A ZIP export, an
+     * instance-to-instance sync, or any other transfer carries a descriptor from
+     * one deployment's identity model into another's, where the same principal
+     * names and group names mean something else — or nothing. Two consequences, and
+     * this method exists for both:
+     * <ul>
+     * <li><b>Exporting</b> a descriptor as-is would disclose internal principal and
+     * team names to whoever receives the file.</li>
+     * <li><b>Importing</b> one as-is would let the file decide ownership,
+     * visibility and grants on the receiving instance — including publishing a
+     * resource, or filing it under someone else's name — with none of the checks
+     * the sharing API applies.</li>
+     * </ul>
+     * The importing side re-stamps to the importing user afterwards, so an import
+     * is owned by whoever performed it. That is both the safe answer and the one a
+     * user expects.
+     *
+     * @return the same descriptor, for chaining
+     */
+    public static DocumentDescriptor stripOwnership(DocumentDescriptor descriptor) {
+        if (descriptor == null) {
+            return null;
+        }
+        descriptor.setOwnerId(null);
+        descriptor.setSpaceId(null);
+        descriptor.setVisibility(null);
+        descriptor.setGrants(null);
+        descriptor.setAccessIndex(null);
+        return descriptor;
+    }
+
     /** The token index {@link #rebuildIndex} stores. Visible for testing. */
     public static String buildIndex(DocumentDescriptor descriptor) {
         Set<String> tokens = new LinkedHashSet<>();
@@ -180,10 +224,16 @@ public final class DescriptorAccess {
         }
 
         if (tokens.isEmpty()) {
-            // Only reachable for a descriptor with an owner-less non-legacy space and
-            // private visibility. An empty index matches no listing at all, and a resource
-            // nobody can list is a worse outcome than one only admins see.
-            tokens.add(Subjects.LEGACY);
+            // Reachable for a descriptor with no owner, a non-legacy space, private
+            // visibility and no valid grant — a shape a crafted import can produce.
+            //
+            // This must NOT be Subjects.LEGACY. That token is admitted to every caller
+            // under the default legacy-visibility policy, while effectiveLevel takes the
+            // owned branch for the same descriptor and grants nobody anything — so the
+            // resource would be listed to everyone and readable by no one, leaking its
+            // name, description and ACL. Listed-but-not-readable is the one direction this
+            // class promises cannot happen, so the fallback names nobody instead.
+            tokens.add(Subjects.TOKEN_NONE);
         }
 
         StringBuilder out = new StringBuilder();

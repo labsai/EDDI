@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.backup.impl;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.backup.IResourceSource;
 import ai.labs.eddi.backup.IResourceSource.*;
 import ai.labs.eddi.backup.model.ImportPreview;
@@ -77,7 +78,7 @@ class UpgradeExecutorTest {
         descriptorStore = Mockito.mock(IDocumentDescriptorStore.class);
 
         executor = new UpgradeExecutor(agentStore, workflowStore,
-                snippetStore, jsonSerialization, structuralMatcher, descriptorStore);
+                snippetStore, jsonSerialization, structuralMatcher, descriptorStore, mock(ResourceAccessGuard.class));
     }
 
     // ==================== Snippet Processing ====================

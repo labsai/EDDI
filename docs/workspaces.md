@@ -143,15 +143,47 @@ Two things it deliberately will not do:
 - **Starting a conversation** requires `USE`. An anonymous caller on the public
   production endpoints therefore reaches **published agents only**.
 
-That last one is the change most likely to surprise: an agent created after
-enforcement is on is not public until somebody publishes it. Agents that predate
-ownership stay reachable under `legacy-visibility=shared`, so switching the
-feature on does not silently take an existing public bot offline.
+- **Exporting** an agent requires `VIEW` on it. Export reads the agent *and*
+  every configuration it references, so leaving it ungated would have been a
+  complete read of any agent by id.
+- **Duplicating** a resource produces a copy owned by whoever duplicated it, in
+  their space, at `space` visibility — never a copy filed under the original
+  owner's name.
+- **Importing** a ZIP files everything under the importing user. A ZIP's
+  descriptors are treated as untrusted for ownership: an archive cannot decide
+  who owns a resource on your deployment, publish it, or grant access to
+  somebody. Exported ZIPs likewise carry no owner, space, visibility or grants,
+  so they do not disclose your principal and team names to whoever receives them.
 
-MCP inherits all of it — the admin tools call the same beans in-process — and
-the engine deliberately does not. A conversation turn runs under the chatting
-user's identity, and requiring them to own the agent's configuration would break
-every shared agent.
+That "starting a conversation" line is the change most likely to surprise: an
+agent created after enforcement is on is not public until somebody publishes it.
+Agents that predate ownership stay reachable under `legacy-visibility=shared`, so
+switching the feature on does not silently take an existing public bot offline.
+
+### Resources with no descriptor at all
+
+A few creation paths produce no descriptor — most notably the setup API, which
+reaches the stores over an internal loopback call with no credentials. Those
+resources have no recorded owner, and EDDI cannot invent one.
+
+They stay **readable and usable** under `legacy-visibility=shared`, so nothing
+breaks. They are **not** editable, deletable, deployable or shareable by
+non-admins: an absent record must not grant authority. Each refusal is logged at
+`WARN` naming the resource, so the gap is findable. Assign an owner with the
+ownership-transfer endpoint to close it.
+
+**MCP inherits it where it shares the beans.** Tools that hold an injected
+`IRest*Store` — the agent store in `McpConversationTools`, the group store in
+`McpGroupTools`, agent administration in `McpAdminTools` — call the same objects
+in-process and are checked identically. Tools that resolve a store through
+`IRestInterfaceFactory` make a **loopback HTTP call** instead, so the endpoint's
+own checks apply to a request that carries no credentials. That is a
+pre-existing limitation of EDDI's internal loopback calls (they already fail
+under `authorization.enabled=true`), not something workspaces introduce.
+
+**The engine deliberately does not inherit it.** A conversation turn runs under
+the chatting user's identity, and requiring them to own the agent's
+configuration would break every shared agent.
 
 ---
 

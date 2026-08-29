@@ -55,13 +55,25 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
     private static final String FIELD_ORIGIN_ID = "originId";
 
     /**
-     * The materialised access-control index on {@code DocumentDescriptor}.
+     * The materialised access-control index on {@code DocumentDescriptor}, which
+     * every owner-filtered listing ANDs a predicate on.
+     *
+     * <h3>What this index does and does not buy</h3> Declared here so both backends
+     * create it, and so a future exact-match or prefix query on the field is
+     * served. It does <b>not</b> make the current access predicate index-backed:
+     * that predicate is an unanchored regex ({@code |token|} has to match
+     * mid-string), and neither MongoDB nor PostgreSQL can use a btree index for
+     * one. The scoped listing is therefore a scan.
      * <p>
-     * Indexed here rather than only where it is written, because every
-     * owner-filtered listing ANDs a predicate on it — and this collection is shared
-     * with conversation descriptors, so it grows with conversation volume. An
-     * unindexed predicate here is a full scan on the hottest listing in the
-     * product.
+     * That is not a regression — the type predicate this store has always applied
+     * ({@code "eddi://" + type + ".*"}) is a regex scan too, so the access group
+     * adds predicates to a scan rather than turning an indexed lookup into one —
+     * but it is a real ceiling on a collection shared with conversation
+     * descriptors. Making it index-backed means storing the tokens as an
+     * <em>array</em> and querying with {@code $in} / a GIN index, which needs
+     * {@link IResourceFilter} to grow an operator beyond "string means regex".
+     * Worth doing; deliberately not done blind, since the PostgreSQL half cannot be
+     * verified without a PostgreSQL to run it on.
      */
     public static final String FIELD_ACCESS_INDEX = "accessIndex";
 

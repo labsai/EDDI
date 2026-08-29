@@ -7,6 +7,137 @@
 
 
 
+## 🔐 fix(security): close the bypasses an adversarial review found in workspaces (2026-08-29)
+
+**Repo:** EDDI (`feat/multi-user-spaces-and-sharing`)
+
+Follow-up to the workspaces commit, from my own second pass plus a maximum-effort
+adversarial review. Every finding below was traced in the code before being fixed;
+nothing here is speculative hardening.
+
+### Bypasses — resources reachable without passing the guard
+
+- **Export was a complete read of any agent by id.** `RestExportService.exportAgent`
+  and `previewExport` read the agent and then every workflow, rule set, api call,
+  LLM config, output set, dictionary, mcp call, RAG config and snippet it
+  references — straight from the stores, gated only by the `eddi-editor` role. An
+  editor with no grant on anything could `POST /backup/export/{anyAgentId}` and
+  receive another user's system prompts, tool definitions, api-call headers and MCP
+  server configs. Exactly the capability the feature exists to remove, and
+  `docs/workspaces.md` already claimed export required VIEW. Both entry points now
+  require it, and the snippet sweep is scoped.
+- **`/descriptorstore/descriptors` was an unscoped inventory of everything.** The
+  cross-type listing called the unscoped overload, `readDescriptor` had no check,
+  and `patchDescriptor` — which renames a resource — had none either. One request
+  per type returned every descriptor in the deployment *and*, now that descriptors
+  carry them, every owner, space and grant. All three guarded.
+- **MCP conversation tools bypassed the USE gate.** `createConversation`,
+  `chatWithAgent` and `chat_managed` call `ConversationService.startConversation`
+  directly, gated only by `eddi-viewer` — the lowest tier. The REST equivalent was
+  403 while the MCP one held a full conversation with any private agent.
+- **Two reverse-reference listings were unscoped** —
+  `readAgentDescriptors(containingWorkflowUri=…)` and
+  `readWorkflowDescriptors(containingResourceUri=…)`. Anyone holding one resource
+  URI could enumerate everything referencing it, across all workspaces.
+- **RAG ingestion was a write gated by read access.** `published` grants VIEW to
+  everyone, so any editor could inject documents into a published RAG config's
+  knowledge base — prompt-injection into every agent retrieving from it. Now EDIT.
+- **Template preview returned every prompt snippet in the deployment.** Snippet
+  names stay (a preview that cannot say which references resolve is useless);
+  bodies are redacted for callers who do not already see everything.
+
+### Descriptor provenance — where ownership comes from
+
+- **Duplicating copied the source's ownership.**
+  `createDocumentDescriptorForDuplicate` wrote the source descriptor back verbatim,
+  so duplicating a *published* agent — which anyone may do — filed the copy under
+  the original owner, in their space, at their visibility. The duplicator could not
+  edit or delete what they had just created, and anyone could inject resources into
+  a victim's workspace attributed to them. It now builds a fresh descriptor, carries
+  name and description only, and stamps the duplicator. It also no longer mutates
+  the source object it read.
+- **Import trusted the archive.** A crafted `descriptor.json` could set `ownerId`,
+  `visibility: published`, arbitrary `grants` — and, worst, a hand-written
+  `accessIndex`, which is the one way to reach the token index without passing
+  through `Subjects` and its escaping. Ownership is stripped from imported
+  descriptors and the importing user stamped. Export strips the same fields, so a
+  ZIP no longer discloses principal and team names to whoever receives it.
+- **Three more descriptor-creating paths were unstamped** — the import create path,
+  both `UpgradeExecutor` direct-create paths, and the group descriptor sync.
+
+### Fail-open corrections
+
+- **A missing descriptor granted OWN to everyone.** `requireAccess` treated "no
+  descriptor" as "unowned" and, under the default `legacy-visibility=shared`,
+  returned OWN — read, edit, delete, deploy, undeploy. Not hypothetical: the setup
+  API reaches the stores over an unauthenticated loopback call and produces
+  descriptors with no owner. The fallback now admits **reading and using only** and
+  refuses EDIT and above regardless of policy, logged at WARN naming the resource.
+- **Listing and reading could disagree in the leaking direction.** `DescriptorAccess`
+  promises "listed but not readable cannot happen". Two shapes broke it: an
+  owner-less descriptor with a real space and `private` visibility fell through to
+  the `legacy` token — admitted to everyone — while `effectiveLevel` granted nobody
+  anything; and an unowned descriptor's grants were indexed but ignored by the
+  short-circuit. Fixed with `Subjects.TOKEN_NONE` (which `admittingTokens` never
+  emits) and by making the legacy admission a contribution rather than an early
+  return. The agreement test now sweeps the **full** cross-product of owner × space
+  × visibility × grant shape × caller × policy — ~1000 cases — and it was that sweep
+  that found the second shape.
+- **`transferOwnership(id, null, …)` un-owned a whole graph**, which under the
+  default policy means owned by everybody. Validated in the service, not only at the
+  REST edge, since the bean is reachable in-process.
+
+### Correctness
+
+- **The backfill migration queried four descriptor types that do not exist.** It
+  used the ZIP file-extension names — `ai.labs.behavior`, `ai.labs.httpcalls`,
+  `ai.labs.langchain`, `ai.labs.regulardictionary` — where listings use
+  `ai.labs.rules`, `ai.labs.apicalls`, `ai.labs.llm`, `ai.labs.dictionary`
+  (AGENTS.md §5.5). Those four queries matched nothing and the migration then
+  recorded itself complete, so **every pre-existing rule set, api call, LLM config
+  and dictionary would have vanished from every listing** the moment enforcement was
+  switched on — including from their owners, with no way to re-run short of deleting
+  the log row. The list is now derived from the stores' own `resourceURI` constants,
+  and `WorkspaceAccessIndexMigrationTest` asserts it. The migration also no longer
+  records completion when a page read failed.
+- **`ResourceSharingService` wrote back at the wrong version.** It re-resolved the
+  current version at write time and wrote a descriptor read at an earlier one; a
+  concurrent `PUT` in between left the descriptor naming the wrong version of its
+  own resource. It now writes at the version it read.
+- **The grant list is disclosed at OWN, not VIEW.** `published` grants VIEW to
+  everyone, so returning grants to any reader published every subject on the
+  resource — real principal and team names.
+- **Nested groups are followed** when sharing a group-of-groups, bounded by a
+  nesting limit as well as the visited set.
+
+### Corrections to my own claims
+
+- **The MCP coverage claim was wrong.** `ResourceAccessGuard` and `RestVersionInfo`
+  said the MCP admin tools "call those same beans in-process and therefore inherit
+  it". `McpAdminTools` resolves most stores through `IRestInterfaceFactory`, which
+  builds a REST client and makes a **loopback HTTP call**. Only the injected facades
+  inherit the guard. Corrected in both javadocs and in the documentation.
+- **`accessIndex` being in `INDEXED_FIELDS` does not make the access predicate
+  index-backed.** The predicate is an unanchored regex, which neither backend can
+  serve from a btree index. Not a regression — the type predicate this store has
+  always applied is a regex scan too — but the comment claimed otherwise. It now
+  states plainly what the index does and does not buy, and names the fix (tokens as
+  an array plus an operator on `IResourceFilter`), deliberately not attempted blind
+  because the PostgreSQL half cannot be verified without a PostgreSQL to run it on.
+
+### Verification
+
+Full unit suite: 20 373 tests. The only remaining failures are the environmental
+ones this machine always has (loopback sockets and event-loop creation) — none in
+any touched package. New tests: `WorkspaceAccessIndexMigrationTest`,
+`ResourceUtilitiesDuplicateOwnershipTest`, the widened `DescriptorAccessTest`
+cross-product sweep, and the missing-descriptor and principal-trimming cases in
+`ResourceAccessGuardTest`.
+
+---
+
+
+
 ## 🔐 feat(security): per-user workspaces and resource sharing (2026-08-29)
 
 **Repo:** EDDI (`feat/multi-user-spaces-and-sharing`)

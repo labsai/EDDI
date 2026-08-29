@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.mcp;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.triggermanagement.IRestAgentTriggerStore;
 import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
@@ -86,7 +87,8 @@ class McpConversationToolsTest {
         var conversationAccessGuard = new ConversationAccessGuard(mockIdentity, new OwnershipValidator(false),
                 mock(IConversationDescriptorStore.class));
         tools = new McpConversationTools(conversationService, agentAdmin, AgentStore, restInterfaceFactory, jsonSerialization, boundedLogStore,
-                auditStore, AgentTriggerStore, userConversationStore, RestAgentEngine, mockIdentity, conversationAccessGuard, false);
+                auditStore, AgentTriggerStore, userConversationStore, RestAgentEngine, mockIdentity, conversationAccessGuard,
+                mock(ResourceAccessGuard.class), false);
     }
 
     // --- listAgents ---

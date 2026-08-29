@@ -42,6 +42,18 @@ public final class Subjects {
     public static final String TOKEN_ALL = "all";
 
     /**
+     * Access-index token that admits nobody.
+     * <p>
+     * An index must never be empty — an empty string matches no predicate, but so
+     * does {@code |}, and reasoning about which is which invites the wrong fix
+     * later. This is the explicit "reachable by no one" marker, and
+     * {@link DescriptorAccess#admittingTokens} never emits it, so a resource
+     * carrying it is listed by nobody. It is the correct index for a descriptor
+     * whose structured fields also grant nobody anything.
+     */
+    public static final String TOKEN_NONE = "none";
+
+    /**
      * Space id and access-index token for resources created before ownership was
      * recorded. Whether it is actually admitted to a listing is the operator's
      * choice — see {@code eddi.workspaces.legacy-visibility}.

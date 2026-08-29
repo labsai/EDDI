@@ -35,9 +35,17 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * with a non-throwing one for listings.
  *
  * <h3>Where this is and is not applied</h3> It guards the <em>authoring</em>
- * surface: {@code RestVersionInfo} and the {@code IRest*Store} facades, which
- * the MCP admin tools also call in-process and therefore inherit. It is
- * deliberately absent from the engine's own resolution path —
+ * surface: {@code RestVersionInfo} and the {@code IRest*Store} facades. MCP
+ * tools that hold an injected facade — {@code McpConversationTools}'s agent
+ * store, {@code McpGroupTools}'s group store, {@code McpAdminTools}'s
+ * {@code IRestAgentAdministration} — call those beans in-process and inherit
+ * it. MCP tools that resolve a store through {@code IRestInterfaceFactory}
+ * instead do <em>not</em>: that builds a REST client and makes a loopback HTTP
+ * call, so the endpoint's own checks apply to a request that carries no
+ * credentials — which is a pre-existing problem with internal loopback calls,
+ * not something this guard introduces or fixes.
+ * <p>
+ * It is deliberately absent from the engine's own resolution path —
  * {@code ResourceClientLibrary.getResource} reads through the stores directly,
  * because the identity on a conversation turn is whoever is chatting, who does
  * not own the agent they are talking to.
@@ -135,15 +143,8 @@ public class ResourceAccessGuard {
         try {
             descriptor = documentDescriptorStore.readCurrentDescriptor(resourceId);
         } catch (ResourceNotFoundException e) {
-            // No descriptor at all. Not necessarily an error: resources can predate the
-            // descriptor filter, and a few are created by paths that never wrote one. Treat
-            // it exactly as an unowned descriptor is treated, so the legacy-visibility
-            // policy decides — rather than inventing a third answer here.
-            LOGGER.debugf("No descriptor for resource %s; falling back to legacy-visibility policy", sanitize(resourceId));
-            if (settings.admitsLegacy()) {
-                return;
-            }
-            throw new ForbiddenException("Access denied: this " + resourceType + " has no recorded owner");
+            requireLegacyFallback(resourceId, required, resourceType);
+            return;
         } catch (ResourceStoreException e) {
             LOGGER.warnf("Could not load descriptor for access check on %s: %s", sanitize(resourceId), e.getMessage());
             throw new ForbiddenException("Access denied: unable to verify ownership of this " + resourceType);
@@ -186,11 +187,8 @@ public class ResourceAccessGuard {
         try {
             descriptor = documentDescriptorStore.readCurrentDescriptor(agentId);
         } catch (ResourceNotFoundException e) {
-            LOGGER.debugf("No descriptor for agent %s; falling back to legacy-visibility policy", sanitize(agentId));
-            if (settings.admitsLegacy()) {
-                return;
-            }
-            throw new ForbiddenException("Access denied: this agent has no recorded owner");
+            requireLegacyFallback(agentId, AccessLevel.USE, "agent");
+            return;
         } catch (ResourceStoreException e) {
             LOGGER.warnf("Could not load descriptor for use check on agent %s: %s", sanitize(agentId), e.getMessage());
             throw new ForbiddenException("Access denied: unable to verify access to this agent");
@@ -203,6 +201,36 @@ public class ResourceAccessGuard {
             throw new ForbiddenException("Access denied: you do not have access to this agent. Ask its owner to share it with you, "
                     + "or have them publish it if it is meant to be public.");
         }
+    }
+
+    /**
+     * What to do when a resource has no descriptor at all.
+     *
+     * <h3>Read-only, never write</h3> A missing descriptor is not the same as an
+     * unowned one. Resources can predate the descriptor filter, and some creation
+     * paths never produce one — {@code AgentSetupService} reaches the stores over
+     * an unauthenticated loopback call, for instance. Treating that as
+     * {@link AccessLevel#OWN} under the default {@code legacy-visibility=shared}
+     * would hand every editor delete, undeploy and re-share on any such resource,
+     * which is a fail-open answer to a question we could not answer at all.
+     * <p>
+     * So the fallback admits reading and using, and refuses anything above it
+     * regardless of the legacy policy. That keeps an upgraded deployment working —
+     * nothing disappears, nothing stops answering — without letting an absent
+     * record grant authority.
+     * <p>
+     * Logged at WARN rather than DEBUG: a resource with no descriptor is a gap an
+     * operator should be able to find and close, not something to discover from a
+     * support ticket.
+     */
+    private void requireLegacyFallback(String resourceId, AccessLevel required, String resourceType) {
+        if (settings.admitsLegacy() && !required.includes(AccessLevel.EDIT)) {
+            LOGGER.debugf("No descriptor for %s %s; admitting %s under legacy-visibility", resourceType, sanitize(resourceId), required);
+            return;
+        }
+        LOGGER.warnf("No descriptor recorded for %s '%s' — refusing %s access. A resource with no descriptor has no owner, "
+                + "so it cannot be edited, deleted or re-shared until one is assigned.", resourceType, sanitize(resourceId), required);
+        throw new ForbiddenException("Access denied: this " + resourceType + " has no recorded owner");
     }
 
     /**
@@ -224,7 +252,10 @@ public class ResourceAccessGuard {
             String principal = spaceContext.currentPrincipal();
             if (principal != null) {
                 if (descriptor.getOwnerId() == null || descriptor.getOwnerId().isBlank()) {
-                    descriptor.setOwnerId(principal);
+                    // Trimmed, because CallerSpaces.of and defaultWriteSpace both trim: an owner
+                    // stored with surrounding whitespace would never match its own principal
+                    // again, and the owner would silently lose their own resource.
+                    descriptor.setOwnerId(principal.trim());
                 }
                 if (descriptor.getSpaceId() == null || descriptor.getSpaceId().isBlank()) {
                     descriptor.setSpaceId(spaceContext.defaultWriteSpace());

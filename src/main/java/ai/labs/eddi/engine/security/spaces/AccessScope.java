@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.security.spaces;
 
+import ai.labs.eddi.datastore.DescriptorStore;
 import ai.labs.eddi.datastore.IResourceFilter;
 
 import java.util.ArrayList;
@@ -24,9 +25,6 @@ import java.util.List;
  * @author ginccc
  */
 public final class AccessScope {
-
-    /** The field the materialised access index is stored in. */
-    public static final String FIELD_ACCESS_INDEX = "accessIndex";
 
     private static final AccessScope UNRESTRICTED = new AccessScope(null);
 
@@ -74,7 +72,7 @@ public final class AccessScope {
         }
         List<IResourceFilter.QueryFilter> filters = new ArrayList<>(admittingTokens.size());
         for (String token : admittingTokens) {
-            filters.add(new IResourceFilter.QueryFilter(FIELD_ACCESS_INDEX, Subjects.tokenPattern(token)));
+            filters.add(new IResourceFilter.QueryFilter(DescriptorStore.FIELD_ACCESS_INDEX, Subjects.tokenPattern(token)));
         }
         return new IResourceFilter.QueryFilters(IResourceFilter.QueryFilters.ConnectingType.OR, filters);
     }

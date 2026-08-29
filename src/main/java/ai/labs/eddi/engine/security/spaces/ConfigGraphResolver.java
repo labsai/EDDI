@@ -44,10 +44,13 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  * on config that may since have changed.
  *
  * <h3>Bounded on purpose</h3> A malformed or hostile config can point at
- * itself, and a deep graph could otherwise fan out without limit. Visited ids
- * are tracked, the queue is capped, and any single unreadable reference is
- * skipped rather than failing the whole share — a share that silently grants
- * nothing is worse than one that grants slightly less than the maximum.
+ * itself, and a deep graph could otherwise fan out without limit. Three bounds:
+ * {@code visited} stops a cycle from being walked twice, the <em>result</em> is
+ * capped at {@link #MAX_GRAPH_SIZE} (the queue itself is not — it drains
+ * against that cap), and group nesting stops at {@link #MAX_GROUP_NESTING}. Any
+ * single unreadable reference is skipped rather than failing the whole share: a
+ * share that silently grants nothing is worse than one that grants slightly
+ * less than the maximum.
  *
  * @author ginccc
  */
@@ -62,6 +65,13 @@ public class ConfigGraphResolver {
      * config cannot turn one share into an unbounded write amplification.
      */
     static final int MAX_GRAPH_SIZE = 500;
+
+    /**
+     * How far group-of-group nesting is followed. Deeper than any group a human
+     * assembles, and a hard stop for a config that nests into itself — which
+     * {@code visited} also catches, belt and braces.
+     */
+    static final int MAX_GROUP_NESTING = 8;
 
     private static final String KEY_URI = "uri";
     private static final String PARSER_HOST = "ai.labs.parser";
@@ -94,7 +104,7 @@ public class ConfigGraphResolver {
         Set<String> visited = new LinkedHashSet<>();
         Deque<String> queue = new ArrayDeque<>();
 
-        seedFromRoot(rootId, queue, visited);
+        seedFromRoot(rootId, queue, visited, 0);
 
         Set<String> result = new LinkedHashSet<>();
         while (!queue.isEmpty() && result.size() < MAX_GRAPH_SIZE) {
@@ -116,8 +126,11 @@ public class ConfigGraphResolver {
         return result;
     }
 
-    private void seedFromRoot(String rootId, Deque<String> queue, Set<String> visited) {
-        visited.add(rootId);
+    private void seedFromRoot(String rootId, Deque<String> queue, Set<String> visited, int depth) {
+        if (!visited.add(rootId) && depth > 0) {
+            // Already seeded — a group that (directly or indirectly) contains itself.
+            return;
+        }
 
         // An agent points at workflows.
         try {
@@ -139,12 +152,19 @@ public class ConfigGraphResolver {
             AgentGroupConfiguration group = agentGroupStore.read(rootId, current.getVersion());
             if (group != null && group.getMembers() != null) {
                 for (var member : group.getMembers()) {
-                    if (member != null && member.agentId() != null && !member.agentId().isBlank()) {
-                        queue.offer(member.agentId());
-                        // A member agent's own graph is reached by seeding from it in turn.
-                        for (String nested : referencedFromAgent(member.agentId())) {
-                            queue.offer(nested);
-                        }
+                    if (member == null || member.agentId() == null || member.agentId().isBlank()) {
+                        continue;
+                    }
+                    queue.offer(member.agentId());
+                    // A member's own graph. A member is either an agent (workflows) or a
+                    // nested group (group-of-groups is a shipped feature), and the id alone
+                    // does not say which — so try both and let the unreadable one contribute
+                    // nothing. Bounded by `visited` and MAX_GRAPH_SIZE like everything else.
+                    for (String nested : referencedFromAgent(member.agentId())) {
+                        queue.offer(nested);
+                    }
+                    if (depth < MAX_GROUP_NESTING) {
+                        seedFromRoot(member.agentId(), queue, visited, depth + 1);
                     }
                 }
             }

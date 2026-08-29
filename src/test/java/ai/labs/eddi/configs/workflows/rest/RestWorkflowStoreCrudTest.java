@@ -50,7 +50,7 @@ class RestWorkflowStoreCrudTest {
         documentDescriptorStore = mock(IDocumentDescriptorStore.class);
         jsonSchemaCreator = mock(IJsonSchemaCreator.class);
         sut = new RestWorkflowStore(workflowStore, resourceClientLibrary, documentDescriptorStore, jsonSchemaCreator,
-                mock(ResourceAccessGuard.class));
+                permissiveGuard());
     }
 
     private IResourceStore.IResourceId dummyResourceId(String id, int version) {
@@ -499,5 +499,18 @@ class RestWorkflowStoreCrudTest {
             // Should not propagate — logs warning and continues
             assertDoesNotThrow(() -> sut.deleteWorkflow("aabbccddeeff112233445566", 1, true, true));
         }
+    }
+
+    /**
+     * A guard that admits everything. {@code visibleOnly} filters with
+     * {@code canAccess}, which a bare Mockito mock answers {@code false} to —
+     * correct for a security check, wrong for a test that is not about the security
+     * check.
+     */
+    private static ResourceAccessGuard permissiveGuard() {
+        ResourceAccessGuard guard = mock(ResourceAccessGuard.class);
+        lenient().when(guard.seesEverything()).thenReturn(true);
+        lenient().when(guard.canAccess(any(), any())).thenReturn(true);
+        return guard;
     }
 }

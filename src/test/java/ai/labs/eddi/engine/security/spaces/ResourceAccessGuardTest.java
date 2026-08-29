@@ -145,12 +145,29 @@ class ResourceAccessGuardTest {
         }
 
         @Test
-        @DisplayName("a missing descriptor follows the legacy-visibility policy")
-        void missingDescriptorFollowsPolicy() throws Exception {
+        @DisplayName("a missing descriptor admits reading, and never more than reading")
+        void missingDescriptorIsReadOnly() throws Exception {
             var store = mock(IDocumentDescriptorStore.class);
             when(store.readCurrentDescriptor(RESOURCE_ID)).thenThrow(new IResourceStore.ResourceNotFoundException("none"));
+            var g = guard(identity("bob"), settings, store);
 
-            assertDoesNotThrow(() -> guard(identity("bob"), settings, store).requireAccess(RESOURCE_ID, AccessLevel.VIEW, "agent"));
+            // Some creation paths produce no descriptor at all — the setup API reaches the
+            // stores over an unauthenticated loopback call, for one. Treating that as OWN
+            // would hand every editor delete, undeploy and re-share on those resources.
+            assertDoesNotThrow(() -> g.requireAccess(RESOURCE_ID, AccessLevel.VIEW, "agent"));
+            assertDoesNotThrow(() -> g.requireAgentUseAccess(RESOURCE_ID));
+
+            assertThrows(ForbiddenException.class, () -> g.requireAccess(RESOURCE_ID, AccessLevel.EDIT, "agent"),
+                    "an absent record must not grant the authority to change the resource");
+            assertThrows(ForbiddenException.class, () -> g.requireAccess(RESOURCE_ID, AccessLevel.OWN, "agent"),
+                    "an absent record must not grant the authority to delete or re-share");
+        }
+
+        @Test
+        @DisplayName("admin-only legacy visibility refuses a missing descriptor outright")
+        void missingDescriptorUnderStrictPolicy() throws Exception {
+            var store = mock(IDocumentDescriptorStore.class);
+            when(store.readCurrentDescriptor(RESOURCE_ID)).thenThrow(new IResourceStore.ResourceNotFoundException("none"));
 
             var strict = settings(true, true, WorkspaceSettings.LEGACY_ADMIN_ONLY);
             assertThrows(ForbiddenException.class,
@@ -205,6 +222,17 @@ class ResourceAccessGuardTest {
             assertEquals(Subjects.personalSpace("alice"), stamped.getSpaceId());
             assertEquals(ResourceVisibility.space.wireName(), stamped.getVisibility());
             assertTrue(stamped.getAccessIndex().contains(Subjects.OWNER_TOKEN_PREFIX + "alice"));
+        }
+
+        @Test
+        @DisplayName("a principal with surrounding whitespace is stored trimmed")
+        void trimsThePrincipal() {
+            var settings = settings(false, true, WorkspaceSettings.LEGACY_SHARED);
+            var g = guard(identity("  alice  "), settings, mock(IDocumentDescriptorStore.class));
+
+            var stamped = g.stampNewDescriptor(new DocumentDescriptor());
+            assertEquals("alice", stamped.getOwnerId(),
+                    "CallerSpaces trims, so an untrimmed owner would never match its own principal again");
         }
 
         @Test

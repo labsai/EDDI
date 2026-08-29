@@ -66,7 +66,7 @@ class RestAgentStoreExtendedTest {
         openMocks(this);
         restAgentStore = new RestAgentStore(agentStore, restWorkflowStore,
                 documentDescriptorStore, jsonSchemaCreator, scheduleStore, capabilityRegistryService, deploymentStore,
-                mock(ResourceAccessGuard.class));
+                permissiveGuard());
     }
 
     // ==================== readJsonSchema ====================
@@ -459,5 +459,18 @@ class RestAgentStoreExtendedTest {
                 return version;
             }
         };
+    }
+
+    /**
+     * A guard that admits everything. {@code visibleOnly} filters with
+     * {@code canAccess}, which a bare Mockito mock answers {@code false} to —
+     * correct for a security check, wrong for a test that is not about the security
+     * check.
+     */
+    private static ResourceAccessGuard permissiveGuard() {
+        ResourceAccessGuard guard = mock(ResourceAccessGuard.class);
+        lenient().when(guard.seesEverything()).thenReturn(true);
+        lenient().when(guard.canAccess(any(), any())).thenReturn(true);
+        return guard;
     }
 }

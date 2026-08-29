@@ -23,10 +23,12 @@ import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
  * The shared CRUD body behind all fifteen configuration resource types.
  *
  * <h3>This is where the authoring surface is guarded</h3> Every
- * {@code IRest*Store} delegates its list / read / update / delete here, and the
- * MCP admin tools call those same beans in-process — so one
- * {@link ResourceAccessGuard} here covers both surfaces, rather than fifteen
- * stores each remembering to check.
+ * {@code IRest*Store} delegates its list / read / update / delete here, so one
+ * {@link ResourceAccessGuard} covers all fifteen types rather than each store
+ * remembering to check. MCP tools that hold an injected facade inherit it
+ * through the same beans; MCP tools that resolve a store through
+ * {@code IRestInterfaceFactory} make a loopback HTTP call instead and are
+ * subject to the endpoint's checks, not this object's.
  * <p>
  * The engine deliberately does <em>not</em> pass through this class: since the
  * runtime/authoring split, {@code ResourceClientLibrary.getResource} and the

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.descriptors.rest;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.descriptors.model.SimpleDocumentDescriptor;
@@ -33,7 +34,7 @@ class RestDocumentDescriptorStoreTest {
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
-        restStore = new RestDocumentDescriptorStore(documentDescriptorStore);
+        restStore = new RestDocumentDescriptorStore(documentDescriptorStore, mock(ResourceAccessGuard.class));
     }
 
     @Test
@@ -41,7 +42,7 @@ class RestDocumentDescriptorStoreTest {
     void readDescriptors() throws Exception {
         var desc = new DocumentDescriptor();
         desc.setName("test");
-        when(documentDescriptorStore.readDescriptors("agent", "filter", 0, 10, false))
+        when(documentDescriptorStore.readDescriptors(eq("agent"), eq("filter"), eq(0), eq(10), eq(false), any()))
                 .thenReturn(List.of(desc));
 
         List<DocumentDescriptor> result = restStore.readDescriptors("agent", "filter", 0, 10);
@@ -52,7 +53,7 @@ class RestDocumentDescriptorStoreTest {
     @Test
     @DisplayName("readDescriptors — throws InternalServerErrorException on ResourceStoreException")
     void readDescriptorsStoreException() throws Exception {
-        when(documentDescriptorStore.readDescriptors(any(), any(), any(), any(), eq(false)))
+        when(documentDescriptorStore.readDescriptors(any(), any(), any(), any(), eq(false), any()))
                 .thenThrow(new IResourceStore.ResourceStoreException("db error"));
 
         assertThrows(InternalServerErrorException.class,
@@ -62,7 +63,7 @@ class RestDocumentDescriptorStoreTest {
     @Test
     @DisplayName("readDescriptors — throws NotFoundException on ResourceNotFoundException")
     void readDescriptorsNotFound() throws Exception {
-        when(documentDescriptorStore.readDescriptors(any(), any(), any(), any(), eq(false)))
+        when(documentDescriptorStore.readDescriptors(any(), any(), any(), any(), eq(false), any()))
                 .thenThrow(new IResourceStore.ResourceNotFoundException("not found"));
 
         assertThrows(NotFoundException.class,

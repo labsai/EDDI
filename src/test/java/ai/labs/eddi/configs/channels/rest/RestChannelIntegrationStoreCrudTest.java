@@ -91,7 +91,7 @@ class RestChannelIntegrationStoreCrudTest {
         @DisplayName("should delegate to documentDescriptorStore")
         void delegatesToStore() throws Exception {
             var descriptors = List.of(new DocumentDescriptor());
-            when(documentDescriptorStore.readDescriptors("ai.labs.channel", "filter", 0, 10, false))
+            when(documentDescriptorStore.readDescriptors(eq("ai.labs.channel"), eq("filter"), eq(0), eq(10), eq(false), any()))
                     .thenReturn(descriptors);
 
             List<DocumentDescriptor> result = sut.readChannelDescriptors("filter", 0, 10);

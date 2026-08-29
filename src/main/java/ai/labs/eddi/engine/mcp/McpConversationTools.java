@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.mcp;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.triggermanagement.IRestAgentTriggerStore;
 import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
@@ -74,6 +75,7 @@ public class McpConversationTools {
     private final IConversationService conversationService;
     private final IRestAgentAdministration agentAdmin;
     private final IRestAgentStore agentStore;
+    private final ResourceAccessGuard resourceAccessGuard;
     private final IRestInterfaceFactory restInterfaceFactory;
     private final IJsonSerialization jsonSerialization;
     private final BoundedLogStore boundedLogStore;
@@ -96,7 +98,9 @@ public class McpConversationTools {
             IRestInterfaceFactory restInterfaceFactory, IJsonSerialization jsonSerialization, BoundedLogStore boundedLogStore,
             IRestAuditStore auditStore, IRestAgentTriggerStore agentTriggerStore, IUserConversationStore userConversationStore,
             IRestAgentEngine restAgentEngine, SecurityIdentity identity, ConversationAccessGuard conversationAccessGuard,
+            ResourceAccessGuard resourceAccessGuard,
             @ConfigProperty(name = "authorization.enabled", defaultValue = "false") boolean authEnabled) {
+        this.resourceAccessGuard = resourceAccessGuard;
         this.conversationService = conversationService;
         this.agentAdmin = agentAdmin;
         this.agentStore = agentStore;
@@ -169,6 +173,10 @@ public class McpConversationTools {
             // engine then assigns an anonymous id, as before). Without this, an
             // MCP-created conversation would belong to nobody and its own creator
             // could never read it back once the ownership gate applies.
+            // The same USE gate the REST start endpoint applies. Without it an MCP client
+            // holding only eddi-viewer — the lowest tier — could hold a full conversation
+            // with any private agent by id, which is 403 over REST.
+            resourceAccessGuard.requireAgentUseAccess(agentId);
             String ownerUserId = conversationAccessGuard.resolveOwnerUserId(null);
             ConversationResult result = conversationService.startConversation(env, agentId, ownerUserId, Collections.emptyMap());
             return jsonSerialization.serialize(Map.of("conversationId", result.conversationId(), "conversationUri",
@@ -252,6 +260,7 @@ public class McpConversationTools {
             // owner. An existing conversation must instead be owned by the caller:
             // continuing another user's conversation is a write into it.
             if (convId == null || convId.isBlank()) {
+                resourceAccessGuard.requireAgentUseAccess(agentId);
                 String ownerUserId = conversationAccessGuard.resolveOwnerUserId(null);
                 ConversationResult convResult = conversationService.startConversation(env, agentId, ownerUserId, Collections.emptyMap());
                 convId = convResult.conversationId();
@@ -853,6 +862,7 @@ public class McpConversationTools {
         // Start a new conversation — use ConversationService directly to avoid
         // the JAX-RS layer which converts exceptions to HTTP responses that are
         // hard to inspect programmatically.
+        resourceAccessGuard.requireAgentUseAccess(agentId);
         var initialContext = new HashMap<String, Context>(deployment.getInitialContext());
         var convResult = conversationService.startConversation(usedEnv, agentId, userId, initialContext);
         String conversationId = convResult.conversationId();

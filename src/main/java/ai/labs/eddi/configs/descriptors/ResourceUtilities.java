@@ -7,6 +7,7 @@ package ai.labs.eddi.configs.descriptors;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.utils.RestUtilities;
 
 import jakarta.ws.rs.BadRequestException;
@@ -42,7 +43,25 @@ public class ResourceUtilities {
         throw new BadRequestException(Response.status(BAD_REQUEST).entity(message).type(MediaType.TEXT_PLAIN).build());
     }
 
-    public static void createDocumentDescriptorForDuplicate(IDocumentDescriptorStore documentDescriptorStore, String oldId, Integer oldVersion,
+    /**
+     * Creates the descriptor for a duplicated resource.
+     *
+     * <h3>A copy belongs to whoever made it</h3> The source descriptor is used as a
+     * template for name and description only — its ownership, space, visibility and
+     * grants are stripped and the duplicating caller is stamped instead.
+     * <p>
+     * Copying them would be wrong in both directions. Duplicating a colleague's
+     * <em>published</em> agent (which anyone may read, and therefore duplicate)
+     * would file the copy under <em>their</em> name, in <em>their</em> space,
+     * leaving the person who made it unable to edit or delete it — and letting
+     * anyone inject resources into someone else's workspace, attributed to them.
+     * <p>
+     * {@code DocumentDescriptorFilter} cannot rescue this: it only creates a
+     * descriptor when none exists, and this method has already created one by the
+     * time the filter runs.
+     */
+    public static void createDocumentDescriptorForDuplicate(IDocumentDescriptorStore documentDescriptorStore,
+                                                            ResourceAccessGuard resourceAccessGuard, String oldId, Integer oldVersion,
                                                             URI newResourceLocation)
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
 
@@ -50,16 +69,21 @@ public class ResourceUtilities {
 
         var newResourceId = RestUtilities.extractResourceId(newResourceLocation);
 
+        DocumentDescriptor duplicate = new DocumentDescriptor();
+        duplicate.setDescription(oldDescriptor.getDescription());
         if (!isNullOrEmpty(oldDescriptor.getName())) {
-            oldDescriptor.setName(oldDescriptor.getName() + COPY_APPENDIX);
+            duplicate.setName(oldDescriptor.getName() + COPY_APPENDIX);
+        } else {
+            duplicate.setName(oldDescriptor.getName());
         }
 
-        oldDescriptor.setResource(newResourceLocation);
+        duplicate.setResource(newResourceLocation);
         Date currentTime = new Date(System.currentTimeMillis());
-        oldDescriptor.setCreatedOn(currentTime);
-        oldDescriptor.setLastModifiedOn(currentTime);
+        duplicate.setCreatedOn(currentTime);
+        duplicate.setLastModifiedOn(currentTime);
 
-        documentDescriptorStore.createDescriptor(newResourceId.getId(), newResourceId.getVersion(), oldDescriptor);
+        documentDescriptorStore.createDescriptor(newResourceId.getId(), newResourceId.getVersion(),
+                resourceAccessGuard.stampNewDescriptor(duplicate));
 
     }
 

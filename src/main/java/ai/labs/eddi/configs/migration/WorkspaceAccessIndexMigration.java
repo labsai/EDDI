@@ -4,7 +4,22 @@
  */
 package ai.labs.eddi.configs.migration;
 
+import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
+import ai.labs.eddi.configs.channels.IRestChannelIntegrationStore;
+import ai.labs.eddi.configs.connections.IRestConnectionStore;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.configs.dictionary.IRestDictionaryStore;
+import ai.labs.eddi.configs.groups.IRestAgentGroupStore;
+import ai.labs.eddi.configs.llm.IRestLlmStore;
+import ai.labs.eddi.configs.mcpcalls.IRestMcpCallsStore;
+import ai.labs.eddi.configs.output.IRestOutputStore;
+import ai.labs.eddi.configs.parser.IRestParserStore;
+import ai.labs.eddi.configs.propertysetter.IRestPropertySetterStore;
+import ai.labs.eddi.configs.rag.IRestRagStore;
+import ai.labs.eddi.configs.rules.IRestRuleSetStore;
+import ai.labs.eddi.configs.snippets.IRestPromptSnippetStore;
+import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.migration.model.MigrationLog;
 import ai.labs.eddi.engine.security.spaces.DescriptorAccess;
@@ -15,6 +30,7 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.util.List;
+import java.util.stream.Stream;
 
 /**
  * One-shot startup migration: gives every pre-existing configuration descriptor
@@ -48,13 +64,43 @@ public class WorkspaceAccessIndexMigration {
     private static final String MIGRATION_KEY = "workspace-access-index-migration-complete";
 
     /**
-     * Descriptor types to backfill. Every configuration type that has a REST store,
+     * Descriptor types to backfill: every configuration type that has a REST store,
      * because every one of them is listed through the same access predicate.
+     *
+     * <h3>Derived, not hand-written</h3> The type a listing queries comes from
+     * {@link RestUtilities#extractDescriptorType} applied to each store's own
+     * {@code resourceURI}, and several of those differ from the file-extension
+     * names used in ZIP archives — {@code ai.labs.rules} not
+     * {@code ai.labs.behavior}, {@code ai.labs.apicalls} not
+     * {@code ai.labs.httpcalls}, {@code ai.labs.llm} not {@code ai.labs.langchain},
+     * {@code ai.labs.dictionary} not {@code ai.labs.regulardictionary} (AGENTS.md
+     * §5.5). Deriving the list from the constants is what keeps a hand-written
+     * near-miss from silently backfilling nothing for a type and then recording
+     * itself as complete — which would make every rule set, api call, LLM config
+     * and dictionary vanish from every listing the moment enforcement was switched
+     * on.
+     * <p>
+     * {@code WorkspaceAccessIndexMigrationTest} asserts this against the stores.
      */
-    private static final List<String> DESCRIPTOR_TYPES = List.of(
-            "ai.labs.agent", "ai.labs.workflow", "ai.labs.behavior", "ai.labs.httpcalls", "ai.labs.mcpcalls",
-            "ai.labs.langchain", "ai.labs.output", "ai.labs.property", "ai.labs.parser", "ai.labs.regulardictionary",
-            "ai.labs.rag", "ai.labs.snippet", "ai.labs.channel", "ai.labs.connection", "ai.labs.group");
+    static final List<String> DESCRIPTOR_TYPES = Stream.of(
+            IRestAgentStore.resourceURI,
+            IRestWorkflowStore.resourceURI,
+            IRestRuleSetStore.resourceURI,
+            IRestApiCallsStore.resourceURI,
+            IRestMcpCallsStore.resourceURI,
+            IRestLlmStore.resourceURI,
+            IRestOutputStore.resourceURI,
+            IRestPropertySetterStore.resourceURI,
+            IRestParserStore.resourceURI,
+            IRestDictionaryStore.resourceURI,
+            IRestRagStore.resourceURI,
+            IRestPromptSnippetStore.resourceURI,
+            IRestChannelIntegrationStore.resourceURI,
+            IRestConnectionStore.resourceURI,
+            IRestAgentGroupStore.resourceURI)
+            .map(RestUtilities::extractDescriptorType)
+            .distinct()
+            .toList();
 
     /**
      * Page size for the sweep. Bounded so a large deployment does not load it all.
@@ -86,6 +132,7 @@ public class WorkspaceAccessIndexMigration {
 
         int stamped = 0;
         int scanned = 0;
+        boolean complete = true;
         for (String type : DESCRIPTOR_TYPES) {
             for (int page = 0; page < MAX_PAGES; page++) {
                 List<DocumentDescriptor> batch;
@@ -96,6 +143,7 @@ public class WorkspaceAccessIndexMigration {
                     batch = descriptorStore.readDescriptors(type, "", page, BATCH_SIZE, true);
                 } catch (Exception e) {
                     LOGGER.warnf("Could not read %s descriptors on page %d during access-index backfill: %s", type, page, e.getMessage());
+                    complete = false;
                     break;
                 }
                 if (batch == null || batch.isEmpty()) {
@@ -111,6 +159,17 @@ public class WorkspaceAccessIndexMigration {
                     break;
                 }
             }
+        }
+
+        if (!complete) {
+            // Deliberately NOT recording completion: a partial backfill that marks itself
+            // done leaves descriptors with no access index, and those are invisible in
+            // every listing once enforcement is on — with no way to re-run short of
+            // deleting the log row by hand. Retrying on the next startup is cheap;
+            // the stamp is idempotent.
+            LOGGER.warnv("Workspace access-index backfill INCOMPLETE ({0} scanned, {1} stamped) — it will retry on the next startup.",
+                    scanned, stamped);
+            return;
         }
 
         LOGGER.infov("Workspace access-index backfill complete: {0} descriptor(s) scanned, {1} stamped.", scanned, stamped);

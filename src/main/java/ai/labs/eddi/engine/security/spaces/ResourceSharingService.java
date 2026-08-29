@@ -100,15 +100,25 @@ public class ResourceSharingService {
     public record ShareResult(List<String> updated, List<String> skipped) {
     }
 
-    /** Reports how a resource is shared. Requires read access. */
+    /**
+     * Reports how a resource is shared.
+     * <p>
+     * Readable at {@link AccessLevel#VIEW}, but the <em>grant list</em> only at
+     * {@link AccessLevel#OWN}. A {@code published} resource grants VIEW to
+     * everyone, so returning its grants to any reader would publish every subject
+     * on it — real principal names and Keycloak team names — to the whole
+     * deployment. Owner, space and the caller's own level are enough for a
+     * recipient to understand why they can see something and whom to ask about it.
+     */
     public ShareInfo describe(String resourceId) {
         accessGuard.requireAccess(resourceId, AccessLevel.VIEW, RESOURCE_TYPE);
         DocumentDescriptor descriptor = loadOrThrow(resourceId);
         AccessLevel level = accessGuard.effectiveLevel(descriptor);
+        boolean maySeeGrants = level != null && level.includes(AccessLevel.OWN);
+        List<ResourceGrant> grants = maySeeGrants && descriptor.getGrants() != null ? List.copyOf(descriptor.getGrants()) : List.of();
         return new ShareInfo(resourceId, descriptor.getOwnerId(), descriptor.getSpaceId(),
                 descriptor.getVisibility() == null ? ResourceVisibility.space.wireName() : descriptor.getVisibility(),
-                descriptor.getGrants() == null ? List.of() : List.copyOf(descriptor.getGrants()),
-                level == null ? null : level.name());
+                grants, level == null ? null : level.name());
     }
 
     /**
@@ -176,6 +186,15 @@ public class ResourceSharingService {
         if (!accessGuard.isAdmin()) {
             throw new ForbiddenException("Only an administrator may transfer ownership");
         }
+        // Validated here rather than only at the REST edge, because this is a public
+        // bean any in-process caller can reach. A blank owner combined with cascade
+        // would make the agent and its entire config graph unowned — which under the
+        // default legacy-visibility policy means owned by everybody.
+        if (newOwnerId == null || newOwnerId.isBlank()) {
+            throw new IllegalArgumentException("A new owner is required: transferring ownership to nobody would make the resource "
+                    + "unowned, which the legacy-visibility policy treats as reachable by everyone.");
+        }
+        String owner = newOwnerId.trim();
 
         List<String> updated = new ArrayList<>();
         List<String> skipped = new ArrayList<>();
@@ -186,14 +205,15 @@ public class ResourceSharingService {
 
         for (String id : all) {
             try {
-                DocumentDescriptor descriptor = loadOrNull(id);
-                if (descriptor == null) {
+                VersionedDescriptor loaded = loadOrNull(id);
+                if (loaded == null) {
                     skipped.add(id);
                     continue;
                 }
-                descriptor.setOwnerId(newOwnerId);
-                descriptor.setSpaceId(newSpaceId == null || newSpaceId.isBlank() ? Subjects.personalSpace(newOwnerId) : newSpaceId);
-                writeBack(id, descriptor);
+                DocumentDescriptor descriptor = loaded.descriptor();
+                descriptor.setOwnerId(owner);
+                descriptor.setSpaceId(newSpaceId == null || newSpaceId.isBlank() ? Subjects.personalSpace(owner) : newSpaceId.trim());
+                writeBack(id, descriptor, loaded.version());
                 updated.add(id);
             } catch (Exception e) {
                 LOGGER.warnf("Could not transfer ownership of %s: %s", sanitize(id), e.getMessage());
@@ -239,18 +259,19 @@ public class ResourceSharingService {
      * index disagree is invisible in listings it should appear in.
      */
     private void mutate(String id, List<String> updated, List<String> skipped, Consumer<DocumentDescriptor> change) {
-        DocumentDescriptor descriptor;
+        VersionedDescriptor loaded;
         try {
-            descriptor = loadOrNull(id);
+            loaded = loadOrNull(id);
         } catch (Exception e) {
             LOGGER.warnf("Could not load descriptor %s while updating sharing: %s", sanitize(id), e.getMessage());
             skipped.add(id);
             return;
         }
-        if (descriptor == null) {
+        if (loaded == null) {
             skipped.add(id);
             return;
         }
+        DocumentDescriptor descriptor = loaded.descriptor();
         // You cannot pass on access you were only lent. A referenced resource the
         // caller can read but does not own is left exactly as it was, and reported.
         if (!accessGuard.canAccess(descriptor, AccessLevel.OWN)) {
@@ -259,7 +280,7 @@ public class ResourceSharingService {
         }
         change.accept(descriptor);
         try {
-            writeBack(id, descriptor);
+            writeBack(id, descriptor, loaded.version());
             updated.add(id);
         } catch (Exception e) {
             LOGGER.warnf("Could not write sharing change to %s: %s", sanitize(id), e.getMessage());
@@ -267,26 +288,52 @@ public class ResourceSharingService {
         }
     }
 
-    private void writeBack(String id, DocumentDescriptor descriptor) throws ResourceStoreException, ResourceNotFoundException {
+    /**
+     * Writes the descriptor back at the version it was read from.
+     * <p>
+     * <b>Not</b> at whatever the current version happens to be at write time. The
+     * descriptor object in hand was read at version N; if a {@code PUT} on the
+     * resource lands in between, {@code DocumentDescriptorFilter} creates version
+     * N+1 with {@code resource} re-pointed at it — and writing our stale object
+     * over N+1 would leave the descriptor naming the wrong version of its own
+     * resource.
+     * <p>
+     * {@code setDescriptor} writes in place rather than creating a version, because
+     * sharing is metadata about the resource rather than a new revision of it;
+     * versioning it would make every share look like a config change in the
+     * resource's history.
+     * <p>
+     * Concurrent shares of the same resource still race — the store offers no
+     * compare-and-set on this path — so the last write wins on the grant list. Two
+     * people re-sharing one resource in the same instant is not a case worth a
+     * lock; two people sharing <em>different</em> resources, which is the common
+     * one, does not interact at all.
+     */
+    private void writeBack(String id, DocumentDescriptor descriptor, int version) throws ResourceStoreException, ResourceNotFoundException {
         accessGuard.stampModification(descriptor);
-        var current = documentDescriptorStore.getCurrentResourceId(id);
-        // setDescriptor writes in place rather than creating a version: sharing is
-        // metadata about the resource, not a new revision of it, and versioning it
-        // would make every share look like a config change in the resource's history.
-        documentDescriptorStore.setDescriptor(id, current.getVersion(), descriptor);
+        documentDescriptorStore.setDescriptor(id, version, descriptor);
     }
 
-    private DocumentDescriptor loadOrNull(String id) throws ResourceStoreException, ResourceNotFoundException {
-        return documentDescriptorStore.readCurrentDescriptor(id);
+    /**
+     * A descriptor and the version it was read at, so a write can go back to
+     * exactly that version rather than to whatever is current by then.
+     */
+    private record VersionedDescriptor(DocumentDescriptor descriptor, int version) {
+    }
+
+    private VersionedDescriptor loadOrNull(String id) throws ResourceStoreException, ResourceNotFoundException {
+        var current = documentDescriptorStore.getCurrentResourceId(id);
+        DocumentDescriptor descriptor = documentDescriptorStore.readDescriptor(id, current.getVersion());
+        return descriptor == null ? null : new VersionedDescriptor(descriptor, current.getVersion());
     }
 
     private DocumentDescriptor loadOrThrow(String id) {
         try {
-            DocumentDescriptor descriptor = loadOrNull(id);
-            if (descriptor == null) {
+            VersionedDescriptor loaded = loadOrNull(id);
+            if (loaded == null) {
                 throw new NotFoundException("No such resource: " + id);
             }
-            return descriptor;
+            return loaded.descriptor();
         } catch (ResourceNotFoundException e) {
             throw new NotFoundException("No such resource: " + id);
         } catch (ResourceStoreException e) {

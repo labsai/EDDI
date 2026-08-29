@@ -46,6 +46,7 @@ public class RestAgentGroupStore implements IRestAgentGroupStore {
 
     private final IAgentGroupStore groupStore;
     private final IDocumentDescriptorStore documentDescriptorStore;
+    private final ResourceAccessGuard resourceAccessGuard;
     private final IJsonSchemaCreator jsonSchemaCreator;
     private final IGroupWorkspaceStore workspaceStore;
     private final IScheduleStore scheduleStore;
@@ -55,6 +56,7 @@ public class RestAgentGroupStore implements IRestAgentGroupStore {
     public RestAgentGroupStore(IAgentGroupStore groupStore, IDocumentDescriptorStore documentDescriptorStore, IJsonSchemaCreator jsonSchemaCreator,
             IGroupWorkspaceStore workspaceStore, IScheduleStore scheduleStore,
             ResourceAccessGuard resourceAccessGuard) {
+        this.resourceAccessGuard = resourceAccessGuard;
         restVersionInfo = new RestVersionInfo<>(resourceURI, groupStore, documentDescriptorStore, resourceAccessGuard);
         this.groupStore = groupStore;
         this.documentDescriptorStore = documentDescriptorStore;
@@ -236,6 +238,10 @@ public class RestAgentGroupStore implements IRestAgentGroupStore {
                 if (config.getDescription() != null) {
                     descriptor.setDescription(config.getDescription());
                 }
+                // Stamped like any other newly created resource: this path runs when the
+                // descriptor filter has not (yet) produced one, and an unstamped descriptor
+                // would leave the group unowned.
+                resourceAccessGuard.stampNewDescriptor(descriptor);
                 try {
                     documentDescriptorStore.createDescriptor(resourceId, version, descriptor);
                 } catch (IResourceStore.ResourceStoreException ignored) {

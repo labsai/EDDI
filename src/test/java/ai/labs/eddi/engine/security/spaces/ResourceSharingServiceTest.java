@@ -65,6 +65,8 @@ class ResourceSharingServiceTest {
         descriptors.put(BORROWED_CHILD, descriptor("bob"));
 
         store = mock(IDocumentDescriptorStore.class);
+        // describe() resolves through readCurrentDescriptor; the mutating paths resolve
+        // the version explicitly so they can write back to the version they read.
         when(store.readCurrentDescriptor(anyString())).thenAnswer(i -> {
             var d = descriptors.get(i.<String>getArgument(0));
             if (d == null) {
@@ -72,16 +74,28 @@ class ResourceSharingServiceTest {
             }
             return d;
         });
-        when(store.getCurrentResourceId(anyString())).thenAnswer(i -> new IResourceStore.IResourceId() {
-            @Override
-            public String getId() {
-                return i.getArgument(0);
+        when(store.readDescriptor(anyString(), anyInt())).thenAnswer(i -> {
+            var d = descriptors.get(i.<String>getArgument(0));
+            if (d == null) {
+                throw new IResourceStore.ResourceNotFoundException("none");
             }
+            return d;
+        });
+        when(store.getCurrentResourceId(anyString())).thenAnswer(i -> {
+            if (!descriptors.containsKey(i.<String>getArgument(0))) {
+                throw new IResourceStore.ResourceNotFoundException("none");
+            }
+            return new IResourceStore.IResourceId() {
+                @Override
+                public String getId() {
+                    return i.getArgument(0);
+                }
 
-            @Override
-            public Integer getVersion() {
-                return 1;
-            }
+                @Override
+                public Integer getVersion() {
+                    return 1;
+                }
+            };
         });
 
         accessGuard = mock(ResourceAccessGuard.class);

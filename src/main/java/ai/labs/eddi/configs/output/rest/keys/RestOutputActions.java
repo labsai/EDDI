@@ -51,12 +51,10 @@ public class RestOutputActions implements IRestOutputActions {
     @Override
     public List<String> readOutputActions(String workflowId, Integer workflowVersion, String filter, Integer limit) {
         List<String> retOutputKeys = new LinkedList<>();
-        // These endpoints fan out from one workflow into whichever rule sets, api
-        // calls,
-        // output sets and dictionaries it references, reading those stores directly.
-        // The
-        // workflow is the entry point the caller named, so it is what access is decided
-        // against — without this the helper is an unguarded read of any workflow.
+        // This fans out from one workflow into whichever rule sets, api calls, output
+        // sets and dictionaries it references, reading those stores directly. The
+        // workflow is the entry point the caller named, so it is what access is
+        // decided against — without this the helper reads any workflow, unguarded.
         accessGuard.requireAccess(workflowId, AccessLevel.VIEW, "workflow");
         try {
             WorkflowConfiguration workflowConfig = workflowStore.read(workflowId, workflowVersion);
