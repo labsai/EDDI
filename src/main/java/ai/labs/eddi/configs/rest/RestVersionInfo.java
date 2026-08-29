@@ -7,6 +7,7 @@ package ai.labs.eddi.configs.rest;
 import ai.labs.eddi.configs.IRestVersionInfo;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
+import ai.labs.eddi.engine.security.spaces.AccessScope;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
@@ -79,13 +80,31 @@ public class RestVersionInfo<T> implements IRestVersionInfo {
         return readDescriptors(RestUtilities.extractDescriptorType(resourceURI), filter, index, limit);
     }
 
+    /**
+     * As {@link #readDescriptors(String, Integer, Integer)}, narrowed to one space.
+     * <p>
+     * The narrowing happens in the query for the same reason the access predicate
+     * does: filtering a page after the fact returns short pages, and page 2 of
+     * "everything" is not page 2 of "this space". It can only ever remove rows —
+     * see {@link AccessScope#withinSpace}.
+     */
+    public List<DocumentDescriptor> readDescriptors(String filter, Integer index, Integer limit, String space) {
+        return readDescriptors(RestUtilities.extractDescriptorType(resourceURI), filter, index, limit,
+                accessGuard.listingScope().withinSpace(space));
+    }
+
     public List<DocumentDescriptor> readDescriptors(String type, String filter, Integer index, Integer limit) {
+        return readDescriptors(type, filter, index, limit, accessGuard.listingScope());
+    }
+
+    private List<DocumentDescriptor> readDescriptors(String type, String filter, Integer index, Integer limit,
+                                                     AccessScope scope) {
         try {
             // Filtered in the query rather than on the returned page: post-filtering
             // returns short pages and forces the scan-budgeted back-fill that conversation
             // listing has to do, where no such predicate exists.
             List<DocumentDescriptor> descriptors = documentDescriptorStore.readDescriptors(type, filter, index, limit, false,
-                    accessGuard.listingScope());
+                    scope);
             // The scope decides WHICH rows come back; this decides how much of each row a
             // non-owner gets to read. Without it every listing serialises the grant list.
             descriptors.forEach(accessGuard::redactForCaller);

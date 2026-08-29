@@ -6,6 +6,7 @@ package ai.labs.eddi.configs.agents.rest;
 
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.any;
+import ai.labs.eddi.engine.security.spaces.AccessScope;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
@@ -120,7 +121,7 @@ class RestAgentStoreExpandedTest {
             when(documentDescriptorStore.readDescriptors(eq("ai.labs.agent"), eq("filter"), eq(0), eq(20), eq(false), any()))
                     .thenReturn(List.of(new DocumentDescriptor()));
 
-            List<DocumentDescriptor> result = sut.readAgentDescriptors("filter", 0, 20);
+            List<DocumentDescriptor> result = sut.readAgentDescriptors("filter", 0, 20, "");
 
             assertEquals(1, result.size());
         }
@@ -533,6 +534,10 @@ class RestAgentStoreExpandedTest {
         ResourceAccessGuard guard = mock(ResourceAccessGuard.class);
         lenient().when(guard.seesEverything()).thenReturn(true);
         lenient().when(guard.canAccess(any(), any())).thenReturn(true);
+        // A real guard never returns null here, and the space-narrowing overload
+        // chains straight off it. Left unstubbed the mock answers null and the
+        // listing NPEs, which reads as a production bug rather than a bare mock.
+        lenient().when(guard.listingScope()).thenReturn(AccessScope.unrestricted());
         return guard;
     }
 }

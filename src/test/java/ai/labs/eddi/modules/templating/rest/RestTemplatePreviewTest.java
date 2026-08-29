@@ -43,6 +43,7 @@ class RestTemplatePreviewTest {
     private IMemoryItemConverter memoryItemConverter;
     private PromptSnippetService promptSnippetService;
     private ConversationAccessGuard conversationAccessGuard;
+    private ResourceAccessGuard resourceAccessGuard;
     private RestTemplatePreview restTemplatePreview;
 
     @BeforeEach
@@ -52,11 +53,12 @@ class RestTemplatePreviewTest {
         memoryItemConverter = mock(IMemoryItemConverter.class);
         promptSnippetService = mock(PromptSnippetService.class);
         conversationAccessGuard = mock(ConversationAccessGuard.class);
+        resourceAccessGuard = mock(ResourceAccessGuard.class);
         when(promptSnippetService.getAll()).thenReturn(Map.of());
 
         restTemplatePreview = new RestTemplatePreview(
                 templatingEngine, conversationMemoryStore,
-                memoryItemConverter, promptSnippetService, conversationAccessGuard, mock(ResourceAccessGuard.class));
+                memoryItemConverter, promptSnippetService, conversationAccessGuard, resourceAccessGuard);
     }
 
     // ==================== Null / Blank Input ====================
@@ -276,6 +278,8 @@ class RestTemplatePreviewTest {
         void shouldInjectSnippetsIntoTemplateData() throws Exception {
             Map<String, Object> snippets = Map.of("safety", "Always verify facts.");
             when(promptSnippetService.getAll()).thenReturn(snippets);
+            // A caller who sees everything anyway gets the real contents.
+            when(resourceAccessGuard.seesEverything()).thenReturn(true);
             when(templatingEngine.processTemplate(eq("{{snippets.safety}}"), anyMap()))
                     .thenAnswer(inv -> {
                         Map<String, Object> data = inv.getArgument(1);
@@ -303,6 +307,36 @@ class RestTemplatePreviewTest {
             List<String> vars = response.availableVariables();
             assertTrue(vars.contains("snippets.greeting"), "Should list snippets.greeting");
             assertTrue(vars.contains("snippets.farewell"), "Should list snippets.farewell");
+        }
+
+        @Test
+        @DisplayName("a restricted caller cannot read snippet contents back through their own template")
+        void shouldNotLeakSnippetContentsThroughTheRenderedTemplate() throws Exception {
+            // The exfiltration this guards against: the reference panel redacts snippet
+            // contents but hands out the NAMES, and the caller supplies the template. So
+            // redacting only the panel is no protection — one call lists the names, a
+            // second renders "{snippets.<name>}". The contents must be gone from the map
+            // the engine renders against, not just from the panel.
+            Map<String, Object> snippets = Map.of("victimSecret", "Bob's proprietary prompt.");
+            when(promptSnippetService.getAll()).thenReturn(snippets);
+            when(resourceAccessGuard.seesEverything()).thenReturn(false);
+
+            Map<String, Object> rendered = new LinkedHashMap<>();
+            when(templatingEngine.processTemplate(eq("{snippets.victimSecret}"), anyMap()))
+                    .thenAnswer(inv -> {
+                        rendered.putAll(inv.getArgument(1));
+                        return "irrelevant";
+                    });
+
+            TemplatePreviewResponse response = restTemplatePreview.previewTemplate(
+                    new TemplatePreviewRequest("{snippets.victimSecret}", null));
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> renderedSnippets = (Map<String, Object>) rendered.get("snippets");
+            assertNotNull(renderedSnippets, "the key stays, so the preview can still say which references resolve");
+            assertTrue(renderedSnippets.containsKey("victimSecret"), "names are not the secret");
+            assertEquals("<redacted>", renderedSnippets.get("victimSecret"), "contents must not reach the engine");
+            assertEquals("<redacted>", response.variableValues().get("snippets.victimSecret"));
         }
 
         @Test

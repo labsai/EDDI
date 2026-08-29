@@ -136,6 +136,53 @@ Two things it deliberately will not do:
 
 ---
 
+## Asking what applies to you
+
+A client cannot work out whether workspaces are enforced by looking at the data.
+Ownership is recorded whenever authentication is on — deliberately, so
+attribution accumulates before you flip enforcement — and a deployment with the
+feature *off* returns descriptors that look exactly like one where everything
+predates ownership. So the server says.
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" "$EDDI/workspaces"
+```
+
+```json
+{
+  "enabled": true,
+  "principal": "alice@example.com",
+  "defaultSpace": "user:alice@example.com",
+  "spaces": [
+    { "id": "user:alice@example.com", "kind": "personal", "label": "alice@example.com" },
+    { "id": "team:engineering", "kind": "team", "label": "engineering" }
+  ],
+  "seesEverything": false
+}
+```
+
+`principal` is the value stamped as `ownerId` — compare against it, not against
+a display name from the token; the two need not match. Space `id`s are opaque:
+they carry escaping a client must not re-derive, and one built differently
+selects a workspace matching nothing rather than failing. `label` is the decoded
+form, for display only.
+
+It answers only for the caller, and takes no principal parameter, so it cannot
+be used to enumerate somebody else's group membership.
+
+Listings accept the ids it returns:
+
+```bash
+curl -H "Authorization: Bearer $TOKEN"   "$EDDI/agentstore/agents/descriptors?space=team:engineering"
+```
+
+`space` is a **narrowing only** — asking for a space you cannot reach returns
+nothing rather than granting it, and it narrows an administrator's view too. It
+is a query parameter rather than a client-side filter because page 2 of
+"everything" is not page 2 of "this space".
+
+---
+
 ## What changes for users when you enable it
 
 - **Listings** show only what the caller owns, shares a space with, has been

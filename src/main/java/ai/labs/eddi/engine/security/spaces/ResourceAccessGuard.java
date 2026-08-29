@@ -126,25 +126,31 @@ public class ResourceAccessGuard {
      *            the level the operation demands
      * @param resourceType
      *            human-readable type, for the error message
+     * @return the level the caller actually holds, which may exceed
+     *         {@code required}. Callers that also redact a response should pass
+     *         this to {@link #redactUnlessOwner} rather than re-deciding against
+     *         the descriptor they are about to return: that one may be an older
+     *         version, whose recorded owner and grants can differ from the current
+     *         ones this check used.
+     *
      * @throws ForbiddenException
      *             if the caller's level is insufficient, or if the descriptor
      *             cannot be loaded at all — an unverifiable owner is not an absent
      *             owner
      */
-    public void requireAccess(String resourceId, AccessLevel required, String resourceType) {
+    public AccessLevel requireAccess(String resourceId, AccessLevel required, String resourceType) {
         if (seesEverything()) {
-            return;
+            return AccessLevel.OWN;
         }
         if (resourceId == null || resourceId.isBlank()) {
-            return; // nothing addressed; the operation itself will fail on its own terms
+            return null; // nothing addressed; the operation itself will fail on its own terms
         }
 
         DocumentDescriptor descriptor;
         try {
             descriptor = documentDescriptorStore.readCurrentDescriptor(resourceId);
         } catch (ResourceNotFoundException e) {
-            requireLegacyFallback(resourceId, required, resourceType);
-            return;
+            return requireLegacyFallback(resourceId, required, resourceType);
         } catch (ResourceStoreException e) {
             LOGGER.warnf("Could not load descriptor for access check on %s: %s", sanitize(resourceId), e.getMessage());
             throw new ForbiddenException("Access denied: unable to verify ownership of this " + resourceType);
@@ -156,6 +162,7 @@ public class ResourceAccessGuard {
             LOGGER.debugf("Access detail: resourceId='%s', granted='%s', required='%s'", sanitize(resourceId), granted, required);
             throw new ForbiddenException("Access denied: you do not have " + required.name().toLowerCase() + " access to this " + resourceType);
         }
+        return granted;
     }
 
     /**
@@ -176,30 +183,43 @@ public class ResourceAccessGuard {
      * refusal message says.
      */
     public void requireAgentUseAccess(String agentId) {
+        requireUseAccess(agentId, "agent");
+    }
+
+    /**
+     * As {@link #requireAgentUseAccess}, for a target that is not an agent.
+     * <p>
+     * Group discussions are reachable by the same routes agents are — a channel
+     * target, a trigger — and a group is a guarded descriptor like any other, so
+     * the same check applies. The label only shapes the refusal message; passing
+     * the wrong one tells the caller to go ask the owner of the wrong thing.
+     */
+    public void requireUseAccess(String resourceId, String resourceTypeLabel) {
         if (seesEverything()) {
             return;
         }
-        if (agentId == null || agentId.isBlank()) {
+        if (resourceId == null || resourceId.isBlank()) {
             return;
         }
 
         DocumentDescriptor descriptor;
         try {
-            descriptor = documentDescriptorStore.readCurrentDescriptor(agentId);
+            descriptor = documentDescriptorStore.readCurrentDescriptor(resourceId);
         } catch (ResourceNotFoundException e) {
-            requireLegacyFallback(agentId, AccessLevel.USE, "agent");
+            requireLegacyFallback(resourceId, AccessLevel.USE, resourceTypeLabel);
             return;
         } catch (ResourceStoreException e) {
-            LOGGER.warnf("Could not load descriptor for use check on agent %s: %s", sanitize(agentId), e.getMessage());
-            throw new ForbiddenException("Access denied: unable to verify access to this agent");
+            LOGGER.warnf("Could not load descriptor for use check on %s %s: %s", resourceTypeLabel, sanitize(resourceId),
+                    e.getMessage());
+            throw new ForbiddenException("Access denied: unable to verify access to this " + resourceTypeLabel);
         }
 
         AccessLevel granted = DescriptorAccess.effectiveLevel(descriptor, spaceContext.current(), settings.admitsLegacy());
         if (granted == null || !granted.includes(AccessLevel.USE)) {
-            LOGGER.warnf("Use check failed: caller denied conversation access to an agent");
-            LOGGER.debugf("Use detail: agentId='%s', granted='%s'", sanitize(agentId), granted);
-            throw new ForbiddenException("Access denied: you do not have access to this agent. Ask its owner to share it with you, "
-                    + "or have them publish it if it is meant to be public.");
+            LOGGER.warnf("Use check failed: caller denied conversation access to a %s", resourceTypeLabel);
+            LOGGER.debugf("Use detail: resourceId='%s', type='%s', granted='%s'", sanitize(resourceId), resourceTypeLabel, granted);
+            throw new ForbiddenException("Access denied: you do not have access to this " + resourceTypeLabel
+                    + ". Ask its owner to share it with you, or have them publish it if it is meant to be public.");
         }
     }
 
@@ -223,10 +243,13 @@ public class ResourceAccessGuard {
      * operator should be able to find and close, not something to discover from a
      * support ticket.
      */
-    private void requireLegacyFallback(String resourceId, AccessLevel required, String resourceType) {
+    private AccessLevel requireLegacyFallback(String resourceId, AccessLevel required, String resourceType) {
         if (settings.admitsLegacy() && !required.includes(AccessLevel.EDIT)) {
             LOGGER.debugf("No descriptor for %s %s; admitting %s under legacy-visibility", resourceType, sanitize(resourceId), required);
-            return;
+            // Exactly what was asked for and no more. Reporting OWN here would let a
+            // caller redact-check their way into a grant list on a resource whose owner
+            // we could not establish in the first place.
+            return required;
         }
         LOGGER.warnf("No descriptor recorded for %s '%s' — refusing %s access. A resource with no descriptor has no owner, "
                 + "so it cannot be edited, deleted or re-shared until one is assigned.", resourceType, sanitize(resourceId), required);
@@ -307,6 +330,30 @@ public class ResourceAccessGuard {
         if (descriptor == null || seesEverything() || canAccess(descriptor, AccessLevel.OWN)) {
             return descriptor;
         }
+        return redact(descriptor);
+    }
+
+    /**
+     * As {@link #redactForCaller}, but told what the caller holds instead of
+     * working it out from the descriptor in hand.
+     * <p>
+     * For a versioned read the two are not the same question. Sharing writes land
+     * on the <em>current</em> version, so an older version's descriptor can still
+     * name a previous owner and carry that era's grant list — and deciding
+     * redaction against it would disclose those to somebody who no longer owns the
+     * resource. Pass the level {@link #requireAccess} returned, which was decided
+     * against the current descriptor.
+     *
+     * @return the same descriptor, for chaining
+     */
+    public DocumentDescriptor redactUnlessOwner(DocumentDescriptor descriptor, AccessLevel callerLevel) {
+        if (descriptor == null || seesEverything() || (callerLevel != null && callerLevel.includes(AccessLevel.OWN))) {
+            return descriptor;
+        }
+        return redact(descriptor);
+    }
+
+    private static DocumentDescriptor redact(DocumentDescriptor descriptor) {
         descriptor.setGrants(null);
         descriptor.setAccessIndex(null);
         return descriptor;

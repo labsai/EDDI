@@ -132,23 +132,23 @@ class McpConversationToolsTest {
     @Test
     void listAgentConfigs_returnsDescriptors() throws IOException {
         var descriptor = new DocumentDescriptor();
-        when(AgentStore.readAgentDescriptors("", 0, 20)).thenReturn(List.of(descriptor));
+        when(AgentStore.readAgentDescriptors("", 0, 20, "")).thenReturn(List.of(descriptor));
         when(jsonSerialization.serialize(any())).thenReturn("[{\"name\":\"TestAgent\"}]");
 
         String result = tools.listAgentConfigs(null, null);
 
         assertNotNull(result);
-        verify(AgentStore).readAgentDescriptors("", 0, 20);
+        verify(AgentStore).readAgentDescriptors("", 0, 20, "");
     }
 
     @Test
     void listAgentConfigs_withFilterAndLimit() throws IOException {
-        when(AgentStore.readAgentDescriptors("search", 0, 5)).thenReturn(Collections.emptyList());
+        when(AgentStore.readAgentDescriptors("search", 0, 5, "")).thenReturn(Collections.emptyList());
         when(jsonSerialization.serialize(any())).thenReturn("[]");
 
         tools.listAgentConfigs("search", 5);
 
-        verify(AgentStore).readAgentDescriptors("search", 0, 5);
+        verify(AgentStore).readAgentDescriptors("search", 0, 5, "");
     }
 
     // --- createConversation ---

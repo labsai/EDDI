@@ -52,6 +52,7 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
 
     private final IChannelIntegrationStore channelStore;
     private final IDocumentDescriptorStore documentDescriptorStore;
+    private final ResourceAccessGuard resourceAccessGuard;
     private final RestVersionInfo<ChannelIntegrationConfiguration> restVersionInfo;
 
     @Inject
@@ -61,6 +62,35 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
         restVersionInfo = new RestVersionInfo<>(resourceURI, channelStore, documentDescriptorStore, resourceAccessGuard);
         this.channelStore = channelStore;
         this.documentDescriptorStore = documentDescriptorStore;
+        this.resourceAccessGuard = resourceAccessGuard;
+    }
+
+    /**
+     * Asserts the author may converse with everything this channel points at.
+     * <p>
+     * <h3>Why the channel's own permissions are not enough</h3> A channel target is
+     * a standing invitation: once configured, every inbound Slack message reaches
+     * {@code targetId} as a system-initiated conversation, which is deliberately
+     * below the USE gate. Without this check an editor could aim a channel they
+     * control at a colleague's private agent and relay its replies into a room of
+     * their choosing, having never held access to it. Mirrors the checks on
+     * triggers, schedules and group membership, which are the same shape of
+     * standing reference.
+     */
+    private void requireUseOnTargets(ChannelIntegrationConfiguration configuration) {
+        if (configuration == null || configuration.getTargets() == null) {
+            return;
+        }
+        for (var target : configuration.getTargets()) {
+            if (target == null || target.getTargetId() == null || target.getTargetId().isBlank()) {
+                continue;
+            }
+            if (target.getType() == ChannelTarget.TargetType.GROUP) {
+                resourceAccessGuard.requireUseAccess(target.getTargetId(), "group");
+            } else {
+                resourceAccessGuard.requireAgentUseAccess(target.getTargetId());
+            }
+        }
     }
 
     @Override
@@ -77,6 +107,7 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
     public Response updateChannel(String id, Integer version,
                                   ChannelIntegrationConfiguration channelConfiguration) {
         validateConfiguration(channelConfiguration);
+        requireUseOnTargets(channelConfiguration);
         validateUniqueChannelId(channelConfiguration, id);
         Response response = restVersionInfo.update(id, version, channelConfiguration);
         syncDescriptor(id, channelConfiguration);
@@ -86,6 +117,7 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
     @Override
     public Response createChannel(ChannelIntegrationConfiguration channelConfiguration) {
         validateConfiguration(channelConfiguration);
+        requireUseOnTargets(channelConfiguration);
         validateUniqueChannelId(channelConfiguration, null);
         Response response = restVersionInfo.create(channelConfiguration);
         URI location = response.getLocation();

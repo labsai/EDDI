@@ -60,12 +60,15 @@ public class RestDocumentDescriptorStore implements IRestDocumentDescriptorStore
 
     @Override
     public DocumentDescriptor readDescriptor(String id, Integer version) {
-        accessGuard.requireAccess(id, AccessLevel.VIEW, "resource");
+        // The level is decided against the CURRENT descriptor and carried into the
+        // redaction below, because the version being read may be an older one whose
+        // recorded owner and grants predate a transfer or a re-share.
+        AccessLevel callerLevel = accessGuard.requireAccess(id, AccessLevel.VIEW, "resource");
         try {
             // Redaction mutates in place; the return value is deliberately unused so the
             // response can never become whatever a decorator (or a test double) returns.
             DocumentDescriptor descriptor = documentDescriptorStore.readDescriptor(id, version);
-            accessGuard.redactForCaller(descriptor);
+            accessGuard.redactUnlessOwner(descriptor, callerLevel);
             return descriptor;
         } catch (IResourceStore.ResourceStoreException e) {
             log.error(e.getLocalizedMessage(), e);

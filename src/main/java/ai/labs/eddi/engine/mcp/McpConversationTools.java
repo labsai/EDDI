@@ -151,7 +151,7 @@ public class McpConversationTools {
         try {
             int limitInt = limit != null ? limit : 20;
             String filterStr = filter != null ? filter : "";
-            List<DocumentDescriptor> descriptors = agentStore.readAgentDescriptors(filterStr, 0, limitInt);
+            List<DocumentDescriptor> descriptors = agentStore.readAgentDescriptors(filterStr, 0, limitInt, "");
             return jsonSerialization.serialize(descriptors);
         } catch (Exception e) {
             LOGGER.error("MCP list_agent_configs failed", e);

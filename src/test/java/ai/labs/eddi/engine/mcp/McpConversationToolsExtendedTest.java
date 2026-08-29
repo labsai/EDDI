@@ -302,7 +302,7 @@ class McpConversationToolsExtendedTest {
 
     @Test
     void listAgentConfigs_handlesException() {
-        when(agentStore.readAgentDescriptors(any(), anyInt(), anyInt()))
+        when(agentStore.readAgentDescriptors(any(), anyInt(), anyInt(), any()))
                 .thenThrow(new RuntimeException("DB error"));
 
         String result = tools.listAgentConfigs(null, null);

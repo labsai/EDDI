@@ -7,6 +7,111 @@
 
 
 
+## 🔒 fix(security): close two standing bypasses of the USE gate; add a workspace capability endpoint (2026-08-29)
+
+**Repo:** EDDI (`feat/multi-user-spaces-and-sharing`)
+
+An adversarial review pass over the whole workspaces PR (Fable, read-only)
+found two ways past the very control the PR introduces. Both were the same
+shape as holes the PR had already closed elsewhere, which is what made them
+oversights rather than decisions.
+
+### Channel integrations were a standing bypass (high)
+
+Triggers, schedules and group membership all check `requireAgentUseAccess` on
+the agents they *reference*, because those references are standing invitations:
+once written, they reach the target as a system-initiated conversation, which
+sits deliberately below the USE gate. `RestChannelIntegrationStore` wired the
+guard into `RestVersionInfo` — covering the channel config's own CRUD — and
+never checked the targets.
+
+So an editor holding Slack credentials could point a channel's `ChannelTarget`
+at a colleague's **private** agent, and every message in that Slack room would
+converse with it and relay the replies, having never held access to it.
+`TargetType.GROUP` was identical.
+
+`requireUseOnTargets` now runs before the write in `createChannel` and
+`updateChannel`. `ResourceAccessGuard.requireAgentUseAccess` was generalised to
+`requireUseAccess(id, label)` so a GROUP target is refused as a *group* rather
+than being told to go ask the owner of an agent.
+
+### Template preview leaked every snippet in the deployment (high)
+
+`RestTemplatePreview` redacted snippet **contents** from the variable-reference
+panel for callers who do not see everything — and then rendered the caller's
+template against the *unredacted* map. The comment justifying that
+("it renders only what the caller's own template actually references, which is
+their own composition") was simply wrong: the caller supplies the template, and
+the panel hands them the names. One call lists every snippet name, a second
+call whose body is `{snippets.<name>}` prints the content. Snippets are a
+guarded configuration type, so this disclosed colleagues' prompt building
+blocks cross-workspace through an endpoint any editor can reach.
+
+The redaction moved into the map the engine renders against. Names stay — a
+preview that cannot say which references resolve is not a preview — and the
+value renders as `<redacted>`. The regression test was mutation-checked: revert
+the fix and it fails with the real content in the assertion.
+
+### A2A conversed with agents that were never exposed (medium)
+
+`AgentCardService` states the gate for the A2A surface is `isA2aEnabled()` on
+the agent. Discovery enforced it; `A2ATaskHandler.handleTaskSend` did not, so a
+peer that knew an id could talk to any agent, opted in or not. It now refuses
+through `getAgentCard`, which returns null for both "no such agent" and "not
+enabled" — the same answer discovery gives. A2A remains outside the workspace
+model on purpose; this only enforces the gate it already claimed.
+
+### Redaction decided against a possibly stale version (low)
+
+`readDescriptor` gated on the **current** descriptor and then redacted against
+the **addressed** one. Sharing writes land on the current version only, so an
+older version can still name a previous owner and carry that era's grants.
+`requireAccess` now returns the level it granted, and the versioned read passes
+it to the new `redactUnlessOwner`. Two answers to "does this caller own it" in
+one request path is a smell whatever its impact.
+
+### `GET /workspaces` — because a client cannot work this out
+
+A deployment with workspaces **off** returns descriptors that look exactly like
+one where everything predates ownership: no owner, no space, no visibility.
+Ownership is still *recorded* while enforcement is off — deliberately, so
+attribution accumulates before an operator flips the switch — which means the
+fields being present proves nothing either. A UI guessing from the data offers
+a Share dialog that silently cannot work.
+
+`RestWorkspaces` answers for the calling user only: whether enforcement is
+active, their principal (the value stamped as `ownerId`, not a display name),
+their default write space, every space they can reach, and whether they see
+everything. It never takes a principal as a parameter, so it cannot enumerate
+somebody else's group membership.
+
+Serving the space list also removes the Manager's client-side reimplementation
+of `Subjects`' encoding. That mirror could only fail silently: an id encoded
+differently selects a workspace matching nothing, which renders as "you have no
+agents" rather than as an error.
+
+### `?space=` on the agent listing
+
+The Manager's space switcher sent `?space=` to `/agentstore/agents/descriptors`,
+which did not accept it — the switcher changed the URL and nothing else. The
+parameter now exists there and threads through a new
+`RestVersionInfo.readDescriptors(filter, index, limit, space)`, so every
+resource type can pick it up the same way. It narrows in the query, never
+client-side: page 2 of "everything" is not page 2 of "this space".
+
+### Deliberately not changed
+
+`ConverseWithAgentTool` / `CreateSubAgentTool` reach `startConversation` with a
+target the *model* picks at runtime, and `DynamicAgentConfig.permissiveDefault()`
+allows any target. Unlike channels, triggers and groups there is no
+authoring-time reference to check, so closing it means a runtime gate on the
+chatting user's identity — which would change delegation semantics for existing
+deployments. Recorded here as an open decision rather than changed quietly.
+
+---
+
+
+
 ## 🔑 fix(security): authenticate EDDI's own loopback calls; close the last USE side doors (2026-08-29)
 
 **Repo:** EDDI (`feat/multi-user-spaces-and-sharing`)

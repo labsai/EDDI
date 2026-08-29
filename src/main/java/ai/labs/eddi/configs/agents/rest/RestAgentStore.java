@@ -123,8 +123,8 @@ public class RestAgentStore implements IRestAgentStore {
     }
 
     @Override
-    public List<DocumentDescriptor> readAgentDescriptors(String filter, Integer index, Integer limit) {
-        return restVersionInfo.readDescriptors(filter, index, limit);
+    public List<DocumentDescriptor> readAgentDescriptors(String filter, Integer index, Integer limit, String space) {
+        return restVersionInfo.readDescriptors(filter, index, limit, space);
     }
 
     @Override
