@@ -99,6 +99,24 @@ parameter now exists there and threads through a new
 resource type can pick it up the same way. It narrows in the query, never
 client-side: page 2 of "everything" is not page 2 of "this space".
 
+### `WorkspacesIT` — the wiring, over real HTTP
+
+Everything the new endpoint and the `?space=` parameter can get wrong is
+wiring: whether a query parameter binds, whether Jackson emits the field names
+a client is typed against, whether a path is routed at all. None of that is
+visible to a unit test holding the resource class directly, and two of them had
+already been wrong once.
+
+The disabled payload is pinned here deliberately, because EDDI-Manager's MSW
+default handler answers `GET /workspaces` with exactly that shape. If the
+contract moves, that mock keeps every frontend test green while the real thing
+has changed — so the shape is asserted on the side that owns it.
+
+One assertion is worth naming: `?space=.*` must return **nothing**. Both
+storage backends treat a String filter as a regular expression, so an
+unescaped identity predicate is a vulnerability rather than a style note, and
+`.*` selecting everything is exactly what that bug looks like.
+
 ### Deliberately not changed
 
 `ConverseWithAgentTool` / `CreateSubAgentTool` reach `startConversation` with a
