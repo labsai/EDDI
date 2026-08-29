@@ -6,12 +6,9 @@ package ai.labs.eddi.integration;
 
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
-import ai.labs.eddi.utils.RestUtilities;
 import io.restassured.http.ContentType;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-
-import java.net.URI;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
@@ -206,14 +203,17 @@ public class WorkspacesIT extends BaseIntegrationIT {
         // An agent is created first because `everyItem` over an empty list is
         // vacuously true, and this suite seeds nothing of its own — the assertion
         // would otherwise hold whatever the server sent.
+        // `packages` is the whole of an AgentConfiguration — name and description
+        // live on the DESCRIPTOR, and StrictConfigurationBodyInterceptor rejects a
+        // body carrying them. An empty list is enough: this test needs a descriptor
+        // to exist, not an agent that runs.
         String location = createResource("""
-                { "name": "Workspace IT Agent", "description": "created so the listing below is not empty" }
-                """, "/agentstore/agents");
-        var created = RestUtilities.extractResourceId(URI.create(location));
+                {"packages": []}""", "/agentstore/agents");
+        var created = extractResourceId(location);
 
         try {
             given()
-                    .queryParam("filter", created.getId())
+                    .queryParam("filter", created.id())
                     .queryParam("limit", 5)
                     .when().get(AGENT_DESCRIPTORS)
                     .then()
@@ -221,7 +221,7 @@ public class WorkspacesIT extends BaseIntegrationIT {
                     .body("$", hasSize(greaterThan(0)))
                     .body("callerLevel", everyItem(nullValue()));
         } finally {
-            deleteResourceQuietly("/agentstore/agents/", created.getId(), created.getVersion());
+            deleteResourceQuietly("/agentstore/agents/", created.id(), created.version());
         }
     }
 
