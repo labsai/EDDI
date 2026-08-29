@@ -147,10 +147,15 @@ Two things it deliberately will not do:
   any colleague's live agent.
 - **Starting a conversation** requires `USE`. An anonymous caller on the public
   production endpoints therefore reaches **published agents only**.
-- **Schedules and triggers** are checked when they are *authored*: creating or
-  re-pointing one at an agent requires `USE` on that agent. The fire itself runs
-  system-initiated and is deliberately not re-checked — the vet happens where
-  the human is.
+- **Schedules, triggers and group membership** are checked when they are
+  *authored*: creating or re-pointing one at an agent requires `USE` on that
+  agent. The fire (or the group's member turn) runs system-initiated and is
+  deliberately not re-checked — the vet happens where the human is.
+- **The OpenAI-compatible `/v1` API** serves **published agents only** under
+  enforcement, and lists only those. It authenticates with one shared key and
+  takes the user id from a header, so there is no verified principal to scope
+  to — honouring that self-asserted id would let a single leaked key reach any
+  user's private agents.
 
 - **Exporting** an agent requires `VIEW` on it. Export reads the agent *and*
   every configuration it references, so leaving it ungated would have been a
@@ -168,6 +173,34 @@ That "starting a conversation" line is the change most likely to surprise: an
 agent created after enforcement is on is not public until somebody publishes it.
 Agents that predate ownership stay reachable under `legacy-visibility=shared`, so
 switching the feature on does not silently take an existing public bot offline.
+
+### The Platform Operator
+
+The Operator works with workspaces, but two things must be true.
+
+**1. It must authenticate as the chatting user.** Set its auth mode to
+`caller-identity`, so its tools send `Bearer ${caller:token}`. Then every action
+it takes runs with the real user's permissions: it lists what they can see,
+edits what they may edit, and anything it creates is owned by them. In `none`
+mode its tool calls carry no credentials and get 401 as soon as OIDC is on —
+before workspaces enter the picture at all.
+
+**2. The Operator agent itself must be reachable by everyone who uses it.** It
+is provisioned by whoever activates it, so under enforcement it lands in *that
+person's* space and every other user gets 403 when they open the drawer. It is a
+platform tool, not a personal one — publish it once after activation:
+
+```bash
+curl -X PUT -H "Authorization: Bearer $TOKEN"   "$EDDI/descriptorstore/descriptors/$OPERATOR_AGENT_ID/shares/visibility?visibility=published&cascade=true"
+```
+
+Publishing makes its configuration readable by everyone who can reach the API —
+its system prompt and tool definitions, though not its vault-referenced
+credentials. If that is more than you want, share it with a team at `USE`
+instead: `POST .../shares?subject=team:staff&level=USE&cascade=true`.
+
+The same applies to any agent meant to serve a whole deployment rather than one
+person.
 
 ### Resources with no descriptor at all
 

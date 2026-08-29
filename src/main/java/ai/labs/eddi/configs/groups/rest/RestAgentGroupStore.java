@@ -108,8 +108,32 @@ public class RestAgentGroupStore implements IRestAgentGroupStore {
         return restVersionInfo.read(id, version);
     }
 
+    /**
+     * Every member agent must be one the caller may actually converse with.
+     * <p>
+     * A group's member turns run system-initiated, deliberately below the USE gate
+     * — no interactive caller exists then. So recruiting an agent into a group is
+     * the moment to check: without this, adding a colleague's private agent as a
+     * member is a standing bypass of the gate on {@code /agents/{id}/start}, with
+     * the group discussion as the read-out channel.
+     * <p>
+     * Nested groups are checked as agents here; an id that names a group rather
+     * than an agent resolves against its own descriptor, which is the right subject
+     * either way.
+     */
+    private void requireUseOnMembers(AgentGroupConfiguration configuration) {
+        if (configuration == null || configuration.getMembers() == null) {
+            return;
+        }
+        for (var member : configuration.getMembers()) {
+            if (member != null && member.agentId() != null && !member.agentId().isBlank()) {
+                resourceAccessGuard.requireAgentUseAccess(member.agentId());
+            }
+        }
+    }
     @Override
     public Response updateGroup(String id, Integer version, AgentGroupConfiguration groupConfiguration) {
+        requireUseOnMembers(groupConfiguration);
         Response response = restVersionInfo.update(id, version, groupConfiguration);
         syncDescriptor(id, groupConfiguration);
         return response;
@@ -117,6 +141,7 @@ public class RestAgentGroupStore implements IRestAgentGroupStore {
 
     @Override
     public Response createGroup(AgentGroupConfiguration groupConfiguration) {
+        requireUseOnMembers(groupConfiguration);
         Response response = restVersionInfo.create(groupConfiguration);
         // Sync name/description from config onto the descriptor
         URI location = response.getLocation();

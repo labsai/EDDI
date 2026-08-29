@@ -89,6 +89,22 @@ public class ResourceSharingService {
     }
 
     /**
+     * One resource a share touched — or declined to.
+     *
+     * @param id
+     *            the resource id
+     * @param name
+     *            its descriptor name, or {@code null} when it has none. Carried so
+     *            a share dialog can say "also granted on Support Rules" rather than
+     *            "also granted on 1111111111111111111111", which is the difference
+     *            between a confirmation a person can check and one they can only
+     *            accept. Without it the Manager would issue one descriptor read per
+     *            entry to render the same sentence.
+     */
+    public record ShareTarget(String id, String name) {
+    }
+
+    /**
      * The outcome of a share or revoke.
      *
      * @param updated
@@ -97,7 +113,17 @@ public class ResourceSharingService {
      *            resources reachable from the root that the caller may not
      *            re-share, and which were therefore left alone
      */
-    public record ShareResult(List<String> updated, List<String> skipped) {
+    public record ShareResult(List<ShareTarget> updated, List<ShareTarget> skipped) {
+
+        /** Ids only — the shape callers that just need to count or compare want. */
+        public List<String> updatedIds() {
+            return updated.stream().map(ShareTarget::id).toList();
+        }
+
+        /** Ids only, for the resources left alone. */
+        public List<String> skippedIds() {
+            return skipped.stream().map(ShareTarget::id).toList();
+        }
     }
 
     /**
@@ -134,8 +160,8 @@ public class ResourceSharingService {
         accessGuard.requireAccess(resourceId, AccessLevel.OWN, RESOURCE_TYPE);
 
         String grantedBy = accessGuard.currentPrincipal();
-        List<String> updated = new ArrayList<>();
-        List<String> skipped = new ArrayList<>();
+        List<ShareTarget> updated = new ArrayList<>();
+        List<ShareTarget> skipped = new ArrayList<>();
 
         applyGrant(resourceId, subject, level, grantedBy, updated, skipped);
         for (String referenced : targets(resourceId, cascade)) {
@@ -148,8 +174,8 @@ public class ResourceSharingService {
     public ShareResult revoke(String resourceId, String subject, boolean cascade) {
         accessGuard.requireAccess(resourceId, AccessLevel.OWN, RESOURCE_TYPE);
 
-        List<String> updated = new ArrayList<>();
-        List<String> skipped = new ArrayList<>();
+        List<ShareTarget> updated = new ArrayList<>();
+        List<ShareTarget> skipped = new ArrayList<>();
 
         applyRevoke(resourceId, subject, updated, skipped);
         for (String referenced : targets(resourceId, cascade)) {
@@ -167,8 +193,8 @@ public class ResourceSharingService {
     public ShareResult setVisibility(String resourceId, ResourceVisibility visibility, boolean cascade) {
         accessGuard.requireAccess(resourceId, AccessLevel.OWN, RESOURCE_TYPE);
 
-        List<String> updated = new ArrayList<>();
-        List<String> skipped = new ArrayList<>();
+        List<ShareTarget> updated = new ArrayList<>();
+        List<ShareTarget> skipped = new ArrayList<>();
 
         applyVisibility(resourceId, visibility, updated, skipped);
         for (String referenced : targets(resourceId, cascade)) {
@@ -196,8 +222,8 @@ public class ResourceSharingService {
         }
         String owner = newOwnerId.trim();
 
-        List<String> updated = new ArrayList<>();
-        List<String> skipped = new ArrayList<>();
+        List<ShareTarget> updated = new ArrayList<>();
+        List<ShareTarget> skipped = new ArrayList<>();
 
         Set<String> all = new LinkedHashSet<>();
         all.add(resourceId);
@@ -207,17 +233,17 @@ public class ResourceSharingService {
             try {
                 VersionedDescriptor loaded = loadOrNull(id);
                 if (loaded == null) {
-                    skipped.add(id);
+                    skipped.add(new ShareTarget(id, null));
                     continue;
                 }
                 DocumentDescriptor descriptor = loaded.descriptor();
                 descriptor.setOwnerId(owner);
                 descriptor.setSpaceId(newSpaceId == null || newSpaceId.isBlank() ? Subjects.personalSpace(owner) : newSpaceId.trim());
                 writeBack(id, descriptor, loaded.version());
-                updated.add(id);
+                updated.add(new ShareTarget(id, descriptor.getName()));
             } catch (Exception e) {
                 LOGGER.warnf("Could not transfer ownership of %s: %s", sanitize(id), e.getMessage());
-                skipped.add(id);
+                skipped.add(new ShareTarget(id, null));
             }
         }
         return new ShareResult(updated, skipped);
@@ -227,7 +253,7 @@ public class ResourceSharingService {
         return cascade ? graphResolver.referencedResourceIds(resourceId) : Set.of();
     }
 
-    private void applyGrant(String id, String subject, AccessLevel level, String grantedBy, List<String> updated, List<String> skipped) {
+    private void applyGrant(String id, String subject, AccessLevel level, String grantedBy, List<ShareTarget> updated, List<ShareTarget> skipped) {
         mutate(id, updated, skipped, descriptor -> {
             List<ResourceGrant> grants = descriptor.getGrants() == null ? new ArrayList<>() : new ArrayList<>(descriptor.getGrants());
             // One grant per subject: re-sharing at a different level replaces rather than
@@ -238,7 +264,7 @@ public class ResourceSharingService {
         });
     }
 
-    private void applyRevoke(String id, String subject, List<String> updated, List<String> skipped) {
+    private void applyRevoke(String id, String subject, List<ShareTarget> updated, List<ShareTarget> skipped) {
         mutate(id, updated, skipped, descriptor -> {
             if (descriptor.getGrants() == null) {
                 return;
@@ -249,7 +275,7 @@ public class ResourceSharingService {
         });
     }
 
-    private void applyVisibility(String id, ResourceVisibility visibility, List<String> updated, List<String> skipped) {
+    private void applyVisibility(String id, ResourceVisibility visibility, List<ShareTarget> updated, List<ShareTarget> skipped) {
         mutate(id, updated, skipped, descriptor -> descriptor.setVisibility(visibility.wireName()));
     }
 
@@ -258,33 +284,33 @@ public class ResourceSharingService {
      * the access index every time, because a descriptor whose structured fields and
      * index disagree is invisible in listings it should appear in.
      */
-    private void mutate(String id, List<String> updated, List<String> skipped, Consumer<DocumentDescriptor> change) {
+    private void mutate(String id, List<ShareTarget> updated, List<ShareTarget> skipped, Consumer<DocumentDescriptor> change) {
         VersionedDescriptor loaded;
         try {
             loaded = loadOrNull(id);
         } catch (Exception e) {
             LOGGER.warnf("Could not load descriptor %s while updating sharing: %s", sanitize(id), e.getMessage());
-            skipped.add(id);
+            skipped.add(new ShareTarget(id, null));
             return;
         }
         if (loaded == null) {
-            skipped.add(id);
+            skipped.add(new ShareTarget(id, null));
             return;
         }
         DocumentDescriptor descriptor = loaded.descriptor();
         // You cannot pass on access you were only lent. A referenced resource the
         // caller can read but does not own is left exactly as it was, and reported.
         if (!accessGuard.canAccess(descriptor, AccessLevel.OWN)) {
-            skipped.add(id);
+            skipped.add(new ShareTarget(id, descriptor.getName()));
             return;
         }
         change.accept(descriptor);
         try {
             writeBack(id, descriptor, loaded.version());
-            updated.add(id);
+            updated.add(new ShareTarget(id, descriptor.getName()));
         } catch (Exception e) {
             LOGGER.warnf("Could not write sharing change to %s: %s", sanitize(id), e.getMessage());
-            skipped.add(id);
+            skipped.add(new ShareTarget(id, descriptor.getName()));
         }
     }
 

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.integrations.openai;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.Deployment.Status;
@@ -78,13 +79,17 @@ public class AgentModelResolver {
 
     private Cache<String, Catalogue> cache;
 
+    private final ResourceAccessGuard resourceAccessGuard;
+
     @Inject
     public AgentModelResolver(IAgentFactory agentFactory,
             IDocumentDescriptorStore documentDescriptorStore,
-            OpenAiCompatConfig config) {
+            OpenAiCompatConfig config,
+            ResourceAccessGuard resourceAccessGuard) {
         this.agentFactory = agentFactory;
         this.documentDescriptorStore = documentDescriptorStore;
         this.config = config;
+        this.resourceAccessGuard = resourceAccessGuard;
     }
 
     @PostConstruct
@@ -149,11 +154,27 @@ public class AgentModelResolver {
         }
     }
 
-    /** The OpenAI model list for all ready agents. */
+    /**
+     * The OpenAI model list for all ready agents the caller may actually use.
+     * <p>
+     * The {@code /v1} surface authenticates with one shared API key and takes the
+     * user id from a header it is configured to trust, so there is no verified
+     * principal here — {@code ResourceAccessGuard} therefore sees an anonymous
+     * caller and admits only <b>published</b> agents once workspaces are enforced.
+     * That is the intended answer rather than a limitation: a self-asserted user id
+     * must not unlock that user's private agents, and listing a model the same
+     * caller would be refused at chat time is worse than not listing it.
+     * <p>
+     * With workspaces off, {@code seesEverything()} is true and the list is exactly
+     * what it always was.
+     */
     public List<ModelObject> listModels() {
         Catalogue catalogue = catalogue();
         List<ModelObject> models = new ArrayList<>(catalogue.byModelId().size());
         for (Entry entry : catalogue.byModelId().values()) {
+            if (!mayUse(entry.agentId())) {
+                continue;
+            }
             models.add(ModelObject.of(entry.modelId(), entry.createdEpochSeconds()));
             if (config.isExposeStatelessVariants()) {
                 models.add(ModelObject.of(entry.modelId() + STATELESS_SUFFIX, entry.createdEpochSeconds()));
@@ -162,6 +183,18 @@ public class AgentModelResolver {
         return models;
     }
 
+    /**
+     * Whether the current caller may converse with this agent. Non-throwing: a
+     * listing omits what it may not offer rather than failing wholesale.
+     */
+    private boolean mayUse(String agentId) {
+        try {
+            resourceAccessGuard.requireAgentUseAccess(agentId);
+            return true;
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
     /**
      * Resolve a client-supplied {@code model} value to a deployed agent.
      * <p>

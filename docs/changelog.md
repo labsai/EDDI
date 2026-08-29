@@ -7,6 +7,125 @@
 
 
 
+## 🔑 fix(security): authenticate EDDI's own loopback calls; close the last USE side doors (2026-08-29)
+
+**Repo:** EDDI (`feat/multi-user-spaces-and-sharing`)
+
+Closing every remaining finding from the review passes, and answering the
+question they were blocking: **does the Platform Operator work under per-user
+workspaces?**
+
+### The Operator: yes, and here is what it took
+
+In `caller-identity` mode the Operator's generated tools send
+`Authorization: Bearer ${caller:token}`, which `CallerIdentityResolver` replaces
+with the bearer of whoever is chatting. Every action it takes therefore runs as
+the real user — it lists what they can see, edits what they may edit, and
+anything it creates is stamped as theirs. That is exactly the behaviour
+workspaces want and it needed no change at all.
+
+Two things did.
+
+**EDDI's internal loopback calls carried no credentials (critical).**
+`AgentSetupService` — behind the agent wizard, the `setup-api` endpoint, and
+therefore the Operator's agent-creation tools — re-enters EDDI's own REST API
+through `RestInterfaceFactory`, as does most of `McpAdminTools`. That client sent
+no `Authorization` header while `/*` sits behind the `authenticated` HTTP policy,
+so **every one of those paths answered 401 whenever
+`authorization.enabled=true`** — the exact configuration workspaces require. The
+wizard, setup-api and the operator's entire write capability were unusable on any
+Keycloak-protected deployment, and the failure surfaced as a server fault rather
+than a missing credential.
+
+New `LoopbackCallerAuthFilter` forwards the caller's own token across the hop.
+Registered only on the **one-argument** `RestInterfaceFactory.get(Class)`, which
+addresses `127.0.0.1` on this process's own port: the destination is not merely
+same-origin, it is this very process. The two-argument overload that names an
+arbitrary remote instance for cross-instance sync deliberately does not get it —
+that is the case where forwarding a token would leak it. A pipeline thread's
+*bound* identity wins over a captured one, so a HITL resume stays attributed to
+the user whose turn it is rather than the administrator approving it.
+
+Two consequences beyond the 401: resources created through `setup-api` are now
+stamped with their **actual owner** instead of being left unowned, and the MCP
+tools that resolve stores this way genuinely do inherit `ResourceAccessGuard` —
+making true the claim an earlier pass had to walk back.
+
+**The Operator agent would have been invisible to everyone but its activator.**
+It is provisioned by whoever turns it on, so under enforcement it lands in that
+person's space and every other user gets 403 opening the drawer. Deliberately
+*not* fixed in code: auto-publishing an agent because of its name is how security
+bugs get written. The sharing API already covers it, and the deployment step is
+now documented — publish it once, or share it to a team at `USE` if the
+deployment would rather not expose the Operator's prompt.
+
+### The last USE side doors
+
+- **Group membership.** Same shape as the schedules and triggers closed last
+  pass: a group's member turns run system-initiated, below the gate, so
+  recruiting a colleague's private agent as a member reached it with the group
+  discussion as the read-out channel. Checked now at group create and update.
+- **The OpenAI-compatible `/v1` API.** One shared key reached any deployed agent
+  by id. It now applies the same gate — and since `/v1` has no verified principal
+  (one key, a user id from a trusted header), that admits **published agents
+  only** under enforcement. Deliberately not scoped to the header-supplied user
+  id: honouring a self-asserted identity would let one leaked key reach that
+  user's private agents. `listModels` filters to match, so a client never sees a
+  model it would be refused at chat time.
+
+### Manager-readiness
+
+- **`?space=` narrows any descriptor listing server-side**, so a space switcher
+  can page correctly — client-side filtering cannot, because page 2 of
+  "everything" is not page 2 of "this space". Implemented as its own AND-ed
+  filter group: folding it into the access group would OR it and turn a narrowing
+  into a widening, which `AccessScopeTest` pins down along with the anchoring that
+  stops `team:eng` matching `team:engineering`.
+- **Share results carry resource names** alongside ids, so a share dialog can say
+  "also granted on Support Rules" rather than on `1111111111111111111111` — the
+  difference between a confirmation a person can check and one they can only
+  accept. `updatedIds()` / `skippedIds()` keep the id-only shape for callers that
+  just count.
+
+### Deliberately still open
+
+- **Sub-agent tools** (`ConverseWithAgentTool`, `CreateSubAgentTool`) reach
+  agents by id under the conversation's identity. Runtime-side and governed by
+  tool approval rather than workspaces.
+- **Descriptor creation in a response filter** rather than in the stores. Much
+  less pressing now the loopback paths authenticate and stamp correctly, but
+  still the most leveraged follow-up.
+- **The access predicate is a regex scan.** A scaling ceiling, not a correctness
+  problem; the array-plus-`$in` fix needs a real PostgreSQL to verify.
+- **Enumeration oracles** on the capability registry, deployment listing and
+  `getCurrentResourceId`. Pre-existing; names and ids, not configuration.
+
+Across four passes every serious finding was the same shape — *a surface that
+reaches agents or descriptors without passing the guard*. They are now closed
+individually at each authoring entry point, which is correct but enumerative. The
+durable version is a USE check inside `ConversationService.startConversation`
+with an explicit flag for genuinely system-initiated callers; worth doing before
+this is described as a hard security boundary.
+
+### Verification
+
+Full unit suite green apart from this machine's environmental socket failures.
+New: `LoopbackCallerAuthFilterTest` (six cases, including bound-over-captured
+precedence and the fail-soft path) and `AccessScopeTest` (six, including that a
+space narrowing cannot widen).
+
+**What is still unproven, and it is the important part.** The loopback fix
+changes how every internal API call authenticates, and its correctness depends on
+a live security context, a real Keycloak and the HTTP stack — none of which exist
+in a unit test. Before enabling this anywhere that matters: staging, Keycloak on,
+two real accounts, Operator activated and published, then confirm each user sees
+only their own agents, the Operator can create one, and the created agent belongs
+to whoever asked for it.
+
+---
+
+
+
 ## 🔎 fix(security): third-pass review — group-share regression, ACL leak in listings, USE-gate side doors (2026-08-29)
 
 **Repo:** EDDI (`feat/multi-user-spaces-and-sharing`)

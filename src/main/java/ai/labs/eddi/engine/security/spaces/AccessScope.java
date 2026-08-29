@@ -26,12 +26,17 @@ import java.util.List;
  */
 public final class AccessScope {
 
-    private static final AccessScope UNRESTRICTED = new AccessScope(null);
+    /** The descriptor field naming the space a resource belongs to. */
+    public static final String FIELD_SPACE_ID = "spaceId";
+
+    private static final AccessScope UNRESTRICTED = new AccessScope(null, null);
 
     private final List<String> admittingTokens;
+    private final String spaceId;
 
-    private AccessScope(List<String> admittingTokens) {
+    private AccessScope(List<String> admittingTokens, String spaceId) {
         this.admittingTokens = admittingTokens;
+        this.spaceId = spaceId;
     }
 
     /**
@@ -51,9 +56,34 @@ public final class AccessScope {
      *            whether resources with no recorded owner are admitted
      */
     public static AccessScope forCaller(CallerSpaces caller, boolean admitLegacy) {
-        return new AccessScope(DescriptorAccess.admittingTokens(caller, admitLegacy));
+        return new AccessScope(DescriptorAccess.admittingTokens(caller, admitLegacy), null);
     }
 
+    /**
+     * Narrows this scope to one space — the server side of a space switcher.
+     * <p>
+     * A narrowing, never a widening: it ANDs a space predicate onto whatever this
+     * scope already admits, so asking for a space you cannot reach returns nothing
+     * rather than granting it. Applied even to an unrestricted scope, so an
+     * administrator can look at one team's workspace without being handed every
+     * other one — that is a view preference, and it must not become a way to see
+     * less than you are entitled to <em>or</em> more.
+     * <p>
+     * This has to happen in the query. Filtering a page client-side breaks paging:
+     * page 2 of "everything" is not page 2 of "this space".
+     */
+    public AccessScope withinSpace(String spaceId) {
+        if (spaceId == null || spaceId.isBlank()) {
+            return this;
+        }
+        return new AccessScope(admittingTokens, spaceId.trim());
+    }
+
+    /**
+     * Whether the caller's own reach is unlimited. A space narrowing does not
+     * change this — it is a view preference layered on top, and
+     * {@link #toSpaceFilter()} carries it separately.
+     */
     public boolean isUnrestricted() {
         return admittingTokens == null;
     }
@@ -75,6 +105,29 @@ public final class AccessScope {
             filters.add(new IResourceFilter.QueryFilter(DescriptorStore.FIELD_ACCESS_INDEX, Subjects.tokenPattern(token)));
         }
         return new IResourceFilter.QueryFilters(IResourceFilter.QueryFilters.ConnectingType.OR, filters);
+    }
+
+    /**
+     * The space narrowing, as its own AND-ed group, or {@code null} when this scope
+     * names no space.
+     * <p>
+     * Separate from {@link #toQueryFilters()} because filter groups are ANDed while
+     * filters within a group follow the group's connector: the access tokens must
+     * stay an OR among themselves, and the space must AND with the result. Folding
+     * the space into the same group would OR it, turning a narrowing into a
+     * widening — the exact bug this shape exists to prevent.
+     */
+    public IResourceFilter.QueryFilters toSpaceFilter() {
+        if (spaceId == null) {
+            return null;
+        }
+        return new IResourceFilter.QueryFilters(List.of(
+                new IResourceFilter.QueryFilter(FIELD_SPACE_ID, Subjects.exactPattern(spaceId))));
+    }
+
+    /** The space this scope is narrowed to, or {@code null}. */
+    public String spaceId() {
+        return spaceId;
     }
 
     /**

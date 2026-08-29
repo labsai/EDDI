@@ -128,6 +128,19 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
     public List<T> readDescriptors(String type, String filter, Integer index, Integer limit, boolean includeDeleted,
                                    IResourceFilter.QueryFilters accessRestriction)
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+        return readDescriptors(type, filter, index, limit, includeDeleted, accessRestriction, null);
+    }
+
+    /**
+     * As above, with a further AND-ed group — used to narrow a listing to one
+     * space.
+     *
+     * @param extraRestriction
+     *            an additional filter group, or {@code null}
+     */
+    public List<T> readDescriptors(String type, String filter, Integer index, Integer limit, boolean includeDeleted,
+                                   IResourceFilter.QueryFilters accessRestriction, IResourceFilter.QueryFilters extraRestriction)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
 
         List<IResourceFilter.QueryFilter> queryFiltersRequired = new LinkedList<>();
         String filterURI = "eddi://" + type + ".*";
@@ -171,6 +184,9 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
         }
         if (accessRestriction != null && !accessRestriction.getQueryFilters().isEmpty()) {
             filterGroups.add(accessRestriction);
+        }
+        if (extraRestriction != null && !extraRestriction.getQueryFilters().isEmpty()) {
+            filterGroups.add(extraRestriction);
         }
         IResourceFilter.QueryFilters[] allFilters = filterGroups.toArray(new IResourceFilter.QueryFilters[0]);
 

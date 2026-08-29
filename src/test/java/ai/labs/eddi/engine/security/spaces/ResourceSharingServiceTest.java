@@ -122,8 +122,8 @@ class ResourceSharingServiceTest {
     void sharingCascades() {
         var result = service.share(AGENT, Subjects.user("carol"), AccessLevel.VIEW, true);
 
-        assertTrue(result.updated().contains(AGENT));
-        assertTrue(result.updated().contains(OWNED_CHILD),
+        assertTrue(result.updatedIds().contains(AGENT));
+        assertTrue(result.updatedIds().contains(OWNED_CHILD),
                 "an agent shared without its config graph is a name pointing at documents the recipient cannot open");
         assertEquals(AccessLevel.VIEW, grantFor(descriptors.get(OWNED_CHILD), Subjects.user("carol")));
     }
@@ -133,8 +133,8 @@ class ResourceSharingServiceTest {
     void doesNotResharePassOnBorrowedAccess() {
         var result = service.share(AGENT, Subjects.user("carol"), AccessLevel.VIEW, true);
 
-        assertTrue(result.skipped().contains(BORROWED_CHILD));
-        assertFalse(result.updated().contains(BORROWED_CHILD));
+        assertTrue(result.skippedIds().contains(BORROWED_CHILD));
+        assertFalse(result.updatedIds().contains(BORROWED_CHILD));
         assertEquals(null, grantFor(descriptors.get(BORROWED_CHILD), Subjects.user("carol")),
                 "you cannot pass on access you were only lent");
     }
@@ -144,7 +144,7 @@ class ResourceSharingServiceTest {
     void noCascade() {
         var result = service.share(AGENT, Subjects.user("carol"), AccessLevel.USE, false);
 
-        assertEquals(List.of(AGENT), result.updated());
+        assertEquals(List.of(AGENT), result.updatedIds());
         verify(graphResolver, org.mockito.Mockito.never()).referencedResourceIds(anyString());
     }
 
@@ -193,7 +193,7 @@ class ResourceSharingServiceTest {
 
         assertEquals(ResourceVisibility.published.wireName(), descriptors.get(AGENT).getVisibility());
         assertEquals(ResourceVisibility.published.wireName(), descriptors.get(OWNED_CHILD).getVisibility());
-        assertTrue(result.skipped().contains(BORROWED_CHILD));
+        assertTrue(result.skippedIds().contains(BORROWED_CHILD));
     }
 
     @Test

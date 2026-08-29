@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.integrations.openai;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.lifecycle.TaskId;
@@ -92,12 +93,16 @@ public class OpenAiConversationBridge {
     private Counter conversationsCreated;
     private Timer turnTimer;
 
+    private final ResourceAccessGuard resourceAccessGuard;
+
     @Inject
     public OpenAiConversationBridge(IConversationService conversationService,
             IUserConversationStore userConversationStore,
             OpenAiMessageMapper messageMapper,
             OpenAiCompatConfig config,
-            MeterRegistry meterRegistry) {
+            MeterRegistry meterRegistry,
+            ResourceAccessGuard resourceAccessGuard) {
+        this.resourceAccessGuard = resourceAccessGuard;
         this.conversationService = conversationService;
         this.userConversationStore = userConversationStore;
         this.messageMapper = messageMapper;
@@ -240,6 +245,13 @@ public class OpenAiConversationBridge {
 
     private String startConversation(AgentModelResolver.ResolvedModel model, String userId, String intent) {
         try {
+            // The same USE gate the REST and MCP surfaces apply. There is no verified
+            // principal on /v1 — one shared API key, a user id taken from a trusted
+            // header — so this admits only published agents once workspaces are enforced,
+            // and everything as before when they are not. Deliberately NOT scoped to the
+            // header-supplied userId: that id is self-asserted, and honouring it would let
+            // one leaked key reach any user's private agents.
+            resourceAccessGuard.requireAgentUseAccess(model.agentId());
             var result = conversationService.startConversation(model.environment(), model.agentId(), userId,
                     Map.of(CONTEXT_CHANNEL_INTENT, new Context(Context.ContextType.string, intent)));
             conversationsCreated.increment();
