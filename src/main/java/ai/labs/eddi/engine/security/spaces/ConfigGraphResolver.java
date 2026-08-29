@@ -165,7 +165,7 @@ public class ConfigGraphResolver {
                     if (member == null || member.agentId() == null || member.agentId().isBlank()) {
                         continue;
                     }
-                    queue.offer(member.agentId());
+                    queue.addLast(member.agentId());
                     if (depth < MAX_GROUP_NESTING) {
                         seedFromRoot(member.agentId(), queue, seededRoots, depth + 1);
                     }
@@ -240,7 +240,7 @@ public class ConfigGraphResolver {
     private static void offerUri(URI uri, Deque<String> queue) {
         String id = idOf(uri);
         if (id != null && !id.isBlank()) {
-            queue.offer(id);
+            queue.addLast(id);
         }
     }
 
