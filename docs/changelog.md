@@ -117,6 +117,32 @@ storage backends treat a String filter as a regular expression, so an
 unescaped identity predicate is a vulnerability rather than a style note, and
 `.*` selecting everything is exactly what that bug looks like.
 
+### Coverage on the two classes that had none
+
+A JaCoCo pass over the workspace package found `RestResourceSharing` at **0%**
+— no unit test referenced it at all, only the new IT over HTTP — and
+`SpaceContext` at 64% instructions / 50% branches.
+
+Both are places where a mistake is silent rather than loud.
+`RestResourceSharing` is where loose query text becomes a decision about who can
+reach a resource: a level that parsed to something weaker, a subject nobody
+holds, a visibility guessed between three options that differ on who can read
+the thing. None of those look like errors afterwards — they look like a share
+that worked. `SpaceContext` reads the groups claim, which arrives as a JSON
+array through one code path, a `List<String>` through another and a bare string
+when single-valued; an unhandled shape does not throw, it just leaves the caller
+with no team spaces, and every resource shared with their team becomes invisible
+to them.
+
+Now 97.2% / 86.7% and 100% / 81%. The JSON-array handling was mutation-checked:
+removing the quote-stripping makes the space id `team:"engineering"`, which
+matches nothing — the test goes red with the quoted form in the message.
+
+One test was written wrong and corrected rather than the code: `parseOrNull`
+accepts *both* `private` and the `privateAccess` constant name, deliberately, so
+a client that read the constant out of generated code is not punished for it.
+The test now pins that leniency instead of asserting it away.
+
 ### Deliberately not changed
 
 `ConverseWithAgentTool` / `CreateSubAgentTool` reach `startConversation` with a
