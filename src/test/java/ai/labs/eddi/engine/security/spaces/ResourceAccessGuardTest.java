@@ -25,6 +25,7 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -204,6 +205,54 @@ class ResourceAccessGuardTest {
             var store2 = mock(IDocumentDescriptorStore.class);
             when(store2.readCurrentDescriptor(RESOURCE_ID)).thenReturn(ownedBy("alice"));
             assertThrows(ForbiddenException.class, () -> guard(identity(null), settings, store2).requireAgentUseAccess(RESOURCE_ID));
+        }
+    }
+
+    @Nested
+    @DisplayName("redaction")
+    class Redaction {
+
+        private final WorkspaceSettings settings = settings(true, true, WorkspaceSettings.LEGACY_SHARED);
+
+        private DocumentDescriptor publishedWithGrants() {
+            var d = ownedBy("alice");
+            d.setVisibility(ResourceVisibility.published.wireName());
+            d.setGrants(List.of(new ResourceGrant(Subjects.user("bob"), AccessLevel.USE.name(), "alice", new Date(0))));
+            return DescriptorAccess.rebuildIndex(d);
+        }
+
+        @Test
+        @DisplayName("a non-owner listing a published resource does not receive its ACL")
+        void nonOwnerLosesGrants() {
+            var g = guard(identity("carol"), settings, mock(IDocumentDescriptorStore.class));
+
+            var redacted = g.redactForCaller(publishedWithGrants());
+
+            // Published grants VIEW to everyone, so without this every listing would
+            // serialise the full grant audience — real principal and team names — making
+            // describe()'s owner-only disclosure theatre.
+            assertNull(redacted.getGrants());
+            assertNull(redacted.getAccessIndex());
+            assertEquals("alice", redacted.getOwnerId(), "owner stays: the Manager's owner column needs it");
+            assertEquals(ResourceVisibility.published.wireName(), redacted.getVisibility());
+        }
+
+        @Test
+        @DisplayName("the owner keeps the full descriptor")
+        void ownerKeepsGrants() {
+            var g = guard(identity("alice"), settings, mock(IDocumentDescriptorStore.class));
+
+            var d = g.redactForCaller(publishedWithGrants());
+
+            assertEquals(1, d.getGrants().size());
+        }
+
+        @Test
+        @DisplayName("an admin keeps the full descriptor")
+        void adminKeepsGrants() {
+            var g = guard(identity("root", "eddi-admin"), settings, mock(IDocumentDescriptorStore.class));
+
+            assertEquals(1, g.redactForCaller(publishedWithGrants()).getGrants().size());
         }
     }
 

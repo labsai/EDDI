@@ -13,6 +13,7 @@ import ai.labs.eddi.engine.runtime.internal.ScheduleFireExecutor;
 import ai.labs.eddi.engine.runtime.internal.SchedulePollerService;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.security.OwnershipValidator;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.core.Response;
@@ -59,6 +60,8 @@ class RestScheduleStoreExpandedTest {
         setField(sut, "pollerService", pollerService);
         setField(sut, "identity", mock(io.quarkus.security.identity.SecurityIdentity.class));
         setField(sut, "ownershipValidator", ownershipValidator);
+        // A bare mock admits everything: its void requireAgentUseAccess does nothing.
+        setField(sut, "resourceAccessGuard", mock(ResourceAccessGuard.class));
         setField(sut, "defaultTimeZone", "UTC");
         setField(sut, "minIntervalSeconds", 60L);
     }

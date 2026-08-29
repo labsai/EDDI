@@ -68,7 +68,8 @@ public class RestWorkflowStore implements IRestWorkflowStore {
         if (descriptors == null || descriptors.isEmpty()) {
             return descriptors;
         }
-        return descriptors.stream().filter(d -> resourceAccessGuard.canAccess(d, AccessLevel.VIEW)).toList();
+        return descriptors.stream().filter(d -> resourceAccessGuard.canAccess(d, AccessLevel.VIEW))
+                .map(resourceAccessGuard::redactForCaller).toList();
     }
 
     @Override

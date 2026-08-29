@@ -9,6 +9,7 @@ import ai.labs.eddi.engine.triggermanagement.IRestAgentTriggerStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.triggermanagement.model.AgentTriggerConfiguration;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -27,10 +28,12 @@ public class RestAgentTriggerStore implements IRestAgentTriggerStore {
     private static final String CACHE_NAME = "agentTriggers";
     private final IAgentTriggerStore agentTriggerStore;
     private final ICache<String, AgentTriggerConfiguration> agentTriggersCache;
+    private final ResourceAccessGuard resourceAccessGuard;
 
     @Inject
-    public RestAgentTriggerStore(IAgentTriggerStore agentTriggerStore, ICacheFactory cacheFactory) {
+    public RestAgentTriggerStore(IAgentTriggerStore agentTriggerStore, ICacheFactory cacheFactory, ResourceAccessGuard resourceAccessGuard) {
         this.agentTriggerStore = agentTriggerStore;
+        this.resourceAccessGuard = resourceAccessGuard;
         agentTriggersCache = cacheFactory.getCache(CACHE_NAME);
     }
 
@@ -58,9 +61,28 @@ public class RestAgentTriggerStore implements IRestAgentTriggerStore {
         }
     }
 
+    /**
+     * A trigger routes inbound messages into conversations with the agents its
+     * deployments name; the routing itself runs with no interactive caller and sits
+     * below the USE gate. So the gate applies at authoring time: without this,
+     * pointing a trigger at a private agent is a standing bypass of the check on
+     * {@code /agents/{id}/start}.
+     */
+    private void requireUseOnReferencedAgents(AgentTriggerConfiguration configuration) {
+        if (configuration == null || configuration.getAgentDeployments() == null) {
+            return;
+        }
+        for (var deployment : configuration.getAgentDeployments()) {
+            if (deployment != null && deployment.getAgentId() != null && !deployment.getAgentId().isBlank()) {
+                resourceAccessGuard.requireAgentUseAccess(deployment.getAgentId());
+            }
+        }
+    }
+
     @Override
     public Response updateAgentTrigger(String intent, AgentTriggerConfiguration agentTriggerConfiguration) {
         try {
+            requireUseOnReferencedAgents(agentTriggerConfiguration);
             agentTriggerStore.updateAgentTrigger(intent, agentTriggerConfiguration);
             agentTriggersCache.put(intent, agentTriggerConfiguration);
             return Response.ok().build();
@@ -72,6 +94,7 @@ public class RestAgentTriggerStore implements IRestAgentTriggerStore {
     @Override
     public Response createAgentTrigger(AgentTriggerConfiguration agentTriggerConfiguration) {
         try {
+            requireUseOnReferencedAgents(agentTriggerConfiguration);
             agentTriggerStore.createAgentTrigger(agentTriggerConfiguration);
             agentTriggersCache.put(agentTriggerConfiguration.getIntent(), agentTriggerConfiguration);
             return Response.ok().build();

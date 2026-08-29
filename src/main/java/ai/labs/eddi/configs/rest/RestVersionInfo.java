@@ -84,7 +84,12 @@ public class RestVersionInfo<T> implements IRestVersionInfo {
             // Filtered in the query rather than on the returned page: post-filtering
             // returns short pages and forces the scan-budgeted back-fill that conversation
             // listing has to do, where no such predicate exists.
-            return documentDescriptorStore.readDescriptors(type, filter, index, limit, false, accessGuard.listingScope());
+            List<DocumentDescriptor> descriptors = documentDescriptorStore.readDescriptors(type, filter, index, limit, false,
+                    accessGuard.listingScope());
+            // The scope decides WHICH rows come back; this decides how much of each row a
+            // non-owner gets to read. Without it every listing serialises the grant list.
+            descriptors.forEach(accessGuard::redactForCaller);
+            return descriptors;
         } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
             throw sneakyThrow(e);
         }

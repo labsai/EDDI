@@ -7,6 +7,105 @@
 
 
 
+## 🔎 fix(security): third-pass review — group-share regression, ACL leak in listings, USE-gate side doors (2026-08-29)
+
+**Repo:** EDDI (`feat/multi-user-spaces-and-sharing`)
+
+A fresh critical pass over the whole branch, this time including the API/UX
+surface. Four defects found and fixed, each with a test that fails without the
+fix; the rest of the pass is recorded as verified-clean or explicitly open.
+
+### Fixed
+
+- **Sharing a group silently dropped the member agents (critical, my own
+  regression).** The nested-group fix from the previous pass made the seeding
+  recursion and the poll loop share one visited-set, so every member agent was
+  pre-marked "done" and excluded from the share result: recipients of a group
+  share could open the workflows but not talk to any member agent. It survived
+  because `ResourceSharingServiceTest` mocks the resolver and the resolver itself
+  had **no test** — the exact blind spot reviews exist to find.
+  `ConfigGraphResolver` now uses two sets (`seededRoots` for recursion,
+  `dequeued` for the loop), the dead `referencedFromAgent` helper is gone, and
+  `ConfigGraphResolverTest` runs the real traversal over in-memory stores —
+  agent graphs, groups, nested groups, self-referential groups. Mutation-checked:
+  re-merging the two sets fails three of the five tests.
+- **The ACL still leaked through every listing.** `describe()` discloses grants
+  only at OWN — but listings and direct descriptor reads serialised the raw
+  `DocumentDescriptor`, `grants` and `accessIndex` included, and a `published`
+  resource is listable by everyone. The restraint on the sharing endpoint was
+  theatre. `ResourceAccessGuard.redactForCaller` now strips both fields for
+  non-owners at every descriptor exit: `RestVersionInfo.readDescriptors` (all
+  fifteen types), the cross-type descriptor endpoint, and the two
+  reverse-reference listings. Owner, space and visibility stay — the Manager's
+  owner column needs them, and "owned by alice" is what a recipient needs to know
+  whom to ask.
+- **Schedules and triggers were standing side doors around the USE gate.** Both
+  are authored by a user naming an agent id, and both *fire* system-initiated —
+  deliberately below the gate, because no interactive caller exists then. So any
+  editor could converse with a private agent by scheduling it or pointing a
+  trigger at it. The gate now applies at authoring time — schedule create/update
+  (the re-point path) and trigger create/update, on every referenced deployment.
+- **The schedule store turned the 403 into a 500.** Found by the new gate test,
+  not by reading: `createSchedule`'s blanket `catch (Exception)` swallowed the
+  guard's `ForbiddenException` and rethrew `InternalServerErrorException` — the
+  caller could not tell "you may not schedule that agent" from "the server
+  broke". Both create and update now rethrow the refusal.
+- **`@Consumes(APPLICATION_JSON)` on the body-less share POST** made strict
+  clients and generated SDKs manufacture a Content-Type for an entity that does
+  not exist. Removed.
+
+### Verified clean this pass
+
+- All fifteen `duplicate*` endpoints read through the guarded
+  `restVersionInfo.read` — duplication is not a read bypass anywhere.
+- The setup-API concern dissolves on inspection: its credential-less loopback
+  calls already 401 under `authorization.enabled=true` (pre-existing, see the
+  loopback-auth note), and enforcement *requires* auth — so no unowned-agent hole
+  opens through the wizard path under enforcement.
+- The `ForbiddenException`-to-403 mapping is the same one `OwnershipValidator`
+  has always relied on; no new mapper needed.
+
+### Known open, deliberately not implemented here
+
+- **OpenAI `/v1` adapter bypasses USE**: one shared API key converses with every
+  deployed agent. Whether `/v1` should serve only `published` agents under
+  enforcement is a product decision (it would change what Open WebUI users see),
+  not something to half-implement from a review.
+- **Group membership is not USE-checked at group creation** — recruiting a
+  colleague's private agent into a group reaches it through the (deliberately
+  ungated) member-turn path. Same class as the schedule/trigger doors, but group
+  flows are collaborative by design; needs its own decision.
+- **Built-in sub-agent tools** (`ConverseWithAgentTool`, `CreateSubAgentTool`)
+  let a prompted LLM converse with agents by id under the conversation's
+  identity. Runtime-side, partially mitigated by tool governance; out of scope
+  for the authoring-surface model.
+- **Enumeration surfaces**: capability registry, deployment listing, and the
+  `getCurrentResourceId` endpoints remain unscoped existence/version oracles
+  (pre-existing).
+- **Manager-facing API gaps** for the upcoming UI: listings have no server-side
+  `space` filter (the space switcher would need one to page correctly), and
+  `ShareResult` returns ids, not names.
+- **Keycloak nesting semantics**: membership in `/engineering/backend` does not
+  confer the `/engineering` space — Keycloak's group-membership claim lists the
+  groups a user is actually in. Documented behaviour, worth knowing before teams
+  adopt nested groups.
+
+### Verification
+
+Targeted suites for every touched area plus `ImportStyleTest` and the doc-link
+guard, then two full unit runs (the first raced a parallel build over `target/`
+and produced phantom `NoClassDefFound`s — the piped-mvnw lesson again, now in
+concurrent form; the uncontended rerun was clean apart from the known
+environmental failures). Mutation checks: the resolver two-set fix and the
+schedule USE gate both have tests that fail with the defect reintroduced. The
+full run also caught that `readDescriptor` returned whatever
+`redactForCaller` returned — the call site now ignores the decorator's return
+value, so no double (or future decorator) can null the response.
+
+---
+
+
+
 ## 🔐 fix(security): close the bypasses an adversarial review found in workspaces (2026-08-29)
 
 **Repo:** EDDI (`feat/multi-user-spaces-and-sharing`)

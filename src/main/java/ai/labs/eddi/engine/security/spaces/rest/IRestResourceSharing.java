@@ -5,7 +5,6 @@
 package ai.labs.eddi.engine.security.spaces.rest;
 
 import jakarta.annotation.security.RolesAllowed;
-import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
 import jakarta.ws.rs.DefaultValue;
 import jakarta.ws.rs.GET;
@@ -64,8 +63,10 @@ public interface IRestResourceSharing {
      * @param cascade
      *            also grant on everything the resource references
      */
+    // No @Consumes: the operation is fully specified by query parameters and a
+    // declared JSON body type on a body-less POST makes strict clients and
+    // generated SDKs manufacture a Content-Type for an entity that does not exist.
     @POST
-    @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(summary = "Share with a person or team",
                description = "Grants access. Re-granting a subject replaces its level rather than adding a second grant.")

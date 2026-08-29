@@ -46,7 +46,10 @@ public class RestDocumentDescriptorStore implements IRestDocumentDescriptorStore
             // parameter rather than deriving it from a store, which makes it the one
             // endpoint that can enumerate every configuration type in the deployment. It
             // has to carry the caller's scope for the same reason each typed store does.
-            return documentDescriptorStore.readDescriptors(type, filter, index, limit, false, accessGuard.listingScope());
+            List<DocumentDescriptor> descriptors = documentDescriptorStore.readDescriptors(type, filter, index, limit, false,
+                    accessGuard.listingScope());
+            descriptors.forEach(accessGuard::redactForCaller);
+            return descriptors;
         } catch (IResourceStore.ResourceStoreException e) {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
@@ -59,7 +62,11 @@ public class RestDocumentDescriptorStore implements IRestDocumentDescriptorStore
     public DocumentDescriptor readDescriptor(String id, Integer version) {
         accessGuard.requireAccess(id, AccessLevel.VIEW, "resource");
         try {
-            return documentDescriptorStore.readDescriptor(id, version);
+            // Redaction mutates in place; the return value is deliberately unused so the
+            // response can never become whatever a decorator (or a test double) returns.
+            DocumentDescriptor descriptor = documentDescriptorStore.readDescriptor(id, version);
+            accessGuard.redactForCaller(descriptor);
+            return descriptor;
         } catch (IResourceStore.ResourceStoreException e) {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);

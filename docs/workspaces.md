@@ -49,6 +49,11 @@ shipped realm (`keycloak/eddi-realm.json`) already includes a
 Without the mapper every user simply has a personal space and no teams. That is
 a correct answer, not a failure.
 
+Group nesting is literal: a member of `/engineering/backend` gets the
+`team:engineering/backend` space, **not** `team:engineering` — Keycloak's
+membership claim lists the groups a user is actually in, and EDDI does not
+invent ancestry. Share with the parent team explicitly if that is what you mean.
+
 Roles stay what they were — `eddi-admin`, `eddi-editor`, `eddi-user`,
 `eddi-viewer`, `eddi-approver`. **Roles say what you may do; spaces say what you
 may see.** Do not mint per-team roles: they do not compose, and they cannot
@@ -142,6 +147,10 @@ Two things it deliberately will not do:
   any colleague's live agent.
 - **Starting a conversation** requires `USE`. An anonymous caller on the public
   production endpoints therefore reaches **published agents only**.
+- **Schedules and triggers** are checked when they are *authored*: creating or
+  re-pointing one at an agent requires `USE` on that agent. The fire itself runs
+  system-initiated and is deliberately not re-checked — the vet happens where
+  the human is.
 
 - **Exporting** an agent requires `VIEW` on it. Export reads the agent *and*
   every configuration it references, so leaving it ungated would have been a

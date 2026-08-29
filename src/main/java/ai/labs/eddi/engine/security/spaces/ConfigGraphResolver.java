@@ -101,15 +101,22 @@ public class ConfigGraphResolver {
      * @return referenced ids, in discovery order; empty when the root is neither
      */
     public Set<String> referencedResourceIds(String rootId) {
-        Set<String> visited = new LinkedHashSet<>();
+        // Two sets on purpose. `seededRoots` guards the seeding recursion (groups can
+        // nest, and nest into themselves); `dequeued` dedups the poll loop. They must
+        // NOT be one set: seeding pre-registers an id before the loop ever polls it,
+        // and a shared set made the loop treat every seeded member agent as "already
+        // done" — so sharing a group granted on the members' workflows while silently
+        // skipping the member agents themselves.
+        Set<String> seededRoots = new LinkedHashSet<>();
+        Set<String> dequeued = new LinkedHashSet<>();
         Deque<String> queue = new ArrayDeque<>();
 
-        seedFromRoot(rootId, queue, visited, 0);
+        seedFromRoot(rootId, queue, seededRoots, 0);
 
         Set<String> result = new LinkedHashSet<>();
         while (!queue.isEmpty() && result.size() < MAX_GRAPH_SIZE) {
             String id = queue.poll();
-            if (id == null || id.equals(rootId) || !visited.add(id)) {
+            if (id == null || id.equals(rootId) || !dequeued.add(id)) {
                 continue;
             }
             result.add(id);
@@ -126,8 +133,8 @@ public class ConfigGraphResolver {
         return result;
     }
 
-    private void seedFromRoot(String rootId, Deque<String> queue, Set<String> visited, int depth) {
-        if (!visited.add(rootId) && depth > 0) {
+    private void seedFromRoot(String rootId, Deque<String> queue, Set<String> seededRoots, int depth) {
+        if (!seededRoots.add(rootId)) {
             // Already seeded — a group that (directly or indirectly) contains itself.
             return;
         }
@@ -146,7 +153,10 @@ public class ConfigGraphResolver {
             LOGGER.debugf("Root %s is not a readable agent (%s); trying agent group", sanitize(rootId), e.getMessage());
         }
 
-        // An agent group points at member agents, which point at workflows.
+        // An agent group points at members. A member is either an agent (whose
+        // workflows the recursive call offers) or a nested group (group-of-groups is
+        // a shipped feature) — the id alone does not say which, so the recursion
+        // tries both branches and the unreadable one contributes nothing.
         try {
             var current = agentGroupStore.getCurrentResourceId(rootId);
             AgentGroupConfiguration group = agentGroupStore.read(rootId, current.getVersion());
@@ -156,34 +166,13 @@ public class ConfigGraphResolver {
                         continue;
                     }
                     queue.offer(member.agentId());
-                    // A member's own graph. A member is either an agent (workflows) or a
-                    // nested group (group-of-groups is a shipped feature), and the id alone
-                    // does not say which — so try both and let the unreadable one contribute
-                    // nothing. Bounded by `visited` and MAX_GRAPH_SIZE like everything else.
-                    for (String nested : referencedFromAgent(member.agentId())) {
-                        queue.offer(nested);
-                    }
                     if (depth < MAX_GROUP_NESTING) {
-                        seedFromRoot(member.agentId(), queue, visited, depth + 1);
+                        seedFromRoot(member.agentId(), queue, seededRoots, depth + 1);
                     }
                 }
             }
         } catch (Exception e) {
             LOGGER.debugf("Root %s is not a readable agent group either (%s)", sanitize(rootId), e.getMessage());
-        }
-    }
-
-    private List<String> referencedFromAgent(String agentId) {
-        try {
-            var current = agentStore.getCurrentResourceId(agentId);
-            var agent = agentStore.read(agentId, current.getVersion());
-            if (agent == null || agent.getWorkflows() == null) {
-                return List.of();
-            }
-            return agent.getWorkflows().stream().map(ConfigGraphResolver::idOf).filter(id -> id != null && !id.isBlank()).toList();
-        } catch (Exception e) {
-            LOGGER.debugf("Could not read member agent %s: %s", sanitize(agentId), e.getMessage());
-            return List.of();
         }
     }
 

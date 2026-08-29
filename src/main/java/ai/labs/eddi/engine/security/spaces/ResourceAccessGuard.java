@@ -284,6 +284,34 @@ public class ResourceAccessGuard {
         return DescriptorAccess.rebuildIndex(descriptor);
     }
 
+    /**
+     * Strips what a non-owner has no business reading from a descriptor about to be
+     * serialised: the grant list and the access index.
+     * <p>
+     * {@code ResourceSharingService.describe} already discloses grants only at
+     * {@link AccessLevel#OWN} — but descriptors also leave the building through
+     * every listing and every direct descriptor read, and a {@code published}
+     * resource is listable by everyone. Without this, the sharing endpoint's
+     * restraint is theatre: the same subjects — real principal and team names —
+     * ride out in the list JSON. Owner, space and visibility stay: the Manager's
+     * owner column needs them, and "owned by alice, space-visible" is exactly what
+     * a recipient needs to understand why they can see something.
+     * <p>
+     * Mutates the given instance, which is safe because descriptors are
+     * deserialised fresh per read — but for that reason this must never be called
+     * on a descriptor that will be written back.
+     *
+     * @return the same descriptor, for chaining
+     */
+    public DocumentDescriptor redactForCaller(DocumentDescriptor descriptor) {
+        if (descriptor == null || seesEverything() || canAccess(descriptor, AccessLevel.OWN)) {
+            return descriptor;
+        }
+        descriptor.setGrants(null);
+        descriptor.setAccessIndex(null);
+        return descriptor;
+    }
+
     /** The caller's principal name, or {@code null} when unauthenticated. */
     public String currentPrincipal() {
         return spaceContext.currentPrincipal();

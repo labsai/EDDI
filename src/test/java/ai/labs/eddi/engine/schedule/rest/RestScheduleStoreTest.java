@@ -13,6 +13,7 @@ import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
 import ai.labs.eddi.engine.runtime.internal.ScheduleFireExecutor;
 import ai.labs.eddi.engine.runtime.internal.SchedulePollerService;
 import ai.labs.eddi.engine.security.OwnershipValidator;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
@@ -53,6 +54,7 @@ class RestScheduleStoreTest {
         // Auth-enabled validator: isAdmin() is then driven by the mocked identity's
         // role.
         setField(rest, "ownershipValidator", new OwnershipValidator(true));
+        setField(rest, "resourceAccessGuard", permissiveResourceGuard());
         setField(rest, "defaultTimeZone", "UTC");
         setField(rest, "minIntervalSeconds", 60L);
     }
@@ -428,6 +430,21 @@ class RestScheduleStoreTest {
     }
 
     @Test
+    void createSchedule_agentTheCallerMayNotUse_refused() throws Exception {
+        // A schedule converses with its agent on every fire, and the fire is
+        // system-initiated — below the USE gate by design. So the gate lives at
+        // create time; without it, scheduling a private agent is a standing bypass
+        // of the check on /agents/{id}/start.
+        asEditor("editor-1");
+        var privateAgentGuard = mock(ResourceAccessGuard.class);
+        doThrow(new io.quarkus.security.ForbiddenException("no")).when(privateAgentGuard).requireAgentUseAccess(anyString());
+        setField(rest, "resourceAccessGuard", privateAgentGuard);
+
+        assertThrows(io.quarkus.security.ForbiddenException.class, () -> rest.createSchedule(dreamSchedule("d9", "editor-1")));
+        verify(scheduleStore, never()).createSchedule(any());
+    }
+
+    @Test
     void createSchedule_actingAsAnotherUser_forbiddenForEditor() throws Exception {
         asEditor("editor-1");
 
@@ -720,5 +737,14 @@ class RestScheduleStoreTest {
         } catch (Exception e) {
             throw new RuntimeException("Cannot set field " + fieldName, e);
         }
+    }
+
+    /**
+     * A guard that admits every agent — a bare mock's void
+     * {@code requireAgentUseAccess} does nothing. These tests exercise schedule
+     * semantics; the USE gate has its own.
+     */
+    private static ResourceAccessGuard permissiveResourceGuard() {
+        return mock(ResourceAccessGuard.class);
     }
 }
