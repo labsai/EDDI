@@ -430,9 +430,9 @@ class HttpCallToolsProvider implements ToolSourceProvider {
      */
     private static String parseFailureDetail(IOException e) {
         String reason = switch (e) {
-            case JsonParseException ignored ->
+            case JsonParseException _ ->
                 "the document is malformed — an unescaped character, an unquoted token, or a missing delimiter";
-            case MismatchedInputException ignored ->
+            case MismatchedInputException _ ->
                 "the document is empty or ends before it is complete";
             default -> "the document could not be parsed";
         };
