@@ -85,7 +85,8 @@ eebfe898b34858918d5cbbe11e60336d1b6a916e:src/test/java/ai/labs/eddi/secrets/sani
 # the CONSTANT NAME: a provider name sitting next to a hex blob is the shape the
 # rule looks for, whatever the blob actually is. Renamed in a follow-up commit to
 # one that says what the value is and leaves the provider out of it, but gitleaks
-# scans a PR's whole commit range, so the introducing commit still needs an entry.
+# scans a pull request's whole commit range, so the introducing commit still needs
+# an entry. Carried by PR #711 (SaaS connectors).
 # Never a key: the value is a document id used to look a row up.
 #
 # Note this comment deliberately does NOT quote the old declaration. The first
@@ -95,7 +96,7 @@ eebfe898b34858918d5cbbe11e60336d1b6a916e:src/test/java/ai/labs/eddi/secrets/sani
 
 # The allowlist entry above, in the commit where its explanation still quoted the
 # `JIRA_ID = "<hex>"` declaration it was explaining. The comment no longer does,
-# but that commit is in this PR's range.
+# but that commit is still in the scan range of PR #711.
 0c228141ecfcaf0270190b557dafa2aea0d09eab:.gitleaksignore:atlassian-api-token:85
 
 # MongoOAuthStateStoreTest / PostgresOAuthStateStoreUnitTest: the fixture standing
@@ -103,7 +104,7 @@ eebfe898b34858918d5cbbe11e60336d1b6a916e:src/test/java/ai/labs/eddi/secrets/sani
 # next to a constant named STATE_TOKEN — a value shape and a name that together
 # are exactly what generic-api-key is built to match. Replaced in a follow-up
 # commit with a zero-entropy value (repeated characters: same shape, nothing for
-# the scanner to weigh), but the introducing commit stays in the PR's range.
+# the scanner to weigh), but the introducing commit stays in #711's scan range.
 # Never a credential: an OAuth state is a correlation nonce, compared for equality
 # and then discarded, and any string does the job.
 0c228141ecfcaf0270190b557dafa2aea0d09eab:src/test/java/ai/labs/eddi/connections/oauth/MongoOAuthStateStoreTest.java:generic-api-key:62
