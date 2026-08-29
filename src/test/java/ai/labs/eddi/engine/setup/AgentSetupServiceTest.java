@@ -787,7 +787,7 @@ class AgentSetupServiceTest {
         void nullAgentName() {
             var request = new CreateApiAgentRequest(
                     null, "prompt", "openapi: 3.0", "openai", "gpt-4",
-                    "sk-key", null, null, null, null, null, null, null, null, null, null, null, null);
+                    "sk-key", null, null, null, null, null, null, null, null, null, null, null, null, null);
             var ex = assertThrows(AgentSetupService.AgentSetupException.class,
                     () -> service.createApiAgent(request));
             assertTrue(ex.getMessage().contains("Agent name is required"));
@@ -798,7 +798,7 @@ class AgentSetupServiceTest {
         void blankSystemPrompt() {
             var request = new CreateApiAgentRequest(
                     "My Agent", "   ", "openapi: 3.0", "openai", "gpt-4",
-                    "sk-key", null, null, null, null, null, null, null, null, null, null, null, null);
+                    "sk-key", null, null, null, null, null, null, null, null, null, null, null, null, null);
             var ex = assertThrows(AgentSetupService.AgentSetupException.class,
                     () -> service.createApiAgent(request));
             assertTrue(ex.getMessage().contains("System prompt is required"));
@@ -809,7 +809,7 @@ class AgentSetupServiceTest {
         void blankOpenApiSpec() {
             var request = new CreateApiAgentRequest(
                     "My Agent", "You are helpful", "", "openai", "gpt-4",
-                    "sk-key", null, null, null, null, null, null, null, null, null, null, null, null);
+                    "sk-key", null, null, null, null, null, null, null, null, null, null, null, null, null);
             var ex = assertThrows(AgentSetupService.AgentSetupException.class,
                     () -> service.createApiAgent(request));
             assertTrue(ex.getMessage().contains("OpenAPI spec is required"));
@@ -820,7 +820,7 @@ class AgentSetupServiceTest {
         void cloudProviderNoApiKey() {
             var request = new CreateApiAgentRequest(
                     "My Agent", "You are helpful", "openapi: 3.0", "openai", "gpt-4",
-                    null, null, null, null, null, null, null, null, null, null, null, null, null);
+                    null, null, null, null, null, null, null, null, null, null, null, null, null, null);
             var ex = assertThrows(AgentSetupService.AgentSetupException.class,
                     () -> service.createApiAgent(request));
             assertTrue(ex.getMessage().contains("API key is required"));
@@ -839,7 +839,7 @@ class AgentSetupServiceTest {
             for (int bad : new int[]{0, -1, AgentSetupService.MAX_TOOL_ITERATIONS + 1}) {
                 var request = new CreateApiAgentRequest(
                         "My Agent", "You are helpful", "not-even-openapi", "openai", "gpt-4",
-                        "sk-key", null, null, null, null, null, null, null, null, null, null, bad, null);
+                        "sk-key", null, null, null, null, null, null, null, null, null, null, bad, null, null);
                 var ex = assertThrows(AgentSetupService.AgentSetupException.class,
                         () -> service.createApiAgent(request), "value " + bad + " must be rejected");
                 assertTrue(ex.getMessage().contains("maxToolIterations"),
@@ -863,7 +863,7 @@ class AgentSetupServiceTest {
             for (int ok : new int[]{1, AgentSetupService.MAX_TOOL_ITERATIONS}) {
                 var request = new CreateApiAgentRequest(
                         "My Agent", "You are helpful", "not-even-openapi", "openai", "gpt-4",
-                        "sk-key", null, null, null, null, null, null, null, null, null, null, ok, null);
+                        "sk-key", null, null, null, null, null, null, null, null, null, null, ok, null, null);
                 var ex = assertThrows(AgentSetupService.AgentSetupException.class,
                         () -> service.createApiAgent(request), "value " + ok + " must reach the spec parse");
                 assertFalse(ex.getMessage().contains("maxToolIterations"),
@@ -891,7 +891,7 @@ class AgentSetupServiceTest {
 
             var request = new CreateApiAgentRequest(
                     "My Agent", "You are helpful", "openapi: 3.0", "openai", "gpt-4",
-                    "sk-key", null, null, null, null, null, null, null, null, hitl, null, null, null);
+                    "sk-key", null, null, null, null, null, null, null, null, hitl, null, null, null, null);
 
             var ex = assertThrows(AgentSetupService.AgentSetupException.class,
                     () -> guardedService.createApiAgent(request));
@@ -913,7 +913,7 @@ class AgentSetupServiceTest {
             var request = new CreateApiAgentRequest(
                     "My Agent", "You are helpful", "openapi: 3.0", "openai", "gpt-4",
                     "sk-key", null, null, null, null, null, null, null, null, null,
-                    "https://good.example.com/mcp,ftp://bad.example.com/mcp", null, null);
+                    "https://good.example.com/mcp,ftp://bad.example.com/mcp", null, null, null);
 
             var ex = assertThrows(AgentSetupService.AgentSetupException.class,
                     () -> guardedService.createApiAgent(request));
@@ -932,7 +932,7 @@ class AgentSetupServiceTest {
             var request = new CreateApiAgentRequest(
                     "My Agent", "You are helpful", "openapi: 3.0", "openai", "gpt-4",
                     "sk-key", null, null, null, null, null, null, null, null, null,
-                    "https://a.example.com/mcp, https://b.example.com/mcp", null, null);
+                    "https://a.example.com/mcp, https://b.example.com/mcp", null, null, null);
 
             var ex = assertThrows(AgentSetupService.AgentSetupException.class,
                     () -> guardedService.createApiAgent(request));
@@ -958,7 +958,7 @@ class AgentSetupServiceTest {
 
             var request = new CreateApiAgentRequest(
                     "My Agent", "You are helpful", "openapi: 3.0", "openai", "gpt-4",
-                    "sk-key", null, null, null, null, null, null, null, null, hitl, null, null, null);
+                    "sk-key", null, null, null, null, null, null, null, null, hitl, null, null, null, null);
 
             var ex = assertThrows(AgentSetupService.AgentSetupException.class,
                     () -> guardedService.createApiAgent(request));

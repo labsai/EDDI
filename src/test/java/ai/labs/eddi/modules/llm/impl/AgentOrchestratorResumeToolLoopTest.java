@@ -57,6 +57,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.*;
@@ -273,8 +274,12 @@ class AgentOrchestratorResumeToolLoopTest {
         verify(calculatorTool, times(1)).calculate("2+2");
         verify(journalStore).tryClaim("conv-1", "epoch-1", "c1", "calculate", "reviewer-1");
         verify(journalStore).tryClaim("conv-1", "epoch-1", "c2", "calculate", "reviewer-1");
-        verify(journalStore).markExecuted("conv-1", "epoch-1", "c1", "42");
-        verify(journalStore).markExecuted("conv-1", "epoch-1", "c2", "4");
+        // The journal records what the MODEL was given, provenance envelope and all —
+        // not the tool's raw output. On a duplicate claim the journalled string is
+        // replayed straight into the transcript, so journalling the raw result would
+        // make a crash-and-retry the one path where a tool result arrives ungoverned.
+        verify(journalStore).markExecuted(eq("conv-1"), eq("epoch-1"), eq("c1"), contains("42"));
+        verify(journalStore).markExecuted(eq("conv-1"), eq("epoch-1"), eq("c2"), contains("4"));
         verify(chatModel, times(1)).chat(any(ChatRequest.class));
     }
 

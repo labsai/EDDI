@@ -486,7 +486,8 @@ public class AgentSetupService {
         // it should not have written. Key resolution still precedes every store call.
         McpApiToolBuilder.ApiBuildResult buildResult;
         try {
-            buildResult = McpApiToolBuilder.parseAndBuild(request.openApiSpec(), request.endpoints(), request.apiBaseUrl(), request.apiAuth());
+            buildResult = McpApiToolBuilder.parseAndBuild(request.openApiSpec(), request.endpoints(), request.apiBaseUrl(), request.apiAuth(),
+                    request.apiAuthHeader());
         } catch (IllegalArgumentException e) {
             throw new AgentSetupException("OpenAPI parsing failed: " + e.getMessage(), e);
         }

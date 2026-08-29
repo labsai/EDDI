@@ -8,6 +8,8 @@ import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.engine.tenancy.model.TenantQuota;
 import ai.labs.eddi.engine.tenancy.model.UsageSnapshot;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.micrometer.prometheus.PrometheusConfig;
+import io.micrometer.prometheus.PrometheusMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -323,6 +325,51 @@ class TenantQuotaServiceTest {
 
         assertEquals(1.0, convCount);
         assertEquals(1.0, apiCount);
+    }
+
+    // --- Prometheus exposition (tag-key collision regression test) ---
+
+    @Nested
+    @DisplayName("Prometheus exposition")
+    class PrometheusExpositionTests {
+
+        /**
+         * A {@link PrometheusMeterRegistry} keeps only the first tag-key shape
+         * registered under a given metric name and silently drops every later one — no
+         * exception, no warning. This service used to register
+         * {@code eddi.tenant.quota.denied} untagged in {@code init()} and then again
+         * with {@code tenant}+{@code type} at each denial, so the tagged series never
+         * reached {@code /q/metrics} and the per-tenant breakdown documented in
+         * {@code docs/metrics.md} did not exist.
+         * <p>
+         * {@link SimpleMeterRegistry} tolerates the collision and happily reports both
+         * shapes, which is exactly why every other test in this class missed it. This
+         * one asserts against a real Prometheus scrape.
+         */
+        @Test
+        @DisplayName("denials reach the scrape carrying tenant and type labels")
+        void deniedCounterIsExposedWithItsLabels() {
+            var prometheus = new PrometheusMeterRegistry(PrometheusConfig.DEFAULT);
+            var store = new InMemoryTenantQuotaStore(TenantQuota.unlimited(TENANT_ID));
+            var service = new TenantQuotaService(store, prometheus, TENANT_ID);
+            store.setQuota(new TenantQuota(TENANT_ID, 1, -1, -1, -1, true));
+
+            assertTrue(service.acquireConversationSlot().allowed());
+            assertFalse(service.acquireConversationSlot().allowed(), "second slot must be denied");
+
+            String scrape = prometheus.scrape();
+            String denied = scrape.lines()
+                    .filter(l -> l.startsWith("eddi_tenant_quota_denied_total"))
+                    .findFirst()
+                    .orElseThrow(() -> new AssertionError(
+                            "eddi_tenant_quota_denied_total absent from scrape:\n" + scrape));
+
+            assertTrue(denied.contains("tenant=\"" + TENANT_ID + "\""),
+                    "denial series lost its tenant label — a colliding untagged registration is "
+                            + "shadowing it: " + denied);
+            assertTrue(denied.contains("type=\"conversation\""),
+                    "denial series lost its type label: " + denied);
+        }
     }
 
     // --- Concurrency (TOCTOU regression test) ---

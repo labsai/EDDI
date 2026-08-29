@@ -12,9 +12,9 @@ Changes are organized by **where they live** in the JSON config. The Manager edi
 
 | Config Type | REST Endpoint | Manager Page |
 |-------------|---------------|--------------|
-| **LLM Task** (`langchain.json`) | `GET/PUT /langchainstore/langchains/{id}?version=N` | Workflow Extension → LLM Task editor |
+| **LLM Task** (`langchain.json`) | `GET/PUT /llmstore/llms/{id}?version=N` | Workflow Extension → LLM Task editor |
 | **Agent** (`AgentConfiguration`) | `GET/PUT /agentstore/agents/{id}?version=N` | Agent editor |
-| **Behavior Rules** (`behavior.json`) | `GET/PUT /behaviorstore/behaviorsets/{id}?version=N` | Behavior Rule editor |
+| **Behavior Rules** (`behavior.json`) | `GET/PUT /rulestore/rulesets/{id}?version=N` | Behavior Rule editor |
 
 ---
 

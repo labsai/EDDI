@@ -17,6 +17,7 @@ import org.jboss.logging.Logger;
 
 import javax.sql.DataSource;
 import java.sql.*;
+import java.time.Clock;
 import java.time.Instant;
 import java.time.YearMonth;
 import java.time.ZoneOffset;
@@ -138,6 +139,17 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
             """;
 
     private final Instance<DataSource> dataSourceInstance;
+
+    /**
+     * The source of "now" for every rolling window. See
+     * {@code MongoTenantQuotaStore#clock} — same windows, same wall-clock
+     * alignment, same reason a test cannot assert two increments add up without
+     * pinning it.
+     * <p>
+     * Production always gets {@link Clock#systemUTC()}. Only tests pass anything
+     * else.
+     */
+    private final Clock clock;
     private volatile boolean schemaInitialized = false;
 
     // Bootstrap config — stored as fields for lazy initialization in ensureSchema()
@@ -156,15 +168,24 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
         this.dataSourceInstance = dataSourceInstance;
         this.defaultTenantId = defaultTenantId;
         this.defaultQuota = new TenantQuota(defaultTenantId, maxConvPerDay, maxAgents, maxApiCalls, maxCost, enabled);
+        this.clock = Clock.systemUTC();
     }
 
     /**
      * Test-only constructor — no CDI injection, no bootstrap.
      */
     PostgresTenantQuotaStore(Instance<DataSource> dataSourceInstance) {
+        this(dataSourceInstance, Clock.systemUTC());
+    }
+
+    /**
+     * Test-only constructor taking the clock, so a test can pin "now".
+     */
+    PostgresTenantQuotaStore(Instance<DataSource> dataSourceInstance, Clock clock) {
         this.dataSourceInstance = dataSourceInstance;
         this.defaultTenantId = null;
         this.defaultQuota = null;
+        this.clock = clock;
     }
 
     private synchronized void ensureSchema() {
@@ -350,8 +371,8 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
             return QuotaCheckResult.OK;
         }
 
-        long dayStartMs = Instant.now().truncatedTo(ChronoUnit.DAYS).toEpochMilli();
-        long minuteStartMs = Instant.now().truncatedTo(ChronoUnit.MINUTES).toEpochMilli();
+        long dayStartMs = clock.instant().truncatedTo(ChronoUnit.DAYS).toEpochMilli();
+        long minuteStartMs = clock.instant().truncatedTo(ChronoUnit.MINUTES).toEpochMilli();
 
         ensureSchema();
         try (Connection conn = dataSourceInstance.get().getConnection()) {
@@ -386,8 +407,8 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
             return QuotaCheckResult.OK;
         }
 
-        long minuteStartMs = Instant.now().truncatedTo(ChronoUnit.MINUTES).toEpochMilli();
-        long dayStartMs = Instant.now().truncatedTo(ChronoUnit.DAYS).toEpochMilli();
+        long minuteStartMs = clock.instant().truncatedTo(ChronoUnit.MINUTES).toEpochMilli();
+        long dayStartMs = clock.instant().truncatedTo(ChronoUnit.DAYS).toEpochMilli();
 
         ensureSchema();
         try (Connection conn = dataSourceInstance.get().getConnection()) {
@@ -416,9 +437,9 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
 
     @Override
     public QuotaCheckResult tryAddCost(String tenantId, double cost, double limit) {
-        String monthKey = YearMonth.now(ZoneOffset.UTC).toString();
-        long dayStartMs = Instant.now().truncatedTo(ChronoUnit.DAYS).toEpochMilli();
-        long minuteStartMs = Instant.now().truncatedTo(ChronoUnit.MINUTES).toEpochMilli();
+        String monthKey = YearMonth.now(clock.withZone(ZoneOffset.UTC)).toString();
+        long dayStartMs = clock.instant().truncatedTo(ChronoUnit.DAYS).toEpochMilli();
+        long minuteStartMs = clock.instant().truncatedTo(ChronoUnit.MINUTES).toEpochMilli();
 
         ensureSchema();
         try (Connection conn = dataSourceInstance.get().getConnection()) {
@@ -508,7 +529,7 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
                     String monthKey = rs.getString("cost_month");
-                    if (monthKey != null && monthKey.equals(YearMonth.now(ZoneOffset.UTC).toString())) {
+                    if (monthKey != null && monthKey.equals(YearMonth.now(clock.withZone(ZoneOffset.UTC)).toString())) {
                         return rs.getDouble("monthly_cost_usd");
                     }
                 }
@@ -554,6 +575,6 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
                 Instant.ofEpochMilli(rs.getLong("day_start")),
                 rs.getString("cost_month") != null
                         ? YearMonth.parse(rs.getString("cost_month"))
-                        : YearMonth.now(ZoneOffset.UTC));
+                        : YearMonth.now(clock.withZone(ZoneOffset.UTC)));
     }
 }

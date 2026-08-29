@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.mcpcalls.rest;
 
+import ai.labs.eddi.configs.mcpcalls.model.McpToolDiscoveryRequest;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.mcpcalls.IMcpCallsStore;
 import ai.labs.eddi.configs.mcpcalls.model.McpCallsConfiguration;
@@ -112,14 +113,14 @@ class RestMcpCallsStoreTest {
         @Test
         @DisplayName("should return BAD_REQUEST for null URL")
         void nullUrl() {
-            Response response = restStore.discoverTools(null, null, null);
+            Response response = restStore.discoverTools(null, null);
             assertEquals(400, response.getStatus());
         }
 
         @Test
         @DisplayName("should return BAD_REQUEST for blank URL")
         void blankUrl() {
-            Response response = restStore.discoverTools("  ", null, null);
+            Response response = restStore.discoverTools(new McpToolDiscoveryRequest("  ", null), null);
             assertEquals(400, response.getStatus());
         }
 
@@ -128,11 +129,15 @@ class RestMcpCallsStoreTest {
         void connectionFailure() throws Exception {
             when(mcpToolProviderManager.discoverTools(any()))
                     .thenThrow(new RuntimeException("Connection refused"));
-            Response response = restStore.discoverTools("http://localhost:9999", "http", null);
+            Response response = restStore.discoverTools(new McpToolDiscoveryRequest("http://localhost:9999", "http"), null);
             assertEquals(502, response.getStatus());
             @SuppressWarnings("unchecked")
             Map<String, Object> entity = (Map<String, Object>) response.getEntity();
-            assertTrue(entity.get("error").toString().contains("Connection refused"));
+            String error = entity.get("error").toString();
+            assertTrue(error.contains("RuntimeException"), "the caller learns the failure TYPE: " + error);
+            assertTrue(!error.contains("Connection refused"),
+                    "the exception MESSAGE stays out of the response — it routinely carries the resolved URL, "
+                            + "and a URL with a templated credential in it IS the credential");
         }
     }
 

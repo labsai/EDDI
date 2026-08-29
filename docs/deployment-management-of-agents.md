@@ -267,7 +267,7 @@ This will:
 Workflows can also be individually cascade-deleted:
 
 ```
-DELETE /packagestore/packages/{id}?version={version}&cascade=true&permanent=true
+DELETE /workflowstore/workflows/{id}?version={version}&cascade=true&permanent=true
 → 200 OK (package + all extension resources deleted)
 ```
 
@@ -312,13 +312,13 @@ Returns a report listing all unreferenced resources across all stores (workflows
   "deletedCount": 0,
   "orphans": [
     {
-      "resourceUri": "eddi://ai.labs.package/packagestore/packages/abc123?version=1",
+      "resourceUri": "eddi://ai.labs.workflow/workflowstore/workflows/abc123?version=1",
       "type": "ai.labs.package",
       "name": "Unused Workflow",
       "deleted": false
     },
     {
-      "resourceUri": "eddi://ai.labs.behavior/behaviorstore/behaviorsets/def456?version=1",
+      "resourceUri": "eddi://ai.labs.rules/rulestore/rulesets/def456?version=1",
       "type": "ai.labs.behavior",
       "name": "Old Behavior Set",
       "deleted": true

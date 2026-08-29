@@ -53,6 +53,17 @@ data:
   QUARKUS_HTTP_CORS_ORIGINS: "http://localhost:3000,http://localhost:7070"
   QUARKUS_OIDC_TENANT_ENABLED: "false"
 
+  # Authentication escape hatches. OIDC is off by default in this quickstart, and
+  # AuthStartupGuard refuses a production boot in that state without an explicit
+  # opt-out — so these three are what make the manifest actually start. The MCP
+  # endpoint and the secrets vault need their OWN opt-in on top of the first flag:
+  # inheriting it must not be enough to expose agent CRUD or vault writes.
+  # Set all three to "false" and QUARKUS_OIDC_TENANT_ENABLED to "true" for anything
+  # reachable from outside the cluster.
+  EDDI_SECURITY_ALLOW_UNAUTHENTICATED: "true"
+  EDDI_MCP_ALLOW_UNAUTHENTICATED: "true"
+  EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED: "true"
+
 ---
 # --- EDDI Secret (placeholder — see instructions above) ---
 apiVersion: v1

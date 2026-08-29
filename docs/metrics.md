@@ -2,9 +2,22 @@
 
 E.D.D.I exposes comprehensive metrics via [Micrometer](https://micrometer.io/) in Prometheus format, covering conversations, tool execution, caching, rate limiting, cost tracking, multi-agent group discussions, scheduled triggers, tenant quotas, audit integrity, and JVM internals.
 
-## Quick Start — Grafana Dashboard
+## Quick Start — Grafana Dashboards
 
-E.D.D.I ships with a pre-built **Operations Command Center** dashboard (45 panels, 9 rows) that auto-provisions into Grafana.
+E.D.D.I ships three dashboards, all auto-provisioned into Grafana by
+`docker-compose.monitoring.yml`:
+
+| Dashboard | UID | File | Shape | Use it for |
+|-----------|-----|------|-------|------------|
+| **Operations Command Center** | `eddi-ops` | `eddi-operations-dashboard.json` | 51 panels, KPI strip + 9 rows | The front door. Is the platform healthy, and if not, roughly where. |
+| **Full Metrics Reference** | `eddi-metrics-all` | `eddi-full-metrics-dashboard.json` | 133 panels, 19 subsystem rows | Every meter E.D.D.I registers. Go here when the number you need is not on the ops dashboard. |
+| **EDDI Observability** | `eddi-observability` | `eddi-grafana-dashboard.json` | 16 panels, 6 rows | The original dashboard: Coordinator Health, Pipeline Tasks, Tool Execution, Vault & Security, NATS, HTTP & JVM. |
+
+The Full Metrics Reference covers **all 144 registered meters** — it is generated
+from the registration sites in the source, so a metric cannot be added to the
+codebase and silently go unwatched. All rows but the first are collapsed; open
+the subsystem you care about. Two template variables scope everything: the
+Prometheus **data source** and the scrape **job**.
 
 ### Enable Monitoring
 
@@ -42,11 +55,82 @@ The dashboard appears automatically as the Grafana home page. Anonymous viewer a
 
 > **Database-agnostic**: Row 9 includes panels for both MongoDB (`mongodb_driver_pool_*`) and PostgreSQL (`agroal_*`). Whichever backend is active shows data; the other gracefully shows "No data".
 
+### Full Metrics Reference — rows
+
+`Overview` (open by default) · `Conversations` · `Coordinator & Lifecycle Pipeline` ·
+`Tool Execution Engine` · `Tool Cache` · `Tool Rate Limiting` ·
+`LLM — Model Cascade & Streaming` · `Guardrails, Counterweights & Masking` ·
+`Human-in-the-Loop` · `Group Conversations & Standing Teams` · `Scheduling` ·
+`Persistent Memory — Dream & Summarization` ·
+`Integrations — MCP, A2A Identity, OpenAI-compatible API` ·
+`Capability Registry & Connections` · `Secrets Vault` · `Tenancy, Quotas & Audit` ·
+`Platform Operator` · `NATS JetStream` · `Runtime context (Quarkus / JVM built-ins)`
+
+---
+
+## Naming: what the exposition actually looks like
+
+All metrics are served at `/q/metrics`. Micrometer mostly uses **dot notation** in
+source (`eddi.tool.cache.hits`) and Prometheus renders it with underscores. The
+rules below are worth knowing exactly, because guessing wrong yields a panel that
+is silently empty rather than an error. They were verified against Micrometer
+1.17.0 with `micrometer-registry-prometheus-simpleclient`, the registry Quarkus
+pulls in.
+
+| Meter | Source name | Prometheus series |
+|-------|-------------|-------------------|
+| Counter | `eddi.tool.calls` | `eddi_tool_calls_total` |
+| Counter, name already ends in `_count` | `eddi.vault.errors.count` | `eddi_vault_errors_count_total` |
+| Counter, name already ends in `_total` | `eddi_group_cost_ceiling_hit_total` | `eddi_group_cost_ceiling_hit_total` — **not** doubled |
+| Timer | `eddi.pipeline.task.duration` | `_seconds_count`, `_seconds_sum`, `_seconds_max` |
+| Distribution summary | `eddi.llm.cascade.confidence` | `_count`, `_sum`, `_max` |
+| Gauge | `eddi_agents_deployed` | `eddi_agents_deployed` |
+| Tag key with a dot | `.tag("task.id", …)` | label `task_id` |
+
+Tag keys that are already camelCase stay camelCase — `connection.resolve.time`
+carries `authType`, not `auth_type`. Only dots are rewritten.
+
+### Timers do not publish percentiles
+
+Every E.D.D.I timer exposes `_seconds_sum`, `_seconds_count` and `_seconds_max`.
+Only **one** — `eddi.pipeline.task.duration` — calls
+`publishPercentileHistogram()`, so it is the only one with a `_seconds_bucket`
+series and therefore the only one where `histogram_quantile()` returns anything.
+
+```promql
+# Mean over the interval — works for every timer
+sum(rate(eddi_tool_execution_duration_seconds_sum[5m]))
+  / clamp_min(sum(rate(eddi_tool_execution_duration_seconds_count[5m])), 1e-9)
+
+# Peak — the decaying max, not p100 of the window
+max(eddi_tool_execution_duration_seconds_max)
+
+# A true quantile — ONLY for eddi_pipeline_task_duration
+histogram_quantile(0.99, sum by (le) (rate(eddi_pipeline_task_duration_seconds_bucket[5m])))
+```
+
+`histogram_quantile` over any other EDDI timer returns an empty result, which
+Grafana renders as "No data" — indistinguishable from an idle system. If you want
+percentiles on a timer, add `.publishPercentileHistogram()` at its registration
+site first; it is not free (one series per bucket per tag combination).
+
+### One name, one tag shape
+
+A `PrometheusMeterRegistry` keeps only the **first** tag-key shape registered
+under a given metric name and silently drops every later one — no exception, no
+log line. Registering `foo` untagged and then `foo{tenant,type}` means the tagged
+series never reaches `/q/metrics` at all.
+
+So a metric must be registered with the same tag keys at every call site. Where
+you want both a total and a breakdown, tag everything and aggregate at query time
+with `sum(rate(...))` — do not add a second untagged counter under the same name.
+`TenantQuotaService` had exactly this bug; `TenantQuotaServiceTest`
+(`PrometheusExpositionTests`) now pins the exposition against a real scrape,
+because a `SimpleMeterRegistry` tolerates the collision and will not catch it.
+
 ---
 
 ## Metrics Reference
-
-All metrics are accessible at `/q/metrics`. Micrometer uses **dot notation** (e.g., `eddi.tool.cache.hits`); Prometheus automatically converts to **underscore notation** with `_total` suffix for counters (e.g., `eddi_tool_cache_hits_total`).
 
 ### Conversation Metrics
 
@@ -87,7 +171,9 @@ rate(eddi_tool_execution_success_total{tool="weather"}[5m])
 ```
 eddi_tool_cache_hits_total                  # Cache hits
 eddi_tool_cache_misses_total                # Cache misses
-eddi_tool_cache_puts_total                  # Cache puts (per tool)
+eddi_tool_cache_puts_by_tool_total{tool}    # Cache puts (per tool; there is no untagged variant)
+eddi_tool_cache_hits_by_tool_total{tool}    # Cache hits, per tool
+eddi_tool_cache_misses_by_tool_total{tool}  # Cache misses, per tool
 eddi_tool_cache_get_duration_seconds        # Get latency (timer)
 eddi_tool_cache_put_duration_seconds        # Put latency (timer)
 eddi_tool_cache_size                        # Current entries (gauge)
@@ -170,17 +256,35 @@ eddi_schedule_fire_duration_seconds         # Fire latency (timer)
 ### Tenant Quota Metrics
 
 ```
-eddi_tenant_quota_allowed_total             # Quota checks passed
-eddi_tenant_quota_denied_total              # Quota checks denied
+eddi_tenant_quota_allowed_total             # Slot acquisitions granted (untagged)
+eddi_tenant_quota_denied_total{tenant,type} # Quota denials, always tagged
 eddi_tenant_usage_conversations_total       # Conversation usage (per tenant)
 eddi_tenant_usage_api_calls_total           # API call usage (per tenant)
 eddi_tenant_usage_cost_total                # Cost usage (per tenant)
 ```
 
-Quota denied counters include `type` and `tenant` labels:
+Denials carry `tenant` and `type` (`conversation` / `api_call` / `agent` / `cost`);
+aggregate at query time rather than expecting an untagged total:
+
 ```promql
+# One tenant, one limit type
 rate(eddi_tenant_quota_denied_total{type="cost", tenant="acme"}[5m])
+
+# All denials
+sum(rate(eddi_tenant_quota_denied_total[5m]))
 ```
+
+> **Upgrade note.** Before this was fixed, the denial counter was *also*
+> registered untagged, which — per [One name, one tag
+> shape](#one-name-one-tag-shape) — meant the tagged series never reached
+> `/q/metrics` and the per-tenant breakdown above did not work at all. After
+> upgrading, Prometheus keeps the old label-less samples for its retention window,
+> so breakdown queries should filter them out with `{tenant!=""}`. The shipped
+> dashboard already does.
+
+`eddi_tenant_quota_allowed_total` counts **slot acquisitions only**. The read-only
+gates (`checkAgentQuota`, `checkCostBudget`) deliberately do not touch it, so
+`allowed / (allowed + denied)` is not a true accept rate.
 
 ### Audit Ledger Metrics
 
@@ -366,10 +470,22 @@ sum(rate(eddi_tool_execution_success_total[5m])) /
    sum(rate(eddi_tool_execution_failure_total[5m])))
 ```
 
-**P95 Conversation Processing Latency:**
+**Mean Conversation Processing Latency:**
 ```promql
-histogram_quantile(0.95,
-  sum(rate(eddi_conversation_processing_duration_seconds_bucket[5m])) by (le))
+sum(rate(eddi_conversation_processing_duration_seconds_sum[5m]))
+  / clamp_min(sum(rate(eddi_conversation_processing_duration_seconds_count[5m])), 1e-9)
+```
+
+> **There is no P95 for this timer.** See [Timers do not publish
+> percentiles](#timers-do-not-publish-percentiles) — `eddi_conversation_processing_duration`
+> exposes no `_bucket` series, so `histogram_quantile` over it returns nothing at
+> all. Use the mean above, or `max(eddi_conversation_processing_duration_seconds_max)`
+> for the peak.
+
+**P99 Pipeline Task Duration** (the one timer that *does* have buckets):
+```promql
+histogram_quantile(0.99,
+  sum by (le) (rate(eddi_pipeline_task_duration_seconds_bucket[5m])))
 ```
 
 **Cost Per Hour:**

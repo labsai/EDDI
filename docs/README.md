@@ -45,7 +45,9 @@ Built with **Java 25** and **Quarkus**. Ships as a **Red Hat-certified Docker im
 ### 🔗 Protocols & Interoperability
 
 - **[MCP Server](mcp-server.md)** (80+ tools) — Full EDDI control from Claude Desktop, IDE plugins, or any MCP client
+- **[MCP Client](mcp-client.md)** — Point an agent at somebody else's MCP server, including stdio servers via a bridge sidecar
 - **[A2A Protocol](a2a-protocol.md)** — Agent-to-Agent peer communication with skill discovery
+- **[Connections](connections.md)** — One credential model for every outbound call: static keys, HTTP Basic, OAuth service accounts, and per-end-user OAuth
 - **[OpenAI-Compatible API](open-webui-integration.md)** — Deployed agents presented as OpenAI models for Open WebUI and OpenAI SDK clients
 - **SSE Streaming** — Token-by-token responses, including most tool-enabled turns (a single-chunk fallback applies to cascade agents, providers without a streaming builder, and a few other configurations), plus a live `tool_call` event so clients can show "Using {tool}…" while the turn is still running
 

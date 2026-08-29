@@ -42,7 +42,7 @@ All EDDI's resources start with `eddi://`, which is used to distinguish EDDI-spe
 Example URI:
 
 ```
-eddi://ai.labs.behavior/behaviorstore/behaviorsets/673abc123?version=1
+eddi://ai.labs.rules/rulestore/rulesets/673abc123?version=1
 ```
 
 ## Extension Discovery
