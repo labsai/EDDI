@@ -21,6 +21,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -70,6 +71,55 @@ class WorkspaceAccessIndexMigrationTest {
         // Recording completion here would strand every descriptor without an index —
         // invisible in every listing once enforcement is on, with no way to re-run.
         verify(logStore, never()).createMigrationLog(any());
+    }
+
+    @Test
+    @DisplayName("a failed WRITE also blocks completion, not just a failed read")
+    void doesNotRecordCompletionAfterAFailedWrite() throws Exception {
+        // The read-failure case was covered; this one was not, and it is the more
+        // likely of the two. `stampIfNeeded` swallowed the write exception and
+        // returned "not written", which was indistinguishable from "already
+        // correct" — so a run where every write threw recorded itself complete and
+        // left those descriptors with no access index. Under enforcement that means
+        // invisible in every listing, with no way to re-run short of deleting the
+        // log row by hand.
+        var descriptorStore = mock(IDocumentDescriptorStore.class);
+        var logStore = mock(IMigrationLogStore.class);
+        when(logStore.readMigrationLog(anyString())).thenReturn(null);
+
+        DocumentDescriptor unstamped = new DocumentDescriptor();
+        unstamped.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/abcdef1234567890abcdef?version=1"));
+        unstamped.setOwnerId("alice");
+        when(descriptorStore.readDescriptors(anyString(), anyString(), anyInt(), anyInt(), anyBoolean()))
+                .thenReturn(List.of(unstamped))
+                .thenReturn(List.of());
+        doThrow(new IResourceStore.ResourceStoreException("write rejected", null))
+                .when(descriptorStore).setDescriptor(anyString(), anyInt(), any());
+
+        new WorkspaceAccessIndexMigration(descriptorStore, logStore).runIfNeeded();
+
+        verify(logStore, never()).createMigrationLog(any());
+    }
+
+    @Test
+    @DisplayName("a descriptor that cannot be addressed at all does not block completion forever")
+    void unstampableDescriptorDoesNotBlockCompletion() throws Exception {
+        // A descriptor with an unparseable resource URI would fail identically on
+        // every retry, so holding the migration open for it would mean it never
+        // completes — a different way to strand the deployment.
+        var descriptorStore = mock(IDocumentDescriptorStore.class);
+        var logStore = mock(IMigrationLogStore.class);
+        when(logStore.readMigrationLog(anyString())).thenReturn(null);
+
+        DocumentDescriptor unaddressable = new DocumentDescriptor();
+        unaddressable.setOwnerId("alice");
+        when(descriptorStore.readDescriptors(anyString(), anyString(), anyInt(), anyInt(), anyBoolean()))
+                .thenReturn(List.of(unaddressable))
+                .thenReturn(List.of());
+
+        new WorkspaceAccessIndexMigration(descriptorStore, logStore).runIfNeeded();
+
+        verify(logStore).createMigrationLog(any());
     }
 
     @Test

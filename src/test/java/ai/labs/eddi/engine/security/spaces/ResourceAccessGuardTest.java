@@ -304,6 +304,12 @@ class ResourceAccessGuardTest {
         private final WorkspaceSettings enforcing = settings(true, true, WorkspaceSettings.LEGACY_SHARED);
         private final WorkspaceSettings notEnforcing = settings(false, true, WorkspaceSettings.LEGACY_SHARED);
 
+        private DocumentDescriptor publishedWithGrantsOwnedBy(String owner) {
+            var d = published(owner);
+            d.setGrants(List.of(new ResourceGrant(Subjects.user("bob"), AccessLevel.USE.name(), owner, new Date(0))));
+            return DescriptorAccess.rebuildIndex(d);
+        }
+
         private DocumentDescriptor published(String owner) {
             var d = ownedBy(owner);
             d.setVisibility(ResourceVisibility.published.wireName());
@@ -393,6 +399,41 @@ class ResourceAccessGuardTest {
             var g = guard(identity("carol"), enforcing, mock(IDocumentDescriptorStore.class));
 
             assertEquals(AccessLevel.VIEW.name(), g.redactForCaller(alreadyStamped).getCallerLevel());
+        }
+
+        @Test
+        @DisplayName("grants are NOT handed to a non-owner just because enforcement is off")
+        void grantsStayHiddenWhenNotEnforcing() {
+            // seesEverything() is true for everyone while enforcement is off, so
+            // keying disclosure on the granted level alone gave every editor the
+            // full grant audience of every resource. Ownership and grants ARE
+            // recorded in that state — the documented rollout is to let attribution
+            // accumulate before switching enforcement on — so this is a deployment
+            // part-way through the recommended path, broadcasting the audience lists
+            // it had just built up.
+            var g = guard(identity("carol"), notEnforcing, mock(IDocumentDescriptorStore.class));
+
+            var d = g.redactForCaller(publishedWithGrantsOwnedBy("alice"));
+
+            assertNull(d.getGrants());
+            assertNull(d.getAccessIndex());
+            assertEquals("alice", d.getOwnerId(), "owner and visibility still travel");
+        }
+
+        @Test
+        @DisplayName("an owner still sees their own grants while enforcement is off")
+        void ownerKeepsGrantsWhenNotEnforcing() {
+            var g = guard(identity("alice"), notEnforcing, mock(IDocumentDescriptorStore.class));
+
+            assertEquals(1, g.redactForCaller(publishedWithGrantsOwnedBy("alice")).getGrants().size());
+        }
+
+        @Test
+        @DisplayName("an administrator still sees them while enforcement is off")
+        void adminKeepsGrantsWhenNotEnforcing() {
+            var g = guard(identity("root", "eddi-admin"), notEnforcing, mock(IDocumentDescriptorStore.class));
+
+            assertEquals(1, g.redactForCaller(publishedWithGrantsOwnedBy("alice")).getGrants().size());
         }
 
         @Test

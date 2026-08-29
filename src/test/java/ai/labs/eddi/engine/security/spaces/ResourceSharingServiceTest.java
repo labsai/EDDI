@@ -30,6 +30,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -145,7 +146,7 @@ class ResourceSharingServiceTest {
         var result = service.share(AGENT, Subjects.user("carol"), AccessLevel.USE, false);
 
         assertEquals(List.of(AGENT), result.updatedIds());
-        verify(graphResolver, org.mockito.Mockito.never()).referencedResourceIds(anyString());
+        verify(graphResolver, never()).referencedResourceIds(anyString());
     }
 
     @Test

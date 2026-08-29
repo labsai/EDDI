@@ -132,6 +132,7 @@ public class WorkspaceAccessIndexMigration {
 
         int stamped = 0;
         int scanned = 0;
+        int failed = 0;
         boolean complete = true;
         for (String type : DESCRIPTOR_TYPES) {
             for (int page = 0; page < MAX_PAGES; page++) {
@@ -151,12 +152,35 @@ public class WorkspaceAccessIndexMigration {
                 }
                 scanned += batch.size();
                 for (DocumentDescriptor descriptor : batch) {
-                    if (stampIfNeeded(descriptor)) {
-                        stamped++;
+                    switch (stampIfNeeded(descriptor)) {
+                        case STAMPED -> stamped++;
+                        // A write that failed is the case this whole `complete` flag
+                        // exists for: the descriptor keeps no access index, and an
+                        // unindexed descriptor is invisible in every listing once
+                        // enforcement is on. Recording the migration as done would
+                        // strand it there with no way to re-run short of deleting the
+                        // log row by hand.
+                        case FAILED -> {
+                            failed++;
+                            complete = false;
+                        }
+                        // Already correct, or unstampable at all (no resource URI, or
+                        // one that does not parse). Neither is retryable, so neither
+                        // blocks completion.
+                        case SKIPPED -> {
+                        }
                     }
                 }
                 if (batch.size() < BATCH_SIZE) {
                     break;
+                }
+                if (page == MAX_PAGES - 1) {
+                    // A full last page means there is more to read than the cap allows.
+                    // Stopping quietly here and recording completion is the same
+                    // stranding as a failed write, just reached by a different route.
+                    LOGGER.warnf("Access-index backfill hit the %d-page cap for %s with a full page — more descriptors remain.",
+                            MAX_PAGES, type);
+                    complete = false;
                 }
             }
         }
@@ -167,8 +191,10 @@ public class WorkspaceAccessIndexMigration {
             // every listing once enforcement is on — with no way to re-run short of
             // deleting the log row by hand. Retrying on the next startup is cheap;
             // the stamp is idempotent.
-            LOGGER.warnv("Workspace access-index backfill INCOMPLETE ({0} scanned, {1} stamped) — it will retry on the next startup.",
-                    scanned, stamped);
+            LOGGER.warnv(
+                    "Workspace access-index backfill INCOMPLETE ({0} scanned, {1} stamped, {2} failed to write) "
+                            + "— it will retry on the next startup.",
+                    scanned, stamped, failed);
             return;
         }
 
@@ -177,31 +203,51 @@ public class WorkspaceAccessIndexMigration {
     }
 
     /**
-     * @return whether the descriptor was written
+     * What happened to one descriptor.
+     *
+     * <h3>Why three and not a boolean</h3> "Not written" meant two unrelated
+     * things: already correct, and <em>could not be written</em>. Collapsing them
+     * let a run where every write threw record itself as complete, which is the one
+     * outcome this migration's own comments say must never happen.
      */
-    private boolean stampIfNeeded(DocumentDescriptor descriptor) {
+    private enum StampOutcome {
+        /** Written. */
+        STAMPED,
+        /**
+         * Already correct, or carrying nothing that could be stamped. Not retryable.
+         */
+        SKIPPED,
+        /** The write threw. Retryable, and completion must wait for it. */
+        FAILED
+    }
+
+    private StampOutcome stampIfNeeded(DocumentDescriptor descriptor) {
         if (descriptor == null || descriptor.getResource() == null) {
-            return false;
+            return StampOutcome.SKIPPED;
         }
         String rebuilt = DescriptorAccess.buildIndex(descriptor);
         if (rebuilt.equals(descriptor.getAccessIndex())) {
-            return false;
+            return StampOutcome.SKIPPED;
         }
         descriptor.setAccessIndex(rebuilt);
 
         var resourceId = RestUtilities.extractResourceId(descriptor.getResource());
         if (resourceId == null || resourceId.getId() == null || resourceId.getVersion() == null) {
-            return false;
+            // Nothing to address. Retrying would fail identically forever, so this must
+            // not hold the migration open — but it is worth saying out loud, because a
+            // descriptor with an unparseable resource URI is a data problem of its own.
+            LOGGER.warnf("Descriptor with unusable resource URI skipped during access-index backfill: %s", descriptor.getResource());
+            return StampOutcome.SKIPPED;
         }
         try {
             // setDescriptor writes in place. A backfill must not create a version: doing so
             // would make every pre-existing resource look as though it had just been
             // edited.
             descriptorStore.setDescriptor(resourceId.getId(), resourceId.getVersion(), descriptor);
-            return true;
+            return StampOutcome.STAMPED;
         } catch (Exception e) {
             LOGGER.warnf("Could not stamp access index on descriptor %s v%s: %s", resourceId.getId(), resourceId.getVersion(), e.getMessage());
-            return false;
+            return StampOutcome.FAILED;
         }
     }
 }

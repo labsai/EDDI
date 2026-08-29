@@ -7,6 +7,71 @@
 
 
 
+## 🔍 fix(workspaces): findings from the final adversarial pass (2026-08-29)
+
+**Repo:** EDDI (`feat/multi-user-spaces-and-sharing`)
+
+A sixth review pass over the whole branch, after `callerLevel` landed. It
+confirmed the earlier fixes and found four things worth acting on — three of
+which are about tests that could not fail.
+
+### The migration recorded itself complete after a failed write
+
+`stampIfNeeded` caught every `setDescriptor` exception, logged a warning and
+returned `false` — which was indistinguishable from "already correct". So a run
+where every write threw still recorded the migration as done, and the class's
+own comment says exactly what that costs: descriptors with no access index are
+invisible in every listing once enforcement is on, with no way to re-run short
+of deleting the log row by hand.
+
+Three outcomes now, not a boolean: `STAMPED`, `SKIPPED` (already correct, or
+carrying nothing addressable — neither retryable) and `FAILED`, which holds the
+migration open. The `MAX_PAGES` exhaustion path did the same thing by a
+different route and is now also treated as incomplete. The existing test covered
+a failed *read* only; the write case is now covered and mutation-checked.
+
+### Nothing failed if a listing stopped calling the guard
+
+`ResourceAccessGuardTest` proves `redactForCaller` strips what it should.
+`AccessScopeTest` proves a space predicate narrows. Neither notices if an
+endpoint stops invoking them — and every test in that area handed the store a
+*mocked* guard, so deleting `descriptors.forEach(accessGuard::redactForCaller)`,
+or replacing `listingScope().withinSpace(space)` with `listingScope()`, left the
+whole suite green.
+
+The same shape as the mix-in test that registered its own mix-in: the unit under
+test was the collaborator, not the wiring. `ListingRedactionWiringTest` uses a
+**real** guard with a restrictive identity and asserts on what actually comes
+back. All three mutations now fail it.
+
+### Grants were disclosed to everyone while enforcement was off
+
+`seesEverything()` is true for every caller in that state, so keying grant
+disclosure on the granted level alone handed every editor the full grant
+audience — real principal and team names — of every resource. Not hypothetical:
+ownership and grants are recorded whenever authentication is on, and the
+documented rollout is to let attribution accumulate *before* switching
+enforcement on. A deployment part-way along that path was broadcasting the
+audience lists it had just built.
+
+Disclosure now asks the question structurally — does this caller actually own it,
+or hold the admin role — which does not depend on the enforcement flag and is
+therefore correct in both states.
+
+### Two assertions in `WorkspacesIT` that could not fail
+
+`?space=.*` asserted `hasSize(0)`, but the IT profile disables authorization, so
+no descriptor is ever stamped with a `spaceId` — an empty result proved only
+that the field was absent, and the test would have passed with the escaping
+removed entirely. It now pins what it can (a metacharacter-laden value is
+handled, not 500) and says plainly where the escaping is actually covered.
+`everyItem(nullValue())` over a page this suite never seeds was vacuous the same
+way; it now creates an agent first.
+
+---
+
+
+
 ## 🪪 feat(workspaces): report the caller's access level on listed descriptors (2026-08-29)
 
 **Repo:** EDDI (`feat/multi-user-spaces-and-sharing`)

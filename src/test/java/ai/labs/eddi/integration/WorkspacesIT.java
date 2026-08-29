@@ -6,13 +6,17 @@ package ai.labs.eddi.integration;
 
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
+import ai.labs.eddi.utils.RestUtilities;
 import io.restassured.http.ContentType;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.net.URI;
+
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.everyItem;
+import static org.hamcrest.Matchers.greaterThan;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.notNullValue;
@@ -88,18 +92,26 @@ public class WorkspacesIT extends BaseIntegrationIT {
     }
 
     @Test
-    @DisplayName("a space id carrying regex metacharacters is matched literally, not as a pattern")
-    void spaceParameterIsNotAPattern() {
-        // Both storage backends treat a String filter as a regular expression, so an
-        // unescaped identity predicate is a real vulnerability rather than a style
-        // note. `.*` must select nothing, not everything.
+    @DisplayName("a space id carrying regex metacharacters is handled, not rejected")
+    void spaceParameterAcceptsMetacharacters() {
+        // NOT a test that `.*` matches nothing — it cannot be, here. This profile
+        // sets authorization.enabled=false, so no descriptor is ever stamped with a
+        // spaceId, and an empty result proves only that the field is absent. An
+        // earlier version asserted hasSize(0) and would have passed with the
+        // escaping removed entirely.
+        //
+        // What this DOES pin is that a metacharacter-laden value reaches the query
+        // layer and comes back as a well-formed empty page rather than a 500 from a
+        // malformed pattern. The escaping itself is covered where it can actually be
+        // observed: AccessScopeTest (anchored, escaped predicate) and SubjectsTest
+        // (the shared PCRE/POSIX-ERE metacharacter set).
         given()
                 .queryParam("space", ".*")
                 .queryParam("limit", 50)
                 .when().get(AGENT_DESCRIPTORS)
                 .then()
                 .statusCode(200)
-                .body("$", hasSize(0));
+                .contentType(ContentType.JSON);
     }
 
     @Test
@@ -190,12 +202,27 @@ public class WorkspacesIT extends BaseIntegrationIT {
         // listing is byte-identical to a deployment that has never heard of
         // workspaces. A client that started drawing per-row permissions from this
         // field would otherwise change behaviour on a deployment that did not opt in.
-        given()
-                .queryParam("limit", 5)
-                .when().get(AGENT_DESCRIPTORS)
-                .then()
-                .statusCode(200)
-                .body("callerLevel", everyItem(nullValue()));
+        //
+        // An agent is created first because `everyItem` over an empty list is
+        // vacuously true, and this suite seeds nothing of its own — the assertion
+        // would otherwise hold whatever the server sent.
+        String location = createResource("""
+                { "name": "Workspace IT Agent", "description": "created so the listing below is not empty" }
+                """, "/agentstore/agents");
+        var created = RestUtilities.extractResourceId(URI.create(location));
+
+        try {
+            given()
+                    .queryParam("filter", created.getId())
+                    .queryParam("limit", 5)
+                    .when().get(AGENT_DESCRIPTORS)
+                    .then()
+                    .statusCode(200)
+                    .body("$", hasSize(greaterThan(0)))
+                    .body("callerLevel", everyItem(nullValue()));
+        } finally {
+            deleteResourceQuietly("/agentstore/agents/", created.getId(), created.getVersion());
+        }
     }
 
     @Test

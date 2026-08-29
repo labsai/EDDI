@@ -373,12 +373,44 @@ public class ResourceAccessGuard {
     private DocumentDescriptor applyCallerLevel(DocumentDescriptor descriptor, AccessLevel granted) {
         descriptor.setCallerLevel(settings.isEnforcing() && granted != null ? granted.name() : null);
 
-        if (granted != null && granted.includes(AccessLevel.OWN)) {
+        if (mayReadGrants(descriptor, granted)) {
             return descriptor;
         }
         descriptor.setGrants(null);
         descriptor.setAccessIndex(null);
         return descriptor;
+    }
+
+    /**
+     * Whether this caller may see the grant list and the access index.
+     *
+     * <h3>Why enforcement-off is not "everyone owns everything" here</h3>
+     * {@link #seesEverything()} is true for every caller while enforcement is off,
+     * so keying disclosure on the granted level alone would hand every editor the
+     * full grant audience — real principal and team names — of every resource. That
+     * is not hypothetical: ownership and grants are recorded whenever
+     * authentication is on, and the documented rollout is to let attribution
+     * accumulate <em>before</em> switching enforcement on. A deployment part-way
+     * through that, or one that switched enforcement back off, would be
+     * broadcasting the audience lists it had built up.
+     * <p>
+     * So the question is asked structurally instead: does this caller actually own
+     * the resource, or hold the administrator role? Neither answer depends on the
+     * enforcement flag, which is what makes it safe in both states. The sharing
+     * endpoint is unaffected — it decides disclosure itself, and is the surface
+     * that exists to show an owner their own grants.
+     */
+    private boolean mayReadGrants(DocumentDescriptor descriptor, AccessLevel granted) {
+        if (ownershipValidator.isAdmin(identity)) {
+            return true;
+        }
+        if (!settings.isEnforcing()) {
+            // Nothing is enforced, so `granted` says OWN for everyone. Fall back to
+            // the structural question, which does not.
+            AccessLevel structural = DescriptorAccess.effectiveLevel(descriptor, spaceContext.current(), settings.admitsLegacy());
+            return structural != null && structural.includes(AccessLevel.OWN);
+        }
+        return granted != null && granted.includes(AccessLevel.OWN);
     }
 
     /** The caller's principal name, or {@code null} when unauthenticated. */
