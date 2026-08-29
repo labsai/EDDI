@@ -61,12 +61,25 @@ introduce, a redundant `import java.lang.Error`, is gone with the revert above.
 No behaviour changes: every edit replaces an inline FQN with the identical type named
 by a top-level import, or moves an import line.
 
-One review follow-up: shortening the two FQNs in `HttpCallToolsProvider.parseFailureDetail`
-put its `case JsonParseException ignored ->` / `case MismatchedInputException ignored ->`
-switch labels into the diff, and CodeQL flagged the bindings as never read. They were, and
-had been all along - the pattern only needs the *type*. Both now use the unnamed variable
-`_`, which is what the rest of the codebase already uses for a binding it does not intend
-to read (`catch (NumberFormatException _)` in `BoundedLogStore` and `PathNavigator`).
+One review follow-up, in two rounds. Shortening the two FQNs in
+`HttpCallToolsProvider.parseFailureDetail` pulled its `case JsonParseException ignored ->` /
+`case MismatchedInputException ignored ->` switch labels into the diff, and CodeQL's
+"unread local variable" query flagged both bindings. It was right, and it predated this
+branch: the switch only needs the *type* to choose a sentence, so `ignored` never had a
+reader.
+
+The first attempt renamed them to the unnamed variable `_`, which is what the codebase
+already uses for a binding it does not intend to read (`catch (NumberFormatException _)` in
+`BoundedLogStore` and `PathNavigator`). **CodeQL re-fired on that** - it reports
+`Variable 'JsonParseException _' is never read` just the same, so it does not treat `_` as
+an intentional discard.
+
+Since a pattern label must bind *something*, the fix is to stop using one: the switch is now
+a plain `instanceof` chain, which is also the style the position lookup in the same method
+already uses. Same order, same three sentences, same default. The single call site is inside
+`catch (IOException e)`, so the one semantic difference between the two forms - a pattern
+switch throws on a null selector where `instanceof` yields false - is unreachable. Note that
+no test pins these strings; equivalence here is by inspection, not by assertion.
 
 The failing-class *set* was diffed rather than just the counts - that catches a swap
 where one class newly breaks while another newly passes, which equal totals would hide.

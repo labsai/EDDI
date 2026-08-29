@@ -429,13 +429,19 @@ class HttpCallToolsProvider implements ToolSourceProvider {
      * @return a body-free description of the parse failure
      */
     private static String parseFailureDetail(IOException e) {
-        String reason = switch (e) {
-            case JsonParseException _ ->
-                "the document is malformed — an unescaped character, an unquoted token, or a missing delimiter";
-            case MismatchedInputException _ ->
-                "the document is empty or ends before it is complete";
-            default -> "the document could not be parsed";
-        };
+        // Plain instanceof rather than a switch with pattern labels: only the TYPE
+        // picks the sentence, nothing here reads the matched value. A pattern label
+        // has to bind something, and both a named binding and the unnamed `_` are
+        // reported by the CodeQL "unread local variable" query - the same style the
+        // position lookup below already uses says it without the dead binding.
+        String reason;
+        if (e instanceof JsonParseException) {
+            reason = "the document is malformed — an unescaped character, an unquoted token, or a missing delimiter";
+        } else if (e instanceof MismatchedInputException) {
+            reason = "the document is empty or ends before it is complete";
+        } else {
+            reason = "the document could not be parsed";
+        }
         String position = "";
         if (e instanceof JsonProcessingException jsonError) {
             JsonLocation location = jsonError.getLocation();
