@@ -12,7 +12,7 @@ type: application
 # three releases because nothing enforces this; nothing packages the chart yet,
 # which is the only reason that was harmless.
 version: 1.0.1
-appVersion: "6.3.0"
+appVersion: "6.4.0"
 home: https://eddi.labs.ai
 sources:
   - https://github.com/labsai/EDDI

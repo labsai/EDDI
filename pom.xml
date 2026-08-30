@@ -5,7 +5,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>ai.labs</groupId>
     <artifactId>eddi</artifactId>
-    <version>6.3.0</version>
+    <version>6.4.0</version>
     <properties>
         <compiler-plugin.version>3.15.0</compiler-plugin.version>
         <maven.compiler.source>25</maven.compiler.source>
@@ -16,7 +16,7 @@
         <quarkus.microprofile.version>3.0.0.Final</quarkus.microprofile.version>
         <quarkus.platform.artifact-id>quarkus-bom</quarkus.platform.artifact-id>
         <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
-        <quarkus.platform.version>3.38.3</quarkus.platform.version>
+        <quarkus.platform.version>3.39.1</quarkus.platform.version>
         <langchain4j-beta.version>1.19.0-beta29</langchain4j-beta.version>
         <langchain4j.version>1.19.0</langchain4j.version>
         <langchain4j-libs.version>1.19.0</langchain4j-libs.version>
@@ -26,7 +26,7 @@
         <failsafe-plugin.version>3.5.6</failsafe-plugin.version>
         <failsafe.useModulePath>false</failsafe.useModulePath>
         <war-plugin.version>3.4.0</war-plugin.version>
-        <quarkus-mcp-server.version>1.13.1</quarkus-mcp-server.version>
+        <quarkus-mcp-server.version>1.13.2</quarkus-mcp-server.version>
         <langchain4j-community.version>1.19.0-beta29</langchain4j-community.version>
         <skipITs>true</skipITs>
     </properties>
@@ -42,7 +42,7 @@
             <dependency>
                 <groupId>io.github.classgraph</groupId>
                 <artifactId>classgraph</artifactId>
-                <version>4.8.192</version>
+                <version>4.8.194</version>
             </dependency>
             <!-- Override jinjava to fix CVE-2026-25526 (pulled by jlama-core via jlama) -->
             <dependency>
@@ -68,6 +68,20 @@
             <dependency>
                 <groupId>com.fasterxml.jackson.core</groupId>
                 <artifactId>jackson-databind</artifactId>
+                <version>2.22.2</version>
+            </dependency>
+            <!-- Keep the two jackson-dataformat modules we declare on the same patch
+                 as jackson-core/databind above. The Quarkus BOM manages the whole
+                 Jackson family at 2.22.0; overriding only core and databind for the
+                 advisories leaves csv and xml a patch behind their own core. -->
+            <dependency>
+                <groupId>com.fasterxml.jackson.dataformat</groupId>
+                <artifactId>jackson-dataformat-csv</artifactId>
+                <version>2.22.2</version>
+            </dependency>
+            <dependency>
+                <groupId>com.fasterxml.jackson.dataformat</groupId>
+                <artifactId>jackson-dataformat-xml</artifactId>
                 <version>2.22.2</version>
             </dependency>
             <!-- Override reactor-netty-http to fix CVE-2025-22227 (pulled by langchain4j-azure-open-ai) -->
@@ -321,7 +335,7 @@
         <dependency>
             <groupId>org.jsoup</groupId>
             <artifactId>jsoup</artifactId>
-            <version>1.23.1</version>
+            <version>1.23.2</version>
         </dependency>
         <dependency>
             <groupId>com.fasterxml.jackson.dataformat</groupId>
@@ -340,7 +354,7 @@
         <dependency>
             <groupId>de.undercouch</groupId>
             <artifactId>bson4jackson</artifactId>
-            <version>2.15.1</version>
+            <version>2.18.0</version>
             <exclusions>
                 <exclusion>
                     <groupId>com.fasterxml.jackson.core</groupId>
@@ -371,7 +385,7 @@
         <dependency>
             <groupId>com.networknt</groupId>
             <artifactId>json-schema-validator</artifactId>
-            <version>1.5.4</version>
+            <version>1.5.9</version>
         </dependency>
         <dependency>
             <groupId>jakarta.annotation</groupId>
