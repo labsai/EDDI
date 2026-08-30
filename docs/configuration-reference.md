@@ -148,7 +148,7 @@ Full guide: [workspaces.md](workspaces.md).
 
 | Property | Default | Description |
 |---|---|---|
-| `eddi.workspaces.enabled` | `false` | Whether listings and reads are actually filtered by workspace. No effect while `authorization.enabled=false` — with no authenticated principal there is nothing to scope to, and startup warns rather than denying everyone everything |
+| `eddi.workspaces.enabled` | `false` | Whether workspace access is actually enforced: listings filtered, and reads, writes, deletes and re-sharing each checked against the level the caller holds (`VIEW` / `USE` / `EDIT` / `OWN`). No effect while `authorization.enabled=false` — with no authenticated principal there is nothing to scope to, and startup warns rather than denying everyone everything |
 | `eddi.workspaces.groups-claim` | `groups` | The JWT claim listing the caller's teams. Needs a group-membership protocol mapper on the `eddi-backend` client; without one every user simply gets a personal space and no teams, which is a correct answer rather than a failure |
 | `eddi.workspaces.legacy-visibility` | `shared` | Who may see resources with no recorded owner: `shared` (everyone, so an upgrade hides nothing) or `admin-only` (only `eddi-admin`, so an operator migrates deliberately and then closes the door). Any other value fails startup rather than picking a policy by guessing |
 | `eddi.workspaces.default-space` | *(empty)* | Where new resources are filed. Empty means the creator's personal space; a Keycloak group name gives a team-first deployment, where colleagues see each other's work by default and personal spaces are reached by explicitly moving a resource |
