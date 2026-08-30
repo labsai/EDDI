@@ -5,9 +5,9 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.engine.security.CallerIdentityContext;
-import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
-import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
+import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
@@ -109,7 +109,7 @@ class LlmTaskExtendedBranchTest {
 
         llmTask = new LlmTask(resourceClientLibrary, dataFactory, memoryItemConverter,
                 templatingEngine, jsonSerialization, prePostUtils, chatModelRegistry,
-                mock(IApiCallExecutor.class), mock(IRestAgentStore.class), mock(IRestWorkflowStore.class),
+                mock(IApiCallExecutor.class), mock(IAgentStore.class), mock(IWorkflowStore.class),
                 mock(RagContextProvider.class), new TokenCounterFactory(), mock(ConversationSummarizer.class),
                 mockSnippetService, globalVariableResolver, counterweightService,
                 identityMaskingService, mock(AgentOrchestrator.class), new ConversationHistoryBuilder(),
@@ -474,7 +474,7 @@ class LlmTaskExtendedBranchTest {
 
             var ioTask = new LlmTask(resourceClientLibrary, dataFactory, memoryItemConverter,
                     templatingEngine, jsonSerialization, prePostUtils, chatModelRegistry,
-                    mock(IApiCallExecutor.class), mock(IRestAgentStore.class), mock(IRestWorkflowStore.class),
+                    mock(IApiCallExecutor.class), mock(IAgentStore.class), mock(IWorkflowStore.class),
                     mock(RagContextProvider.class), new TokenCounterFactory(), mock(ConversationSummarizer.class),
                     snippetService, gvr, cws,
                     ims, mock(AgentOrchestrator.class), new ConversationHistoryBuilder(),

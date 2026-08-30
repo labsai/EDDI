@@ -9,6 +9,7 @@ import ai.labs.eddi.datastore.DescriptorStore;
 import ai.labs.eddi.datastore.IResourceStorageFactory;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
+import ai.labs.eddi.engine.security.spaces.AccessScope;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -33,6 +34,22 @@ public class DocumentDescriptorStore implements IDocumentDescriptorStore {
             throws ResourceStoreException, ResourceNotFoundException {
 
         return descriptorStore.readDescriptors(type, filter, index, limit, includeDeleted);
+    }
+
+    @Override
+    public List<DocumentDescriptor> readDescriptors(String type, String filter, Integer index, Integer limit, boolean includeDeleted,
+                                                    AccessScope scope)
+            throws ResourceStoreException, ResourceNotFoundException {
+
+        var accessRestriction = scope == null ? null : scope.toQueryFilters();
+        var spaceRestriction = scope == null ? null : scope.toSpaceFilter();
+        return descriptorStore.readDescriptors(type, filter, index, limit, includeDeleted, accessRestriction, spaceRestriction);
+    }
+
+    @Override
+    public DocumentDescriptor readCurrentDescriptor(String resourceId) throws ResourceStoreException, ResourceNotFoundException {
+        var currentId = descriptorStore.getCurrentResourceId(resourceId);
+        return descriptorStore.readDescriptor(resourceId, currentId.getVersion());
     }
 
     @Override

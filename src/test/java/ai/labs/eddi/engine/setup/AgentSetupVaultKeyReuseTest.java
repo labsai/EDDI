@@ -642,7 +642,7 @@ class AgentSetupVaultKeyReuseTest {
         void invalidSpecDoesNotTouchTheVault() {
             service.vaultKeyReuse = AgentSetupService.VAULT_KEY_REUSE_NEVER;
             var request = new CreateApiAgentRequest("Api Agent", "be helpful", "this is not an OpenAPI document", "anthropic",
-                    "claude-sonnet-5", KEY, null, null, null, null, null, false, null, null, null, null, null, null);
+                    "claude-sonnet-5", KEY, null, null, null, null, null, false, null, null, null, null, null, null, null);
 
             var e = assertThrows(AgentSetupService.AgentSetupException.class, () -> service.createApiAgent(request));
 

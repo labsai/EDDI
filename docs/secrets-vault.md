@@ -29,8 +29,8 @@ EDDI includes a built-in secrets vault for managing sensitive values like API ke
 | `VaultSecretProvider`                  | `secrets.impl`     | Production implementation with envelope crypto + persistence    |
 | `SecretResolver`                       | `secrets`          | Resolves `${vault:...}` references to plaintext at runtime  |
 | `IRestSecretStore` / `RestSecretStore` | `secrets.rest`     | JAX-RS endpoints for secret CRUD and key rotation               |
-| `SecretScrubber`                       | `secrets.sanitize` | Removes `${vault:...}` references from export payloads      |
-| `SecretRedactionFilter`                | `secrets.sanitize` | Regex-based log redaction for API keys, tokens, vault refs      |
+| `SecretScrubber`                       | `secrets.sanitize` | Removes plaintext secrets from export payloads (leaves `${vault:...}` references intact) |
+| `SecretRedactionFilter`                | `secrets.sanitize` | Regex-based log redaction for API keys and tokens                |
 | `ISecretPersistence`                   | `secrets.persist.` | DB abstraction (MongoDB default, PostgreSQL via profile)        |
 
 ## Secret References
@@ -206,7 +206,7 @@ eddi.vault.grant-enforcement=enforce
 eddi.setup.vault-key-reuse=checksum
 ```
 
-> **⚠️ Important:** The vault master key encrypts all stored API keys. If the master key is lost, all encrypted secrets become **permanently unrecoverable**. Back up your `~/.eddi/.env` file.
+> **⚠️ Important:** The vault master key encrypts all stored API keys. If the master key is lost, all encrypted secrets become **permanently unrecoverable**. Back up your `~/.eddi/.env` file. If the key has already changed and the old one is unavailable, `POST /secretstore/secrets/{tenantId}/reset` (see [REST API](#rest-api)) clears the unrecoverable entries so the tenant can start fresh.
 
 ## Secret Input (Agent Conversations)
 
@@ -236,9 +236,12 @@ To signal the chat UI to show a password field, use the `inputField` output type
 {
   "type": "inputField",
   "subType": "password",
-  "text": "Please enter your API key:"
+  "label": "API Key",
+  "placeholder": "Paste your API key here"
 }
 ```
+
+The explanatory sentence ("Please enter your API key:") belongs in a sibling `text` output item in the same action's output set — the `inputField` item only controls how the input is rendered.
 
 ### Chat UI: Password Fields + Secret Mode
 
@@ -268,10 +271,12 @@ An agent that asks the user for an API key mid-conversation wires it up like thi
 
 ```json
 // Output configuration — prompts with a password field
+// (pair it with a sibling `text` item that explains what to enter)
 {
   "type": "inputField",
   "subType": "password",
-  "text": "Please enter your API key:"
+  "label": "API Key",
+  "placeholder": "Paste your API key here"
 }
 
 // Property setter — auto-vaults the input
@@ -292,7 +297,7 @@ When creating agents through the Manager's agent wizard, the Platform Operator, 
 
 1. User provides an API key during agent setup
 2. `AgentSetupService.vaultApiKey()` resolves it against the vault (see *Reusing one key across agents* below)
-3. A vault reference (`${vault:setup.<agent-name>.<timestamp>.apiKey}`, or the name you chose) is written to the LLM configuration
+3. A vault reference (`${vault:setup.<agent-name>.<timestamp>-<random>.apiKey}`, or the name you chose) is written to the LLM configuration
 4. When the vault is enabled, the plaintext key is never persisted in MongoDB — only the vault reference is stored
 
 ### Reusing one key across agents
@@ -359,19 +364,30 @@ All endpoints are under the base path `/secretstore/secrets`. All endpoints requ
 
 | Method   | Path                         | Description                                            |
 | -------- | ---------------------------- | ------------------------------------------------------ |
-| `PUT`    | `/{tenantId}/{keyName}`      | Store a secret (body = plaintext value)                |
+| `PUT`    | `/{tenantId}/{keyName}`      | Store a secret (JSON body: `{"value": …, "description": …, "allowedAgents": …}`) |
 | `DELETE` | `/{tenantId}/{keyName}`      | Delete a secret                                        |
 | `GET`    | `/{tenantId}/{keyName}`      | Get secret **metadata only** (never returns plaintext) |
 | `GET`    | `/{tenantId}`                | List all secrets for a tenant (metadata only)          |
 | `GET`    | `/health`                    | Vault health check (provider status)                   |
 | `POST`   | `/{tenantId}/rotate-dek`     | Install the tenant's next DEK generation and sweep rows onto it |
 | `POST`   | `/admin/rotate-kek`          | Rotate the Master Key (KEK) — **TLS required**         |
+| `POST`   | `/{tenantId}/reset`          | Delete **ALL** secrets and the DEK for a tenant — destructive; use when the master key changed and the old key is unavailable |
 
 > **⚠️ Important:** The `GET` endpoints return **metadata only** (`keyName`, `createdAt`, `lastAccessedAt`, `checksum`). Secret values are **write-only** — they can be stored and used by the engine but never retrieved via API.
 
 ### Response Examples
 
-**`PUT /{tenantId}/{keyName}`** — returns the vault reference:
+**`PUT /{tenantId}/{keyName}`** — the request body carries the plaintext value, an optional description, and the optional agent grant list (`allowedAgents` defaults to `["*"]` when omitted):
+
+```json
+{
+  "value": "sk-...",
+  "description": "OpenAI production key",
+  "allowedAgents": ["*"]
+}
+```
+
+It returns the vault reference:
 
 ```json
 {
@@ -402,6 +418,16 @@ All endpoints are under the base path `/secretstore/secrets`. All endpoints requ
   "status": "UP",
   "provider": "VaultSecretProvider",
   "available": true
+}
+```
+
+**`POST /{tenantId}/reset`** — deletes every secret and the DEK for the tenant:
+
+```json
+{
+  "tenantId": "default",
+  "secretsDeleted": 5,
+  "message": "Vault reset for tenant 'default'. 5 secret(s) deleted, DEK removed. The next secret store operation will generate a fresh DEK with the current master key."
 }
 ```
 
@@ -580,11 +606,12 @@ The EDDI Manager includes a dedicated **Secrets Admin** page at `/manage/secrets
 | Anthropic keys (`sk-ant-...`) | `sk-ant-<REDACTED>`       | `sk-ant-api03-...` → `sk-ant-<REDACTED>`                |
 | Bearer tokens                 | `Bearer <REDACTED>`       | `Bearer eyJhb...` → `Bearer <REDACTED>`                 |
 | API key params                | `apikey=<REDACTED>`       | `apikey=secret123` → `apikey=<REDACTED>`                |
-| Vault references              | `${vault:<REDACTED>}` | `${vault:t/key}` → `${vault:<REDACTED>}`        |
+
+> A bare `${vault:...}` reference is deliberately **not** redacted — it is a pointer, not a secret, and hiding it removes exactly the information an approver needs to judge a request. A reference followed by extra value material (`${vault:k}SECRET-TAIL`) **is** redacted as a whole.
 
 ### Export Sanitization
 
-`SecretScrubber` removes vault references from agent export (backup) payloads, replacing them with `<SECRET_REMOVED>`. This prevents secrets from leaking when agents are shared or exported.
+`SecretScrubber` removes plaintext secrets from agent export (backup) payloads — detected by field name, by credentials embedded in a URL, and by Shannon entropy — replacing each with `${vault:REDACTED}`. This prevents secrets from leaking when agents are shared or exported. Existing `${vault:...}` / `${eddivault:...}` references are deliberately left intact: a reference is a pointer to a secret, not the secret itself.
 
 ### Memory Protection
 

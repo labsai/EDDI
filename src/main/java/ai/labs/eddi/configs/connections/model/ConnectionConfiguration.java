@@ -167,6 +167,11 @@ public class ConnectionConfiguration {
             throw new IllegalArgumentException("PER_USER binding requires authType OAUTH2_AUTHORIZATION_CODE — it is the only flow that "
                     + "produces a grant per end user. A static key is the same key for everybody however it is bound.");
         }
+        if (binding == Binding.CALLER_SUPPLIED && authType != AuthType.STATIC) {
+            throw new IllegalArgumentException("CALLER_SUPPLIED binding requires authType STATIC. The caller hands over a finished header "
+                    + "value, so there is nothing for EDDI to encode, exchange or refresh — a BASIC username or an oauth block on such a "
+                    + "connection would read as load-bearing and be silently ignored.");
+        }
         if (authType == AuthType.OAUTH2_AUTHORIZATION_CODE && binding != Binding.PER_USER) {
             throw new IllegalArgumentException("authType OAUTH2_AUTHORIZATION_CODE requires binding PER_USER. The flow files its grant under "
                     + "the user who completed the consent screen, so a SERVICE-bound one would look for a grant under the service principal "
@@ -213,6 +218,29 @@ public class ConnectionConfiguration {
                 throw new IllegalArgumentException("BASIC requires staticAuth.username.");
             }
             requireReference(staticAuth.getPasswordRef(), "staticAuth.passwordRef");
+            return;
+        }
+        // CALLER_SUPPLIED inverts the rule the two lines below enforce: the value
+        // arrives with each request, so a stored template is either dead config or a
+        // second credential racing the supplied one — and whichever won would do so by
+        // resolution order, silently. Refusing is the only reading that cannot
+        // surprise.
+        // headerName is still required, and still checked above: the connection owns
+        // the
+        // header name whoever supplies its value.
+        if (binding == Binding.CALLER_SUPPLIED) {
+            if (staticAuth.getValueTemplate() != null && !staticAuth.getValueTemplate().isBlank()) {
+                throw new IllegalArgumentException("CALLER_SUPPLIED must not set staticAuth.valueTemplate: the caller supplies the value on "
+                        + "each request, so a stored one would either never be read or quietly take precedence over theirs.");
+            }
+            if (staticAuth.getUsername() != null && !staticAuth.getUsername().isBlank()) {
+                throw new IllegalArgumentException("CALLER_SUPPLIED must not set staticAuth.username: it belongs to BASIC, which this "
+                        + "binding does not allow.");
+            }
+            if (staticAuth.getPasswordRef() != null && !staticAuth.getPasswordRef().isBlank()) {
+                throw new IllegalArgumentException("CALLER_SUPPLIED must not set staticAuth.passwordRef: the credential comes from the "
+                        + "caller, not the vault.");
+            }
             return;
         }
         if (staticAuth.getValueTemplate() == null || staticAuth.getValueTemplate().isBlank()) {

@@ -48,8 +48,9 @@ This starts Keycloak alongside EDDI with pre-configured realm, clients, and test
 
 | User | Password | Role | Notes |
 |------|----------|------|-------|
-| `eddi` | `eddi` | admin | Full access, forced password change on first login |
-| `viewer` | `viewer` | viewer | Read-only access, forced password change on first login |
+| `eddi` | `eddi` | `eddi-admin`, `eddi-editor` | Full access, forced password change on first login |
+| `viewer` | `viewer` | `eddi-viewer` | Read-only access, forced password change on first login |
+| `user` | `user` | `eddi-user` | Standard user access, forced password change on first login |
 
 ### Configuration Properties
 
@@ -74,17 +75,24 @@ docker run -e QUARKUS_OIDC_TENANT_ENABLED=true \
            labsai/eddi:latest
 ```
 
+> **Roles are deployment-wide.** `eddi-editor` grants authoring rights over
+> *every* configuration in the deployment. To scope agents, workflows and the
+> rest to the user or team that created them — and to share them deliberately —
+> see [Workspaces](workspaces.md).
+
 ### Auth Permissions
 
 When OIDC is enabled, the following permission rules apply (see `application.properties`):
 
 | Path Pattern | Policy |
 | --- | --- |
-| `/q/metrics/*`, `/q/health/*` | **Permit** — Infrastructure endpoints |
+| `/q/health/*` | **Permit** (GET only) — required for k8s probes |
+| `/q/metrics/*` | **Authenticated** — deliberately not permitted (metrics leak deployment shape); a Prometheus scraper must present a Bearer token |
 | `/`, `/manage`, `/manage/*`, `/chat`, `/chat/*` | **Permit** — SPA entry points (the SPA loads and handles Keycloak login via keycloak-js) |
-| `/agents/production/*` | **Permit** — Production conversation endpoints (public-facing) |
 | `/scripts/*`, `/fonts/*`, `/css/*`, `/js/*`, `/img/*` | **Permit** — Static assets for Manager SPA |
 | `/*` (catch-all) | **Authenticated** — All other API endpoints require a valid Bearer token |
+
+> **Note:** there is no HTTP-layer permit for conversation endpoints — `/agents/production/*` is caught by the catch-all `authenticated` policy and answers `401` before any resource method runs. The production exemption in `RestAgentManagement.checkUserAuthIfApplicable` (below) is an inner check only; to expose a production conversation surface anonymously you must add your own `quarkus.http.auth.permission.*` permit rule.
 
 ### RestAgentManagement Gate
 
@@ -99,7 +107,7 @@ if (checkForUserAuthentication &&
 ```
 
 - When `quarkus.oidc.tenant-enabled=false` → `checkForUserAuthentication=false` → all requests pass
-- When `quarkus.oidc.tenant-enabled=true` → only authenticated users can access production endpoints
+- When `quarkus.oidc.tenant-enabled=true` → a request against a non-production environment (`unrestricted`, `test`) must be authenticated; `production` conversations are exempt from this particular gate
 - Requests to `/production/` environments always pass regardless of auth status
 
 ### Local Development Keycloak
@@ -114,8 +122,8 @@ This starts Keycloak 26 on port 8180 with:
 
 - **Realm**: `eddi`
 - **Clients**: `eddi-manager` (SPA, public), `eddi-backend` (bearer-only)
-- **Roles**: `admin`, `editor`, `viewer`
-- **Test users**: `eddi`/`eddi` (admin), `viewer`/`viewer` (read-only)
+- **Roles**: `eddi-admin`, `eddi-editor`, `eddi-user`, `eddi-viewer` (plus `eddi-approver`, used by the HITL approval endpoints)
+- **Test users**: `eddi`/`eddi` (`eddi-admin` + `eddi-editor`), `viewer`/`viewer` (`eddi-viewer`), `user`/`user` (`eddi-user`)
 
 ---
 
@@ -148,7 +156,7 @@ fails the call loudly rather than degrading quietly:
 | **Headers only** | A token reference in a query parameter, request body or request path is rejected — only a header is ever substituted. `${caller:userId}` is permitted in headers and query parameters. |
 | **Authenticated turns only** | The identity is captured from the request driving the turn. Scheduled jobs and triggers have no caller and cannot satisfy the reference. |
 | **Fails closed** | An unsatisfiable reference throws rather than resolving to an empty string, which would send `Bearer ` and surface downstream as a confusing `401`. |
-| **Never persisted** | Resolution happens while building the request; `scrubSensitiveHeaders` strips authorization headers before the request is written to conversation memory. |
+| **Never persisted** | Resolution happens while building the request; `RequestRedactor.redactRequestMap` redacts the URI, headers, query parameters and body before the request is written to conversation memory. |
 
 **Thread safety.** A conversation turn is built on the request thread but
 executed on pool threads, where request-scoped beans no longer resolve. The
@@ -163,9 +171,36 @@ Set `eddi.caller-identity.enabled=false` to forbid the feature outright.
 
 ## SSRF Protection — `UrlValidationUtils`
 
-**Applies to:** PDF Reader, Web Scraper, and any future tool that fetches remote resources.
+**Applies to:** PDF Reader, Web Scraper, and any future tool that fetches remote
+resources — **always**, with no configuration.
 
 Server-Side Request Forgery (SSRF) occurs when an attacker tricks a server-side application into making requests to internal services. EDDI prevents this with `UrlValidationUtils.validateUrl(url)`:
+
+> ### ⚠️ Configured outbound calls are a separate, opt-in case
+>
+> The validation described in this section is unconditional for **tool** URLs,
+> because those are chosen by the LLM and therefore attacker-influenceable. It is
+> **not** applied by default to outbound calls whose target comes from *your own
+> configuration* — httpCalls, MCP servers and A2A peers — because those routinely
+> and legitimately address internal hosts (`http://billing.internal/api`), which
+> the validator would reject.
+>
+> Turn it on with:
+>
+> ```properties
+> eddi.security.ssrf-protection.enabled=true   # default: false
+> ```
+>
+> When enabled, `ApiCallExecutor`, `McpToolProviderManager` and
+> `A2AToolProviderManager` validate the **fully resolved** target — after
+> templating, global variables and vault references have been substituted — and
+> stop following redirects, so a `3xx` cannot bounce a permitted request onto an
+> internal host.
+>
+> **Enable it whenever any part of an httpCall URL can be influenced by
+> conversation input** (`{properties.x}`, `{memory.current.input}`, a context
+> variable). Leave it off only if every outbound target is a fixed literal and you
+> genuinely need to reach private addresses.
 
 ### Scheme Allowlist
 
@@ -189,9 +224,14 @@ DNS resolution is performed and the resolved address is checked before any conne
 | `172.16.0.0/12`  | Private network (Class B)     |
 | `192.168.0.0/16` | Private network (Class C)     |
 | `169.254.0.0/16` | Link-local (AWS/GCP metadata) |
-| `fd00::/8`       | IPv6 unique-local             |
+| `100.64.0.0/10`  | CGNAT (RFC 6598)              |
+| `224.0.0.0/4`    | IPv4 multicast                |
+| `0.0.0.0/8`      | Unspecified / "this network"  |
+| `fc00::/7`       | IPv6 unique-local (RFC 4193 — covers `fc00::/8` and `fd00::/8`) |
 | `fe80::/10`      | IPv6 link-local               |
 | `::1`            | IPv6 loopback                 |
+
+IPv4-mapped IPv6 addresses (`::ffff:x.x.x.x`) are unwrapped and re-checked against every IPv4 rule above.
 
 ### Cloud Metadata Endpoint Blocking
 
@@ -211,7 +251,7 @@ Hostnames that indicate internal services are rejected:
 ### Usage
 
 ```java
-import static ai.labs.eddi.modules.langchain.tools.UrlValidationUtils.validateUrl;
+import static ai.labs.eddi.modules.llm.tools.UrlValidationUtils.validateUrl;
 
 // In any tool method that accepts a URL:
 validateUrl(url); // throws IllegalArgumentException if blocked
@@ -334,7 +374,7 @@ Different conversations are processed **concurrently** — only same-conversatio
 
 ## HTTP Call Content-Type Handling
 
-The `HttpCallExecutor` uses strict equality (`equals`) rather than prefix matching (`startsWith`) when checking the `Content-Type` header against `application/json`. This prevents content types like `application/json-patch+json` from being incorrectly deserialised as standard JSON.
+The `ApiCallExecutor` uses strict equality (`equals`) rather than prefix matching (`startsWith`) when checking the `Content-Type` header against `application/json`. This prevents content types like `application/json-patch+json` from being incorrectly deserialised as standard JSON.
 
 ---
 
@@ -392,9 +432,10 @@ EDDI's CI/CD pipeline enforces multiple automated security gates before any code
 | **CodeQL** | SAST | Java source code | Blocking (PR) + weekly deep scan | N/A |
 | **Trivy** | CVE scanning | Filesystem deps + Docker image | Blocking (CRITICAL/HIGH) | `.trivyignore` |
 | **Gitleaks** | Secret scanning | Full git history | Blocking | `.gitleaksignore` |
-| **ZAP** | DAST | Live API (OpenAPI spec) | Report-only | `fail_action` in workflow |
 | **CycloneDX** | SBOM | Maven dependency tree | Artifact generation | N/A |
 | **Jazzer** | Fuzz testing | PathNavigator, MatchingUtilities | JUnit integration | N/A |
+
+> **DAST is intentionally absent.** A ZAP API scan used to live in `ci.yml` and was removed rather than kept as decorative coverage: it ran *after* the image was pushed, it scanned an instance started with `EDDI_SECURITY_ALLOW_UNAUTHENTICATED` (so the authorization layer under test was switched off), and it ran passive-only with `fail_action: false`. Re-adding it means fixing all three at once — build the image in a job that does not push, stand up Keycloak, drive an authenticated OpenAPI scan against it, and gate the publish job on the result.
 
 ### Override Files
 

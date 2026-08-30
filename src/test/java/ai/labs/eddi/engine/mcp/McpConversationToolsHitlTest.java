@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 package ai.labs.eddi.engine.mcp;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 
 import ai.labs.eddi.datastore.serialization.JsonSerialization;
@@ -75,7 +76,7 @@ class McpConversationToolsHitlTest {
                 mock(BoundedLogStore.class),
                 mock(IRestAuditStore.class),
                 agentTriggerStore, userConversationStore, restAgentEngine,
-                identity, conversationAccessGuard, false);
+                identity, conversationAccessGuard, mock(ResourceAccessGuard.class), false);
     }
 
     @Test

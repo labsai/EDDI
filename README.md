@@ -547,8 +547,8 @@ Dev mode also enables:
 | `./mvnw compile`                                              | Compile sources only (fast feedback)                                        |
 | `./mvnw clean compile`                                        | Clean build — delete `target/` and recompile from scratch                   |
 | `./mvnw test`                                                 | Run **unit tests** (excludes `*IT.java` integration tests)                  |
-| `./mvnw verify -DskipITs`                                     | Compile + unit tests + package (no integration tests)                       |
-| `./mvnw verify`                                               | **Full build** — compile + unit tests + integration tests (requires Docker) |
+| `./mvnw verify`                                               | Compile + unit tests + package. **Integration tests are skipped** — `skipITs` defaults to `true` in `pom.xml` |
+| `./mvnw verify -DskipITs=false`                               | **Full build** — adds the `*IT.java` integration tests (requires Docker). This is what CI runs |
 | `./mvnw validate`                                             | Run **Checkstyle** code style checks                                        |
 | `./mvnw formatter:format`                                     | **Auto-format** Java sources using the project Eclipse formatter            |
 | `./mvnw package -DskipTests`                                  | Build the JAR without running tests (for `install.sh --local`)              |

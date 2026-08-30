@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.workflows.rest;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
@@ -44,7 +45,8 @@ class RestWorkflowStoreTest {
     @BeforeEach
     void setUp() {
         openMocks(this);
-        restWorkflowStore = new RestWorkflowStore(WorkflowStore, resourceClientLibrary, documentDescriptorStore, jsonSchemaCreator);
+        restWorkflowStore = new RestWorkflowStore(WorkflowStore, resourceClientLibrary, documentDescriptorStore, jsonSchemaCreator,
+                mock(ResourceAccessGuard.class));
     }
 
     /**

@@ -44,6 +44,10 @@ services:
       # provisioning change. Was stranded in a top-level grafana-data/ left over
       # from the bind-mount era and provisioned by nothing.
       - ./docs/monitoring/eddi-operations-dashboard.json:/var/lib/grafana/dashboards/eddi-operations.json:ro
+      # Full Metrics Reference — one panel group per subsystem, covering every
+      # meter EDDI registers. The operations dashboard stays the front door;
+      # this is where you go when the KPI you need is not on it.
+      - ./docs/monitoring/eddi-full-metrics-dashboard.json:/var/lib/grafana/dashboards/eddi-full-metrics.json:ro
       - ./docs/monitoring/grafana-provisioning/datasources:/etc/grafana/provisioning/datasources:ro
       - ./docs/monitoring/grafana-provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
       - grafana-data:/var/lib/grafana

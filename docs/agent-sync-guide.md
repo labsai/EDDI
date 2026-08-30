@@ -17,7 +17,7 @@ Agent Sync lets you synchronize agent configurations between two running EDDI in
 ## Prerequisites
 
 - Both EDDI instances must be reachable over HTTP/HTTPS
-- The **source** instance must have the agent deployed
+- The agent only needs to **exist** in the source instance's agent store — it does not have to be deployed
 - If the source requires authentication, you'll need a valid Bearer token
 
 ## Workflow
@@ -50,24 +50,34 @@ curl -X POST "http://localhost:7070/backup/import/sync/preview?sourceUrl=https:/
     {
       "resourceType": "agent",
       "action": "UPDATE",
-      "originId": "remote-agent-id",
-      "localId": "local-agent-id"
+      "sourceId": "remote-agent-id",
+      "targetId": "local-agent-id",
+      "targetVersion": 3,
+      "matchStrategy": "targetAgent"
     },
     {
-      "resourceType": "llm",
+      "resourceType": "langchain",
       "action": "UPDATE",
-      "originId": "remote-llm-id",
-      "localId": "local-llm-id"
+      "sourceId": "remote-llm-id",
+      "targetId": "local-llm-id",
+      "targetVersion": 2,
+      "matchStrategy": "type"
     },
     {
       "resourceType": "behavior",
       "action": "SKIP",
-      "originId": "remote-behavior-id",
-      "localId": "local-behavior-id"
+      "sourceId": "remote-behavior-id",
+      "targetId": "local-behavior-id",
+      "targetVersion": 1,
+      "matchStrategy": "type"
     }
   ]
 }
 ```
+
+`targetId` and `targetVersion` are `null` for a `CREATE`, and `matchStrategy` records how the match was found (e.g. `targetAgent`, `position`, `type`, `name` — `null` for `CREATE`).
+
+`resourceType` uses the config file extension labels, not the v6 URI names — the full set is `agent`, `workflow`, `langchain`, `httpcalls`, `behavior`, `regulardictionary`, `property`, `output`, `mcpcalls`, `rag`, `snippet`.
 
 **Actions explained:**
 

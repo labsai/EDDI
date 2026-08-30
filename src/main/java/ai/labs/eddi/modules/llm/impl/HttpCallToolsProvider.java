@@ -4,10 +4,10 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
-import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.apicalls.model.ApiCall;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
-import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
+import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
@@ -127,18 +127,18 @@ class HttpCallToolsProvider implements ToolSourceProvider {
             .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
             .build();
 
-    private final IRestAgentStore restAgentStore;
-    private final IRestWorkflowStore restWorkflowStore;
+    private final IAgentStore agentStore;
+    private final IWorkflowStore workflowStore;
     private final IResourceClientLibrary resourceClientLibrary;
     private final IApiCallExecutor apiCallExecutor;
     private final IJsonSerialization jsonSerialization;
     private final IMemoryItemConverter memoryItemConverter;
 
-    HttpCallToolsProvider(IRestAgentStore restAgentStore, IRestWorkflowStore restWorkflowStore,
+    HttpCallToolsProvider(IAgentStore agentStore, IWorkflowStore workflowStore,
             IResourceClientLibrary resourceClientLibrary, IApiCallExecutor apiCallExecutor,
             IJsonSerialization jsonSerialization, IMemoryItemConverter memoryItemConverter) {
-        this.restAgentStore = restAgentStore;
-        this.restWorkflowStore = restWorkflowStore;
+        this.agentStore = agentStore;
+        this.workflowStore = workflowStore;
         this.resourceClientLibrary = resourceClientLibrary;
         this.apiCallExecutor = apiCallExecutor;
         this.jsonSerialization = jsonSerialization;
@@ -180,8 +180,8 @@ class HttpCallToolsProvider implements ToolSourceProvider {
         try {
             LOGGER.infof("Discovering httpcall tools for agent: %s v%s", memory.getAgentId(), memory.getAgentVersion());
 
-            var stepConfigs = WorkflowTraversal.discoverConfigs(memory, HTTPCALLS_TYPE, ApiCallsConfiguration.class, restAgentStore,
-                    restWorkflowStore, resourceClientLibrary);
+            var stepConfigs = WorkflowTraversal.discoverConfigs(memory, HTTPCALLS_TYPE, ApiCallsConfiguration.class, agentStore,
+                    workflowStore, resourceClientLibrary);
 
             for (var stepConfig : stepConfigs) {
                 ApiCallsConfiguration httpCallsConfig = stepConfig.config();

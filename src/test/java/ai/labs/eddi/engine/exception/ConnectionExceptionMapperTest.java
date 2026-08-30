@@ -43,6 +43,13 @@ class ConnectionExceptionMapperTest {
             ConnectionException.Reason.INVALID_CONFIGURATION, 400,
             ConnectionException.Reason.UNSUPPORTED_PLACEMENT, 400,
             ConnectionException.Reason.TARGET_NOT_ALLOWED, 400,
+            // 400 rather than the 409 its neighbours use, and the difference is the
+            // point: those are fixed by a human linking an account, while this one says
+            // the request itself was incomplete — the calling system omitted a header it
+            // was supposed to attach, and the same call by the same user keeps failing
+            // until it sends one. A 409 would send an integrator looking for an
+            // unconnected user who does not exist.
+            ConnectionException.Reason.NO_CALLER_CREDENTIAL, 400,
             ConnectionException.Reason.NOT_FOUND, 404,
             ConnectionException.Reason.NOT_CONNECTED, 409,
             ConnectionException.Reason.NO_VERIFIED_PRINCIPAL, 409,

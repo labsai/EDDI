@@ -17,6 +17,8 @@ import ai.labs.eddi.engine.runtime.internal.ScheduleFireExecutor;
 import ai.labs.eddi.engine.runtime.internal.SchedulePollerService;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.security.OwnershipValidator;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -76,6 +78,9 @@ public class RestScheduleStore implements IRestScheduleStore {
 
     @Inject
     OwnershipValidator ownershipValidator;
+
+    @Inject
+    ResourceAccessGuard resourceAccessGuard;
 
     @ConfigProperty(name = "eddi.schedule.default-timezone", defaultValue = "UTC")
     String defaultTimeZone;
@@ -141,6 +146,15 @@ public class RestScheduleStore implements IRestScheduleStore {
                 return ownerGuard;
             }
 
+            // A schedule converses with its agent on every fire, and the fire itself is
+            // system-initiated — deliberately below the USE gate, because no interactive
+            // caller exists then. The gate therefore applies HERE, where the human is:
+            // without it, scheduling a private agent is a standing bypass of
+            // /agents/{id}/start's check.
+            if (schedule != null && schedule.getAgentId() != null && !schedule.getAgentId().isBlank()) {
+                resourceAccessGuard.requireAgentUseAccess(schedule.getAgentId());
+            }
+
             // Validate
             validateSchedule(schedule);
 
@@ -158,6 +172,11 @@ public class RestScheduleStore implements IRestScheduleStore {
         } catch (IllegalArgumentException e) {
             LOGGER.warn("Invalid schedule configuration: " + e.getMessage());
             return Response.status(Response.Status.BAD_REQUEST).entity("Invalid schedule configuration").build();
+        } catch (ForbiddenException e) {
+            // The USE gate's refusal. Without this rethrow the generic catch below
+            // turns a clean 403 into a 500 — the caller cannot tell "you may not
+            // schedule that agent" from "the server broke".
+            throw e;
         } catch (Exception e) {
             LOGGER.error("Failed to create schedule", e);
             throw new InternalServerErrorException("Failed to create schedule");
@@ -182,6 +201,12 @@ public class RestScheduleStore implements IRestScheduleStore {
             Response guard = requireAdminForHitl(scheduleId, "update");
             if (guard != null) {
                 return guard;
+            }
+
+            // Same USE gate as create: an update can re-point an existing schedule at a
+            // different agent, which is the same act as scheduling that agent afresh.
+            if (schedule != null && schedule.getAgentId() != null && !schedule.getAgentId().isBlank()) {
+                resourceAccessGuard.requireAgentUseAccess(schedule.getAgentId());
             }
 
             // BOTH sides matter, and checking only one is the bug this replaces.
@@ -232,6 +257,11 @@ public class RestScheduleStore implements IRestScheduleStore {
         } catch (IllegalArgumentException e) {
             LOGGER.warn("Invalid schedule update for " + scheduleId + ": " + e.getMessage());
             return Response.status(Response.Status.BAD_REQUEST).entity("Invalid schedule configuration").build();
+        } catch (ForbiddenException e) {
+            // The USE gate's refusal. Without this rethrow the generic catch below
+            // turns a clean 403 into a 500 — the caller cannot tell "you may not
+            // schedule that agent" from "the server broke".
+            throw e;
         } catch (Exception e) {
             LOGGER.error("Failed to update schedule " + scheduleId, e);
             throw new InternalServerErrorException("Failed to update schedule");

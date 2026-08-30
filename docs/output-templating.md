@@ -33,7 +33,7 @@ The **output templating** is evaluated by the **Quarkus Qute templating engine**
 ### Common Use Cases
 
 - **Personalization**: Greet users by name: `"Hello {context.userName}!"`
-- **API Response Formatting**: Display data from HTTP calls: `"Your order #{httpCalls.orderData.orderId} is on the way"`
+- **API Response Formatting**: Display data from HTTP calls: `"Your order #{memory.current.httpCalls.orderData.orderId} is on the way"`
 - **Conditional Outputs**: `"{#if user.isPremium}Exclusive offer for you!{/if}"`
 - **Iteration**: Loop through arrays: `"Available options: {#for opt in options}{opt}{#if opt_hasNext}, {/if}{/for}"`
 
@@ -42,10 +42,11 @@ The **output templating** is evaluated by the **Quarkus Qute templating engine**
 In templates, you have access to:
 
 - **`memory.current.*`** - Current step data (input, httpCalls, properties)
-- **`memory.previous.*`** - Previous step data
+- **`memory.last.*`** - Previous step data
+- **`memory.past.*`** - All earlier steps (list)
 - **`context.*`** - Context passed from your application
 - **`properties.*`** - Conversation properties (stored data)
-- **`httpCalls.*`** - Responses from external APIs
+- **`memory.current.httpCalls.*`** - Responses from external APIs (per step)
 
 ## Configuration
 

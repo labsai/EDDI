@@ -200,10 +200,11 @@
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 42 },
       "id": 9,
       "title": "Vault Resolve Latency",
+      "description": "eddi.vault.resolve.duration is a plain Timer — it publishes _seconds_sum/_count/_max but no _seconds_bucket, so the P99 series this panel used to query never existed and the panel was permanently half-empty. 'Peak' is the decaying max. Only eddi.pipeline.task.duration calls publishPercentileHistogram(), so it is the only EDDI timer with real quantiles.",
       "type": "timeseries",
       "targets": [
         { "expr": "rate(eddi_vault_resolve_duration_seconds_sum[5m]) / rate(eddi_vault_resolve_duration_seconds_count[5m])", "legendFormat": "Avg Resolve" },
-        { "expr": "histogram_quantile(0.99, rate(eddi_vault_resolve_duration_seconds_bucket[5m]))", "legendFormat": "P99 Resolve" }
+        { "expr": "max(eddi_vault_resolve_duration_seconds_max)", "legendFormat": "Peak Resolve" }
       ]
     },
     {

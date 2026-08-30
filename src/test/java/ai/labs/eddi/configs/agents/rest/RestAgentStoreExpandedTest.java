@@ -4,6 +4,10 @@
  */
 package ai.labs.eddi.configs.agents.rest;
 
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.any;
+import ai.labs.eddi.engine.security.spaces.AccessScope;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
@@ -62,7 +66,7 @@ class RestAgentStoreExpandedTest {
         deploymentStore = mock(IDeploymentStore.class);
 
         sut = new RestAgentStore(agentStore, restWorkflowStore, documentDescriptorStore,
-                jsonSchemaCreator, scheduleStore, capabilityRegistryService, deploymentStore);
+                jsonSchemaCreator, scheduleStore, capabilityRegistryService, deploymentStore, permissiveGuard());
     }
 
     private IResourceStore.IResourceId dummyResourceId(String id, int version) {
@@ -114,10 +118,10 @@ class RestAgentStoreExpandedTest {
         @Test
         @DisplayName("should delegate to document descriptor store")
         void standard() throws Exception {
-            when(documentDescriptorStore.readDescriptors("ai.labs.agent", "filter", 0, 20, false))
+            when(documentDescriptorStore.readDescriptors(eq("ai.labs.agent"), eq("filter"), eq(0), eq(20), eq(false), any()))
                     .thenReturn(List.of(new DocumentDescriptor()));
 
-            List<DocumentDescriptor> result = sut.readAgentDescriptors("filter", 0, 20);
+            List<DocumentDescriptor> result = sut.readAgentDescriptors("filter", 0, 20, "");
 
             assertEquals(1, result.size());
         }
@@ -518,5 +522,22 @@ class RestAgentStoreExpandedTest {
 
             assertDoesNotThrow(() -> sut.populateCapabilityRegistry());
         }
+    }
+
+    /**
+     * A guard that admits everything. {@code visibleOnly} filters with
+     * {@code canAccess}, which a bare Mockito mock answers {@code false} to —
+     * correct for a security check, wrong for a test that is not about the security
+     * check.
+     */
+    private static ResourceAccessGuard permissiveGuard() {
+        ResourceAccessGuard guard = mock(ResourceAccessGuard.class);
+        lenient().when(guard.seesEverything()).thenReturn(true);
+        lenient().when(guard.canAccess(any(), any())).thenReturn(true);
+        // A real guard never returns null here, and the space-narrowing overload
+        // chains straight off it. Left unstubbed the mock answers null and the
+        // listing NPEs, which reads as a production bug rather than a bare mock.
+        lenient().when(guard.listingScope()).thenReturn(AccessScope.unrestricted());
+        return guard;
     }
 }

@@ -19,7 +19,7 @@ A regular conversation runs a **linear pipeline** of lifecycle tasks (parse → 
 
 This is **opt-in per turn**: whether to pause depends on runtime conditions (user intent, slot values, context). Behavior rules are EDDI's existing mechanism for conditional actions — reusing them keeps the logic in configuration, not Java.
 
-The `hitlConfig` on `AgentConfiguration` only controls **timeout behavior** — the actual triggering is in the behavior rules. Without a rule emitting `PAUSE_CONVERSATION`, `hitlConfig` does nothing.
+For a rule pause, `hitlConfig`'s `approvalTimeout`/`timeoutPolicy`/`pauseReason` only control **timeout behavior** — the actual triggering is in the behavior rules. Without a rule emitting `PAUSE_CONVERSATION`, none of them do anything. (`hitlConfig.toolApprovals` is a separate trigger that needs no behavior rule — see [Tool-Level Approval Gating](#tool-level-approval-gating).)
 
 ### Group: Config-Driven
 
@@ -60,7 +60,7 @@ Human reviews → POST /agents/{conversationId}/resume with a decision
        └→ Remaining tasks (output, templating, …) execute normally
 ```
 
-**While paused, user input is rejected without being consumed**: `POST /agents/{id}/say` returns `409 Conflict` immediately with a body directing to the resume endpoint — the message is *not* queued and *not* processed. The same applies if a pause commits in the narrow window after a message was accepted (the turn is skipped and answered with `409` instead of executing against the paused conversation). Chat clients should render "awaiting approval" and disable input until the decision lands.
+**While paused, user input is rejected without being consumed**: `POST /agents/{conversationId}` returns `409 Conflict` immediately with a body directing to the resume endpoint — the message is *not* queued and *not* processed. The same applies if a pause commits in the narrow window after a message was accepted (the turn is skipped and answered with `409` instead of executing against the paused conversation). Chat clients should render "awaiting approval" and disable input until the decision lands.
 
 ### Configuration
 
@@ -320,7 +320,7 @@ Patterns are matched by `ToolApprovalPatterns` / `ToolApprovalGate`:
 
 ### Effective timeout policy
 
-Tool pauses resolve their effective timeout policy with a deliberate rule (`ConversationService.applyEffectiveToolTimeoutPolicy`):
+Tool pauses resolve their effective timeout policy with a deliberate rule (`ConversationHitlService.applyEffectiveToolTimeoutPolicy`):
 
 1. The **governing [rule](#per-tool-approval-rules)**'s `timeoutPolicy` wins — the most specific statement in the config, so it is honoured verbatim (`AUTO_APPROVE` included).
 2. Otherwise an **explicit** `toolApprovals.timeoutPolicy` wins verbatim — including an explicit `AUTO_APPROVE` (the designer opted in at the tool level). Its `approvalTimeout` is used, falling back to the outer `hitlConfig.approvalTimeout`.
@@ -374,7 +374,7 @@ For an `http`-sourced call, the tool name alone tells an approver little: it com
 
 **The two fields are independent, and a client must not infer one from the other.** `requestPinned` says whether a fingerprint will be *enforced* before execution — not whether a preview exists. An `http` call carrying `preRequest.propertyInstructions` is previewed best-effort but deliberately left unpinnable, so it arrives with `requestPinned: false` and a non-null `requestPreview`: show it, but do not present it as guaranteed to be what runs. `requestPreview: null` means there was nothing to resolve (every non-`http` tool), which is not a resolution failure a caller should treat as an error.
 
-On resume, an **approved** call is re-resolved and its fingerprint re-compared immediately before execution. A mismatch refuses the call — a synthetic `{"status":"NOT_EXECUTED","reason":"the request changed after it was approved"}` result, an audit line (`hitl.tool.request_changed`, tool + callId + reason only — never the request itself), and the rest of the batch proceeds normally. This is what makes the approval bind to *the request that runs*, not to the name of the tool that was called.
+On resume, an **approved** call is re-resolved and its fingerprint re-compared immediately before execution. A mismatch refuses the call — a synthetic `{"status":"NOT_EXECUTED","reason":"the request changed after it was approved"}` result, an alertable log marker (`WARN hitl.tool.request_changed` — tool + callId + reason only, never the request itself; not an audit-ledger entry, for the same reason as `hitl.tool.outcome_unknown` below), and the rest of the batch proceeds normally. This is what makes the approval bind to *the request that runs*, not to the name of the tool that was called.
 
 **Headers are fingerprinted redacted; the body is fingerprinted raw.** For **headers** the fingerprint deliberately covers the redacted form: `ApiCallExecutor` resolves `${caller:token}` into `Authorization` at execution time, and the approver is routinely a different person than whoever's turn raised the pause — fingerprinting the live header would mismatch on every cross-user approval (the normal case) and the check would have to be disabled. Redacting first makes the fingerprint answer what approval is actually about — *what the request does* — and leaves *whose credentials carry it* to authentication, which the fingerprint does not participate in.
 

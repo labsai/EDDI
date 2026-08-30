@@ -429,7 +429,7 @@ curl -s -X POST "$EDDI/agents/<CONVERSATION_ID>" \
     }
   ],
   "conversationProperties": {},
-  "conversationSteps": [ /* … */ ]
+  "conversationSteps": []
 }
 ```
 

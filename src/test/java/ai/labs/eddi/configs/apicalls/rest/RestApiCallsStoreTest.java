@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.apicalls.rest;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.apicalls.model.ApiEndpointDiscoveryRequest;
 import ai.labs.eddi.configs.apicalls.IApiCallsStore;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
@@ -39,7 +40,7 @@ class RestApiCallsStoreTest {
     @BeforeEach
     void setUp() {
         mocks = openMocks(this);
-        store = new RestApiCallsStore(httpCallsStore, documentDescriptorStore, jsonSchemaCreator);
+        store = new RestApiCallsStore(httpCallsStore, documentDescriptorStore, jsonSchemaCreator, mock(ResourceAccessGuard.class));
     }
 
     @AfterEach

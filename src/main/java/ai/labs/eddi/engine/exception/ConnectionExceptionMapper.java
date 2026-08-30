@@ -39,13 +39,20 @@ public class ConnectionExceptionMapper implements ExceptionMapper<ConnectionExce
      * 403: the caller is authenticated and permitted, the resource simply is not in
      * a state that can serve the request yet, and the action that fixes it is
      * connecting or reconnecting rather than presenting a different token.
+     * <p>
+     * {@code NO_CALLER_CREDENTIAL} is 400 instead, and the difference is the point:
+     * those three are fixed by a human linking an account, while this one says the
+     * request itself was incomplete — a header the calling system was supposed to
+     * attach is missing, and the same call with the same account will keep failing
+     * until that system sends it. A 409 would tell an integrator to go looking for
+     * an unconnected user who does not exist.
      */
     private static Response.Status statusOf(ConnectionException.Reason reason) {
         if (reason == null) {
             return Response.Status.INTERNAL_SERVER_ERROR;
         }
         return switch (reason) {
-            case INVALID_CONFIGURATION, UNSUPPORTED_PLACEMENT, TARGET_NOT_ALLOWED -> Response.Status.BAD_REQUEST;
+            case INVALID_CONFIGURATION, UNSUPPORTED_PLACEMENT, TARGET_NOT_ALLOWED, NO_CALLER_CREDENTIAL -> Response.Status.BAD_REQUEST;
             case NOT_FOUND -> Response.Status.NOT_FOUND;
             case NOT_CONNECTED, NO_VERIFIED_PRINCIPAL, GRANT_UNUSABLE -> Response.Status.CONFLICT;
             case TOKEN_ENDPOINT_UNAVAILABLE -> Response.Status.SERVICE_UNAVAILABLE;

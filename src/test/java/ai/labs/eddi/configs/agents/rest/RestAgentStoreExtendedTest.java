@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.agents.rest;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
@@ -64,7 +65,8 @@ class RestAgentStoreExtendedTest {
     void setUp() {
         openMocks(this);
         restAgentStore = new RestAgentStore(agentStore, restWorkflowStore,
-                documentDescriptorStore, jsonSchemaCreator, scheduleStore, capabilityRegistryService, deploymentStore);
+                documentDescriptorStore, jsonSchemaCreator, scheduleStore, capabilityRegistryService, deploymentStore,
+                permissiveGuard());
     }
 
     // ==================== readJsonSchema ====================
@@ -457,5 +459,18 @@ class RestAgentStoreExtendedTest {
                 return version;
             }
         };
+    }
+
+    /**
+     * A guard that admits everything. {@code visibleOnly} filters with
+     * {@code canAccess}, which a bare Mockito mock answers {@code false} to —
+     * correct for a security check, wrong for a test that is not about the security
+     * check.
+     */
+    private static ResourceAccessGuard permissiveGuard() {
+        ResourceAccessGuard guard = mock(ResourceAccessGuard.class);
+        lenient().when(guard.seesEverything()).thenReturn(true);
+        lenient().when(guard.canAccess(any(), any())).thenReturn(true);
+        return guard;
     }
 }

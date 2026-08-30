@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.backup.impl;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.backup.IZipArchive;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
@@ -96,7 +97,7 @@ class RestExportServiceExtendedBranchTest {
                 dictionaryStore, ruleSetStore, apiCallsStore, llmStore,
                 propertySetterStore, outputStore, mcpCallsStore, ragStore,
                 snippetStore, jsonSerialization, zipArchive, secretScrubber,
-                scheduleStore);
+                scheduleStore, mock(ResourceAccessGuard.class));
     }
 
     // =========================================================
@@ -125,7 +126,7 @@ class RestExportServiceExtendedBranchTest {
                     "exportSnippets", Path.class, Set.class);
             method.setAccessible(true);
 
-            when(documentDescriptorStore.readDescriptors(eq("ai.labs.snippet"), anyString(), anyInt(), anyInt(), eq(false)))
+            when(documentDescriptorStore.readDescriptors(eq("ai.labs.snippet"), anyString(), anyInt(), anyInt(), eq(false), any()))
                     .thenReturn(null);
 
             Set<String> names = new LinkedHashSet<>();
@@ -140,7 +141,7 @@ class RestExportServiceExtendedBranchTest {
                     "exportSnippets", Path.class, Set.class);
             method.setAccessible(true);
 
-            when(documentDescriptorStore.readDescriptors(eq("ai.labs.snippet"), anyString(), anyInt(), anyInt(), eq(false)))
+            when(documentDescriptorStore.readDescriptors(eq("ai.labs.snippet"), anyString(), anyInt(), anyInt(), eq(false), any()))
                     .thenReturn(Collections.emptyList());
 
             Set<String> names = new LinkedHashSet<>();
@@ -157,7 +158,7 @@ class RestExportServiceExtendedBranchTest {
 
             DocumentDescriptor desc = new DocumentDescriptor();
             desc.setResource(URI.create("eddi://ai.labs.snippet/snippetstore/snippets/aabbccddeeff112233445566?version=1"));
-            when(documentDescriptorStore.readDescriptors(eq("ai.labs.snippet"), anyString(), anyInt(), anyInt(), eq(false)))
+            when(documentDescriptorStore.readDescriptors(eq("ai.labs.snippet"), anyString(), anyInt(), anyInt(), eq(false), any()))
                     .thenReturn(List.of(desc));
 
             PromptSnippet snippet = new PromptSnippet();
@@ -178,7 +179,7 @@ class RestExportServiceExtendedBranchTest {
 
             DocumentDescriptor desc = new DocumentDescriptor();
             desc.setResource(URI.create("eddi://ai.labs.snippet/snippetstore/snippets/aabbccddeeff112233445566?version=1"));
-            when(documentDescriptorStore.readDescriptors(eq("ai.labs.snippet"), anyString(), anyInt(), anyInt(), eq(false)))
+            when(documentDescriptorStore.readDescriptors(eq("ai.labs.snippet"), anyString(), anyInt(), anyInt(), eq(false), any()))
                     .thenReturn(List.of(desc));
 
             PromptSnippet snippet = new PromptSnippet();
@@ -199,7 +200,7 @@ class RestExportServiceExtendedBranchTest {
 
             DocumentDescriptor desc = new DocumentDescriptor();
             desc.setResource(URI.create("eddi://ai.labs.snippet/snippetstore/snippets/aabbccddeeff112233445566?version=1"));
-            when(documentDescriptorStore.readDescriptors(eq("ai.labs.snippet"), anyString(), anyInt(), anyInt(), eq(false)))
+            when(documentDescriptorStore.readDescriptors(eq("ai.labs.snippet"), anyString(), anyInt(), anyInt(), eq(false), any()))
                     .thenReturn(List.of(desc));
             when(snippetStore.read("aabbccddeeff112233445566", 1))
                     .thenThrow(new IResourceStore.ResourceNotFoundException("not found"));

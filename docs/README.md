@@ -88,6 +88,7 @@ Build agent behavior by composing these extensions:
 
 | Topic                   | Guide                                              |
 | ----------------------- | -------------------------------------------------- |
+| ⚙️ Configuration Reference | [→ Guide](configuration-reference.md)           |
 | 🐳 Docker               | [→ Guide](docker.md)                               |
 | ☸️ Kubernetes & Helm    | [→ Guide](kubernetes.md)                           |
 | 🔴 Red Hat & OpenShift  | [→ Guide](redhat-openshift.md)                     |

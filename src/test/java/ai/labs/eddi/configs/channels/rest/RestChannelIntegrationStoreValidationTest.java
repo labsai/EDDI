@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.configs.channels.rest;
 
+import static org.mockito.Mockito.mock;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.channels.model.ChannelTarget;
 import jakarta.ws.rs.BadRequestException;
@@ -30,7 +32,7 @@ class RestChannelIntegrationStoreValidationTest {
     @BeforeEach
     void setUp() {
         // Construct with null dependencies — we only call validateConfiguration()
-        store = new RestChannelIntegrationStore(null, null);
+        store = new RestChannelIntegrationStore(null, null, mock(ResourceAccessGuard.class));
         config = validConfig();
     }
 

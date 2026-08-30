@@ -4,6 +4,9 @@
  */
 package ai.labs.eddi.configs;
 
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.any;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.dictionary.IDictionaryStore;
@@ -40,9 +43,10 @@ class DescriptorListingDelegationTest {
     @DisplayName("rulesets list under ai.labs.rules — the namespace their URIs actually carry")
     void ruleSetListingUsesTheRulesNamespace() throws Exception {
         var documentDescriptorStore = mock(IDocumentDescriptorStore.class);
-        var store = new RestRuleSetStore(mock(IRuleSetStore.class), documentDescriptorStore, mock(IJsonSchemaCreator.class));
+        var store = new RestRuleSetStore(mock(IRuleSetStore.class), documentDescriptorStore, mock(IJsonSchemaCreator.class),
+                mock(ResourceAccessGuard.class));
         List<DocumentDescriptor> expected = List.of(new DocumentDescriptor());
-        doReturn(expected).when(documentDescriptorStore).readDescriptors("ai.labs.rules", "f", 0, 10, false);
+        doReturn(expected).when(documentDescriptorStore).readDescriptors(eq("ai.labs.rules"), eq("f"), eq(0), eq(10), eq(false), any());
 
         assertEquals(expected, store.readBehaviorDescriptors("f", 0, 10),
                 "querying any other namespace returns an empty list forever, with no error");
@@ -53,9 +57,9 @@ class DescriptorListingDelegationTest {
     void dictionaryListingUsesTheDictionaryNamespace() throws Exception {
         var documentDescriptorStore = mock(IDocumentDescriptorStore.class);
         var store = new RestDictionaryStore(mock(IDictionaryStore.class), documentDescriptorStore,
-                mock(IJsonSchemaCreator.class));
+                mock(IJsonSchemaCreator.class), mock(ResourceAccessGuard.class));
         List<DocumentDescriptor> expected = List.of(new DocumentDescriptor());
-        doReturn(expected).when(documentDescriptorStore).readDescriptors("ai.labs.dictionary", "f", 0, 10, false);
+        doReturn(expected).when(documentDescriptorStore).readDescriptors(eq("ai.labs.dictionary"), eq("f"), eq(0), eq(10), eq(false), any());
 
         assertEquals(expected, store.readRegularDictionaryDescriptors("f", 0, 10));
     }

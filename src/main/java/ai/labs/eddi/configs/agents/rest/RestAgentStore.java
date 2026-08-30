@@ -10,6 +10,8 @@ import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.configs.descriptors.model.AccessLevel;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.configs.workflows.rest.RestWorkflowStore;
 import ai.labs.eddi.configs.rest.RestVersionInfo;
@@ -47,6 +49,7 @@ public class RestAgentStore implements IRestAgentStore {
     private final IJsonSchemaCreator jsonSchemaCreator;
     private final RestVersionInfo<AgentConfiguration> restVersionInfo;
     private final IDocumentDescriptorStore documentDescriptorStore;
+    private final ResourceAccessGuard resourceAccessGuard;
     private final IScheduleStore scheduleStore;
     private final CapabilityRegistryService capabilityRegistryService;
     private final IDeploymentStore deploymentStore;
@@ -56,8 +59,10 @@ public class RestAgentStore implements IRestAgentStore {
     @Inject
     public RestAgentStore(IAgentStore agentStore, IRestWorkflowStore restWorkflowStore, IDocumentDescriptorStore documentDescriptorStore,
             IJsonSchemaCreator jsonSchemaCreator, IScheduleStore scheduleStore, CapabilityRegistryService capabilityRegistryService,
-            IDeploymentStore deploymentStore) {
-        restVersionInfo = new RestVersionInfo<>(resourceURI, agentStore, documentDescriptorStore);
+            IDeploymentStore deploymentStore,
+            ResourceAccessGuard resourceAccessGuard) {
+        this.resourceAccessGuard = resourceAccessGuard;
+        restVersionInfo = new RestVersionInfo<>(resourceURI, agentStore, documentDescriptorStore, resourceAccessGuard);
         this.documentDescriptorStore = documentDescriptorStore;
         this.agentStore = agentStore;
         this.restWorkflowStore = restWorkflowStore;
@@ -95,6 +100,19 @@ public class RestAgentStore implements IRestAgentStore {
         }
     }
 
+    /**
+     * Drops descriptors the caller may not view. Mirrors
+     * {@code ResourceAccessGuard.requireAccess(id, VIEW, …)} exactly, so a caller
+     * never lists something they could not then read.
+     */
+    private List<DocumentDescriptor> visibleOnly(List<DocumentDescriptor> descriptors) {
+        if (descriptors == null || descriptors.isEmpty()) {
+            return descriptors;
+        }
+        return descriptors.stream().filter(d -> resourceAccessGuard.canAccess(d, AccessLevel.VIEW))
+                .map(resourceAccessGuard::redactForCaller).toList();
+    }
+
     @Override
     public Response readJsonSchema() {
         try {
@@ -105,8 +123,8 @@ public class RestAgentStore implements IRestAgentStore {
     }
 
     @Override
-    public List<DocumentDescriptor> readAgentDescriptors(String filter, Integer index, Integer limit) {
-        return restVersionInfo.readDescriptors(filter, index, limit);
+    public List<DocumentDescriptor> readAgentDescriptors(String filter, Integer index, Integer limit, String space) {
+        return restVersionInfo.readDescriptors(filter, index, limit, space);
     }
 
     @Override
@@ -119,8 +137,15 @@ public class RestAgentStore implements IRestAgentStore {
         }
 
         try {
-            return agentStore.getAgentDescriptorsContainingWorkflow(validatedResourceId.getId(), validatedResourceId.getVersion(),
-                    includePreviousVersions);
+            // Post-filtered rather than query-filtered: this is a reverse-reference lookup
+            // in the store, not a descriptor listing, so there is no AccessScope to hand
+            // it. Unfiltered it is a cross-workspace enumeration — anyone holding one
+            // resource URI could list every resource in the deployment that references it,
+            // with the full descriptor payload. The page can come back short; that is the
+            // right trade for a diagnostic listing bounded by how many things reference
+            // one resource.
+            return visibleOnly(agentStore.getAgentDescriptorsContainingWorkflow(validatedResourceId.getId(),
+                    validatedResourceId.getVersion(), includePreviousVersions));
         } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {
             throw sneakyThrow(e);
         }
@@ -195,6 +220,7 @@ public class RestAgentStore implements IRestAgentStore {
 
     @Override
     public Response duplicateAgent(String id, Integer version, Boolean deepCopy) {
+        restVersionInfo.requireViewAccess(id);
         restVersionInfo.validateParameters(id, version);
         try {
             AgentConfiguration agentConfig = agentStore.read(id, version);
@@ -221,7 +247,7 @@ public class RestAgentStore implements IRestAgentStore {
             // URIs
             IResourceId newAgentId = restVersionInfo.createDocument(agentConfig);
             URI createdUri = RestUtilities.createURI(resourceURI, newAgentId.getId(), versionQueryParam, newAgentId.getVersion());
-            createDocumentDescriptorForDuplicate(documentDescriptorStore, id, version, createdUri);
+            createDocumentDescriptorForDuplicate(documentDescriptorStore, resourceAccessGuard, id, version, createdUri);
 
             return Response.created(createdUri).location(createdUri)
                     .header("X-Resource-URI", createdUri.toString()).build();
@@ -257,6 +283,8 @@ public class RestAgentStore implements IRestAgentStore {
 
     @Override
     public Response deleteAgent(String id, Integer version, Boolean permanent, Boolean cascade) {
+        // Before the cascade, not after — see RestVersionInfo.requireOwnAccess.
+        restVersionInfo.requireOwnAccess(id);
         if (cascade) {
             // Cascade-delete all schedules for this Agent first
             try {

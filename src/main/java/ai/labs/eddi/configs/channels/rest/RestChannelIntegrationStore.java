@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.channels.IRestChannelIntegrationStore;
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.channels.model.ChannelTarget;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.datastore.IResourceStore;
@@ -51,14 +52,45 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
 
     private final IChannelIntegrationStore channelStore;
     private final IDocumentDescriptorStore documentDescriptorStore;
+    private final ResourceAccessGuard resourceAccessGuard;
     private final RestVersionInfo<ChannelIntegrationConfiguration> restVersionInfo;
 
     @Inject
     public RestChannelIntegrationStore(IChannelIntegrationStore channelStore,
-            IDocumentDescriptorStore documentDescriptorStore) {
-        restVersionInfo = new RestVersionInfo<>(resourceURI, channelStore, documentDescriptorStore);
+            IDocumentDescriptorStore documentDescriptorStore,
+            ResourceAccessGuard resourceAccessGuard) {
+        restVersionInfo = new RestVersionInfo<>(resourceURI, channelStore, documentDescriptorStore, resourceAccessGuard);
         this.channelStore = channelStore;
         this.documentDescriptorStore = documentDescriptorStore;
+        this.resourceAccessGuard = resourceAccessGuard;
+    }
+
+    /**
+     * Asserts the author may converse with everything this channel points at.
+     * <p>
+     * <h3>Why the channel's own permissions are not enough</h3> A channel target is
+     * a standing invitation: once configured, every inbound Slack message reaches
+     * {@code targetId} as a system-initiated conversation, which is deliberately
+     * below the USE gate. Without this check an editor could aim a channel they
+     * control at a colleague's private agent and relay its replies into a room of
+     * their choosing, having never held access to it. Mirrors the checks on
+     * triggers, schedules and group membership, which are the same shape of
+     * standing reference.
+     */
+    private void requireUseOnTargets(ChannelIntegrationConfiguration configuration) {
+        if (configuration == null || configuration.getTargets() == null) {
+            return;
+        }
+        for (var target : configuration.getTargets()) {
+            if (target == null || target.getTargetId() == null || target.getTargetId().isBlank()) {
+                continue;
+            }
+            if (target.getType() == ChannelTarget.TargetType.GROUP) {
+                resourceAccessGuard.requireUseAccess(target.getTargetId(), "group");
+            } else {
+                resourceAccessGuard.requireAgentUseAccess(target.getTargetId());
+            }
+        }
     }
 
     @Override
@@ -75,6 +107,7 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
     public Response updateChannel(String id, Integer version,
                                   ChannelIntegrationConfiguration channelConfiguration) {
         validateConfiguration(channelConfiguration);
+        requireUseOnTargets(channelConfiguration);
         validateUniqueChannelId(channelConfiguration, id);
         Response response = restVersionInfo.update(id, version, channelConfiguration);
         syncDescriptor(id, channelConfiguration);
@@ -84,6 +117,7 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
     @Override
     public Response createChannel(ChannelIntegrationConfiguration channelConfiguration) {
         validateConfiguration(channelConfiguration);
+        requireUseOnTargets(channelConfiguration);
         validateUniqueChannelId(channelConfiguration, null);
         Response response = restVersionInfo.create(channelConfiguration);
         URI location = response.getLocation();
@@ -321,10 +355,14 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
                             && existing.getPlatformConfig() != null
                             && channelType.equalsIgnoreCase(existing.getChannelType())
                             && channelId.equals(existing.getPlatformConfig().get("channelId"))) {
+                        // The sweep is deliberately unscoped: a channelId collides with every
+                        // integration in the deployment, not only the caller's own, so scoping it
+                        // would let two workspaces both bind the same Slack channel and route each
+                        // other's messages. What the message must NOT do is name the conflicting
+                        // integration — that would turn a uniqueness check into an enumeration
+                        // oracle for other people's channel integrations.
                         throw new BadRequestException(
-                                "Another channel integration ('"
-                                        + (existing.getName() != null ? existing.getName() : resId.getId())
-                                        + "') already uses channelId '" + channelId
+                                "Another channel integration already uses channelId '" + channelId
                                         + "' for type '" + channelType + "'.");
                     }
                 } catch (BadRequestException e) {

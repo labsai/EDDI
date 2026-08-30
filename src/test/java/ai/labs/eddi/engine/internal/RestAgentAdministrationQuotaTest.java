@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
@@ -77,7 +78,7 @@ class RestAgentAdministrationQuotaTest {
         admin = new RestAgentAdministration(runtime, agentFactory, mock(IAgentStore.class), deploymentStore,
                 mock(IConversationMemoryStore.class), mock(IRestConversationStore.class),
                 mock(IDocumentDescriptorStore.class), mock(IDeploymentListener.class),
-                mock(IScheduleStore.class), tenantQuotaService);
+                mock(IScheduleStore.class), tenantQuotaService, mock(ResourceAccessGuard.class));
     }
 
     private static DeploymentInfo deployed(String agentId, int version) {

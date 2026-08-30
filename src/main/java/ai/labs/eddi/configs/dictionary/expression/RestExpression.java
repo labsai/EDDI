@@ -8,7 +8,9 @@ import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.configs.dictionary.IDictionaryStore;
 import ai.labs.eddi.configs.dictionary.IRestExpression;
+import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.utils.CollectionUtilities;
 import ai.labs.eddi.utils.RestUtilities;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -29,9 +31,11 @@ import java.util.Map;
 public class RestExpression implements IRestExpression {
     private final IWorkflowStore workflowStore;
     private final IDictionaryStore regularDictionaryStore;
+    private final ResourceAccessGuard accessGuard;
 
     @Inject
-    public RestExpression(IWorkflowStore workflowStore, IDictionaryStore regularDictionaryStore) {
+    public RestExpression(IWorkflowStore workflowStore, IDictionaryStore regularDictionaryStore, ResourceAccessGuard accessGuard) {
+        this.accessGuard = accessGuard;
         this.workflowStore = workflowStore;
         this.regularDictionaryStore = regularDictionaryStore;
     }
@@ -39,6 +43,11 @@ public class RestExpression implements IRestExpression {
     @Override
     public List<String> readExpressions(String workflowId, Integer workflowVersion, String filter, Integer limit) {
         List<String> retExpressions = new LinkedList<>();
+        // This fans out from one workflow into whichever rule sets, api calls, output
+        // sets and dictionaries it references, reading those stores directly. The
+        // workflow is the entry point the caller named, so it is what access is
+        // decided against — without this the helper reads any workflow, unguarded.
+        accessGuard.requireAccess(workflowId, AccessLevel.VIEW, "workflow");
         try {
             WorkflowConfiguration workflowConfig = workflowStore.read(workflowId, workflowVersion);
             List<IResourceStore.IResourceId> resourceIds = readDictionaryResourceIds(workflowConfig);

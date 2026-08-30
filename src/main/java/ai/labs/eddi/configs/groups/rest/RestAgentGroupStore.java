@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.groups.rest;
 
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.IGroupWorkspaceStore;
 import ai.labs.eddi.configs.groups.IRestAgentGroupStore;
@@ -45,6 +46,7 @@ public class RestAgentGroupStore implements IRestAgentGroupStore {
 
     private final IAgentGroupStore groupStore;
     private final IDocumentDescriptorStore documentDescriptorStore;
+    private final ResourceAccessGuard resourceAccessGuard;
     private final IJsonSchemaCreator jsonSchemaCreator;
     private final IGroupWorkspaceStore workspaceStore;
     private final IScheduleStore scheduleStore;
@@ -52,8 +54,10 @@ public class RestAgentGroupStore implements IRestAgentGroupStore {
 
     @Inject
     public RestAgentGroupStore(IAgentGroupStore groupStore, IDocumentDescriptorStore documentDescriptorStore, IJsonSchemaCreator jsonSchemaCreator,
-            IGroupWorkspaceStore workspaceStore, IScheduleStore scheduleStore) {
-        restVersionInfo = new RestVersionInfo<>(resourceURI, groupStore, documentDescriptorStore);
+            IGroupWorkspaceStore workspaceStore, IScheduleStore scheduleStore,
+            ResourceAccessGuard resourceAccessGuard) {
+        this.resourceAccessGuard = resourceAccessGuard;
+        restVersionInfo = new RestVersionInfo<>(resourceURI, groupStore, documentDescriptorStore, resourceAccessGuard);
         this.groupStore = groupStore;
         this.documentDescriptorStore = documentDescriptorStore;
         this.jsonSchemaCreator = jsonSchemaCreator;
@@ -104,8 +108,32 @@ public class RestAgentGroupStore implements IRestAgentGroupStore {
         return restVersionInfo.read(id, version);
     }
 
+    /**
+     * Every member agent must be one the caller may actually converse with.
+     * <p>
+     * A group's member turns run system-initiated, deliberately below the USE gate
+     * — no interactive caller exists then. So recruiting an agent into a group is
+     * the moment to check: without this, adding a colleague's private agent as a
+     * member is a standing bypass of the gate on {@code /agents/{id}/start}, with
+     * the group discussion as the read-out channel.
+     * <p>
+     * Nested groups are checked as agents here; an id that names a group rather
+     * than an agent resolves against its own descriptor, which is the right subject
+     * either way.
+     */
+    private void requireUseOnMembers(AgentGroupConfiguration configuration) {
+        if (configuration == null || configuration.getMembers() == null) {
+            return;
+        }
+        for (var member : configuration.getMembers()) {
+            if (member != null && member.agentId() != null && !member.agentId().isBlank()) {
+                resourceAccessGuard.requireAgentUseAccess(member.agentId());
+            }
+        }
+    }
     @Override
     public Response updateGroup(String id, Integer version, AgentGroupConfiguration groupConfiguration) {
+        requireUseOnMembers(groupConfiguration);
         Response response = restVersionInfo.update(id, version, groupConfiguration);
         syncDescriptor(id, groupConfiguration);
         return response;
@@ -113,6 +141,7 @@ public class RestAgentGroupStore implements IRestAgentGroupStore {
 
     @Override
     public Response createGroup(AgentGroupConfiguration groupConfiguration) {
+        requireUseOnMembers(groupConfiguration);
         Response response = restVersionInfo.create(groupConfiguration);
         // Sync name/description from config onto the descriptor
         URI location = response.getLocation();
@@ -234,6 +263,10 @@ public class RestAgentGroupStore implements IRestAgentGroupStore {
                 if (config.getDescription() != null) {
                     descriptor.setDescription(config.getDescription());
                 }
+                // Stamped like any other newly created resource: this path runs when the
+                // descriptor filter has not (yet) produced one, and an unstamped descriptor
+                // would leave the group unowned.
+                resourceAccessGuard.stampNewDescriptor(descriptor);
                 try {
                     documentDescriptorStore.createDescriptor(resourceId, version, descriptor);
                 } catch (IResourceStore.ResourceStoreException ignored) {

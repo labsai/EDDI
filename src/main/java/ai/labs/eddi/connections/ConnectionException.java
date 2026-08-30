@@ -32,6 +32,14 @@ public class ConnectionException extends RuntimeException {
         NO_VERIFIED_PRINCIPAL,
         /** {@code PER_USER} and this user has not connected yet. */
         NOT_CONNECTED,
+        /**
+         * {@code CALLER_SUPPLIED} and this request carried no credential for the
+         * connection. Distinct from {@link #NOT_CONNECTED}, which says a stored grant
+         * is missing and is fixed by sending the user through a consent screen; this
+         * one says the calling system did not attach a credential it was expected to,
+         * and is fixed in that system.
+         */
+        NO_CALLER_CREDENTIAL,
         /** The stored grant is revoked or its refresh token is dead. */
         GRANT_UNUSABLE,
         /** The target origin is not on the connection's allowlist. */

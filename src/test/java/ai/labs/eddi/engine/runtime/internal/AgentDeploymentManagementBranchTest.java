@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.migration.ChannelConnectorMigration;
+import ai.labs.eddi.configs.migration.WorkspaceAccessIndexMigration;
 import ai.labs.eddi.configs.migration.IMigrationManager;
 import ai.labs.eddi.configs.migration.V6QuteMigration;
 import ai.labs.eddi.configs.migration.V6RenameMigration;
@@ -82,7 +83,8 @@ class AgentDeploymentManagementBranchTest {
         management = new AgentDeploymentManagement(
                 deploymentStore, agentFactory, agentStore, agentsReadiness,
                 conversationMemoryStore, documentDescriptorStore, migrationManager,
-                v6RenameMigration, v6QuteMigration, channelConnectorMigration, runtime, workflowStore, ruleSetStore, 30);
+                v6RenameMigration, v6QuteMigration, channelConnectorMigration, mock(WorkspaceAccessIndexMigration.class),
+                runtime, workflowStore, ruleSetStore, 30);
     }
 
     @Nested

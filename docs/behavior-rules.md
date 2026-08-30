@@ -29,7 +29,7 @@ Behavior Rules examine the conversation memory (including parsed input, context 
 
 ## Behavior Rules Structure
 
-`Behavior Rules` are very flexible in structure to cover most use cases that you will come across. `Behavior Rules` are clustered in `Groups`. `Behavior Rules` are executed sequentially within each `Group`. As soon as one `Behavior Rule` succeeds, all remaining `Behavior Rules` in this `Group` will be skipped.
+`Behavior Rules` are very flexible in structure to cover most use cases that you will come across. `Behavior Rules` are clustered in `Groups`. `Behavior Rules` are executed sequentially within each `Group`. By default, as soon as one `Behavior Rule` succeeds, all remaining `Behavior Rules` in this `Group` will be skipped. A `Group` may override this with the optional `executionStrategy` field (default `executeUntilFirstSuccess`): with `"executionStrategy": "executeAll"`, every rule in the group whose conditions match fires and contributes its actions. Any other value fails ruleset deserialization.
 
 ## **Groups**
 
@@ -364,19 +364,32 @@ The **`{id}`** is a path parameters that indicate which behavior rule you want t
 
 ### API Methods
 
-| HTTP Method | API Endpoint                                      | Request Body          | Response              |
-| ----------- | ------------------------------------------------- | --------------------- | --------------------- |
-| **DELETE**  | `/rulestore/rulesets/{id}`                | N/A                   | N/A                   |
-| **GET**     | `/rulestore/rulesets/{id}`                | N/A                   | **BehaviorSet model** |
-| **PUT**     | `/rulestore/rulesets/{id}`                | **BehaviorSet model** | N/A                   |
-| **GET**     | `/rulestore/rulesets/descriptors`         | N/A                   | **DocumentDescriptor[]** |
-| **POST**    | `/rulestore/rulesets`                     | **BehaviorSet model** | N/A                   |
-| **GET**     | `/rulestore/rulesets/{id}/currentversion` | N/A                   | **BehaviorSet model** |
-| **POST**    | `/rulestore/rulesets/{id}/currentversion` | **BehaviorSet model** | N/A                   |
+| HTTP Method | API Endpoint                                      | Request Body                | Response                             |
+| ----------- | ------------------------------------------------- | --------------------------- | ------------------------------------ |
+| **GET**     | `/rulestore/rulesets/descriptors`                 | N/A                         | **DocumentDescriptor[]**             |
+| **POST**    | `/rulestore/rulesets`                             | **RuleSetConfiguration**    | `201 Created` + `Location` and `X-Resource-URI` headers naming the new id and version |
+| **GET**     | `/rulestore/rulesets/{id}?version=N`              | N/A                         | **RuleSetConfiguration**             |
+| **PUT**     | `/rulestore/rulesets/{id}?version=N`              | **RuleSetConfiguration**    | `200 OK` + `Location` of the **new** version |
+| **POST**    | `/rulestore/rulesets/{id}?version=N`              | N/A                         | Duplicates the ruleset               |
+| **DELETE**  | `/rulestore/rulesets/{id}?version=N`              | N/A                         | N/A                                  |
+| **GET**     | `/rulestore/rulesets/{id}/currentversion`         | N/A                         | **`text/plain` integer** — the version number, *not* the ruleset |
+| **POST**    | `/rulestore/rulesets/{id}/currentversion`         | N/A                         | `303 See Other` → `/rulestore/rulesets/{id}?version=N` |
+
+> **`/currentversion` returns a version, not a document.** The `GET` answers with
+> a bare integer in `text/plain`, and the `POST` takes no body at all — it only
+> redirects you to the current version's URL. To fetch the ruleset itself, use
+> `GET /rulestore/rulesets/{id}?version=N`.
+>
+> Configurations are **immutable and versioned**: a `PUT` does not overwrite,
+> it creates version `N+1` and returns its `Location`. `?version=` is mandatory
+> on every read — omitting it fails the request with
+> `Argument must not be null (version)`. Use
+> `GET /rulestore/rulesets/{id}/currentversion` to look up the current version
+> number first.
 
 ### Example
 
-We will demonstrate here the creation of a `BehaviorSet`
+We will demonstrate here the creation of a `RuleSetConfiguration`
 
 _Request URL_
 

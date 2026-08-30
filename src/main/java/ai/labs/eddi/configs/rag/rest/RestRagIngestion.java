@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.configs.rag.rest;
 
+import ai.labs.eddi.configs.descriptors.model.AccessLevel;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.rag.IRestRagIngestion;
 import ai.labs.eddi.configs.rag.IRestRagStore;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
@@ -29,8 +31,11 @@ public class RestRagIngestion implements IRestRagIngestion {
     private final IRestRagStore restRagStore;
     private final RagIngestionService ragIngestionService;
 
+    private final ResourceAccessGuard resourceAccessGuard;
+
     @Inject
-    public RestRagIngestion(IRestRagStore restRagStore, RagIngestionService ragIngestionService) {
+    public RestRagIngestion(IRestRagStore restRagStore, RagIngestionService ragIngestionService, ResourceAccessGuard resourceAccessGuard) {
+        this.resourceAccessGuard = resourceAccessGuard;
         this.restRagStore = restRagStore;
         this.ragIngestionService = ragIngestionService;
     }
@@ -40,6 +45,15 @@ public class RestRagIngestion implements IRestRagIngestion {
         if (documentContent == null || documentContent.isBlank()) {
             return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", "Document content is required")).build();
         }
+
+        // EDIT, not the VIEW that reading the config needs. Ingestion writes documents
+        // into the knowledge base every agent using this config retrieves from, so
+        // gating it on read access would let anyone poison a *published* RAG config's
+        // knowledge base — published grants VIEW to everyone by design.
+        //
+        // Checked before readRag so the refusal is a 403: the catch below turns any
+        // exception into a 404, which would otherwise mask the real answer.
+        resourceAccessGuard.requireAccess(ragConfigId, AccessLevel.EDIT, "RAG configuration");
 
         RagConfiguration ragConfig;
         try {
@@ -63,6 +77,9 @@ public class RestRagIngestion implements IRestRagIngestion {
 
     @Override
     public Response getIngestionStatus(String ragConfigId, String ingestionId) {
+        // The status of an ingestion is only meaningful to whoever could have started
+        // it, and the caller names the RAG config in the path — so check it.
+        resourceAccessGuard.requireAccess(ragConfigId, AccessLevel.VIEW, "RAG configuration");
         String status = ragIngestionService.getStatus(ingestionId);
         return Response.ok(Map.of("ingestionId", ingestionId, "status", status)).build();
     }

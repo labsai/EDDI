@@ -28,6 +28,8 @@ import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
+import ai.labs.eddi.engine.security.spaces.DescriptorAccess;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.llm.IRestLlmStore;
@@ -99,13 +101,16 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     private final StructuralMatcher structuralMatcher;
     private final UpgradeExecutor upgradeExecutor;
 
+    private final ResourceAccessGuard resourceAccessGuard;
+
     private static final Logger LOGGER = Logger.getLogger(RestImportService.class);
 
     @Inject
     public RestImportService(IZipArchive zipArchive, IJsonSerialization jsonSerialization,
             IMigrationManager migrationManager,
             IDocumentDescriptorStore documentDescriptorStore, TemplateSyntaxMigrator templateSyntaxMigrator,
-            StructuralMatcher structuralMatcher, UpgradeExecutor upgradeExecutor) {
+            StructuralMatcher structuralMatcher, UpgradeExecutor upgradeExecutor, ResourceAccessGuard resourceAccessGuard) {
+        this.resourceAccessGuard = resourceAccessGuard;
         this.zipArchive = zipArchive;
         this.jsonSerialization = jsonSerialization;
         this.migrationManager = migrationManager;
@@ -751,9 +756,11 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
             // Create the DocumentDescriptor that the DocumentDescriptorFilter would
             // normally create on a 201 response. Since we bypass the REST layer,
-            // the filter never runs, so we must create it manually.
+            // the filter never runs, so we must create it manually — including the
+            // ownership stamp, or every imported resource would be unowned.
             documentDescriptorStore.createDescriptor(
-                    resourceId.getId(), resourceId.getVersion(), createDocumentDescriptor(createdUri));
+                    resourceId.getId(), resourceId.getVersion(),
+                    resourceAccessGuard.stampNewDescriptor(createDocumentDescriptor(createdUri)));
 
             return createdUri;
         } catch (IResourceStore.ResourceStoreException e) {
@@ -1186,6 +1193,11 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                                 }
                                 // Update the resource URI to point to the new version
                                 existingDescriptor.setResource(newUri);
+                                // Only name and description are taken from the ZIP, so ownership is
+                                // unchanged here — but a descriptor written before the access index
+                                // existed acquires one on this write rather than staying unlistable
+                                // until the backfill migration runs.
+                                DescriptorAccess.rebuildIndex(existingDescriptor);
 
                                 if (currentDescriptorId.getVersion() < newResourceId.getVersion()) {
                                     // MERGE path: descriptor version is behind the resource version
@@ -1205,10 +1217,18 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                                 }
                             }
                         } catch (IResourceStore.ResourceNotFoundException e) {
-                            // No existing descriptor — create one for the new resource
+                            // No existing descriptor — create one for the new resource.
+                            //
+                            // The ZIP's descriptor is UNTRUSTED input as far as ownership goes: it
+                            // was written by another deployment, where the same principal and team
+                            // names mean something else, and honouring it would let a file decide
+                            // who owns a resource here and who it is shared with — publishing it,
+                            // or filing it under someone else's name, with none of the checks the
+                            // sharing API applies. Strip that, then stamp the importing user, so
+                            // an import is owned by whoever performed it.
                             zipDescriptor.setResource(newUri);
-                            documentDescriptorStore.createDescriptor(
-                                    newResourceId.getId(), newResourceId.getVersion(), zipDescriptor);
+                            documentDescriptorStore.createDescriptor(newResourceId.getId(), newResourceId.getVersion(),
+                                    resourceAccessGuard.stampNewDescriptor(DescriptorAccess.stripOwnership(zipDescriptor)));
                         }
                     }
                 }

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
@@ -72,7 +73,7 @@ class RestAgentAdministrationTest {
         agentStore = mock(IAgentStore.class);
         restAgentAdmin = new RestAgentAdministration(runtime, agentFactory, agentStore, deploymentStore,
                 conversationMemoryStore, restConversationStore, documentDescriptorStore,
-                deploymentListener, scheduleStore, tenantQuotaService);
+                deploymentListener, scheduleStore, tenantQuotaService, mock(ResourceAccessGuard.class));
     }
 
     @Nested
