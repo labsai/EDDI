@@ -49,6 +49,33 @@ bottom of this file and are never archived.
 
 ---
 
+## 📋 docs(config): document the four workspace properties that were breaking `main` (2026-08-30)
+
+**Repo:** EDDI (`fix/connection-extra-auth-params-code-verifier`)
+
+Found while merging `main` into this branch to clear a changelog conflict: `main` itself
+was red, and had been since 2ce8d69f0. `ConfigurationReferenceCoverageTest.referenceIsExhaustive`
+failed on four properties the workspaces feature (#723) shipped without adding to
+`docs/configuration-reference.md` — `eddi.workspaces.enabled`, `.groups-claim`,
+`.legacy-visibility` and `.default-space`. That test exists precisely to catch a property
+an operator cannot set because nobody wrote it down, and it did its job; the entry was
+simply never made.
+
+Not this branch's defect, and normally its own PR. Fixed here because the merge inherits
+the failure, so this PR cannot go green while it stands, and no open PR was addressing it.
+The change is documentation only — a new **Workspaces & resource sharing** subsection under
+Security & authentication, with the four properties, their defaults, and the note that
+`eddi.workspaces.enabled` gates *enforcement* only while ownership is stamped whenever
+`authorization.enabled` is on. That separation is the one thing an operator has to
+understand before flipping the switch, and it lived only in `WorkspaceSettings`'s Javadoc.
+
+Descriptions are taken from `WorkspaceSettings` and the comments in
+`application.properties` rather than paraphrased, so the reference and the code say the
+same thing. `referenceInventsNothing` — the other direction of the same test — passes too,
+so nothing documented here is a property the code does not read.
+
+---
+
 ## 🔎 docs: a 196-agent audit of every page against source (2026-08-29)
 
 **Repo:** EDDI (`docs/accuracy-audit`)
