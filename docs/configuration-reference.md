@@ -135,6 +135,24 @@ Full narrative and metrics: [scheduling.md → Deployment Configuration](schedul
 | `eddi.caller-identity.enabled` | `true` | Enables `${caller:token}` / `${caller:userId}` in httpCall headers. See [httpcalls.md](httpcalls.md) |
 | `eddi.keycloak.public.url` | *(empty)* | Browser-facing Keycloak URL when it differs from the in-cluster one |
 
+### Workspaces & resource sharing
+
+Full guide: [workspaces.md](workspaces.md).
+
+> Enforcement and ownership are deliberately separate switches. Ownership is
+> stamped on every new resource whenever `authorization.enabled` is on,
+> regardless of `eddi.workspaces.enabled`, so a deployment can run a release with
+> attribution recorded and nothing filtered, confirm the data looks right, and
+> only then enforce. Enforcing before ownership has been stamped and backfilled
+> is what would hide people's own work from them.
+
+| Property | Default | Description |
+|---|---|---|
+| `eddi.workspaces.enabled` | `false` | Whether workspace access is actually enforced: listings filtered, and reads, writes, deletes and re-sharing each checked against the level the caller holds (`VIEW` / `USE` / `EDIT` / `OWN`). No effect while `authorization.enabled=false` — with no authenticated principal there is nothing to scope to, and startup warns rather than denying everyone everything |
+| `eddi.workspaces.groups-claim` | `groups` | The JWT claim listing the caller's teams. Needs a group-membership protocol mapper on the `eddi-backend` client; without one every user simply gets a personal space and no teams, which is a correct answer rather than a failure |
+| `eddi.workspaces.legacy-visibility` | `shared` | Who may see resources with no recorded owner: `shared` (everyone, so an upgrade hides nothing) or `admin-only` (only `eddi-admin`, so an operator migrates deliberately and then closes the door). Any other value fails startup rather than picking a policy by guessing |
+| `eddi.workspaces.default-space` | *(empty)* | Where new resources are filed. Empty means the creator's personal space; a Keycloak group name gives a team-first deployment, where colleagues see each other's work by default and personal spaces are reached by explicitly moving a resource |
+
 ### Secrets vault
 
 Full guide: [secrets-vault.md](secrets-vault.md).

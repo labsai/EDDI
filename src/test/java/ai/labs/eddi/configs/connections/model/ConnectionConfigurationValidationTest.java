@@ -7,6 +7,8 @@ package ai.labs.eddi.configs.connections.model;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.List;
 import java.util.Map;
@@ -116,6 +118,19 @@ class ConnectionConfigurationValidationTest {
         void refusesCredentialInExtraAuthParams() {
             var connection = oauthConnection(AuthType.OAUTH2_CLIENT_CREDENTIALS);
             connection.getOauth().setExtraAuthParams(Map.of("client_secret", "oops"));
+
+            var error = assertThrows(IllegalArgumentException.class, connection::validate);
+
+            assertTrue(error.getMessage().contains("credential-shaped"), error.getMessage());
+        }
+
+        @ParameterizedTest
+        @DisplayName("a credential-shaped extraAuthParam is refused however it is punctuated")
+        @ValueSource(strings = {"code_verifier", "Code-Verifier", "CODE.VERIFIER", "codeverifier", "api_key", "access_token",
+                "refresh_token", "private_key", "secret_key", "api_token"})
+        void refusesCredentialInExtraAuthParamsWhateverTheSpelling(String key) {
+            var connection = oauthConnection(AuthType.OAUTH2_CLIENT_CREDENTIALS);
+            connection.getOauth().setExtraAuthParams(Map.of(key, "oops"));
 
             var error = assertThrows(IllegalArgumentException.class, connection::validate);
 
