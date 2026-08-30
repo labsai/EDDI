@@ -13,6 +13,28 @@ export interface AgentDescriptor {
   lastModifiedOn: number;
   createdBy?: string;
   lastModifiedBy?: string;
+  /**
+   * Workspace fields. Absent on a backend without workspaces, and on data that
+   * predates ownership being recorded — so every consumer must treat them as
+   * optional rather than assuming a listing carries them.
+   *
+   * `grants` and `accessIndex` are deliberately NOT here: the backend redacts
+   * them for anyone who does not own the resource, so a listing is not a place
+   * to read them. Use the share endpoint, which discloses them at OWN only.
+   */
+  ownerId?: string;
+  spaceId?: string;
+  visibility?: "private" | "space" | "published";
+  /**
+   * What the signed-in user may do with THIS resource — `USE`, `VIEW`, `EDIT`
+   * or `OWN`.
+   *
+   * Per-request rather than per-resource: the same document carries a different
+   * value for two callers. Absent when the backend does not enforce workspaces,
+   * and on any backend that predates the field — read it through
+   * `accessFor()` in `@/lib/access`, which treats absence as unrestricted.
+   */
+  callerLevel?: string;
 }
 
 export interface Agent {
@@ -152,13 +174,18 @@ export function parseResourceUri(resource: string): {
 export function getAgentDescriptors(
   limit = 20,
   index = 0,
-  filter = ""
+  filter = "",
+  space = ""
 ): Promise<AgentDescriptor[]> {
   const params = new URLSearchParams({
     limit: String(limit),
     index: String(index),
   });
   if (filter) params.set("filter", filter);
+  // Narrowing happens in the query, never on the returned page: page 2 of
+  // "everything" is not page 2 of "this workspace", so filtering client-side
+  // would quietly break pagination.
+  if (space) params.set("space", space);
   return api.get<AgentDescriptor[]>(
     `/agentstore/agents/descriptors?${params.toString()}`
   );

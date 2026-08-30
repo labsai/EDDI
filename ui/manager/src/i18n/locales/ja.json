@@ -4522,5 +4522,73 @@
     "workflow": "ワークフロー",
     "dictionary": "辞書",
     "rag": "RAG"
+  },
+  "workspaces": {
+    "allSpaces": "すべてのワークスペース",
+    "personalSpace": "自分のワークスペース",
+    "switcherLabel": "ワークスペースを切り替え",
+    "badge": {
+      "published": "公開済み",
+      "shared": "共有中",
+      "sharedTitle": "{{owner}} が所有 · {{space}} 内",
+      "ownedBy": "{{owner}} が所有"
+    },
+    "level": {
+      "use": "会話のみ",
+      "useHint": "エージェントと会話できますが、構成内容は見えません（プロンプト・ツール・認証情報は非公開）。",
+      "view": "閲覧可能",
+      "viewHint": "設定を読み取りエクスポートできますが、変更はできません。",
+      "edit": "編集可能",
+      "editHint": "変更とデプロイはできますが、削除や再共有はできません。",
+      "own": "所有者",
+      "ownHint": "削除や他者への共有を含む完全な権限。"
+    },
+    "visibility": {
+      "private": "非公開",
+      "privateHint": "自分と共有した相手のみ。",
+      "space": "ワークスペース",
+      "spaceHint": "このリソースのワークスペースの全員。",
+      "published": "公開",
+      "publishedHint": "このデプロイにアクセスできる全員。"
+    },
+    "share": {
+      "title": "共有",
+      "titleNamed": "「{{name}}」を共有",
+      "visibility": "公開範囲",
+      "peopleAndTeams": "ユーザーとチーム",
+      "subjectLabel": "ユーザーまたはチーム",
+      "subjectPlaceholder": "name@example.com または team:engineering",
+      "levelLabel": "アクセスレベル",
+      "add": "共有",
+      "shared": "共有しました",
+      "revoked": "アクセスを解除しました",
+      "revokeFor": "{{subject}} との共有を解除",
+      "visibilityUpdated": "公開範囲を更新しました",
+      "noGrants": "まだ誰とも共有していません。",
+      "notOwner": "アクセス権を変更できるのは所有者だけです。より広く共有したい場合は所有者にご依頼ください。",
+      "ownedBy": "{{owner}} が所有",
+      "unowned": "所有者の記録なし",
+      "inSpace": "{{space}} 内",
+      "subjectRequired": "共有するユーザーまたはチームを入力してください。",
+      "unknownPrefix": "「user:」または「team:」を使うか、人物名のみを入力してください。",
+      "cascadeApplied_other": "{{count}} 件のリソースに適用しました",
+      "cascadeSkipped_other": "{{count}} 件のリソースは変更されていません — あなたの所有物ではありません",
+      "confirmOwner": "オーナー権限の付与を確定",
+      "ownerWarning": "相手は共同オーナーになります。これを削除したり、誰とでも共有したりできます。あとでアクセス権を取り消すことはできますが、相手が行った操作は取り消せません。",
+      "cascadeApplied_one": "{{count}} 件のリソースに適用しました",
+      "cascadeSkipped_one": "{{count}} 件のリソースは変更されていません — あなたの所有物ではありません",
+      "subjectIsPerson": "個人",
+      "subjectIsTeam": "チーム",
+      "useOnly": "これと会話はできますが、設定は共有されていないため、ここで管理できるものはありません。",
+      "cascadeRevoked_other": "{{count}} 件のリソースから削除しました",
+      "andMore_other": "ほか {{count}} 件",
+      "cascadeRevoked_one": "{{count}} 件のリソースから削除しました",
+      "andMore_one": "ほか {{count}} 件"
+    },
+    "emptySpace": "このワークスペースにエージェントはありません",
+    "emptySpaceDescription": "他のワークスペースに閲覧可能なエージェントがある可能性があります。",
+    "showAllSpaces": "すべてのワークスペースを表示",
+    "useOnlyMenu": "会話専用として共有されています。",
+    "switcherCurrent": "ワークスペースを切り替え — 現在は {{space}}"
   }
 }

@@ -33,10 +33,12 @@ export function useAgentDescriptors(
 }
 
 /** Infinite-scroll agent list with offset-based pagination */
-export function useInfiniteAgentDescriptors(filter = "") {
+export function useInfiniteAgentDescriptors(filter = "", space = "") {
   return useInfiniteQuery({
-    queryKey: agentKeys.descriptorsInfinite(filter),
-    queryFn: ({ pageParam = 0 }) => getAgentDescriptors(PAGE_SIZE, pageParam, filter),
+    // The space is part of the key: switching workspace must refetch rather
+    // than re-render a cached page belonging to the previous one.
+    queryKey: [...agentKeys.descriptorsInfinite(filter), space],
+    queryFn: ({ pageParam = 0 }) => getAgentDescriptors(PAGE_SIZE, pageParam, filter, space),
     initialPageParam: 0,
     getNextPageParam: (lastPage, allPages) => {
       // If we got a full page, there are probably more

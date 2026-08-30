@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
-import { Bot, Search, Plus, Upload, ExternalLink, Trash2, Copy, Download, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
+import { Bot, Search, Plus, Upload, ExternalLink, Trash2, Copy, Download, Share2, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/api-client";
 import { useInfiniteAgentDescriptors, useDeleteAgent, useDuplicateAgent, groupAgentsByName } from "@/hooks/use-agents";
@@ -22,18 +22,25 @@ import {
 } from "@/components/shared/view-toggle";
 import { getStoredViewMode, setStoredViewMode } from "@/components/shared/view-mode";
 import { useOnboarding } from "@/hooks/use-onboarding";
+import { ALL_SPACES, useSpaces } from "@/hooks/use-spaces";
+import { SpaceSwitcher } from "@/components/workspaces/space-switcher";
+import { OwnershipBadge } from "@/components/workspaces/ownership-badge";
+import { accessFor } from "@/lib/access";
+import { ShareDialog } from "@/components/workspaces/share-dialog";
 
 type SortField = "name" | "version" | "modified";
 type SortDir = "asc" | "desc";
 
 export function AgentsPage() {
   const { t } = useTranslation();
+  const { activeSpace, setActiveSpace, enabled: workspacesEnabled } = useSpaces();
   const [search, setSearch] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
   const [quickCreateOpen, setQuickCreateOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; version: number } | null>(null);
   const [exportTarget, setExportTarget] = useState<{ id: string; version: number } | null>(null);
+  const [shareTarget, setShareTarget] = useState<{ id: string; name: string } | null>(null);
   const [view, setView] = useState<ViewMode>(() => getStoredViewMode("agents"));
   const [sortField, setSortField] = useState<SortField>("modified");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
@@ -53,7 +60,7 @@ export function AgentsPage() {
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
-  } = useInfiniteAgentDescriptors(search);
+  } = useInfiniteAgentDescriptors(search, activeSpace);
 
   const deleteMutation = useDeleteAgent();
   const duplicateMutation = useDuplicateAgent();
@@ -161,6 +168,7 @@ export function AgentsPage() {
             data-testid="agent-search"
           />
         </div>
+        <SpaceSwitcher />
         <ViewToggle view={view} onChange={handleViewChange} />
       </div>
 
@@ -188,13 +196,31 @@ export function AgentsPage() {
       )}
 
       {!isLoading && !isError && groupedAgents.length === 0 && (
-        <EmptyState
-          icon={Bot}
-          title={search ? t("common.noResults") : t("agents.empty")}
-          description={!search ? t("agents.emptyDescription", "Use the wizard to create a fully configured agent in minutes.") : undefined}
-          actionLabel={!search ? t("agents.createAgent") : undefined}
-          onAction={!search ? () => setCreateOpen(true) : undefined}
-        />
+        /* Three empty states, not two. "No agents yet" under an active
+           workspace filter is simply false — the agents exist, they are
+           somewhere else — and offering "Create agent" there compounds it,
+           because a new agent is filed in the default space and would not
+           appear in the filter either. */
+        activeSpace && !search ? (
+          <EmptyState
+            icon={Bot}
+            title={t("workspaces.emptySpace", "No agents in this workspace")}
+            description={t(
+              "workspaces.emptySpaceDescription",
+              "Other workspaces may have agents you can see."
+            )}
+            actionLabel={t("workspaces.showAllSpaces", "Show all workspaces")}
+            onAction={() => setActiveSpace(ALL_SPACES)}
+          />
+        ) : (
+          <EmptyState
+            icon={Bot}
+            title={search ? t("common.noResults") : t("agents.empty")}
+            description={!search ? t("agents.emptyDescription", "Use the wizard to create a fully configured agent in minutes.") : undefined}
+            actionLabel={!search ? t("agents.createAgent") : undefined}
+            onAction={!search ? () => setCreateOpen(true) : undefined}
+          />
+        )
       )}
 
       {!isLoading && !isError && groupedAgents.length > 0 && (
@@ -218,6 +244,14 @@ export function AgentsPage() {
                   onDuplicate={handleDuplicate}
                   onDelete={handleDelete}
                   onExport={(id, version) => setExportTarget({ id, version })}
+                  onShare={
+                    // Omitted — not disabled — when the deployment does not
+                    // enforce workspaces, which hides the menu entry entirely.
+                    // A Share dialog whose every control is inert is worse than
+                    // no Share button: it teaches a model the deployment does
+                    // not have and looks broken rather than absent.
+                    workspacesEnabled ? (id, name) => setShareTarget({ id, name }) : undefined
+                  }
                 />
               ))}
             </div>
@@ -282,15 +316,32 @@ export function AgentsPage() {
                     <tr
                       key={agent.id}
                       className="hover:bg-secondary/30 transition-colors"
+                      data-testid={`agent-row-${agent.id}`}
                     >
                       <td className="px-5 py-3">
-                        <Link
-                          to={`/manage/agentview/${agent.id}`}
-                          className="text-sm font-medium text-foreground hover:text-primary transition-colors"
-                        >
-                          {agent.name || t("agents.unnamed", "Unnamed Agent")}
-                          <ExternalLink className="ms-1 inline h-3 w-3 opacity-40" />
-                        </Link>
+                        {accessFor(agent.callerLevel).canView ? (
+                          <Link
+                            to={`/manage/agentview/${agent.id}`}
+                            className="text-sm font-medium text-foreground hover:text-primary transition-colors"
+                          >
+                            {agent.name || t("agents.unnamed", "Unnamed Agent")}
+                            <ExternalLink className="ms-1 inline h-3 w-3 opacity-40" />
+                          </Link>
+                        ) : (
+                          <span className="text-sm font-medium text-foreground">
+                            {agent.name || t("agents.unnamed", "Unnamed Agent")}
+                          </span>
+                        )}
+                        {/* A user whose stored view mode is "list" could
+                            otherwise neither see who owns a resource nor share
+                            one — the feature was reachable from card view
+                            only. */}
+                        <OwnershipBadge
+                          className="ms-2 align-middle"
+                          ownerId={agent.ownerId}
+                          spaceId={agent.spaceId}
+                          visibility={agent.visibility}
+                        />
                       </td>
                       <td className="px-5 py-3">
                         <span className="font-mono text-xs text-muted-foreground">
@@ -308,31 +359,60 @@ export function AgentsPage() {
                         </span>
                       </td>
                       <td className="px-5 py-3 text-end">
+                        {/* All four are the shared primitive, not hand-rolled
+                            `<button>`s: the row previously had none of the
+                            focus-visible ring the primitive carries, so a
+                            keyboard user tabbed through four invisible stops. */}
                         <div className="inline-flex items-center gap-1">
-                          <button
-                            onClick={() => handleDuplicate(agent.id, agent.version)}
-                            className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
-                            title={t("common.duplicate", "Duplicate")}
-                            aria-label={t("common.duplicate", "Duplicate")}
-                          >
-                            <Copy className="h-4 w-4" aria-hidden="true" />
-                          </button>
-                          <button
-                            onClick={() => setExportTarget({ id: agent.id, version: agent.version })}
-                            className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
-                            title={t("agents.export", "Export")}
-                            aria-label={t("agents.export", "Export")}
-                          >
-                            <Download className="h-4 w-4" aria-hidden="true" />
-                          </button>
-                          <button
-                            onClick={() => handleDelete(agent.id, agent.version)}
-                            className="rounded-md p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
-                            title={t("common.delete")}
-                            aria-label={t("common.delete")}
-                          >
-                            <Trash2 className="h-4 w-4" aria-hidden="true" />
-                          </button>
+                          {accessFor(agent.callerLevel).canView && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                              onClick={() => handleDuplicate(agent.id, agent.version)}
+                              title={t("common.duplicate", "Duplicate")}
+                              aria-label={t("common.duplicate", "Duplicate")}
+                            >
+                              <Copy aria-hidden="true" />
+                            </Button>
+                          )}
+                          {accessFor(agent.callerLevel).canView && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                              onClick={() => setExportTarget({ id: agent.id, version: agent.version })}
+                              title={t("agents.export", "Export")}
+                              aria-label={t("agents.export", "Export")}
+                            >
+                              <Download aria-hidden="true" />
+                            </Button>
+                          )}
+                          {workspacesEnabled && accessFor(agent.callerLevel).canOwn && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                              onClick={() => setShareTarget({ id: agent.id, name: agent.name || agent.id })}
+                              title={t("workspaces.share.title", "Share")}
+                              aria-label={t("workspaces.share.title", "Share")}
+                              data-testid={`agent-row-share-${agent.id}`}
+                            >
+                              <Share2 aria-hidden="true" />
+                            </Button>
+                          )}
+                          {accessFor(agent.callerLevel).canOwn && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                              onClick={() => handleDelete(agent.id, agent.version)}
+                              title={t("common.delete")}
+                              aria-label={t("common.delete")}
+                            >
+                              <Trash2 aria-hidden="true" />
+                            </Button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -393,6 +473,16 @@ export function AgentsPage() {
           onClose={() => setExportTarget(null)}
           agentId={exportTarget.id}
           agentVersion={exportTarget.version}
+        />
+      )}
+
+      {/* Share dialog */}
+      {shareTarget && (
+        <ShareDialog
+          open
+          onClose={() => setShareTarget(null)}
+          resourceId={shareTarget.id}
+          resourceName={shareTarget.name}
         />
       )}
     </div>

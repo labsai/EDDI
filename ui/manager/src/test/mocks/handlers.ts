@@ -7,6 +7,9 @@ const AGENTS_MOCK = [
     description: "24/7 customer support with order tracking, returns processing, and live-agent escalation",
     createdOn: Date.now() - 12 * 86400000,
     lastModifiedOn: Date.now() - 3600000,
+    ownerId: "alice@example.com",
+    spaceId: "user:alice@example.com",
+    visibility: "space"
   },
   {
     resource: "eddi://ai.labs.agent/agentstore/agents/agent2?version=2",
@@ -14,6 +17,9 @@ const AGENTS_MOCK = [
     description: "Self-service knowledge base answering product, billing, and account questions",
     createdOn: Date.now() - 14 * 86400000,
     lastModifiedOn: Date.now() - 7200000,
+    ownerId: "alice@example.com",
+    spaceId: "user:alice@example.com",
+    visibility: "private"
   },
   {
     resource: "eddi://ai.labs.agent/agentstore/agents/agent3?version=1",
@@ -21,6 +27,9 @@ const AGENTS_MOCK = [
     description: "Books, reschedules, and cancels appointments with calendar integration and reminders",
     createdOn: Date.now() - 10 * 86400000,
     lastModifiedOn: Date.now() - 2 * 86400000,
+    ownerId: "alice@example.com",
+    spaceId: "team:engineering",
+    visibility: "space"
   },
   {
     resource: "eddi://ai.labs.agent/agentstore/agents/agent4?version=2",
@@ -28,6 +37,9 @@ const AGENTS_MOCK = [
     description: "Extracts line items from uploaded invoices, validates totals, and flags discrepancies",
     createdOn: Date.now() - 8 * 86400000,
     lastModifiedOn: Date.now() - 86400000,
+    ownerId: "bob@example.com",
+    spaceId: "team:engineering",
+    visibility: "published"
   },
   {
     resource: "eddi://ai.labs.agent/agentstore/agents/agent5?version=1",
@@ -686,7 +698,116 @@ function verdictConversation() {
   };
 }
 
+/**
+ * A deployment that records ownership but does not enforce it — the backend's
+ * own default, and therefore this suite's.
+ */
+const WORKSPACES_DISABLED = {
+  enabled: false,
+  // `principal` and `defaultSpace` are deliberately ABSENT rather than null.
+  // EDDI's REST mapper serialises with NON_NULL, so that is the shape the real
+  // endpoint sends for an anonymous caller — and a mock that sent explicit
+  // nulls would let a `=== null` check pass here and fail in production.
+  spaces: [] as { id: string; kind: string; label: string }[],
+  seesEverything: true,
+};
+
+/** Where an E2E spec plants the workspace context it wants. */
+export const WORKSPACE_SEED_KEY = "eddi-e2e-workspaces";
+
+/** Where an E2E spec plants the sharing state of one resource, keyed by id. */
+export const SHARE_SEED_KEY = "eddi-e2e-shares";
+
+function readSeed<T>(key: string): T | null {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : null;
+  } catch {
+    // No localStorage (the node tier), or malformed JSON someone hand-edited.
+    // Falling back to the default is right either way: a seed that cannot be
+    // read must not silently become a *different* seed.
+    return null;
+  }
+}
+
+function readWorkspaceSeed() {
+  return readSeed<typeof WORKSPACES_DISABLED>(WORKSPACE_SEED_KEY);
+}
+
+function readShareSeed(id: string) {
+  const all = readSeed<Record<string, unknown>>(SHARE_SEED_KEY);
+  return all?.[id] ?? null;
+}
+
+/**
+ * What each fixture agent grants the signed-in user once enforcement is on.
+ *
+ * agent1/agent2 are alice's own; agent3 is shared with her team for chatting
+ * only; agent4 is bob's, published, so readable but not hers to delete.
+ */
+const CALLER_LEVELS: Record<string, string> = {
+  agent1: "OWN",
+  agent2: "OWN",
+  agent3: "USE",
+  agent4: "VIEW",
+};
+
+function withCallerLevel<T extends { resource: string }>(agent: T): T & { callerLevel?: string } {
+  const id = /agents\/([^?]+)/.exec(agent.resource)?.[1];
+  const level = id ? CALLER_LEVELS[id] : undefined;
+  return level ? { ...agent, callerLevel: level } : agent;
+}
+
+function stripCallerLevel<T extends object>(agent: T): T {
+  const rest = { ...(agent as T & { callerLevel?: string }) };
+  delete rest.callerLevel;
+  return rest as T;
+}
+
+function defaultShareInfo(id: string) {
+  return {
+    resourceId: id,
+    ownerId: "alice@example.com",
+    spaceId: "user:alice@example.com",
+    visibility: "space",
+    // Empty rather than absent: an empty list is not null, so NON_NULL keeps it.
+    grants: [],
+    // The SHARING endpoint's own level, which is a different field from the one
+    // on a listed descriptor: `describe()` refuses below VIEW, so this is always
+    // present and always at least VIEW. It is what gates the dialog's controls.
+    callerLevel: "OWN",
+  };
+}
+
 export const handlers = [
+  // Workspace context. Disabled by default, matching the backend's own default
+  // and today's behaviour — no existing test should suddenly grow a sharing UI
+  // it never asked for.
+  //
+  // Unit tests override this with `server.use()`. The E2E tier cannot: MSW
+  // answers from a service worker there, so `page.route` never sees the request
+  // (workforce.spec.ts documents that trap at length). So this one handler also
+  // reads a seed from localStorage, which a spec plants with
+  // `page.addInitScript` before the app boots. Confined to the mock layer on
+  // purpose — the application code has no idea this exists.
+  http.get("*/workspaces", () => HttpResponse.json(readWorkspaceSeed() ?? WORKSPACES_DISABLED)),
+
+  // The sharing family, keyed by resource id. Answers for an unshared,
+  // caller-owned resource; a spec that needs grants or a non-owner view seeds
+  // them the same way as above.
+  http.get("*/descriptorstore/descriptors/:id/shares", ({ params }) =>
+    HttpResponse.json(readShareSeed(String(params.id)) ?? defaultShareInfo(String(params.id)))
+  ),
+  http.post("*/descriptorstore/descriptors/:id/shares", ({ params }) =>
+    HttpResponse.json({ updated: [{ id: String(params.id), name: "Support Agent" }], skipped: [] })
+  ),
+  http.delete("*/descriptorstore/descriptors/:id/shares", ({ params }) =>
+    HttpResponse.json({ updated: [{ id: String(params.id), name: "Support Agent" }], skipped: [] })
+  ),
+  http.put("*/descriptorstore/descriptors/:id/shares/visibility", ({ params }) =>
+    HttpResponse.json({ updated: [{ id: String(params.id), name: "Support Agent" }], skipped: [] })
+  ),
+
   // Template preview — resolves Qute templates for the LLM editor preview
   http.post("*/administration/preview/template", async ({ request }) => {
     const body = (await request.json()) as { template?: string; conversationId?: string };
@@ -829,13 +950,30 @@ export const handlers = [
         )
       : AGENTS_MOCK;
 
+    // `?space=` narrows in the query on the backend, so it has to narrow here
+    // too. A mock that accepted the parameter and ignored it would let the
+    // space switcher pass its own E2E test while doing nothing — which is
+    // exactly the bug this feature already shipped once.
+    const space = url.searchParams.get("space") ?? "";
+    const scoped = space
+      ? matched.filter((a) => "spaceId" in a && a.spaceId === space)
+      : matched;
+
+    // `callerLevel` is stamped by the server ONLY while enforcement is on —
+    // ResourceAccessGuard omits it otherwise, and NON_NULL keeps it off the
+    // wire. Carrying it on the static fixtures produced a pairing the backend
+    // cannot produce (levels present, `enabled: false`), which would let a test
+    // encode "USE gating applies with the feature off" as expected behaviour.
+    const enforced = readWorkspaceSeed()?.enabled === true;
+    const answered = enforced ? scoped.map(withCallerLevel) : scoped.map(stripCallerLevel);
+
     // Most-recent-first, because the backend orders them that way — verified
     // against a live EDDI 6.3.0. This matters as soon as `limit` is honoured:
     // the dashboard's "recent agents" asks for exactly 4, so returning them in
     // array order hands it the four OLDEST and quietly makes the section a lie.
     // The E2E expectation encoded the correct four all along; it only passed
     // before because the handler returned all eight and let the page sort.
-    const ordered = [...matched].sort(
+    const ordered = [...answered].sort(
       (a, b) => b.lastModifiedOn - a.lastModifiedOn,
     );
 

@@ -4522,5 +4522,73 @@
     "workflow": "Workflow",
     "dictionary": "Dictionary",
     "rag": "RAG"
+  },
+  "workspaces": {
+    "allSpaces": "All workspaces",
+    "personalSpace": "My workspace",
+    "switcherLabel": "Switch workspace",
+    "badge": {
+      "published": "Published",
+      "shared": "Shared",
+      "sharedTitle": "Owned by {{owner}} · in {{space}}",
+      "ownedBy": "Owned by {{owner}}"
+    },
+    "level": {
+      "use": "Can chat",
+      "useHint": "They can talk to the agent, but cannot see how it is built — no prompts, tools or credentials.",
+      "view": "Can view",
+      "viewHint": "They can read the configuration and export a copy, but not change it.",
+      "edit": "Can edit",
+      "editHint": "They can change and deploy it, but not delete it or share it further.",
+      "own": "Owner",
+      "ownHint": "Full control, including deleting it and sharing it with others."
+    },
+    "visibility": {
+      "private": "Private",
+      "privateHint": "Only you and people you share it with.",
+      "space": "Workspace",
+      "spaceHint": "Everyone in this resource's workspace.",
+      "published": "Published",
+      "publishedHint": "Everyone with access to this deployment."
+    },
+    "share": {
+      "title": "Share",
+      "titleNamed": "Share “{{name}}”",
+      "visibility": "Visibility",
+      "peopleAndTeams": "People and teams",
+      "subjectLabel": "Person or team",
+      "subjectPlaceholder": "name@example.com or team:engineering",
+      "levelLabel": "Access level",
+      "add": "Share",
+      "shared": "Shared",
+      "revoked": "Access removed",
+      "revokeFor": "Stop sharing with {{subject}}",
+      "visibilityUpdated": "Visibility updated",
+      "noGrants": "Not shared with anyone yet.",
+      "notOwner": "Only the owner can change who has access. Ask them if you need this shared more widely.",
+      "ownedBy": "Owned by {{owner}}",
+      "unowned": "No recorded owner",
+      "inSpace": "in {{space}}",
+      "subjectRequired": "Enter a person or team to share with.",
+      "unknownPrefix": "Use 'user:' or 'team:' — or just a name for a person.",
+      "cascadeApplied_one": "Applied to {{count}} resource",
+      "cascadeSkipped_one": "{{count}} resource left unchanged — you do not own it",
+      "cascadeApplied_other": "Applied to {{count}} resources",
+      "cascadeSkipped_other": "{{count}} resources left unchanged — you do not own them",
+      "confirmOwner": "Confirm owner access",
+      "ownerWarning": "They become a co-owner: they can delete this and share it with anyone. You can remove their access later, but not undo what they do with it.",
+      "subjectIsPerson": "Person",
+      "subjectIsTeam": "Team",
+      "useOnly": "You can chat with this, but its configuration has not been shared with you — so there is nothing here to manage.",
+      "cascadeRevoked_one": "Removed from {{count}} resource",
+      "andMore_one": "and {{count}} more",
+      "cascadeRevoked_other": "Removed from {{count}} resources",
+      "andMore_other": "and {{count}} more"
+    },
+    "emptySpace": "No agents in this workspace",
+    "emptySpaceDescription": "Other workspaces may have agents you can see.",
+    "showAllSpaces": "Show all workspaces",
+    "useOnlyMenu": "Shared with you for chatting only.",
+    "switcherCurrent": "Switch workspace — currently {{space}}"
   }
 }

@@ -4522,5 +4522,73 @@
     "workflow": "工作流",
     "dictionary": "字典",
     "rag": "RAG"
+  },
+  "workspaces": {
+    "allSpaces": "所有工作区",
+    "personalSpace": "我的工作区",
+    "switcherLabel": "切换工作区",
+    "badge": {
+      "published": "已发布",
+      "shared": "已共享",
+      "sharedTitle": "归 {{owner}} 所有 · 位于 {{space}}",
+      "ownedBy": "归 {{owner}} 所有"
+    },
+    "level": {
+      "use": "可对话",
+      "useHint": "可以与该智能体对话，但看不到它的构建方式——没有提示词、工具或凭据。",
+      "view": "可查看",
+      "viewHint": "可以读取配置并导出副本，但不能修改。",
+      "edit": "可编辑",
+      "editHint": "可以修改和部署，但不能删除或再次共享。",
+      "own": "所有者",
+      "ownHint": "完全控制，包括删除和与他人共享。"
+    },
+    "visibility": {
+      "private": "私有",
+      "privateHint": "仅限您本人及您共享给的人。",
+      "space": "工作区",
+      "spaceHint": "该资源所在工作区的所有人。",
+      "published": "已发布",
+      "publishedHint": "所有能访问此部署的人。"
+    },
+    "share": {
+      "title": "共享",
+      "titleNamed": "共享“{{name}}”",
+      "visibility": "可见性",
+      "peopleAndTeams": "人员和团队",
+      "subjectLabel": "人员或团队",
+      "subjectPlaceholder": "name@example.com 或 team:engineering",
+      "levelLabel": "访问级别",
+      "add": "共享",
+      "shared": "已共享",
+      "revoked": "已移除访问权限",
+      "revokeFor": "停止与 {{subject}} 共享",
+      "visibilityUpdated": "可见性已更新",
+      "noGrants": "尚未共享给任何人。",
+      "notOwner": "只有所有者才能更改访问权限。如需更广泛共享，请联系他们。",
+      "ownedBy": "归 {{owner}} 所有",
+      "unowned": "未记录所有者",
+      "inSpace": "位于 {{space}}",
+      "subjectRequired": "请输入要共享的人员或团队。",
+      "unknownPrefix": "请使用“user:”或“team:”——或直接填写人员姓名。",
+      "cascadeApplied_other": "已应用于 {{count}} 项资源",
+      "cascadeSkipped_other": "{{count}} 项资源未更改 — 它们不属于你",
+      "confirmOwner": "确认授予所有者权限",
+      "ownerWarning": "对方将成为共同所有者：可以删除它并共享给任何人。您之后可以撤销其访问权限，但无法撤销其已完成的操作。",
+      "cascadeApplied_one": "已应用于 {{count}} 项资源",
+      "cascadeSkipped_one": "{{count}} 项资源未更改 — 它们不属于你",
+      "subjectIsPerson": "个人",
+      "subjectIsTeam": "团队",
+      "useOnly": "您可以与它对话，但其配置未与您共享，因此这里没有可管理的内容。",
+      "cascadeRevoked_other": "已从 {{count}} 项资源中移除",
+      "andMore_other": "另有 {{count}} 项",
+      "cascadeRevoked_one": "已从 {{count}} 项资源中移除",
+      "andMore_one": "另有 {{count}} 项"
+    },
+    "emptySpace": "此工作区中没有智能体",
+    "emptySpaceDescription": "其他工作区可能有您可以查看的智能体。",
+    "showAllSpaces": "显示所有工作区",
+    "useOnlyMenu": "仅共享给您用于对话。",
+    "switcherCurrent": "切换工作区 — 当前为 {{space}}"
   }
 }
