@@ -171,16 +171,23 @@ server holds per-user state, that matters; if it is stateless, it does not.
 
 ## Credentials
 
-`apiKey` is sent as `Authorization: Bearer <value>`. Three forms are resolved:
+`apiKey` is sent as `Authorization: Bearer <value>`. Four forms are resolved:
 
 | Value | Resolves to |
 | --- | --- |
 | `${vault:name}` | A vault secret. **Use this.** |
 | `${vars:name}` | A global variable — for non-secret values. |
 | `${caller:token}` | The chatting user's own bearer token, released only to the **same origin** the caller addressed. |
+| `${connection:name}` | A managed connection — OAuth or static, `SERVICE` or `PER_USER`; resolved per request. See [connections](connections.md). Must be the whole value (`ConnectionReference.requireSole`). |
 
-A literal key is accepted and logs a warning: it sits in plaintext in MongoDB and
-in any export that outruns scrubbing.
+A literal key is accepted: it sits in plaintext in MongoDB and in any export that
+outruns scrubbing.
+
+> **Use `https://` for any server you send a credential to.** The URL validator
+> accepts `http://` and `https://` alike, and nothing refuses to attach a bearer
+> token to a cleartext connection — so an `apiKey` against an `http://` server is
+> transmitted in the clear, and EDDI will not warn you. Reserve `http://` for a
+> loopback server with no credential.
 
 Rotating a vault secret now evicts cached MCP clients immediately. Before that,
 the client cache was keyed on a hash of the *unresolved* reference and the

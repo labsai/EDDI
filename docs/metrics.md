@@ -10,14 +10,18 @@ E.D.D.I ships three dashboards, all auto-provisioned into Grafana by
 | Dashboard | UID | File | Shape | Use it for |
 |-----------|-----|------|-------|------------|
 | **Operations Command Center** | `eddi-ops` | `eddi-operations-dashboard.json` | 51 panels, KPI strip + 9 rows | The front door. Is the platform healthy, and if not, roughly where. |
-| **Full Metrics Reference** | `eddi-metrics-all` | `eddi-full-metrics-dashboard.json` | 133 panels, 19 subsystem rows | Every meter E.D.D.I registers. Go here when the number you need is not on the ops dashboard. |
+| **Full Metrics Reference** | `eddi-metrics-all` | `eddi-full-metrics-dashboard.json` | 138 panels, 19 subsystem rows | Every meter E.D.D.I registers. Go here when the number you need is not on the ops dashboard. |
 | **EDDI Observability** | `eddi-observability` | `eddi-grafana-dashboard.json` | 16 panels, 6 rows | The original dashboard: Coordinator Health, Pipeline Tasks, Tool Execution, Vault & Security, NATS, HTTP & JVM. |
 
-The Full Metrics Reference covers **all 144 registered meters** — it is generated
-from the registration sites in the source, so a metric cannot be added to the
-codebase and silently go unwatched. All rows but the first are collapsed; open
-the subsystem you care about. Two template variables scope everything: the
-Prometheus **data source** and the scrape **job**.
+The Full Metrics Reference covers **every `eddi.*` meter the codebase
+registers**, and that is a checked property rather than an aspiration:
+`MetricsDashboardCoverageTest` scans the registration sites in `src/main/java`
+and fails the build if any meter has no panel. Add a meter without a panel and
+`./mvnw test` tells you, naming the meter and the file that registers it.
+
+All rows but the first are collapsed; open the subsystem you care about. Two
+template variables scope everything: the Prometheus **data source** and the
+scrape **job**.
 
 ### Enable Monitoring
 
@@ -36,7 +40,7 @@ docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d
 | Prometheus | http://localhost:9090       | —              |
 | Metrics    | http://localhost:7070/q/metrics | —          |
 
-The dashboard appears automatically as the Grafana home page. Anonymous viewer access is enabled by default.
+Log in to Grafana with `admin` / `admin`, then open **Dashboards → EDDI** — the provisioned folder holding all three. Grafana's built-in Home is still the landing page; anonymous access is not enabled.
 
 ### Dashboard Sections
 
@@ -134,7 +138,7 @@ because a `SimpleMeterRegistry` tolerates the collision and will not catch it.
 
 ### Conversation Metrics
 
-```
+```text
 eddi_conversation_start_count_total         # Conversations started
 eddi_conversation_end_count_total           # Conversations ended
 eddi_conversation_processing_count_total    # Messages processed
@@ -153,7 +157,7 @@ eddi_conversation_redo_duration_seconds     # Redo latency (timer)
 
 ### Tool Execution Metrics
 
-```
+```text
 eddi_tool_execution_success_total           # Successful executions
 eddi_tool_execution_failure_total           # Failed executions
 eddi_tool_execution_cached_total            # Cache-served executions
@@ -168,7 +172,7 @@ rate(eddi_tool_execution_success_total{tool="weather"}[5m])
 
 ### Tool Cache Metrics
 
-```
+```text
 eddi_tool_cache_hits_total                  # Cache hits
 eddi_tool_cache_misses_total                # Cache misses
 eddi_tool_cache_puts_by_tool_total{tool}    # Cache puts (per tool; there is no untagged variant)
@@ -189,7 +193,7 @@ eddi_tool_cache_bypassed_total              # Calls that skipped the cache (per 
 
 ### Rate Limiting Metrics
 
-```
+```text
 eddi_tool_ratelimit_allowed_total{tool="..."}  # Allowed calls (per tool)
 eddi_tool_ratelimit_denied_total{tool="..."}   # Denied calls (per tool)
 eddi_tool_ratelimit_remaining                  # Remaining capacity (gauge)
@@ -206,21 +210,32 @@ sum(rate(eddi_tool_ratelimit_allowed_total[5m]))
 
 ### Cost Tracking Metrics
 
-```
+```text
 eddi_tool_calls_total                       # Total tool calls
-eddi_tool_costs_total                       # Total cumulative cost (gauge)
+eddi_tool_costs_total                       # Cumulative cost
 eddi_tool_budget_exceeded_total             # Budget exceeded events
 ```
 
-Per-tool breakdown:
+Per-tool breakdown — note the `_total`, which the exposition adds to every
+counter. `eddi_tool_calls{tool="weather"}` without it matches no series and
+returns an empty result rather than an error:
+
+```text
+eddi_tool_calls_total{tool="weather"}       # Calls per tool
+eddi_tool_costs_total{tool="weather"}       # Cost per tool
 ```
-eddi_tool_calls{tool="weather"}             # Calls per tool
-eddi_tool_costs{tool="weather"}             # Cost per tool
-```
+
+> **`eddi_tool_costs_total` is two meters under one name.** The code registers a
+> counter `eddi.tool.costs` (tagged by `tool`) *and* a gauge
+> `eddi.tool.costs.total`. Micrometer appends `_total` to the counter and leaves
+> the gauge alone, so both land on `eddi_tool_costs_total`. Treat a query on that
+> name as ambiguous until the collision is resolved in the code: use the
+> `tool`-tagged series for per-tool cost, and prefer
+> `GET /llm/tools/costs` when you need the authoritative total.
 
 ### Group Discussion Metrics
 
-```
+```text
 eddi_group_discussion_count_total           # Discussions started
 eddi_group_discussion_failure_count_total   # Discussions failed
 eddi_group_discussion_duration_seconds      # Duration (timer)
@@ -235,7 +250,7 @@ eddi_group_close_count_total                # Conversations closed to further ro
 
 ### Standing Team (Cadence) Metrics
 
-```
+```text
 eddi_team_cadence_runs_started_total        # Cadence fires that started a discussion
 eddi_team_cadence_runs_skipped_total        # Fires skipped (run still in flight, empty backlog, claim lost)
 eddi_team_cadence_writebacks_total          # Completed runs written back to the backlog
@@ -244,7 +259,7 @@ eddi_team_cadence_claims_reclaimed_total    # Stale claims reclaimed after claim
 
 ### Scheduled Trigger Metrics
 
-```
+```text
 eddi_schedule_poll_count_total              # Poll cycles
 eddi_schedule_fire_count_total              # Schedules fired
 eddi_schedule_fire_failed_total             # Fire failures
@@ -255,7 +270,7 @@ eddi_schedule_fire_duration_seconds         # Fire latency (timer)
 
 ### Tenant Quota Metrics
 
-```
+```text
 eddi_tenant_quota_allowed_total             # Slot acquisitions granted (untagged)
 eddi_tenant_quota_denied_total{tenant,type} # Quota denials, always tagged
 eddi_tenant_usage_conversations_total       # Conversation usage (per tenant)
@@ -286,15 +301,188 @@ sum(rate(eddi_tenant_quota_denied_total[5m]))
 gates (`checkAgentQuota`, `checkCostBudget`) deliberately do not touch it, so
 `allowed / (allowed + denied)` is not a true accept rate.
 
+### Coordinator Metrics
+
+```text
+eddi_coordinator_active_conversations       # Conversations with a live queue (gauge)
+eddi_coordinator_queue_depth                # Total queued messages across all conversations (gauge)
+eddi_coordinator_total_processed_total      # Messages processed since start
+```
+
+`queue_depth` rising while `total_processed` flattens is the signature of a
+backlog: work is arriving faster than it drains.
+
+### Pipeline Metrics
+
+```text
+eddi_pipeline_task_duration_seconds         # Per-task latency; tags: task.id, task.type
+eddi_pipeline_task_errors_total             # Per-task failures; tags: task.id, task.type, error.type
+```
+
+`eddi_pipeline_task_duration` is the **only** EDDI meter publishing histogram
+buckets, so it is the only one where `histogram_quantile` gives a real
+percentile. See [Timers do not publish percentiles](#timers-do-not-publish-percentiles).
+
+### Model Cascade Metrics
+
+Full guide: [model-cascade.md](model-cascade.md).
+
+```text
+eddi_llm_cascade_executions_total           # Cascade runs started; tag: agentMode
+eddi_llm_cascade_escalations_total          # Moves to a costlier step; tag: reason (low_confidence|timeout|<error type>)
+eddi_llm_cascade_accepted_step_total        # Which step answered; tag: step
+eddi_llm_cascade_step_errors_total          # Per-step failures; tags: provider, type
+eddi_llm_cascade_ceiling_exceeded_total     # Run cut short; tag: kind (cost|duration)
+eddi_llm_cascade_tokens_total               # Tokens consumed; tag: provider
+eddi_llm_cascade_cost_total                 # Dollars spent; tag: provider
+eddi_llm_cascade_step_latency_seconds       # Per-step latency (timer); tag: provider
+eddi_llm_cascade_confidence                 # Confidence scores (distribution summary — `_count`/`_sum`/`_max`, no `_seconds`)
+```
+
+**`accepted_step` is the metric that says whether cascading is working.** Mass at
+`step="0"` means the cheap model is carrying the load, which is the entire point.
+Mass at the last step means every turn pays for the cheap attempt *and* the
+expensive one.
+
+### Streaming Metrics
+
+```text
+eddi_llm_streaming_downgraded_total         # Fell back to a single chunk; tag: reason
+eddi_llm_streaming_no_partials_total        # Provider streamed, but emitted no partial tokens
+eddi_llm_tool_context_evictions_total       # Exchanges dropped to fit the tool-context budget; tag: outcome (within_budget|still_over_budget)
+```
+
+`still_over_budget` means eviction ran and the context *remains* too large — the
+turn proceeds degraded. A persistent non-zero rate is a configuration problem,
+not a blip.
+
+### Attachment Metrics
+
+Full guide: [attachments-guide.md](attachments-guide.md).
+
+```text
+eddi_attachment_forwarded_total             # Attachments converted to LLM content
+eddi_attachment_reinlined_total             # Extracted text stitched back into history
+eddi_attachment_errors_total                # Drops, cap-skips and capability gates
+```
+
+### HITL Metrics
+
+Full guide: [hitl.md](hitl.md).
+
+```text
+eddi_hitl_pause_count_total                 # Turn-level pauses; tag: surface
+eddi_hitl_resume_count_total                # Turn-level resumes; tag: surface
+eddi_hitl_timeout_count_total               # Approvals that expired unanswered
+eddi_hitl_tool_pause_count_total            # Per-tool-call pauses
+eddi_hitl_tool_resume_count_total           # Per-tool-call resumes; tag: verdict
+eddi_hitl_tool_guard_count_total            # Guard evaluations; tag: guard
+eddi_hitl_rule_matched_total                # Approval rules that matched; tag: match
+eddi_mcp_hitl_pending_listed_total          # Pending approvals listed via MCP; tag: surface
+eddi_mcp_hitl_decision_total                # Decisions via MCP; tags: surface, verdict
+eddi_mcp_hitl_cancelled_total               # Cancellations via MCP; tag: surface
+```
+
+Pauses without matching resumes are approvals nobody answered. Alert on
+`eddi_hitl_pause_count_total - eddi_hitl_resume_count_total` growing without
+bound, not on either alone.
+
+### Platform Operator Metrics
+
+```text
+eddi_operator_write_approval_total          # Gated operator writes; tag: decision
+eddi_operator_gate_verified                 # Write gate is verified and active (gauge, 1|0)
+eddi_operator_canary_total                  # Canary probes of the write gate
+eddi_operator_canary_duration_seconds       # Canary probe latency
+```
+
+`eddi_operator_gate_verified` dropping to `0` means the Platform Operator's
+human-approval gate is no longer proven — treat it as a security alert.
+
+### Prompt & Guardrail Metrics
+
+```text
+eddi_snippets_cache_hits_total              # Prompt-snippet cache hits
+eddi_snippets_cache_misses_total            # Prompt-snippet cache misses
+eddi_counterweight_activation_count_total   # Counterweight activations; tag: level (normal|cautious|strict|unknown)
+eddi_counterweight_strict_downgraded_total  # strict downgraded because the model could not honour it
+eddi_identity_masking_applied_total         # Identity-masking passes applied
+```
+
+### Agent Identity & Signing Metrics
+
+```text
+eddi_agent_identity_sign_count_total        # Agent configurations signed
+eddi_agent_identity_verify_success_total    # Signature verifications that passed
+eddi_agent_identity_verify_fail_total       # Signature verifications that failed
+eddi_agent_nonce_replay_rejected_total      # Requests rejected as replays
+eddi_agent_nonce_freshness_rejected_total   # Requests rejected as stale
+eddi_agent_nonce_clockskew_rejected_total   # Requests rejected for clock skew
+```
+
+Any sustained `verify_fail` or `replay_rejected` rate is an attack signal or a
+misconfigured peer — never routine.
+
+### Capability Registry Metrics
+
+Full guide: [capability-match-guide.md](capability-match-guide.md).
+
+```text
+eddi_capability_query_count_total           # Capability lookups
+eddi_capability_query_time_seconds          # Lookup latency (timer)
+eddi_capability_miss_count_total            # Lookups matching no agent; tag: skill
+eddi_capability_strategy_applied_total      # Resolution strategy used; tag: strategy
+```
+
+`miss_count` tagged by `skill` names exactly which capability your agents cannot
+serve — the most directly actionable metric in this list.
+
+### Secrets Vault Metrics
+
+Full guide: [secrets-vault.md](secrets-vault.md).
+
+```text
+eddi_vault_resolve_count_total              # Secret resolutions
+eddi_vault_store_count_total                # Secrets written
+eddi_vault_rotate_count_total               # Key rotations
+eddi_vault_delete_count_total               # Secrets deleted
+eddi_vault_errors_count_total               # Vault operation failures
+eddi_vault_cache_hits_total                 # Resolved-secret cache hits
+eddi_vault_cache_misses_total               # Resolved-secret cache misses
+eddi_vault_resolve_errors_total             # Resolution failures seen by SecretResolver
+eddi_vault_resolve_duration_seconds         # Resolution latency, provider side (timer)
+eddi_vault_resolve_time_seconds             # Resolution latency, resolver side (timer)
+eddi_vault_store_duration_seconds           # Write latency (timer)
+```
+
+### MCP & Integration Metrics
+
+```text
+eddi_mcp_discovery_total                    # Remote tool discoveries; tag: outcome
+eddi_mcp_response_truncation_count_total    # Tool responses truncated to fit the context
+eddi_mcp_conversation_access_denied_total   # MCP conversation access refused; tag: tool
+eddi_openai_requests_total                  # OpenAI-compatible API requests; tags: mode, outcome
+eddi_openai_request_duration_seconds        # Request latency (timer)
+eddi_openai_conversations_created_total     # Conversations created via the /v1 adapter
+eddi_caller_identity_resolution_total       # Caller-identity resolutions; tags: outcome, reference
+```
+
+### Session & Listing Metrics
+
+```text
+eddi_session_checkpoint_count_total         # Conversation memory checkpoints written
+eddi_conversations_listing_owner_scan_exhausted_total  # Conversation listing gave up scanning for an owner
+```
+
 ### Audit Ledger Metrics
 
-```
+```text
 eddi_audit_entries_dropped_total            # Audit entries dropped (compliance-critical)
 ```
 
 ### Deployed Agents
 
-```
+```text
 eddi_agents_deployed                        # Currently deployed agents (gauge)
 ```
 
@@ -302,7 +490,7 @@ eddi_agents_deployed                        # Currently deployed agents (gauge)
 
 > Only active when using the NATS messaging profile. Shows nothing under in-memory messaging.
 
-```
+```text
 eddi_nats_publish_count_total               # Messages published
 eddi_nats_consume_count_total               # Messages consumed
 eddi_nats_dead_letter_count_total           # Dead letters
@@ -314,7 +502,7 @@ eddi_nats_consume_duration_seconds          # Consume latency (timer)
 
 Standard Micrometer metrics for Quarkus:
 
-```
+```text
 jvm_memory_used_bytes{area="heap|nonheap"}
 jvm_memory_committed_bytes{area="heap|nonheap"}
 jvm_memory_max_bytes{area="heap"}
@@ -330,15 +518,15 @@ http_server_requests_seconds{method,uri,status}
 
 ### Database Connection Pool (auto-exposed)
 
-**MongoDB** (when `eddi.datastore.type=mongo`):
-```
+**MongoDB** (when `eddi.datastore.type=mongodb`):
+```text
 mongodb_driver_pool_size
 mongodb_driver_pool_checkedout
 mongodb_driver_pool_waitqueuesize
 ```
 
 **PostgreSQL / Agroal** (when `eddi.datastore.type=postgres`):
-```
+```text
 agroal_active_count
 agroal_available_count
 agroal_awaiting_count
@@ -423,21 +611,32 @@ groups:
 
 EDDI also exposes tool metrics via REST:
 
-```bash
-# Cache stats
-GET /langchain/tools/cache/stats
+All of them live under `/llm/tools` (`RestToolHistory`):
 
-# Rate limit info
-GET /langchain/tools/ratelimit/{toolName}
+```bash
+# Tool history for one conversation
+GET    /llm/tools/history/{conversationId}
+
+# Result cache
+GET    /llm/tools/cache/stats
+GET    /llm/tools/cache/ttl/{toolName}
+DELETE /llm/tools/cache
+
+# Rate limiting
+GET    /llm/tools/ratelimit/{toolName}
+POST   /llm/tools/ratelimit/{toolName}/reset
 
 # Cost tracking
-GET /langchain/tools/costs
-GET /langchain/tools/costs/conversation/{conversationId}
-GET /langchain/tools/costs/tool/{toolName}
-
-# Tool history
-GET /langchain/tools/history/{conversationId}
+GET    /llm/tools/costs
+GET    /llm/tools/costs/conversation/{conversationId}
+GET    /llm/tools/costs/tool/{toolName}
+POST   /llm/tools/costs/reset
 ```
+
+> The pre-v6 prefix `/langchain/tools` still answers, because
+> `LegacyPathRewriteFilter` rewrites it to `/llm/tools`. That is a compatibility
+> shim for existing clients, not a second spelling to write in new code — it can
+> be withdrawn, and it makes stale documentation look correct while it lives.
 
 ---
 

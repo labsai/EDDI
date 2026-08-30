@@ -238,6 +238,49 @@ PENDING → CLAIMED → EXECUTING → COMPLETED
 
 The `SchedulePollerService` is cluster-aware — in multi-instance deployments, only one instance executes each scheduled fire. This is achieved via atomic claim operations (`tryClaim`), preventing duplicate execution when running EDDI behind a load balancer.
 
+Two consequences are worth stating plainly, because they shape how a scheduled
+target must be written:
+
+- **Claiming is per-lease compare-and-set**, so exactly one instance wins a given
+  poll. But **delivery is at-least-once**: if the winner dies mid-fire, the lease
+  expires (`eddi.schedule.lease-timeout`) and another instance re-claims the same
+  fire. **Scheduled targets must be idempotent.**
+- Instances identify themselves by `eddi.schedule.instance-id`, which is
+  auto-derived from the hostname when left empty. In an environment where
+  hostnames are recycled or duplicated (some container schedulers), set it
+  explicitly — two instances sharing an ID makes claim ownership ambiguous.
+
+## Deployment Configuration
+
+Individual schedules are configuration documents; the *poller* that runs them is
+tuned deployment-wide in `application.properties` (or the matching environment
+variables — Quarkus maps `eddi.schedule.poll-interval` to
+`EDDI_SCHEDULE_POLL_INTERVAL` — every non-alphanumeric character becomes `_`).
+
+| Property | Default | What it controls |
+|---|---|---|
+| `eddi.schedule.enabled` | `true` | Master switch. `false` stops all polling — schedules remain stored and simply never fire |
+| `eddi.schedule.poll-interval` | `15s` | How often each instance looks for due schedules. This is the floor on firing punctuality: a schedule due at `12:00:00` fires somewhere in `[12:00:00, 12:00:15)` |
+| `eddi.schedule.poll-batch-size` | `100` | Max schedules claimed per poll cycle. Claimed schedules dispatch concurrently on virtual threads; raise it to drain large bursts (e.g. many one-shot HITL approval timeouts expiring together) |
+| `eddi.schedule.lease-timeout` | `5m` | How long a claimed schedule is considered owned before another instance may re-claim it. Set it comfortably above your longest fire, or a slow run gets executed twice |
+| `eddi.schedule.max-retries` | `5` | Attempts before a fire is `DEAD_LETTERED` |
+| `eddi.schedule.backoff-base-seconds` | `15` | Retry delay = `base × multiplier^(attempt-1)` seconds |
+| `eddi.schedule.backoff-multiplier` | `4` | With the defaults: 15s, 60s, 4m, 16m, 64m |
+| `eddi.schedule.min-interval-seconds` | `60` | Smallest cron interval a schedule may request. Guards against schedule bombing; a rejected create returns a message naming this property |
+| `eddi.schedule.instance-id` | *(hostname)* | Identity used for cluster claim tracking |
+| `eddi.schedule.default-timezone` | `UTC` | IANA zone applied to schedules that do not name one |
+
+### Observability
+
+| Metric | Type | Read it for |
+|---|---|---|
+| `eddi.schedule.poll.count` | Counter | Poller liveness. Flat means the poller is not running — check `eddi.schedule.enabled` |
+| `eddi.schedule.fire.count` | Counter | Fires executed |
+| `eddi.schedule.fire.failed` | Counter | Fires that raised. Compare against `fire.count` for a failure rate |
+| `eddi.schedule.fire.deadlettered` | Counter | Fires that exhausted `max-retries`. **Alert on any increase** — these need manual retry or dismissal |
+| `eddi.schedule.fire.duration` | Timer | If p99 approaches `lease-timeout`, double execution is imminent |
+| `eddi.schedule.claim.conflict` | Counter | Instances racing for the same schedule. Normal and expected in a cluster; a sharp rise alongside falling `fire.count` suggests contention rather than work |
+
 ## Best Practices
 
 1. **Start with longer intervals** — Begin with hourly or daily schedules and increase frequency only if needed

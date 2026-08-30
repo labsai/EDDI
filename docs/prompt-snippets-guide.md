@@ -1,6 +1,6 @@
 # Prompt Snippets — Usage Guide
 
-> Prompt Snippets are reusable system prompt building blocks stored as versioned configuration documents. They replace the deleted `CounterweightService`, `IdentityMaskingService`, and `DeploymentContextService` with a flexible, user-extensible, config-driven approach.
+> Prompt Snippets are reusable system prompt building blocks stored as versioned configuration documents. They replace the deleted `DeploymentContextService` with a flexible, user-extensible, config-driven approach, and supply the customisable preset text for the counterweight and identity-masking features described in [langchain.md → Behavioral Safety](langchain.md#behavioral-safety-counterweight--identity-masking).
 
 ## Quick Start
 
@@ -60,8 +60,8 @@ Template Data Map:
 Snippets are cached in a Caffeine cache with a **5-minute TTL**. This means:
 
 - Snippets load once from MongoDB, then serve from cache
-- After creating/updating/deleting a snippet, changes appear within 5 minutes
-- For immediate effect, restart the server or call `invalidateCache()` programmatically
+- `POST`/`PUT`/`DELETE` on `/snippetstore/snippets` invalidate the cache synchronously, so a snippet edited through the REST API takes effect on the next LLM turn
+- The 5-minute TTL is the fallback for changes made outside the REST API (a direct database write, or another node)
 - Cache hit/miss metrics are exposed at `/q/metrics` as `eddi.snippets.cache.hits` and `eddi.snippets.cache.misses`
 
 ### Name Validation
@@ -83,19 +83,9 @@ This ensures safe Qute dot-notation access (`{snippets.name}`).
 
 ### `templateEnabled` (default: `true`)
 
-Controls whether the Qute template engine resolves template markers inside the snippet content.
+Intended to control whether the Qute template engine resolves template markers inside the snippet content. **It is currently inert.**
 
-**When `true` (default):** Template variables in the snippet are resolved against the full template data map. This allows snippets to be dynamic:
-
-```json
-{
-  "name": "personalized_greeting",
-  "content": "Address the user as {properties.preferred_name} and respond in {properties.preferred_language}.",
-  "templateEnabled": true
-}
-```
-
-**When `false`:** the content is wrapped in a Qute unparsed block (`{|...|}`) automatically, so `{...}` markers inside it reach the model literally instead of being resolved. This is useful for code examples or documentation snippets:
+Snippet content is injected verbatim and is never template-resolved, whatever `templateEnabled` says. A snippet reaches a prompt as a template *data value* — `{snippets.name}` resolves to it — and Qute does not re-parse what an expression resolved to. Any `{...}` inside the content therefore reaches the model as literal text:
 
 ```json
 {
@@ -105,17 +95,9 @@ Controls whether the Qute template engine resolves template markers inside the s
 }
 ```
 
-### Inline Override
+That is exactly the `templateEnabled: false` guarantee, and every snippet gets it for free — no unparsed-block wrapping is applied or needed. The corollary is that `templateEnabled: true` does **not** make `{properties.x}` inside a snippet resolve either; it too reaches the model literally. Snippets cannot be made dynamic this way — put the dynamic parts in the system prompt template itself, around the `{snippets.name}` reference.
 
-Even when `templateEnabled` is `true`, you can protect specific sections with a Qute unparsed block directly in the content:
-
-```json
-{
-  "name": "mixed_content",
-  "content": "Hello {properties.name}! {|Use {placeholder} in templates.|}",
-  "templateEnabled": true
-}
-```
+The field is kept because stored configs carry it and because honouring it remains a live option; see the `PromptSnippetService` class javadoc for what enabling it would cost.
 
 ---
 
@@ -193,21 +175,21 @@ Usage: `{snippets.cautious_mode}`
   "name": "gdpr_notice",
   "category": "compliance",
   "description": "GDPR-compliant data handling instructions",
-  "content": "DATA PRIVACY: You are operating under GDPR regulations. Never store or repeat personal data beyond the current conversation unless the user explicitly consents. If asked about data handling, refer to our privacy policy at {properties.privacy_policy_url}.",
+  "content": "DATA PRIVACY: You are operating under GDPR regulations. Never store or repeat personal data beyond the current conversation unless the user explicitly consents. If asked about data handling, refer the user to our published privacy policy.",
   "tags": ["compliance", "gdpr", "eu"],
   "templateEnabled": true
 }
 ```
 
-### Dynamic — Context-Aware Routing
+### Routing — Escalation Rules
 
 ```json
 {
   "name": "routing_context",
   "category": "custom",
-  "description": "Injects department-specific instructions from properties",
-  "content": "You are handling inquiries for the {properties.department} department. Follow these department-specific guidelines:\n{properties.department_guidelines}",
-  "tags": ["routing", "dynamic"],
+  "description": "Department handover and escalation rules",
+  "content": "ROUTING: Handle only inquiries that belong to your assigned department. If a request belongs elsewhere, say so and hand it over rather than guessing. Escalate to a human agent whenever the user asks for one.",
+  "tags": ["routing"],
   "templateEnabled": true
 }
 ```
@@ -241,8 +223,8 @@ The designer controls exactly where each snippet appears, enabling precise promp
 
 | Legacy Service | Snippet Replacement |
 |---|---|
-| `CounterweightService` | Create a `cautious_mode` snippet with your safety instructions |
-| `IdentityMaskingService` | Create a `persona_instructions` snippet with masking rules |
 | `DeploymentContextService` | Create environment-specific snippets (`prod_rules`, `staging_rules`) |
+
+`CounterweightService` and `IdentityMaskingService` were **not** removed — they are still applied to every system prompt and are configured per LLM task via the `counterweight` and `identityMasking` blocks in [langchain.md → Behavioral Safety](langchain.md#behavioral-safety-counterweight--identity-masking). Counterweight preset text is itself customised by creating `counterweight-cautious` / `counterweight-strict` snippets.
 
 The key advantage: snippets are **user-configurable** without code changes, versionable, and composable.

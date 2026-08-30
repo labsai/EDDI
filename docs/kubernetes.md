@@ -21,11 +21,26 @@ kubectl apply -f https://raw.githubusercontent.com/labsai/EDDI/main/k8s/quicksta
 Then generate and store a vault master key:
 
 ```bash
-# Generate the secret
+# Generate the secret. EDDI reads its secrets from a mounted properties FILE
+# rather than environment variables, so the Secret holds exactly one key:
+# "application-secrets.properties".
+kubectl delete secret eddi-secrets -n eddi --ignore-not-found
+set -euo pipefail
+
+# mktemp gives an unpredictable name created 0600, so it cannot be pre-created
+# or symlinked by another local user.
+secrets_file=$(mktemp "${TMPDIR:-/tmp}/eddi-secrets.XXXXXX")
+trap 'shred -u "$secrets_file" 2>/dev/null || rm -f "$secrets_file"' EXIT
+
+key=$(openssl rand -base64 24)
+[ -n "$key" ] || { echo "vault key generation failed" >&2; exit 1; }
+printf 'eddi.vault.master-key=%s\n' "$key" > "$secrets_file"
+
+# The key name must be application-secrets.properties — that is the filename the
+# Deployment mounts. Passing the temp path bare would name the key after it.
 kubectl create secret generic eddi-secrets \
   --namespace=eddi \
-  --from-literal=EDDI_VAULT_MASTER_KEY="$(openssl rand -base64 24)" \
-  --dry-run=client -o yaml | kubectl apply -f -
+  --from-file=application-secrets.properties="$secrets_file"
 
 # Restart EDDI to pick up the key
 kubectl rollout restart deployment/eddi -n eddi
@@ -81,11 +96,11 @@ The component overlays (auth, nats, monitoring, etc.) are designed to be **compo
 | Component | Description | Helm Values |
 |---|---|---|
 | **Keycloak Auth** | OIDC authentication | `--set keycloak.enabled=true --set eddi.oidc.enabled=true` |
-| **NATS JetStream** | Durable messaging for multi-replica | `--set nats.enabled=true --set eddi.messagingType=nats` |
+| **NATS JetStream** | Durable, ordered messaging | `--set nats.enabled=true --set eddi.messagingType=nats` |
 | **Manager UI** | Configuration dashboard | `--set manager.enabled=true` |
-| **Monitoring** | Prometheus + Grafana | `--set monitoring.prometheus.enabled=true` |
+| **Monitoring** | Prometheus + Grafana | — (Kustomize only: `k8s/overlays/monitoring/`) |
 | **Ingress** | External HTTPS access | `--set ingress.enabled=true --set ingress.hosts[0].host=eddi.example.com` |
-| **Production** | HPA, PDB, NetworkPolicy | `--set autoscaling.enabled=true --set podDisruptionBudget.enabled=true` |
+| **Production** | PDB, NetworkPolicy | `--set podDisruptionBudget.enabled=true --set networkPolicy.enabled=true` |
 
 ### Composing Kustomize Overlays
 
@@ -135,12 +150,12 @@ kubectl apply -k k8s/examples/postgres-ha/
     │  EDDI Deployment     │───▶│  MongoDB    │
     │  (labsai/eddi:latest) │    │ StatefulSet │
     │                      │    └─────────────┘
-    │  replicas: 1-10      │    ┌─────────────┐
-    │  (HPA auto-scales)   │───▶│ PostgreSQL  │
+    │  replicas: 1         │    ┌─────────────┐
+    │  (single-writer)     │───▶│ PostgreSQL  │
     └──────────────────────┘    │ StatefulSet │
                │                └─────────────┘
     ┌──────────▼──────────┐
-    │   NATS JetStream     │  (optional, for multi-replica)
+    │   NATS JetStream     │  (optional, durable ordering)
     │   StatefulSet        │
     └──────────────────────┘
 ```
@@ -158,11 +173,27 @@ Three ways to manage it:
    bash k8s/create-secrets.sh
    ```
 
-2. **Manual kubectl**:
+2. **Manual kubectl** — the Secret holds one key, `application-secrets.properties`,
+   which the Deployment mounts as a file and loads via `QUARKUS_CONFIG_LOCATIONS`:
    ```bash
+   set -euo pipefail
+
+   # mktemp gives an unpredictable name created 0600, so another local user
+   # cannot pre-create the path or point it at a symlink.
+   secrets_file=$(mktemp "${TMPDIR:-/tmp}/eddi-secrets.XXXXXX")
+   trap 'shred -u "$secrets_file" 2>/dev/null || rm -f "$secrets_file"' EXIT
+
+   # Fail closed: an empty key would create a Secret that silently leaves the
+   # vault inert and secrets in plaintext.
+   key=$(openssl rand -base64 24)
+   [ -n "$key" ] || { echo "vault key generation failed" >&2; exit 1; }
+   printf 'eddi.vault.master-key=%s\n' "$key" > "$secrets_file"
+
+   # The Secret key must be named application-secrets.properties — that is the
+   # filename the Deployment mounts. A bare temp path would name it otherwise.
    kubectl create secret generic eddi-secrets \
      --namespace=eddi \
-     --from-literal=EDDI_VAULT_MASTER_KEY="$(openssl rand -base64 24)"
+     --from-file=application-secrets.properties="$secrets_file"
    ```
 
 3. **External secrets** (production): Use [External Secrets Operator](https://external-secrets.io/) to sync from AWS Secrets Manager, HashiCorp Vault, Azure Key Vault, etc.
@@ -190,23 +221,26 @@ The production overlay includes a `NetworkPolicy` that restricts EDDI to:
 
 Default configuration uses in-memory messaging — suitable for development and low-traffic deployments.
 
-### Multi-Replica (production)
+### Durable Messaging (production)
 
-For horizontal scaling, enable NATS JetStream for durable message ordering:
+EDDI runs at **exactly one replica**. It serialises the turns of a conversation with
+a JVM-local lock, so a second replica silently drops turns — the Helm chart refuses
+to render with `eddi.replicas` above 1 or `autoscaling.enabled=true`, and every
+shipped manifest pins `replicas: 1`. NATS JetStream is a durable ordering and
+dead-lettering primitive, not a scale-out enabler: the Callable still executes in
+the JVM that published it. Scale **vertically** via `eddi.resources`.
 
 **Kustomize:**
 ```bash
-# Use the ready-made HA example
+# Use the ready-made HA example (PostgreSQL + NATS, still one replica)
 kubectl apply -k k8s/examples/postgres-ha/
 ```
 
 **Helm:**
 ```bash
 helm install eddi ./helm/eddi \
-  --set eddi.replicas=2 \
   --set nats.enabled=true \
   --set eddi.messagingType=nats \
-  --set autoscaling.enabled=true \
   --namespace eddi --create-namespace
 ```
 
@@ -221,16 +255,14 @@ annotations:
   prometheus.io/path: "/q/metrics"
 ```
 
-Deploy the monitoring stack using the full example or Helm:
+Deploy the monitoring stack with Kustomize. The Helm chart does **not** ship
+Prometheus or Grafana templates yet, so `monitoring.*` values render nothing:
 
 ```bash
 # Kustomize (with MongoDB + Auth + Monitoring)
 kubectl apply -k k8s/examples/mongodb-full/
 
-# Helm
-helm install eddi ./helm/eddi \
-  --set monitoring.prometheus.enabled=true \
-  --set monitoring.grafana.enabled=true
+# Or the monitoring component on its own overlay: k8s/overlays/monitoring/
 
 # Access Grafana
 kubectl port-forward svc/grafana 3000:3000 -n eddi

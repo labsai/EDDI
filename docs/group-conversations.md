@@ -58,7 +58,7 @@ curl -X POST /groupstore/groups \
 # Start discussion
 curl -X POST /groups/<groupId>/conversations \
   -H "Content-Type: application/json" \
-  -d '{"input": "What is the best architecture for our new service?"}'
+  -d '{"question": "What is the best architecture for our new service?"}'
 ```
 
 ## Member Roles
@@ -145,9 +145,10 @@ tools.
   silently filing a task without its dependency schedules it immediately, which
   is the opposite of what was asked.
 - **`assignToRole`** takes `"ROLE:Reviewer"` or a member's exact name, and files
-  the task already assigned. Omitting it (or passing `"ALL"`) leaves the task
-  for the wave loop to assign, as it does any other. An unmatched role is
-  refused with the available roles named.
+  the task already assigned. Omitting it (or passing `"ALL"`) round-robins the
+  task to the next member through the same resolver the PLAN phase uses — every
+  filed task gets an owner, and filing is refused outright if the team has
+  nobody to own it. An unmatched role is refused with the available roles named.
 - Refusals are sentences aimed at the model: duplicate subject, unknown
   dependency, circular dependency, subject over 200 chars, description over
   4,000, and either cap being reached.
@@ -436,12 +437,15 @@ claim/lease/retry/dead-letter; the executor branches on
    holds the claim — but only up to a TTL (see **Stale claims** below).
 2. **Pull** — top-N *executable* backlog tasks by priority; an empty pull
    skips, logged.
-3. **Claim** — a conditional store write on `runningDiscussionId`; two pods
-   firing concurrently cannot both start, without any in-JVM lock.
-4. **Run** — pulled tasks are injected as a runtime copy of `config.tasks`
+3. **Run** — the discussion is started first, so the claim can carry its real
+   id. Pulled tasks are injected as a runtime copy of `config.tasks`
    (the stored config is never written) and the cadence's `maxCostPerRun`
    rides the inherited-ceiling slot: dollar-primary, per the Dream precedent.
    The discussion runs under the cadence *creator's* identity.
+4. **Claim** — a conditional store write on `runningDiscussionId`, taken before
+   any task turn can complete and without any in-JVM lock. Two pods firing
+   concurrently both start a discussion; the one that loses the CAS cancels its
+   just-started discussion before its first turn, so only one fire does work.
 
 **Writeback** happens at the next fire (or on a workspace read — read-repair),
 never from inside the discussion thread, so a pod crash mid-discussion loses
@@ -538,20 +542,19 @@ roles fail loudly, naming the template's real roles.
 
 ## Attachments
 
-A discussion can carry shared files. `POST /groups/{groupId}/conversations` (and the `/stream` variant) accepts an `attachments` array alongside `question`, in the same three shapes the single-agent API takes:
+A discussion can carry shared files. `POST /groups/{groupId}/conversations` (and the `/stream` variant) accepts an `attachments` array alongside `question`, in two shapes — hosted (`mimeType` + `url`) and inline (`mimeType` + `data`, optionally `fileName`):
 
 ```json
 {
   "question": "Review the attached architecture proposal.",
   "attachments": [
-    { "storageRef": "att_01J..." },
     { "mimeType": "application/pdf", "url": "https://example.com/proposal.pdf" },
-    { "mimeType": "image/png", "fileName": "diagram.png", "base64Data": "iVBOR..." }
+    { "mimeType": "image/png", "fileName": "diagram.png", "data": "iVBOR..." }
   ]
 }
 ```
 
-Inline `base64Data` is stored in the blob store owned by the group conversation, so it is granted to members and reaped with the conversation. Hosted `url` references and pre-uploaded `storageRef`s pass through as-is.
+Inline `data` is stored in the blob store owned by the group conversation, so it is granted to members and reaped with the conversation. Hosted `url` references pass through as-is. A ref carrying neither is skipped, as is a `url` ref with no `mimeType`.
 
 **How members receive them.** On a member's **first** turn the orchestrator grants that member's private conversation access to the group's blobs and injects them as `attachment_*` context — from there the ordinary single-agent attachment path applies (multimodal forwarding for vision models, PDF/text extraction otherwise). On **later** turns the member's own conversation history carries them: `AttachmentForwarder` notes the earlier attachments and the `readAttachment` tool is auto-enabled for any conversation that has them, independently of `builtInToolsWhitelist`. A recruited member gets the same grant on its own first turn, and a nested `GROUP` member propagates the whole set down.
 

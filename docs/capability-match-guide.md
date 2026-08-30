@@ -71,7 +71,7 @@
 | Key | Required | Default | Description |
 |---|---|---|---|
 | `skill` | Yes | — | Skill name to search for (case-insensitive) |
-| `strategy` | No | `highest_confidence` | Selection strategy: `highest_confidence`, `round_robin`, or `all` |
+| `strategy` | No | `highest_confidence` | Selection strategy: `highest_confidence`, `round_robin`, `random`, or `all` |
 | `minResults` | No | `1` | Minimum number of matching agents for SUCCESS |
 
 ### Selection Strategies
@@ -79,14 +79,24 @@
 | Strategy | Behavior |
 |---|---|
 | `highest_confidence` | Sort matches by confidence (high → medium → low) |
-| `round_robin` | Randomize order (for load distribution) |
+| `round_robin` | Deterministic rotation — a per-skill counter advances one position on each query (for load distribution) |
+| `random` | Shuffle matches randomly |
 | `all` | Return all matches in natural order |
 
 ---
 
 ## Template Variables
 
-Config values support **Qute template expressions**, resolved against the conversation memory at evaluation time. This enables dynamic routing:
+> **Known limitation — template expressions do not currently resolve here.**
+> `CapabilityMatchCondition.resolveTemplate` hands a config value to the templating
+> engine only when the value contains the double-brace marker `{{`, so a single-brace
+> Qute expression such as `{properties.requiredSkill}` never reaches the engine at all —
+> and a double-brace one that does reach it is left literal, because Qute does not
+> resolve `{{ … }}` (pinned by `PlaceholderSyntaxContractTest`). Either way the
+> unresolved string is used as the skill name, matches nothing, and the condition
+> silently returns FAIL. Give `skill` and `strategy` literal values until this is fixed.
+
+The intent is that config values are **Qute template expressions**, resolved against the conversation memory at evaluation time, enabling dynamic routing:
 
 ```json
 {
@@ -99,7 +109,7 @@ Config values support **Qute template expressions**, resolved against the conver
 }
 ```
 
-The `skill` and `strategy` values are resolved using `IMemoryItemConverter.convert(memory)` — the same data map available to system prompts and httpCalls templates.
+The `skill` and `strategy` values would be resolved using `IMemoryItemConverter.convert(memory)` — the same data map available to system prompts and httpCalls templates.
 
 ---
 
@@ -193,16 +203,24 @@ Use the discovered agents to dynamically compose a group conversation:
 ```
 
 **System prompt (LLM task triggered by `create_expert_group`):**
-```
-The following agents have been identified as legal analysis experts:
-{memory.current.capabilityMatch.results}
+```text
+Legal analysis experts have been identified for this request.
 
 Use the createGroupConversation tool to assemble them into a discussion panel.
 ```
 
+> The matched agent IDs are written with `storeData` into the current step's data
+> store under the key `capabilityMatch.results`, so Java tasks and tools can read
+> them. They are **not** reachable from a template: `{memory.current.*}` resolves
+> against the step's `conversationOutput`, which only the `addConversationOutput*`
+> methods populate — and the key itself contains a dot, so it would not be
+> addressable as `.capabilityMatch.results` even if it were there.
+
 ### Example 3: Template-Based Routing with Properties
 
-Use PropertySetter to capture the user's intent, then route dynamically:
+Use PropertySetter to capture the user's intent, then route dynamically — subject to the
+limitation in [Template Variables](#template-variables): the `{properties.requiredSkill}`
+below is not resolved by `capabilityMatch` today, so this example does not yet work.
 
 **property.json (PropertySetterTask):**
 ```json
@@ -241,7 +259,7 @@ Use PropertySetter to capture the user's intent, then route dynamically:
 
 ## Attribute Filtering
 
-The `CapabilityRegistryService` also supports fine-grained attribute matching via the `findBySkillAndAttributes` API. This is available programmatically (e.g., from MCP tools or REST) but not yet exposed as a behavior rule config. Example:
+The `CapabilityRegistryService` also supports fine-grained attribute matching via the `findBySkillAndAttributes` API. This is available to in-process Java callers only — no REST endpoint, MCP tool or behavior rule config currently exposes attribute filtering (`/capabilities`, the A2A `/.well-known/capabilities` endpoint and the `findAgentsByCapability` tool all call the skill-only overload). Example:
 
 ```java
 // Find translation agents that support German

@@ -108,11 +108,13 @@ PRODUCTION EDDI  (has the agent from first import)
 **Scenario 1: Promoting to Production (first time)**
 
 ```bash
-# 1. Export from test environment
-curl -X POST http://test.eddi.com/backup/export/agent123?agentVersion=1
+# 1. Export from test environment — the Location header names the ZIP
+LOCATION=$(curl -s -D - -o /dev/null -X POST \
+  "http://test.eddi.com/backup/export/agent123?agentVersion=1" \
+  | grep -i '^location:' | tr -d '\r' | awk '{print $2}')
 
 # 2. Download the ZIP
-curl -O http://test.eddi.com/backup/export/agent123-1.zip
+curl -o agent123-1.zip "http://test.eddi.com${LOCATION}"
 
 # 3. Import to production (creates new agent)
 curl -X POST -H "Content-Type: application/zip" \
@@ -126,8 +128,10 @@ curl -X POST http://prod.eddi.com/administration/production/deploy/{newAgentId}?
 
 ```bash
 # 1. Export updated agent from dev
-curl -X POST http://dev.eddi.com/backup/export/agent123?agentVersion=3
-curl -O http://dev.eddi.com/backup/export/agent123-3.zip
+LOCATION=$(curl -s -D - -o /dev/null -X POST \
+  "http://dev.eddi.com/backup/export/agent123?agentVersion=3" \
+  | grep -i '^location:' | tr -d '\r' | awk '{print $2}')
+curl -o agent123-3.zip "http://dev.eddi.com${LOCATION}"
 
 # 2. Preview what would change in production
 curl -X POST -H "Content-Type: application/zip" \
@@ -147,7 +151,7 @@ curl -X POST http://prod.eddi.com/administration/production/deploy/{agentId}?ver
 # Preview first to get the origin IDs
 curl -X POST -H "Content-Type: application/zip" \
   --data-binary @agent123-3.zip http://prod.eddi.com/backup/import/preview
-# Response includes originId for each resource
+# Response includes sourceId for each resource
 
 # Merge only the behavior rules and HTTP calls (by origin ID)
 curl -X POST -H "Content-Type: application/zip" \
@@ -161,9 +165,10 @@ curl -X POST -H "Content-Type: application/zip" \
 # Regular automated backup (cron job)
 #!/bin/bash
 DATE=$(date +%Y%m%d)
-curl -X POST http://prod.eddi.com/backup/export/agent123?agentVersion=1
-curl -O http://prod.eddi.com/backup/export/agent123-1.zip
-mv agent123-1.zip "backups/agent123-$DATE.zip"
+LOCATION=$(curl -s -D - -o /dev/null -X POST \
+  "http://prod.eddi.com/backup/export/agent123?agentVersion=1" \
+  | grep -i '^location:' | tr -d '\r' | awk '{print $2}')
+curl -o "backups/agent123-$DATE.zip" "http://prod.eddi.com${LOCATION}"
 aws s3 cp "backups/agent123-$DATE.zip" s3://agent-backups/
 
 # Restore after failure
@@ -217,13 +222,19 @@ Send a **`POST`** request to export. The response `Location` header contains the
 | API Endpoint | `/backup/export/{agentId}?agentVersion={version}` |
 | Response     | `Location` header with ZIP download URL           |
 
+The filename is `{urlEncodedAgentName}-{agentId}-{agentVersion}.zip` whenever the agent's
+descriptor carries a name (it drops to `{agentId}-{agentVersion}.zip` only for a nameless
+agent), so read it from the `Location` header rather than constructing it.
+
 **Example:**
 
 ```bash
-curl -X POST http://localhost:7070/backup/export/agent123?agentVersion=1
-# Response Header: Location: /backup/export/agent123-1.zip
+LOCATION=$(curl -s -D - -o /dev/null -X POST \
+  "http://localhost:7070/backup/export/agent123?agentVersion=1" \
+  | grep -i '^location:' | tr -d '\r' | awk '{print $2}')
+# e.g. /backup/export/My+Agent-agent123-1.zip
 
-curl -O http://localhost:7070/backup/export/agent123-1.zip
+curl -O "http://localhost:7070${LOCATION}"
 ```
 
 ### Importing an Agent (Create)
@@ -261,34 +272,44 @@ Dry-run analysis: returns what would change without modifying any data.
 
 ```json
 {
-  "agentOriginId": "original-agent-id-from-source",
-  "agentName": "My Agent",
+  "sourceAgentId": "original-agent-id-from-source",
+  "sourceAgentName": "My Agent",
+  "targetAgentId": "local-agent-id",
+  "targetAgentName": "My Agent",
   "resources": [
     {
-      "originId": "original-resource-id",
+      "sourceId": "original-resource-id",
       "resourceType": "agent",
       "name": "My Agent",
       "action": "UPDATE",
-      "localId": "local-agent-id",
-      "localVersion": 1
+      "targetId": "local-agent-id",
+      "targetVersion": 1,
+      "matchStrategy": "originId",
+      "workflowIndex": -1
     },
     {
-      "originId": "original-behavior-id",
+      "sourceId": "original-behavior-id",
       "resourceType": "behavior",
       "name": "Greeting Rules",
       "action": "CREATE",
-      "localId": null,
-      "localVersion": null
+      "targetId": null,
+      "targetVersion": null,
+      "matchStrategy": null,
+      "workflowIndex": 0
     }
   ]
 }
 ```
+
+Upgrade previews additionally populate `sourceContent` and `targetContent` with the
+raw JSON of each side. The `sourceId` values are what `selectedResources` expects.
 
 **Actions:**
 
 - `CREATE` — No matching local resource found; will be created
 - `UPDATE` — Matching local resource found; will be updated
 - `SKIP` — Resource is unchanged; will be skipped
+- `CONFLICT` — Match is ambiguous; must be resolved manually
 
 ### Importing an Agent (Merge)
 

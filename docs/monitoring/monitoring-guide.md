@@ -111,12 +111,12 @@ EDDI adds manual spans in `LifecycleManager` for each pipeline task:
 
 ```text
 Trace: POST /agentstore/agents/{agentId}/conversations/{convId}
-  └── eddi.pipeline.task [task.id=ai.labs.behavior, task.type=behaviorRules]
-  └── eddi.pipeline.task [task.id=ai.labs.property, task.type=propertySetter]
+  └── eddi.pipeline.task [task.id=ai.labs.behavior, task.type=behavior_rules]
+  └── eddi.pipeline.task [task.id=ai.labs.property, task.type=properties]
   └── eddi.pipeline.task [task.id=ai.labs.llm, task.type=langchain]
       └── HTTP POST https://api.openai.com/v1/chat/completions (auto)
       └── MongoDB find conversations (auto)
-  └── eddi.pipeline.task [task.id=ai.labs.output, task.type=outputGeneration]
+  └── eddi.pipeline.task [task.id=ai.labs.output, task.type=output]
 ```
 
 **Span attributes:**
@@ -226,7 +226,7 @@ source.
 | File | Dashboard | Shape |
 |------|-----------|-------|
 | `eddi-operations-dashboard.json` | Operations Command Center (`eddi-ops`) | KPI strip + 9 rows, 51 panels |
-| `eddi-full-metrics-dashboard.json` | Full Metrics Reference (`eddi-metrics-all`) | 19 subsystem rows, 133 panels — **every** meter EDDI registers |
+| `eddi-full-metrics-dashboard.json` | Full Metrics Reference (`eddi-metrics-all`) | 19 subsystem rows, 138 panels — **every** meter EDDI registers, enforced by `MetricsDashboardCoverageTest` |
 | `eddi-grafana-dashboard.json` | EDDI Observability (`eddi-observability`) | The original dashboard, 6 groups: Coordinator Health, Pipeline Tasks, Tool Execution, Vault & Security, NATS, HTTP & JVM |
 
 Start at **Operations Command Center** — it answers "is the platform healthy".

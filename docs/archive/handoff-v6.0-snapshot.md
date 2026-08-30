@@ -1,11 +1,20 @@
-# EDDI v6.0 — Current Status
+# ARCHIVED — EDDI v6.0 Development Snapshot
 
-> [!IMPORTANT]
-> **This file is a historical snapshot from early v6.0 development and is no longer actively maintained.**
-> For the authoritative, up-to-date log of all changes, decisions, and reasoning, see [`docs/changelog.md`](docs/changelog.md).
-> This file contains class names and package paths that have since been renamed (e.g., `LangchainTask` → `LlmTask`, `HttpCallsTask` → `ApiCallsTask`).
-
-> **Last updated:** 2026-03-30
+> [!CAUTION]
+> **Do not follow anything on this page.** It is a frozen snapshot of early v6.0
+> development, last updated **2026-03-30**, kept only so the reasoning behind
+> those decisions stays recoverable.
+>
+> It names classes that have been renamed (`LangchainTask` → `LlmTask`,
+> `HttpCallsTask` → `ApiCallsTask`), REST paths that have moved, and phase
+> plans that were superseded. It lived at the repository root until it was
+> archived here, which meant AI coding assistants loaded 70 KB of stale
+> identifiers as context on every session.
+>
+> **For anything current:**
+> - [`docs/changelog.md`](../changelog.md) — the authoritative log of changes and decisions
+> - [`AGENTS.md`](../../AGENTS.md) — how to work in this codebase today
+> - [`docs/architecture.md`](../architecture.md) — how the system is actually built
 
 ## Completed
 
