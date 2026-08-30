@@ -63,7 +63,7 @@ The workflow certifies the image that was **already released** — it never rebu
 
 To trigger a certification release, go to **Actions → Red Hat Certification Release → Run workflow** and provide:
 
-- `version` — EDDI version (e.g., `6.3.0`) — must already be released on Docker Hub
+- `version` — EDDI version (e.g., `6.4.0`) — must already be released on Docker Hub
 - `release` — Incremental release number (e.g., `1`, `2`, `3`) — lets the same version be re-submitted
 - `submit` — Whether to submit results to Red Hat (`true`/`false`)
 
@@ -187,5 +187,5 @@ docker run -d \
   -e QUARKUS_OIDC_AUTH_SERVER_URL='https://keycloak.example.com/realms/eddi' \
   -e QUARKUS_OIDC_CLIENT_ID=eddi \
   -e QUARKUS_OIDC_CREDENTIALS_SECRET="$OIDC_CLIENT_SECRET" \
-  labsai/eddi:6.3.0
+  labsai/eddi:6.4.0
 ```

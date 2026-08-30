@@ -81,7 +81,7 @@
 FROM registry.access.redhat.com/ubi9/openjdk-25-runtime:1.24@sha256:6b320cbb20bd8b74ed4b44d0ea086cc9651bfc64396fbe6c0d906a8da12bdd20
 
 ### Red Hat Container Certification — required labels
-ARG EDDI_VERSION=6.3.0
+ARG EDDI_VERSION=6.4.0
 ARG EDDI_RELEASE=1
 
 LABEL name="labsai/eddi" \

@@ -49,6 +49,85 @@ bottom of this file and are never archived.
 
 ---
 
+## ⬆️ chore(release): EDDI 6.4.0, Quarkus 3.39.1, and every safe patch/minor ahead of the release (2026-08-30)
+
+**Repo:** EDDI (`chore/deps-and-version-6-4-0`)
+
+Two things that belong in one branch, because the version bump is only meaningful once the
+dependency state it will ship is settled: the release number moves `6.3.0` → **`6.4.0`**, and
+every update `versions:display-dependency-updates` reported for the artefacts **we pin ourselves**
+is taken, provided it is a patch or minor of a GA release.
+
+### Dependencies
+
+Quarkus platform `3.38.3` → **`3.39.1`**. The previous bump (aa6c48bfa) deliberately skipped
+`3.39.0.CR1` as a pre-release; `3.39.1` is GA, so the same reasoning now argues for taking it.
+
+Also taken: `quarkus-mcp-server` 1.13.1 → 1.13.2, `classgraph` 4.8.192 → 4.8.194, `jsoup`
+1.23.1 → 1.23.2, `json-schema-validator` 1.5.4 → 1.5.9, `bson4jackson` 2.15.1 → 2.18.0.
+
+`jackson-dataformat-csv` and `jackson-dataformat-xml` are now pinned to **2.22.2** alongside
+`jackson-core`/`jackson-databind`. This is new managed state, not a version bump of something we
+already pinned, and the reason is skew: the Quarkus BOM manages the whole Jackson family at
+2.22.0, and overriding only core and databind for the two advisories left the two dataformat
+modules we declare a patch behind their own core. Same family, same patch.
+
+**Deliberately not taken**, so the release ships a stable state: `jsonschema-generator` 5.0.0,
+`json-path` 3.0.0, `json-schema-validator` 3.0.7, `bson4jackson` 3.2.0, `testcontainers` 2.0.5,
+`vertx-web-client` 5.1.6, `wiremock` 4.0.0-beta.38, `quarkus-mcp-server` 2.0.0,
+`maven-compiler-plugin` 4.0.0-beta-5, `maven-surefire-plugin` 3.6.0-M1 and
+`reactor-netty-http` 1.4.0-M1 — every one a major jump, a milestone, or a beta. `mockito-core`
+5.21.0 → 5.23.0 and `snakeyaml` 2.6 → 2.7 are managed by the Quarkus BOM, so they are the
+platform's to move, not ours.
+
+**The security pins survive the platform bump**, which was checked rather than assumed —
+`dependency:list` on the built tree resolves `jackson-core`/`jackson-databind` 2.22.2,
+`postgresql` 42.7.13, `bcprov-lts8on` 2.73.12.1, `jinjava` 2.8.4, `reactor-netty-http` 1.2.8 and
+`jnats` 2.26.2. The `ban-jackson3` enforcer rule still passes, so the Elasticsearch client has
+not smuggled `tools.jackson` back in under 3.39.1.
+
+### Version
+
+`6.3.0` → `6.4.0` across the same artefact set the previous two bumps used (7a64f9c84,
+c0835c98d), rather than a blanket grep:
+
+- **Build/runtime** — `pom.xml`, `application.properties` (`projectVersion`,
+  `smallrye-openapi.info-version`, `container-image.additional-tags`), `OpenApiConfig` `@Info`,
+  `Dockerfile` `EDDI_VERSION` build arg.
+- **Deployment** — helm `Chart.yaml` appVersion + `values.yaml` image tag, k8s deployment and
+  quickstart (version labels, pinned image tag, cosign/crane comment examples),
+  `redhat-certify.yml` workflow input default.
+- **Docs** — `build-reproducibility.md`, `redhat-openshift.md` and `developer-quickstart.md`, the
+  three pages whose copy-pasteable commands name the current tag. The per-page version headers
+  are already dynamic release badges.
+
+Two differences from the previous bump's file set. `src/main/resources/initial-agents/` no longer
+exists, so there is no bundled `Agent+Father-<version>.zip` to rename and no
+`available_agents.txt` to follow it. And `developer-quickstart.md` is new to the set — its
+`EDDI_VERSION=6.3.0 docker compose up -d` was added after the 6.3.0 bump.
+
+**Left at 6.3.0 deliberately**, because these are historical facts and not claims about the
+current release: every `@since 6.3.0` and `@Deprecated(since = "6.3.0")`, the "pre-6.3.0
+behaviour" notes in `application.properties`, `docs/hitl.md` and `docs/configuration-reference.md`
+describing the `eddi.hitl.tool.task-approvals.mode=replace` legacy path, and the worked examples
+in `release-signing.md` / `release-versioning.md`, which illustrate the tagging flow rather than
+name the shipping version. The `6.3.0` in the bundled Manager JS assets is built output from the
+EDDI-Manager repo and moves when that bundle is rebuilt.
+
+### Verified
+
+`mvnw compile` is green. The full unit run is **20,221 tests, 8 failures, 213 errors, 3 skipped**,
+and every one of those 221 is this sandbox rather than the bump: `Unable to establish loopback
+connection`, `failed to create a child event loop`, `IOReactorException: Failure opening selector`
+(no socket binding), or `Could not find a valid Docker environment` (the Mongo and Postgres
+container stores). Causation was checked rather than assumed, because Quarkus is a platform bump
+and "environmental" is exactly what a real regression would hide behind: the nine affected classes
+were re-run against the pre-bump `pom.xml` and produced **151 tests, 8 failures, 123 errors** — the
+same counts, and `diff` over the 146 reported error and failure lines shows the *same test methods*
+failing in the same way before and after. CI is the gate for the socket- and Docker-bound cases.
+
+---
+
 ## 📋 docs(config): document the four workspace properties that were breaking `main` (2026-08-30)
 
 **Repo:** EDDI (`fix/connection-extra-auth-params-code-verifier`)
