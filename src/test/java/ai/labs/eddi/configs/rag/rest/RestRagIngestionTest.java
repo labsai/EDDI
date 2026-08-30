@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.rag.rest;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.rag.IRestRagStore;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.modules.rag.RagIngestionService;
@@ -31,7 +32,7 @@ class RestRagIngestionTest {
     @BeforeEach
     void setUp() {
         openMocks(this);
-        restRagIngestion = new RestRagIngestion(restRagStore, ragIngestionService);
+        restRagIngestion = new RestRagIngestion(restRagStore, ragIngestionService, mock(ResourceAccessGuard.class));
     }
 
     @Test

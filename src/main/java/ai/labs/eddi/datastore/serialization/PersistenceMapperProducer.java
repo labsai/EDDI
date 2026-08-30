@@ -38,6 +38,12 @@ public class PersistenceMapperProducer {
         // rather than fail. This repo has already been bitten once by an implicit date
         // format (commit dc117cddc).
         mapper.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, true);
-        return mapper;
+
+        // Wire-only fields dropped here rather than annotated on the model, because
+        // the model is shared with the REST mapper, which does need them. Both
+        // storage backends reach storage through this mapper — DescriptorStore is
+        // DB-agnostic and goes through IDocumentBuilder either way — so this one
+        // registration covers MongoDB and PostgreSQL.
+        return PersistenceMixins.register(mapper);
     }
 }

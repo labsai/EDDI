@@ -5,6 +5,8 @@
 package ai.labs.eddi.configs.workflows.rest;
 
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.configs.descriptors.model.AccessLevel;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
@@ -41,17 +43,33 @@ public class RestWorkflowStore implements IRestWorkflowStore {
     private final IJsonSchemaCreator jsonSchemaCreator;
     private final RestVersionInfo<WorkflowConfiguration> restVersionInfo;
     private final IDocumentDescriptorStore documentDescriptorStore;
+    private final ResourceAccessGuard resourceAccessGuard;
 
     private static final Logger log = Logger.getLogger(RestWorkflowStore.class);
 
     @Inject
     public RestWorkflowStore(IWorkflowStore workflowStore, ResourceClientLibrary resourceClientLibrary,
-            IDocumentDescriptorStore documentDescriptorStore, IJsonSchemaCreator jsonSchemaCreator) {
-        restVersionInfo = new RestVersionInfo<>(resourceURI, workflowStore, documentDescriptorStore);
+            IDocumentDescriptorStore documentDescriptorStore, IJsonSchemaCreator jsonSchemaCreator,
+            ResourceAccessGuard resourceAccessGuard) {
+        this.resourceAccessGuard = resourceAccessGuard;
+        restVersionInfo = new RestVersionInfo<>(resourceURI, workflowStore, documentDescriptorStore, resourceAccessGuard);
         this.documentDescriptorStore = documentDescriptorStore;
         this.workflowStore = workflowStore;
         this.resourceClientLibrary = resourceClientLibrary;
         this.jsonSchemaCreator = jsonSchemaCreator;
+    }
+
+    /**
+     * Drops descriptors the caller may not view. Mirrors
+     * {@code ResourceAccessGuard.requireAccess(id, VIEW, …)} exactly, so a caller
+     * never lists something they could not then read.
+     */
+    private List<DocumentDescriptor> visibleOnly(List<DocumentDescriptor> descriptors) {
+        if (descriptors == null || descriptors.isEmpty()) {
+            return descriptors;
+        }
+        return descriptors.stream().filter(d -> resourceAccessGuard.canAccess(d, AccessLevel.VIEW))
+                .map(resourceAccessGuard::redactForCaller).toList();
     }
 
     @Override
@@ -77,7 +95,14 @@ public class RestWorkflowStore implements IRestWorkflowStore {
         }
 
         try {
-            return workflowStore.getWorkflowDescriptorsContainingResource(containingResourceUri, includePreviousVersions);
+            // Post-filtered rather than query-filtered: this is a reverse-reference lookup
+            // in the store, not a descriptor listing, so there is no AccessScope to hand
+            // it. Unfiltered it is a cross-workspace enumeration — anyone holding one
+            // resource URI could list every resource in the deployment that references it,
+            // with the full descriptor payload. The page can come back short; that is the
+            // right trade for a diagnostic listing bounded by how many things reference
+            // one resource.
+            return visibleOnly(workflowStore.getWorkflowDescriptorsContainingResource(containingResourceUri, includePreviousVersions));
         } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {
             throw sneakyThrow(e);
         }
@@ -158,6 +183,9 @@ public class RestWorkflowStore implements IRestWorkflowStore {
 
     @Override
     public Response deleteWorkflow(String id, Integer version, Boolean permanent, Boolean cascade) {
+        // Before the cascade, not after: restVersionInfo.delete() checks at the end,
+        // by which point the referenced resources would already be gone.
+        restVersionInfo.requireOwnAccess(id);
         if (cascade) {
             try {
                 WorkflowConfiguration workflowConfig = workflowStore.read(id, version);
@@ -244,6 +272,7 @@ public class RestWorkflowStore implements IRestWorkflowStore {
 
     @Override
     public Response duplicateWorkflow(String id, Integer version, Boolean deepCopy) {
+        restVersionInfo.requireViewAccess(id);
         restVersionInfo.validateParameters(id, version);
         try {
             WorkflowConfiguration workflowConfig = workflowStore.read(id, version);
@@ -269,7 +298,7 @@ public class RestWorkflowStore implements IRestWorkflowStore {
             // URIs
             IResourceStore.IResourceId resourceId = restVersionInfo.createDocument(workflowConfig);
             URI createdUri = RestUtilities.createURI(resourceURI, resourceId.getId(), versionQueryParam, resourceId.getVersion());
-            createDocumentDescriptorForDuplicate(documentDescriptorStore, id, version, createdUri);
+            createDocumentDescriptorForDuplicate(documentDescriptorStore, resourceAccessGuard, id, version, createdUri);
 
             return Response.created(createdUri).location(createdUri)
                     .header("X-Resource-URI", createdUri.toString())
@@ -313,7 +342,8 @@ public class RestWorkflowStore implements IRestWorkflowStore {
                 newResourceLocation = duplicateResourceResponse.getLocation();
 
                 var oldResourceId = RestUtilities.extractResourceId(oldResourceUri);
-                createDocumentDescriptorForDuplicate(documentDescriptorStore, oldResourceId.getId(), oldResourceId.getVersion(), newResourceLocation);
+                createDocumentDescriptorForDuplicate(documentDescriptorStore, resourceAccessGuard, oldResourceId.getId(), oldResourceId.getVersion(),
+                        newResourceLocation);
             }
         } catch (Exception e) {
             throw new ServiceException(e.getLocalizedMessage(), e);

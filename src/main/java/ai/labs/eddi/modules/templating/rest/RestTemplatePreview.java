@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.templating.rest;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.memory.ConversationMemoryUtilities;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
@@ -40,12 +41,19 @@ public class RestTemplatePreview implements IRestTemplatePreview {
     private final PromptSnippetService promptSnippetService;
     private final ConversationAccessGuard conversationAccessGuard;
 
+    private final ResourceAccessGuard resourceAccessGuard;
+
+    /** Stand-in for a snippet body the caller may not read. */
+    private static final String REDACTED = "<redacted>";
+
     @Inject
     public RestTemplatePreview(ITemplatingEngine templatingEngine,
             IConversationMemoryStore conversationMemoryStore,
             IMemoryItemConverter memoryItemConverter,
             PromptSnippetService promptSnippetService,
-            ConversationAccessGuard conversationAccessGuard) {
+            ConversationAccessGuard conversationAccessGuard,
+            ResourceAccessGuard resourceAccessGuard) {
+        this.resourceAccessGuard = resourceAccessGuard;
         this.templatingEngine = templatingEngine;
         this.conversationMemoryStore = conversationMemoryStore;
         this.memoryItemConverter = memoryItemConverter;
@@ -71,16 +79,34 @@ public class RestTemplatePreview implements IRestTemplatePreview {
             templateData = buildDefaultSampleData();
         }
 
-        // Inject prompt snippets — same as LlmTask.execute()
+        // Inject prompt snippets — same as LlmTask.execute(), except that a caller
+        // who does not see everything gets the NAMES with the contents replaced.
+        //
+        // The redaction has to happen here, in the map the template is rendered
+        // against, and not only in the reference panel below. The caller supplies
+        // the template, so redacting the panel alone is no protection at all: one
+        // call lists every snippet name, and a second call whose template is
+        // "{snippets.<name>}" prints the content the panel refused to show. That
+        // was a live hole, not a hypothetical — snippets are a guarded
+        // configuration type, and this endpoint would otherwise hand any editor
+        // the full text of every colleague's prompt building blocks.
         Map<String, Object> snippets = promptSnippetService.getAll();
+        boolean redactSnippets = !resourceAccessGuard.seesEverything();
         if (!snippets.isEmpty()) {
-            templateData.put("snippets", snippets);
+            templateData.put("snippets", redactSnippets ? redactValues(snippets) : snippets);
         }
 
         // Flatten keys for the variable reference panel
         List<String> availableVariables = new ArrayList<>();
         Map<String, Object> variableValues = new LinkedHashMap<>();
         flattenKeys("", templateData, availableVariables, variableValues, 4);
+
+        // Belt and braces: the panel is flattened from the already-redacted map, so
+        // this only catches a snippet whose own value is a nested structure that
+        // flattening walked into.
+        if (!snippets.isEmpty() && redactSnippets) {
+            variableValues.replaceAll((key, value) -> key.startsWith("snippets.") ? REDACTED : value);
+        }
 
         // Resolve template
         try {
@@ -90,6 +116,21 @@ public class RestTemplatePreview implements IRestTemplatePreview {
             LOGGER.debugv("Template preview resolution error: {0}", e.getMessage());
             return new TemplatePreviewResponse(null, availableVariables, variableValues, e.getMessage());
         }
+    }
+
+    /**
+     * The same snippet names with every value replaced.
+     * <p>
+     * Names are kept because a preview that cannot tell you which
+     * {@code {snippets.x}} references resolve is not much of a preview, and a name
+     * is not the secret — the content is. Rendering then yields {@code <redacted>}
+     * where the content would have been, which is the honest answer rather than a
+     * silent blank.
+     */
+    private static Map<String, Object> redactValues(Map<String, Object> snippets) {
+        Map<String, Object> redacted = new LinkedHashMap<>(snippets.size());
+        snippets.keySet().forEach(key -> redacted.put(key, REDACTED));
+        return redacted;
     }
 
     /**

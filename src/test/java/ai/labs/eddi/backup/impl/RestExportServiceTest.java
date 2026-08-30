@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.backup.impl;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.backup.IZipArchive;
 import ai.labs.eddi.backup.model.ExportPreview;
 import ai.labs.eddi.configs.agents.IAgentStore;
@@ -84,7 +85,7 @@ class RestExportServiceTest {
                 dictionaryStore, behaviorStore, httpCallsStore, llmStore,
                 propertySetterStore, outputStore, mcpCallsStore, ragStore,
                 snippetStore, jsonSerialization, zipArchive, secretScrubber,
-                scheduleStore);
+                scheduleStore, mock(ResourceAccessGuard.class));
     }
 
     // ─── getAgentZipArchive security ─────────────────────────────

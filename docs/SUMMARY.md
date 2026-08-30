@@ -60,6 +60,7 @@
 ## Security & Compliance
 
 - [Security](security.md)
+- [Workspaces (per-user isolation & sharing)](workspaces.md)
 - [Secrets Vault](secrets-vault.md)
 - [Global Variables](global-variables.md)
 - [Audit Ledger](audit-ledger.md)

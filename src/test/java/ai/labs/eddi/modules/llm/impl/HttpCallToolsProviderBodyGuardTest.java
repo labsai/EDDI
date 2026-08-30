@@ -4,12 +4,12 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
-import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.apicalls.model.ApiCall;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.apicalls.model.Request;
-import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
+import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.datastore.serialization.JsonSerialization;
@@ -74,8 +74,8 @@ class HttpCallToolsProviderBodyGuardTest {
     private static final String TOOL_NAME = "setupAgent";
 
     private IConversationMemory memory;
-    private IRestAgentStore agentStore;
-    private IRestWorkflowStore workflowStore;
+    private IAgentStore agentStore;
+    private IWorkflowStore workflowStore;
     private IResourceClientLibrary resourceClientLibrary;
     private IApiCallExecutor apiCallExecutor;
     private IMemoryItemConverter memoryItemConverter;
@@ -90,8 +90,8 @@ class HttpCallToolsProviderBodyGuardTest {
         memory = mock(IConversationMemory.class);
         when(memory.getAgentId()).thenReturn(AGENT_ID);
         when(memory.getAgentVersion()).thenReturn(AGENT_VERSION);
-        agentStore = mock(IRestAgentStore.class);
-        workflowStore = mock(IRestWorkflowStore.class);
+        agentStore = mock(IAgentStore.class);
+        workflowStore = mock(IWorkflowStore.class);
         resourceClientLibrary = mock(IResourceClientLibrary.class);
         apiCallExecutor = mock(IApiCallExecutor.class);
         memoryItemConverter = mock(IMemoryItemConverter.class);
@@ -493,14 +493,14 @@ class HttpCallToolsProviderBodyGuardTest {
     private ToolExecutor executorFor(ApiCall apiCall) throws Exception {
         var agentConfig = new AgentConfiguration();
         agentConfig.setWorkflows(List.of(URI.create(WORKFLOW_URI)));
-        when(agentStore.readAgent(AGENT_ID, AGENT_VERSION)).thenReturn(agentConfig);
+        when(agentStore.read(AGENT_ID, AGENT_VERSION)).thenReturn(agentConfig);
 
         var step = new WorkflowConfiguration.WorkflowStep();
         step.setType(URI.create("eddi://ai.labs.httpcalls"));
         step.setConfig(Map.of("uri", HTTPCALLS_URI));
         var workflowConfig = new WorkflowConfiguration();
         workflowConfig.setWorkflowSteps(List.of(step));
-        when(workflowStore.readWorkflow("wf-1", 1)).thenReturn(workflowConfig);
+        when(workflowStore.read("wf-1", 1)).thenReturn(workflowConfig);
 
         var httpCallsConfig = new ApiCallsConfiguration();
         httpCallsConfig.setTargetServerUrl("https://eddi.example");

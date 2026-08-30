@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.backup.impl;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.backup.IZipArchive;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
@@ -89,7 +90,7 @@ class RestExportServiceCleanupTest {
                 mock(IDictionaryStore.class), mock(IRuleSetStore.class), mock(IApiCallsStore.class),
                 mock(ILlmStore.class), mock(IPropertySetterStore.class), mock(IOutputStore.class),
                 mock(IMcpCallsStore.class), mock(IRagStore.class), mock(IPromptSnippetStore.class),
-                jsonSerialization, zipArchive, secretScrubber, scheduleStore);
+                jsonSerialization, zipArchive, secretScrubber, scheduleStore, mock(ResourceAccessGuard.class));
 
         tmpDir = Paths.get(FileUtilities.buildPath(System.getProperty("user.dir"), "tmp"));
         exportRoot = tmpDir.resolve("export");

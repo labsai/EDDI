@@ -4,7 +4,7 @@
  */
 package ai.labs.eddi.integrations.channels;
 
-import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration.ChannelConnector;
 import ai.labs.eddi.configs.channels.IChannelIntegrationStore;
@@ -55,7 +55,7 @@ class ChannelTargetRouterRefreshTest {
     private IChannelIntegrationStore channelStore;
     private IDocumentDescriptorStore descriptorStore;
     private IRestAgentAdministration agentAdmin;
-    private IRestAgentStore agentStore;
+    private IAgentStore agentStore;
     private SecretResolver secretResolver;
     private ChannelTargetRouter router;
 
@@ -67,7 +67,7 @@ class ChannelTargetRouterRefreshTest {
         channelStore = mock(IChannelIntegrationStore.class);
         descriptorStore = mock(IDocumentDescriptorStore.class);
         agentAdmin = mock(IRestAgentAdministration.class);
-        agentStore = mock(IRestAgentStore.class);
+        agentStore = mock(IAgentStore.class);
         secretResolver = mock(SecretResolver.class);
 
         ICacheFactory cacheFactory = mock(ICacheFactory.class);
@@ -211,7 +211,7 @@ class ChannelTargetRouterRefreshTest {
 
         when(agentAdmin.getDeploymentStatuses(Deployment.Environment.production))
                 .thenReturn(List.of(status));
-        when(agentStore.readAgent(eq(agentId), eq(1))).thenReturn(agentConfig);
+        when(agentStore.read(eq(agentId), eq(1))).thenReturn(agentConfig);
     }
 
     // ─── Public API — resolveTarget ────────────────────────────────────────────
@@ -887,7 +887,7 @@ class ChannelTargetRouterRefreshTest {
                     Deployment.Status.READY, desc);
             when(agentAdmin.getDeploymentStatuses(Deployment.Environment.production))
                     .thenReturn(List.of(status));
-            when(agentStore.readAgent(eq(AGENT_ID), eq(1))).thenReturn(agentConfig);
+            when(agentStore.read(eq(AGENT_ID), eq(1))).thenReturn(agentConfig);
 
             assertNull(router.resolveTarget("slack", CHANNEL_ID, "hello"));
             assertFalse(router.hasAnyChannels("slack"));
@@ -913,7 +913,7 @@ class ChannelTargetRouterRefreshTest {
                     Deployment.Status.READY, desc);
             when(agentAdmin.getDeploymentStatuses(Deployment.Environment.production))
                     .thenReturn(List.of(status));
-            when(agentStore.readAgent(eq(AGENT_ID), eq(1))).thenReturn(agentConfig);
+            when(agentStore.read(eq(AGENT_ID), eq(1))).thenReturn(agentConfig);
 
             assertNull(router.resolveTarget("slack", CHANNEL_ID, "hello"));
         }
@@ -945,7 +945,7 @@ class ChannelTargetRouterRefreshTest {
                     Deployment.Status.READY, desc);
             when(agentAdmin.getDeploymentStatuses(Deployment.Environment.production))
                     .thenReturn(List.of(status));
-            when(agentStore.readAgent(eq(AGENT_ID), eq(1))).thenReturn(agentConfig);
+            when(agentStore.read(eq(AGENT_ID), eq(1))).thenReturn(agentConfig);
             when(secretResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
 
             ResolvedTarget result = router.resolveTarget("slack", CHANNEL_ID, "hello");

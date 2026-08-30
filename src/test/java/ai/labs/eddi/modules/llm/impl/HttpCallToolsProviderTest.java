@@ -4,8 +4,8 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
-import ai.labs.eddi.configs.agents.IRestAgentStore;
-import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
+import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
@@ -40,7 +40,7 @@ import static org.mockito.Mockito.*;
 class HttpCallToolsProviderTest {
 
     private HttpCallToolsProvider provider() {
-        return new HttpCallToolsProvider(mock(IRestAgentStore.class), mock(IRestWorkflowStore.class),
+        return new HttpCallToolsProvider(mock(IAgentStore.class), mock(IWorkflowStore.class),
                 mock(IResourceClientLibrary.class), mock(IApiCallExecutor.class), mock(IJsonSerialization.class),
                 mock(IMemoryItemConverter.class));
     }
@@ -59,8 +59,8 @@ class HttpCallToolsProviderTest {
 
     @Test
     void contribute_explicitlyDisabled_returnsEmptyWithoutDiscovering() {
-        var restAgentStore = mock(IRestAgentStore.class);
-        var provider = new HttpCallToolsProvider(restAgentStore, mock(IRestWorkflowStore.class),
+        var restAgentStore = mock(IAgentStore.class);
+        var provider = new HttpCallToolsProvider(restAgentStore, mock(IWorkflowStore.class),
                 mock(IResourceClientLibrary.class), mock(IApiCallExecutor.class), mock(IJsonSerialization.class),
                 mock(IMemoryItemConverter.class));
 

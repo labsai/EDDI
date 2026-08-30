@@ -4,7 +4,7 @@
  */
 package ai.labs.eddi.engine.a2a;
 
-import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
@@ -35,18 +35,18 @@ public class AgentCardService {
 
     private static final Logger LOGGER = Logger.getLogger(AgentCardService.class);
 
-    private final IRestAgentStore restAgentStore;
+    private final IAgentStore agentStore;
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final String baseUrl;
     private final boolean authEnabled;
     private final String oidcAuthServerUrl;
 
     @Inject
-    public AgentCardService(IRestAgentStore restAgentStore, IDocumentDescriptorStore documentDescriptorStore,
+    public AgentCardService(IAgentStore agentStore, IDocumentDescriptorStore documentDescriptorStore,
             @ConfigProperty(name = "eddi.a2a.base-url", defaultValue = "http://localhost:7070") String baseUrl,
             @ConfigProperty(name = "authorization.enabled", defaultValue = "false") boolean authEnabled,
             @ConfigProperty(name = "quarkus.oidc.auth-server-url") Optional<String> oidcAuthServerUrl) {
-        this.restAgentStore = restAgentStore;
+        this.agentStore = agentStore;
         this.documentDescriptorStore = documentDescriptorStore;
         this.baseUrl = baseUrl;
         this.authEnabled = authEnabled;
@@ -64,11 +64,11 @@ public class AgentCardService {
      */
     public AgentCard getAgentCard(String agentId) {
         try {
-            var resourceId = restAgentStore.getCurrentResourceId(agentId);
+            var resourceId = agentStore.getCurrentResourceId(agentId);
             if (resourceId == null) {
                 return null;
             }
-            AgentConfiguration config = restAgentStore.readAgent(agentId, resourceId.getVersion());
+            AgentConfiguration config = agentStore.read(agentId, resourceId.getVersion());
             if (config == null || !config.isA2aEnabled()) {
                 return null;
             }
@@ -88,7 +88,13 @@ public class AgentCardService {
     public List<AgentCard> listA2AAgents() {
         List<AgentCard> cards = new ArrayList<>();
         try {
-            List<DocumentDescriptor> descriptors = restAgentStore.readAgentDescriptors("", 0, 100);
+            // Unrestricted deliberately: an Agent Card is published to A2A *peers*, which
+            // are
+            // remote systems rather than EDDI users, so the caller has no workspace to
+            // scope
+            // to. The gate for this surface is `isA2aEnabled()` on the agent plus whatever
+            // authentication fronts the A2A endpoints — not the workspace model.
+            List<DocumentDescriptor> descriptors = documentDescriptorStore.readDescriptors("ai.labs.agent", "", 0, 100, false);
             if (descriptors == null) {
                 return cards;
             }

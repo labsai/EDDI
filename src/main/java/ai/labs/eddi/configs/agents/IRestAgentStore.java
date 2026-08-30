@@ -35,6 +35,16 @@ public interface IRestAgentStore extends IRestVersionInfo {
     @Operation(operationId = "readAgentJsonSchema", description = "Read JSON Schema for Agent definition.")
     Response readJsonSchema();
 
+    /**
+     * @param space
+     *            narrows the listing to one space id ({@code user:<principal>} or
+     *            {@code team:<group>}) — the server side of the Manager's space
+     *            switcher, and the reason it is a query parameter rather than a
+     *            client-side filter: page 2 of "everything" is not page 2 of "this
+     *            space". A narrowing only: asking for a space you cannot reach
+     *            returns nothing rather than granting it. Blank means every space
+     *            you can reach.
+     */
     @GET
     @Path("descriptors")
     @Produces(MediaType.APPLICATION_JSON)
@@ -44,7 +54,9 @@ public interface IRestAgentStore extends IRestVersionInfo {
                                                   @QueryParam("index")
                                                   @DefaultValue("0") Integer index,
                                                   @QueryParam("limit")
-                                                  @DefaultValue("20") Integer limit);
+                                                  @DefaultValue("20") Integer limit,
+                                                  @QueryParam("space")
+                                                  @DefaultValue("") String space);
 
     @POST
     @Path("descriptors")

@@ -19,9 +19,9 @@ import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.modules.apicalls.impl.PrePostUtils;
 import ai.labs.eddi.modules.llm.impl.builder.ILanguageModelBuilder;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
-import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.properties.model.Property;
-import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
+import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
 import ai.labs.eddi.modules.llm.tools.impl.*;
 import ai.labs.eddi.secrets.SecretResolver;
@@ -109,7 +109,7 @@ class LlmTaskExtendedTest {
                 templatingEngine, jsonSerialization, prePostUtils,
                 chatModelRegistry,
                 mock(IApiCallExecutor.class),
-                mock(IRestAgentStore.class), mock(IRestWorkflowStore.class),
+                mock(IAgentStore.class), mock(IWorkflowStore.class),
                 mock(RagContextProvider.class),
                 new TokenCounterFactory(), conversationSummarizer,
                 promptSnippetService, globalVariableResolver,

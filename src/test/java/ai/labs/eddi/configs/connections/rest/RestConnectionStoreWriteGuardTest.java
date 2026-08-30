@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.connections.rest;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.connections.IConnectionStore;
 import ai.labs.eddi.configs.connections.model.AuthType;
 import ai.labs.eddi.configs.connections.model.Binding;
@@ -65,7 +66,7 @@ class RestConnectionStoreWriteGuardTest {
 
     private RestConnectionStore rest() {
         return new RestConnectionStore(connectionStore, mock(IDocumentDescriptorStore.class), mock(IJsonSchemaCreator.class), connectionRegistry,
-                grantStore, secretProvider, true);
+                grantStore, secretProvider, true, mock(ResourceAccessGuard.class));
     }
 
     /** A document that passes every OTHER check, so a refusal is attributable. */

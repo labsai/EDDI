@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.connections.IRestConnectionStore;
 import ai.labs.eddi.configs.connections.model.Binding;
 import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
@@ -49,8 +50,9 @@ public class RestConnectionStore implements IRestConnectionStore {
     public RestConnectionStore(IConnectionStore connectionStore, IDocumentDescriptorStore documentDescriptorStore,
             IJsonSchemaCreator jsonSchemaCreator, ConnectionRegistry connectionRegistry, IConnectionGrantStore grantStore,
             ISecretProvider secretProvider,
-            @ConfigProperty(name = "authorization.enabled", defaultValue = "false") boolean authorizationEnabled) {
-        this.restVersionInfo = new RestVersionInfo<>(resourceURI, connectionStore, documentDescriptorStore);
+            @ConfigProperty(name = "authorization.enabled", defaultValue = "false") boolean authorizationEnabled,
+            ResourceAccessGuard resourceAccessGuard) {
+        this.restVersionInfo = new RestVersionInfo<>(resourceURI, connectionStore, documentDescriptorStore, resourceAccessGuard);
         this.connectionStore = connectionStore;
         this.jsonSchemaCreator = jsonSchemaCreator;
         this.connectionRegistry = connectionRegistry;

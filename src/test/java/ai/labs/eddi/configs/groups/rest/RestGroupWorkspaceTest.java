@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.groups.rest;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.IGroupWorkspaceStore;
 import ai.labs.eddi.configs.groups.IRestGroupWorkspace.BacklogTaskRequest;
@@ -61,7 +62,7 @@ class RestGroupWorkspaceTest {
         var principal = mock(Principal.class);
         lenient().when(principal.getName()).thenReturn("pm@example.com");
         lenient().when(identity.getPrincipal()).thenReturn(principal);
-        rest = new RestGroupWorkspace(workspaceStore, groupStore, scheduleStore, teamCadenceService, identity);
+        rest = new RestGroupWorkspace(workspaceStore, groupStore, scheduleStore, teamCadenceService, identity, mock(ResourceAccessGuard.class));
 
         var resourceId = mock(IResourceStore.IResourceId.class);
         lenient().when(resourceId.getVersion()).thenReturn(1);

@@ -13,6 +13,7 @@ import ai.labs.eddi.configs.migration.ChannelConnectorMigration;
 import ai.labs.eddi.configs.migration.IMigrationManager;
 import ai.labs.eddi.configs.migration.V6QuteMigration;
 import ai.labs.eddi.configs.migration.V6RenameMigration;
+import ai.labs.eddi.configs.migration.WorkspaceAccessIndexMigration;
 import ai.labs.eddi.configs.rules.IRuleSetStore;
 import ai.labs.eddi.configs.rules.model.RuleConfiguration;
 import ai.labs.eddi.configs.rules.model.RuleGroupConfiguration;
@@ -76,6 +77,7 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
     private final V6RenameMigration v6RenameMigration;
     private final V6QuteMigration v6QuteMigration;
     private final ChannelConnectorMigration channelConnectorMigration;
+    private final WorkspaceAccessIndexMigration workspaceAccessIndexMigration;
     private final IAgentsReadiness agentsReadiness;
     private final IRuntime runtime;
     private final IWorkflowStore workflowStore;
@@ -89,7 +91,8 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
     public AgentDeploymentManagement(IDeploymentStore deploymentStore, IAgentFactory agentFactory, IAgentStore agentStore,
             IAgentsReadiness agentsReadiness, IConversationMemoryStore conversationMemoryStore, IDocumentDescriptorStore documentDescriptorStore,
             IMigrationManager migrationManager, V6RenameMigration v6RenameMigration, V6QuteMigration v6QuteMigration,
-            ChannelConnectorMigration channelConnectorMigration, IRuntime runtime, IWorkflowStore workflowStore, IRuleSetStore ruleSetStore,
+            ChannelConnectorMigration channelConnectorMigration, WorkspaceAccessIndexMigration workspaceAccessIndexMigration,
+            IRuntime runtime, IWorkflowStore workflowStore, IRuleSetStore ruleSetStore,
             @ConfigProperty(name = "eddi.conversations.maximumLifeTimeOfIdleConversationsInDays") int maximumLifeTimeOfIdleConversationsInDays) {
         this.deploymentStore = deploymentStore;
         this.agentFactory = agentFactory;
@@ -101,6 +104,7 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
         this.v6RenameMigration = v6RenameMigration;
         this.v6QuteMigration = v6QuteMigration;
         this.channelConnectorMigration = channelConnectorMigration;
+        this.workspaceAccessIndexMigration = workspaceAccessIndexMigration;
         this.runtime = runtime;
         this.workflowStore = workflowStore;
         this.ruleSetStore = ruleSetStore;
@@ -137,6 +141,13 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
             channelConnectorMigration.runIfNeeded();
         } catch (Exception e) {
             LOGGER.error("Channel connector migration failed — will retry on next startup", e);
+        }
+        try {
+            // Last of the migrations: it re-derives the access index from whatever the
+            // earlier ones left behind, so running it before them would index stale state.
+            workspaceAccessIndexMigration.runIfNeeded();
+        } catch (Exception e) {
+            LOGGER.error("Workspace access-index migration failed — will retry on next startup", e);
         }
 
         migrationManager.startMigrationIfFirstTimeRun(() -> {

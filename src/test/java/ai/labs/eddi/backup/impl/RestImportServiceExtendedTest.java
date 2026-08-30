@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.backup.impl;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.backup.IZipArchive;
 import ai.labs.eddi.backup.model.ImportPreview;
 import ai.labs.eddi.backup.model.ImportPreview.DiffAction;
@@ -69,7 +70,7 @@ class RestImportServiceExtendedTest {
         importService = new RestImportService(
                 zipArchive, jsonSerialization,
                 migrationManager, documentDescriptorStore,
-                templateSyntaxMigrator, structuralMatcher, upgradeExecutor);
+                templateSyntaxMigrator, structuralMatcher, upgradeExecutor, mock(ResourceAccessGuard.class));
     }
 
     // ==================== normalizeVaultReferences ====================

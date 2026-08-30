@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.backup.impl;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.backup.IZipArchive;
 import ai.labs.eddi.backup.model.ImportPreview;
 import ai.labs.eddi.configs.agents.IAgentStore;
@@ -93,7 +94,7 @@ class RestImportServiceRollbackAndCleanupTest {
         importService = new RestImportService(
                 zipArchive, jsonSerialization,
                 mock(IMigrationManager.class), documentDescriptorStore,
-                mock(TemplateSyntaxMigrator.class), structuralMatcher, upgradeExecutor);
+                mock(TemplateSyntaxMigrator.class), structuralMatcher, upgradeExecutor, mock(ResourceAccessGuard.class));
     }
 
     // ==================== D11 — rollback of a partial import ====================

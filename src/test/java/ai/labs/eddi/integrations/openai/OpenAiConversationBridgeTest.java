@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.integrations.openai;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.memory.MemoryKeys;
@@ -84,7 +85,7 @@ class OpenAiConversationBridgeTest {
         bridge = new OpenAiConversationBridge(conversationService, userConversationStore,
                 new OpenAiMessageMapper(objectMapper, 5),
                 OpenAiTestFixtures.config(b -> b.requestTimeoutSeconds = 2),
-                new SimpleMeterRegistry());
+                new SimpleMeterRegistry(), permissiveUseGuard());
         bridge.initMetrics();
     }
 
@@ -695,5 +696,13 @@ class OpenAiConversationBridgeTest {
         ArgumentCaptor<Map<String, Context>> captor = ArgumentCaptor.forClass(Map.class);
         verify(conversationService).startConversation(any(), any(), any(), captor.capture());
         assertTrue(captor.getValue().containsKey(OpenAiConversationBridge.CONTEXT_CHANNEL_INTENT));
+    }
+
+    /**
+     * A guard that admits every agent: a bare mock's void requireAgentUseAccess
+     * does nothing. The /v1 USE gate has its own tests.
+     */
+    private static ResourceAccessGuard permissiveUseGuard() {
+        return mock(ResourceAccessGuard.class);
     }
 }

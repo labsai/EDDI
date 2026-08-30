@@ -4,7 +4,7 @@
  */
 package ai.labs.eddi.integrations.channels;
 
-import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration.ChannelConnector;
 import ai.labs.eddi.configs.channels.IChannelIntegrationStore;
@@ -60,7 +60,7 @@ public class ChannelTargetRouter {
     private final IChannelIntegrationStore channelStore;
     private final IDocumentDescriptorStore descriptorStore;
     private final IRestAgentAdministration agentAdmin;
-    private final IRestAgentStore agentStore;
+    private final IAgentStore agentStore;
     private final SecretResolver secretResolver;
 
     // ─── Cached state (atomic reference swap) ──────────────────────────────────
@@ -111,7 +111,7 @@ public class ChannelTargetRouter {
     public ChannelTargetRouter(IChannelIntegrationStore channelStore,
             IDocumentDescriptorStore descriptorStore,
             IRestAgentAdministration agentAdmin,
-            IRestAgentStore agentStore,
+            IAgentStore agentStore,
             SecretResolver secretResolver,
             ICacheFactory cacheFactory) {
         this.channelStore = channelStore;
@@ -556,7 +556,7 @@ public class ChannelTargetRouter {
                 }
                 String agentId = status.getAgentId();
                 try {
-                    AgentConfiguration agentConfig = agentStore.readAgent(
+                    AgentConfiguration agentConfig = agentStore.read(
                             agentId, status.getAgentVersion());
                     if (agentConfig != null && agentConfig.getChannels() != null) {
                         for (ChannelConnector connector : agentConfig.getChannels()) {

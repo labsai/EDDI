@@ -45,6 +45,7 @@ class A2ATaskHandlerTest {
 
     private IConversationService conversationService;
     private ICacheFactory cacheFactory;
+    private AgentCardService agentCardService;
     private A2ATaskHandler handler;
     private MapCache<String, String> taskCache;
     private MapCache<String, String> contextCache;
@@ -59,6 +60,10 @@ class A2ATaskHandlerTest {
         when(cacheFactory.<String, String>getCache("a2aTaskMapping")).thenReturn(taskCache);
         when(cacheFactory.<String, String>getCache("a2aTaskMapping:context")).thenReturn(contextCache);
 
+        // A2A-enabled by default here; the refusal path has its own test.
+        agentCardService = mock(AgentCardService.class);
+        when(agentCardService.getAgentCard(anyString())).thenReturn(mock(A2AModels.AgentCard.class));
+
         handler = handlerFor(PEER_A);
     }
 
@@ -72,13 +77,13 @@ class A2ATaskHandlerTest {
         when(identity.isAnonymous()).thenReturn(false);
         Principal principal = () -> principalName;
         when(identity.getPrincipal()).thenReturn(principal);
-        return new A2ATaskHandler(conversationService, cacheFactory, identity);
+        return new A2ATaskHandler(conversationService, cacheFactory, identity, agentCardService);
     }
 
     private A2ATaskHandler anonymousHandler() {
         SecurityIdentity identity = mock(SecurityIdentity.class);
         when(identity.isAnonymous()).thenReturn(true);
-        return new A2ATaskHandler(conversationService, cacheFactory, identity);
+        return new A2ATaskHandler(conversationService, cacheFactory, identity, agentCardService);
     }
 
     private static Map<String, Object> sendParams(String taskId, String contextId, String text) {
@@ -149,6 +154,23 @@ class A2ATaskHandlerTest {
             // Cached under the calling peer, not under the bare taskId
             assertEquals("conv-abc", taskCache.get(scopedKey(PEER_A, "task-1")));
             assertNull(taskCache.get("task-1"));
+        }
+
+        @Test
+        @DisplayName("refuses an agent that was never opted into A2A, and starts no conversation")
+        void refusesAgentNotExposedOverA2A() throws Exception {
+            // Discovery already enforced this — listA2AAgents and getAgentCard both hide
+            // an agent with a2aEnabled=false. Conversing did not, so a peer that knew an
+            // id could talk to an agent nobody had exposed, private ones included.
+            // getAgentCard returns null for both "no such agent" and "not enabled", which
+            // is the same answer discovery gives.
+            when(agentCardService.getAgentCard("not-exposed")).thenReturn(null);
+
+            assertThrows(InvalidA2ARequestException.class,
+                    () -> handler.handleTaskSend("not-exposed", sendParams("task-1", null, "Hi!")));
+
+            verify(conversationService, never())
+                    .startConversation(any(), anyString(), anyString(), anyMap());
         }
 
         @Test

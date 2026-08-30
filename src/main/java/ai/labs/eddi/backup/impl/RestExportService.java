@@ -13,6 +13,9 @@ import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
+import ai.labs.eddi.configs.descriptors.model.AccessLevel;
+import ai.labs.eddi.engine.security.spaces.DescriptorAccess;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.apicalls.IApiCallsStore;
 import ai.labs.eddi.configs.llm.ILlmStore;
 import ai.labs.eddi.configs.mcpcalls.IMcpCallsStore;
@@ -101,12 +104,15 @@ public class RestExportService extends AbstractBackupService implements IRestExp
      */
     private static final Pattern SNIPPET_REF_PATTERN = Pattern.compile("snippets\\.([a-zA-Z0-9_\\-]+)");
 
+    private final ResourceAccessGuard resourceAccessGuard;
+
     @Inject
     public RestExportService(IDocumentDescriptorStore documentDescriptorStore, IAgentStore agentStore, IWorkflowStore workflowStore,
             IDictionaryStore regularDictionaryStore, IRuleSetStore behaviorStore, IApiCallsStore httpCallsStore, ILlmStore llmStore,
             IPropertySetterStore propertySetterStore, IOutputStore outputStore, IMcpCallsStore mcpCallsStore, IRagStore ragStore,
             IPromptSnippetStore snippetStore, IJsonSerialization jsonSerialization, IZipArchive zipArchive,
-            SecretScrubber secretScrubber, IScheduleStore scheduleStore) {
+            SecretScrubber secretScrubber, IScheduleStore scheduleStore, ResourceAccessGuard resourceAccessGuard) {
+        this.resourceAccessGuard = resourceAccessGuard;
         this.documentDescriptorStore = documentDescriptorStore;
         this.agentStore = agentStore;
         this.workflowStore = workflowStore;
@@ -155,6 +161,12 @@ public class RestExportService extends AbstractBackupService implements IRestExp
             // Validate agentId early before any path construction (CodeQL
             // java/path-injection)
             sanitizePathComponent(agentId, "agentId");
+
+            // Export reads the agent AND every configuration it references, straight from
+            // the stores — so without this it is a complete read of any agent by id, which
+            // is exactly the capability workspaces exist to remove. VIEW, because exporting
+            // is reading: it is what a recipient of a shared agent is entitled to do.
+            resourceAccessGuard.requireAccess(agentId, AccessLevel.VIEW, "agent");
 
             // Parse selective export filter — null means "export all"
             Set<String> selectedIds = parseSelectedResourceIds(selectedResourceIds);
@@ -296,6 +308,12 @@ public class RestExportService extends AbstractBackupService implements IRestExp
     public ExportPreview previewExport(String agentId, Integer agentVersion) {
         try {
             sanitizePathComponent(agentId, "agentId");
+
+            // Export reads the agent AND every configuration it references, straight from
+            // the stores — so without this it is a complete read of any agent by id, which
+            // is exactly the capability workspaces exist to remove. VIEW, because exporting
+            // is reading: it is what a recipient of a shared agent is entitled to do.
+            resourceAccessGuard.requireAccess(agentId, AccessLevel.VIEW, "agent");
 
             AgentConfiguration agentConfig = agentStore.read(agentId, agentVersion);
             DocumentDescriptor agentDescriptor = documentDescriptorStore.readDescriptor(agentId, agentVersion);
@@ -512,11 +530,40 @@ public class RestExportService extends AbstractBackupService implements IRestExp
         String filename = MessageFormat.format("{0}.descriptor.json", documentId);
         Path filePath = Paths.get(path.toString(), filename);
         deleteFileIfExists(filePath);
+        // Ownership does not travel between deployments: principal and team names mean
+        // something else — or nothing — on the receiving side, and writing them into a
+        // file that leaves the deployment discloses them. See
+        // DescriptorAccess.stripOwnership. Stripped on the copy that is written, not on
+        // the object returned, which callers still use to name the exported resource.
         try (BufferedWriter writer = Files.newBufferedWriter(filePath)) {
-            writer.write(jsonSerialization.serialize(documentDescriptor));
+            writer.write(jsonSerialization.serialize(DescriptorAccess.stripOwnership(copyForExport(documentDescriptor))));
         }
 
         return documentDescriptor;
+    }
+
+    /**
+     * A copy of the descriptor to write into the archive, so stripping ownership
+     * from the exported form cannot alter the object the caller goes on to use.
+     */
+    private static DocumentDescriptor copyForExport(DocumentDescriptor source) {
+        if (source == null) {
+            // The descriptor store can answer null; serialising that wrote "null" into the
+            // archive before this method existed, and still does. Not this method's
+            // business to change.
+            return null;
+        }
+        DocumentDescriptor copy = new DocumentDescriptor();
+        copy.setResource(source.getResource());
+        copy.setName(source.getName());
+        copy.setDescription(source.getDescription());
+        copy.setOriginId(source.getOriginId());
+        copy.setCreatedOn(source.getCreatedOn());
+        copy.setLastModifiedOn(source.getLastModifiedOn());
+        copy.setCreatedBy(source.getCreatedBy());
+        copy.setLastModifiedBy(source.getLastModifiedBy());
+        copy.setDeleted(source.isDeleted());
+        return copy;
     }
 
     private static <T> Map<IResourceId, T> readConfigs(IResourceStore<T> store, List<URI> configUris)
@@ -590,8 +637,11 @@ public class RestExportService extends AbstractBackupService implements IRestExp
         }
 
         try {
+            // Scoped: this sweeps every snippet in the deployment and the export only
+            // filters by referenced NAME afterwards, so an unscoped listing would let an
+            // agent that names a snippet pull in a colleague's snippet of the same name.
             List<DocumentDescriptor> descriptors = documentDescriptorStore.readDescriptors(
-                    "ai.labs.snippet", "", 0, IDescriptorStore.NO_LIMIT, false);
+                    "ai.labs.snippet", "", 0, IDescriptorStore.NO_LIMIT, false, resourceAccessGuard.listingScope());
             if (descriptors == null || descriptors.isEmpty()) {
                 return;
             }
@@ -628,7 +678,8 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                     Path descriptorPath = Paths.get(snippetsDir.toString(), descriptorFilename);
                     deleteFileIfExists(descriptorPath);
                     try (BufferedWriter writer = Files.newBufferedWriter(descriptorPath)) {
-                        writer.write(jsonSerialization.serialize(descriptor));
+                        // Same reason as writeDocumentDescriptor: ownership does not travel.
+                        writer.write(jsonSerialization.serialize(DescriptorAccess.stripOwnership(copyForExport(descriptor))));
                     }
                     exportedCount++;
                 } catch (IResourceStore.ResourceNotFoundException e) {

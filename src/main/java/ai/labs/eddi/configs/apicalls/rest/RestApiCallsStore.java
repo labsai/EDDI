@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.apicalls.rest;
 
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.apicalls.IApiCallsStore;
 import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
@@ -44,8 +45,9 @@ public class RestApiCallsStore implements IRestApiCallsStore {
     private final RestVersionInfo<ApiCallsConfiguration> restVersionInfo;
 
     @Inject
-    public RestApiCallsStore(IApiCallsStore httpCallsStore, IDocumentDescriptorStore documentDescriptorStore, IJsonSchemaCreator jsonSchemaCreator) {
-        restVersionInfo = new RestVersionInfo<>(resourceURI, httpCallsStore, documentDescriptorStore);
+    public RestApiCallsStore(IApiCallsStore httpCallsStore, IDocumentDescriptorStore documentDescriptorStore, IJsonSchemaCreator jsonSchemaCreator,
+            ResourceAccessGuard resourceAccessGuard) {
+        restVersionInfo = new RestVersionInfo<>(resourceURI, httpCallsStore, documentDescriptorStore, resourceAccessGuard);
         this.httpCallsStore = httpCallsStore;
         this.jsonSchemaCreator = jsonSchemaCreator;
     }

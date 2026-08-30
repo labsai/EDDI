@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.agents.rest;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.configs.agents.crypto.AgentPublicKey;
@@ -59,7 +60,7 @@ class RestAgentStoreTest {
     void setUp() {
         openMocks(this);
         restAgentStore = new RestAgentStore(AgentStore, restWorkflowStore, documentDescriptorStore, jsonSchemaCreator, scheduleStore,
-                capabilityRegistryService, deploymentStore);
+                capabilityRegistryService, deploymentStore, mock(ResourceAccessGuard.class));
     }
 
     /** Helper to create a dummy DocumentDescriptor for reference-count mocking */

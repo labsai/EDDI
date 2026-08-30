@@ -559,6 +559,807 @@ addressed immediately afterwards — see the entry above.
 
 ---
 
+## 🔍 fix(workspaces): findings from the final adversarial pass (2026-08-29)
+
+**Repo:** EDDI (`feat/multi-user-spaces-and-sharing`)
+
+A sixth review pass over the whole branch, after `callerLevel` landed. It
+confirmed the earlier fixes and found four things worth acting on — three of
+which are about tests that could not fail.
+
+### The migration recorded itself complete after a failed write
+
+`stampIfNeeded` caught every `setDescriptor` exception, logged a warning and
+returned `false` — which was indistinguishable from "already correct". So a run
+where every write threw still recorded the migration as done, and the class's
+own comment says exactly what that costs: descriptors with no access index are
+invisible in every listing once enforcement is on, with no way to re-run short
+of deleting the log row by hand.
+
+Three outcomes now, not a boolean: `STAMPED`, `SKIPPED` (already correct, or
+carrying nothing addressable — neither retryable) and `FAILED`, which holds the
+migration open. The `MAX_PAGES` exhaustion path did the same thing by a
+different route and is now also treated as incomplete. The existing test covered
+a failed *read* only; the write case is now covered and mutation-checked.
+
+### Nothing failed if a listing stopped calling the guard
+
+`ResourceAccessGuardTest` proves `redactForCaller` strips what it should.
+`AccessScopeTest` proves a space predicate narrows. Neither notices if an
+endpoint stops invoking them — and every test in that area handed the store a
+*mocked* guard, so deleting `descriptors.forEach(accessGuard::redactForCaller)`,
+or replacing `listingScope().withinSpace(space)` with `listingScope()`, left the
+whole suite green.
+
+The same shape as the mix-in test that registered its own mix-in: the unit under
+test was the collaborator, not the wiring. `ListingRedactionWiringTest` uses a
+**real** guard with a restrictive identity and asserts on what actually comes
+back. All three mutations now fail it.
+
+### Grants were disclosed to everyone while enforcement was off
+
+`seesEverything()` is true for every caller in that state, so keying grant
+disclosure on the granted level alone handed every editor the full grant
+audience — real principal and team names — of every resource. Not hypothetical:
+ownership and grants are recorded whenever authentication is on, and the
+documented rollout is to let attribution accumulate *before* switching
+enforcement on. A deployment part-way along that path was broadcasting the
+audience lists it had just built.
+
+Disclosure now asks the question structurally — does this caller actually own it,
+or hold the admin role — which does not depend on the enforcement flag and is
+therefore correct in both states.
+
+### Two assertions in `WorkspacesIT` that could not fail
+
+`?space=.*` asserted `hasSize(0)`, but the IT profile disables authorization, so
+no descriptor is ever stamped with a `spaceId` — an empty result proved only
+that the field was absent, and the test would have passed with the escaping
+removed entirely. It now pins what it can (a metacharacter-laden value is
+handled, not 500) and says plainly where the escaping is actually covered.
+`everyItem(nullValue())` over a page this suite never seeds was vacuous the same
+way; it now creates an agent first.
+
+---
+
+
+
+## 🪪 feat(workspaces): report the caller's access level on listed descriptors (2026-08-29)
+
+**Repo:** EDDI (`feat/multi-user-spaces-and-sharing`)
+
+Closing the gap the last review left open as a decision.
+
+### The gap
+
+A listing gave a recipient no way to tell what they could do with a row. The
+grant list is disclosed at `OWN` only — deliberately, since a published
+resource is readable by everyone and its grant audience is a list of real
+principal and team names — and `ownerId` alone does not answer it either: a
+resource shared with your team at `USE` and one shared at `EDIT` look identical.
+
+So the Manager offered every action on every row and let the server refuse. A
+colleague who shared an agent so you could *talk to* it produced a card with
+Share, Delete and Export on it, all of which 403. That reads as the product
+being broken rather than as the resource not being yours.
+
+### `callerLevel`
+
+`DocumentDescriptor` now carries the level the calling user holds, stamped by
+`ResourceAccessGuard` on the way out. It is unlike every other field on that
+class: it describes the *relationship* between the resource and whoever asked,
+so the same document serialises differently for two callers.
+
+That makes it dangerous in a way the other fields are not, and two properties
+are enforced rather than documented:
+
+- **It can never be stored.** `patchDescriptor` and
+  `ResourceSharingService.writeBack` both read a descriptor and write it back.
+  `redactForCaller` already documented that it must not be called on something
+  about to be written — but documenting is not preventing, and persisting one
+  caller's level would tell every later reader they hold whatever the last
+  writer happened to hold, an escalation nothing logs. A Jackson mix-in on the
+  persistence mapper drops it. Both storage backends reach storage through that
+  one mapper, so one registration covers MongoDB and PostgreSQL.
+- **It can never be set by a client.** `@JsonProperty(access = READ_ONLY)`, so a
+  PATCH body cannot assert its own access level into a read-modify-write.
+
+**Null when enforcement is off**, rather than `OWN`. Everyone may do everything
+in that state, so a level would be true and meaningless — and omitting it keeps
+a listing byte-identical to a deployment that has never heard of workspaces,
+which is the compatibility property this whole feature is built around. A client
+that wants to know asks `GET /workspaces` once instead of inferring it per row.
+
+### Verified by reverting, twice
+
+The first version of `PersistenceMixinsTest` built its own mapper by calling
+`PersistenceMixins.register(...)`. That tested the mix-in worked and **not** that
+anything used it: deleting the registration from `PersistenceMapperProducer`
+left the suite green. It now goes through the real producer, and both
+guarantees were re-checked by reverting them — the storage one fails with the
+stamped JSON in the message, the read-only one with `expected: <null> but was:
+<OWN>`.
+
+---
+
+
+
+## 🔒 fix(security): close two standing bypasses of the USE gate; add a workspace capability endpoint (2026-08-29)
+
+**Repo:** EDDI (`feat/multi-user-spaces-and-sharing`)
+
+An adversarial review pass over the whole workspaces PR (Fable, read-only)
+found two ways past the very control the PR introduces. Both were the same
+shape as holes the PR had already closed elsewhere, which is what made them
+oversights rather than decisions.
+
+### Channel integrations were a standing bypass (high)
+
+Triggers, schedules and group membership all check `requireAgentUseAccess` on
+the agents they *reference*, because those references are standing invitations:
+once written, they reach the target as a system-initiated conversation, which
+sits deliberately below the USE gate. `RestChannelIntegrationStore` wired the
+guard into `RestVersionInfo` — covering the channel config's own CRUD — and
+never checked the targets.
+
+So an editor holding Slack credentials could point a channel's `ChannelTarget`
+at a colleague's **private** agent, and every message in that Slack room would
+converse with it and relay the replies, having never held access to it.
+`TargetType.GROUP` was identical.
+
+`requireUseOnTargets` now runs before the write in `createChannel` and
+`updateChannel`. `ResourceAccessGuard.requireAgentUseAccess` was generalised to
+`requireUseAccess(id, label)` so a GROUP target is refused as a *group* rather
+than being told to go ask the owner of an agent.
+
+### Template preview leaked every snippet in the deployment (high)
+
+`RestTemplatePreview` redacted snippet **contents** from the variable-reference
+panel for callers who do not see everything — and then rendered the caller's
+template against the *unredacted* map. The comment justifying that
+("it renders only what the caller's own template actually references, which is
+their own composition") was simply wrong: the caller supplies the template, and
+the panel hands them the names. One call lists every snippet name, a second
+call whose body is `{snippets.<name>}` prints the content. Snippets are a
+guarded configuration type, so this disclosed colleagues' prompt building
+blocks cross-workspace through an endpoint any editor can reach.
+
+The redaction moved into the map the engine renders against. Names stay — a
+preview that cannot say which references resolve is not a preview — and the
+value renders as `<redacted>`. The regression test was mutation-checked: revert
+the fix and it fails with the real content in the assertion.
+
+### A2A conversed with agents that were never exposed (medium)
+
+`AgentCardService` states the gate for the A2A surface is `isA2aEnabled()` on
+the agent. Discovery enforced it; `A2ATaskHandler.handleTaskSend` did not, so a
+peer that knew an id could talk to any agent, opted in or not. It now refuses
+through `getAgentCard`, which returns null for both "no such agent" and "not
+enabled" — the same answer discovery gives. A2A remains outside the workspace
+model on purpose; this only enforces the gate it already claimed.
+
+### Redaction decided against a possibly stale version (low)
+
+`readDescriptor` gated on the **current** descriptor and then redacted against
+the **addressed** one. Sharing writes land on the current version only, so an
+older version can still name a previous owner and carry that era's grants.
+`requireAccess` now returns the level it granted, and the versioned read passes
+it to the new `redactUnlessOwner`. Two answers to "does this caller own it" in
+one request path is a smell whatever its impact.
+
+### `GET /workspaces` — because a client cannot work this out
+
+A deployment with workspaces **off** returns descriptors that look exactly like
+one where everything predates ownership: no owner, no space, no visibility.
+Ownership is still *recorded* while enforcement is off — deliberately, so
+attribution accumulates before an operator flips the switch — which means the
+fields being present proves nothing either. A UI guessing from the data offers
+a Share dialog that silently cannot work.
+
+`RestWorkspaces` answers for the calling user only: whether enforcement is
+active, their principal (the value stamped as `ownerId`, not a display name),
+their default write space, every space they can reach, and whether they see
+everything. It never takes a principal as a parameter, so it cannot enumerate
+somebody else's group membership.
+
+Serving the space list also removes the Manager's client-side reimplementation
+of `Subjects`' encoding. That mirror could only fail silently: an id encoded
+differently selects a workspace matching nothing, which renders as "you have no
+agents" rather than as an error.
+
+### `?space=` on the agent listing
+
+The Manager's space switcher sent `?space=` to `/agentstore/agents/descriptors`,
+which did not accept it — the switcher changed the URL and nothing else. The
+parameter now exists there and threads through a new
+`RestVersionInfo.readDescriptors(filter, index, limit, space)`, so every
+resource type can pick it up the same way. It narrows in the query, never
+client-side: page 2 of "everything" is not page 2 of "this space".
+
+### `WorkspacesIT` — the wiring, over real HTTP
+
+Everything the new endpoint and the `?space=` parameter can get wrong is
+wiring: whether a query parameter binds, whether Jackson emits the field names
+a client is typed against, whether a path is routed at all. None of that is
+visible to a unit test holding the resource class directly, and two of them had
+already been wrong once.
+
+The disabled payload is pinned here deliberately, because EDDI-Manager's MSW
+default handler answers `GET /workspaces` with exactly that shape. If the
+contract moves, that mock keeps every frontend test green while the real thing
+has changed — so the shape is asserted on the side that owns it.
+
+One assertion is worth naming: `?space=.*` must return **nothing**. Both
+storage backends treat a String filter as a regular expression, so an
+unescaped identity predicate is a vulnerability rather than a style note, and
+`.*` selecting everything is exactly what that bug looks like.
+
+### Coverage on the two classes that had none
+
+A JaCoCo pass over the workspace package found `RestResourceSharing` at **0%**
+— no unit test referenced it at all, only the new IT over HTTP — and
+`SpaceContext` at 64% instructions / 50% branches.
+
+Both are places where a mistake is silent rather than loud.
+`RestResourceSharing` is where loose query text becomes a decision about who can
+reach a resource: a level that parsed to something weaker, a subject nobody
+holds, a visibility guessed between three options that differ on who can read
+the thing. None of those look like errors afterwards — they look like a share
+that worked. `SpaceContext` reads the groups claim, which arrives as a JSON
+array through one code path, a `List<String>` through another and a bare string
+when single-valued; an unhandled shape does not throw, it just leaves the caller
+with no team spaces, and every resource shared with their team becomes invisible
+to them.
+
+Now 97.2% / 86.7% and 100% / 81%. The JSON-array handling was mutation-checked:
+removing the quote-stripping makes the space id `team:"engineering"`, which
+matches nothing — the test goes red with the quoted form in the message.
+
+One test was written wrong and corrected rather than the code: `parseOrNull`
+accepts *both* `private` and the `privateAccess` constant name, deliberately, so
+a client that read the constant out of generated code is not punished for it.
+The test now pins that leniency instead of asserting it away.
+
+### Deliberately not changed
+
+`ConverseWithAgentTool` / `CreateSubAgentTool` reach `startConversation` with a
+target the *model* picks at runtime, and `DynamicAgentConfig.permissiveDefault()`
+allows any target. Unlike channels, triggers and groups there is no
+authoring-time reference to check, so closing it means a runtime gate on the
+chatting user's identity — which would change delegation semantics for existing
+deployments. Recorded here as an open decision rather than changed quietly.
+
+---
+
+
+
+## 🔑 fix(security): authenticate EDDI's own loopback calls; close the last USE side doors (2026-08-29)
+
+**Repo:** EDDI (`feat/multi-user-spaces-and-sharing`)
+
+Closing every remaining finding from the review passes, and answering the
+question they were blocking: **does the Platform Operator work under per-user
+workspaces?**
+
+### The Operator: yes, and here is what it took
+
+In `caller-identity` mode the Operator's generated tools send
+`Authorization: Bearer ${caller:token}`, which `CallerIdentityResolver` replaces
+with the bearer of whoever is chatting. Every action it takes therefore runs as
+the real user — it lists what they can see, edits what they may edit, and
+anything it creates is stamped as theirs. That is exactly the behaviour
+workspaces want and it needed no change at all.
+
+Two things did.
+
+**EDDI's internal loopback calls carried no credentials (critical).**
+`AgentSetupService` — behind the agent wizard, the `setup-api` endpoint, and
+therefore the Operator's agent-creation tools — re-enters EDDI's own REST API
+through `RestInterfaceFactory`, as does most of `McpAdminTools`. That client sent
+no `Authorization` header while `/*` sits behind the `authenticated` HTTP policy,
+so **every one of those paths answered 401 whenever
+`authorization.enabled=true`** — the exact configuration workspaces require. The
+wizard, setup-api and the operator's entire write capability were unusable on any
+Keycloak-protected deployment, and the failure surfaced as a server fault rather
+than a missing credential.
+
+New `LoopbackCallerAuthFilter` forwards the caller's own token across the hop.
+Registered only on the **one-argument** `RestInterfaceFactory.get(Class)`, which
+addresses `127.0.0.1` on this process's own port: the destination is not merely
+same-origin, it is this very process. The two-argument overload that names an
+arbitrary remote instance for cross-instance sync deliberately does not get it —
+that is the case where forwarding a token would leak it. A pipeline thread's
+*bound* identity wins over a captured one, so a HITL resume stays attributed to
+the user whose turn it is rather than the administrator approving it.
+
+Two consequences beyond the 401: resources created through `setup-api` are now
+stamped with their **actual owner** instead of being left unowned, and the MCP
+tools that resolve stores this way genuinely do inherit `ResourceAccessGuard` —
+making true the claim an earlier pass had to walk back.
+
+**The Operator agent would have been invisible to everyone but its activator.**
+It is provisioned by whoever turns it on, so under enforcement it lands in that
+person's space and every other user gets 403 opening the drawer. Deliberately
+*not* fixed in code: auto-publishing an agent because of its name is how security
+bugs get written. The sharing API already covers it, and the deployment step is
+now documented — publish it once, or share it to a team at `USE` if the
+deployment would rather not expose the Operator's prompt.
+
+### The last USE side doors
+
+- **Group membership.** Same shape as the schedules and triggers closed last
+  pass: a group's member turns run system-initiated, below the gate, so
+  recruiting a colleague's private agent as a member reached it with the group
+  discussion as the read-out channel. Checked now at group create and update.
+- **The OpenAI-compatible `/v1` API.** One shared key reached any deployed agent
+  by id. It now applies the same gate — and since `/v1` has no verified principal
+  (one key, a user id from a trusted header), that admits **published agents
+  only** under enforcement. Deliberately not scoped to the header-supplied user
+  id: honouring a self-asserted identity would let one leaked key reach that
+  user's private agents. `listModels` filters to match, so a client never sees a
+  model it would be refused at chat time.
+
+### Manager-readiness
+
+- **`?space=` narrows any descriptor listing server-side**, so a space switcher
+  can page correctly — client-side filtering cannot, because page 2 of
+  "everything" is not page 2 of "this space". Implemented as its own AND-ed
+  filter group: folding it into the access group would OR it and turn a narrowing
+  into a widening, which `AccessScopeTest` pins down along with the anchoring that
+  stops `team:eng` matching `team:engineering`.
+- **Share results carry resource names** alongside ids, so a share dialog can say
+  "also granted on Support Rules" rather than on `1111111111111111111111` — the
+  difference between a confirmation a person can check and one they can only
+  accept. `updatedIds()` / `skippedIds()` keep the id-only shape for callers that
+  just count.
+
+### Deliberately still open
+
+- **Sub-agent tools** (`ConverseWithAgentTool`, `CreateSubAgentTool`) reach
+  agents by id under the conversation's identity. Runtime-side and governed by
+  tool approval rather than workspaces.
+- **Descriptor creation in a response filter** rather than in the stores. Much
+  less pressing now the loopback paths authenticate and stamp correctly, but
+  still the most leveraged follow-up.
+- **The access predicate is a regex scan.** A scaling ceiling, not a correctness
+  problem; the array-plus-`$in` fix needs a real PostgreSQL to verify.
+- **Enumeration oracles** on the capability registry, deployment listing and
+  `getCurrentResourceId`. Pre-existing; names and ids, not configuration.
+
+Across four passes every serious finding was the same shape — *a surface that
+reaches agents or descriptors without passing the guard*. They are now closed
+individually at each authoring entry point, which is correct but enumerative. The
+durable version is a USE check inside `ConversationService.startConversation`
+with an explicit flag for genuinely system-initiated callers; worth doing before
+this is described as a hard security boundary.
+
+### Verification
+
+Full unit suite green apart from this machine's environmental socket failures.
+New: `LoopbackCallerAuthFilterTest` (six cases, including bound-over-captured
+precedence and the fail-soft path) and `AccessScopeTest` (six, including that a
+space narrowing cannot widen).
+
+**What is still unproven, and it is the important part.** The loopback fix
+changes how every internal API call authenticates, and its correctness depends on
+a live security context, a real Keycloak and the HTTP stack — none of which exist
+in a unit test. Before enabling this anywhere that matters: staging, Keycloak on,
+two real accounts, Operator activated and published, then confirm each user sees
+only their own agents, the Operator can create one, and the created agent belongs
+to whoever asked for it.
+
+---
+
+
+
+## 🔎 fix(security): third-pass review — group-share regression, ACL leak in listings, USE-gate side doors (2026-08-29)
+
+**Repo:** EDDI (`feat/multi-user-spaces-and-sharing`)
+
+A fresh critical pass over the whole branch, this time including the API/UX
+surface. Four defects found and fixed, each with a test that fails without the
+fix; the rest of the pass is recorded as verified-clean or explicitly open.
+
+### Fixed
+
+- **Sharing a group silently dropped the member agents (critical, my own
+  regression).** The nested-group fix from the previous pass made the seeding
+  recursion and the poll loop share one visited-set, so every member agent was
+  pre-marked "done" and excluded from the share result: recipients of a group
+  share could open the workflows but not talk to any member agent. It survived
+  because `ResourceSharingServiceTest` mocks the resolver and the resolver itself
+  had **no test** — the exact blind spot reviews exist to find.
+  `ConfigGraphResolver` now uses two sets (`seededRoots` for recursion,
+  `dequeued` for the loop), the dead `referencedFromAgent` helper is gone, and
+  `ConfigGraphResolverTest` runs the real traversal over in-memory stores —
+  agent graphs, groups, nested groups, self-referential groups. Mutation-checked:
+  re-merging the two sets fails three of the five tests.
+- **The ACL still leaked through every listing.** `describe()` discloses grants
+  only at OWN — but listings and direct descriptor reads serialised the raw
+  `DocumentDescriptor`, `grants` and `accessIndex` included, and a `published`
+  resource is listable by everyone. The restraint on the sharing endpoint was
+  theatre. `ResourceAccessGuard.redactForCaller` now strips both fields for
+  non-owners at every descriptor exit: `RestVersionInfo.readDescriptors` (all
+  fifteen types), the cross-type descriptor endpoint, and the two
+  reverse-reference listings. Owner, space and visibility stay — the Manager's
+  owner column needs them, and "owned by alice" is what a recipient needs to know
+  whom to ask.
+- **Schedules and triggers were standing side doors around the USE gate.** Both
+  are authored by a user naming an agent id, and both *fire* system-initiated —
+  deliberately below the gate, because no interactive caller exists then. So any
+  editor could converse with a private agent by scheduling it or pointing a
+  trigger at it. The gate now applies at authoring time — schedule create/update
+  (the re-point path) and trigger create/update, on every referenced deployment.
+- **The schedule store turned the 403 into a 500.** Found by the new gate test,
+  not by reading: `createSchedule`'s blanket `catch (Exception)` swallowed the
+  guard's `ForbiddenException` and rethrew `InternalServerErrorException` — the
+  caller could not tell "you may not schedule that agent" from "the server
+  broke". Both create and update now rethrow the refusal.
+- **`@Consumes(APPLICATION_JSON)` on the body-less share POST** made strict
+  clients and generated SDKs manufacture a Content-Type for an entity that does
+  not exist. Removed.
+
+### Verified clean this pass
+
+- All fifteen `duplicate*` endpoints read through the guarded
+  `restVersionInfo.read` — duplication is not a read bypass anywhere.
+- The setup-API concern dissolves on inspection: its credential-less loopback
+  calls already 401 under `authorization.enabled=true` (pre-existing, see the
+  loopback-auth note), and enforcement *requires* auth — so no unowned-agent hole
+  opens through the wizard path under enforcement.
+- The `ForbiddenException`-to-403 mapping is the same one `OwnershipValidator`
+  has always relied on; no new mapper needed.
+
+### Known open, deliberately not implemented here
+
+- **OpenAI `/v1` adapter bypasses USE**: one shared API key converses with every
+  deployed agent. Whether `/v1` should serve only `published` agents under
+  enforcement is a product decision (it would change what Open WebUI users see),
+  not something to half-implement from a review.
+- **Group membership is not USE-checked at group creation** — recruiting a
+  colleague's private agent into a group reaches it through the (deliberately
+  ungated) member-turn path. Same class as the schedule/trigger doors, but group
+  flows are collaborative by design; needs its own decision.
+- **Built-in sub-agent tools** (`ConverseWithAgentTool`, `CreateSubAgentTool`)
+  let a prompted LLM converse with agents by id under the conversation's
+  identity. Runtime-side, partially mitigated by tool governance; out of scope
+  for the authoring-surface model.
+- **Enumeration surfaces**: capability registry, deployment listing, and the
+  `getCurrentResourceId` endpoints remain unscoped existence/version oracles
+  (pre-existing).
+- **Manager-facing API gaps** for the upcoming UI: listings have no server-side
+  `space` filter (the space switcher would need one to page correctly), and
+  `ShareResult` returns ids, not names.
+- **Keycloak nesting semantics**: membership in `/engineering/backend` does not
+  confer the `/engineering` space — Keycloak's group-membership claim lists the
+  groups a user is actually in. Documented behaviour, worth knowing before teams
+  adopt nested groups.
+
+### Verification
+
+Targeted suites for every touched area plus `ImportStyleTest` and the doc-link
+guard, then two full unit runs (the first raced a parallel build over `target/`
+and produced phantom `NoClassDefFound`s — the piped-mvnw lesson again, now in
+concurrent form; the uncontended rerun was clean apart from the known
+environmental failures). Mutation checks: the resolver two-set fix and the
+schedule USE gate both have tests that fail with the defect reintroduced. The
+full run also caught that `readDescriptor` returned whatever
+`redactForCaller` returned — the call site now ignores the decorator's return
+value, so no double (or future decorator) can null the response.
+
+---
+
+
+
+## 🔐 fix(security): close the bypasses an adversarial review found in workspaces (2026-08-29)
+
+**Repo:** EDDI (`feat/multi-user-spaces-and-sharing`)
+
+Follow-up to the workspaces commit, from my own second pass plus a maximum-effort
+adversarial review. Every finding below was traced in the code before being fixed;
+nothing here is speculative hardening.
+
+### Bypasses — resources reachable without passing the guard
+
+- **Export was a complete read of any agent by id.** `RestExportService.exportAgent`
+  and `previewExport` read the agent and then every workflow, rule set, api call,
+  LLM config, output set, dictionary, mcp call, RAG config and snippet it
+  references — straight from the stores, gated only by the `eddi-editor` role. An
+  editor with no grant on anything could `POST /backup/export/{anyAgentId}` and
+  receive another user's system prompts, tool definitions, api-call headers and MCP
+  server configs. Exactly the capability the feature exists to remove, and
+  `docs/workspaces.md` already claimed export required VIEW. Both entry points now
+  require it, and the snippet sweep is scoped.
+- **`/descriptorstore/descriptors` was an unscoped inventory of everything.** The
+  cross-type listing called the unscoped overload, `readDescriptor` had no check,
+  and `patchDescriptor` — which renames a resource — had none either. One request
+  per type returned every descriptor in the deployment *and*, now that descriptors
+  carry them, every owner, space and grant. All three guarded.
+- **MCP conversation tools bypassed the USE gate.** `createConversation`,
+  `chatWithAgent` and `chat_managed` call `ConversationService.startConversation`
+  directly, gated only by `eddi-viewer` — the lowest tier. The REST equivalent was
+  403 while the MCP one held a full conversation with any private agent.
+- **Two reverse-reference listings were unscoped** —
+  `readAgentDescriptors(containingWorkflowUri=…)` and
+  `readWorkflowDescriptors(containingResourceUri=…)`. Anyone holding one resource
+  URI could enumerate everything referencing it, across all workspaces.
+- **RAG ingestion was a write gated by read access.** `published` grants VIEW to
+  everyone, so any editor could inject documents into a published RAG config's
+  knowledge base — prompt-injection into every agent retrieving from it. Now EDIT.
+- **Template preview returned every prompt snippet in the deployment.** Snippet
+  names stay (a preview that cannot say which references resolve is useless);
+  bodies are redacted for callers who do not already see everything.
+
+### Descriptor provenance — where ownership comes from
+
+- **Duplicating copied the source's ownership.**
+  `createDocumentDescriptorForDuplicate` wrote the source descriptor back verbatim,
+  so duplicating a *published* agent — which anyone may do — filed the copy under
+  the original owner, in their space, at their visibility. The duplicator could not
+  edit or delete what they had just created, and anyone could inject resources into
+  a victim's workspace attributed to them. It now builds a fresh descriptor, carries
+  name and description only, and stamps the duplicator. It also no longer mutates
+  the source object it read.
+- **Import trusted the archive.** A crafted `descriptor.json` could set `ownerId`,
+  `visibility: published`, arbitrary `grants` — and, worst, a hand-written
+  `accessIndex`, which is the one way to reach the token index without passing
+  through `Subjects` and its escaping. Ownership is stripped from imported
+  descriptors and the importing user stamped. Export strips the same fields, so a
+  ZIP no longer discloses principal and team names to whoever receives it.
+- **Three more descriptor-creating paths were unstamped** — the import create path,
+  both `UpgradeExecutor` direct-create paths, and the group descriptor sync.
+
+### Fail-open corrections
+
+- **A missing descriptor granted OWN to everyone.** `requireAccess` treated "no
+  descriptor" as "unowned" and, under the default `legacy-visibility=shared`,
+  returned OWN — read, edit, delete, deploy, undeploy. Not hypothetical: the setup
+  API reaches the stores over an unauthenticated loopback call and produces
+  descriptors with no owner. The fallback now admits **reading and using only** and
+  refuses EDIT and above regardless of policy, logged at WARN naming the resource.
+- **Listing and reading could disagree in the leaking direction.** `DescriptorAccess`
+  promises "listed but not readable cannot happen". Two shapes broke it: an
+  owner-less descriptor with a real space and `private` visibility fell through to
+  the `legacy` token — admitted to everyone — while `effectiveLevel` granted nobody
+  anything; and an unowned descriptor's grants were indexed but ignored by the
+  short-circuit. Fixed with `Subjects.TOKEN_NONE` (which `admittingTokens` never
+  emits) and by making the legacy admission a contribution rather than an early
+  return. The agreement test now sweeps the **full** cross-product of owner × space
+  × visibility × grant shape × caller × policy — ~1000 cases — and it was that sweep
+  that found the second shape.
+- **`transferOwnership(id, null, …)` un-owned a whole graph**, which under the
+  default policy means owned by everybody. Validated in the service, not only at the
+  REST edge, since the bean is reachable in-process.
+
+### Correctness
+
+- **The backfill migration queried four descriptor types that do not exist.** It
+  used the ZIP file-extension names — `ai.labs.behavior`, `ai.labs.httpcalls`,
+  `ai.labs.langchain`, `ai.labs.regulardictionary` — where listings use
+  `ai.labs.rules`, `ai.labs.apicalls`, `ai.labs.llm`, `ai.labs.dictionary`
+  (AGENTS.md §5.5). Those four queries matched nothing and the migration then
+  recorded itself complete, so **every pre-existing rule set, api call, LLM config
+  and dictionary would have vanished from every listing** the moment enforcement was
+  switched on — including from their owners, with no way to re-run short of deleting
+  the log row. The list is now derived from the stores' own `resourceURI` constants,
+  and `WorkspaceAccessIndexMigrationTest` asserts it. The migration also no longer
+  records completion when a page read failed.
+- **`ResourceSharingService` wrote back at the wrong version.** It re-resolved the
+  current version at write time and wrote a descriptor read at an earlier one; a
+  concurrent `PUT` in between left the descriptor naming the wrong version of its
+  own resource. It now writes at the version it read.
+- **The grant list is disclosed at OWN, not VIEW.** `published` grants VIEW to
+  everyone, so returning grants to any reader published every subject on the
+  resource — real principal and team names.
+- **Nested groups are followed** when sharing a group-of-groups, bounded by a
+  nesting limit as well as the visited set.
+
+### Corrections to my own claims
+
+- **The MCP coverage claim was wrong.** `ResourceAccessGuard` and `RestVersionInfo`
+  said the MCP admin tools "call those same beans in-process and therefore inherit
+  it". `McpAdminTools` resolves most stores through `IRestInterfaceFactory`, which
+  builds a REST client and makes a **loopback HTTP call**. Only the injected facades
+  inherit the guard. Corrected in both javadocs and in the documentation.
+- **`accessIndex` being in `INDEXED_FIELDS` does not make the access predicate
+  index-backed.** The predicate is an unanchored regex, which neither backend can
+  serve from a btree index. Not a regression — the type predicate this store has
+  always applied is a regex scan too — but the comment claimed otherwise. It now
+  states plainly what the index does and does not buy, and names the fix (tokens as
+  an array plus an operator on `IResourceFilter`), deliberately not attempted blind
+  because the PostgreSQL half cannot be verified without a PostgreSQL to run it on.
+
+### Verification
+
+Full unit suite: 20 373 tests. The only remaining failures are the environmental
+ones this machine always has (loopback sockets and event-loop creation) — none in
+any touched package. New tests: `WorkspaceAccessIndexMigrationTest`,
+`ResourceUtilitiesDuplicateOwnershipTest`, the widened `DescriptorAccessTest`
+cross-product sweep, and the missing-descriptor and principal-trimming cases in
+`ResourceAccessGuardTest`.
+
+---
+
+
+
+## 🔐 feat(security): per-user workspaces and resource sharing (2026-08-29)
+
+**Repo:** EDDI (`feat/multi-user-spaces-and-sharing`)
+
+Configuration resources — agents, workflows, rule sets, LLM configs, output sets,
+dictionaries, api calls, mcp calls, RAG, prompt snippets, channels, connections,
+agent groups — had **no ownership at all**. `DocumentDescriptor` inherits a
+`createdBy` field from `ResourceDescriptor` and nothing ever wrote it, so the
+authoring surface was one shared workspace gated only by
+`@RolesAllowed({"eddi-admin","eddi-editor"})`. Any editor could read, edit,
+undeploy and delete anyone's work, and `eddi-user` could `POST
+/agents/{anyId}/start`.
+
+Off by default (`eddi.workspaces.enabled=false`). Full operator guide:
+[`docs/workspaces.md`](workspaces.md).
+
+### The model
+
+**Spaces are the boundary, grants are the exception.** Every descriptor gains
+`ownerId`, `spaceId` (`user:<principal>` or `team:<keycloak group>`),
+`visibility` (`private` / `space` / `published`) and a list of `ResourceGrant`.
+A single ACL-per-resource model makes the common case tedious; a pure space model
+makes the common exception impossible.
+
+**`AccessLevel` is USE < VIEW < EDIT < OWN.** The `USE`/`VIEW` split is the one
+that earns its complexity: letting a colleague *talk to* an agent is a different
+act from letting them read its system prompt, tool list and vault references, and
+the first is by far the more common share. `EDIT` deliberately excludes delete and
+re-share — a teammate sharing a space can change a colleague's agent but not
+remove it.
+
+### Design decisions
+
+- **One materialised `accessIndex` field, not a query over structured fields.**
+  `IResourceFilter` ANDs groups and ORs within a group, and cannot nest — so the
+  real policy (`owner OR (space AND visibility=space) OR granted OR published`) is
+  not expressible as a query at all. Collapsing it to pipe-delimited tokens at
+  write time makes a listing one indexed OR-group. `DescriptorAccess` holds both
+  halves so it stays checkable that they agree; `DescriptorAccessTest` asserts
+  agreement across the whole matrix.
+- **Every identity predicate is anchored and escaped.** Both backends treat a
+  `String` filter as a **regular expression** — `MongoResourceStorage` builds
+  `Filters.regex`, `PostgresResourceStorage` emits `~`. An unescaped predicate for
+  `alice` also matches `malice`, and an unescaped `.` in an email matches any
+  character. `Subjects` escapes only the metacharacters PCRE and POSIX ERE agree
+  on: escaping an ordinary character is *undefined* in POSIX ERE, so escaping
+  defensively would be less portable, not more.
+- **Filtered in the query, not on the page.** `RestConversationStore` post-filters
+  conversations with a `MAX_OWNER_SCAN` budget because no predicate exists there.
+  Config listings must not repeat that: `accessIndex` joined
+  `DescriptorStore.INDEXED_FIELDS`, which matters especially because the
+  `descriptors` collection is shared with conversation descriptors and grows with
+  conversation volume.
+- **`AccessScope` is an explicit argument, never ambient state.** Internal callers
+  that operate below the access model — the export service, the orphan sweep, the
+  startup migration — write `unrestricted()` at the call site. Reading scope from
+  a thread-local would make "unfiltered" the behaviour of any path that forgot to
+  set it, which is the shape most fail-open authorization bugs have.
+- **Cascades check before they cascade.** `deleteAgent`/`deleteWorkflow` tear down
+  referenced resources *before* the guarded `restVersionInfo.delete`, so both now
+  call `requireOwnAccess` first. Checking only at the end would have let an
+  unauthorised caller destroy the graph on the way to being refused.
+- **Sharing walks the graph, and stops at what you do not own.**
+  `ConfigGraphResolver` resolves agent → workflows → steps → parser dictionaries;
+  a referenced resource the sharer only borrowed is skipped and named in the
+  response's `skipped` list rather than silently widened. Bounded at 500 resources
+  against cyclic configs, and the cut-off is logged rather than silent.
+- **The channel-uniqueness sweep stays global but stopped naming names.** A
+  `channelId` collides with every integration in the deployment, so scoping the
+  check would let two workspaces bind the same Slack channel. Its error message no
+  longer names the conflicting integration, which had turned a uniqueness check
+  into an enumeration oracle.
+
+### Enforcement surfaces
+
+`RestVersionInfo` (all fifteen types, inherited by the MCP admin tools),
+the store methods that bypass it for filter arguments (`readOutputSet`,
+`readOutputKeys`, `readExpressions`, `readSnippet`, the patch and duplicate
+paths), the workflow-fan-out helpers (`RestAction`, `RestExpression`,
+`RestOutputActions` — all keyed on the workflow the caller named), the group
+workspace endpoints (decided against the *group's* descriptor, since a workspace
+has none of its own), deploy/undeploy, and `POST /agents/{id}/start`.
+
+### Backward compatibility
+
+- Default off; `eddi.workspaces.enabled=true` with `authorization.enabled=false`
+  logs that it has no effect rather than denying everyone everything.
+- Ownership is **recorded** whenever authentication is on, independent of
+  enforcement, so an operator can accumulate attribution, verify it, and only then
+  enforce.
+- `WorkspaceAccessIndexMigration` backfills every pre-existing descriptor with the
+  `legacy` token. Required, not optional: neither backend can express "this field
+  is absent", so an unstamped descriptor would match no access predicate and
+  vanish from every listing. It deliberately **does not invent owners**.
+- `eddi.workspaces.legacy-visibility=shared` (default) keeps pre-existing
+  resources visible to everyone, so an upgrade hides nothing.
+
+### Keycloak
+
+`keycloak/eddi-realm.json` gains a `groups` protocol mapper on both clients, a
+sample `/engineering` group, and — unrelated but overdue — the **`eddi-approver`
+role, which `OwnershipValidator` and `HitlAccessGuard` have been checking for
+without it ever being defined in the shipped realm.**
+
+### Verification
+
+`./mvnw compile`, `./mvnw test-compile`, the repo-wide guards (`ImportStyleTest`,
+`DocumentationLinks`, `StrictBoundary*`, `ShippedRulesets`) and 49 new tests
+across `SubjectsTest`, `DescriptorAccessTest`, `ResourceAccessGuardTest`,
+`RestVersionInfoAccessTest` and `ResourceSharingServiceTest`.
+
+Two mutation checks confirm the tests are not vacuous: removing the token
+delimiters from `Subjects.tokenPattern` fails `doesNotMatchSubstring`, and
+defaulting a missing visibility to `published` fails
+`missingVisibilityDefaultsToSpace`.
+
+### Not done
+
+The EDDI-Manager UI (space switcher, owner column, share dialog, published
+catalog) is a separate repo and a separate change. Until it lands, sharing is
+driven through the REST endpoints above.
+
+---
+
+
+
+## 🔐 refactor(engine): split the engine's config reads off the authoring surface (2026-08-29)
+
+**Repo:** EDDI (`feat/multi-user-spaces-and-sharing`)
+
+Prerequisite for per-user workspaces, and worth doing on its own merits. Two
+populations were reading configuration through the same beans and needed opposite
+answers from them.
+
+`ResourceClientLibrary.getResource` — the engine resolving an `eddi://` reference
+mid-turn — went through the `IRest*Store` facades, as did `AgentStoreService`,
+`WorkflowStoreService`, `WorkflowTraversal`, `AgentCardService` and
+`ChannelTargetRouter`. The identity on a conversation turn is **whoever is
+chatting**, who in general does not own the agent they are talking to. Any
+ownership check placed on the authoring surface would therefore have failed every
+turn on every shared agent — the agent would not have been able to load its own
+rule set.
+
+All of those now read `IResourceStore` beans directly. What stayed on the facades
+is exactly the set of operations a *person* performs: `duplicateResource` and
+`deleteResource` (the cascade behind `RestWorkflowStore` and the orphan purge
+behind `RestOrphanAdmin`). The class comment states the rule so the split does not
+silently erode: **a read added here belongs on the store side, a mutation on the
+facade side.**
+
+### Design decisions
+
+- **`AgentOrchestrator` lost a parameter rather than gaining a type.** It already
+  injected `IAgentStore`; the separate `IRestAgentStore` it passed down to
+  `HttpCallToolsProvider` and `McpToolsProvider` was redundant once those take the
+  store. Dropping it beats keeping two parameters of the same type.
+- **`AgentCardService.listA2AAgents` lists through `IDocumentDescriptorStore`
+  unrestricted, deliberately.** An Agent Card is published to A2A *peers* — remote
+  systems, not EDDI users — so there is no caller workspace to scope to. Its gate
+  is `isA2aEnabled()` plus whatever authenticates the A2A endpoints.
+- **The store reads throw checked exceptions the facades swallowed.**
+  `readFromStore` rethrows via `SneakyThrow`, exactly as the facades did, so
+  `WorkflowTraversal`'s degrade-and-continue behaviour on a missing reference is
+  unchanged.
+
+### Verification
+
+`./mvnw compile`, `./mvnw test-compile`, and 637 tests across the touched areas
+(`ResourceClientLibraryTest`, `AgentOrchestrator*`, `WorkflowTraversal*`,
+`RagContextProvider*`, `ChannelTargetRouter*`, `AgentCardServiceTest`,
+`DocumentDescriptorFilterTest`) — all green. `ResourceClientLibraryTest` now mocks
+both sides and asserts the split: reads verify against the stores, duplicate/delete
+against the facades.
+
+---
+
+
+
 ## 📝 docs(monitoring): reconcile the dashboard inventory with what is provisioned (2026-08-27)
 
 **Repo:** EDDI (`feat/grafana-full-metrics-dashboard`)

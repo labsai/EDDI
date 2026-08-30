@@ -31,6 +31,7 @@ import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
 import ai.labs.eddi.engine.security.OwnershipValidator;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.tenancy.QuotaExceededException;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -73,6 +74,7 @@ public class RestAgentEngine implements IRestAgentEngine {
     private final SecurityIdentity identity;
     private final OwnershipValidator ownershipValidator;
     private final ConversationAccessGuard conversationAccessGuard;
+    private final ResourceAccessGuard resourceAccessGuard;
     private final HitlAccessGuard hitlAccessGuard;
     private final IHitlToolJournalStore hitlToolJournalStore;
     private final int agentTimeout;
@@ -88,6 +90,7 @@ public class RestAgentEngine implements IRestAgentEngine {
             SecurityIdentity identity,
             OwnershipValidator ownershipValidator,
             ConversationAccessGuard conversationAccessGuard,
+            ResourceAccessGuard resourceAccessGuard,
             HitlAccessGuard hitlAccessGuard,
             IHitlToolJournalStore hitlToolJournalStore,
             @ConfigProperty(name = "systemRuntime.agentTimeoutInSeconds") int agentTimeout) {
@@ -96,6 +99,7 @@ public class RestAgentEngine implements IRestAgentEngine {
         this.identity = identity;
         this.ownershipValidator = ownershipValidator;
         this.conversationAccessGuard = conversationAccessGuard;
+        this.resourceAccessGuard = resourceAccessGuard;
         this.hitlAccessGuard = hitlAccessGuard;
         this.hitlToolJournalStore = hitlToolJournalStore;
         this.agentTimeout = agentTimeout;
@@ -109,6 +113,11 @@ public class RestAgentEngine implements IRestAgentEngine {
     @Override
     public Response startConversationWithContext(String agentId, Environment environment, String userId, Map<String, Context> context) {
         try {
+            // USE, not VIEW: talking to an agent is not reading how it was built. Checked
+            // here rather than in ConversationService, because the system-initiated starts
+            // (group members, schedule fires, sub-agents, Slack, A2A) legitimately run with
+            // no interactive caller and must not be gated on one.
+            resourceAccessGuard.requireAgentUseAccess(agentId);
             String resolvedUserId = ownershipValidator.validateAndResolveUserId(identity, userId);
             var result = conversationService.startConversation(environment, agentId, resolvedUserId, context);
             return Response.created(result.conversationUri()).build();
