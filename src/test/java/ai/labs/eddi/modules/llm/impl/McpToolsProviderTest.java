@@ -19,10 +19,17 @@ import static org.mockito.Mockito.*;
  * Focused unit tests for {@link McpToolsProvider}, extracted from {@code
  * AgentOrchestrator} during the R2 (step 2) refactor. Covers {@code
  * contribute}'s enable/disable gate — new surface introduced by the extraction
- * (the check moved down from {@code buildToolSetup}). Discovery itself is
- * already covered indirectly by {@code AgentOrchestratorExtendedTest} and
- * directly by the {@code McpToolProviderManager*Test} suites (unchanged by this
- * move), re-verified green through the new delegator.
+ * (the check moved down from {@code buildToolSetup}).
+ * <p>
+ * This comment used to claim discovery was "already covered indirectly by
+ * {@code AgentOrchestratorExtendedTest}". It was not: those suites pass a
+ * mocked memory whose {@code getAgentVersion()} is null, so
+ * {@code WorkflowTraversal} returns before the per-server loop, and the
+ * {@code McpToolProviderManager*Test} suites cover the manager rather than this
+ * class. The measured result was 31% instruction coverage on
+ * {@link McpToolsProvider}. Discovery — filtering, collisions, the resource
+ * bridge and failure mapping — is now covered directly by
+ * {@code McpToolsProviderDiscoveryTest}.
  *
  * @author tests
  */
@@ -61,13 +68,20 @@ class McpToolsProviderTest {
     void contribute_nullFlag_defaultsToEnabled() {
         var memory = mock(IConversationMemory.class);
         when(memory.getAgentId()).thenReturn("agent-1");
+        when(memory.getAgentVersion()).thenReturn(7);
         var task = new LlmConfiguration.Task();
         task.setEnableMcpCallTools(null);
         var ctx = new ToolAssemblyContext(memory, task, null, null, "user-1", "agent-1", null);
 
-        var contribution = provider(mock(McpToolProviderManager.class)).contribute(ctx);
+        var restAgentStore = mock(IRestAgentStore.class);
+        var contribution = new McpToolsProvider(restAgentStore, mock(IRestWorkflowStore.class),
+                mock(IResourceClientLibrary.class), mock(McpToolProviderManager.class)).contribute(ctx);
 
+        // The point of the test is that a null flag does NOT short-circuit: discovery
+        // has to be attempted. assertNotNull alone passed either way, because the
+        // disabled path also returns a non-null empty contribution.
         assertNotNull(contribution);
+        verify(restAgentStore).readAgent("agent-1", 7);
     }
 
     @Test

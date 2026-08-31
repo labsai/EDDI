@@ -17,9 +17,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.util.*;
 
@@ -38,6 +41,27 @@ class AuditLedgerServiceBranchTest {
     private IAuditStore auditStore;
 
     private MeterRegistry meterRegistry;
+
+    @TempDir
+    Path tempDir;
+
+    /**
+     * A dead-letter path whose write is guaranteed to fail on every platform.
+     * <p>
+     * The parent directory is deliberately never created, and {@code Files.write}
+     * with {@code CREATE} does not create parent directories - so the write throws
+     * {@code NoSuchFileException} on Linux and Windows alike.
+     * <p>
+     * This used to be a hardcoded {@code Z:\nonexistent\...}, which is unwritable
+     * only on Windows: a backslash is a legal character in a Unix filename, so on
+     * the Linux CI runner that whole string was one relative filename which
+     * {@code CREATE} happily created. The tests below then exercised the file
+     * fallback's SUCCESS path while claiming to cover its failure path, and left a
+     * junk file in the build directory.
+     */
+    private String unwritableDeadLetterPath() {
+        return tempDir.resolve("no-such-dir").resolve("deadletter.jsonl").toString();
+    }
 
     @BeforeEach
     void setUp() throws Exception {
@@ -349,7 +373,7 @@ class AuditLedgerServiceBranchTest {
         // Use a temp file path that likely fails (to cover the file-fallback error
         // path)
         var service = new AuditLedgerService(auditStore, true, 60,
-                Optional.empty(), "Z:\\nonexistent\\path\\deadletter.jsonl", false, "default", AuditLedgerService.DEFAULT_MAX_QUEUE_SIZE,
+                Optional.empty(), unwritableDeadLetterPath(), false, "default", AuditLedgerService.DEFAULT_MAX_QUEUE_SIZE,
                 true, 500, meterRegistry, natsInstance, null, new ObjectMapper());
         service.init();
 
@@ -359,6 +383,13 @@ class AuditLedgerServiceBranchTest {
         service.flush();
         service.flush();
         service.flush(); // triggers dead letter
+
+        // NATS was actually attempted: without this the test would still pass if
+        // writeToDeadLetter were never reached at all.
+        verify(js, atLeastOnce()).publish(anyString(), any(byte[].class));
+        // ...and the file fallback genuinely failed rather than quietly succeeding.
+        assertFalse(Files.exists(Path.of(unwritableDeadLetterPath())),
+                "the dead-letter write must fail, otherwise this test does not cover the failure path");
 
         // Should not throw even though both NATS and file fail
         service.shutdown();
@@ -376,7 +407,7 @@ class AuditLedgerServiceBranchTest {
 
         // Use a nonexistent path to test error handling
         var service = new AuditLedgerService(auditStore, true, 60,
-                Optional.empty(), "Z:\\nonexistent\\deadletter.jsonl", false, "default", AuditLedgerService.DEFAULT_MAX_QUEUE_SIZE,
+                Optional.empty(), unwritableDeadLetterPath(), false, "default", AuditLedgerService.DEFAULT_MAX_QUEUE_SIZE,
                 true, 500, meterRegistry, natsInstance, null, new ObjectMapper());
         service.init();
 
@@ -386,6 +417,13 @@ class AuditLedgerServiceBranchTest {
         service.flush();
         service.flush();
         service.flush(); // triggers dead letter
+
+        // NATS is unresolvable, so the file fallback is the path under test...
+        verify(natsInstance, atLeastOnce()).isResolvable();
+        verify(natsInstance, never()).get();
+        // ...and it failed, rather than creating the file and passing vacuously.
+        assertFalse(Files.exists(Path.of(unwritableDeadLetterPath())),
+                "the dead-letter write must fail, otherwise this test does not cover the failure path");
 
         // Should handle file write failure gracefully
         service.shutdown();
@@ -454,7 +492,7 @@ class AuditLedgerServiceBranchTest {
         doReturn(conn).when(natsInstance).get();
 
         var service = new AuditLedgerService(auditStore, true, 60,
-                Optional.empty(), "Z:\\nonexistent\\deadletter.jsonl", false, "default", AuditLedgerService.DEFAULT_MAX_QUEUE_SIZE,
+                Optional.empty(), unwritableDeadLetterPath(), false, "default", AuditLedgerService.DEFAULT_MAX_QUEUE_SIZE,
                 true, 500, meterRegistry, natsInstance, null, new ObjectMapper());
         service.init();
 

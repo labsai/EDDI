@@ -1371,6 +1371,109 @@ against the facades.
 
 ---
 
+## 🔍 fix(review): close an SSRF gap, and two tests that passed for the wrong reason (2026-08-28)
+
+**Repo:** EDDI (`claude/code-review-test-coverage-59bf99`)
+
+A review pass for dead code, defects and thin coverage. Dead code came up empty —
+every candidate turned out to be framework-wired (`OpenApiTagSortFilter` via Quarkus
+`@OpenApiFilter`, `LifecycleModule` as a CDI producer, `URIMessageBodyProvider` as a
+JAX-RS `@Provider`), there are zero `TODO/FIXME` markers in `src/main`, and no
+`ILifecycleTask` holds mutable instance state. Three real problems did surface, each
+verified by reverting the fix and watching the new test fail.
+
+**Measured baseline** (local `./mvnw test`): 20,295 tests, 8 failures / 193 errors —
+all environmental (loopback sockets, Docker, network), matching the known local
+profile. Fresh JaCoCo from that run: 89.91% instruction / 79.24% branch.
+
+### 1. `SourceUrlValidator` accepted internal hosts the rest of the codebase refuses
+
+The remote agent-sync endpoints (`backup/import/sync*`, open to **`eddi-editor`**,
+not just admin) validated their `sourceUrl` with a second, local copy of the SSRF
+predicate built from the four JDK checks. Those do not cover:
+
+- **RFC 4193 IPv6 ULA `fc00::/7`** — `isSiteLocalAddress()` only matches the
+  deprecated `fec0::/10`
+- **RFC 6598 CGNAT `100.64.0.0/10`** — used by Tailscale and some k8s pod CIDRs
+- IPv4 multicast
+
+`UrlValidationUtils.isPrivateAddress` — which AGENTS.md already names as the thing to
+call before fetching a user-controlled URL — covers all of them. `isPrivateIp` now
+delegates there instead of keeping the weaker duplicate, which is also what §4.7
+"Unification over duplication" asks for. `isPrivateAddress` is promoted to `public`
+and documented as the single definition of an unsafe outbound address.
+
+The wrapper keeps its own messages and its HTTPS-in-production rule (which has no
+equivalent in `UrlValidationUtils`), so no existing message assertion changes.
+Deliberately *not* adopted: `UrlValidationUtils`' `.local`/`.internal` hostname
+block — those hostnames resolve and are then caught by the address check anyway, and
+blocking them by name would newly reject a legitimate corporate sync target.
+
+Confirmed by mutation: with the old predicate restored, `100.64.0.1`, `fd00::1`,
+`fc00::1` and `224.0.0.1` were all **accepted**.
+
+### 2. Two audit dead-letter tests never tested what they claimed on Linux
+
+`AuditLedgerServiceBranchTest` passed `"Z:\\nonexistent\\path\\deadletter.jsonl"` as
+the dead-letter path to force the file-fallback **failure** branch. That is only
+unwritable on Windows: a backslash is a legal character in a Unix filename, so on the
+Linux CI runner the whole string is one relative filename that
+`Files.write(..., CREATE)` happily creates. So the two assertion-free tests
+(`writeToDeadLetterNatsFails`, `writeToDeadLetterFileOnly`) exercised the *success*
+path on CI while their comments claimed the failure path — and left a junk file named
+`Z:\nonexistent\path\deadletter.jsonl` in the build directory, which is not
+gitignored.
+
+Replaced with `@TempDir` + a deliberately-uncreated parent directory: `Files.write`
+with `CREATE` does not create parent directories, so it throws `NoSuchFileException`
+on both platforms. Both tests gained real assertions — that NATS was actually
+attempted (or actually skipped), and that the dead-letter file does **not** exist
+afterwards, which is what makes them fail if the write ever starts succeeding again.
+
+Confirmed by mutation: pointing the helper at a writable path fails exactly those two
+tests.
+
+### 3. `McpToolsProvider` sat at 31% coverage, including its tool-confusion defence
+
+`McpToolsProviderTest` asserted in its javadoc that discovery was "already covered
+indirectly by `AgentOrchestratorExtendedTest`". Measurement disagreed: 264 of 383
+instructions and 41 of 50 branches missed. The indirect suites drive discovery with a
+mocked memory whose `getAgentVersion()` is null, so `WorkflowTraversal` returns before
+the per-server loop is ever entered, and the `McpToolProviderManager*Test` suites
+cover the *manager*, not this class.
+
+Untested as a result: whitelist/blacklist filtering (the blacklist is an operator
+security control), the first-write-wins collision handling the class documents at
+length as an anti-tool-confusion measure, the spec-without-executor skip, the
+resource-bridge opt-in and its `IllegalArgumentException` → `INVALID_CONFIGURATION`
+path, and the `asProviderFailures` kind mapping.
+
+New `McpToolsProviderDiscoveryTest` covers all of it (13 tests). Note for future
+authors, called out in the class comment: `WorkflowTraversal` memoizes a completed
+traversal for two seconds in a **static** map keyed on
+`agentId|version|stepType|configClass`, so every test allocates its own agent id.
+
+The stale javadoc is corrected, and `contribute_nullFlag_defaultsToEnabled` — which
+asserted only `assertNotNull`, and so passed whether or not the flag short-circuited —
+now verifies that discovery was actually attempted.
+
+Confirmed by mutation: removing the collision guard fails
+`collisionKeepsFirstSpecAndItsExecutor`.
+
+### Noted, not changed
+
+- `RemoteApiResourceSource` builds a raw `HttpClient` rather than using
+  `SafeHttpClient`, contrary to §4.4. Not urgent — the JDK default redirect policy is
+  `NEVER`, so there is no redirect-based bypass — but it is a real follow-up with its
+  own blast radius (timeout/redirect semantics differ).
+- `ImportStyleTest` enforces the §4.7 no-inline-FQN rule only for
+  `ai.labs.eddi|java.util|java.time|java.nio.file`, so ~59 inline third-party FQNs
+  across 41 files slip through. Handled separately so it does not drown this review.
+
+---
+
+
+
 ## 📝 docs(monitoring): reconcile the dashboard inventory with what is provisioned (2026-08-27)
 
 **Repo:** EDDI (`feat/grafana-full-metrics-dashboard`)
