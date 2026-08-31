@@ -8,6 +8,7 @@ import ai.labs.eddi.modules.nlp.expressions.Expression;
 
 import java.util.regex.Pattern;
 
+import org.jboss.logging.Logger;
 import static ai.labs.eddi.utils.CharacterUtilities.isNumber;
 
 /**
@@ -79,5 +80,5 @@ public class Value extends Expression {
         return super.hashCode();
     }
 
-    private static final org.jboss.logging.Logger log = org.jboss.logging.Logger.getLogger(Value.class);
+    private static final Logger log = Logger.getLogger(Value.class);
 }

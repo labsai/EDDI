@@ -25,6 +25,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
+import com.mongodb.client.model.UpdateOptions;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -96,8 +97,8 @@ class MongoUserMemoryStoreTest {
     @DisplayName("mergeProperties — skips empty properties")
     void mergePropertiesEmpty() throws Exception {
         store.mergeProperties(TEST_USER, new Properties());
-        verify(collection, never()).updateOne(any(org.bson.conversions.Bson.class), any(org.bson.conversions.Bson.class),
-                any(com.mongodb.client.model.UpdateOptions.class));
+        verify(collection, never()).updateOne(any(Bson.class), any(Bson.class),
+                any(UpdateOptions.class));
     }
 
     @Test

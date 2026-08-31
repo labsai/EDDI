@@ -24,6 +24,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
+import jakarta.ws.rs.NotFoundException;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -559,7 +560,7 @@ class RestScheduleStoreTest {
 
         // A missing schedule must not be reported as forbidden — otherwise the guard
         // becomes an oracle for which schedule ids exist.
-        assertThrows(jakarta.ws.rs.NotFoundException.class, () -> rest.updateSchedule("gone", makeCronSchedule("gone")));
+        assertThrows(NotFoundException.class, () -> rest.updateSchedule("gone", makeCronSchedule("gone")));
     }
 
     /**

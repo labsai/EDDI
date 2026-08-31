@@ -34,6 +34,7 @@ import org.mockito.MockitoAnnotations;
 import java.lang.reflect.Method;
 import java.util.*;
 
+import dev.langchain4j.service.tool.ToolExecutor;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -740,7 +741,7 @@ class AgentOrchestratorTest {
         ToolSpecification spec = ToolSpecification.builder()
                 .name("test_tool").description("desc").build();
         List<ToolSpecification> specs = List.of(spec);
-        Map<String, dev.langchain4j.service.tool.ToolExecutor> executors = Map.of();
+        Map<String, ToolExecutor> executors = Map.of();
 
         var result = new AgentOrchestrator.HttpCallToolsResult(specs, executors, Map.of(), Map.of());
 

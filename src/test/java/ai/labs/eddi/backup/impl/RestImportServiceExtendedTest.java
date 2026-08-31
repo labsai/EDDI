@@ -38,6 +38,8 @@ import java.nio.file.Files;
 import java.util.List;
 import java.util.Set;
 
+import jakarta.enterprise.inject.spi.CDI;
+import jakarta.enterprise.inject.Instance;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -590,11 +592,11 @@ class RestImportServiceExtendedTest {
             // readSnippetDescriptors returns empty → no existing snippets
             when(snippetStore.readSnippetDescriptors(eq(""), eq(0), eq(0))).thenReturn(List.of());
 
-            try (var cdiMock = org.mockito.Mockito.mockStatic(jakarta.enterprise.inject.spi.CDI.class)) {
-                var cdi = mock(jakarta.enterprise.inject.spi.CDI.class);
-                cdiMock.when(jakarta.enterprise.inject.spi.CDI::current).thenReturn(cdi);
-                var instance = (jakarta.enterprise.inject.Instance<IRestPromptSnippetStore>) mock(
-                        jakarta.enterprise.inject.Instance.class);
+            try (var cdiMock = org.mockito.Mockito.mockStatic(CDI.class)) {
+                var cdi = mock(CDI.class);
+                cdiMock.when(CDI::current).thenReturn(cdi);
+                var instance = (Instance<IRestPromptSnippetStore>) mock(
+                        Instance.class);
                 when(cdi.select(IRestPromptSnippetStore.class)).thenReturn(instance);
                 when(instance.get()).thenReturn(snippetStore);
 
@@ -668,11 +670,11 @@ class RestImportServiceExtendedTest {
             existingSnippet.setName("safety_prompt");
             when(snippetStore.readSnippet(existingSnippetId, 1)).thenReturn(existingSnippet);
 
-            try (var cdiMock = org.mockito.Mockito.mockStatic(jakarta.enterprise.inject.spi.CDI.class)) {
-                var cdi = mock(jakarta.enterprise.inject.spi.CDI.class);
-                cdiMock.when(jakarta.enterprise.inject.spi.CDI::current).thenReturn(cdi);
-                var instance = (jakarta.enterprise.inject.Instance<IRestPromptSnippetStore>) mock(
-                        jakarta.enterprise.inject.Instance.class);
+            try (var cdiMock = org.mockito.Mockito.mockStatic(CDI.class)) {
+                var cdi = mock(CDI.class);
+                cdiMock.when(CDI::current).thenReturn(cdi);
+                var instance = (Instance<IRestPromptSnippetStore>) mock(
+                        Instance.class);
                 when(cdi.select(IRestPromptSnippetStore.class)).thenReturn(instance);
                 when(instance.get()).thenReturn(snippetStore);
 
@@ -851,12 +853,12 @@ class RestImportServiceExtendedTest {
                     "eddi://ai.labs.agent/agentstore/agents/" + newAgentId + "?version=1"));
             when(documentDescriptorStore.readDescriptor(newAgentId, 1)).thenReturn(existingDescriptor);
 
-            try (var cdiMock = org.mockito.Mockito.mockStatic(jakarta.enterprise.inject.spi.CDI.class)) {
-                var cdi = mock(jakarta.enterprise.inject.spi.CDI.class);
-                cdiMock.when(jakarta.enterprise.inject.spi.CDI::current).thenReturn(cdi);
+            try (var cdiMock = org.mockito.Mockito.mockStatic(CDI.class)) {
+                var cdi = mock(CDI.class);
+                cdiMock.when(CDI::current).thenReturn(cdi);
 
-                var agentStoreInstance = (jakarta.enterprise.inject.Instance<IAgentStore>) mock(
-                        jakarta.enterprise.inject.Instance.class);
+                var agentStoreInstance = (Instance<IAgentStore>) mock(
+                        Instance.class);
                 when(cdi.select(IAgentStore.class)).thenReturn(agentStoreInstance);
                 when(agentStoreInstance.get()).thenReturn(agentStore);
 

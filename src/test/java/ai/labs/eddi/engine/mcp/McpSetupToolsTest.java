@@ -34,6 +34,7 @@ import org.mockito.ArgumentCaptor;
 import java.net.URI;
 import java.util.List;
 
+import io.quarkus.security.identity.SecurityIdentity;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -90,7 +91,7 @@ class McpSetupToolsTest {
         when(secretProvider.isAvailable()).thenReturn(false);
 
         service = new AgentSetupService(restInterfaceFactory, agentAdmin, secretProvider, "http://localhost:11434");
-        var mockIdentity = mock(io.quarkus.security.identity.SecurityIdentity.class);
+        var mockIdentity = mock(SecurityIdentity.class);
         lenient().when(mockIdentity.isAnonymous()).thenReturn(true);
         tools = new McpSetupTools(service, jsonSerialization, mockIdentity, false);
     }
@@ -267,7 +268,7 @@ class McpSetupToolsTest {
         when(AgentStore.createAgent(any())).thenReturn(Response.created(URI.create("/agentstore/agents/agent-1?version=1")).build());
 
         var vaultTools = new McpSetupTools(vaultService, jsonSerialization,
-                mock(io.quarkus.security.identity.SecurityIdentity.class), false);
+                mock(SecurityIdentity.class), false);
 
         vaultTools.setupAgent("Vault Agent", "You are helpful", "openai", "gpt-4o", "sk-live-secret", null, null, null,
                 null, null, null, null, false, null);

@@ -27,6 +27,7 @@ import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
 
+import jakarta.ws.rs.BadRequestException;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -226,7 +227,7 @@ class RestAgentStoreTest {
             security.setSignInterAgentMessages(true);
             config.setSecurity(security);
 
-            assertThrows(jakarta.ws.rs.BadRequestException.class,
+            assertThrows(BadRequestException.class,
                     () -> restAgentStore.createAgent(config));
         }
 
@@ -238,7 +239,7 @@ class RestAgentStoreTest {
             security.setRequirePeerVerification(true);
             config.setSecurity(security);
 
-            assertThrows(jakarta.ws.rs.BadRequestException.class,
+            assertThrows(BadRequestException.class,
                     () -> restAgentStore.createAgent(config));
         }
 
@@ -296,7 +297,7 @@ class RestAgentStoreTest {
             security.setSignInterAgentMessages(true);
             config.setSecurity(security);
 
-            assertThrows(jakarta.ws.rs.BadRequestException.class,
+            assertThrows(BadRequestException.class,
                     () -> restAgentStore.updateAgent(AGENT_ID, 1, config));
         }
 
@@ -312,7 +313,7 @@ class RestAgentStoreTest {
 
             when(AgentStore.read(AGENT_ID, 1)).thenReturn(sourceConfig);
 
-            assertThrows(jakarta.ws.rs.BadRequestException.class,
+            assertThrows(BadRequestException.class,
                     () -> restAgentStore.duplicateAgent(AGENT_ID, 1, false));
         }
 

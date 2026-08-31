@@ -18,6 +18,7 @@ import java.util.concurrent.*;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Consumer;
 import java.util.logging.LogRecord;
+import org.jboss.logmanager.ExtLogRecord;
 
 /**
  * In-memory ring buffer that captures log records with MDC context. Provides:
@@ -182,7 +183,7 @@ public class BoundedLogStore {
         String userId = null;
         Integer agentVersion = null;
 
-        if (record instanceof org.jboss.logmanager.ExtLogRecord extRecord) {
+        if (record instanceof ExtLogRecord extRecord) {
             environment = extRecord.getMdc("environment");
             agentId = extRecord.getMdc("agentId");
             conversationId = extRecord.getMdc("conversationId");
@@ -356,7 +357,7 @@ public class BoundedLogStore {
         Object[] params = record.getParameters();
 
         // 1. Try ExtLogRecord's built-in getFormattedMessage() first
-        if (record instanceof org.jboss.logmanager.ExtLogRecord extRecord) {
+        if (record instanceof ExtLogRecord extRecord) {
             try {
                 String formatted = extRecord.getFormattedMessage();
                 if (formatted != null && !formatted.equals(msg)) {

@@ -16,6 +16,7 @@ import org.mockito.ArgumentCaptor;
 
 import java.util.Map;
 
+import dev.langchain4j.model.output.TokenUsage;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -155,7 +156,7 @@ class SummarizationServiceTest {
         var aiMessage = AiMessage.from("summary text");
         var chatResponse = ChatResponse.builder()
                 .aiMessage(aiMessage)
-                .tokenUsage(new dev.langchain4j.model.output.TokenUsage(500, 100))
+                .tokenUsage(new TokenUsage(500, 100))
                 .build();
         when(chatModel.chat(any(ChatRequest.class))).thenReturn(chatResponse);
 

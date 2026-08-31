@@ -20,6 +20,7 @@ import org.jboss.logging.Logger;
 
 import java.util.List;
 
+import jakarta.ws.rs.NotFoundException;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
@@ -132,7 +133,7 @@ public class HitlAccessGuard {
         if (groupId != null && !groupId.equals(gc.getGroupId())) {
             LOGGER.infof("Group conversation %s does not belong to group %s",
                     sanitize(groupConversationId), sanitize(groupId));
-            throw new jakarta.ws.rs.NotFoundException("Group conversation not found.");
+            throw new NotFoundException("Group conversation not found.");
         }
         ownershipValidator.requireOwnerAdminOrApprover(identity, gc.getUserId(), "group conversation");
     }
@@ -184,7 +185,7 @@ public class HitlAccessGuard {
         if (groupId != null && !groupId.equals(gc.getGroupId())) {
             LOGGER.infof("Group conversation %s does not belong to group %s",
                     sanitize(groupConversationId), sanitize(groupId));
-            throw new jakarta.ws.rs.NotFoundException("Group conversation not found.");
+            throw new NotFoundException("Group conversation not found.");
         }
         String callerId = identity != null && identity.getPrincipal() != null ? identity.getPrincipal().getName() : null;
         if (gc.getPendingHumanInput() != null && callerId != null
@@ -223,7 +224,7 @@ public class HitlAccessGuard {
         if (groupId != null && !groupId.equals(gc.getGroupId())) {
             LOGGER.infof("Group conversation %s does not belong to group %s",
                     sanitize(groupConversationId), sanitize(groupId));
-            throw new jakarta.ws.rs.NotFoundException("Group conversation not found.");
+            throw new NotFoundException("Group conversation not found.");
         }
         if (ownershipValidator.isAdmin(identity)) {
             return;

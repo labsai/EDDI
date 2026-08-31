@@ -92,7 +92,7 @@ class McpConversationToolsExtendedTest {
         when(restInterfaceFactory.get(IRestDocumentDescriptorStore.class)).thenReturn(descriptorStore);
 
         lenient().when(jsonSerialization.serialize(any())).thenReturn("{}");
-        mockIdentity = mock(io.quarkus.security.identity.SecurityIdentity.class);
+        mockIdentity = mock(SecurityIdentity.class);
         lenient().when(mockIdentity.isAnonymous()).thenReturn(true);
         // Authorization disabled: the guard admits every caller.
         conversationAccessGuard = new ConversationAccessGuard(mockIdentity, new OwnershipValidator(false),
@@ -184,7 +184,7 @@ class McpConversationToolsExtendedTest {
                 .thenThrow(new RestInterfaceFactory.RestInterfaceFactoryException("Factory error", new RuntimeException("cause")));
         when(failingFactory.get(IRestDocumentDescriptorStore.class)).thenReturn(descriptorStore);
 
-        var mockIdentity = mock(io.quarkus.security.identity.SecurityIdentity.class);
+        var mockIdentity = mock(SecurityIdentity.class);
         lenient().when(mockIdentity.isAnonymous()).thenReturn(true);
         var localTools = new McpConversationTools(conversationService, agentAdmin, agentStore,
                 failingFactory, jsonSerialization, boundedLogStore, auditStore,

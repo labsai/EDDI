@@ -1371,6 +1371,88 @@ against the facades.
 
 ---
 
+## 🧹 refactor(style): make ImportStyleTest enforce the rule it documents (2026-08-28)
+
+**Repo:** EDDI (`refactor/import-style-guard`)
+
+`ImportStyleTest` guards AGENTS.md §4.7 ("never inline a fully-qualified name"), but
+its `INLINE_FQN` pattern only matched four package roots —
+`ai.labs.eddi|java.util|java.time|java.nio.file`. Every third-party FQN was invisible
+to it, so the rule was enforced on about a tenth of the surface it claims to cover.
+
+Measured blind spot: **381 inline FQNs across 118 files**, for roots the project
+actually depends on — `jakarta`, `javax`, `org.eclipse`, `org.jboss`, `com.fasterxml`,
+`io.quarkus`, `io.smallrye`, `io.micrometer`, `io.nats`, `org.bson`, `com.mongodb`,
+`org.postgresql`, `dev.langchain4j`, plus the JDK's `java.io`, `java.net`, `java.lang`
+and `java.security`. Examples: `jakarta.ws.rs.NotFoundException` in `McpHitlTools`,
+`io.micrometer.core.instrument.Counter` as a field type in `AuditLedgerService`,
+`org.eclipse.microprofile.openapi.models.tags.Tag::getName` in `OpenApiTagSortFilter`.
+
+Essentially none were the disambiguation case §4.7 permits — they were simply missing
+imports. Rather than park 118 files in an allowlist (the test's own doc argues an
+`ALLOWED` entry should be "a deliberate, reviewable act rather than silent drift", and
+an allowlist that never shrinks is exactly the drift it warns about), the pattern is
+widened to an explicit root list and the violations are fixed.
+
+The root list stays explicit rather than a general lowercase-dotted-path shape,
+because a generic pattern also matches method chains and builder idioms on a
+lowercase receiver, which are not FQNs at all.
+
+### One genuine collision found, and allowlisted
+
+`NatsConversationCoordinator` imports `io.nats.client.api.*`, which brings in
+`io.nats.client.api.Error`. Its `catch (RuntimeException | java.lang.Error e)` clauses
+mean the JDK type, and the inline FQN is load-bearing: rewriting it to `Error` makes
+the reference ambiguous and the file stops compiling. An explicit
+`import java.lang.Error` resolves it but is a redundant import (`java.lang` is
+implicit) that Checkstyle flags — so the inline FQN really is the only clean spelling.
+Added to `ALLOWED` with that reasoning recorded.
+
+Worth noting how this surfaced: the automated rewrite's conflict check only consulted
+*single-type* imports, so a name introduced by a wildcard import was invisible to it.
+The compiler caught it. Anyone repeating this exercise should expect wildcard imports
+to hide exactly this class of collision.
+
+### Verification
+
+Clean `test-compile` (not incremental — a type-level refactor reuses stale `.class`
+files otherwise), `ImportStyleTest` green against the widened pattern, and the full
+unit suite re-run against the pre-change baseline of 20,295 tests / 8 failures /
+193 errors (all environmental: loopback sockets, Docker, network). Checkstyle is
+unchanged at its pre-existing violation count — the one violation this work did
+introduce, a redundant `import java.lang.Error`, is gone with the revert above.
+
+No behaviour changes: every edit replaces an inline FQN with the identical type named
+by a top-level import, or moves an import line.
+
+One review follow-up, in two rounds. Shortening the two FQNs in
+`HttpCallToolsProvider.parseFailureDetail` pulled its `case JsonParseException ignored ->` /
+`case MismatchedInputException ignored ->` switch labels into the diff, and CodeQL's
+"unread local variable" query flagged both bindings. It was right, and it predated this
+branch: the switch only needs the *type* to choose a sentence, so `ignored` never had a
+reader.
+
+The first attempt renamed them to the unnamed variable `_`, which is what the codebase
+already uses for a binding it does not intend to read (`catch (NumberFormatException _)` in
+`BoundedLogStore` and `PathNavigator`). **CodeQL re-fired on that** - it reports
+`Variable 'JsonParseException _' is never read` just the same, so it does not treat `_` as
+an intentional discard.
+
+Since a pattern label must bind *something*, the fix is to stop using one: the switch is now
+a plain `instanceof` chain, which is also the style the position lookup in the same method
+already uses. Same order, same three sentences, same default. The single call site is inside
+`catch (IOException e)`, so the one semantic difference between the two forms - a pattern
+switch throws on a null selector where `instanceof` yields false - is unreachable. Note that
+no test pins these strings; equivalence here is by inspection, not by assertion.
+
+The failing-class *set* was diffed rather than just the counts - that catches a swap
+where one class newly breaks while another newly passes, which equal totals would hide.
+It came back identical, so nothing regressed.
+
+---
+
+
+
 ## 📝 docs(monitoring): reconcile the dashboard inventory with what is provisioned (2026-08-27)
 
 **Repo:** EDDI (`feat/grafana-full-metrics-dashboard`)

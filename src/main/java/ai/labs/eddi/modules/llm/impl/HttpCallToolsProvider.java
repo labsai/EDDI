@@ -40,6 +40,9 @@ import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
 
+import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
+import com.fasterxml.jackson.databind.exc.MismatchedInputException;
+import com.fasterxml.jackson.core.JsonParseException;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
@@ -196,7 +199,7 @@ class HttpCallToolsProvider implements ToolSourceProvider {
                             .description(apiCall.getDescription() != null ? apiCall.getDescription() : "Execute " + apiCall.getName());
 
                     if (apiCall.getParameters() != null && !apiCall.getParameters().isEmpty()) {
-                        var schemaBuilder = dev.langchain4j.model.chat.request.json.JsonObjectSchema.builder();
+                        var schemaBuilder = JsonObjectSchema.builder();
                         for (var param : apiCall.getParameters().entrySet()) {
                             schemaBuilder.addStringProperty(param.getKey(), param.getValue() != null ? param.getValue() : param.getKey());
                         }
@@ -426,13 +429,19 @@ class HttpCallToolsProvider implements ToolSourceProvider {
      * @return a body-free description of the parse failure
      */
     private static String parseFailureDetail(IOException e) {
-        String reason = switch (e) {
-            case com.fasterxml.jackson.core.JsonParseException ignored ->
-                "the document is malformed — an unescaped character, an unquoted token, or a missing delimiter";
-            case com.fasterxml.jackson.databind.exc.MismatchedInputException ignored ->
-                "the document is empty or ends before it is complete";
-            default -> "the document could not be parsed";
-        };
+        // Plain instanceof rather than a switch with pattern labels: only the TYPE
+        // picks the sentence, nothing here reads the matched value. A pattern label
+        // has to bind something, and both a named binding and the unnamed `_` are
+        // reported by the CodeQL "unread local variable" query - the same style the
+        // position lookup below already uses says it without the dead binding.
+        String reason;
+        if (e instanceof JsonParseException) {
+            reason = "the document is malformed — an unescaped character, an unquoted token, or a missing delimiter";
+        } else if (e instanceof MismatchedInputException) {
+            reason = "the document is empty or ends before it is complete";
+        } else {
+            reason = "the document could not be parsed";
+        }
         String position = "";
         if (e instanceof JsonProcessingException jsonError) {
             JsonLocation location = jsonError.getLocation();
