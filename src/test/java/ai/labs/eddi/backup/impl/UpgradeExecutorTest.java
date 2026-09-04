@@ -8,6 +8,7 @@ import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.backup.IResourceSource;
 import ai.labs.eddi.backup.IResourceSource.*;
 import ai.labs.eddi.backup.model.ImportPreview;
+import ai.labs.eddi.backup.model.UpgradeResult;
 import ai.labs.eddi.backup.model.ImportPreview.DiffAction;
 import ai.labs.eddi.backup.model.ImportPreview.ResourceDiff;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
@@ -38,6 +39,9 @@ import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.enterprise.inject.Instance;
+import jakarta.enterprise.inject.spi.CDI;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -48,6 +52,7 @@ import org.mockito.Mockito;
 
 import java.net.URI;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -78,7 +83,7 @@ class UpgradeExecutorTest {
         descriptorStore = Mockito.mock(IDocumentDescriptorStore.class);
 
         executor = new UpgradeExecutor(agentStore, workflowStore,
-                snippetStore, jsonSerialization, structuralMatcher, descriptorStore, mock(ResourceAccessGuard.class));
+                snippetStore, jsonSerialization, structuralMatcher, descriptorStore, mock(BackupMetrics.class), mock(ResourceAccessGuard.class));
     }
 
     // ==================== Snippet Processing ====================
@@ -183,7 +188,7 @@ class UpgradeExecutorTest {
     class AgentConfigUpdate {
 
         @Test
-        @DisplayName("should update agent with new version and return URI")
+        @DisplayName("should update agent with new version and return URI when a workflow order is given")
         void updatesAgentAndReturnsUri() throws Exception {
             var source = createSource(List.of(), List.of());
 
@@ -198,11 +203,34 @@ class UpgradeExecutorTest {
             when(agentStore.updateAgent(eq("target-1"), eq(3), any()))
                     .thenReturn(Response.ok().build());
 
-            URI result = executor.executeUpgrade(source, "target-1", null, null);
+            var result = executor.executeUpgrade(source, "target-1", null, List.of("wf-1"));
 
-            assertNotNull(result);
-            assertTrue(result.toString().contains("target-1"));
-            assertTrue(result.toString().contains("version=4"));
+            assertTrue(result.agentUpdated());
+            assertNotNull(result.agentUri());
+            assertTrue(result.agentUri().toString().contains("target-1"));
+            assertTrue(result.agentUri().toString().contains("version=4"));
+        }
+
+        @Test
+        @DisplayName("should NOT burn an agent version when nothing changed")
+        void leavesAgentVersionAloneWhenNothingChanged() throws Exception {
+            var source = createSource(List.of(), List.of());
+
+            List<ResourceDiff> diffs = new ArrayList<>();
+            diffs.add(agentDiff("src-1", "target-1", DiffAction.SKIP));
+
+            setupPreviewAndAgent("target-1", 3, diffs);
+
+            var result = executor.executeUpgrade(source, "target-1", null, null);
+
+            // An unconditional updateAgent wrote a byte-identical configuration and
+            // bumped the version, so a CI job that synced on every build inflated the
+            // version history and "v14" said nothing about whether anything changed.
+            verify(agentStore, never()).updateAgent(anyString(), anyInt(), any());
+            assertFalse(result.agentUpdated());
+            assertFalse(result.wroteAnything());
+            assertEquals("eddi://ai.labs.agent/agentstore/agents/target-1?version=3",
+                    result.agentUri().toString());
         }
     }
 
@@ -228,7 +256,7 @@ class UpgradeExecutorTest {
 
             // Setup preview and descriptor without setting up default agentConfig
             var preview = new ImportPreview("src-1", "Source Agent", "target-1", "Target Agent", diffs);
-            when(structuralMatcher.buildPreview(any(), eq("target-1"), eq(false))).thenReturn(preview);
+            when(structuralMatcher.buildPreview(any(), eq("target-1"), eq(true))).thenReturn(preview);
 
             var descriptor = new DocumentDescriptor();
             descriptor.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/target-1?version=1"));
@@ -265,15 +293,23 @@ class UpgradeExecutorTest {
     class ExtensionProcessing {
 
         @Test
-        @DisplayName("should update matched extension and rewrite workflow URI")
+        @DisplayName("should update matched extension and rewrite the step's config.uri")
         @SuppressWarnings("unchecked")
         void updatesExtensionAndRewritesWorkflowUri() throws Exception {
             String wfId = "aaaaaaaaaaaaaaaaaaaaaaaa";
             String extId = "bbbbbbbbbbbbbbbbbbbbbbbb";
+            String oldExtUri = "eddi://ai.labs.llm/llmstore/llms/" + extId + "?version=2";
 
-            var llmExt = new ExtensionSourceData("src-ext-1", "GPT Config", "langchain", "ai.labs.llm", "{\"model\":\"gpt-4\"}");
+            // A workflow shaped the way AgentSetupService writes one and the way the
+            // shipped reference config looks: type is the eddi:// step-type URI and
+            // the extension reference lives in config.uri, not in extensions.
+            var sourceWfConfig = workflowWithLlmStep(oldExtUri);
+            String extensionKey = WorkflowExtensions.scan(sourceWfConfig).getFirst().key();
+
+            var llmExt = new ExtensionSourceData("src-ext-1", "GPT Config", "langchain",
+                    "eddi://ai.labs.llm", "{\"model\":\"gpt-4\"}");
             var sourceWf = new WorkflowSourceData("src-wf-1", "Workflow 1", 0,
-                    new WorkflowConfiguration(), Map.of("ai.labs.llm", llmExt));
+                    sourceWfConfig, Map.of(extensionKey, llmExt));
             var source = createSource(List.of(sourceWf), List.of());
 
             // Diffs: agent SKIP, workflow UPDATE with extension UPDATE
@@ -285,7 +321,7 @@ class UpgradeExecutorTest {
                     DiffAction.UPDATE, extId, 2, "type", null, null, -1));
 
             var preview = new ImportPreview("src-1", "Source Agent", "target-1", "Target Agent", diffs);
-            when(structuralMatcher.buildPreview(any(), eq("target-1"), eq(false))).thenReturn(preview);
+            when(structuralMatcher.buildPreview(any(), eq("target-1"), eq(true))).thenReturn(preview);
 
             // Setup agent descriptor
             var descriptor = new DocumentDescriptor();
@@ -298,12 +334,7 @@ class UpgradeExecutorTest {
                     .thenReturn(new LlmConfiguration(List.of()));
             when(llmStore.updateLlm(eq(extId), eq(2), any())).thenReturn(Response.ok().build());
 
-            // Workflow config with workflowStep referencing old extension URI
-            var targetWfConfig = new WorkflowConfiguration();
-            var step = new WorkflowConfiguration.WorkflowStep();
-            step.setType(URI.create("ai.labs.llm"));
-            step.setExtensions(new HashMap<>(Map.of("uri", "eddi://ai.labs.llm/llmstore/llms/" + extId + "?version=2")));
-            targetWfConfig.setWorkflowSteps(List.of(step));
+            var targetWfConfig = workflowWithLlmStep(oldExtUri);
             when(workflowStore.readWorkflow(wfId, 1)).thenReturn(targetWfConfig);
             when(workflowStore.updateWorkflow(eq(wfId), eq(1), any())).thenReturn(Response.ok().build());
 
@@ -315,21 +346,116 @@ class UpgradeExecutorTest {
             when(agentStore.updateAgent(eq("target-1"), eq(1), any())).thenReturn(Response.ok().build());
 
             @SuppressWarnings("rawtypes")
-            MockedStatic<jakarta.enterprise.inject.spi.CDI> cdiMock = Mockito.mockStatic(jakarta.enterprise.inject.spi.CDI.class);
+            MockedStatic<CDI> cdiMock = Mockito.mockStatic(CDI.class);
             try (cdiMock) {
-                var cdiInstance = Mockito.mock(jakarta.enterprise.inject.spi.CDI.class);
-                cdiMock.when(jakarta.enterprise.inject.spi.CDI::current).thenReturn(cdiInstance);
-                var instanceLlm = (jakarta.enterprise.inject.Instance<IRestLlmStore>) Mockito
-                        .mock(jakarta.enterprise.inject.Instance.class);
+                var cdiInstance = Mockito.mock(CDI.class);
+                cdiMock.when(CDI::current).thenReturn(cdiInstance);
+                var instanceLlm = (Instance<IRestLlmStore>) Mockito
+                        .mock(Instance.class);
                 when(cdiInstance.select(IRestLlmStore.class)).thenReturn(instanceLlm);
                 when(instanceLlm.get()).thenReturn(llmStore);
 
-                URI result = executor.executeUpgrade(source, "target-1", null, null);
+                var result = executor.executeUpgrade(source, "target-1", null, null);
 
-                assertNotNull(result);
+                assertNotNull(result.agentUri());
+                assertFalse(result.hasFailures());
                 verify(llmStore).updateLlm(eq(extId), eq(2), any());
-                verify(workflowStore).updateWorkflow(eq(wfId), eq(1), any());
+
+                var captor = org.mockito.ArgumentCaptor.forClass(WorkflowConfiguration.class);
+                verify(workflowStore).updateWorkflow(eq(wfId), eq(1), captor.capture());
+
+                // The engine reads config.uri. Writing the new version into
+                // extensions.uri left the deployed pipeline on the OLD extension
+                // version while the agent version was bumped, and left a stray key
+                // that reference scans do not count as a reference.
+                var updatedStep = captor.getValue().getWorkflowSteps().getFirst();
+                assertEquals("eddi://ai.labs.llm/llmstore/llms/" + extId + "?version=3",
+                        updatedStep.getConfig().get("uri"));
+                assertFalse(updatedStep.getExtensions().containsKey("uri"));
+
+                // ... and the agent is versioned because the workflow genuinely changed
+                verify(agentStore).updateAgent(eq("target-1"), eq(1), any());
             }
+        }
+
+        @Test
+        @DisplayName("a scrubbed secret is replaced by the target's own value, not written as a placeholder")
+        @SuppressWarnings("unchecked")
+        void restoresScrubbedSecretsFromTarget() throws Exception {
+            String wfId = "aaaaaaaaaaaaaaaaaaaaaaaa";
+            String extId = "bbbbbbbbbbbbbbbbbbbbbbbb";
+
+            // Everything in an export ZIP has been through the secret scrubber, which
+            // replaces live credentials with ${vault:REDACTED}. Writing that straight
+            // into the target replaced a production agent's working API keys with
+            // placeholders — an upgrade from an export broke the agent it updated.
+            String scrubbedSource = "{\"apiKey\":\"${vault:REDACTED}\",\"model\":\"gpt-4\"}";
+            String targetContent = "{\"apiKey\":\"sk-live-abc\",\"model\":\"gpt-3\"}";
+
+            var llmExt = new ExtensionSourceData("src-ext-1", "GPT Config", "langchain",
+                    "eddi://ai.labs.llm", scrubbedSource);
+            var sourceWf = new WorkflowSourceData("src-wf-1", "Workflow 1", 0,
+                    new WorkflowConfiguration(), Map.of("k", llmExt));
+            var source = createSource(List.of(sourceWf), List.of());
+
+            List<ResourceDiff> diffs = new ArrayList<>();
+            diffs.add(agentDiff("src-1", "target-1", DiffAction.SKIP));
+            diffs.add(new ResourceDiff("src-wf-1", "workflow", "Workflow 1",
+                    DiffAction.UPDATE, wfId, 1, "position", null, null, 0));
+            diffs.add(new ResourceDiff("src-ext-1", "langchain", "GPT Config",
+                    DiffAction.UPDATE, extId, 2, "type", scrubbedSource, targetContent, -1));
+
+            setupPreviewAndAgent("target-1", 1, diffs);
+            when(workflowStore.readWorkflow(wfId, 1)).thenReturn(new WorkflowConfiguration());
+
+            // Real JSON round-tripping — the merge under test is about JSON, not mocks.
+            var mapper = new ObjectMapper();
+            when(jsonSerialization.deserialize(anyString()))
+                    .thenAnswer(inv -> mapper.readValue((String) inv.getArgument(0), Object.class));
+            when(jsonSerialization.serialize(any()))
+                    .thenAnswer(inv -> mapper.writeValueAsString(inv.getArgument(0)));
+
+            var mergedJson = new AtomicReference<String>();
+            when(jsonSerialization.deserialize(anyString(), eq(LlmConfiguration.class)))
+                    .thenAnswer(inv -> {
+                        mergedJson.set(inv.getArgument(0));
+                        return new LlmConfiguration(List.of());
+                    });
+
+            var llmStore = Mockito.mock(IRestLlmStore.class);
+            when(llmStore.updateLlm(eq(extId), eq(2), any())).thenReturn(Response.ok().build());
+
+            @SuppressWarnings("rawtypes")
+            MockedStatic<CDI> cdiMock = Mockito.mockStatic(CDI.class);
+            try (cdiMock) {
+                var cdiInstance = Mockito.mock(CDI.class);
+                cdiMock.when(CDI::current).thenReturn(cdiInstance);
+                var instanceLlm = (Instance<IRestLlmStore>) Mockito
+                        .mock(Instance.class);
+                when(cdiInstance.select(IRestLlmStore.class)).thenReturn(instanceLlm);
+                when(instanceLlm.get()).thenReturn(llmStore);
+
+                executor.executeUpgrade(source, "target-1", null, null);
+            }
+
+            assertNotNull(mergedJson.get(), "the store update never ran");
+            assertFalse(mergedJson.get().contains("${vault:REDACTED}"), mergedJson.get());
+            assertTrue(mergedJson.get().contains("sk-live-abc"), mergedJson.get());
+            // Everything that is not a scrubbed secret still comes from the source.
+            assertTrue(mergedJson.get().contains("gpt-4"), mergedJson.get());
+        }
+
+        /**
+         * A workflow step in the shape the engine and the exporter actually produce.
+         */
+        private WorkflowConfiguration workflowWithLlmStep(String extensionUri) {
+            var config = new WorkflowConfiguration();
+            var step = new WorkflowConfiguration.WorkflowStep();
+            step.setType(URI.create("eddi://ai.labs.llm"));
+            step.setConfig(new HashMap<>(Map.of("uri", extensionUri)));
+            step.setExtensions(new HashMap<>());
+            config.setWorkflowSteps(new ArrayList<>(List.of(step)));
+            return config;
         }
 
         @Test
@@ -351,7 +477,7 @@ class UpgradeExecutorTest {
                     DiffAction.CREATE, null, null, null, null, null, -1));
 
             var preview = new ImportPreview("src-1", "Source Agent", "target-1", "Target Agent", diffs);
-            when(structuralMatcher.buildPreview(any(), eq("target-1"), eq(false))).thenReturn(preview);
+            when(structuralMatcher.buildPreview(any(), eq("target-1"), eq(true))).thenReturn(preview);
 
             var descriptor = new DocumentDescriptor();
             descriptor.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/target-1?version=1"));
@@ -384,20 +510,20 @@ class UpgradeExecutorTest {
             when(agentStore.updateAgent(eq("target-1"), eq(1), any())).thenReturn(Response.ok().build());
 
             @SuppressWarnings("rawtypes")
-            MockedStatic<jakarta.enterprise.inject.spi.CDI> cdiMock = Mockito.mockStatic(jakarta.enterprise.inject.spi.CDI.class);
+            MockedStatic<CDI> cdiMock = Mockito.mockStatic(CDI.class);
             try (cdiMock) {
-                var cdiInstance = Mockito.mock(jakarta.enterprise.inject.spi.CDI.class);
-                cdiMock.when(jakarta.enterprise.inject.spi.CDI::current).thenReturn(cdiInstance);
+                var cdiInstance = Mockito.mock(CDI.class);
+                cdiMock.when(CDI::current).thenReturn(cdiInstance);
 
                 // CDI lookup for IRestRagStore (getStore in resolveExtensionOps)
-                var instanceRestRag = (jakarta.enterprise.inject.Instance<IRestRagStore>) Mockito
-                        .mock(jakarta.enterprise.inject.Instance.class);
+                var instanceRestRag = (Instance<IRestRagStore>) Mockito
+                        .mock(Instance.class);
                 when(cdiInstance.select(IRestRagStore.class)).thenReturn(instanceRestRag);
                 when(instanceRestRag.get()).thenReturn(ragRestStore);
 
                 // CDI lookup for IRagStore (dispatchCreateDirect)
-                var instanceRag = (jakarta.enterprise.inject.Instance<IRagStore>) Mockito
-                        .mock(jakarta.enterprise.inject.Instance.class);
+                var instanceRag = (Instance<IRagStore>) Mockito
+                        .mock(Instance.class);
                 when(cdiInstance.select(IRagStore.class)).thenReturn(instanceRag);
                 when(instanceRag.get()).thenReturn(ragDirectStore);
 
@@ -445,16 +571,16 @@ class UpgradeExecutorTest {
             when(wfDirectStore.create(any())).thenReturn(wfResourceId);
 
             @SuppressWarnings("rawtypes")
-            MockedStatic<jakarta.enterprise.inject.spi.CDI> cdiMock = Mockito.mockStatic(jakarta.enterprise.inject.spi.CDI.class);
+            MockedStatic<CDI> cdiMock = Mockito.mockStatic(CDI.class);
             try (cdiMock) {
-                var cdiInstance = Mockito.mock(jakarta.enterprise.inject.spi.CDI.class);
-                cdiMock.when(jakarta.enterprise.inject.spi.CDI::current).thenReturn(cdiInstance);
-                var instanceWf = (jakarta.enterprise.inject.Instance<IWorkflowStore>) Mockito
-                        .mock(jakarta.enterprise.inject.Instance.class);
+                var cdiInstance = Mockito.mock(CDI.class);
+                cdiMock.when(CDI::current).thenReturn(cdiInstance);
+                var instanceWf = (Instance<IWorkflowStore>) Mockito
+                        .mock(Instance.class);
                 when(cdiInstance.select(IWorkflowStore.class)).thenReturn(instanceWf);
                 when(instanceWf.get()).thenReturn(wfDirectStore);
 
-                URI result = executor.executeUpgrade(source, "target-1", null, null);
+                URI result = executor.executeUpgrade(source, "target-1", null, null).agentUri();
 
                 assertNotNull(result);
                 verify(wfDirectStore).create(any());
@@ -493,7 +619,7 @@ class UpgradeExecutorTest {
             diffs.add(agentDiff("src-1", "target-1", DiffAction.SKIP));
 
             var preview = new ImportPreview("src-1", "Source Agent", "target-1", "Target Agent", diffs);
-            when(structuralMatcher.buildPreview(any(), eq("target-1"), eq(false))).thenReturn(preview);
+            when(structuralMatcher.buildPreview(any(), eq("target-1"), eq(true))).thenReturn(preview);
 
             var descriptor = new DocumentDescriptor();
             descriptor.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/target-1?version=1"));
@@ -505,8 +631,10 @@ class UpgradeExecutorTest {
             when(agentStore.updateAgent(eq("target-1"), eq(1), any()))
                     .thenThrow(new RuntimeException("DB error"));
 
+            // A workflow order is what makes the agent config genuinely need writing;
+            // without one the executor deliberately does not touch the agent at all.
             assertThrows(RuntimeException.class,
-                    () -> executor.executeUpgrade(source, "target-1", null, null));
+                    () -> executor.executeUpgrade(source, "target-1", null, List.of("wf-1")));
         }
     }
 
@@ -518,7 +646,7 @@ class UpgradeExecutorTest {
 
     private void setupPreviewAndAgent(String targetAgentId, int version, List<ResourceDiff> diffs) throws Exception {
         var preview = new ImportPreview("src-1", "Source Agent", targetAgentId, "Target Agent", diffs);
-        when(structuralMatcher.buildPreview(any(), eq(targetAgentId), eq(false))).thenReturn(preview);
+        when(structuralMatcher.buildPreview(any(), eq(targetAgentId), eq(true))).thenReturn(preview);
 
         var descriptor = new DocumentDescriptor();
         descriptor.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/" + targetAgentId + "?version=" + version));
@@ -562,15 +690,80 @@ class UpgradeExecutorTest {
     @DisplayName("Unknown extension type handling")
     class UnknownExtensionType {
 
+        /**
+         * m5, on the CREATE side. {@code createExtension} resolves the store through
+         * the same registry {@code updateExtension} does, and used to swallow the
+         * {@code IllegalArgumentException} that names an unregistered type — so a
+         * brand-new extension of a type nobody had wired up was reported as "the store
+         * did not accept the create", pointing the operator at a store that was never
+         * consulted.
+         * <p>
+         * This test replaces one that asserted only {@code assertNotNull} on the agent
+         * URI, which that path can never answer null.
+         */
         @Test
-        @DisplayName("should return null URI when extension type is unknown")
+        @DisplayName("an unregistered type on the create path is a wiring error too, and writes nothing")
         @SuppressWarnings("unchecked")
-        void unknownTypeReturnsNull() throws Exception {
+        void unregisteredTypeOnCreateIsReportedAsWiringError() throws Exception {
             String wfId = "aabbccddeeff112233445566";
 
-            var unknownExt = new ExtensionSourceData("src-ext-u", "Unknown Config", "unknowntype", "ai.labs.unknown", "{}");
+            var unknownExt = new ExtensionSourceData("src-ext-u", "Unknown Config", "unknowntype",
+                    "eddi://ai.labs.unknown", "{}");
             var sourceWf = new WorkflowSourceData("src-wf-1", "Workflow 1", 0,
-                    new WorkflowConfiguration(), Map.of("ai.labs.unknown", unknownExt));
+                    new WorkflowConfiguration(), Map.of("eddi://ai.labs.unknown#0/config", unknownExt));
+            var source = createSource(List.of(sourceWf), List.of());
+
+            List<ResourceDiff> diffs = new ArrayList<>();
+            diffs.add(agentDiff("src-1", "target-1", DiffAction.SKIP));
+            diffs.add(new ResourceDiff("src-wf-1", "workflow", "Workflow 1",
+                    DiffAction.UPDATE, wfId, 1, "position", null, null, 0));
+            // CREATE, not UPDATE: this extension has no counterpart in the target.
+            diffs.add(new ResourceDiff("src-ext-u", "unknowntype", "Unknown Config",
+                    DiffAction.CREATE, null, null, null, null, null, -1));
+
+            setupPreviewAndAgent("target-1", 1, diffs);
+            when(workflowStore.readWorkflow(wfId, 1)).thenReturn(new WorkflowConfiguration());
+
+            @SuppressWarnings("rawtypes")
+            MockedStatic<CDI> cdiMock = Mockito.mockStatic(CDI.class);
+            try (cdiMock) {
+                var cdiInstance = Mockito.mock(CDI.class);
+                cdiMock.when(CDI::current).thenReturn(cdiInstance);
+
+                UpgradeResult result = executor.executeUpgrade(source, "target-1", null, null);
+
+                assertEquals(1, result.failures().size(), result.failures().toString());
+                String reason = result.failures().getFirst().reason();
+                assertTrue(reason.contains("No store operations are registered"),
+                        "the operator must be told the type is unregistered, got: " + reason);
+                assertTrue(reason.contains("unknowntype"), "the reason must name the type, got: " + reason);
+                assertFalse(reason.contains("did not accept"),
+                        "a wiring mistake must not be reported as a store rejection, got: " + reason);
+
+                // Nothing landed, so nothing may be reported as written either.
+                assertEquals(0, result.created());
+                assertEquals(0, result.updated());
+                assertFalse(result.agentUpdated(), "a failed create must not bump the agent version");
+            }
+        }
+
+        /**
+         * m5 — an extension type with no registered store is a wiring mistake, and the
+         * operator has to be told that. {@code updateExtension} used to catch the
+         * {@code IllegalArgumentException} that says so and answer null, which the
+         * caller reported as "the store did not accept the update" — the opposite
+         * diagnosis, pointing at a store that was never consulted.
+         */
+        @Test
+        @DisplayName("an unregistered extension type is reported as a wiring error, not a store rejection")
+        @SuppressWarnings("unchecked")
+        void unregisteredTypeIsReportedAsWiringError() throws Exception {
+            String wfId = "aabbccddeeff112233445566";
+
+            var unknownExt = new ExtensionSourceData("src-ext-u", "Unknown Config", "unknowntype",
+                    "eddi://ai.labs.unknown", "{}");
+            var sourceWf = new WorkflowSourceData("src-wf-1", "Workflow 1", 0,
+                    new WorkflowConfiguration(), Map.of("eddi://ai.labs.unknown#0/config", unknownExt));
             var source = createSource(List.of(sourceWf), List.of());
 
             List<ResourceDiff> diffs = new ArrayList<>();
@@ -581,21 +774,81 @@ class UpgradeExecutorTest {
                     DiffAction.UPDATE, "cccccccccccccccccccccccc", 2, "type", null, null, -1));
 
             setupPreviewAndAgent("target-1", 1, diffs);
-
-            // Workflow config (empty)
             when(workflowStore.readWorkflow(wfId, 1)).thenReturn(new WorkflowConfiguration());
 
             @SuppressWarnings("rawtypes")
-            MockedStatic<jakarta.enterprise.inject.spi.CDI> cdiMock = Mockito.mockStatic(jakarta.enterprise.inject.spi.CDI.class);
+            MockedStatic<CDI> cdiMock = Mockito.mockStatic(CDI.class);
             try (cdiMock) {
-                var cdiInstance = Mockito.mock(jakarta.enterprise.inject.spi.CDI.class);
-                cdiMock.when(jakarta.enterprise.inject.spi.CDI::current).thenReturn(cdiInstance);
+                var cdiInstance = Mockito.mock(CDI.class);
+                cdiMock.when(CDI::current).thenReturn(cdiInstance);
 
-                URI result = executor.executeUpgrade(source, "target-1", null, null);
+                UpgradeResult result = executor.executeUpgrade(source, "target-1", null, null);
 
-                // Should succeed (unknown type logged but skipped), no extension update
-                assertNotNull(result);
+                assertEquals(1, result.failures().size(), result.failures().toString());
+                String reason = result.failures().get(0).reason();
+                assertTrue(reason.contains("No store operations are registered"),
+                        "the operator must be told the type is unregistered, got: " + reason);
+                assertTrue(reason.contains("unknowntype"), "the reason must name the type, got: " + reason);
+                assertFalse(reason.contains("did not accept"),
+                        "a wiring mistake must not be reported as a store rejection, got: " + reason);
             }
+        }
+    }
+
+    // ==================== 'nothing to do' agent URI ====================
+
+    @Nested
+    @DisplayName("Agent URI of an upgrade that wrote nothing")
+    class NoOpAgentUri {
+
+        /**
+         * m8 — when an upgrade writes nothing, the agent URI it reports must not name a
+         * version that was guessed. The version lookup swallows every descriptor
+         * failure and answers 1, so this path handed the caller {@code ?version=1} for
+         * an agent that may well have been at v14.
+         */
+        @Test
+        @DisplayName("reports no version rather than guessing 1 when the descriptor cannot be read")
+        void unreadableDescriptorReportsNoVersion() throws Exception {
+            var source = createSource(List.of(), List.of());
+
+            List<ResourceDiff> diffs = new ArrayList<>();
+            diffs.add(agentDiff("src-1", "target-1", DiffAction.SKIP));
+
+            var preview = new ImportPreview("src-1", "Source Agent", "target-1", "Target Agent", diffs);
+            when(structuralMatcher.buildPreview(any(), eq("target-1"), eq(true))).thenReturn(preview);
+            when(descriptorStore.readDescriptor(eq("target-1"), isNull()))
+                    .thenThrow(new RuntimeException("descriptor store unavailable"));
+
+            // Nothing to write: no workflow was updated or created, no order given.
+            UpgradeResult result = executor.executeUpgrade(source, "target-1", null, null);
+
+            assertFalse(result.agentUpdated(), "nothing changed, so the agent must not be rewritten");
+            assertEquals(IRestAgentStore.resourceURI + "target-1", result.agentUri().toString(),
+                    "an unresolvable version must be omitted, never guessed as 1");
+            verify(agentStore, never()).updateAgent(anyString(), anyInt(), any());
+        }
+
+        @Test
+        @DisplayName("reports the version the descriptor actually names")
+        void readableDescriptorReportsItsVersion() throws Exception {
+            var source = createSource(List.of(), List.of());
+
+            List<ResourceDiff> diffs = new ArrayList<>();
+            diffs.add(agentDiff("src-1", "target-1", DiffAction.SKIP));
+
+            var preview = new ImportPreview("src-1", "Source Agent", "target-1", "Target Agent", diffs);
+            when(structuralMatcher.buildPreview(any(), eq("target-1"), eq(true))).thenReturn(preview);
+
+            var descriptor = new DocumentDescriptor();
+            descriptor.setResource(URI.create(
+                    "eddi://ai.labs.agent/agentstore/agents/target-1?version=14"));
+            when(descriptorStore.readDescriptor(eq("target-1"), isNull())).thenReturn(descriptor);
+
+            UpgradeResult result = executor.executeUpgrade(source, "target-1", null, null);
+
+            assertEquals(IRestAgentStore.resourceURI + "target-1?version=14",
+                    result.agentUri().toString());
         }
     }
 
@@ -636,16 +889,16 @@ class UpgradeExecutorTest {
             when(workflowStore.readWorkflow(wfId, 1)).thenReturn(new WorkflowConfiguration());
 
             @SuppressWarnings("rawtypes")
-            MockedStatic<jakarta.enterprise.inject.spi.CDI> cdiMock = Mockito.mockStatic(jakarta.enterprise.inject.spi.CDI.class);
+            MockedStatic<CDI> cdiMock = Mockito.mockStatic(CDI.class);
             try (cdiMock) {
-                var cdiInstance = Mockito.mock(jakarta.enterprise.inject.spi.CDI.class);
-                cdiMock.when(jakarta.enterprise.inject.spi.CDI::current).thenReturn(cdiInstance);
-                var instanceLlm = (jakarta.enterprise.inject.Instance<IRestLlmStore>) Mockito
-                        .mock(jakarta.enterprise.inject.Instance.class);
+                var cdiInstance = Mockito.mock(CDI.class);
+                cdiMock.when(CDI::current).thenReturn(cdiInstance);
+                var instanceLlm = (Instance<IRestLlmStore>) Mockito
+                        .mock(Instance.class);
                 when(cdiInstance.select(IRestLlmStore.class)).thenReturn(instanceLlm);
                 when(instanceLlm.get()).thenReturn(llmStore);
 
-                URI result = executor.executeUpgrade(source, "target-1", null, null);
+                URI result = executor.executeUpgrade(source, "target-1", null, null).agentUri();
 
                 // Should still succeed (extension update returned null URI, no workflow update
                 // needed)
@@ -679,21 +932,24 @@ class UpgradeExecutorTest {
             setupPreviewAndAgent("target-1", 1, diffs);
 
             @SuppressWarnings("rawtypes")
-            MockedStatic<jakarta.enterprise.inject.spi.CDI> cdiMock = Mockito.mockStatic(jakarta.enterprise.inject.spi.CDI.class);
+            MockedStatic<CDI> cdiMock = Mockito.mockStatic(CDI.class);
             try (cdiMock) {
-                var cdiInstance = Mockito.mock(jakarta.enterprise.inject.spi.CDI.class);
-                cdiMock.when(jakarta.enterprise.inject.spi.CDI::current).thenReturn(cdiInstance);
-                var instanceWf = (jakarta.enterprise.inject.Instance<IWorkflowStore>) Mockito
-                        .mock(jakarta.enterprise.inject.Instance.class);
+                var cdiInstance = Mockito.mock(CDI.class);
+                cdiMock.when(CDI::current).thenReturn(cdiInstance);
+                var instanceWf = (Instance<IWorkflowStore>) Mockito
+                        .mock(Instance.class);
                 when(cdiInstance.select(IWorkflowStore.class)).thenReturn(instanceWf);
                 when(instanceWf.get()).thenThrow(new RuntimeException("CDI lookup failed"));
 
-                // Should NOT throw — createNewWorkflow catches and returns null
-                URI result = executor.executeUpgrade(source, "target-1", null, null);
+                // Should NOT throw — createNewWorkflow catches and records the failure
+                var result = executor.executeUpgrade(source, "target-1", null, null);
 
-                assertNotNull(result);
-                // Agent should still be updated (without the failed new workflow)
-                verify(agentStore).updateAgent(eq("target-1"), eq(1), any());
+                assertNotNull(result.agentUri());
+                // Nothing landed, so no agent version is burned — and the failure is
+                // reported rather than logged and forgotten behind a 201.
+                verify(agentStore, never()).updateAgent(anyString(), anyInt(), any());
+                assertTrue(result.hasFailures());
+                assertEquals("workflow", result.failures().getFirst().resourceType());
             }
         }
     }
@@ -739,16 +995,16 @@ class UpgradeExecutorTest {
             when(workflowStore.readWorkflow(wfId, 1)).thenReturn(targetWfConfig);
 
             @SuppressWarnings("rawtypes")
-            MockedStatic<jakarta.enterprise.inject.spi.CDI> cdiMock = Mockito.mockStatic(jakarta.enterprise.inject.spi.CDI.class);
+            MockedStatic<CDI> cdiMock = Mockito.mockStatic(CDI.class);
             try (cdiMock) {
-                var cdiInstance = Mockito.mock(jakarta.enterprise.inject.spi.CDI.class);
-                cdiMock.when(jakarta.enterprise.inject.spi.CDI::current).thenReturn(cdiInstance);
-                var instanceLlm = (jakarta.enterprise.inject.Instance<IRestLlmStore>) Mockito
-                        .mock(jakarta.enterprise.inject.Instance.class);
+                var cdiInstance = Mockito.mock(CDI.class);
+                cdiMock.when(CDI::current).thenReturn(cdiInstance);
+                var instanceLlm = (Instance<IRestLlmStore>) Mockito
+                        .mock(Instance.class);
                 when(cdiInstance.select(IRestLlmStore.class)).thenReturn(instanceLlm);
                 when(instanceLlm.get()).thenReturn(llmStore);
 
-                URI result = executor.executeUpgrade(source, "target-1", null, null);
+                URI result = executor.executeUpgrade(source, "target-1", null, null).agentUri();
 
                 assertNotNull(result);
                 // Workflow should NOT be updated since null type step was skipped (no match)
@@ -772,7 +1028,7 @@ class UpgradeExecutorTest {
             diffs.add(agentDiff("src-1", "target-1", DiffAction.SKIP));
 
             var preview = new ImportPreview("src-1", "Source Agent", "target-1", "Target Agent", diffs);
-            when(structuralMatcher.buildPreview(any(), eq("target-1"), eq(false))).thenReturn(preview);
+            when(structuralMatcher.buildPreview(any(), eq("target-1"), eq(true))).thenReturn(preview);
 
             // Return null descriptor
             when(descriptorStore.readDescriptor(eq("target-1"), isNull())).thenReturn(null);
@@ -783,7 +1039,7 @@ class UpgradeExecutorTest {
             when(agentStore.readAgent("target-1", 1)).thenReturn(agentConfig);
             when(agentStore.updateAgent(eq("target-1"), eq(1), any())).thenReturn(Response.ok().build());
 
-            URI result = executor.executeUpgrade(source, "target-1", null, null);
+            URI result = executor.executeUpgrade(source, "target-1", null, List.of("wf-1")).agentUri();
 
             assertNotNull(result);
             assertTrue(result.toString().contains("version=2")); // 1 + 1
@@ -798,7 +1054,7 @@ class UpgradeExecutorTest {
             diffs.add(agentDiff("src-1", "target-1", DiffAction.SKIP));
 
             var preview = new ImportPreview("src-1", "Source Agent", "target-1", "Target Agent", diffs);
-            when(structuralMatcher.buildPreview(any(), eq("target-1"), eq(false))).thenReturn(preview);
+            when(structuralMatcher.buildPreview(any(), eq("target-1"), eq(true))).thenReturn(preview);
 
             // Return descriptor with null resource
             var descriptor = new DocumentDescriptor();
@@ -810,7 +1066,7 @@ class UpgradeExecutorTest {
             when(agentStore.readAgent("target-1", 1)).thenReturn(agentConfig);
             when(agentStore.updateAgent(eq("target-1"), eq(1), any())).thenReturn(Response.ok().build());
 
-            URI result = executor.executeUpgrade(source, "target-1", null, null);
+            URI result = executor.executeUpgrade(source, "target-1", null, List.of("wf-1")).agentUri();
 
             assertNotNull(result);
             assertTrue(result.toString().contains("version=2")); // 1 + 1
@@ -825,7 +1081,7 @@ class UpgradeExecutorTest {
             diffs.add(agentDiff("src-1", "target-1", DiffAction.SKIP));
 
             var preview = new ImportPreview("src-1", "Source Agent", "target-1", "Target Agent", diffs);
-            when(structuralMatcher.buildPreview(any(), eq("target-1"), eq(false))).thenReturn(preview);
+            when(structuralMatcher.buildPreview(any(), eq("target-1"), eq(true))).thenReturn(preview);
 
             when(descriptorStore.readDescriptor(eq("target-1"), isNull()))
                     .thenThrow(new RuntimeException("descriptor not found"));
@@ -835,7 +1091,7 @@ class UpgradeExecutorTest {
             when(agentStore.readAgent("target-1", 1)).thenReturn(agentConfig);
             when(agentStore.updateAgent(eq("target-1"), eq(1), any())).thenReturn(Response.ok().build());
 
-            URI result = executor.executeUpgrade(source, "target-1", null, null);
+            URI result = executor.executeUpgrade(source, "target-1", null, List.of("wf-1")).agentUri();
 
             assertNotNull(result);
             assertTrue(result.toString().contains("version=2"));
@@ -867,7 +1123,7 @@ class UpgradeExecutorTest {
                     .when(snippetStore).updateSnippet(anyString(), anyInt(), any());
 
             // Should NOT throw — processSnippet catches and logs
-            URI result = executor.executeUpgrade(source, "target-1", null, null);
+            URI result = executor.executeUpgrade(source, "target-1", null, null).agentUri();
             assertNotNull(result);
         }
     }
@@ -905,17 +1161,17 @@ class UpgradeExecutorTest {
             when(workflowStore.readWorkflow(wfId, 1)).thenReturn(new WorkflowConfiguration());
 
             @SuppressWarnings("rawtypes")
-            MockedStatic<jakarta.enterprise.inject.spi.CDI> cdiMock = Mockito.mockStatic(jakarta.enterprise.inject.spi.CDI.class);
+            MockedStatic<CDI> cdiMock = Mockito.mockStatic(CDI.class);
             try (cdiMock) {
-                var cdiInstance = Mockito.mock(jakarta.enterprise.inject.spi.CDI.class);
-                cdiMock.when(jakarta.enterprise.inject.spi.CDI::current).thenReturn(cdiInstance);
-                var instanceLlm = (jakarta.enterprise.inject.Instance<IRestLlmStore>) Mockito
-                        .mock(jakarta.enterprise.inject.Instance.class);
+                var cdiInstance = Mockito.mock(CDI.class);
+                cdiMock.when(CDI::current).thenReturn(cdiInstance);
+                var instanceLlm = (Instance<IRestLlmStore>) Mockito
+                        .mock(Instance.class);
                 when(cdiInstance.select(IRestLlmStore.class)).thenReturn(instanceLlm);
                 when(instanceLlm.get()).thenReturn(Mockito.mock(IRestLlmStore.class));
 
                 // Should NOT throw — extension processing catches and logs
-                URI result = executor.executeUpgrade(source, "target-1", null, null);
+                URI result = executor.executeUpgrade(source, "target-1", null, null).agentUri();
                 assertNotNull(result);
             }
         }
@@ -1012,12 +1268,12 @@ class UpgradeExecutorTest {
             // Workflow config (empty)
             when(workflowStore.readWorkflow(wfId, 1)).thenReturn(new WorkflowConfiguration());
 
-            MockedStatic<jakarta.enterprise.inject.spi.CDI> cdiMock = Mockito.mockStatic(jakarta.enterprise.inject.spi.CDI.class);
+            MockedStatic<CDI> cdiMock = Mockito.mockStatic(CDI.class);
             try (cdiMock) {
-                var cdiInstance = Mockito.mock(jakarta.enterprise.inject.spi.CDI.class);
-                cdiMock.when(jakarta.enterprise.inject.spi.CDI::current).thenReturn(cdiInstance);
+                var cdiInstance = Mockito.mock(CDI.class);
+                cdiMock.when(CDI::current).thenReturn(cdiInstance);
 
-                var instance = (jakarta.enterprise.inject.Instance) Mockito.mock(jakarta.enterprise.inject.Instance.class);
+                var instance = (Instance) Mockito.mock(Instance.class);
                 when(cdiInstance.select(restStoreClass)).thenReturn(instance);
                 when(instance.get()).thenReturn(mockStore);
 
@@ -1026,7 +1282,7 @@ class UpgradeExecutorTest {
                 // for mock).
                 // This exercises the resolveExtensionOps + dispatchUpdate path, which will
                 // result in null response → null URI → no workflow update.
-                URI result = executor.executeUpgrade(source, "target-1", null, null);
+                URI result = executor.executeUpgrade(source, "target-1", null, null).agentUri();
 
                 assertNotNull(result);
             }

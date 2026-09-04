@@ -49,6 +49,72 @@ bottom of this file and are never archived.
 
 ---
 
+## 🔁 fix(backup): repair agent export, import and sync (2026-09-04)
+
+**Repo:** EDDI (`fix/review-agent-sync`)
+
+From the whole-repository code review. **Granular sync/upgrade did nothing at all**, and
+its preview said otherwise — the single most serious finding of the review, and it was
+broken three independent ways at once.
+
+1. `UpgradeExecutor` asked `StructuralMatcher.buildPreview` for a *content-less* preview
+   (`includeContent=false`), so `sourceJson` and `targetJson` were both null for every
+   matched resource. The action then reduced to `Objects.equals(null, null)` → `SKIP`, and
+   the executor skips every SKIP. Every resource that already existed in the target was
+   silently left untouched.
+2. Extension URIs were read from `step.getExtensions()`, but the engine stores them in
+   `step.getConfig().get("uri")`, so the target extension map came back empty.
+3. The ZIP and remote sources keyed their extension maps by resource-store authority
+   (`ai.labs.rules`) while the target keyed by workflow step type
+   (`eddi://ai.labs.behavior`), so the two sides could never join even with (1) and (2)
+   fixed.
+
+The REST preview endpoints pass `includeContent=true` and therefore showed real
+differences. An operator saw a diff, applied it, received success, and nothing changed.
+
+**Fixed** by a new `WorkflowExtensions` — one scan that is the single source of truth for
+how a workflow points at its extension configs. Both producers and the matcher derive
+keys from it, so source and target are guaranteed to join. The canonical key is
+`<stepType>#<occurrence>/<path>`, which also fixes a workflow with two steps of the same
+type collapsing onto one key and repointing both at the second resource. The diff action
+is now decided from content that is always loaded; `includeContent` governs only what is
+returned to the caller.
+
+### Also in this branch
+
+- **Exported ZIPs were never deleted** and accumulated in the working directory. They now
+  land in `tmp/archives/` and are swept by age (`eddi.backup.export.retention-minutes`,
+  default 60); the 404 message states the real retention instead of a fictional one.
+- **A non-ASCII agent name produced an undownloadable archive.** `URLEncoder` output like
+  `M%C3%BCller+Bot` was written literally to disk, and the download endpoint's character
+  class then rejected the decoded form. Names are slugified instead, and a
+  `Content-Disposition` header carries the readable filename.
+- **Schedules were exported but never imported** — silently dropped on every round trip
+  while the ZIP visibly contained them. Import now reads them, repoints them at the new
+  agent with fire bookkeeping reset, and rolls them back with the rest of the transaction.
+- **A v5 export ZIP imported nothing and reported 200.** The importer only looked for
+  `.agent.json`, never the v5 `.bot.json` it deliberately still accepts elsewhere.
+- **`strategy=upgrade` without `targetAgentId`** silently fell through to create, producing
+  a duplicate agent; it is now a 400 naming the parameter.
+- **A selectively-exported ZIP could not be re-imported**: a deselected extension file is
+  absent from the archive while the workflow still references it, and `readResources`
+  handed the resulting null straight to `store.create()`.
+
+### Regression coverage
+
+Every behavioural change is pinned by a test **proven to fail with its fix reverted**.
+`ExtensionSourceKeyContractTest` writes a real archive to disk and stubs a real remote,
+then asserts both producers emit identical canonical keys *and* that every extension joins
+the target as UPDATE rather than CREATE; its fixture deliberately carries two `httpcalls`
+steps so the collapse-by-type defect is caught too.
+
+Two tests are recorded honestly as characterization rather than guards: the snippet
+name-fallback row is what `main` always emitted, and `RestUtilities.createConflictException`
+was a behaviourally identical refactor. Neither can fail without its change, and both say
+so.
+
+---
+
 ## 📋 docs(config): document the four workspace properties that were breaking `main` (2026-08-30)
 
 **Repo:** EDDI (`fix/connection-extra-auth-params-code-verifier`)

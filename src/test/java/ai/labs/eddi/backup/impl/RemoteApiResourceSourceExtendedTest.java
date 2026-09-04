@@ -26,6 +26,8 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -63,15 +65,26 @@ class RemoteApiResourceSourceExtendedTest {
         }
 
         @Test
-        @DisplayName("InterruptedException is wrapped in RuntimeException")
+        @DisplayName("InterruptedException is wrapped AND the interrupt flag is restored")
         @SuppressWarnings("unchecked")
         void interruptedException() throws Exception {
             when(mockHttpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
                     .thenThrow(new InterruptedException("interrupted"));
 
             var source = createSource(AGENT_ID, 1);
-            var ex = assertThrows(RuntimeException.class, source::readAgent);
-            assertTrue(ex.getMessage().contains("interrupted") || ex.getCause() instanceof InterruptedException);
+            try {
+                var ex = assertThrows(RuntimeException.class, source::readAgent);
+                assertTrue(ex.getMessage().contains("Interrupted"), ex.getMessage());
+
+                // readWorkflows tolerates per-workflow failures and carries on, so a
+                // swallowed interrupt meant a cancelled or shutting-down batch sync kept
+                // issuing HTTP calls to the remote instance.
+                assertTrue(Thread.currentThread().isInterrupted(),
+                        "the interrupt flag must be restored before unwinding");
+            } finally {
+                // Clear it again so the flag does not leak into the next test.
+                Thread.interrupted();
+            }
         }
     }
 
@@ -280,11 +293,41 @@ class RemoteApiResourceSourceExtendedTest {
     @DisplayName("AutoCloseable behavior")
     class CloseableTests {
 
+        /**
+         * The client this class builds for itself owns a selector thread and an
+         * executor. Callers already wrap every source in try-with-resources, so
+         * inheriting {@link IResourceSource}'s no-op {@code close()} left one live
+         * client per agent behind on every batch sync.
+         * <p>
+         * This replaces a test whose only assertion was
+         * {@code assertDoesNotThrow(source::close)} driven through the
+         * <em>borrowed</em>-client constructor — a guaranteed no-op that passed just as
+         * happily with the whole override deleted.
+         */
         @Test
-        @DisplayName("close() does not throw")
-        void closeDoesNotThrow() {
+        @DisplayName("close() shuts down the HTTP client this source created")
+        void closeShutsDownTheClientItCreated() throws Exception {
+            // The ownership flag is what the public constructor sets; it is passed
+            // explicitly here because building a real client opens a selector, and
+            // that needs a loopback socket a sandboxed build does not have.
+            var source = new RemoteApiResourceSource(
+                    BASE_URL, AGENT_ID, 1, "Bearer test-token", jsonSerialization, mockHttpClient, true);
+
+            source.close();
+
+            verify(mockHttpClient).close();
+        }
+
+        @Test
+        @DisplayName("close() leaves a client it was handed alone")
+        void closeLeavesABorrowedClientOpen() throws Exception {
             var source = createSource(AGENT_ID, 1);
-            assertDoesNotThrow(source::close);
+
+            source.close();
+
+            // Closing a client this instance did not create would take the caller's
+            // own client down with it.
+            verify(mockHttpClient, never()).close();
         }
     }
 

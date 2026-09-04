@@ -27,10 +27,17 @@ import java.util.List;
 public interface IRestImportService {
     @POST
     @Consumes("application/zip")
-    @Operation(description = "Import a Agent from a zip file. "
+    @Operation(description = "Import an agent from a zip file. "
             + "strategy=create (default) always creates new resources. "
             + "strategy=merge looks up existing resources by origin ID and updates them. "
-            + "strategy=upgrade syncs content into the targetAgentId by structural matching.")
+            + "strategy=upgrade syncs content into the targetAgentId by structural matching, and requires it. "
+            + "An unknown strategy, or upgrade without targetAgentId, is a 400. "
+            + "An archive containing no agent configuration file, or more than one, is a 400. "
+            + "Agent files named <id>.agent.json (v6) and <id>.bot.json (v5) are both accepted, "
+            + "and any schedules/ directory in the archive is recreated for the imported agent. "
+            + "An upgrade answers 201 when something was written, 200 when source and target were already "
+            + "identical, and 207 Multi-Status when some resources failed — the body is an UpgradeResult "
+            + "listing per-resource outcomes.")
     Response importAgent(InputStream zippedAgentConfigFiles,
                          @QueryParam("strategy")
                          @DefaultValue("create") String strategy,
@@ -80,7 +87,10 @@ public interface IRestImportService {
 
     @POST
     @Path("/sync")
-    @Operation(description = "Execute a single-agent sync from a remote EDDI instance to a local target agent.")
+    @Operation(description = "Execute a single-agent sync from a remote EDDI instance to a local target agent. "
+            + "Answers 201 when something was written, 200 when source and target were already identical "
+            + "(no agent version is burned), and 207 Multi-Status when some resources failed; the body is "
+            + "an UpgradeResult listing per-resource outcomes.")
     Response executeSync(@QueryParam("sourceUrl") String sourceUrl,
                          @QueryParam("sourceAgentId") String sourceAgentId,
                          @QueryParam("sourceAgentVersion") Integer sourceVersion,
@@ -93,7 +103,10 @@ public interface IRestImportService {
     @Path("/sync/batch")
     @Consumes(MediaType.APPLICATION_JSON)
     @Operation(description = "Execute a multi-agent sync from a remote EDDI instance. "
-            + "Each request specifies a source→target agent pair with selected resources and workflow order.")
+            + "Each request specifies a source→target agent pair with selected resources and workflow order. "
+            + "The body is one result per request, in request order, each carrying either an UpgradeResult "
+            + "or the error that stopped it: 200 when all succeeded, 207 Multi-Status when some failed, "
+            + "500 when every one did.")
     Response executeSyncBatch(@QueryParam("sourceUrl") String sourceUrl,
                               List<SyncRequest> requests,
                               @HeaderParam("X-Source-Authorization") String sourceAuth);

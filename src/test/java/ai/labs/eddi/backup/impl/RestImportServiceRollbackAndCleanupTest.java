@@ -4,9 +4,11 @@
  */
 package ai.labs.eddi.backup.impl;
 
+import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.backup.IZipArchive;
 import ai.labs.eddi.backup.model.ImportPreview;
+import ai.labs.eddi.backup.model.UpgradeResult;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
@@ -23,6 +25,7 @@ import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import jakarta.enterprise.inject.Instance;
 import jakarta.enterprise.inject.spi.CDI;
+import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
@@ -94,7 +97,8 @@ class RestImportServiceRollbackAndCleanupTest {
         importService = new RestImportService(
                 zipArchive, jsonSerialization,
                 mock(IMigrationManager.class), documentDescriptorStore,
-                mock(TemplateSyntaxMigrator.class), structuralMatcher, upgradeExecutor, mock(ResourceAccessGuard.class));
+                mock(TemplateSyntaxMigrator.class), structuralMatcher, upgradeExecutor, mock(IScheduleStore.class), mock(BackupMetrics.class),
+                mock(ResourceAccessGuard.class));
     }
 
     // ==================== D11 — rollback of a partial import ====================
@@ -255,7 +259,9 @@ class RestImportServiceRollbackAndCleanupTest {
         void createImportCleansUp() throws Exception {
             AtomicReference<File> unzipped = stubEmptyZip();
 
-            importService.importAgent(new ByteArrayInputStream(new byte[0]), "create", null, null, null);
+            // An archive with no agent file is now a 400, and the tree must go anyway.
+            assertThrows(BadRequestException.class, () -> importService.importAgent(
+                    new ByteArrayInputStream(new byte[0]), "create", null, null, null));
 
             assertUnzippedDirectoryRemoved(unzipped);
         }
@@ -287,9 +293,9 @@ class RestImportServiceRollbackAndCleanupTest {
         void legacyPreviewCleansUp() throws Exception {
             AtomicReference<File> unzipped = stubEmptyZip();
 
-            ImportPreview preview = importService.previewImport(new ByteArrayInputStream(new byte[0]), null);
+            assertThrows(BadRequestException.class,
+                    () -> importService.previewImport(new ByteArrayInputStream(new byte[0]), null));
 
-            assertNotNull(preview);
             assertUnzippedDirectoryRemoved(unzipped);
         }
 
@@ -310,7 +316,8 @@ class RestImportServiceRollbackAndCleanupTest {
         void upgradeImportCleansUp() throws Exception {
             AtomicReference<File> unzipped = stubEmptyZip();
             when(upgradeExecutor.executeUpgrade(any(), eq("target-1"), any(), any()))
-                    .thenReturn(URI.create("eddi://ai.labs.agent/agentstore/agents/" + AGENT_ORIGIN_ID + "?version=2"));
+                    .thenReturn(new UpgradeResult(URI.create("eddi://ai.labs.agent/agentstore/agents/" + AGENT_ORIGIN_ID + "?version=2"), true, 1, 0,
+                            0, List.of()));
 
             importService.importAgent(
                     new ByteArrayInputStream(new byte[0]), "upgrade", null, "target-1", null);

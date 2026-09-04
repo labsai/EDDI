@@ -11,6 +11,7 @@ import ai.labs.eddi.backup.model.ImportPreview.DiffAction;
 import ai.labs.eddi.backup.model.ImportPreview.ResourceDiff;
 import ai.labs.eddi.backup.model.SyncMapping;
 import ai.labs.eddi.backup.model.SyncRequest;
+import ai.labs.eddi.backup.model.UpgradeResult;
 import ai.labs.eddi.configs.IRestVersionInfo;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.apicalls.IApiCallsStore;
@@ -28,6 +29,9 @@ import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
+import ai.labs.eddi.engine.schedule.IScheduleStore;
+import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
+import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
 import ai.labs.eddi.engine.security.spaces.DescriptorAccess;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
@@ -55,14 +59,17 @@ import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
-import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.utils.FileUtilities;
 import ai.labs.eddi.utils.RestUtilities;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.spi.CDI;
 import jakarta.inject.Inject;
+import io.quarkus.runtime.LaunchMode;
+import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.InternalServerErrorException;
+import jakarta.ws.rs.WebApplicationException;
+import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import org.bson.Document;
 import org.jboss.logging.Logger;
@@ -88,8 +95,14 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 public class RestImportService extends AbstractBackupService implements IRestImportService {
     private static final Pattern EDDI_URI_PATTERN = Pattern.compile("\"eddi://ai.labs..*?\"");
     private static final String AGENT_FILE_ENDING = ".agent.json";
+    /** EDDI 5.x named the agent file {@code <id>.bot.json}. */
+    private static final String LEGACY_AGENT_FILE_ENDING = ".bot.json";
+    private static final List<String> AGENT_FILE_ENDINGS = List.of(AGENT_FILE_ENDING, LEGACY_AGENT_FILE_ENDING);
     private static final String DESCRIPTOR_FILE_ENDING = ".descriptor.json";
+    private static final String STRATEGY_CREATE = "create";
     private static final String STRATEGY_MERGE = "merge";
+    private static final String STRATEGY_UPGRADE = "upgrade";
+    private static final Set<String> SUPPORTED_STRATEGIES = Set.of(STRATEGY_CREATE, STRATEGY_MERGE, STRATEGY_UPGRADE);
 
     private final Path tmpPath = Paths.get(FileUtilities.buildPath(System.getProperty("user.dir"), "tmp", "import"));
     private final IZipArchive zipArchive;
@@ -100,6 +113,8 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     private final TemplateSyntaxMigrator templateSyntaxMigrator;
     private final StructuralMatcher structuralMatcher;
     private final UpgradeExecutor upgradeExecutor;
+    private final IScheduleStore scheduleStore;
+    private final BackupMetrics metrics;
 
     private final ResourceAccessGuard resourceAccessGuard;
 
@@ -109,7 +124,9 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     public RestImportService(IZipArchive zipArchive, IJsonSerialization jsonSerialization,
             IMigrationManager migrationManager,
             IDocumentDescriptorStore documentDescriptorStore, TemplateSyntaxMigrator templateSyntaxMigrator,
-            StructuralMatcher structuralMatcher, UpgradeExecutor upgradeExecutor, ResourceAccessGuard resourceAccessGuard) {
+            StructuralMatcher structuralMatcher, UpgradeExecutor upgradeExecutor, IScheduleStore scheduleStore,
+            BackupMetrics metrics, ResourceAccessGuard resourceAccessGuard) {
+        this.metrics = metrics;
         this.resourceAccessGuard = resourceAccessGuard;
         this.zipArchive = zipArchive;
         this.jsonSerialization = jsonSerialization;
@@ -118,6 +135,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         this.templateSyntaxMigrator = templateSyntaxMigrator;
         this.structuralMatcher = structuralMatcher;
         this.upgradeExecutor = upgradeExecutor;
+        this.scheduleStore = scheduleStore;
     }
 
     // ==================== Preview ====================
@@ -134,50 +152,51 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             this.zipArchive.unzip(zippedAgentConfigFiles, targetDir);
             var targetDirPath = targetDir.getPath();
 
-            try (var directoryStream = Files.newDirectoryStream(Paths.get(targetDirPath), path -> path.toString().endsWith(AGENT_FILE_ENDING))) {
+            for (Path agentFilePath : singleAgentFileIn(Paths.get(targetDirPath))) {
+                String agentFileString = readFile(agentFilePath);
+                String agentOriginId = extractIdFromAgentFilename(agentFilePath);
+                String agentName = readNameFromDescriptor(Paths.get(targetDirPath), agentOriginId);
 
-                for (Path agentFilePath : directoryStream) {
-                    String agentFileString = readFile(agentFilePath);
-                    String agentOriginId = extractIdFromAgentFilename(agentFilePath);
-                    String agentName = readNameFromDescriptor(Paths.get(targetDirPath), agentOriginId);
+                List<ResourceDiff> diffs = new ArrayList<>();
 
-                    List<ResourceDiff> diffs = new ArrayList<>();
+                // Agent itself
+                diffs.add(buildResourceDiff(agentOriginId, "agent", agentName));
 
-                    // Agent itself
-                    diffs.add(buildResourceDiff(agentOriginId, "agent", agentName));
+                // Workflows & their extensions
+                AgentConfiguration agentConfig = jsonSerialization.deserialize(agentFileString, AgentConfiguration.class);
+                for (URI workflowUri : agentConfig.getWorkflows()) {
+                    IResourceId workflowResourceId = RestUtilities.extractResourceId(workflowUri);
+                    if (workflowResourceId == null)
+                        continue;
 
-                    // Workflows & their extensions
-                    AgentConfiguration agentConfig = jsonSerialization.deserialize(agentFileString, AgentConfiguration.class);
-                    for (URI workflowUri : agentConfig.getWorkflows()) {
-                        IResourceId workflowResourceId = RestUtilities.extractResourceId(workflowUri);
-                        if (workflowResourceId == null)
-                            continue;
+                    String workflowId = workflowResourceId.getId();
+                    String workflowVersion = String.valueOf(workflowResourceId.getVersion());
+                    String workflowName = readNameFromDescriptor(Paths.get(targetDirPath, workflowId, workflowVersion), workflowId);
+                    diffs.add(buildResourceDiff(workflowId, "workflow", workflowName));
 
-                        String workflowId = workflowResourceId.getId();
-                        String workflowVersion = String.valueOf(workflowResourceId.getVersion());
-                        String workflowName = readNameFromDescriptor(Paths.get(targetDirPath, workflowId, workflowVersion), workflowId);
-                        diffs.add(buildResourceDiff(workflowId, "workflow", workflowName));
-
-                        // Read workflow file to find extension URIs
-                        var dir = Paths.get(FileUtilities.buildPath(targetDirPath, workflowId, workflowVersion));
-                        try (var wfStream = Files.newDirectoryStream(dir,
-                                p -> p.toString().endsWith(".workflow.json") || p.toString().endsWith(".package.json"))) {
-                            for (Path workflowFilePath : wfStream) {
-                                String workflowFileString = readFile(workflowFilePath);
-                                // Normalize legacy URIs from v5 ZIPs
-                                workflowFileString = normalizeLegacyUris(workflowFileString);
-                                addExtensionDiffs(diffs, workflowFileString, dir);
-                            }
+                    // Read workflow file to find extension URIs
+                    var dir = Paths.get(FileUtilities.buildPath(targetDirPath, workflowId, workflowVersion));
+                    try (var wfStream = Files.newDirectoryStream(dir,
+                            p -> p.toString().endsWith(".workflow.json") || p.toString().endsWith(".package.json"))) {
+                        for (Path workflowFilePath : wfStream) {
+                            String workflowFileString = readFile(workflowFilePath);
+                            // Normalize legacy URIs from v5 ZIPs
+                            workflowFileString = normalizeLegacyUris(workflowFileString);
+                            addExtensionDiffs(diffs, workflowFileString, dir);
                         }
                     }
-                    // Snippets (global resources, not workflow-embedded)
-                    addSnippetDiffs(diffs, Paths.get(targetDirPath));
-
-                    return new ImportPreview(agentOriginId, agentName, null, null, diffs);
                 }
+                // Snippets (global resources, not workflow-embedded)
+                addSnippetDiffs(diffs, Paths.get(targetDirPath));
+                // Scheduled triggers, which the import recreates for the new agent
+                addScheduleDiffs(diffs, Paths.get(targetDirPath));
+
+                return new ImportPreview(agentOriginId, agentName, null, null, diffs);
             }
 
-            return new ImportPreview(null, null, null, null, List.of());
+            throw noAgentFileFound();
+        } catch (WebApplicationException e) {
+            throw e;
         } catch (Exception e) {
             LOGGER.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException("Preview failed: " + e.getMessage(), e);
@@ -258,6 +277,36 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         }
     }
 
+    /**
+     * Lists the archive's scheduled triggers. They are always CREATE: a schedule id
+     * belongs to the store that issued it, so there is nothing on this instance to
+     * match against, and the import repoints each one at the newly created agent.
+     */
+    private void addScheduleDiffs(List<ResourceDiff> diffs, Path targetDirPath) {
+        Path schedulesDir = findArchiveDir(targetDirPath, SCHEDULES_DIR);
+        if (schedulesDir == null) {
+            return;
+        }
+        try (var scheduleStream = Files.newDirectoryStream(schedulesDir,
+                p -> p.toString().endsWith("." + SCHEDULE_EXT + ".json"))) {
+            for (Path scheduleFilePath : scheduleStream) {
+                try {
+                    ScheduleConfiguration schedule = jsonSerialization.deserialize(
+                            readFile(scheduleFilePath), ScheduleConfiguration.class);
+                    if (schedule == null) {
+                        continue;
+                    }
+                    diffs.add(new ResourceDiff(schedule.getId(), SCHEDULE_EXT, schedule.getName(),
+                            DiffAction.CREATE, null, null, null, null, null, -1));
+                } catch (Exception e) {
+                    LOGGER.debugf("Could not preview schedule %s: %s", scheduleFilePath.getFileName(), e.getMessage());
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.debugf("Could not scan schedules for preview: %s", e.getMessage());
+        }
+    }
+
     private ResourceDiff buildResourceDiff(String originId, String resourceType, String name) {
         try {
             List<DocumentDescriptor> existing = documentDescriptorStore.findByOriginId(originId);
@@ -308,9 +357,52 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         return null;
     }
 
+    /**
+     * Whether a file in the archive root is an agent config. EDDI 6 writes
+     * {@code <id>.agent.json}; a genuine 5.x export writes {@code <id>.bot.json}
+     * and is accepted too — the rest of the class already normalizes v5 URIs and
+     * accepts the v5 {@code .package.json} workflow file, so refusing the agent
+     * file alone made a v5 import a silent no-op that still answered 200.
+     */
+    private static boolean isAgentFile(Path path) {
+        String filename = path.toString();
+        return AGENT_FILE_ENDINGS.stream().anyMatch(filename::endsWith);
+    }
+
+    private static String agentFileEndingOf(Path path) {
+        String filename = path.toString();
+        return AGENT_FILE_ENDINGS.stream().filter(filename::endsWith).findFirst().orElse(AGENT_FILE_ENDING);
+    }
+
+    /**
+     * The one agent file in the archive root, as a single-element list, or an empty
+     * list when there is none.
+     * <p>
+     * More than one is rejected: the preview only ever described the first file it
+     * enumerated while the import created every one of them, so an operator
+     * approved an import of one agent and got several, with a Location header
+     * pointing at whichever happened to be enumerated last.
+     */
+    private List<Path> singleAgentFileIn(Path archiveRoot) throws IOException {
+        List<Path> agentFiles = new ArrayList<>();
+        try (var directoryStream = Files.newDirectoryStream(archiveRoot, RestImportService::isAgentFile)) {
+            directoryStream.forEach(agentFiles::add);
+        }
+        if (agentFiles.size() > 1) {
+            throw new BadRequestException("The archive contains " + agentFiles.size()
+                    + " agent configuration files. Import one agent per archive.");
+        }
+        return agentFiles;
+    }
+
+    private static BadRequestException noAgentFileFound() {
+        return new BadRequestException("The archive contains no agent configuration file: expected one of "
+                + String.join(", ", AGENT_FILE_ENDINGS) + " in the archive root.");
+    }
+
     private String extractIdFromAgentFilename(Path agentFilePath) {
         String filename = agentFilePath.getFileName().toString();
-        return filename.substring(0, filename.length() - AGENT_FILE_ENDING.length());
+        return filename.substring(0, filename.length() - agentFileEndingOf(agentFilePath).length());
     }
 
     // ==================== Import ====================
@@ -318,22 +410,42 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     @Override
     public Response importAgent(InputStream zippedAgentConfigFiles, String strategy, String selectedOriginIds,
                                 String targetAgentId, String workflowOrder) {
+        metrics.importAttempted();
         try {
+            String requestedStrategy = isNullOrEmpty(strategy) ? STRATEGY_CREATE : strategy.toLowerCase(Locale.ROOT);
+            if (!SUPPORTED_STRATEGIES.contains(requestedStrategy)) {
+                throw new BadRequestException("Unknown strategy '" + strategy + "'. Supported: "
+                        + String.join(", ", SUPPORTED_STRATEGIES) + ".");
+            }
+
             // "upgrade" strategy → use the new structural matcher + upgrade executor
-            if ("upgrade".equalsIgnoreCase(strategy) && targetAgentId != null) {
+            if (STRATEGY_UPGRADE.equals(requestedStrategy)) {
+                if (isNullOrEmpty(targetAgentId) || targetAgentId.isBlank()) {
+                    // Falling through to the create path here produced a brand-new
+                    // duplicate agent and reported 201, so a dropped query parameter
+                    // silently doubled the deployment's agent list.
+                    throw new BadRequestException("strategy=upgrade requires targetAgentId.");
+                }
                 return executeUpgradeFromZip(zippedAgentConfigFiles, targetAgentId, selectedOriginIds, workflowOrder);
             }
             File targetDir = new File(FileUtilities.buildPath(tmpPath.toString(), UUID.randomUUID().toString()));
 
             Set<String> selectedSet = parseSelectedResources(selectedOriginIds);
-            boolean isMerge = STRATEGY_MERGE.equalsIgnoreCase(strategy);
+            boolean isMerge = STRATEGY_MERGE.equals(requestedStrategy);
 
             return importAgentZipFile(zippedAgentConfigFiles, targetDir, isMerge, selectedSet);
+        } catch (WebApplicationException e) {
+            // 400/404 raised deliberately above (or by the upgrade path) must not be
+            // repackaged as a 500 by the catch-all below.
+            metrics.importFailed();
+            throw e;
         } catch (IllegalArgumentException e) {
             // Config validation failure (e.g. invalid hitlConfig) → 400 via the
             // IllegalArgumentExceptionMapper, not a 500.
+            metrics.importFailed();
             throw e;
         } catch (Exception e) {
+            metrics.importFailed();
             LOGGER.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getMessage(), e);
         }
@@ -387,45 +499,48 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         importSnippets(Paths.get(targetDirPath), isMerge, transaction);
 
         URI lastAgentUri = null;
-        try (var directoryStream = Files.newDirectoryStream(Paths.get(targetDirPath), path -> path.toString().endsWith(AGENT_FILE_ENDING))) {
-            for (var agentFilePath : directoryStream) {
-                try {
-                    String agentOriginId = extractIdFromAgentFilename(agentFilePath);
-                    String agentFileString = readFile(agentFilePath);
+        for (var agentFilePath : singleAgentFileIn(Paths.get(targetDirPath))) {
+            try {
+                String agentOriginId = extractIdFromAgentFilename(agentFilePath);
+                String agentFileString = readFile(agentFilePath);
 
-                    // Normalize legacy eddi:// URIs from v5 ZIP exports to v6 canonical form
-                    agentFileString = normalizeLegacyUris(agentFileString);
-                    // Normalize legacy ${eddivault:...} → ${vault:...}
-                    agentFileString = normalizeVaultReferences(agentFileString);
+                // Normalize legacy eddi:// URIs from v5 ZIP exports to v6 canonical form
+                agentFileString = normalizeLegacyUris(agentFileString);
+                // Normalize legacy ${eddivault:...} → ${vault:...}
+                agentFileString = normalizeVaultReferences(agentFileString);
 
-                    AgentConfiguration agentConfig = jsonSerialization.deserialize(agentFileString, AgentConfiguration.class);
+                AgentConfiguration agentConfig = jsonSerialization.deserialize(agentFileString, AgentConfiguration.class);
 
-                    // Reject an invalid HITL config BEFORE importing workflows —
-                    // otherwise the store-level validation only fires at agent
-                    // creation, after all extensions already landed (partial
-                    // import), and surfaced as a 500 instead of a 400.
-                    HitlConfigValidation.validate(agentConfig.getHitlConfig());
+                // Reject an invalid HITL config BEFORE importing workflows —
+                // otherwise the store-level validation only fires at agent
+                // creation, after all extensions already landed (partial
+                // import), and surfaced as a 500 instead of a 400.
+                HitlConfigValidation.validate(agentConfig.getHitlConfig());
 
-                    agentConfig.getWorkflows()
-                            .forEach(workflowUri -> parseWorkflow(targetDirPath, workflowUri, agentConfig, isMerge, selectedSet, transaction));
+                agentConfig.getWorkflows()
+                        .forEach(workflowUri -> parseWorkflow(targetDirPath, workflowUri, agentConfig, isMerge, selectedSet, transaction));
 
-                    URI newAgentUri;
-                    if (isMerge && isSelected(selectedSet, agentOriginId)) {
-                        newAgentUri = createOrUpdateAgent(agentConfig, agentOriginId, transaction);
-                    } else {
-                        newAgentUri = createNewAgent(agentConfig, transaction);
-                    }
-
-                    updateDocumentDescriptor(Paths.get(targetDirPath), buildOldAgentUri(agentFilePath), newAgentUri);
-
-                    // Set originId on the new agent's descriptor
-                    setOriginIdOnDescriptor(newAgentUri, agentOriginId);
-
-                    lastAgentUri = newAgentUri;
-                } catch (IOException | RestInterfaceFactory.RestInterfaceFactoryException e) {
-                    LOGGER.error(e.getLocalizedMessage(), e);
-                    throw new InternalServerErrorException(e.getLocalizedMessage(), e);
+                URI newAgentUri;
+                if (isMerge && isSelected(selectedSet, agentOriginId)) {
+                    newAgentUri = createOrUpdateAgent(agentConfig, agentOriginId, transaction);
+                } else {
+                    newAgentUri = createNewAgent(agentConfig, transaction);
                 }
+
+                // Schedules carry the agent id they fire, so they can only be written
+                // once the agent exists — but before the descriptor bookkeeping, so a
+                // failure there still rolls them back.
+                importSchedules(Paths.get(targetDirPath), newAgentUri, transaction);
+
+                updateDocumentDescriptor(Paths.get(targetDirPath), buildOldAgentUri(agentFilePath), newAgentUri);
+
+                // Set originId on the new agent's descriptor
+                setOriginIdOnDescriptor(newAgentUri, agentOriginId);
+
+                lastAgentUri = newAgentUri;
+            } catch (IOException e) {
+                LOGGER.error(e.getLocalizedMessage(), e);
+                throw new InternalServerErrorException(e.getLocalizedMessage(), e);
             }
         }
         LOGGER.infof("Import complete: lastAgentUri=%s", lastAgentUri);
@@ -436,13 +551,15 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             return Response.status(Response.Status.CREATED)
                     .header("Location", lastAgentUri.toString()).build();
         }
-        return Response.ok(Map.of("resourceUri", "")).build();
+        // Nothing was imported. Answering 200 with an empty resourceUri is how a
+        // whole class of broken archives went unnoticed.
+        throw noAgentFileFound();
     }
 
     private URI buildOldAgentUri(Path agentPath) {
         String agentPathString = agentPath.toString();
         String oldAgentId = agentPathString.substring(agentPathString.lastIndexOf(File.separator) + 1,
-                agentPathString.lastIndexOf(AGENT_FILE_ENDING));
+                agentPathString.lastIndexOf(agentFileEndingOf(agentPath)));
 
         return URI.create(IRestAgentStore.resourceURI + oldAgentId + IRestAgentStore.versionQueryParam + "1");
     }
@@ -476,7 +593,8 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                         // ... for dictionaries
                         List<URI> dictionaryUris = extractResourcesUris(workflowFileString, DICTIONARY_URI_PATTERN);
                         List<URI> newDictionaryUris = createOrUpdateResources(
-                                readResources(dictionaryUris, workflowPath, DICTIONARY_EXT, DictionaryConfiguration.class), dictionaryUris, isMerge,
+                                readResources(dictionaryUris, workflowPath, DICTIONARY_EXT, DictionaryConfiguration.class, isMerge, selectedSet),
+                                dictionaryUris, isMerge,
                                 selectedSet, this::createNewDictionaries, this::updateDictionary, transaction);
 
                         updateDocumentDescriptor(workflowPath, dictionaryUris, newDictionaryUris);
@@ -485,7 +603,8 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                         // ... for behavior
                         List<URI> behaviorUris = extractResourcesUris(workflowFileString, BEHAVIOR_URI_PATTERN);
                         List<URI> newBehaviorUris = createOrUpdateResources(
-                                readResources(behaviorUris, workflowPath, BEHAVIOR_EXT, RuleSetConfiguration.class), behaviorUris, isMerge,
+                                readResources(behaviorUris, workflowPath, BEHAVIOR_EXT, RuleSetConfiguration.class, isMerge, selectedSet),
+                                behaviorUris, isMerge,
                                 selectedSet, this::createNewBehaviors, this::updateBehavior, transaction);
 
                         updateDocumentDescriptor(workflowPath, behaviorUris, newBehaviorUris);
@@ -494,7 +613,8 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                         // ... for http calls
                         List<URI> httpCallsUris = extractResourcesUris(workflowFileString, HTTPCALLS_URI_PATTERN);
                         List<URI> newApiCallsUris = createOrUpdateResources(
-                                readResources(httpCallsUris, workflowPath, HTTPCALLS_EXT, ApiCallsConfiguration.class), httpCallsUris, isMerge,
+                                readResources(httpCallsUris, workflowPath, HTTPCALLS_EXT, ApiCallsConfiguration.class, isMerge, selectedSet),
+                                httpCallsUris, isMerge,
                                 selectedSet, this::createNewApiCalls, this::updateApiCalls, transaction);
 
                         updateDocumentDescriptor(workflowPath, httpCallsUris, newApiCallsUris);
@@ -503,7 +623,8 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                         // ... for langchain
                         List<URI> langchainUris = extractResourcesUris(workflowFileString, LANGCHAIN_URI_PATTERN);
                         List<URI> newLangchainUris = createOrUpdateResources(
-                                readResources(langchainUris, workflowPath, LLM_EXT, LlmConfiguration.class), langchainUris, isMerge, selectedSet,
+                                readResources(langchainUris, workflowPath, LLM_EXT, LlmConfiguration.class, isMerge, selectedSet), langchainUris,
+                                isMerge, selectedSet,
                                 this::createNewLlm, this::updateLangchain, transaction);
 
                         updateDocumentDescriptor(workflowPath, langchainUris, newLangchainUris);
@@ -512,7 +633,8 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                         // ... for property
                         List<URI> propertyUris = extractResourcesUris(workflowFileString, PROPERTY_URI_PATTERN);
                         List<URI> newPropertyUris = createOrUpdateResources(
-                                readResources(propertyUris, workflowPath, PROPERTY_EXT, PropertySetterConfiguration.class), propertyUris, isMerge,
+                                readResources(propertyUris, workflowPath, PROPERTY_EXT, PropertySetterConfiguration.class, isMerge, selectedSet),
+                                propertyUris, isMerge,
                                 selectedSet, this::createNewProperties, this::updateProperty, transaction);
 
                         updateDocumentDescriptor(workflowPath, propertyUris, newPropertyUris);
@@ -521,7 +643,8 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                         // ... for output
                         List<URI> outputUris = extractResourcesUris(workflowFileString, OUTPUT_URI_PATTERN);
                         List<URI> newOutputUris = createOrUpdateResources(
-                                readResources(outputUris, workflowPath, OUTPUT_EXT, OutputConfigurationSet.class), outputUris, isMerge, selectedSet,
+                                readResources(outputUris, workflowPath, OUTPUT_EXT, OutputConfigurationSet.class, isMerge, selectedSet), outputUris,
+                                isMerge, selectedSet,
                                 this::createNewOutputs, this::updateOutput, transaction);
 
                         updateDocumentDescriptor(workflowPath, outputUris, newOutputUris);
@@ -530,7 +653,8 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                         // ... for mcp calls
                         List<URI> mcpCallsUris = extractResourcesUris(workflowFileString, MCPCALLS_URI_PATTERN);
                         List<URI> newMcpCallsUris = createOrUpdateResources(
-                                readResources(mcpCallsUris, workflowPath, MCPCALLS_EXT, McpCallsConfiguration.class), mcpCallsUris, isMerge,
+                                readResources(mcpCallsUris, workflowPath, MCPCALLS_EXT, McpCallsConfiguration.class, isMerge, selectedSet),
+                                mcpCallsUris, isMerge,
                                 selectedSet, this::createNewMcpCalls, this::updateMcpCalls, transaction);
 
                         updateDocumentDescriptor(workflowPath, mcpCallsUris, newMcpCallsUris);
@@ -539,7 +663,8 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                         // ... for rag
                         List<URI> ragUris = extractResourcesUris(workflowFileString, RAG_URI_PATTERN);
                         List<URI> newRagUris = createOrUpdateResources(
-                                readResources(ragUris, workflowPath, RAG_EXT, RagConfiguration.class), ragUris, isMerge, selectedSet,
+                                readResources(ragUris, workflowPath, RAG_EXT, RagConfiguration.class, isMerge, selectedSet), ragUris, isMerge,
+                                selectedSet,
                                 this::createNewRags, this::updateRag, transaction);
 
                         updateDocumentDescriptor(workflowPath, ragUris, newRagUris);
@@ -560,7 +685,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                         agentConfig.setWorkflows(agentConfig.getWorkflows().stream().map(uri -> uri.equals(workflowUri) ? newWorkflowUri : uri)
                                 .collect(Collectors.toList()));
 
-                    } catch (IOException | RestInterfaceFactory.RestInterfaceFactoryException | CallbackMatcher.CallbackMatcherException e) {
+                    } catch (IOException | CallbackMatcher.CallbackMatcherException e) {
                         LOGGER.error(e.getLocalizedMessage(), e);
                         throw new InternalServerErrorException(e.getMessage(), e);
                     }
@@ -578,18 +703,16 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
     @FunctionalInterface
     private interface ResourceCreator<T> {
-        List<URI> create(List<T> configs, ImportTransaction transaction) throws RestInterfaceFactory.RestInterfaceFactoryException;
+        List<URI> create(List<T> configs, ImportTransaction transaction);
     }
 
     @FunctionalInterface
     private interface ResourceUpdater<T> {
-        URI update(T config, String localId, Integer localVersion, ImportTransaction transaction)
-                throws RestInterfaceFactory.RestInterfaceFactoryException;
+        URI update(T config, String localId, Integer localVersion, ImportTransaction transaction);
     }
 
     private <T> List<URI> createOrUpdateResources(List<T> configs, List<URI> originUris, boolean isMerge, Set<String> selectedSet,
-                                                  ResourceCreator<T> creator, ResourceUpdater<T> updater, ImportTransaction transaction)
-            throws RestInterfaceFactory.RestInterfaceFactoryException {
+                                                  ResourceCreator<T> creator, ResourceUpdater<T> updater, ImportTransaction transaction) {
 
         if (!isMerge) {
             // Original behavior: create everything new
@@ -616,9 +739,18 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
             String originId = origResId.getId();
             if (!isSelected(selectedSet, originId)) {
-                // Not selected — check if local exists, keep it; otherwise create
+                // Not selected — keep the local copy if this deployment has one.
                 URI existingUri = findLocalUriByOriginId(originId);
-                resultUris.add(existingUri != null ? existingUri : originUris.get(i));
+                if (existingUri == null) {
+                    // There is nothing to keep. Adding originUris.get(i) — the URI as
+                    // it appeared in the SOURCE deployment — stored a workflow step
+                    // pointing at a resource id that does not exist here, and the
+                    // failure only surfaced later, at deployment or first turn.
+                    throw new BadRequestException("Resource '" + originId + "' was excluded from the import,"
+                            + " but this deployment has no copy of it and the imported workflow references it."
+                            + " Include it in selectedResources, or remove its step from the workflow.");
+                }
+                resultUris.add(existingUri);
                 continue;
             }
 
@@ -672,8 +804,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         return null;
     }
 
-    private URI createOrUpdateAgent(AgentConfiguration agentConfiguration, String agentOriginId, ImportTransaction transaction)
-            throws RestInterfaceFactory.RestInterfaceFactoryException {
+    private URI createOrUpdateAgent(AgentConfiguration agentConfiguration, String agentOriginId, ImportTransaction transaction) {
         URI existingUri = findLocalUriByOriginId(agentOriginId);
         if (existingUri != null) {
             IResourceId localResId = RestUtilities.extractResourceId(existingUri);
@@ -691,7 +822,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     }
 
     private URI createOrUpdateWorkflow(String workflowFileString, String workflowOriginId, ImportTransaction transaction)
-            throws RestInterfaceFactory.RestInterfaceFactoryException, IOException {
+            throws IOException {
         URI existingUri = findLocalUriByOriginId(workflowOriginId);
         if (existingUri != null) {
             IResourceId localResId = RestUtilities.extractResourceId(existingUri);
@@ -810,8 +941,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
     // ==================== Resource Update (merge logic) ====================
 
-    private URI updateDictionary(DictionaryConfiguration config, String localId, Integer localVersion, ImportTransaction transaction)
-            throws RestInterfaceFactory.RestInterfaceFactoryException {
+    private URI updateDictionary(DictionaryConfiguration config, String localId, Integer localVersion, ImportTransaction transaction) {
         IRestDictionaryStore store = getRestResourceStore(IRestDictionaryStore.class);
         Response response = store.updateRegularDictionary(localId, localVersion, config);
         if (response.getStatus() == 200) {
@@ -820,8 +950,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         return createResourceDirect(IDictionaryStore.class, config, IRestDictionaryStore.resourceURI, transaction);
     }
 
-    private URI updateBehavior(RuleSetConfiguration config, String localId, Integer localVersion, ImportTransaction transaction)
-            throws RestInterfaceFactory.RestInterfaceFactoryException {
+    private URI updateBehavior(RuleSetConfiguration config, String localId, Integer localVersion, ImportTransaction transaction) {
         IRestRuleSetStore store = getRestResourceStore(IRestRuleSetStore.class);
         Response response = store.updateRuleSet(localId, localVersion, config);
         if (response.getStatus() == 200) {
@@ -830,8 +959,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         return createResourceDirect(IRuleSetStore.class, config, IRestRuleSetStore.resourceURI, transaction);
     }
 
-    private URI updateApiCalls(ApiCallsConfiguration config, String localId, Integer localVersion, ImportTransaction transaction)
-            throws RestInterfaceFactory.RestInterfaceFactoryException {
+    private URI updateApiCalls(ApiCallsConfiguration config, String localId, Integer localVersion, ImportTransaction transaction) {
         IRestApiCallsStore store = getRestResourceStore(IRestApiCallsStore.class);
         Response response = store.updateApiCalls(localId, localVersion, config);
         if (response.getStatus() == 200) {
@@ -840,8 +968,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         return createResourceDirect(IApiCallsStore.class, config, IRestApiCallsStore.resourceURI, transaction);
     }
 
-    private URI updateLangchain(LlmConfiguration config, String localId, Integer localVersion, ImportTransaction transaction)
-            throws RestInterfaceFactory.RestInterfaceFactoryException {
+    private URI updateLangchain(LlmConfiguration config, String localId, Integer localVersion, ImportTransaction transaction) {
         IRestLlmStore store = getRestResourceStore(IRestLlmStore.class);
         Response response = store.updateLlm(localId, localVersion, config);
         if (response.getStatus() == 200) {
@@ -850,8 +977,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         return createResourceDirect(ILlmStore.class, config, IRestLlmStore.resourceURI, transaction);
     }
 
-    private URI updateProperty(PropertySetterConfiguration config, String localId, Integer localVersion, ImportTransaction transaction)
-            throws RestInterfaceFactory.RestInterfaceFactoryException {
+    private URI updateProperty(PropertySetterConfiguration config, String localId, Integer localVersion, ImportTransaction transaction) {
         IRestPropertySetterStore store = getRestResourceStore(IRestPropertySetterStore.class);
         Response response = store.updatePropertySetter(localId, localVersion, config);
         if (response.getStatus() == 200) {
@@ -860,8 +986,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         return createResourceDirect(IPropertySetterStore.class, config, IRestPropertySetterStore.resourceURI, transaction);
     }
 
-    private URI updateOutput(OutputConfigurationSet config, String localId, Integer localVersion, ImportTransaction transaction)
-            throws RestInterfaceFactory.RestInterfaceFactoryException {
+    private URI updateOutput(OutputConfigurationSet config, String localId, Integer localVersion, ImportTransaction transaction) {
         IRestOutputStore store = getRestResourceStore(IRestOutputStore.class);
         Response response = store.updateOutputSet(localId, localVersion, config);
         if (response.getStatus() == 200) {
@@ -874,8 +999,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         return configs.stream().map(c -> createResourceDirect(IMcpCallsStore.class, c, IRestMcpCallsStore.resourceURI, transaction)).toList();
     }
 
-    private URI updateMcpCalls(McpCallsConfiguration config, String localId, Integer localVersion, ImportTransaction transaction)
-            throws RestInterfaceFactory.RestInterfaceFactoryException {
+    private URI updateMcpCalls(McpCallsConfiguration config, String localId, Integer localVersion, ImportTransaction transaction) {
         IRestMcpCallsStore store = getRestResourceStore(IRestMcpCallsStore.class);
         Response response = store.updateMcpCalls(localId, localVersion, config);
         if (response.getStatus() == 200) {
@@ -888,8 +1012,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         return configs.stream().map(c -> createResourceDirect(IRagStore.class, c, IRestRagStore.resourceURI, transaction)).toList();
     }
 
-    private URI updateRag(RagConfiguration config, String localId, Integer localVersion, ImportTransaction transaction)
-            throws RestInterfaceFactory.RestInterfaceFactoryException {
+    private URI updateRag(RagConfiguration config, String localId, Integer localVersion, ImportTransaction transaction) {
         IRestRagStore store = getRestResourceStore(IRestRagStore.class);
         Response response = store.updateRag(localId, localVersion, config);
         if (response.getStatus() == 200) {
@@ -1033,8 +1156,17 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     }
 
     private Path findSnippetsDir(Path targetDirPath) {
+        return findArchiveDir(targetDirPath, "snippets");
+    }
+
+    /**
+     * Finds a top-level archive directory such as {@code snippets/} or
+     * {@code schedules/}, tolerating the extra {@code <agentId>/} and
+     * {@code <agentId>/<version>/} nesting a hand-built archive can have.
+     */
+    private Path findArchiveDir(Path targetDirPath, String dirName) {
         // Check directly under target dir
-        Path direct = Paths.get(targetDirPath.toString(), "snippets");
+        Path direct = Paths.get(targetDirPath.toString(), dirName);
         if (Files.exists(direct)) {
             return direct;
         }
@@ -1044,14 +1176,14 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         try (var dirStream = Files.newDirectoryStream(targetDirPath, Files::isDirectory)) {
             for (Path subDir : dirStream) {
                 // Look in agentId/ directory
-                Path nested = Paths.get(subDir.toString(), "snippets");
+                Path nested = Paths.get(subDir.toString(), dirName);
                 if (Files.exists(nested)) {
                     return nested;
                 }
                 // Look in agentId/version/ directories
                 try (var versionStream = Files.newDirectoryStream(subDir, Files::isDirectory)) {
                     for (Path versionDir : versionStream) {
-                        Path deepNested = Paths.get(versionDir.toString(), "snippets");
+                        Path deepNested = Paths.get(versionDir.toString(), dirName);
                         if (Files.exists(deepNested)) {
                             return deepNested;
                         }
@@ -1059,9 +1191,101 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 }
             }
         } catch (IOException e) {
-            LOGGER.debug("Error searching for snippets directory: " + e.getMessage());
+            LOGGER.debugf("Error searching for %s directory: %s", dirName, e.getMessage());
         }
         return null;
+    }
+
+    // ==================== Schedule Import ====================
+
+    /**
+     * Recreates the agent's scheduled triggers from the archive's
+     * {@code schedules/} directory.
+     * <p>
+     * Export has always written these files; nothing read them back, so restoring
+     * an agent from a backup brought up an agent whose nightly jobs and heartbeats
+     * had silently stopped — while the ZIP visibly contained them, which is what
+     * made the gap look like a success.
+     * <p>
+     * A schedule is always <em>created</em>, never merged: its id is the store's,
+     * not a portable resource id, and its {@code agentId} is repointed at the agent
+     * this import just created. Fire bookkeeping (claim state, retry counters, last
+     * fire) is reset so an imported schedule starts clean rather than inheriting
+     * another deployment's in-flight lease.
+     * <p>
+     * A schedule that cannot be created fails the whole import rather than being
+     * logged and skipped: the point of importing schedules at all is that an agent
+     * restored without its nightly job looks complete and is not.
+     */
+    private void importSchedules(Path targetDirPath, URI newAgentUri, ImportTransaction transaction) {
+        Path schedulesDir = findArchiveDir(targetDirPath, SCHEDULES_DIR);
+        if (schedulesDir == null) {
+            return;
+        }
+        IResourceId agentResourceId = RestUtilities.extractResourceId(newAgentUri);
+        if (agentResourceId == null || agentResourceId.getId() == null) {
+            throw new InternalServerErrorException(
+                    "The archive contains schedules but the imported agent URI " + newAgentUri + " carries no id.");
+        }
+
+        List<Path> scheduleFiles = new ArrayList<>();
+        try (var scheduleStream = Files.newDirectoryStream(schedulesDir,
+                p -> p.toString().endsWith("." + SCHEDULE_EXT + ".json"))) {
+            scheduleStream.forEach(scheduleFiles::add);
+        } catch (IOException e) {
+            throw new InternalServerErrorException("Could not read schedules from the archive: " + e.getMessage(), e);
+        }
+
+        int imported = 0;
+        for (Path scheduleFilePath : scheduleFiles) {
+            ScheduleConfiguration schedule;
+            try {
+                schedule = jsonSerialization.deserialize(readFile(scheduleFilePath), ScheduleConfiguration.class);
+            } catch (Exception e) {
+                throw new BadRequestException("Could not read '" + scheduleFilePath.getFileName()
+                        + "' from the archive: " + e.getMessage(), e);
+            }
+            if (schedule == null) {
+                continue;
+            }
+            prepareScheduleForImport(schedule, agentResourceId.getId());
+            try {
+                String scheduleId = scheduleStore.createSchedule(schedule);
+                transaction.recordCompensation(() -> deleteScheduleQuietly(scheduleId));
+            } catch (Exception e) {
+                throw new InternalServerErrorException("Could not create the schedule from '"
+                        + scheduleFilePath.getFileName() + "': " + e.getMessage(), e);
+            }
+            imported++;
+        }
+
+        if (imported > 0) {
+            LOGGER.infof("Schedules: imported %d for agent %s", imported, agentResourceId.getId());
+        }
+    }
+
+    /**
+     * Repoints a schedule at the imported agent and clears its fire bookkeeping.
+     */
+    private static void prepareScheduleForImport(ScheduleConfiguration schedule, String newAgentId) {
+        schedule.setId(null);
+        schedule.setAgentId(newAgentId);
+        schedule.setFireStatus(FireStatus.PENDING);
+        schedule.setClaimedBy(null);
+        schedule.setClaimedAt(null);
+        schedule.setFireId(null);
+        schedule.setFailCount(0);
+        schedule.setNextRetryAt(null);
+        schedule.setLastFired(null);
+    }
+
+    private void deleteScheduleQuietly(String scheduleId) {
+        try {
+            scheduleStore.deleteSchedule(scheduleId);
+        } catch (Exception e) {
+            LOGGER.warnf("Rollback could not delete schedule '%s': %s",
+                    LogSanitizer.sanitize(scheduleId), LogSanitizer.sanitize(e.getMessage()));
+        }
     }
 
     // ==================== Rollback of a partial import ====================
@@ -1082,6 +1306,13 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
         private final List<CreatedResource> created = new ArrayList<>();
 
+        /**
+         * Undo actions for things this import created that are not
+         * {@code IResourceStore} resources — a schedule, for instance, lives in
+         * {@link IScheduleStore} and has no version or descriptor.
+         */
+        private final List<Runnable> compensations = new ArrayList<>();
+
         void recordCreated(Class<?> storeClass, IResourceId resourceId) {
             if (storeClass == null || resourceId == null || resourceId.getId() == null) {
                 return;
@@ -1089,9 +1320,22 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             created.add(new CreatedResource(storeClass, resourceId.getId(), resourceId.getVersion()));
         }
 
+        void recordCompensation(Runnable undo) {
+            if (undo != null) {
+                compensations.add(undo);
+            }
+        }
+
         /** Newest first — compensating deletes undo creations in reverse order. */
         List<CreatedResource> createdNewestFirst() {
             List<CreatedResource> reversed = new ArrayList<>(created);
+            Collections.reverse(reversed);
+            return reversed;
+        }
+
+        /** Newest first, for the same reason. */
+        List<Runnable> compensationsNewestFirst() {
+            List<Runnable> reversed = new ArrayList<>(compensations);
             Collections.reverse(reversed);
             return reversed;
         }
@@ -1109,6 +1353,14 @@ public class RestImportService extends AbstractBackupService implements IRestImp
      * never mask the original error.
      */
     private void rollbackCreatedResources(ImportTransaction transaction) {
+        for (Runnable compensation : transaction.compensationsNewestFirst()) {
+            try {
+                compensation.run();
+            } catch (Exception e) {
+                LOGGER.warnf("Rollback compensation failed: %s", LogSanitizer.sanitize(e.getMessage()));
+            }
+        }
+
         List<ImportTransaction.CreatedResource> created = transaction.createdNewestFirst();
         if (created.isEmpty()) {
             return;
@@ -1262,63 +1514,108 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         return ret;
     }
 
-    private <T> T getRestResourceStore(Class<T> clazz) throws RestInterfaceFactory.RestInterfaceFactoryException {
-        // Use direct CDI lookup instead of HTTP loopback proxy.
-        // The MP REST Client proxy strips response headers (Location, X-Resource-URI)
-        // and runs on the Vert.x IO event loop, causing deadlocks during import.
-        return jakarta.enterprise.inject.spi.CDI.current().select(clazz).get();
+    /**
+     * Looks up a REST store bean directly through CDI.
+     * <p>
+     * No REST proxy is involved despite the name: the MP REST Client proxy strips
+     * response headers (Location, X-Resource-URI) and runs on the Vert.x IO event
+     * loop, which deadlocks during import. It therefore cannot throw
+     * {@code RestInterfaceFactoryException} either — that checked exception used to
+     * be declared here and propagated through a dozen signatures, telling every
+     * reader a REST call was happening.
+     */
+    private <T> T getRestResourceStore(Class<T> clazz) {
+        return CDI.current().select(clazz).get();
+    }
+
+    /**
+     * Loads every config a workflow references from the unzipped archive.
+     * <p>
+     * A config that cannot be read fails the import with a 400 naming the file.
+     * Returning null instead put that null straight into the list handed to
+     * {@code store.create(...)}, so a selectively-exported ZIP — whose workflow
+     * still carries the URIs of the files the export left out — died with a bare
+     * NullPointerException surfaced as a 500 whose message was literally "null".
+     *
+     * @param isMerge
+     *            whether this is a merge import, where a resource the caller
+     *            excluded is answered from the local deployment instead of the
+     *            archive
+     * @param selectedSet
+     *            the caller's resource selection, or null for "everything"
+     */
+    private <T> List<T> readResources(List<URI> uris, Path workflowPath, String extension, Class<T> clazz,
+                                      boolean isMerge, Set<String> selectedSet) {
+        return uris.stream()
+                .map(uri -> readResource(uri, workflowPath, extension, clazz, isMerge, selectedSet))
+                .collect(Collectors.toList());
     }
 
     @SuppressWarnings("unchecked")
-    private <T> List<T> readResources(List<URI> uris, Path workflowPath, String extension, Class<T> clazz) {
-        return uris.stream().map(uri -> {
-            Path resourcePath = null;
-            String resourceContent = null;
-            try {
-                IResourceId resourceId = RestUtilities.extractResourceId(uri);
-                if (resourceId == null) {
-                    throw new IOException("resourceId was null");
-                }
-                resourceContent = readFile(createResourcePath(workflowPath, resourceId.getId(), extension));
-                if (uri.toString().startsWith(IRestPropertySetterStore.resourceBaseType)) {
-                    var resourceAsMap = jsonSerialization.deserialize(resourceContent, Map.class);
-                    var migratedPropertySetterDocument = migrationManager.migratePropertySetter().migrate(new Document(resourceAsMap));
+    private <T> T readResource(URI uri, Path workflowPath, String extension, Class<T> clazz,
+                               boolean isMerge, Set<String> selectedSet) {
+        IResourceId resourceId = RestUtilities.extractResourceId(uri);
+        if (resourceId == null || resourceId.getId() == null) {
+            throw new BadRequestException("The archive references '" + uri + "', which carries no resource id.");
+        }
 
-                    if (migratedPropertySetterDocument != null) {
-                        resourceContent = jsonSerialization.serialize(migratedPropertySetterDocument);
-                    }
-                } else if (uri.toString().startsWith(IRestApiCallsStore.resourceBaseType)) {
-                    var resourceAsMap = jsonSerialization.deserialize(resourceContent, Map.class);
-                    var migratedApiCallsDocument = migrationManager.migrateApiCalls().migrate(new Document(resourceAsMap));
-
-                    if (migratedApiCallsDocument != null) {
-                        resourceContent = jsonSerialization.serialize(migratedApiCallsDocument);
-                    }
-                } else if (uri.toString().startsWith(IRestOutputStore.resourceBaseType)) {
-                    var resourceAsMap = jsonSerialization.deserialize(resourceContent, Map.class);
-                    var migratedOutputDocument = migrationManager.migrateOutput().migrate(new Document(resourceAsMap));
-
-                    if (migratedOutputDocument != null) {
-                        resourceContent = jsonSerialization.serialize(migratedOutputDocument);
-                    }
-                }
-
-                // Normalize legacy ${eddivault:...} → ${vault:...}
-                resourceContent = normalizeVaultReferences(resourceContent);
-
-                // Final pass: migrate any remaining Thymeleaf template syntax to Qute
-                resourceContent = templateSyntaxMigrator.migrate(resourceContent);
-
-                return jsonSerialization.deserialize(resourceContent, clazz);
-            } catch (Exception e) {
-                LOGGER.error(e.getLocalizedMessage());
-                LOGGER.error(String.format("uri is: %s", uri));
-                LOGGER.error(String.format("workflowPath is: %s", workflowPath));
-                LOGGER.error(String.format("resourcePath is: %s", resourcePath));
-                LOGGER.error(String.format("resourceContent is:\n%s", resourceContent));
+        Path resourcePath = createResourcePath(workflowPath, resourceId.getId(), extension);
+        if (!Files.exists(resourcePath)) {
+            if (isMerge && !isSelected(selectedSet, resourceId.getId())) {
+                // A merge that deliberately excluded this resource never looks at its
+                // content — createOrUpdateResources answers it from the local copy, or
+                // fails naming it when there is none. EDDI's own selective export omits
+                // the file while leaving the reference in the workflow, so rejecting it
+                // here made the product refuse archives it had just written.
+                LOGGER.debugf("Archive omits %s for excluded resource %s — keeping the local copy",
+                        resourcePath.getFileName(), resourceId.getId());
                 return null;
             }
-        }).collect(Collectors.toList());
+            throw new BadRequestException("The archive references '" + uri + "' but does not contain '"
+                    + resourcePath.getFileName() + "'. A selective export that omits a configuration must also drop"
+                    + " its reference from the workflow it belongs to.");
+        }
+
+        String resourceContent;
+        try {
+            resourceContent = readFile(resourcePath);
+            if (uri.toString().startsWith(IRestPropertySetterStore.resourceBaseType)) {
+                var resourceAsMap = jsonSerialization.deserialize(resourceContent, Map.class);
+                var migratedPropertySetterDocument = migrationManager.migratePropertySetter().migrate(new Document(resourceAsMap));
+
+                if (migratedPropertySetterDocument != null) {
+                    resourceContent = jsonSerialization.serialize(migratedPropertySetterDocument);
+                }
+            } else if (uri.toString().startsWith(IRestApiCallsStore.resourceBaseType)) {
+                var resourceAsMap = jsonSerialization.deserialize(resourceContent, Map.class);
+                var migratedApiCallsDocument = migrationManager.migrateApiCalls().migrate(new Document(resourceAsMap));
+
+                if (migratedApiCallsDocument != null) {
+                    resourceContent = jsonSerialization.serialize(migratedApiCallsDocument);
+                }
+            } else if (uri.toString().startsWith(IRestOutputStore.resourceBaseType)) {
+                var resourceAsMap = jsonSerialization.deserialize(resourceContent, Map.class);
+                var migratedOutputDocument = migrationManager.migrateOutput().migrate(new Document(resourceAsMap));
+
+                if (migratedOutputDocument != null) {
+                    resourceContent = jsonSerialization.serialize(migratedOutputDocument);
+                }
+            }
+
+            // Normalize legacy ${eddivault:...} → ${vault:...}
+            resourceContent = normalizeVaultReferences(resourceContent);
+
+            // Final pass: migrate any remaining Thymeleaf template syntax to Qute
+            resourceContent = templateSyntaxMigrator.migrate(resourceContent);
+
+            return jsonSerialization.deserialize(resourceContent, clazz);
+        } catch (Exception e) {
+            // One line with the throwable attached, and no dump of the config body:
+            // the file name is the diagnostic that was missing, the body is not.
+            LOGGER.errorf(e, "Failed to read %s (referenced as %s)", resourcePath, uri);
+            throw new BadRequestException("Could not read '" + resourcePath.getFileName()
+                    + "' from the archive: " + e.getMessage(), e);
+        }
     }
 
     private Path createResourcePath(Path workflowPath, String resourceId, String extension) {
@@ -1348,39 +1645,79 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     // ==================== Upgrade (Structural) Flow ====================
 
     private ImportPreview previewUpgrade(InputStream zippedAgentConfigFiles, String targetAgentId) {
+        // Created before the try so the finally can remove it even when unzip itself
+        // fails: ZipResourceSource.close() is the only other thing that deletes the
+        // tree, and an unzip that throws never reaches it.
+        File targetDir = new File(FileUtilities.buildPath(tmpPath.toString(), UUID.randomUUID().toString()));
         try {
-            File targetDir = new File(FileUtilities.buildPath(tmpPath.toString(), UUID.randomUUID().toString()));
-            this.zipArchive.unzip(zippedAgentConfigFiles, targetDir);
-
             // try-with-resources: ZipResourceSource.close() removes the unzipped tree
             try (var source = new ZipResourceSource(targetDir.toPath(), jsonSerialization)) {
+                this.zipArchive.unzip(zippedAgentConfigFiles, targetDir);
                 return structuralMatcher.buildPreview(source, targetAgentId, true);
             }
+        } catch (WebApplicationException e) {
+            // A missing or unreadable target agent is a 404, not a server fault.
+            throw e;
         } catch (Exception e) {
             LOGGER.error("Upgrade preview failed: " + e.getMessage(), e);
             throw new InternalServerErrorException("Upgrade preview failed: " + e.getMessage(), e);
+        } finally {
+            deleteTempDirectoryQuietly(targetDir.toPath());
         }
     }
 
     private Response executeUpgradeFromZip(InputStream zippedAgentConfigFiles, String targetAgentId,
                                            String selectedOriginIds, String workflowOrderString) {
+        // See previewUpgrade: the tree must be removable even if unzip throws.
+        File targetDir = new File(FileUtilities.buildPath(tmpPath.toString(), UUID.randomUUID().toString()));
         try {
-            File targetDir = new File(FileUtilities.buildPath(tmpPath.toString(), UUID.randomUUID().toString()));
-            this.zipArchive.unzip(zippedAgentConfigFiles, targetDir);
-
             // try-with-resources: ZipResourceSource.close() removes the unzipped tree
             try (var source = new ZipResourceSource(targetDir.toPath(), jsonSerialization)) {
+                this.zipArchive.unzip(zippedAgentConfigFiles, targetDir);
                 Set<String> selectedSet = parseSelectedResources(selectedOriginIds);
                 List<String> workflowOrder = parseWorkflowOrder(workflowOrderString);
 
-                URI resultUri = upgradeExecutor.executeUpgrade(source, targetAgentId, selectedSet, workflowOrder);
-                return Response.status(Response.Status.CREATED)
-                        .header("Location", resultUri.toString()).build();
+                return upgradeResponse(upgradeExecutor.executeUpgrade(source, targetAgentId, selectedSet, workflowOrder));
             }
+        } catch (WebApplicationException e) {
+            throw e;
         } catch (Exception e) {
             LOGGER.error("Upgrade from ZIP failed: " + e.getMessage(), e);
             throw new InternalServerErrorException("Upgrade failed: " + e.getMessage(), e);
+        } finally {
+            deleteTempDirectoryQuietly(targetDir.toPath());
         }
+    }
+
+    /**
+     * Turns an upgrade outcome into a response the caller can act on.
+     * <ul>
+     * <li>207 Multi-Status - some resources failed; the body lists them. Every
+     * upgrade used to answer 201 regardless, so a half-applied sync looked
+     * identical to a clean one.</li>
+     * <li>201 Created - everything landed and something was written.</li>
+     * <li>200 OK - source and target were already identical; nothing was written
+     * and no agent version was burned.</li>
+     * </ul>
+     * The {@code Location} header is kept on every one of them, so clients that
+     * only read the header keep working.
+     */
+    private Response upgradeResponse(UpgradeResult result) {
+        Response.ResponseBuilder builder;
+        if (result.hasFailures()) {
+            LOGGER.warnf("Upgrade of %s completed with %d failed resource(s)",
+                    result.agentUri(), result.failures().size());
+            builder = Response.status(207, "Multi-Status");
+        } else {
+            builder = Response.status(result.wroteAnything() ? Response.Status.CREATED : Response.Status.OK);
+        }
+
+        // Use a manual Location header instead of Response.created(URI): the latter
+        // validates the URI scheme and may strip eddi:// URIs.
+        if (result.agentUri() != null) {
+            builder.header("Location", result.agentUri().toString());
+        }
+        return builder.entity(result).type(MediaType.APPLICATION_JSON).build();
     }
 
     private List<String> parseWorkflowOrder(String workflowOrderString) {
@@ -1396,10 +1733,17 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     /**
      * In development mode, allow HTTP for remote sync (easier local testing). In
      * production, enforce HTTPS to prevent credential leakage.
+     * <p>
+     * Read from the launch mode, not from the {@code quarkus.profile} <em>system
+     * property</em>: that property is only set when someone passed
+     * {@code -Dquarkus.profile=...} on the command line, so a container started the
+     * normal way with {@code QUARKUS_PROFILE=dev} looked like production and
+     * rejected every {@code http://} source with a message pointing at production
+     * configuration.
      */
-    private boolean isDevMode() {
-        String profile = System.getProperty("quarkus.profile", "prod");
-        return "dev".equalsIgnoreCase(profile) || "test".equalsIgnoreCase(profile);
+    boolean isDevMode() {
+        LaunchMode mode = LaunchMode.current();
+        return mode == LaunchMode.DEVELOPMENT || mode == LaunchMode.TEST;
     }
 
     private void validateSourceUrl(String sourceUrl) {
@@ -1423,8 +1767,11 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         validateSourceUrl(sourceUrl);
         try (var source = new RemoteApiResourceSource(sourceUrl, sourceAgentId, sourceVersion, sourceAuth, jsonSerialization)) {
             return structuralMatcher.buildPreview(source, targetAgentId, true);
+        } catch (WebApplicationException e) {
+            // An unreadable target agent is a 404 the operator can act on.
+            throw e;
         } catch (Exception e) {
-            LOGGER.errorf("Sync preview failed for agent %s from %s: %s", sourceAgentId, sourceUrl, e.getMessage());
+            LOGGER.errorf(e, "Sync preview failed for agent %s from %s", sourceAgentId, sourceUrl);
             throw new InternalServerErrorException("Sync preview failed: " + e.getMessage(), e);
         }
     }
@@ -1444,11 +1791,13 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 ImportPreview preview = structuralMatcher.buildPreview(source, mapping.targetAgentId(), true);
                 previews.add(preview);
             } catch (Exception e) {
-                LOGGER.warnf("Batch preview failed for agent %s: %s", mapping.sourceAgentId(), e.getMessage());
-                // Add a failed preview entry so the caller knows which agent failed
+                LOGGER.warnf(e, "Batch preview failed for agent %s", mapping.sourceAgentId());
+                // Report the failure in its own field. Prefixing the agent NAME with
+                // "Error: " made a client string-match to tell a failed row from a
+                // successful one, and rendered a remote exception where a name belongs.
                 previews.add(new ImportPreview(
-                        mapping.sourceAgentId(), "Error: " + e.getMessage(),
-                        mapping.targetAgentId(), null, List.of()));
+                        mapping.sourceAgentId(), null,
+                        mapping.targetAgentId(), null, List.of(), e.getMessage()));
             }
         }
         return previews;
@@ -1459,19 +1808,16 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                                 String targetAgentId, String selectedResources, String workflowOrder,
                                 String sourceAuth) {
         validateSourceUrl(sourceUrl);
-        try {
-            try (var source = new RemoteApiResourceSource(
-                    sourceUrl, sourceAgentId, sourceVersion, sourceAuth, jsonSerialization)) {
-                Set<String> selectedSet = parseSelectedResources(selectedResources);
-                List<String> wfOrder = parseWorkflowOrder(workflowOrder);
+        try (var source = new RemoteApiResourceSource(
+                sourceUrl, sourceAgentId, sourceVersion, sourceAuth, jsonSerialization)) {
+            Set<String> selectedSet = parseSelectedResources(selectedResources);
+            List<String> wfOrder = parseWorkflowOrder(workflowOrder);
 
-                URI resultUri = upgradeExecutor.executeUpgrade(source, targetAgentId, selectedSet, wfOrder);
-                return Response.status(Response.Status.CREATED)
-                        .header("Location", resultUri.toString()).build();
-            }
+            return upgradeResponse(upgradeExecutor.executeUpgrade(source, targetAgentId, selectedSet, wfOrder));
+        } catch (WebApplicationException e) {
+            throw e;
         } catch (Exception e) {
-            LOGGER.errorf("Sync execution failed for agent %s from %s: %s",
-                    sourceAgentId, sourceUrl, e.getMessage());
+            LOGGER.errorf(e, "Sync execution failed for agent %s from %s", sourceAgentId, sourceUrl);
             throw new InternalServerErrorException("Sync failed: " + e.getMessage(), e);
         }
     }
@@ -1479,28 +1825,64 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     @Override
     public Response executeSyncBatch(String sourceUrl, List<SyncRequest> requests, String sourceAuth) {
         validateSourceUrl(sourceUrl);
-        try {
-            List<URI> resultUris = new ArrayList<>();
-            for (SyncRequest request : requests) {
-                try (var source = new RemoteApiResourceSource(
-                        sourceUrl, request.sourceAgentId(), request.sourceAgentVersion(),
-                        sourceAuth, jsonSerialization)) {
-                    URI resultUri = upgradeExecutor.executeUpgrade(
-                            source, request.targetAgentId(),
-                            request.selectedResources(), request.workflowOrder());
-                    resultUris.add(resultUri);
-                } catch (Exception e) {
-                    LOGGER.warnf("Batch sync failed for agent %s→%s: %s",
-                            request.sourceAgentId(), request.targetAgentId(), e.getMessage());
-                    // Continue with remaining agents — partial success is better than total failure
-                }
-            }
-
-            return Response.ok(resultUris).build();
-        } catch (Exception e) {
-            LOGGER.errorf("Batch sync execution failed: %s", e.getMessage());
-            throw new InternalServerErrorException("Batch sync failed: " + e.getMessage(), e);
+        if (requests == null || requests.isEmpty()) {
+            return Response.ok(List.of()).build();
         }
+
+        // One entry per request, in request order, whether it succeeded or not. The
+        // endpoint used to answer 200 with a list of the URIs that happened to work,
+        // so a batch in which every single agent failed was indistinguishable from a
+        // batch with nothing to do.
+        List<BatchSyncResult> results = new ArrayList<>();
+        int failed = 0;
+        for (SyncRequest request : requests) {
+            if (Thread.currentThread().isInterrupted()) {
+                throw new InternalServerErrorException("Batch sync was interrupted after "
+                        + results.size() + " of " + requests.size() + " agent(s).");
+            }
+            try (var source = new RemoteApiResourceSource(
+                    sourceUrl, request.sourceAgentId(), request.sourceAgentVersion(),
+                    sourceAuth, jsonSerialization)) {
+                UpgradeResult result = upgradeExecutor.executeUpgrade(
+                        source, request.targetAgentId(),
+                        request.selectedResources(), request.workflowOrder());
+                if (result.hasFailures()) {
+                    failed++;
+                }
+                results.add(new BatchSyncResult(request.sourceAgentId(), request.targetAgentId(), result, null));
+            } catch (Exception e) {
+                LOGGER.warnf(e, "Batch sync failed for agent %s to %s",
+                        request.sourceAgentId(), request.targetAgentId());
+                // Continue with the remaining agents, but keep the failure visible.
+                failed++;
+                results.add(new BatchSyncResult(request.sourceAgentId(), request.targetAgentId(), null, e.getMessage()));
+            }
+        }
+
+        if (failed == results.size()) {
+            LOGGER.errorf("Batch sync failed for all %d agent(s) from %s", failed, sourceUrl);
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
+                    .entity(results).type(MediaType.APPLICATION_JSON).build();
+        }
+        if (failed > 0) {
+            return Response.status(207, "Multi-Status").entity(results).type(MediaType.APPLICATION_JSON).build();
+        }
+        return Response.ok(results).type(MediaType.APPLICATION_JSON).build();
+    }
+
+    /**
+     * One agent's outcome inside a batch sync.
+     *
+     * @param sourceAgentId
+     *            the agent that was read from the remote instance
+     * @param targetAgentId
+     *            the local agent it was synced into
+     * @param result
+     *            what the upgrade did, or null when it could not run at all
+     * @param error
+     *            why it could not run, or null on success
+     */
+    public record BatchSyncResult(String sourceAgentId, String targetAgentId, UpgradeResult result, String error) {
     }
 
 }

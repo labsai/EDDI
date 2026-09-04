@@ -4,9 +4,11 @@
  */
 package ai.labs.eddi.backup.impl;
 
+import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.backup.IZipArchive;
 import ai.labs.eddi.backup.model.ImportPreview;
+import ai.labs.eddi.backup.model.UpgradeResult;
 import ai.labs.eddi.backup.model.ImportPreview.DiffAction;
 import ai.labs.eddi.backup.model.ImportPreview.ResourceDiff;
 import ai.labs.eddi.backup.model.SyncMapping;
@@ -23,6 +25,7 @@ import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
@@ -70,7 +73,8 @@ class RestImportServiceExtendedTest {
         importService = new RestImportService(
                 zipArchive, jsonSerialization,
                 migrationManager, documentDescriptorStore,
-                templateSyntaxMigrator, structuralMatcher, upgradeExecutor, mock(ResourceAccessGuard.class));
+                templateSyntaxMigrator, structuralMatcher, upgradeExecutor, mock(IScheduleStore.class), mock(BackupMetrics.class),
+                mock(ResourceAccessGuard.class));
     }
 
     // ==================== normalizeVaultReferences ====================
@@ -219,7 +223,10 @@ class RestImportServiceExtendedTest {
                     "https://example.com", mappings, null);
 
             assertEquals(1, results.size());
-            assertTrue(results.getFirst().sourceAgentName().startsWith("Error:"));
+            assertNull(results.getFirst().sourceAgentName());
+            // The failure is a real field now: prefixing the agent NAME with "Error: "
+            // made a client string-match to tell a failed row from a successful one.
+            assertNotNull(results.getFirst().error());
         }
     }
 
@@ -377,7 +384,7 @@ class RestImportServiceExtendedTest {
     class ImportMerge {
 
         @Test
-        @DisplayName("merge strategy with empty zip returns ok response")
+        @DisplayName("merge strategy with empty zip is rejected, not reported as success")
         void mergeEmptyZip() throws Exception {
             doAnswer(inv -> {
                 File dir = inv.getArgument(1);
@@ -385,12 +392,10 @@ class RestImportServiceExtendedTest {
                 return null;
             }).when(zipArchive).unzip(any(InputStream.class), any(File.class));
 
-            Response response = importService.importAgent(
-                    new ByteArrayInputStream(new byte[0]), "merge", null, null, null);
-
-            assertNotNull(response);
-            // No agent files → returns 200
-            assertEquals(200, response.getStatus());
+            // An archive with no agent file is rejected. Answering 200 with an empty
+            // resourceUri is how a whole class of broken archives went unnoticed.
+            assertThrows(BadRequestException.class, () -> importService.importAgent(
+                    new ByteArrayInputStream(new byte[0]), "merge", null, null, null));
         }
 
         @Test
@@ -402,11 +407,8 @@ class RestImportServiceExtendedTest {
                 return null;
             }).when(zipArchive).unzip(any(InputStream.class), any(File.class));
 
-            Response response = importService.importAgent(
-                    new ByteArrayInputStream(new byte[0]), "create", "res1,res2", null, null);
-
-            assertNotNull(response);
-            assertEquals(200, response.getStatus());
+            assertThrows(BadRequestException.class, () -> importService.importAgent(
+                    new ByteArrayInputStream(new byte[0]), "create", "res1,res2", null, null));
         }
     }
 
@@ -423,7 +425,7 @@ class RestImportServiceExtendedTest {
             URI resultUri = URI.create("eddi://ai.labs.agent/agentstore/agents/target-1?version=2");
             when(upgradeExecutor.executeUpgrade(any(), eq("target-1"),
                     eq(Set.of("res1", "res2")), eq(List.of("wf1", "wf2"))))
-                    .thenReturn(resultUri);
+                    .thenReturn(new UpgradeResult(resultUri, true, 1, 0, 0, List.of()));
 
             doAnswer(inv -> {
                 File dir = inv.getArgument(1);
@@ -765,7 +767,7 @@ class RestImportServiceExtendedTest {
             }).when(zipArchive).unzip(any(InputStream.class), any(File.class));
 
             when(upgradeExecutor.executeUpgrade(any(), eq(targetAgentId), isNull(), isNull()))
-                    .thenReturn(resultUri);
+                    .thenReturn(new UpgradeResult(resultUri, true, 1, 0, 0, List.of()));
 
             Response response = importService.importAgent(
                     new ByteArrayInputStream(new byte[0]), "upgrade", null, targetAgentId, null);
@@ -889,12 +891,11 @@ class RestImportServiceExtendedTest {
                 return null;
             }).when(zipArchive).unzip(any(InputStream.class), any(File.class));
 
-            ImportPreview result = importService.previewImport(
-                    new ByteArrayInputStream(new byte[0]), null);
-
-            assertNotNull(result);
-            assertNull(result.sourceAgentId());
-            assertTrue(result.resources().isEmpty());
+            var ex = assertThrows(BadRequestException.class, () -> importService.previewImport(
+                    new ByteArrayInputStream(new byte[0]), null));
+            // The message has to name what was looked for: an empty preview told the
+            // operator there was nothing to import, which is not the same thing.
+            assertTrue(ex.getMessage().contains(".agent.json"), ex.getMessage());
         }
     }
 
@@ -991,8 +992,8 @@ class RestImportServiceExtendedTest {
                     "https://example.com", mappings, null);
 
             assertEquals(2, results.size());
-            assertTrue(results.get(0).sourceAgentName().startsWith("Error:"));
-            assertTrue(results.get(1).sourceAgentName().startsWith("Error:"));
+            assertNotNull(results.get(0).error());
+            assertNotNull(results.get(1).error());
             assertEquals("agent-1", results.get(0).sourceAgentId());
             assertEquals("agent-2", results.get(1).sourceAgentId());
         }
@@ -1110,11 +1111,8 @@ class RestImportServiceExtendedTest {
             }).when(zipArchive).unzip(any(InputStream.class), any(File.class));
 
             // With spaces around commas — still works
-            Response response = importService.importAgent(
-                    new ByteArrayInputStream(new byte[0]), "create", " res1 , res2 , res3 ", null, null);
-
-            assertNotNull(response);
-            assertEquals(200, response.getStatus());
+            assertThrows(BadRequestException.class, () -> importService.importAgent(
+                    new ByteArrayInputStream(new byte[0]), "create", " res1 , res2 , res3 ", null, null));
         }
 
         @Test
@@ -1126,11 +1124,8 @@ class RestImportServiceExtendedTest {
                 return null;
             }).when(zipArchive).unzip(any(InputStream.class), any(File.class));
 
-            Response response = importService.importAgent(
-                    new ByteArrayInputStream(new byte[0]), "create", "", null, null);
-
-            assertNotNull(response);
-            assertEquals(200, response.getStatus());
+            assertThrows(BadRequestException.class, () -> importService.importAgent(
+                    new ByteArrayInputStream(new byte[0]), "create", "", null, null));
         }
     }
 

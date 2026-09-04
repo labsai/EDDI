@@ -68,7 +68,8 @@ Log in to Grafana with `admin` / `admin`, then open **Dashboards → EDDI** — 
 `Persistent Memory — Dream & Summarization` ·
 `Integrations — MCP, A2A Identity, OpenAI-compatible API` ·
 `Capability Registry & Connections` · `Secrets Vault` · `Tenancy, Quotas & Audit` ·
-`Platform Operator` · `NATS JetStream` · `Runtime context (Quarkus / JVM built-ins)`
+`Platform Operator` · `NATS JetStream` · `Backup — Export, Import & Sync` ·
+`Runtime context (Quarkus / JVM built-ins)`
 
 ---
 
@@ -466,6 +467,27 @@ eddi_openai_request_duration_seconds        # Request latency (timer)
 eddi_openai_conversations_created_total     # Conversations created via the /v1 adapter
 eddi_caller_identity_resolution_total       # Caller-identity resolutions; tags: outcome, reference
 ```
+
+### Backup, Export & Sync Metrics
+
+```text
+eddi_backup_export_count_total                    # Agent exports attempted
+eddi_backup_export_failure_count_total            # Exports that failed
+eddi_backup_import_count_total                    # Archive imports attempted
+eddi_backup_import_failure_count_total            # Imports that failed
+eddi_backup_upgrade_count_total                   # Upgrade/sync runs attempted (ZIP upgrade, /sync, /sync/batch)
+eddi_backup_upgrade_failure_count_total           # Upgrade/sync runs that failed outright
+eddi_backup_upgrade_resource_updated_count_total  # Resources updated in place by a sync
+eddi_backup_upgrade_resource_created_count_total  # Resources created in the target by a sync
+eddi_backup_upgrade_resource_skipped_count_total  # Matched resources whose content was already identical
+eddi_backup_upgrade_resource_failure_count_total  # Resources a sync could not process (the 207 body lists them)
+```
+
+> The four `resource` counters are what answer "the sync returned 201 but
+> nothing changed". All-skipped means source and target already agree; a
+> `created` line where `updated` is expected means the matcher is not joining
+> source and target extensions and every sync is duplicating the configuration
+> tree.
 
 ### Session & Listing Metrics
 

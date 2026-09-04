@@ -31,6 +31,7 @@ import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.utils.RestUtilities;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import jakarta.ws.rs.NotFoundException;
 import org.jboss.logging.Logger;
 
 import java.net.URI;
@@ -46,8 +47,10 @@ import java.util.*;
  * <li><b>Agent</b> — matched directly by {@code targetAgentId} parameter</li>
  * <li><b>Workflows</b> — matched by position (index in agent's workflow
  * list)</li>
- * <li><b>Extensions</b> — matched by {@code WorkflowStep.type} URI
- * (deterministic: each type appears at most once per workflow)</li>
+ * <li><b>Extensions</b> — matched by the canonical
+ * {@link WorkflowExtensions#scan(WorkflowConfiguration) extension key}: the
+ * workflow step's {@code type} URI plus that type's occurrence ordinal within
+ * the workflow</li>
  * <li><b>Snippets</b> — matched by {@code PromptSnippet.name} (natural
  * key)</li>
  * </ol>
@@ -55,6 +58,13 @@ import java.util.*;
  * This is the core matching engine shared by all import/sync flows. It is
  * stateless — all state comes from the {@link IResourceSource} and the target
  * agent's existing configuration.
+ * <p>
+ * <b>Content is always loaded when there is a target.</b>
+ * {@code includeContent} decides only whether the source/target JSON is
+ * <em>returned</em> for the diff view — never whether it is read. Deciding the
+ * {@link DiffAction} from content that was not loaded made every matched
+ * resource compare equal, so {@link UpgradeExecutor} skipped all of them and a
+ * sync silently updated nothing.
  *
  * @since 6.0.0
  */
@@ -94,8 +104,12 @@ public class StructuralMatcher {
      *            if non-null, match against this agent's resource tree (upgrade
      *            strategy). If null, all resources are CREATE.
      * @param includeContent
-     *            if true, populate sourceContent/targetContent for diff view
+     *            if true, populate sourceContent/targetContent for the diff view.
+     *            Does not affect which {@link DiffAction} is computed — content is
+     *            always loaded when {@code targetAgentId} is given.
      * @return the preview with all resource diffs
+     * @throws jakarta.ws.rs.NotFoundException
+     *             if {@code targetAgentId} was given but could not be read
      */
     public ImportPreview buildPreview(IResourceSource source,
                                       String targetAgentId,
@@ -109,14 +123,12 @@ public class StructuralMatcher {
         List<ResourceDiff> diffs = new ArrayList<>();
 
         if (targetAgentId != null) {
-            try {
-                targetConfig = readTargetAgent(targetAgentId);
-                targetAgentName = readDescriptorName(targetAgentId);
-            } catch (Exception e) {
-                LOGGER.warnf("Could not load target agent %s: %s", targetAgentId, e.getMessage());
-                // Proceed without target — all resources will be CREATE
-                targetAgentId = null;
-            }
+            // Deliberately not caught: the caller explicitly named a target, so a
+            // target that cannot be read is a 404 — not a silent switch to "create
+            // everything", which previewed an upgrade as a full duplicate of the
+            // agent and gave the operator nothing to distinguish the two.
+            targetConfig = readTargetAgent(targetAgentId);
+            targetAgentName = readDescriptorName(targetAgentId);
         }
 
         // 1. Agent-level diff
@@ -163,10 +175,10 @@ public class StructuralMatcher {
                     null, -1);
         }
 
-        String sourceJson = includeContent ? serializeSafe(sourceAgent.config()) : null;
-        String targetJson = includeContent ? serializeSafe(targetConfig) : null;
+        String sourceJson = serializeSafe(sourceAgent.config());
+        String targetJson = serializeSafe(targetConfig);
 
-        DiffAction action = Objects.equals(sourceJson, targetJson)
+        DiffAction action = contentEquals(sourceJson, targetJson)
                 ? DiffAction.SKIP
                 : DiffAction.UPDATE;
 
@@ -175,7 +187,8 @@ public class StructuralMatcher {
         return new ResourceDiff(
                 sourceAgent.sourceId(), "agent", sourceAgent.name(),
                 action, targetAgentId, targetVersion, "targetAgent",
-                sourceJson, targetJson, -1);
+                includeContent ? sourceJson : null,
+                includeContent ? targetJson : null, -1);
     }
 
     // ==================== Workflow Diffs ====================
@@ -196,9 +209,9 @@ public class StructuralMatcher {
         String targetName = readDescriptorName(targetId);
 
         // Workflow-level diff
-        String sourceJson = includeContent ? serializeSafe(sourceWf.config()) : null;
-        String targetJson = includeContent ? readTargetWorkflowJson(targetId, targetVersion) : null;
-        DiffAction wfAction = Objects.equals(sourceJson, targetJson)
+        String sourceJson = serializeSafe(sourceWf.config());
+        String targetJson = readTargetWorkflowJson(targetId, targetVersion);
+        DiffAction wfAction = contentEquals(sourceJson, targetJson)
                 ? DiffAction.SKIP
                 : DiffAction.UPDATE;
 
@@ -206,29 +219,32 @@ public class StructuralMatcher {
                 sourceWf.sourceId(), "workflow",
                 sourceWf.name() != null ? sourceWf.name() : targetName,
                 wfAction, targetId, targetVersion, "position",
-                sourceJson, targetJson, sourceWf.positionIndex()));
+                includeContent ? sourceJson : null,
+                includeContent ? targetJson : null, sourceWf.positionIndex()));
 
-        // Extension diffs within this workflow — match by step type
+        // Extension diffs within this workflow — matched by the canonical
+        // WorkflowExtensions key, which both sides derive the same way.
         Map<String, ExtensionSourceData> sourceExtensions = sourceWf.extensions();
         Map<String, TargetExtension> targetExtensions = readTargetExtensions(targetId, targetVersion);
 
         for (Map.Entry<String, ExtensionSourceData> entry : sourceExtensions.entrySet()) {
-            String stepType = entry.getKey();
+            String extensionKey = entry.getKey();
             ExtensionSourceData sourceExt = entry.getValue();
-            TargetExtension targetExt = targetExtensions.get(stepType);
+            TargetExtension targetExt = targetExtensions.get(extensionKey);
 
             if (targetExt != null) {
-                // Matched by type
-                String srcContent = includeContent ? sourceExt.contentJson() : null;
-                String tgtContent = includeContent ? targetExt.contentJson : null;
-                DiffAction extAction = Objects.equals(srcContent, tgtContent)
+                // Matched by step type + occurrence
+                String srcContent = sourceExt.contentJson();
+                String tgtContent = targetExt.contentJson;
+                DiffAction extAction = contentEquals(srcContent, tgtContent)
                         ? DiffAction.SKIP
                         : DiffAction.UPDATE;
 
                 diffs.add(new ResourceDiff(
                         sourceExt.sourceId(), sourceExt.type(), sourceExt.name(),
                         extAction, targetExt.id, targetExt.version, "type",
-                        srcContent, tgtContent, -1));
+                        includeContent ? srcContent : null,
+                        includeContent ? tgtContent : null, -1));
             } else {
                 // No match — new extension type in this workflow
                 diffs.add(new ResourceDiff(
@@ -270,16 +286,17 @@ public class StructuralMatcher {
         IResourceId existing = existingByName.get(sourceSnippet.name());
 
         if (existing != null) {
-            String sourceJson = includeContent ? serializeSafe(sourceSnippet.snippet()) : null;
-            String targetJson = includeContent ? readTargetSnippetJson(existing.getId(), existing.getVersion()) : null;
-            DiffAction action = Objects.equals(sourceJson, targetJson)
+            String sourceJson = serializeSafe(sourceSnippet.snippet());
+            String targetJson = readTargetSnippetJson(existing.getId(), existing.getVersion());
+            DiffAction action = contentEquals(sourceJson, targetJson)
                     ? DiffAction.SKIP
                     : DiffAction.UPDATE;
 
             return new ResourceDiff(
                     sourceSnippet.sourceId(), "snippet", sourceSnippet.name(),
                     action, existing.getId(), existing.getVersion(), "name",
-                    sourceJson, targetJson, -1);
+                    includeContent ? sourceJson : null,
+                    includeContent ? targetJson : null, -1);
         }
 
         return new ResourceDiff(
@@ -292,12 +309,19 @@ public class StructuralMatcher {
     // ==================== Target Reading Helpers ====================
 
     private AgentConfiguration readTargetAgent(String agentId) {
+        AgentConfiguration config;
         try {
             int version = readLatestVersionOrDefault(agentId, 1);
-            return agentStore.readAgent(agentId, version);
+            config = agentStore.readAgent(agentId, version);
+        } catch (NotFoundException e) {
+            throw e;
         } catch (Exception e) {
-            throw new RuntimeException("Failed to read target agent " + agentId, e);
+            throw new NotFoundException("Could not read target agent " + agentId + ": " + e.getMessage(), e);
         }
+        if (config == null) {
+            throw new NotFoundException("Target agent " + agentId + " does not exist.");
+        }
+        return config;
     }
 
     private String readTargetWorkflowJson(String workflowId, int version) {
@@ -305,7 +329,7 @@ public class StructuralMatcher {
             WorkflowConfiguration config = workflowStore.readWorkflow(workflowId, version);
             return serializeSafe(config);
         } catch (Exception e) {
-            LOGGER.debugf("Could not read target workflow %s v%d: %s", workflowId, version, e.getMessage());
+            LOGGER.warnf(e, "Could not read target workflow %s v%d", workflowId, version);
             return null;
         }
     }
@@ -314,56 +338,53 @@ public class StructuralMatcher {
     }
 
     /**
-     * Reads all extensions from a target workflow by parsing its config and loading
-     * each referenced resource via the correct typed store.
+     * Reads all extensions a target workflow references, keyed by the canonical
+     * {@link WorkflowExtensions} key. The URI of each extension is read from the
+     * step's {@code config} map, which is where the engine itself looks — reading
+     * it from {@code extensions} found nothing on any real workflow, so every
+     * source extension was reported as CREATE and a sync duplicated the lot.
      */
     private Map<String, TargetExtension> readTargetExtensions(String workflowId, int version) {
         Map<String, TargetExtension> result = new LinkedHashMap<>();
 
+        WorkflowConfiguration wfConfig;
         try {
-            WorkflowConfiguration wfConfig = workflowStore.readWorkflow(workflowId, version);
-
-            for (WorkflowConfiguration.WorkflowStep step : wfConfig.getWorkflowSteps()) {
-                URI stepType = step.getType();
-                if (stepType == null)
-                    continue;
-
-                Object uriObj = step.getExtensions().get("uri");
-                if (uriObj == null)
-                    continue;
-
-                URI extUri = URI.create(uriObj.toString());
-                IResourceId extResId = RestUtilities.extractResourceId(extUri);
-                if (extResId == null)
-                    continue;
-
-                try {
-                    Object extConfig = readTypedExtension(extUri, stepType.toString());
-                    String json = serializeSafe(extConfig);
-                    result.put(stepType.toString(), new TargetExtension(
-                            extResId.getId(), extResId.getVersion(), json));
-                } catch (Exception e) {
-                    LOGGER.debugf("Could not read target extension %s: %s", extUri, e.getMessage());
-                }
-            }
+            wfConfig = workflowStore.readWorkflow(workflowId, version);
         } catch (Exception e) {
-            LOGGER.debugf("Could not read target workflow config %s v%d: %s", workflowId, version, e.getMessage());
+            LOGGER.warnf(e, "Could not read target workflow config %s v%d", workflowId, version);
+            return result;
+        }
+
+        for (WorkflowExtensions.ExtensionRef ref : WorkflowExtensions.scan(wfConfig)) {
+            try {
+                Object extConfig = readTypedExtension(ref);
+                String json = serializeSafe(extConfig);
+                result.put(ref.key(), new TargetExtension(
+                        ref.resourceId().getId(), ref.resourceId().getVersion(), json));
+            } catch (Exception e) {
+                LOGGER.warnf(e, "Could not read target extension %s", ref.extensionUri());
+            }
         }
 
         return result;
     }
 
     /**
-     * Reads a typed extension config from the correct store based on the step type.
-     * This produces deterministic JSON serialization (matching what UpgradeExecutor
-     * would write), unlike deserializing as {@code Object.class}.
+     * Reads a typed extension config from the correct store, chosen by the
+     * authority of the resource URI itself ({@code ai.labs.rules},
+     * {@code ai.labs.llm}, …) rather than by the workflow step type
+     * ({@code eddi://ai.labs.behavior}) — the two are different names for the same
+     * thing, and matching on the wrong one resolved every extension to "unknown".
+     * <p>
+     * The {@code default} branch is unreachable: {@link WorkflowExtensions#scan}
+     * only produces references for registered authorities. It throws rather than
+     * returning null so that adding a type to the registry without adding it here
+     * fails loudly.
      */
-    private Object readTypedExtension(URI extUri, String stepType) throws Exception {
-        IResourceId resId = RestUtilities.extractResourceId(extUri);
-        if (resId == null)
-            return null;
+    private Object readTypedExtension(WorkflowExtensions.ExtensionRef ref) throws Exception {
+        IResourceId resId = ref.resourceId();
 
-        return switch (stepType) {
+        return switch (ref.type().resourceAuthority()) {
             case "ai.labs.dictionary" -> restInterfaceFactory.get(
                     IRestDictionaryStore.class)
                     .readRegularDictionary(resId.getId(), resId.getVersion(), "", "", 0, 0);
@@ -388,10 +409,8 @@ public class StructuralMatcher {
             case "ai.labs.rag" -> restInterfaceFactory.get(
                     IRestRagStore.class)
                     .readRag(resId.getId(), resId.getVersion());
-            default -> {
-                LOGGER.debugf("Unknown step type for typed read: %s", stepType);
-                yield null;
-            }
+            default -> throw new IllegalStateException(
+                    "No typed store read is registered for extension type " + ref.type().resourceAuthority());
         };
     }
 
@@ -476,6 +495,68 @@ public class StructuralMatcher {
         } catch (Exception e) {
             LOGGER.debugf("Serialization failed: %s", e.getMessage());
             return null;
+        }
+    }
+
+    /**
+     * Compares two configs for equality of <em>content</em>, not of text.
+     * <p>
+     * The two sides are produced by different pipelines: source content is the
+     * verbatim file text from a ZIP or the verbatim HTTP body from another
+     * instance, while target content is a fresh serialization of a deserialized
+     * object. Comparing them as strings made whitespace or field-ordering
+     * differences look like changes, so SKIP effectively never fired and every
+     * resource showed as modified.
+     */
+    private boolean contentEquals(String sourceJson, String targetJson) {
+        if (Objects.equals(sourceJson, targetJson)) {
+            return true;
+        }
+        if (sourceJson == null || targetJson == null) {
+            return false;
+        }
+        return Objects.equals(canonicalJson(sourceJson), canonicalJson(targetJson));
+    }
+
+    /**
+     * Re-serializes JSON with object keys sorted, so two renderings of the same
+     * document compare equal. Returns the input unchanged when it cannot be parsed
+     * — a comparison on raw text is still better than treating unparseable content
+     * as equal.
+     */
+    private String canonicalJson(String json) {
+        try {
+            Object tree = jsonSerialization.deserialize(json);
+            if (tree == null) {
+                return json;
+            }
+            String canonical = jsonSerialization.serialize(sortKeys(tree));
+            return canonical != null ? canonical : json;
+        } catch (Exception e) {
+            LOGGER.debugf("Could not canonicalize JSON for comparison: %s", e.getMessage());
+            return json;
+        }
+    }
+
+    private static Object sortKeys(Object node) {
+        switch (node) {
+            case Map<?, ?> map -> {
+                Map<String, Object> sorted = new TreeMap<>();
+                for (Map.Entry<?, ?> entry : map.entrySet()) {
+                    sorted.put(String.valueOf(entry.getKey()), sortKeys(entry.getValue()));
+                }
+                return sorted;
+            }
+            case List<?> list -> {
+                List<Object> mapped = new ArrayList<>(list.size());
+                for (Object element : list) {
+                    mapped.add(sortKeys(element));
+                }
+                return mapped;
+            }
+            case null, default -> {
+                return node;
+            }
         }
     }
 }

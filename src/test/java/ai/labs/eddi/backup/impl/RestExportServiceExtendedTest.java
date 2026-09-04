@@ -88,7 +88,7 @@ class RestExportServiceExtendedTest {
                 dictionaryStore, behaviorStore, httpCallsStore, llmStore,
                 propertySetterStore, outputStore, mcpCallsStore, ragStore,
                 snippetStore, jsonSerialization, zipArchive, secretScrubber,
-                scheduleStore, mock(ResourceAccessGuard.class));
+                scheduleStore, mock(ResourceAccessGuard.class), mock(BackupMetrics.class));
     }
 
     // ─── sanitizePathComponent ─────────────────────────────────
@@ -101,21 +101,21 @@ class RestExportServiceExtendedTest {
         @DisplayName("should reject double-dot path traversal")
         void doubleDotTraversal() {
             assertThrows(BadRequestException.class,
-                    () -> exportService.exportAgent("agent..id", 1, null));
+                    () -> exportService.exportAgent("agent..id", 1, null, null, null));
         }
 
         @Test
         @DisplayName("should reject absolute path in agentId")
         void absolutePathLinux() {
             assertThrows(BadRequestException.class,
-                    () -> exportService.exportAgent("/etc/passwd", 1, null));
+                    () -> exportService.exportAgent("/etc/passwd", 1, null, null, null));
         }
 
         @Test
         @DisplayName("should reject backslash in agentId")
         void backslash() {
             assertThrows(BadRequestException.class,
-                    () -> exportService.exportAgent("agent\\id", 1, null));
+                    () -> exportService.exportAgent("agent\\id", 1, null, null, null));
         }
     }
 
@@ -158,7 +158,7 @@ class RestExportServiceExtendedTest {
             when(secretScrubber.scrubJson(anyString())).thenAnswer(inv -> inv.getArgument(0));
             when(scheduleStore.readSchedulesByAgentId(agentId)).thenReturn(List.of());
 
-            Response response = exportService.exportAgent(agentId, agentVersion, null);
+            Response response = exportService.exportAgent(agentId, agentVersion, null, null, null);
 
             assertNotNull(response);
             assertEquals(200, response.getStatus());
@@ -266,7 +266,7 @@ class RestExportServiceExtendedTest {
             schedule.setId("schedule-1");
             when(scheduleStore.readSchedulesByAgentId(agentId)).thenReturn(List.of(schedule));
 
-            Response response = exportService.exportAgent(agentId, 1, null);
+            Response response = exportService.exportAgent(agentId, 1, null, null, null);
 
             assertNotNull(response);
             assertEquals(200, response.getStatus());
@@ -291,7 +291,7 @@ class RestExportServiceExtendedTest {
             when(secretScrubber.scrubJson(anyString())).thenAnswer(inv -> inv.getArgument(0));
             when(scheduleStore.readSchedulesByAgentId(agentId)).thenReturn(List.of());
 
-            Response response = exportService.exportAgent(agentId, 1, null);
+            Response response = exportService.exportAgent(agentId, 1, null, null, null);
 
             assertNotNull(response);
             assertEquals(200, response.getStatus());
@@ -322,7 +322,7 @@ class RestExportServiceExtendedTest {
             when(secretScrubber.scrubJson(anyString())).thenAnswer(inv -> inv.getArgument(0));
             when(scheduleStore.readSchedulesByAgentId(agentId)).thenReturn(List.of());
 
-            Response response = exportService.exportAgent(agentId, 1, "res1,res2");
+            Response response = exportService.exportAgent(agentId, 1, "res1,res2", null, null);
 
             assertNotNull(response);
             assertEquals(200, response.getStatus());
