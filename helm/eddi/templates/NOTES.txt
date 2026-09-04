@@ -38,17 +38,12 @@
 
   📡 Access EDDI:
 
-    kubectl port-forward svc/{{ include "eddi.fullname" . }} 7070:7070 -n {{ .Release.Namespace }}
-    open http://localhost:7070
+    kubectl port-forward svc/{{ include "eddi.fullname" . }} {{ .Values.eddi.service.port }}:{{ .Values.eddi.service.port }} -n {{ .Release.Namespace }}
+    open http://localhost:{{ .Values.eddi.service.port }}
 
-{{- if .Values.manager.enabled }}
+  🖥️  The Manager UI is served by EDDI itself:
 
-  🖥️  Access Manager UI:
-
-    kubectl port-forward svc/{{ include "eddi.fullname" . }}-manager 7071:7071 -n {{ .Release.Namespace }}
-    open http://localhost:7071
-
-{{- end }}
+    open http://localhost:{{ .Values.eddi.service.port }}/manage
 
 {{- if .Values.keycloak.enabled }}
 
@@ -64,7 +59,7 @@
 {{- end }}
 
   📊 Components:
-    Database:      {{ if .Values.mongodb.enabled }}MongoDB{{ else if .Values.postgres.enabled }}PostgreSQL{{ else }}None (external){{ end }}
+    Database:      {{ if .Values.mongodb.enabled }}MongoDB (in-chart){{ else if .Values.postgres.enabled }}PostgreSQL (in-chart){{ else if .Values.eddi.datastore.externalConnectionString }}MongoDB (external){{ else }}PostgreSQL (external){{ end }}
     Messaging:     {{ .Values.eddi.messagingType }}
     Auth (OIDC):   {{ if .Values.eddi.oidc.enabled }}Enabled{{ else }}Disabled{{ end }}
     Replicas:      {{ .Values.eddi.replicas }} (fixed — EDDI is single-writer per

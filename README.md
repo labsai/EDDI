@@ -417,7 +417,7 @@ EDDI implements open standards — not proprietary APIs:
 ### 🚀 Cloud-Native & Observable
 
 - 🐳 **One-Command Install** — Interactive wizard sets up EDDI + database via Docker
-- ☸️ **Kubernetes / OpenShift** — Kustomize overlays, Helm charts, HPA, PDB, NetworkPolicy
+- ☸️ **Kubernetes / OpenShift** — Kustomize overlays, Helm charts, PDB, NetworkPolicy (no HPA: EDDI is single-writer per conversation, so both delivery paths pin one replica)
 - 📊 **Prometheus & Grafana** — 50+ Micrometer metrics at `/q/metrics` (tools, vault, memory, scheduling, conversations). Pre-built [Grafana dashboard](docs/monitoring/eddi-grafana-dashboard.json) included
 - 🔭 **OpenTelemetry Tracing** — Per-task distributed traces via OTLP (Jaeger, Tempo, Datadog). Every pipeline task emits spans with `task.id`, `task.type`, `conversation.id`, and `agent.id`
 - 🩺 **Health Checks** — Liveness & readiness probes at `/q/health/live` and `/q/health/ready`
@@ -596,20 +596,30 @@ target/site/jacoco/index.html
 
 ### ☸️ Kubernetes
 
-```bash
-# Quickstart (one-file deployment)
-kubectl apply -f https://raw.githubusercontent.com/labsai/EDDI/main/k8s/quickstart.yaml
+No shipped manifest creates the `eddi-secrets` Secret that holds the vault master
+key — a Secret in the manifests would be reconciled on every `kubectl apply` and
+overwrite a live key, making everything already encrypted with it undecryptable.
+So the Secret is created out-of-band, **before** the first apply. Without it the
+EDDI pod sits in `ContainerCreating` (`MountVolume.SetUp failed: secret
+"eddi-secrets" not found`) and never starts.
 
-# Kustomize overlays
+```bash
+# Kustomize overlays — create the vault Secret first, then apply
+bash k8s/create-secrets.sh                 # PowerShell: .\k8s\create-secrets.ps1
 kubectl apply -k k8s/overlays/mongodb/     # MongoDB backend
 kubectl apply -k k8s/overlays/postgres/    # PostgreSQL backend
 
-# Helm
-helm install eddi ./helm/eddi --namespace eddi --create-namespace
+# Quickstart (one-file manifest; same Secret step, see the Kubernetes Guide)
+kubectl apply -f https://raw.githubusercontent.com/labsai/EDDI/main/k8s/quickstart.yaml
+
+# Helm (renders the Secret itself, so the key is a required value)
+helm install eddi ./helm/eddi \
+  --set eddi.vaultMasterKey="$(openssl rand -base64 24)" \
+  --namespace eddi --create-namespace
 ```
 
-Includes overlays for auth (Keycloak), monitoring (Prometheus/Grafana), NATS messaging, Ingress, and production hardening (HPA, PDB, NetworkPolicy).
-See the [Kubernetes Guide](docs/kubernetes.md) for details.
+Includes overlays for auth (Keycloak), monitoring (Prometheus/Grafana), NATS messaging, Ingress, and production hardening (PDB, NetworkPolicy — deliberately no HPA).
+See the [Kubernetes Guide](docs/kubernetes.md) for details, including the Keycloak upgrade note for existing installs.
 
 ---
 

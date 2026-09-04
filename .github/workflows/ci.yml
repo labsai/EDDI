@@ -54,11 +54,16 @@ jobs:
             # in NO filter at all, so a PR touching only them skipped the whole
             # pipeline — and a skipped required check still satisfies branch
             # protection. They do not need the Java build, just the shell lint.
+            # k8s/create-secrets.{sh,ps1} are in this filter for the same
+            # reason: they are now the ONLY way to get a vault master key into a
+            # cluster, so a syntax error in one is an install that cannot start.
             scripts:
               - 'install.sh'
               - 'install.ps1'
               - 'scripts/**'
               - '.githooks/**'
+              - 'k8s/*.sh'
+              - 'k8s/*.ps1'
 
       - name: Resolve
         id: result
@@ -105,8 +110,13 @@ jobs:
       - name: Bash syntax check
         # Catches the class of error that makes `curl | bash` fail at the worst
         # possible moment — on a user's machine, halfway through an install.
+        #
+        # k8s/*.sh is in here because create-secrets.sh is now the ONLY way to
+        # get a vault master key into a cluster (no manifest ships the Secret),
+        # and its refuse-to-clobber guard was pinned by nothing but a string
+        # assertion in DeploymentManifestsTest.
         run: |
-          for f in install.sh .githooks/*; do
+          for f in install.sh .githooks/* k8s/*.sh; do
             [ -f "$f" ] || continue
             head -n1 "$f" | grep -qE '^#!.*(bash|sh)' || continue
             echo "checking $f"
@@ -116,6 +126,11 @@ jobs:
       - name: ShellCheck
         # Uses the shellcheck preinstalled on ubuntu-latest rather than a
         # third-party action, so there is no extra supply-chain edge to pin.
+        #
+        # Scoped to install.sh deliberately: it is the `curl | bash` path. The
+        # k8s scripts get the syntax parse above; widening shellcheck to them is
+        # a separate change, because it has to be run once and its findings
+        # fixed before it can be a gate.
         run: |
           shellcheck --version
           shellcheck --severity=warning --shell=bash install.sh
@@ -125,10 +140,12 @@ jobs:
         run: |
           # Parse-only: never dot-source or run the installer in CI.
           # Covers scripts/ too — preflight-local.ps1 is a contributor-facing
-          # script and was as unchecked as the installers were.
+          # script and was as unchecked as the installers were — and k8s/, whose
+          # create-secrets.ps1 is the only way to install a vault master key on
+          # Windows.
           $ErrorActionPreference = 'Stop'
           $failed = $false
-          Get-ChildItem -Path ./install.ps1, ./scripts -Filter *.ps1 -Recurse -ErrorAction SilentlyContinue |
+          Get-ChildItem -Path ./install.ps1, ./scripts, ./k8s -Filter *.ps1 -Recurse -ErrorAction SilentlyContinue |
             ForEach-Object {
               $errors = $null
               [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$null, [ref]$errors) | Out-Null
@@ -152,6 +169,7 @@ jobs:
           }
           $targets = @('./install.ps1')
           if (Test-Path ./scripts) { $targets += './scripts' }
+          if (Test-Path ./k8s) { $targets += './k8s' }
           # -Path takes ONE string, not an array — passing @(...) fails with
           # "Cannot convert 'System.Object[]' to the type 'System.String'".
           $found = @()
@@ -160,6 +178,108 @@ jobs:
           }
           $found | Format-Table -AutoSize | Out-String | Write-Host
           if ($found | Where-Object { $_.Severity -eq 'Error' }) { exit 1 }
+
+  # ─── Job 0c: Deployment Manifests ───────────────────────────────
+  #
+  # Nothing in the build had ever rendered k8s/ or helm/, so a manifest could be
+  # broken for as long as nobody tried to deploy it — and both shipped
+  # k8s/examples/ kustomizations had never built at all, while being printed in
+  # docs/kubernetes.md as ready-made recipes. DeploymentManifestsTest covers what
+  # a plain unit build can reach; this job is the part that needs the real tools.
+  manifest-lint:
+    name: Deployment Manifests
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.code == 'true'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Render every kustomization
+        # A `resources:` entry naming a file outside the root is a hard error; a
+        # patch that matches nothing exits 0. This step catches the first class,
+        # DeploymentManifestsTest the second.
+        run: |
+          set -euo pipefail
+          kubectl version --client=true
+          status=0
+          while IFS= read -r kfile; do
+            dir=$(dirname "$kfile")
+            # Components are not applyable roots by design — they have no
+            # resource set of their own and are consumed under `components:`.
+            if grep -qE '^kind:[[:space:]]*Component[[:space:]]*$' "$kfile"; then
+              echo "skip (Component): $dir"
+              continue
+            fi
+            echo "--- kubectl kustomize $dir"
+            if ! kubectl kustomize "$dir" > /dev/null; then
+              echo "::error file=$kfile::kustomization does not build"
+              status=1
+            fi
+          done < <(find k8s -name kustomization.yaml | sort)
+          exit $status
+
+      - name: Render the Helm chart
+        # Uses the helm preinstalled on ubuntu-latest, matching the shell-lint
+        # job's reasoning about shellcheck: no extra supply-chain edge to pin.
+        run: |
+          set -euo pipefail
+          helm version
+          key=ci-placeholder-vault-key
+
+          helm lint helm/eddi --set eddi.vaultMasterKey=$key
+
+          echo "--- default: MongoDB, no auth"
+          helm template eddi helm/eddi --set eddi.vaultMasterKey=$key > /dev/null
+
+          echo "--- PostgreSQL + in-chart Keycloak"
+          helm template eddi helm/eddi \
+            --set eddi.vaultMasterKey=$key \
+            --set eddi.datastoreType=postgres \
+            --set mongodb.enabled=false \
+            --set postgres.enabled=true \
+            --set postgres.password=ci-placeholder-pg \
+            --set eddi.oidc.enabled=true \
+            --set eddi.oidc.publicUrl=http://localhost:8080 \
+            --set keycloak.enabled=true \
+            --set keycloak.adminPassword=ci-placeholder-kc > /dev/null
+
+          echo "--- external datastore + bring-your-own IdP"
+          helm template eddi helm/eddi \
+            --set eddi.vaultMasterKey=$key \
+            --set mongodb.enabled=false \
+            --set postgres.enabled=false \
+            --set eddi.datastore.externalConnectionString=mongodb://db.example.com:27017/eddi \
+            --set eddi.oidc.enabled=true \
+            --set eddi.oidc.authServerUrl=https://idp.example.com/realms/eddi \
+            --set eddi.oidc.publicUrl=https://idp.example.com > /dev/null
+
+      - name: The chart's guards still fire
+        # Every one of these used to render happily and hand the operator a
+        # deployment that could not work. A guard that stops firing is invisible,
+        # so each is asserted to FAIL.
+        run: |
+          set -euo pipefail
+          key=ci-placeholder-vault-key
+          expect_failure() {
+            local what="$1"; shift
+            if helm template eddi helm/eddi "$@" > /dev/null 2>&1; then
+              echo "::error::'$what' rendered successfully — its guard no longer fires"
+              exit 1
+            fi
+            echo "ok: '$what' is refused"
+          }
+          expect_failure "no datastore configured at all" \
+            --set eddi.vaultMasterKey=$key --set mongodb.enabled=false --set postgres.enabled=false
+          expect_failure "messagingType=nats on a stock image" \
+            --set eddi.vaultMasterKey=$key --set eddi.messagingType=nats
+          expect_failure "OIDC enabled without a browser-facing publicUrl" \
+            --set eddi.vaultMasterKey=$key --set eddi.oidc.enabled=true \
+            --set eddi.oidc.authServerUrl=https://idp.example.com/realms/eddi
+          expect_failure "OIDC with neither an in-chart Keycloak nor an authServerUrl" \
+            --set eddi.vaultMasterKey=$key --set eddi.oidc.enabled=true \
+            --set eddi.oidc.publicUrl=https://idp.example.com
 
   # ─── Job 1: Build & Test ────────────────────────────────────────
   build-and-test:

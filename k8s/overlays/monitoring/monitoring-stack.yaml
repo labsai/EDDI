@@ -18,19 +18,30 @@ data:
         metrics_path: '/q/metrics'
         kubernetes_sd_configs:
           - role: pod
+            # own_namespace, not a literal name: kustomize's namespace
+            # transformer rewrites metadata.namespace but NOT the contents of a
+            # ConfigMap payload, so a hardcoded "eddi" here made Prometheus
+            # scrape zero targets — silently — for anyone who changed
+            # `namespace:` in their kustomization.
             namespaces:
-              names:
-                - eddi
+              own_namespace: true
         relabel_configs:
           # Keep only pods with the EDDI label
           - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
             action: keep
             regex: eddi
-          # Use pod IP + Prometheus port annotation to build the scrape address
+          # Use pod IP + Prometheus port annotation to build the scrape address.
+          #
+          # No `separator:` override. `separator` is the string placed BETWEEN
+          # concatenated source label values and defaults to ";" — setting it to
+          # ":" made the input "10.1.2.3:7070", which the regex below (which
+          # requires a literal ";") could never match, so the rule was a no-op.
+          # It looked like it worked only because role:pod already defaults
+          # __address__ to podIP:containerPort and the single declared container
+          # port happens to equal the prometheus.io/port annotation.
           - source_labels: [__meta_kubernetes_pod_ip, __meta_kubernetes_pod_annotation_prometheus_io_port]
             action: replace
             target_label: __address__
-            separator: ':'
             regex: (.+);(.+)
             replacement: $1:$2
           # Use the Prometheus path annotation
@@ -151,9 +162,38 @@ spec:
       port: 9090
       targetPort: http
 ---
+# Grafana datasource provisioning
+#
+# Without this the component shipped half of what it advertises: a Grafana with
+# no datasource at all, which an operator had to point at Prometheus by hand —
+# work then destroyed by the next restart, because storage below is an emptyDir.
+# Declarative provisioning survives the restart, which is why it is a ConfigMap
+# rather than a PVC.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasources
+  labels:
+    app.kubernetes.io/name: grafana
+    app.kubernetes.io/component: monitoring
+    app.kubernetes.io/part-of: eddi
+data:
+  datasources.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        access: proxy
+        # The Prometheus Service declared above, resolved in-namespace.
+        url: http://prometheus:9090
+        isDefault: true
+        editable: false
+---
 # Grafana Deployment
-# Note: Uses emptyDir for storage — dashboards and data are not persistent.
-# For production, use a PVC or provision dashboards via ConfigMaps.
+# Note: Uses emptyDir for storage — dashboards created in the UI and the metric
+# cache are not persistent. The datasource IS, because it is provisioned from
+# the ConfigMap above; add dashboards the same way (a ConfigMap mounted at
+# /etc/grafana/provisioning/dashboards) rather than reaching for a PVC.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -189,6 +229,9 @@ spec:
           volumeMounts:
             - name: grafana-data
               mountPath: /var/lib/grafana
+            - name: grafana-datasources
+              mountPath: /etc/grafana/provisioning/datasources
+              readOnly: true
           resources:
             requests:
               cpu: 50m
@@ -199,6 +242,9 @@ spec:
       volumes:
         - name: grafana-data
           emptyDir: {}
+        - name: grafana-datasources
+          configMap:
+            name: grafana-datasources
 ---
 # Grafana Service
 apiVersion: v1

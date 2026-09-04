@@ -49,6 +49,56 @@ bottom of this file and are never archived.
 
 ---
 
+## ☸️ fix(deploy): repair Keycloak realm substitution and the secret generator, add a manifest regression suite (2026-09-04)
+
+**Repo:** EDDI (`fix/review-deploy`)
+
+From the whole-repository code review. The shipped Kubernetes and Helm assets failed
+*silently at deploy time* rather than loudly at render time.
+
+**Applying the documented quick start destroyed the vault master key.** `k8s/base` shipped
+`eddi-secret.yaml` as a live resource, so every `kubectl apply -k` re-applied the
+placeholder committed to this repository over whatever key was installed. On a first
+install the operator silently ran with a published key; on any later apply the real key was
+overwritten and everything sealed with it became undecryptable. The manifest is now
+`eddi-secret.yaml.example` and is not applied; `create-secrets.sh` refuses to clobber an
+existing secret unless asked.
+
+**Both shipped `k8s/examples/` kustomizations failed to build at all** — verified by running
+`kubectl kustomize`, which exits non-zero because an overlay reaches a file outside its own
+root. Composing overlays the way their own headers instruct also silently discarded their
+ConfigMap patches, so a NATS deployment came up still set to in-memory messaging.
+
+**Keycloak never became ready and never had a realm.** The probes targeted a port serving
+no health endpoint, so the pod stayed NotReady forever and its Service got no endpoints; and
+the deployment never imported the realm, so OIDC discovery resolved against a realm that did
+not exist. Keycloak also ran `start-dev` with no persistent volume, so every restart wiped
+realms, clients and users — it is now a StatefulSet with a volume.
+
+**The Helm realm substitution matched nothing.** The chart replaced the literal
+`https://eddi.example.com`, but both shipped realm copies advertised a *different*
+placeholder host, so `helm` exited 0 and login died with `Invalid parameter: redirect_uri`.
+
+### Regression coverage
+
+Deployment assets were the one area with almost no automated coverage, which is why these
+shipped. This branch adds `DeploymentManifestsTest` — a structural suite that asserts
+*relationships* rather than presence: that the realm placeholder the chart substitutes is
+the one the realm files actually carry; that the token issuer is derived from the same
+public URL on both the Helm and Kustomize paths; that the realm volume resolves to a
+ConfigMap the overlay genuinely generates; and that the secret generator checks before it
+deletes.
+
+A new CI `manifest-lint` job renders every kustomization and lints the chart, so a manifest
+that does not build fails the pipeline instead of a deployment. It is deliberately a PR gate
+and not a release blocker, for the same reason `shell-lint` is: a manifest typo should not
+hold up a security patch.
+
+The six tests were proven by mutating all six inputs at once and confirming exactly six
+failures with no collateral.
+
+---
+
 ## 📋 docs(config): document the four workspace properties that were breaking `main` (2026-08-30)
 
 **Repo:** EDDI (`fix/connection-extra-auth-params-code-verifier`)

@@ -1,37 +1,32 @@
 # EDDI + MongoDB + auth + monitoring — combined example
 #
-# This shows how to compose multiple overlays into a single deployment.
-# Kustomize takes ONE directory, so you create a kustomization.yaml
-# that references both a base overlay and component overlays.
+# This shows how to compose the shipped pieces into a single deployment.
+# Kustomize takes ONE directory, so you write a kustomization.yaml that
+# references a standalone overlay under `resources:` and the component overlays
+# under `components:`.
 #
-# Usage: kubectl apply -k k8s/examples/mongodb-full/
+# Two rules make this work, and this file used to break both:
+#   * `resources:` may name a DIRECTORY outside the root (it becomes its own
+#     kustomization root) but never a loose FILE outside the root — that is a
+#     hard error, and it is why neither shipped example ever built.
+#   * a component's patches are applied into THIS resource set, so they reach
+#     eddi-config. The same patches inside a `kind: Kustomization` referenced
+#     under `resources:` match nothing and are silently dropped.
+#
+# Usage:
+#   bash k8s/create-secrets.sh              # once, before the first apply
+#   kubectl apply -k k8s/examples/mongodb-full/
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 namespace: eddi
 
 resources:
-  # Start with the MongoDB overlay (includes base + MongoDB)
+  # Standalone overlay — includes the base plus MongoDB
   - ../../overlays/mongodb
 
-  # Add component overlays — these provide additional resources + patches
-  - ../../overlays/auth/keycloak-deployment.yaml
-  - ../../overlays/monitoring/monitoring-stack.yaml
-  - ../../overlays/manager/manager-deployment.yaml
-
-# Compose patches from multiple overlays
-patches:
-  # Enable OIDC authentication
-  - target:
-      kind: ConfigMap
-      name: eddi-config
-    patch: |
-      - op: replace
-        path: /data/QUARKUS_OIDC_TENANT_ENABLED
-        value: "true"
-      - op: add
-        path: /data/QUARKUS_OIDC_AUTH_SERVER_URL
-        value: "http://keycloak:8080/realms/eddi"
-      - op: add
-        path: /data/QUARKUS_OIDC_CLIENT_ID
-        value: "eddi-backend"
+components:
+  # Keycloak, its realm import, and every ConfigMap key the auth path needs
+  - ../../overlays/auth
+  # Prometheus + Grafana
+  - ../../overlays/monitoring

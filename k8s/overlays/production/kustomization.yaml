@@ -1,18 +1,28 @@
-# Production hardening overlay
+# Production hardening component
 # Applies: PDB, NetworkPolicy, and tighter resource limits
 #
-# ⚠️  This is a COMPONENT overlay — it does NOT include the base EDDI manifests.
-# You MUST apply it together with a database overlay.
+# ⚠️  This is a kustomize COMPONENT, not a standalone overlay. `kubectl apply -k`
+# on this directory does not work by design. Reference it from a kustomization
+# that already includes the base:
+#
+#   resources:
+#     - ../../overlays/postgres
+#   components:
+#     - ../../overlays/production
+#
+# It used to be `kind: Kustomization`, which made the patches below silent
+# no-ops: a directory under `resources:` is built as its own root first, so the
+# patches targeted a resource set with no eddi Deployment in it — and kustomize
+# exits 0 on a patch that matches nothing. Operators got the PDB and the
+# NetworkPolicy but kept the development resource limits.
 #
 # ⚠️  Deliberately NO HorizontalPodAutoscaler. EDDI serialises the turns of a
 # conversation with a JVM-local lock, so more than one replica silently loses
 # writes (see the comment on spec.replicas in k8s/base/eddi-deployment.yaml).
 # eddi-hpa.yaml stays in this directory as a disabled template; wire it back in
 # only once a distributed conversation coordinator ships.
-apiVersion: kustomize.config.k8s.io/v1beta1
-kind: Kustomization
-
-namespace: eddi
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
 
 resources:
   - eddi-pdb.yaml

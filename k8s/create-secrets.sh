@@ -15,6 +15,7 @@ set -euo pipefail
 
 NAMESPACE="${EDDI_NAMESPACE:-eddi}"
 AUTO=false
+FORCE=false
 VAULT_KEY=""
 
 # Colors
@@ -33,6 +34,7 @@ fail()    { echo -e "  ${RED}❌ $1${RESET}"; exit 1; }
 for arg in "$@"; do
   case "$arg" in
     --auto)       AUTO=true ;;
+    --force)      FORCE=true ;;
     --key=*)      VAULT_KEY="${arg#*=}" ;;
     --namespace=*) NAMESPACE="${arg#*=}" ;;
     --help|-h)
@@ -42,6 +44,8 @@ for arg in "$@"; do
       echo ""
       echo "Options:"
       echo "  --auto                  Auto-generate key, no prompts"
+      echo "  --force                 Replace an existing eddi-secrets (DESTROYS the current"
+      echo "                          master key — everything encrypted with it is then lost)"
       echo "  --key=<key>             Use a specific vault key (min 16 chars)"
       echo "  --namespace=<ns>        Kubernetes namespace (default: eddi)"
       echo ""
@@ -58,6 +62,34 @@ fi
 echo ""
 echo -e "${BOLD}  EDDI — Kubernetes Secret Generator${RESET}"
 echo ""
+
+# Refuse to replace a live master key.
+#
+# This script installs a NEW key, so replacing the Secret makes every API key
+# and secret already encrypted under the old one permanently undecryptable.
+# Dropping the Secret from the shipped manifests closed that trap for
+# `kubectl apply -k`; it must not reopen here, now that the docs route every
+# install through this script. Checked BEFORE the key is generated or prompted
+# for, so nobody types a passphrase that is then thrown away.
+#
+# The delete that makes --force able to rotate lives BELOW this check, not
+# above it: run first it would remove the very Secret the check looks for, the
+# `kubectl get` would then find nothing, and the guard would wave every run
+# through after the key it protects had already been destroyed.
+if [[ "$FORCE" != "true" ]] && kubectl get secret eddi-secrets --namespace="$NAMESPACE" &>/dev/null; then
+  warn "eddi-secrets already exists in namespace ${NAMESPACE} — nothing was changed."
+  echo ""
+  echo -e "  Replacing it installs a ${BOLD}new${RESET} master key, and everything encrypted"
+  echo -e "  under the current one becomes ${BOLD}permanently undecryptable${RESET}."
+  echo ""
+  echo -e "  To read the key already in the cluster:"
+  echo -e "    ${CYAN}kubectl get secret eddi-secrets -n ${NAMESPACE} \\"
+  echo -e "      -o jsonpath='{.data.application-secrets\.properties}' | base64 -d${RESET}"
+  echo ""
+  echo -e "  To rotate deliberately, re-run with ${BOLD}--force${RESET}."
+  echo ""
+  exit 1
+fi
 
 # Generate or accept vault key
 if [[ -n "$VAULT_KEY" ]]; then
@@ -105,7 +137,9 @@ if ! kubectl get namespace "$NAMESPACE" &>/dev/null 2>&1; then
   echo -e "${GREEN}✅${RESET}"
 fi
 
-# Delete existing secret if it exists (to avoid "already exists" error)
+# Delete existing secret if it exists (to avoid "already exists" error).
+# Only reachable with --force, or with nothing there to lose: the guard above
+# has already aborted otherwise.
 kubectl delete secret eddi-secrets --namespace="$NAMESPACE" --ignore-not-found >/dev/null 2>&1
 
 # Create the secret.
