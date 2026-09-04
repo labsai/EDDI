@@ -38,6 +38,7 @@ import ai.labs.eddi.utils.FileUtilities;
 import ai.labs.eddi.utils.RestUtilities;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.core.Response;
@@ -46,12 +47,13 @@ import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 
 import java.io.*;
 import java.net.URI;
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.text.MessageFormat;
+import java.text.Normalizer;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -84,7 +86,30 @@ public class RestExportService extends AbstractBackupService implements IRestExp
     private final Path tmpPath = Paths.get(FileUtilities.buildPath(System.getProperty("user.dir"), "tmp"));
 
     private static final Logger LOGGER = Logger.getLogger(RestExportService.class);
-    private static final String SCHEDULE_EXT = "schedule";
+
+    /**
+     * Sub-directory of {@code tmp/} holding finished ZIPs that are waiting to be
+     * downloaded. Keeping them in their own directory is what makes
+     * {@link #sweepExpiredArchives()} able to delete by age without ever looking at
+     * the export scratch tree or the import staging root.
+     */
+    private static final String EXPORT_ARCHIVE_ROOT = "archives";
+
+    /**
+     * How long a finished archive is kept. Nothing deleted these before: the
+     * scratch tree was cleaned up but the ZIP itself was written to {@code tmp/}
+     * and stayed there forever, so every export permanently consumed disk while the
+     * 404 message claimed archives "are not kept indefinitely".
+     */
+    private static final int DEFAULT_ARCHIVE_RETENTION_MINUTES = 60;
+
+    @ConfigProperty(name = "eddi.backup.export.retention-minutes", defaultValue = "60")
+    int archiveRetentionMinutes;
+
+    /**
+     * Maximum number of characters of the agent name kept in the archive filename.
+     */
+    private static final int MAX_NAME_SLUG_LENGTH = 60;
 
     /**
      * Sub-directory of {@code tmp/} under which every export builds its own
@@ -105,13 +130,16 @@ public class RestExportService extends AbstractBackupService implements IRestExp
     private static final Pattern SNIPPET_REF_PATTERN = Pattern.compile("snippets\\.([a-zA-Z0-9_\\-]+)");
 
     private final ResourceAccessGuard resourceAccessGuard;
+    private final BackupMetrics metrics;
 
     @Inject
     public RestExportService(IDocumentDescriptorStore documentDescriptorStore, IAgentStore agentStore, IWorkflowStore workflowStore,
             IDictionaryStore regularDictionaryStore, IRuleSetStore behaviorStore, IApiCallsStore httpCallsStore, ILlmStore llmStore,
             IPropertySetterStore propertySetterStore, IOutputStore outputStore, IMcpCallsStore mcpCallsStore, IRagStore ragStore,
             IPromptSnippetStore snippetStore, IJsonSerialization jsonSerialization, IZipArchive zipArchive,
-            SecretScrubber secretScrubber, IScheduleStore scheduleStore, ResourceAccessGuard resourceAccessGuard) {
+            SecretScrubber secretScrubber, IScheduleStore scheduleStore, ResourceAccessGuard resourceAccessGuard,
+            BackupMetrics metrics) {
+        this.metrics = metrics;
         this.resourceAccessGuard = resourceAccessGuard;
         this.documentDescriptorStore = documentDescriptorStore;
         this.agentStore = agentStore;
@@ -136,27 +164,71 @@ public class RestExportService extends AbstractBackupService implements IRestExp
         try {
             agentFilename = sanitizeFileName(agentFilename);
 
-            Path zipFilePath = Paths.get(tmpPath.toString(), agentFilename).normalize();
+            Path archiveDir = archiveDirectory();
+            Path zipFilePath = archiveDir.resolve(agentFilename).normalize();
 
-            Path tmpDirPath = Paths.get(tmpPath.toString()).toAbsolutePath().normalize();
-            if (!zipFilePath.startsWith(tmpDirPath)) {
+            if (!zipFilePath.startsWith(archiveDir)) {
                 throw new SecurityException("Invalid file path detected.");
             }
 
-            return Response.ok(new BufferedInputStream(new FileInputStream(zipFilePath.toFile()))).build();
+            return Response.ok(new BufferedInputStream(new FileInputStream(zipFilePath.toFile())))
+                    .header("Content-Disposition", "attachment; filename=\"" + agentFilename + "\"")
+                    .build();
         } catch (FileNotFoundException e) {
             // An archive that is not there is a 404, not a 500. sneakyThrow'ing the
             // FileNotFoundException produced an unlogged 500 error page — easy to hit,
             // since export and download share this path and differ only by method, so
             // a mistyped or expired filename looked like a server fault.
             throw new NotFoundException("No exported archive named '" + agentFilename
-                    + "'. Archives are produced by POST on this path and are not kept indefinitely.");
+                    + "'. Archives are produced by POST on this path and are kept for "
+                    + retentionMinutes() + " minutes.");
+        }
+    }
+
+    /** {@code tmp/archives/}, created on demand. */
+    private Path archiveDirectory() {
+        return Paths.get(tmpPath.toString(), EXPORT_ARCHIVE_ROOT).toAbsolutePath().normalize();
+    }
+
+    private int retentionMinutes() {
+        return archiveRetentionMinutes > 0 ? archiveRetentionMinutes : DEFAULT_ARCHIVE_RETENTION_MINUTES;
+    }
+
+    /**
+     * Deletes finished archives older than the retention window. Runs before each
+     * export rather than on a scheduler: export is the only thing that creates
+     * these files, so sweeping here bounds the directory to what was produced
+     * within one retention window.
+     * <p>
+     * Failures are logged, never thrown — housekeeping must not fail an export.
+     */
+    private void sweepExpiredArchives() {
+        Path archiveDir = archiveDirectory();
+        if (!Files.isDirectory(archiveDir)) {
+            return;
+        }
+        Instant cutoff = Instant.now().minus(Duration.ofMinutes(retentionMinutes()));
+        try (var archives = Files.list(archiveDir)) {
+            archives.filter(Files::isRegularFile).forEach(archive -> {
+                try {
+                    if (Files.getLastModifiedTime(archive).toInstant().isBefore(cutoff)) {
+                        Files.deleteIfExists(archive);
+                        LOGGER.debugf("Deleted expired export archive %s", archive.getFileName());
+                    }
+                } catch (IOException e) {
+                    LOGGER.debugf("Could not evaluate export archive %s: %s", archive, e.getMessage());
+                }
+            });
+        } catch (IOException e) {
+            LOGGER.warnf("Could not sweep expired export archives in %s: %s", archiveDir, e.getMessage());
         }
     }
 
     @Override
-    public Response exportAgent(String agentId, Integer agentVersion, String selectedResourceIds) {
+    public Response exportAgent(String agentId, Integer agentVersion, String selectedResourceIds,
+                                String selectedSnippetIds, String selectedScheduleIds) {
         Path scratchRoot = null;
+        metrics.exportAttempted();
         try {
             // Validate agentId early before any path construction (CodeQL
             // java/path-injection)
@@ -170,6 +242,8 @@ public class RestExportService extends AbstractBackupService implements IRestExp
 
             // Parse selective export filter — null means "export all"
             Set<String> selectedIds = parseSelectedResourceIds(selectedResourceIds);
+            Set<String> selectedSnippets = parseTypedSelection(selectedSnippetIds);
+            Set<String> selectedSchedules = parseTypedSelection(selectedScheduleIds);
 
             AgentConfiguration agentConfig = agentStore.read(agentId, agentVersion);
 
@@ -233,20 +307,32 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                 collectSelectedConfigs(allExtensionConfigs, outputConfigs, selectedIds);
             }
 
-            // Export only snippets actually referenced by the exported configs
+            // Export only snippets actually referenced by the exported configs — and,
+            // when the caller made a snippet selection, only the ones it kept. The
+            // preview renders snippet rows as deselectable, so ignoring the selection
+            // here put back exactly the deployment-specific prompt text a user had
+            // unticked.
             Set<String> referencedSnippetNames = extractReferencedSnippetNames(allExtensionConfigs);
-            exportSnippets(agentPath, referencedSnippetNames);
+            exportSnippets(agentPath, referencedSnippetNames, selectedSnippets);
 
-            // Export schedules for this agent
-            exportSchedules(agentId, agentPath);
+            // Export schedules for this agent, likewise filtered only by the caller's
+            // own schedule selection.
+            exportSchedules(agentId, agentPath, selectedSchedules);
 
+            sweepExpiredArchives();
+            Path archiveDir = Files.createDirectories(archiveDirectory());
             String zipFilename = prepareZipFilename(agentDocumentDescriptor, agentId, agentVersion);
-            String targetZipPath = FileUtilities.buildPath(tmpPath.toString(), zipFilename);
+            String targetZipPath = FileUtilities.buildPath(archiveDir.toString(), zipFilename);
             this.zipArchive.createZip(agentPath.toString(), targetZipPath, tmpPath);
             return Response.ok().location(URI.create("/backup/export/" + zipFilename)).build();
+        } catch (RuntimeException e) {
+            metrics.exportFailed();
+            throw e;
         } catch (IResourceStore.ResourceNotFoundException e) {
+            metrics.exportFailed();
             throw sneakyThrow(e);
         } catch (IResourceStore.ResourceStoreException | IOException | CallbackMatcher.CallbackMatcherException e) {
+            metrics.exportFailed();
             throw sneakyThrow(e);
         } finally {
             // The ZIP is built at this point, so the loose files it was built from
@@ -353,9 +439,21 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                 addExtensionContentForSnippetScan(allExtensionConfigs, wfJson);
             }
             Set<String> referencedSnippetNames = extractReferencedSnippetNames(allExtensionConfigs);
+            // Emit the snippet's real resource id, like every other row: the
+            // selection filter compares resource ids, so a row keyed by name could
+            // never be matched by a client echoing it back.
+            Map<String, IResourceId> snippetIdsByName = resolveSnippetIdsByName(referencedSnippetNames);
             for (String snippetName : referencedSnippetNames) {
-                resources.add(new ExportableResource(snippetName, null, "snippet", snippetName, null, -1, false));
+                IResourceId snippetId = snippetIdsByName.get(snippetName);
+                resources.add(new ExportableResource(
+                        snippetId != null ? snippetId.getId() : snippetName,
+                        snippetId != null ? snippetId.getVersion() : null,
+                        "snippet", snippetName, null, -1, false));
             }
+
+            // Scheduled triggers. They were written into every archive but appeared in
+            // no preview, so an operator could not see what a restore would bring back.
+            addScheduleResources(resources, agentId);
 
             return new ExportPreview(agentId, agentName, agentVersion, resources);
 
@@ -400,31 +498,100 @@ public class RestExportService extends AbstractBackupService implements IRestExp
 
     private void addExtensionContentForSnippetScan(List<String> allConfigs, String wfJson) {
         try {
-            for (IResourceId resId : readConfigs(llmStore, extractResourcesUris(wfJson, LANGCHAIN_URI_PATTERN)).keySet()) {
-                allConfigs.add(jsonSerialization.serialize(llmStore.read(resId.getId(), resId.getVersion())));
-            }
-            for (IResourceId resId : readConfigs(httpCallsStore, extractResourcesUris(wfJson, HTTPCALLS_URI_PATTERN)).keySet()) {
-                allConfigs.add(jsonSerialization.serialize(httpCallsStore.read(resId.getId(), resId.getVersion())));
-            }
-            for (IResourceId resId : readConfigs(propertySetterStore, extractResourcesUris(wfJson, PROPERTY_URI_PATTERN)).keySet()) {
-                allConfigs.add(jsonSerialization.serialize(propertySetterStore.read(resId.getId(), resId.getVersion())));
-            }
-            for (IResourceId resId : readConfigs(outputStore, extractResourcesUris(wfJson, OUTPUT_URI_PATTERN)).keySet()) {
-                allConfigs.add(jsonSerialization.serialize(outputStore.read(resId.getId(), resId.getVersion())));
-            }
+            // readConfigs already loaded every value; iterating keySet() and reading
+            // each resource a second time doubled the datastore round-trips of an
+            // interactive preview for no benefit.
+            collectSerializedConfigs(allConfigs, llmStore, wfJson, LANGCHAIN_URI_PATTERN);
+            collectSerializedConfigs(allConfigs, httpCallsStore, wfJson, HTTPCALLS_URI_PATTERN);
+            collectSerializedConfigs(allConfigs, propertySetterStore, wfJson, PROPERTY_URI_PATTERN);
+            collectSerializedConfigs(allConfigs, outputStore, wfJson, OUTPUT_URI_PATTERN);
         } catch (Exception e) {
             LOGGER.debugf("Could not scan extension content for snippets: %s", e.getMessage());
         }
     }
 
-    private String prepareZipFilename(DocumentDescriptor agentDocumentDescriptor, String agentId, Integer agentVersion)
-            throws UnsupportedEncodingException {
+    private void collectSerializedConfigs(List<String> allConfigs, IResourceStore<?> store,
+                                          String wfJson, Pattern uriPattern)
+            throws Exception {
+        for (Object config : readConfigs(store, extractResourcesUris(wfJson, uriPattern)).values()) {
+            allConfigs.add(jsonSerialization.serialize(config));
+        }
+    }
+
+    /**
+     * Resolves the resource id of each referenced snippet by name, using the same
+     * access-scoped descriptor sweep the export itself performs.
+     */
+    private Map<String, IResourceId> resolveSnippetIdsByName(Set<String> referencedNames) {
+        Map<String, IResourceId> byName = new LinkedHashMap<>();
+        if (referencedNames.isEmpty()) {
+            return byName;
+        }
+        try {
+            List<DocumentDescriptor> descriptors = documentDescriptorStore.readDescriptors(
+                    "ai.labs.snippet", "", 0, IDescriptorStore.NO_LIMIT, false, resourceAccessGuard.listingScope());
+            if (descriptors == null) {
+                return byName;
+            }
+            for (DocumentDescriptor descriptor : descriptors) {
+                try {
+                    IResourceId resourceId = RestUtilities.extractResourceId(descriptor.getResource());
+                    if (resourceId == null) {
+                        continue;
+                    }
+                    PromptSnippet snippet = snippetStore.read(resourceId.getId(), resourceId.getVersion());
+                    if (snippet != null && referencedNames.contains(snippet.getName())) {
+                        byName.putIfAbsent(snippet.getName(), resourceId);
+                    }
+                } catch (Exception e) {
+                    LOGGER.debugf("Could not resolve snippet id for preview: %s", e.getMessage());
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.debugf("Could not list snippet descriptors for preview: %s", e.getMessage());
+        }
+        return byName;
+    }
+
+    /**
+     * Builds the archive's filename, which doubles as the key of the download URL.
+     * <p>
+     * The name is slugified, not percent-encoded: {@code URLEncoder} produced
+     * {@code M%C3%BCller+Bot-...zip}, JAX-RS percent-decoded the path parameter
+     * back on the way in, and {@link #sanitizeFileName(String)} then rejected both
+     * the decoded {@code ü} and the literal {@code %} — so an agent whose name had
+     * any non-ASCII character exported successfully into an archive that could
+     * never be downloaded.
+     */
+    private String prepareZipFilename(DocumentDescriptor agentDocumentDescriptor, String agentId, Integer agentVersion) {
         String zipFilename = "";
-        if (!isNullOrEmpty(agentDocumentDescriptor.getName())) {
-            zipFilename = URLEncoder.encode(agentDocumentDescriptor.getName() + "-", StandardCharsets.UTF_8);
+        if (agentDocumentDescriptor != null && !isNullOrEmpty(agentDocumentDescriptor.getName())) {
+            String slug = slugifyForFilename(agentDocumentDescriptor.getName());
+            if (!slug.isEmpty()) {
+                zipFilename = slug + "-";
+            }
         }
         zipFilename += agentId + "-" + agentVersion + ".zip";
         return zipFilename;
+    }
+
+    /**
+     * Reduces a display name to the character class the download endpoint accepts
+     * ({@code [A-Za-z0-9_.+-]}). Accents are folded rather than dropped, so "Müller
+     * Bot" becomes "Muller-Bot" instead of "Mller-Bot".
+     */
+    static String slugifyForFilename(String name) {
+        // NFKD splits "ü" into "u" plus a combining diaeresis; the mark has to be
+        // dropped, not replaced, or the fold produces "Mu-ller" instead of "Muller".
+        String folded = Normalizer.normalize(name, Normalizer.Form.NFKD)
+                .replaceAll("\\p{M}+", "");
+        String slug = folded.replaceAll("[^A-Za-z0-9_.-]+", "-");
+        slug = slug.replaceAll("-{2,}", "-");
+        slug = slug.replaceAll("^[-.]+", "").replaceAll("-+$", "");
+        if (slug.length() > MAX_NAME_SLUG_LENGTH) {
+            slug = slug.substring(0, MAX_NAME_SLUG_LENGTH).replaceAll("-+$", "");
+        }
+        return slug;
     }
 
     private Map<IResourceId, String> convertConfigsToString(Map<IResourceId, ?> configurationMap) {
@@ -496,7 +663,37 @@ public class RestExportService extends AbstractBackupService implements IRestExp
         if (isNullOrEmpty(selectedResourceIds) || selectedResourceIds.isBlank()) {
             return null;
         }
-        return Arrays.stream(selectedResourceIds.split(","))
+        return splitIds(selectedResourceIds);
+    }
+
+    /**
+     * Parses the selection of a resource type that {@code selectedResources} never
+     * carried — snippets, whose preview row used to be keyed by name rather than by
+     * resource id, and schedules, which appeared in no preview at all.
+     * <p>
+     * Filtering those two by {@code selectedResources} turned every selective
+     * export from a client built against the previous contract into a silent
+     * partial backup: such a client sends a set holding neither a snippet resource
+     * id nor a schedule id, so the archive came out with no snippets and no
+     * schedules — invisible until a restore came up with its cron jobs gone.
+     * <p>
+     * Hence three states rather than two: an <em>absent</em> parameter
+     * ({@code null}) means "no selection was expressed for this type" and exports
+     * all of it, while a <em>present</em> parameter filters — including a
+     * present-but-empty one, which is how a client says "none of them".
+     *
+     * @return {@code null} when the parameter was absent, otherwise the (possibly
+     *         empty) set of selected resource ids
+     */
+    private Set<String> parseTypedSelection(String selectedIds) {
+        if (selectedIds == null) {
+            return null;
+        }
+        return splitIds(selectedIds);
+    }
+
+    private Set<String> splitIds(String csv) {
+        return Arrays.stream(csv.split(","))
                 .map(String::trim)
                 .filter(s -> !s.isEmpty())
                 .collect(Collectors.toCollection(LinkedHashSet::new));
@@ -630,8 +827,12 @@ public class RestExportService extends AbstractBackupService implements IRestExp
     /**
      * Exports only snippets whose {@code name} is in the referenced set. If the
      * referenced set is empty, no snippets are exported.
+     *
+     * @param selectedSnippetIds
+     *            the caller's snippet selection, or {@code null} when it expressed
+     *            none — see {@link #parseTypedSelection(String)}
      */
-    private void exportSnippets(Path agentPath, Set<String> referencedNames) {
+    private void exportSnippets(Path agentPath, Set<String> referencedNames, Set<String> selectedSnippetIds) {
         if (referencedNames.isEmpty()) {
             return;
         }
@@ -659,8 +860,13 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                     if (snippet == null || snippet.getName() == null)
                         continue;
 
-                    // Only export snippets actually referenced by this agent
+                    // Only export snippets actually referenced by this agent...
                     if (!referencedNames.contains(snippet.getName())) {
+                        continue;
+                    }
+                    // ...and, when the caller expressed a snippet selection, only
+                    // those it kept.
+                    if (selectedSnippetIds != null && !selectedSnippetIds.contains(resourceId.getId())) {
                         continue;
                     }
 
@@ -694,15 +900,47 @@ public class RestExportService extends AbstractBackupService implements IRestExp
         }
     }
 
-    private void exportSchedules(String agentId, Path agentPath) {
+    /**
+     * Lists the agent's scheduled triggers as deselectable preview rows. Failure to
+     * read them is not failure to preview: the rest of the preview is still useful.
+     */
+    private void addScheduleResources(List<ExportableResource> resources, String agentId) {
+        try {
+            for (ScheduleConfiguration schedule : scheduleStore.readSchedulesByAgentId(agentId)) {
+                if (schedule == null || schedule.getId() == null) {
+                    continue;
+                }
+                resources.add(new ExportableResource(schedule.getId(), null, SCHEDULE_EXT,
+                        schedule.getName(), null, -1, false));
+            }
+        } catch (Exception e) {
+            LOGGER.warnf("Could not list schedules of agent %s for the export preview: %s", agentId, e.getMessage());
+        }
+    }
+
+    /**
+     * Writes the agent's scheduled triggers into the archive.
+     *
+     * @param selectedScheduleIds
+     *            the caller's schedule selection, or {@code null} when it expressed
+     *            none — see {@link #parseTypedSelection(String)}
+     */
+    private void exportSchedules(String agentId, Path agentPath, Set<String> selectedScheduleIds) {
         try {
             List<ScheduleConfiguration> schedules = scheduleStore.readSchedulesByAgentId(agentId);
             if (schedules.isEmpty()) {
                 return;
             }
 
-            Path schedulesDir = Files.createDirectories(Paths.get(agentPath.toString(), "schedules"));
+            Path schedulesDir = Files.createDirectories(Paths.get(agentPath.toString(), SCHEDULES_DIR));
+            int exported = 0;
             for (ScheduleConfiguration schedule : schedules) {
+                // When the caller expressed a schedule selection, only the ones it
+                // kept.
+                if (selectedScheduleIds != null && !selectedScheduleIds.contains(schedule.getId())) {
+                    continue;
+                }
+                exported++;
                 String json = jsonSerialization.serialize(schedule);
                 json = secretScrubber.scrubJson(json);
                 String filename = schedule.getId() + "." + SCHEDULE_EXT + ".json";
@@ -712,7 +950,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                     writer.write(json);
                 }
             }
-            LOGGER.infof("Exported %d schedule(s) for Agent %s", schedules.size(), agentId);
+            LOGGER.infof("Exported %d schedule(s) for Agent %s", exported, agentId);
         } catch (Exception e) {
             LOGGER.warnf("Failed to export schedules for Agent %s: %s", agentId, e.getMessage());
         }

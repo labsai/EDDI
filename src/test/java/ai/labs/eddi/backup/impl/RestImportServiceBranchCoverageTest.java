@@ -4,9 +4,11 @@
  */
 package ai.labs.eddi.backup.impl;
 
+import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.backup.IZipArchive;
 import ai.labs.eddi.backup.model.ImportPreview;
+import ai.labs.eddi.backup.model.UpgradeResult;
 import ai.labs.eddi.backup.model.SyncMapping;
 import ai.labs.eddi.backup.model.SyncRequest;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
@@ -15,6 +17,7 @@ import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.migration.IMigrationManager;
 import ai.labs.eddi.configs.migration.TemplateSyntaxMigrator;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
@@ -62,7 +65,8 @@ class RestImportServiceBranchCoverageTest {
         importService = new RestImportService(
                 zipArchive, jsonSerialization,
                 migrationManager, documentDescriptorStore,
-                templateSyntaxMigrator, structuralMatcher, upgradeExecutor, mock(ResourceAccessGuard.class));
+                templateSyntaxMigrator, structuralMatcher, upgradeExecutor, mock(IScheduleStore.class), mock(BackupMetrics.class),
+                mock(ResourceAccessGuard.class));
     }
 
     // =========================================================
@@ -82,10 +86,10 @@ class RestImportServiceBranchCoverageTest {
                 return null;
             }).when(zipArchive).unzip(any(InputStream.class), any(File.class));
 
-            Response response = importService.importAgent(
-                    new ByteArrayInputStream(new byte[0]), "merge", null, null, null);
-
-            assertNotNull(response);
+            // An archive with no agent file is rejected. Answering 200 with an empty
+            // resourceUri is how a whole class of broken archives went unnoticed.
+            assertThrows(BadRequestException.class, () -> importService.importAgent(
+                    new ByteArrayInputStream(new byte[0]), "merge", null, null, null));
         }
 
         @Test
@@ -97,10 +101,8 @@ class RestImportServiceBranchCoverageTest {
                 return null;
             }).when(zipArchive).unzip(any(InputStream.class), any(File.class));
 
-            Response response = importService.importAgent(
-                    new ByteArrayInputStream(new byte[0]), null, null, null, null);
-
-            assertNotNull(response);
+            assertThrows(BadRequestException.class, () -> importService.importAgent(
+                    new ByteArrayInputStream(new byte[0]), null, null, null, null));
         }
     }
 
@@ -117,7 +119,7 @@ class RestImportServiceBranchCoverageTest {
         void upgradeWithWorkflowOrder() throws Exception {
             URI resultUri = URI.create("eddi://ai.labs.agent/agentstore/agents/target-1?version=2");
             when(upgradeExecutor.executeUpgrade(any(), eq("target-1"), isNull(), eq(List.of("wf1", "wf2"))))
-                    .thenReturn(resultUri);
+                    .thenReturn(new UpgradeResult(resultUri, true, 1, 0, 0, List.of()));
 
             doAnswer(inv -> {
                 File dir = inv.getArgument(1);
@@ -137,7 +139,7 @@ class RestImportServiceBranchCoverageTest {
         void upgradeWithSelectedOriginIds() throws Exception {
             URI resultUri = URI.create("eddi://ai.labs.agent/agentstore/agents/target-1?version=3");
             when(upgradeExecutor.executeUpgrade(any(), eq("target-1"), eq(Set.of("res1", "res2")), isNull()))
-                    .thenReturn(resultUri);
+                    .thenReturn(new UpgradeResult(resultUri, true, 1, 0, 0, List.of()));
 
             doAnswer(inv -> {
                 File dir = inv.getArgument(1);
@@ -170,10 +172,8 @@ class RestImportServiceBranchCoverageTest {
                 return null;
             }).when(zipArchive).unzip(any(InputStream.class), any(File.class));
 
-            var result = importService.previewImport(
-                    new ByteArrayInputStream(new byte[0]), null);
-
-            assertNotNull(result);
+            assertThrows(BadRequestException.class, () -> importService.previewImport(
+                    new ByteArrayInputStream(new byte[0]), null));
             verify(structuralMatcher, never()).buildPreview(any(), anyString(), anyBoolean());
         }
 
@@ -187,14 +187,12 @@ class RestImportServiceBranchCoverageTest {
             }).when(zipArchive).unzip(any(InputStream.class), any(File.class));
 
             // Empty string targetAgentId — in the code, isNullOrEmpty check
-            var result = importService.previewImport(
-                    new ByteArrayInputStream(new byte[0]), "");
-
-            assertNotNull(result);
+            assertThrows(BadRequestException.class, () -> importService.previewImport(
+                    new ByteArrayInputStream(new byte[0]), ""));
         }
 
         @Test
-        @DisplayName("preview with multiple agent files in ZIP returns first one")
+        @DisplayName("preview with multiple agent files in ZIP is rejected, not silently narrowed")
         void previewMultipleAgentFiles() throws Exception {
             doAnswer(inv -> {
                 File dir = inv.getArgument(1);
@@ -215,10 +213,13 @@ class RestImportServiceBranchCoverageTest {
             // No existing agents
             when(documentDescriptorStore.findByOriginId(anyString())).thenReturn(List.of());
 
-            var result = importService.previewImport(
-                    new ByteArrayInputStream(new byte[0]), null);
-
-            assertNotNull(result);
+            // The preview only ever described the first file it enumerated while the
+            // import created every one of them, so an operator approved an import of
+            // one agent and got several — with a Location header pointing at whichever
+            // happened to be enumerated last.
+            var ex = assertThrows(BadRequestException.class, () -> importService.previewImport(
+                    new ByteArrayInputStream(new byte[0]), null));
+            assertTrue(ex.getMessage().contains("one agent per archive"), ex.getMessage());
         }
     }
 
@@ -373,10 +374,8 @@ class RestImportServiceBranchCoverageTest {
                 return null;
             }).when(zipArchive).unzip(any(InputStream.class), any(File.class));
 
-            Response response = importService.importAgent(
-                    new ByteArrayInputStream(new byte[0]), "create", null, null, null);
-
-            assertNotNull(response);
+            assertThrows(BadRequestException.class, () -> importService.importAgent(
+                    new ByteArrayInputStream(new byte[0]), "create", null, null, null));
         }
     }
 

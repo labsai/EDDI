@@ -27,12 +27,20 @@ public interface IRestExportService {
 
     @POST
     @Path("{agentId}")
-    @Operation(description = "Export a Agent as a ZIP file. When selectedResources is provided, "
-            + "only those resource IDs are included in the ZIP (agent + workflow skeletons are always included).")
+    @Operation(description = "Export an agent as a ZIP file. When selectedResources is provided, "
+            + "only those extension resource IDs are included in the ZIP (agent + workflow skeletons "
+            + "are always included). Snippets and schedules are selected through their own parameters, "
+            + "because their preview rows are newer than selectedResources: omit a parameter and every "
+            + "referenced snippet / every schedule of the agent is exported, pass it (even empty) and "
+            + "only the listed IDs are. "
+            + "The Location header names the finished archive, which is kept for "
+            + "eddi.backup.export.retention-minutes and then deleted.")
     Response exportAgent(@PathParam("agentId") String agentId,
                          @QueryParam("agentVersion")
                          @DefaultValue("1") Integer agentVersion,
-                         @QueryParam("selectedResources") String selectedResourceIds);
+                         @QueryParam("selectedResources") String selectedResourceIds,
+                         @QueryParam("selectedSnippets") String selectedSnippetIds,
+                         @QueryParam("selectedSchedules") String selectedScheduleIds);
 
     @POST
     @Path("{agentId}/preview")

@@ -71,32 +71,19 @@ public class RemoteApiResourceSource implements IResourceSource {
     private List<SnippetSourceData> snippetDataList;
 
     /**
-     * Extension type mappings: step type URI → REST path segment. The REST path
-     * segment is the portion of the URL that identifies the store for this
-     * extension type.
+     * Descriptor listings already fetched from the remote instance, keyed by
+     * descriptors path. A listing is unpaged ({@code limit=0}) and returns every
+     * descriptor of that type in the whole remote deployment, so fetching it once
+     * per workflow and once per extension — purely to fill a display name — turned
+     * a single preview into dozens of full downloads.
+     * <p>
+     * An instance of this class serves exactly one sync request on one thread, so a
+     * plain HashMap is enough.
      */
-    private static final Map<String, String> STEP_TYPE_TO_REST_PATH = Map.of(
-            "ai.labs.dictionary", "/dictionarystore/dictionaries/",
-            "ai.labs.rules", "/rulestore/rulesets/",
-            "ai.labs.apicalls", "/apicallstore/apicalls/",
-            "ai.labs.llm", "/llmstore/llms/",
-            "ai.labs.property", "/propertysetterstore/propertysetters/",
-            "ai.labs.output", "/outputstore/outputsets/",
-            "ai.labs.mcpcalls", "/mcpcallsstore/mcpcalls/",
-            "ai.labs.rag", "/ragstore/rags/");
+    private final Map<String, Map<String, String>> descriptorNamesByPath = new HashMap<>();
 
-    /**
-     * Step type URI → file extension label (for ExtensionSourceData.type).
-     */
-    private static final Map<String, String> STEP_TYPE_TO_EXT_LABEL = Map.of(
-            "ai.labs.dictionary", "regulardictionary",
-            "ai.labs.rules", "behavior",
-            "ai.labs.apicalls", "httpcalls",
-            "ai.labs.llm", "langchain",
-            "ai.labs.property", "property",
-            "ai.labs.output", "output",
-            "ai.labs.mcpcalls", "mcpcalls",
-            "ai.labs.rag", "rag");
+    /** Whether this instance owns {@link #httpClient} and must close it. */
+    private final boolean ownsHttpClient;
 
     public RemoteApiResourceSource(String baseUrl, String agentId, Integer agentVersion,
             String authToken, IJsonSerialization jsonSerialization) {
@@ -108,18 +95,45 @@ public class RemoteApiResourceSource implements IResourceSource {
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(CONNECT_TIMEOUT)
                 .build();
+        this.ownsHttpClient = true;
     }
 
     // Visible for testing
     RemoteApiResourceSource(String baseUrl, String agentId, Integer agentVersion,
             String authToken, IJsonSerialization jsonSerialization,
             HttpClient httpClient) {
+        this(baseUrl, agentId, agentVersion, authToken, jsonSerialization, httpClient, false);
+    }
+
+    /**
+     * Visible for testing. The owned-client branch of {@link #close()} is otherwise
+     * only reachable through the public constructor, which builds a real
+     * {@link HttpClient} — and that opens a selector, which needs a loopback socket
+     * a sandboxed build does not have.
+     */
+    RemoteApiResourceSource(String baseUrl, String agentId, Integer agentVersion,
+            String authToken, IJsonSerialization jsonSerialization,
+            HttpClient httpClient, boolean ownsHttpClient) {
         this.baseUrl = normalizeBaseUrl(baseUrl);
         this.agentId = agentId;
         this.agentVersion = agentVersion;
         this.authToken = authToken;
         this.jsonSerialization = jsonSerialization;
         this.httpClient = httpClient;
+        this.ownsHttpClient = ownsHttpClient;
+    }
+
+    /**
+     * Closes the HTTP client this instance created. Callers already wrap every
+     * source in try-with-resources; without this override they inherited
+     * {@link IResourceSource#close()}'s no-op, so a batch sync over N agents left N
+     * clients — each with a selector thread and an executor — alive until GC.
+     */
+    @Override
+    public void close() {
+        if (ownsHttpClient) {
+            httpClient.close();
+        }
     }
 
     @Override
@@ -153,13 +167,19 @@ public class RemoteApiResourceSource implements IResourceSource {
 
         List<URI> workflowUris = agent.config().getWorkflows();
         for (int i = 0; i < workflowUris.size(); i++) {
+            if (Thread.currentThread().isInterrupted()) {
+                // Per-workflow failures are tolerated, a cancellation is not: carrying on
+                // would keep hitting the remote instance after the thread was asked to stop
+                // and report a truncated read as a complete one.
+                throw new RuntimeException("Interrupted while reading workflows from remote " + baseUrl);
+            }
             try {
                 WorkflowSourceData wfData = readSingleWorkflow(workflowUris.get(i), i);
                 if (wfData != null) {
                     workflowDataList.add(wfData);
                 }
             } catch (Exception e) {
-                LOGGER.warnf("Failed to read workflow %d from remote %s: %s", i, baseUrl, e.getMessage());
+                LOGGER.warnf(e, "Failed to read workflow %d from remote %s", i, baseUrl);
             }
         }
 
@@ -221,16 +241,15 @@ public class RemoteApiResourceSource implements IResourceSource {
      */
     public static List<DocumentDescriptor> listRemoteAgentDescriptors(
                                                                       String baseUrl, String authToken, IJsonSerialization jsonSerialization) {
-        try {
-            String normalized = normalizeBaseUrl(baseUrl);
-            HttpClient client = HttpClient.newBuilder()
-                    .connectTimeout(CONNECT_TIMEOUT)
-                    .build();
+        String normalized = normalizeBaseUrl(baseUrl);
+        if (!normalized.endsWith("/")) {
+            normalized += "/";
+        }
+        URI baseUri = URI.create(normalized);
 
-            if (!normalized.endsWith("/")) {
-                normalized += "/";
-            }
-            URI baseUri = URI.create(normalized);
+        try (HttpClient client = HttpClient.newBuilder()
+                .connectTimeout(CONNECT_TIMEOUT)
+                .build()) {
 
             // codeql[java/ssrf] False Positive: It is an intended feature to connect to a
             // user-provided remote EDDI instance
@@ -251,6 +270,12 @@ public class RemoteApiResourceSource implements IResourceSource {
             DocumentDescriptor[] descriptors = jsonSerialization.deserialize(
                     response.body(), DocumentDescriptor[].class);
             return descriptors != null ? List.of(descriptors) : List.of();
+        } catch (InterruptedException e) {
+            // Never swallow an interrupt: the caller (or the container shutting down)
+            // asked this thread to stop, and a lost flag means the next blocking call
+            // simply carries on.
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Interrupted while listing agents from remote instance " + baseUrl, e);
         } catch (Exception e) {
             throw new RuntimeException("Failed to list agents from remote instance " + baseUrl + ": " + e.getMessage(), e);
         }
@@ -260,8 +285,14 @@ public class RemoteApiResourceSource implements IResourceSource {
 
     private WorkflowSourceData readSingleWorkflow(URI workflowUri, int positionIndex) throws IOException {
         IResourceId wfResId = RestUtilities.extractResourceId(workflowUri);
-        if (wfResId == null)
+        // extractResourceId answers with an id of null for a URI that carries no
+        // resource segment, so the null check has to be on the id: without it the
+        // read went out as /workflowstore/workflows/null?version=0.
+        if (wfResId == null || wfResId.getId() == null) {
+            LOGGER.warnf("Agent %s on %s references a workflow URI with no resource id: %s",
+                    agentId, baseUrl, workflowUri);
             return null;
+        }
 
         String workflowId = wfResId.getId();
         int version = wfResId.getVersion();
@@ -278,46 +309,24 @@ public class RemoteApiResourceSource implements IResourceSource {
     }
 
     /**
-     * Reads all extension configs referenced by a workflow configuration by parsing
-     * each workflow step and fetching the extension resource from the remote
-     * instance.
+     * Reads all extension configs referenced by a workflow configuration, keyed by
+     * the canonical {@link WorkflowExtensions} key so the map joins with the one
+     * {@link StructuralMatcher} builds from the local target workflow.
      */
     private Map<String, ExtensionSourceData> readExtensionsFromWorkflow(WorkflowConfiguration config) {
         Map<String, ExtensionSourceData> extensions = new LinkedHashMap<>();
 
-        for (WorkflowConfiguration.WorkflowStep step : config.getWorkflowSteps()) {
-            URI stepType = step.getType();
-            if (stepType == null)
-                continue;
-
-            Object uriObj = step.getExtensions().get("uri");
-            if (uriObj == null)
-                continue;
-
-            URI extUri = URI.create(uriObj.toString());
-            IResourceId extResId = RestUtilities.extractResourceId(extUri);
-            if (extResId == null)
-                continue;
-
-            String stepTypeStr = stepType.toString();
-            String restPath = STEP_TYPE_TO_REST_PATH.get(stepTypeStr);
-            String extLabel = STEP_TYPE_TO_EXT_LABEL.get(stepTypeStr);
-            if (restPath == null || extLabel == null) {
-                LOGGER.debugf("Unknown step type: %s", stepTypeStr);
-                continue;
-            }
-
+        for (WorkflowExtensions.ExtensionRef ref : WorkflowExtensions.scan(config)) {
+            String restPath = ref.type().restPath();
+            String extId = ref.resourceId().getId();
             try {
-                String contentJson = httpGet(restPath + extResId.getId() + "?version=" + extResId.getVersion());
+                String contentJson = httpGet(restPath + extId + "?version=" + ref.resourceId().getVersion());
+                String name = readRemoteDescriptorName(descriptorsPathOf(restPath), extId);
 
-                // Try to read the descriptor name
-                String name = tryReadDescriptorName(restPath, extResId.getId());
-
-                extensions.put(stepTypeStr, new ExtensionSourceData(
-                        extResId.getId(), name, extLabel, stepTypeStr, contentJson));
+                extensions.put(ref.key(), new ExtensionSourceData(
+                        extId, name, ref.fileExtension(), ref.stepType(), contentJson));
             } catch (Exception e) {
-                LOGGER.debugf("Could not read remote extension %s/%s: %s",
-                        stepTypeStr, extResId.getId(), e.getMessage());
+                LOGGER.debugf("Could not read remote extension %s: %s", ref.extensionUri(), e.getMessage());
             }
         }
 
@@ -327,63 +336,69 @@ public class RemoteApiResourceSource implements IResourceSource {
     /**
      * Resolves the latest version of the agent when no explicit version was
      * provided. Reads the agent descriptor list and finds the matching entry.
+     * <p>
+     * Failing to resolve is an error, not a reason to guess: falling back to
+     * version 1 silently synced an arbitrarily old configuration into the target
+     * whenever the descriptor listing was paginated, access-scoped, or briefly
+     * unavailable.
      */
     private int resolveLatestAgentVersion() {
+        DocumentDescriptor[] descriptors;
         try {
             String json = httpGet("/agentstore/agents/descriptors?index=0&limit=0");
-            DocumentDescriptor[] descriptors = jsonSerialization.deserialize(json, DocumentDescriptor[].class);
-            if (descriptors != null) {
-                for (DocumentDescriptor desc : descriptors) {
-                    IResourceId resId = RestUtilities.extractResourceId(desc.getResource());
-                    if (resId != null && agentId.equals(resId.getId())) {
-                        return resId.getVersion();
-                    }
+            descriptors = jsonSerialization.deserialize(json, DocumentDescriptor[].class);
+        } catch (Exception e) {
+            throw new RuntimeException("Could not determine the latest version of agent " + agentId
+                    + " on " + baseUrl + ": " + e.getMessage(), e);
+        }
+
+        if (descriptors != null) {
+            for (DocumentDescriptor desc : descriptors) {
+                IResourceId resId = RestUtilities.extractResourceId(desc.getResource());
+                if (resId != null && agentId.equals(resId.getId())) {
+                    return resId.getVersion();
                 }
             }
-        } catch (Exception e) {
-            LOGGER.debugf("Could not resolve latest version for %s: %s", agentId, e.getMessage());
         }
-        return 1; // fallback
+
+        throw new RuntimeException("Agent " + agentId + " is not listed on " + baseUrl
+                + " — cannot determine its latest version. Pass an explicit sourceAgentVersion.");
     }
 
     /**
-     * Tries to find a resource's name from the descriptor endpoint.
+     * Name of a resource, taken from its store's descriptor listing. The listing is
+     * fetched at most once per store per request — see
+     * {@link #descriptorNamesByPath}.
      */
     private String readRemoteDescriptorName(String descriptorsPath, String resourceId) {
+        return descriptorNamesByPath
+                .computeIfAbsent(descriptorsPath, this::loadDescriptorNames)
+                .get(resourceId);
+    }
+
+    private Map<String, String> loadDescriptorNames(String descriptorsPath) {
+        Map<String, String> names = new HashMap<>();
         try {
             String json = httpGet(descriptorsPath + "?index=0&limit=0");
             DocumentDescriptor[] descriptors = jsonSerialization.deserialize(json, DocumentDescriptor[].class);
             if (descriptors != null) {
                 for (DocumentDescriptor desc : descriptors) {
                     IResourceId resId = RestUtilities.extractResourceId(desc.getResource());
-                    if (resId != null && resourceId.equals(resId.getId())) {
-                        return desc.getName();
+                    if (resId != null && resId.getId() != null && desc.getName() != null) {
+                        names.putIfAbsent(resId.getId(), desc.getName());
                     }
                 }
             }
         } catch (Exception e) {
-            LOGGER.debugf("Could not read remote descriptor name for %s: %s", resourceId, e.getMessage());
+            LOGGER.debugf("Could not read remote descriptors from %s: %s", descriptorsPath, e.getMessage());
         }
-        return null;
+        return names;
     }
 
-    /**
-     * Best-effort name read for extension resources.
-     */
-    private String tryReadDescriptorName(String storePath, String resourceId) {
-        // Derive descriptors path from store path:
-        // e.g., "/llmstore/llms/" → "/llmstore/llms/descriptors"
-        String descriptorsPath = storePath;
-        if (descriptorsPath.endsWith("/")) {
-            descriptorsPath = descriptorsPath.substring(0, descriptorsPath.length() - 1);
-        }
-        descriptorsPath = descriptorsPath + "/descriptors";
-
-        try {
-            return readRemoteDescriptorName(descriptorsPath, resourceId);
-        } catch (Exception e) {
-            return null;
-        }
+    /** e.g. {@code /llmstore/llms/} → {@code /llmstore/llms/descriptors}. */
+    private static String descriptorsPathOf(String storePath) {
+        String path = storePath.endsWith("/") ? storePath.substring(0, storePath.length() - 1) : storePath;
+        return path + "/descriptors";
     }
 
     /**
@@ -424,7 +439,13 @@ public class RemoteApiResourceSource implements IResourceSource {
             }
 
             return response.body();
-        } catch (IOException | InterruptedException e) {
+        } catch (InterruptedException e) {
+            // Restore the flag before unwinding: readWorkflows catches per-workflow
+            // failures and carries on, so a swallowed interrupt meant a cancelled or
+            // shutting-down batch sync kept issuing HTTP calls to the remote instance.
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Interrupted while reading " + baseUrl + path, e);
+        } catch (IOException e) {
             throw new RuntimeException("Failed to connect to remote " + baseUrl + path + ": " + e.getMessage(), e);
         }
     }
@@ -435,22 +456,17 @@ public class RemoteApiResourceSource implements IResourceSource {
         // Remove trailing slash
         String normalized = url.endsWith("/") ? url.substring(0, url.length() - 1) : url;
 
-        try {
-            // Validate URL to mitigate SSRF concerns by ensuring a valid network scheme and
-            // host.
-            // Note: Connecting to a user-provided instance is an intended feature.
-            URI uri = URI.create(normalized);
-            String scheme = uri.getScheme();
-            if (scheme == null || (!scheme.equalsIgnoreCase("http") && !scheme.equalsIgnoreCase("https"))) {
-                throw new IllegalArgumentException("Only HTTP or HTTPS schemes are allowed: " + url);
-            }
-            if (uri.getHost() == null || uri.getHost().isBlank()) {
-                throw new IllegalArgumentException("Invalid base URL host: " + url);
-            }
-        } catch (IllegalArgumentException e) {
-            throw e;
-        } catch (Exception e) {
-            throw new IllegalArgumentException("Invalid base URL: " + url, e);
+        // Validate URL to mitigate SSRF concerns by ensuring a valid network scheme and
+        // host. Note: Connecting to a user-provided instance is an intended feature.
+        // URI.create and the guards below can only produce IllegalArgumentException,
+        // so there is nothing else to catch and re-wrap here.
+        URI uri = URI.create(normalized);
+        String scheme = uri.getScheme();
+        if (scheme == null || (!scheme.equalsIgnoreCase("http") && !scheme.equalsIgnoreCase("https"))) {
+            throw new IllegalArgumentException("Only HTTP or HTTPS schemes are allowed: " + url);
+        }
+        if (uri.getHost() == null || uri.getHost().isBlank()) {
+            throw new IllegalArgumentException("Invalid base URL host: " + url);
         }
 
         return normalized;

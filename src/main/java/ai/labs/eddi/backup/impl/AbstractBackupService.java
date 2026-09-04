@@ -24,6 +24,10 @@ abstract class AbstractBackupService {
     static final String MCPCALLS_EXT = "mcpcalls";
     static final String RAG_EXT = "rag";
     static final String SNIPPET_EXT = "snippet";
+    static final String SCHEDULE_EXT = "schedule";
+
+    /** Directory inside an export archive that holds the agent's schedules. */
+    static final String SCHEDULES_DIR = "schedules";
 
     // ---- V6 canonical URI patterns ----
     static final Pattern DICTIONARY_URI_PATTERN = Pattern.compile("\"eddi://ai.labs.dictionary/dictionarystore/dictionaries/.*?\"");
@@ -35,16 +39,14 @@ abstract class AbstractBackupService {
     static final Pattern MCPCALLS_URI_PATTERN = Pattern.compile("\"eddi://ai.labs.mcpcalls/mcpcallsstore/mcpcalls/.*?\"");
     static final Pattern RAG_URI_PATTERN = Pattern.compile("\"eddi://ai.labs.rag/ragstore/rags/.*?\"");
 
-    // ---- Legacy (v5) URI patterns for backwards-compatible ZIP import ----
-    static final Pattern LEGACY_DICTIONARY_URI_PATTERN = Pattern
-            .compile("\"eddi://ai.labs.regulardictionary/regulardictionarystore/regulardictionaries/.*?\"");
-    static final Pattern LEGACY_BEHAVIOR_URI_PATTERN = Pattern.compile("\"eddi://ai.labs.behavior/behaviorstore/behaviorsets/.*?\"");
-    static final Pattern LEGACY_HTTPCALLS_URI_PATTERN = Pattern.compile("\"eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/.*?\"");
-    static final Pattern LEGACY_LANGCHAIN_URI_PATTERN = Pattern.compile("\"eddi://ai.labs.langchain/langchainstore/langchains/.*?\"");
-    static final Pattern LEGACY_WORKFLOW_URI_PATTERN = Pattern.compile("\"eddi://ai.labs.package/packagestore/packages/.*?\"");
-    static final Pattern LEGACY_AGENT_URI_PATTERN = Pattern.compile("\"eddi://ai.labs.bot/botstore/bots/.*?\"");
-
-    /** Legacy → v6 URI authority + store path rewrites for import normalization. */
+    /**
+     * Legacy → v6 URI authority + store path rewrites for import normalization.
+     * <p>
+     * This table is the <em>only</em> v5 compatibility mechanism. A parallel set of
+     * {@code LEGACY_*_URI_PATTERN} regexes used to sit beside it with no production
+     * call site at all, which invited the next person to register a legacy type in
+     * the table that does nothing.
+     */
     static final String[][] LEGACY_URI_REWRITES = {
             {"eddi://ai.labs.regulardictionary/regulardictionarystore/regulardictionaries/",
                     "eddi://ai.labs.dictionary/dictionarystore/dictionaries/"},

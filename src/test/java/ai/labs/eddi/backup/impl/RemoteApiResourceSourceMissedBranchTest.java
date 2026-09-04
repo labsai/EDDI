@@ -204,7 +204,7 @@ class RemoteApiResourceSourceMissedBranchTest {
                     .when(httpClient).send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class));
 
             AgentConfiguration agentConfig = new AgentConfiguration();
-            URI wfUri = URI.create("eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=1");
+            URI wfUri = URI.create("eddi://ai.labs.workflow/workflowstore/workflows/aaaaaaaaaaaaaaaaaaaaaaaa?version=1");
             agentConfig.setWorkflows(List.of(wfUri));
             doReturn("{}").when(okResponse).body();
             doReturn(agentConfig).when(jsonSerialization).deserialize(eq("{}"), eq(AgentConfiguration.class));
@@ -224,13 +224,13 @@ class RemoteApiResourceSourceMissedBranchTest {
     @DisplayName("step with null uri extension — skipped")
     void nullUriExtension() throws Exception {
         AgentConfiguration agentConfig = new AgentConfiguration();
-        URI wfUri = URI.create("eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=1");
+        URI wfUri = URI.create("eddi://ai.labs.workflow/workflowstore/workflows/aaaaaaaaaaaaaaaaaaaaaaaa?version=1");
         agentConfig.setWorkflows(List.of(wfUri));
         doReturn(agentConfig).when(jsonSerialization).deserialize(anyString(), eq(AgentConfiguration.class));
 
         WorkflowConfiguration wfConfig = new WorkflowConfiguration();
         WorkflowConfiguration.WorkflowStep step = new WorkflowConfiguration.WorkflowStep();
-        step.setType(URI.create("ai.labs.llm"));
+        step.setType(URI.create("eddi://ai.labs.llm"));
         // uri key is missing from extensions
         step.setExtensions(new HashMap<>(Map.of("other", "value")));
         wfConfig.setWorkflowSteps(List.of(step));
@@ -254,8 +254,12 @@ class RemoteApiResourceSourceMissedBranchTest {
         @Test
         @DisplayName("matching descriptor — returns its version")
         void matchingDescriptor() throws Exception {
+            // A real resource id: RestUtilities.extractResourceId only accepts ids of
+            // at least 18 hex characters, so the old "agent1" fixture resolved to a
+            // null id and this case silently exercised the fallback instead.
+            String agentId = "aaaaaaaaaaaaaaaaaaaaaaaa";
             DocumentDescriptor desc = new DocumentDescriptor();
-            desc.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/agent1?version=5"));
+            desc.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/" + agentId + "?version=5"));
             DocumentDescriptor[] descs = new DocumentDescriptor[]{desc};
 
             doReturn("[]").doReturn("{}").doReturn("[]").when(mockResponse).body();
@@ -266,10 +270,27 @@ class RemoteApiResourceSourceMissedBranchTest {
             doReturn(config).when(jsonSerialization).deserialize(eq("{}"), eq(AgentConfiguration.class));
 
             RemoteApiResourceSource source = new RemoteApiResourceSource(
-                    "http://127.0.0.1:1", "agent1", null, null, jsonSerialization, httpClient);
+                    "http://127.0.0.1:1", agentId, null, null, jsonSerialization, httpClient);
 
             var agentData = source.readAgent();
             assertNotNull(agentData);
+        }
+
+        @Test
+        @DisplayName("agent not listed — fails loudly instead of guessing version 1")
+        void unlistedAgentIsAnError() throws Exception {
+            doReturn("[]").when(mockResponse).body();
+            doReturn(new DocumentDescriptor[0]).when(jsonSerialization)
+                    .deserialize(eq("[]"), eq(DocumentDescriptor[].class));
+
+            RemoteApiResourceSource source = new RemoteApiResourceSource(
+                    "http://127.0.0.1:1", "aaaaaaaaaaaaaaaaaaaaaaaa", null, null, jsonSerialization, httpClient);
+
+            // Falling back to version 1 silently synced an arbitrarily old
+            // configuration into the target whenever the listing was paginated,
+            // access-scoped, or briefly unavailable.
+            var ex = assertThrows(RuntimeException.class, source::readAgent);
+            assertTrue(ex.getMessage().contains("latest version"), ex.getMessage());
         }
     }
 

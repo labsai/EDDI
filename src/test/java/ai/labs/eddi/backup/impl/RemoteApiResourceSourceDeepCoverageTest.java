@@ -227,7 +227,7 @@ class RemoteApiResourceSourceDeepCoverageTest {
     @DisplayName("readExtensionsFromWorkflow — null stepType skipped; unknown stepType skipped")
     void readExtensionsFromWorkflowSkips() throws Exception {
         AgentConfiguration agentConfig = new AgentConfiguration();
-        URI wfUri = URI.create("eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=1");
+        URI wfUri = URI.create("eddi://ai.labs.workflow/workflowstore/workflows/aaaaaaaaaaaaaaaaaaaaaaaa?version=1");
         agentConfig.setWorkflows(List.of(wfUri));
         doReturn(agentConfig).when(jsonSerialization).deserialize(anyString(), eq(AgentConfiguration.class));
 
@@ -260,8 +260,12 @@ class RemoteApiResourceSourceDeepCoverageTest {
     @DisplayName("resolveLatestAgentVersion")
     class ResolveVersion {
 
+        // A version that cannot be resolved is an error, not a reason to guess:
+        // "fall back to 1" silently synced an arbitrarily old configuration into the
+        // target and left only a DEBUG line behind.
+
         @Test
-        @DisplayName("null descriptors → defaults to version 1")
+        @DisplayName("null descriptors → error, not a guess at version 1")
         void nullDescriptors() throws Exception {
             doReturn(null).when(jsonSerialization).deserialize(anyString(), eq(DocumentDescriptor[].class));
 
@@ -273,16 +277,15 @@ class RemoteApiResourceSourceDeepCoverageTest {
             RemoteApiResourceSource source = new RemoteApiResourceSource(
                     "http://127.0.0.1:1", "agent1", null, null, jsonSerialization, httpClient);
 
-            // readAgent triggers resolveLatestAgentVersion which falls back to 1
-            var agentData = source.readAgent();
-            assertNotNull(agentData);
+            var ex = assertThrows(RuntimeException.class, source::readAgent);
+            assertTrue(ex.getMessage().contains("latest version"), ex.getMessage());
         }
 
         @Test
-        @DisplayName("no matching descriptor → defaults to version 1")
+        @DisplayName("no matching descriptor → error, not a guess at version 1")
         void noMatchingDescriptor() throws Exception {
             DocumentDescriptor desc = new DocumentDescriptor();
-            desc.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/other?version=3"));
+            desc.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/bbbbbbbbbbbbbbbbbbbbbbbb?version=3"));
             DocumentDescriptor[] descs = new DocumentDescriptor[]{desc};
 
             // First call: resolve version (descriptors), second call: read agent
@@ -294,10 +297,31 @@ class RemoteApiResourceSourceDeepCoverageTest {
             doReturn(config).when(jsonSerialization).deserialize(eq("{}"), eq(AgentConfiguration.class));
 
             RemoteApiResourceSource source = new RemoteApiResourceSource(
-                    "http://127.0.0.1:1", "agent1", null, null, jsonSerialization, httpClient);
+                    "http://127.0.0.1:1", "aaaaaaaaaaaaaaaaaaaaaaaa", null, null, jsonSerialization, httpClient);
 
-            var agentData = source.readAgent();
-            assertNotNull(agentData);
+            var ex = assertThrows(RuntimeException.class, source::readAgent);
+            assertTrue(ex.getMessage().contains("latest version"), ex.getMessage());
+        }
+
+        @Test
+        @DisplayName("matching descriptor → its version is used")
+        void matchingDescriptorResolvesVersion() throws Exception {
+            String agentId = "aaaaaaaaaaaaaaaaaaaaaaaa";
+            DocumentDescriptor desc = new DocumentDescriptor();
+            desc.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/" + agentId + "?version=7"));
+
+            doReturn("[]").doReturn("{}").doReturn("[]").when(mockResponse).body();
+            doReturn(new DocumentDescriptor[]{desc}).when(jsonSerialization)
+                    .deserialize(eq("[]"), eq(DocumentDescriptor[].class));
+
+            AgentConfiguration config = new AgentConfiguration();
+            config.setWorkflows(List.of());
+            doReturn(config).when(jsonSerialization).deserialize(eq("{}"), eq(AgentConfiguration.class));
+
+            RemoteApiResourceSource source = new RemoteApiResourceSource(
+                    "http://127.0.0.1:1", agentId, null, null, jsonSerialization, httpClient);
+
+            assertNotNull(source.readAgent());
         }
     }
 
@@ -310,14 +334,14 @@ class RemoteApiResourceSourceDeepCoverageTest {
         // The STEP_TYPE_TO_REST_PATH values end with "/" which tryReadDescriptorName
         // trims
         AgentConfiguration agentConfig = new AgentConfiguration();
-        URI wfUri = URI.create("eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=1");
+        URI wfUri = URI.create("eddi://ai.labs.workflow/workflowstore/workflows/aaaaaaaaaaaaaaaaaaaaaaaa?version=1");
         agentConfig.setWorkflows(List.of(wfUri));
         doReturn(agentConfig).when(jsonSerialization).deserialize(anyString(), eq(AgentConfiguration.class));
 
         WorkflowConfiguration wfConfig = new WorkflowConfiguration();
         WorkflowConfiguration.WorkflowStep step = new WorkflowConfiguration.WorkflowStep();
-        step.setType(URI.create("ai.labs.llm"));
-        step.setExtensions(new HashMap<>(Map.<String, Object>of("uri", "eddi://ai.labs.llm/llmstore/llms/llm1?version=1")));
+        step.setType(URI.create("eddi://ai.labs.llm"));
+        step.setExtensions(new HashMap<>(Map.<String, Object>of("uri", "eddi://ai.labs.llm/llmstore/llms/bbbbbbbbbbbbbbbbbbbbbbbb?version=1")));
         wfConfig.setWorkflowSteps(List.of(step));
         doReturn(wfConfig).when(jsonSerialization).deserialize(anyString(), eq(WorkflowConfiguration.class));
         doReturn(null).when(jsonSerialization).deserialize(anyString(), eq(DocumentDescriptor[].class));

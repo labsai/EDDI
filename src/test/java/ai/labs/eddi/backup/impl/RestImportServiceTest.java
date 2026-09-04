@@ -4,9 +4,11 @@
  */
 package ai.labs.eddi.backup.impl;
 
+import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.backup.IZipArchive;
 import ai.labs.eddi.backup.model.ImportPreview;
+import ai.labs.eddi.backup.model.UpgradeResult;
 import ai.labs.eddi.backup.model.ImportPreview.DiffAction;
 import ai.labs.eddi.backup.model.ImportPreview.ResourceDiff;
 import ai.labs.eddi.backup.model.SyncMapping;
@@ -18,6 +20,7 @@ import ai.labs.eddi.configs.migration.TemplateSyntaxMigrator;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
@@ -63,7 +66,8 @@ class RestImportServiceTest {
         importService = new RestImportService(
                 zipArchive, jsonSerialization,
                 migrationManager, documentDescriptorStore,
-                templateSyntaxMigrator, structuralMatcher, upgradeExecutor, mock(ResourceAccessGuard.class));
+                templateSyntaxMigrator, structuralMatcher, upgradeExecutor, mock(IScheduleStore.class), mock(BackupMetrics.class),
+                mock(ResourceAccessGuard.class));
     }
 
     // ==================== Strategy Dispatch ====================
@@ -77,7 +81,7 @@ class RestImportServiceTest {
         void upgradeStrategy() throws Exception {
             URI resultUri = URI.create("eddi://ai.labs.agent/agentstore/agents/target-1?version=2");
             when(upgradeExecutor.executeUpgrade(any(), eq("target-1"), isNull(), isNull()))
-                    .thenReturn(resultUri);
+                    .thenReturn(new UpgradeResult(resultUri, true, 1, 0, 0, List.of()));
 
             // Mock zipArchive.unzip to create minimal directory
             doAnswer(inv -> {
@@ -95,27 +99,34 @@ class RestImportServiceTest {
         }
 
         @Test
-        @DisplayName("upgrade strategy without targetAgentId falls through to create path")
-        void upgradeWithoutTarget() throws Exception {
-            // Without targetAgentId, upgrade strategy is ignored → falls to create/merge
-            // This will fail during import (empty zip), wrapped in
-            // InternalServerErrorException
-            doAnswer(inv -> {
-                File dir = inv.getArgument(1);
-                dir.mkdirs();
-                return null;
-            }).when(zipArchive).unzip(any(InputStream.class), any(File.class));
+        @DisplayName("upgrade strategy without targetAgentId is rejected, not silently created")
+        void upgradeWithoutTarget() {
+            // This used to fall through to the create path and answer 201 with a
+            // brand-new duplicate agent, so a dropped query parameter silently
+            // doubled the deployment's agent list.
+            assertThrows(BadRequestException.class,
+                    () -> importService.importAgent(
+                            new ByteArrayInputStream(new byte[0]), "upgrade", null, null, null));
 
-            // Empty zip → no agent files → returns 200 with null location
-            Response response = importService.importAgent(
-                    new ByteArrayInputStream(new byte[0]), "upgrade", null, null, null);
-
-            // With empty ZIP and CDI calls for importSnippets, this will throw
-            // because getRestResourceStore needs CDI — but importSnippets checks
-            // for snippets dir first. Empty dir → no snippets dir → skips.
-            // Then no .agent.json files → returns null → 200 response
-            assertNotNull(response);
             verify(upgradeExecutor, never()).executeUpgrade(any(), anyString(), any(), any());
+        }
+
+        @Test
+        @DisplayName("upgrade strategy with blank targetAgentId is rejected")
+        void upgradeWithBlankTarget() {
+            assertThrows(BadRequestException.class,
+                    () -> importService.importAgent(
+                            new ByteArrayInputStream(new byte[0]), "upgrade", null, "   ", null));
+
+            verify(upgradeExecutor, never()).executeUpgrade(any(), anyString(), any(), any());
+        }
+
+        @Test
+        @DisplayName("an unknown strategy is rejected instead of silently creating")
+        void unknownStrategyRejected() {
+            assertThrows(BadRequestException.class,
+                    () -> importService.importAgent(
+                            new ByteArrayInputStream(new byte[0]), "UPGRAGE", null, "target-1", null));
         }
 
         @Test
@@ -199,7 +210,7 @@ class RestImportServiceTest {
     class PreviewMerge {
 
         @Test
-        @DisplayName("empty ZIP returns preview with empty diffs")
+        @DisplayName("empty ZIP is rejected with a message naming the file it looked for")
         void emptyZip() throws Exception {
             doAnswer(inv -> {
                 File dir = inv.getArgument(1);
@@ -207,12 +218,13 @@ class RestImportServiceTest {
                 return null;
             }).when(zipArchive).unzip(any(InputStream.class), any(File.class));
 
-            ImportPreview result = importService.previewImport(
-                    new ByteArrayInputStream(new byte[0]), null);
+            var ex = assertThrows(BadRequestException.class, () -> importService.previewImport(
+                    new ByteArrayInputStream(new byte[0]), null));
 
-            assertNotNull(result);
-            assertNull(result.sourceAgentId());
-            assertTrue(result.resources().isEmpty());
+            // A preview with zero resources told the operator there was nothing to
+            // import — indistinguishable from an archive the importer cannot read.
+            assertTrue(ex.getMessage().contains(".agent.json"), ex.getMessage());
+            assertTrue(ex.getMessage().contains(".bot.json"), ex.getMessage());
         }
 
         @Test

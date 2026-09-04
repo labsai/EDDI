@@ -149,51 +149,16 @@ class RestImportServiceUncoveredBranchTest {
         }
 
         @Test
-        @DisplayName("extracts legacy dictionary URIs")
-        void extractLegacyDictionaryUris() throws Exception {
-            String input = "\"eddi://ai.labs.regulardictionary/regulardictionarystore/regulardictionaries/d1?version=1\"";
-            List<URI> result = invokeExtractResourcesUris(input, AbstractBackupService.LEGACY_DICTIONARY_URI_PATTERN);
-            assertEquals(1, result.size());
-        }
-
-        @Test
-        @DisplayName("extracts legacy behavior URIs")
-        void extractLegacyBehaviorUris() throws Exception {
-            String input = "\"eddi://ai.labs.behavior/behaviorstore/behaviorsets/b1?version=1\"";
-            List<URI> result = invokeExtractResourcesUris(input, AbstractBackupService.LEGACY_BEHAVIOR_URI_PATTERN);
-            assertEquals(1, result.size());
-        }
-
-        @Test
-        @DisplayName("extracts legacy httpcalls URIs")
-        void extractLegacyHttpcallsUris() throws Exception {
-            String input = "\"eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/h1?version=1\"";
-            List<URI> result = invokeExtractResourcesUris(input, AbstractBackupService.LEGACY_HTTPCALLS_URI_PATTERN);
-            assertEquals(1, result.size());
-        }
-
-        @Test
-        @DisplayName("extracts legacy langchain URIs")
-        void extractLegacyLangchainUris() throws Exception {
-            String input = "\"eddi://ai.labs.langchain/langchainstore/langchains/l1?version=1\"";
-            List<URI> result = invokeExtractResourcesUris(input, AbstractBackupService.LEGACY_LANGCHAIN_URI_PATTERN);
-            assertEquals(1, result.size());
-        }
-
-        @Test
-        @DisplayName("extracts legacy workflow URIs")
-        void extractLegacyWorkflowUris() throws Exception {
-            String input = "\"eddi://ai.labs.package/packagestore/packages/p1?version=1\"";
-            List<URI> result = invokeExtractResourcesUris(input, AbstractBackupService.LEGACY_WORKFLOW_URI_PATTERN);
-            assertEquals(1, result.size());
-        }
-
-        @Test
-        @DisplayName("extracts legacy agent URIs")
-        void extractLegacyAgentUris() throws Exception {
-            String input = "\"eddi://ai.labs.bot/botstore/bots/bot1?version=1\"";
-            List<URI> result = invokeExtractResourcesUris(input, AbstractBackupService.LEGACY_AGENT_URI_PATTERN);
-            assertEquals(1, result.size());
+        @DisplayName("every legacy authority in the rewrite table maps to a v6 URI")
+        void legacyUrisAreNormalizedNotMatched() {
+            // The six LEGACY_*_URI_PATTERN constants these cases used to exercise had
+            // no production call site; normalizeLegacyUris and its rewrite table are
+            // the live v5 mechanism, so that is what is asserted here.
+            for (String[] rewrite : AbstractBackupService.LEGACY_URI_REWRITES) {
+                String legacy = "\"" + rewrite[0] + "res1?version=1\"";
+                assertEquals("\"" + rewrite[1] + "res1?version=1\"",
+                        AbstractBackupService.normalizeLegacyUris(legacy));
+            }
         }
 
         @SuppressWarnings("unchecked")
@@ -862,19 +827,15 @@ class RestImportServiceUncoveredBranchTest {
     class CrossMatchPatterns {
 
         @Test
-        @DisplayName("legacy patterns don't match v6 URIs")
-        void legacyDontMatchV6() throws Exception {
-            String v6Dict = "\"eddi://ai.labs.dictionary/dictionarystore/dictionaries/x?version=1\"";
-            assertTrue(extractUris(v6Dict, AbstractBackupService.LEGACY_DICTIONARY_URI_PATTERN).isEmpty());
-
-            String v6Behavior = "\"eddi://ai.labs.rules/rulestore/rulesets/x?version=1\"";
-            assertTrue(extractUris(v6Behavior, AbstractBackupService.LEGACY_BEHAVIOR_URI_PATTERN).isEmpty());
-
-            String v6HttpCalls = "\"eddi://ai.labs.apicalls/apicallstore/apicalls/x?version=1\"";
-            assertTrue(extractUris(v6HttpCalls, AbstractBackupService.LEGACY_HTTPCALLS_URI_PATTERN).isEmpty());
-
-            String v6Llm = "\"eddi://ai.labs.llm/llmstore/llms/x?version=1\"";
-            assertTrue(extractUris(v6Llm, AbstractBackupService.LEGACY_LANGCHAIN_URI_PATTERN).isEmpty());
+        @DisplayName("normalizing an already-v6 URI leaves it untouched")
+        void normalizingV6IsIdempotent() {
+            for (String v6 : List.of(
+                    "\"eddi://ai.labs.dictionary/dictionarystore/dictionaries/x?version=1\"",
+                    "\"eddi://ai.labs.rules/rulestore/rulesets/x?version=1\"",
+                    "\"eddi://ai.labs.apicalls/apicallstore/apicalls/x?version=1\"",
+                    "\"eddi://ai.labs.llm/llmstore/llms/x?version=1\"")) {
+                assertEquals(v6, AbstractBackupService.normalizeLegacyUris(v6));
+            }
         }
 
         @Test

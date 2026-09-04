@@ -249,6 +249,23 @@ Full guide: [attachments-guide.md](attachments-guide.md).
 
 ---
 
+## Backup, export & import
+
+Full guide: [import-export-an-agent.md](import-export-an-agent.md).
+
+| Property | Default | Description |
+|---|---|---|
+| `eddi.backup.export.retention-minutes` | `60` | How long a finished export archive stays downloadable |
+
+> `POST /backup/export/{agentId}` writes a ZIP under `tmp/archives/` and answers
+> with a `Location` header the client then GETs, so the file has to outlive the
+> request. Nothing else deletes it: every export first sweeps archives older
+> than this window. Raise it if a client may take longer than this between the
+> POST and the GET; lower it to bound disk use on an instance that exports on a
+> cron.
+
+---
+
 ## Protocols & integrations
 
 ### MCP
