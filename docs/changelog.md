@@ -49,6 +49,56 @@ bottom of this file and are never archived.
 
 ---
 
+## 🧬 fix(configs): keep v5 stored configurations loadable (2026-09-04)
+
+**Repo:** EDDI (`fix/review-legacy-compat`)
+
+From the whole-repository code review: the one compatibility contract this project
+promises to keep — stored JSON configs and exported ZIPs keep loading — was broken in
+the direction that loses everything silently.
+
+`WorkflowConfiguration.workflowSteps` carried no alias for the key EDDI 5.x actually
+persisted. `PackageConfiguration` wrote `packageExtensions` up to and including 5.6.0,
+and `SerializationCustomizer` deliberately pins `FAIL_ON_UNKNOWN_PROPERTIES=false`, so
+the old key was dropped without a word: the workflow deserialized to **zero steps**,
+`WorkflowStoreClientLibrary` happily built an executable workflow from the empty list,
+and the agent *deployed successfully* while running no parser, no behaviour rules and no
+output for the rest of its life. No exception, no warning, no failed deployment.
+
+Fixed by `@JsonAlias({"packageExtensions", "workflowExtensions", "pipelineSteps"})` on
+the setter. The two intermediate names never reached a released database, but keeping
+them is cheaper than being wrong about which of them did.
+
+The same shape existed in the output model: the polymorphic type id was renamed
+`botFace` → `agentFace` with no alias and no `defaultImpl`, so a v5 output set carrying a
+`botFace` item was unloadable. `OutputItem` now registers the retired id as a subtype
+alias of `AgentFaceOutputItem`.
+
+Two further compatibility gaps, both found by the review's cross-cutting pass:
+
+- **Migrations were MongoDB-only.** `MigrationManager` held the legacy document rewrites
+  as private helpers, so a ZIP imported against PostgreSQL skipped them entirely and the
+  same archive produced different agents per backend. The rewrites moved into a new
+  backend-neutral `LegacyDocumentMigrations`, which `PostgresMigrationManager` now applies
+  too; `PostgresMigrationManagerParityTest` pins that both managers perform the same set.
+- **The strict-boundary sweep skipped the evidence.** `StrictBoundaryShippedConfigsTest`
+  counted `.bot.json` and `.package.json` fixtures as *skipped* rather than checked —
+  precisely the two file kinds that would have caught the missing aliases. It now parses
+  them.
+
+**Regression coverage.** Every behavioural change is pinned by a test proven to fail with
+its fix reverted. `WorkflowConfigurationLegacyAliasTest` reads the repository's own v5
+fixture and asserts the step count, and it first asserts the fixture still contains the v5
+key — so the test cannot quietly pass while guarding nothing. With the alias removed it
+fails with `expected: <6> but was: <0>`.
+
+Note for anyone repeating this exercise: proving a test fails without its fix requires
+touching the restored file's timestamp. Maven compiles incrementally by mtime, and both
+`git checkout` and `Move-Item` restore an *older* one, so the test silently runs the
+previously compiled class and the proof is worthless.
+
+---
+
 ## 📋 docs(config): document the four workspace properties that were breaking `main` (2026-08-30)
 
 **Repo:** EDDI (`fix/connection-extra-auth-params-code-verifier`)

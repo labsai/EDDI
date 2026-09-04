@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Test;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -109,6 +110,32 @@ class DynamicAgentGuardrailResolutionTest {
             assertTrue(resolved.isAllowRecruitment());
             assertFalse(resolved.isAllowDelegation());
         }
+
+        @Test
+        @DisplayName("an explicitly null flag stays off — it is not dropped into the permissive POJO default")
+        void explicitNullMustNotWidenThePolicy() {
+            // The mapper is built from the shared SerializationCustomizer recipe for
+            // its FAIL_ON_UNKNOWN_PROPERTIES=false. That recipe also sets NON_NULL as
+            // the default property inclusion, and Jackson makes a bare Include a
+            // CONTENT inclusion too — which filters map entries during the intermediate
+            // serialization convertValue performs. Left alone, a stored
+            // "allowDelegation": null never reaches the setter and the primitive keeps
+            // its POJO default of true, so a fail-closed resolver would hand the turn a
+            // capability the stored document did not grant.
+            var stored = new LinkedHashMap<String, Object>();
+            stored.put("enabled", true);
+            stored.put("allowDelegation", null);
+            stored.put("inheritParentModel", null);
+
+            var memory = memory();
+            putPolicy(memory, stored);
+
+            var resolved = DynamicAgentToolsProvider.resolveDynamicAgentConfig(memory);
+
+            assertTrue(resolved.isEnabled(), "the readable part of the policy must still apply");
+            assertFalse(resolved.isAllowDelegation(), "a stored null must read as false, not as the POJO default true");
+            assertFalse(resolved.isInheritParentModel(), "a stored null must read as false, not as the POJO default true");
+        }
     }
 
     @Nested
@@ -130,17 +157,48 @@ class DynamicAgentGuardrailResolutionTest {
         }
 
         @Test
-        @DisplayName("a map that is not this config also fails closed")
+        @DisplayName("a map whose values do not fit the model fails closed")
         void unconvertibleMapFailsClosed() {
             var memory = memory();
             var bogus = new LinkedHashMap<String, Object>();
-            bogus.put("thisFieldDoesNotExist", 42);
+            // A genuine type mismatch: allowedModels is a Map, not a String. This is
+            // what "we cannot read the operator's policy" actually looks like.
+            bogus.put("allowedModels", "not-a-map");
             putPolicy(memory, bogus);
 
             var resolved = DynamicAgentToolsProvider.resolveDynamicAgentConfig(memory);
 
             assertFalse(resolved.isEnabled());
             assertFalse(resolved.isAllowCreation());
+        }
+
+        @Test
+        @DisplayName("an unknown key is ignored — a policy from another version still applies")
+        void unknownKeyDoesNotDisableTheStoredPolicy() {
+            // This used to fail closed, and that was the bug: the mapper here was the
+            // one strict ObjectMapper in the codebase pointed at a stored config POJO.
+            // Dropping any field from DynamicAgentConfig — which this project treats as
+            // a safe change — would have turned every group conversation whose context
+            // map predated the removal into "dynamic agents silently off", with only a
+            // WARN. The same on a rolling upgrade, in either direction.
+            var config = new DynamicAgentConfig();
+            config.setEnabled(true);
+            config.setAllowCreation(true);
+            config.setAllowRecruitment(false);
+            config.setMaxCreatedAgentsPerDiscussion(7);
+
+            var stored = new LinkedHashMap<String, Object>(asStoredMap(config));
+            stored.put("aFieldThisVersionNoLongerDeclares", 42);
+
+            var memory = memory();
+            putPolicy(memory, stored);
+
+            var resolved = DynamicAgentToolsProvider.resolveDynamicAgentConfig(memory);
+
+            assertTrue(resolved.isEnabled(), "a retired key must not cost the discussion its dynamic-agent policy");
+            assertTrue(resolved.isAllowCreation());
+            assertFalse(resolved.isAllowRecruitment(), "the stored policy must survive intact, not be re-defaulted");
+            assertEquals(7, resolved.getMaxCreatedAgentsPerDiscussion());
         }
     }
 

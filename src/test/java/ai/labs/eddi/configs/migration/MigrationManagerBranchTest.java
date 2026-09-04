@@ -30,6 +30,12 @@ import static org.mockito.MockitoAnnotations.openMocks;
  * startMigrationIfFirstTimeRun lifecycle, saveToPersistence branches,
  * convertPropertyInstructions value type branches, migrateOutput type
  * detection, and removeNonSupportedProperties/removeNonStringProperties.
+ * <p>
+ * The last two now live on {@link LegacyDocumentMigrations} — the transforms
+ * were moved off this Mongo-bound bean so PostgreSQL gets them too — and are
+ * called directly rather than reflectively. Reflection is how the move broke
+ * these two tests with a {@code NoSuchMethodException} that only a full
+ * {@code ./mvnw test} could see; a direct call would have failed the compile.
  */
 @DisplayName("MigrationManager — Extended Branch Coverage")
 class MigrationManagerBranchTest {
@@ -555,7 +561,7 @@ class MigrationManagerBranchTest {
 
         @Test
         @DisplayName("removes all keys except type and specified fieldNames")
-        void removesExceptTypeAndFieldNames() throws Exception {
+        void removesExceptTypeAndFieldNames() {
             var map = new HashMap<String, Object>();
             map.put("type", "text");
             map.put("text", "Hello");
@@ -563,10 +569,7 @@ class MigrationManagerBranchTest {
             map.put("uri", "remove");
             map.put("extra", "remove");
 
-            var method = MigrationManager.class.getDeclaredMethod(
-                    "removeNonSupportedProperties", Map.class, String[].class);
-            method.setAccessible(true);
-            method.invoke(migrationManager, map, new String[]{"text", "delay"});
+            LegacyDocumentMigrations.removeNonSupportedProperties(map, "text", "delay");
 
             assertTrue(map.containsKey("type"));
             assertTrue(map.containsKey("text"));
@@ -586,17 +589,14 @@ class MigrationManagerBranchTest {
 
         @Test
         @DisplayName("removes non-string values, keeps strings and nulls")
-        void removesNonStrings() throws Exception {
+        void removesNonStrings() {
             var map = new HashMap<String, Object>();
             map.put("text", "keep");
             map.put("number", 42);
             map.put("list", List.of("a"));
             map.put("nullVal", null);
 
-            var method = MigrationManager.class.getDeclaredMethod(
-                    "removeNonStringProperties", Map.class);
-            method.setAccessible(true);
-            method.invoke(migrationManager, map);
+            LegacyDocumentMigrations.removeNonStringProperties(map);
 
             assertTrue(map.containsKey("text"));
             assertFalse(map.containsKey("number"));
