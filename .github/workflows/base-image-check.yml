@@ -152,9 +152,17 @@ jobs:
 
           # Verify the replacement actually changed something
           if git diff --quiet "$DOCKERFILE"; then
-            echo "::warning::sed replacement produced no diff — skipping PR"
+            # The digest DID change; the sed just could not apply it. That is a
+            # breakage of the update mechanism itself - e.g. the FROM line was
+            # reformatted or split, so `${IMAGE}:${TAG}@${OLD_DIGEST}` no longer
+            # matches - and the base image then stays pinned to an outdated digest
+            # indefinitely. This used to `exit 0` and the Summary step mapped
+            # `noop` to the same green "Digest current - no action needed" text as
+            # the case where nothing had changed at all, so the only signal was a
+            # ::warning:: buried in the step log.
+            echo "::error::Digest changed but the sed replacement produced no diff - check the FROM line format in ${DOCKERFILE}"
             echo "outcome=noop" >> $GITHUB_OUTPUT
-            exit 0
+            exit 1
           fi
 
           # Check if Dependabot already has a PR for this Dockerfile
@@ -286,7 +294,7 @@ jobs:
             updated)    echo "- 🔄 Digest changed — existing PR updated" >> $GITHUB_STEP_SUMMARY ;;
             current)    echo "- ✅ Digest changed but PR already has latest" >> $GITHUB_STEP_SUMMARY ;;
             dependabot) echo "- ℹ️ Digest changed — Dependabot PR already open" >> $GITHUB_STEP_SUMMARY ;;
-            noop)       echo "- ✅ Digest current — no action needed" >> $GITHUB_STEP_SUMMARY ;;
+            noop)       echo "- ❌ Digest changed but the Dockerfile could NOT be updated — check the FROM line format" >> $GITHUB_STEP_SUMMARY ;;
             *)          echo "- ✅ Digest current — no action needed" >> $GITHUB_STEP_SUMMARY ;;
           esac
 

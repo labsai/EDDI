@@ -39,9 +39,12 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "EDDI version (e.g. 6.3.0)"
+        # No default on purpose. This selects an ALREADY PUBLISHED tag to certify,
+        # so a default is a hand-copied release version that goes stale the moment
+        # pom.xml is bumped — and dispatching with a stale default certifies the
+        # previous release without anything saying so. Type the tag you mean.
+        description: "Published EDDI version tag to certify (e.g. 6.3.0)"
         required: true
-        default: "6.3.0"
       release:
         description: "Release number (e.g. 1, 2, 3)"
         required: true

@@ -1,13 +1,27 @@
-# EDDI with PostgreSQL (no MongoDB)
+# EDDI with PostgreSQL (no MongoDB) — a COMPLETE stack, not an overlay.
 # Used by: install.sh --db=postgres
+#
+#   docker compose -f docker-compose.postgres-only.yml up
 #
 # PostgreSQL serves as the sole database backend for all EDDI stores.
 # Activated via QUARKUS_PROFILE=postgres which switches IResourceStorageFactory
 # from MongoResourceStorageFactory to PostgresResourceStorageFactory.
+#
+# This replaces the old docker-compose.postgres.yml, which README.md documented
+# as an overlay (`-f docker-compose.yml -f docker-compose.postgres.yml`). It
+# could not work as one: `depends_on` is keyed by service, so the base's
+# `mongodb: condition: service_healthy` merged in rather than being replaced, the
+# base's MONGODB_CONNECTIONSTRING survived, and an overlay cannot un-declare a
+# service in the first place — so the documented "PostgreSQL instead of MongoDB"
+# command still pulled MongoDB, kept its volume, and would not start EDDI until
+# mongod reported healthy. The two files were also drifted near-duplicates that
+# both declared a volume called `pgdata`.
 
 services:
   eddi:
-    image: labsai/eddi:latest
+    # Not a literal `:latest`: the old overlay hardcoded one, so an operator who
+    # set EDDI_VERSION=6.2.0 to pin a release silently got latest anyway.
+    image: labsai/eddi:${EDDI_VERSION:-latest}
     environment:
       QUARKUS_PROFILE: "${QUARKUS_PROFILE:-postgres}"
       QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/eddi

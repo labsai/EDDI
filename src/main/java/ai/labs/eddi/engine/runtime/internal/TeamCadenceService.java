@@ -8,7 +8,6 @@ import ai.labs.eddi.configs.groups.IGroupConversationStore;
 import ai.labs.eddi.configs.groups.IGroupWorkspaceStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.TaskDefinition;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
-import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
 import ai.labs.eddi.configs.groups.model.GroupWorkspace;
 import ai.labs.eddi.configs.groups.model.GroupWorkspace.Cadence;
 import ai.labs.eddi.configs.groups.model.GroupWorkspace.MemberStats;

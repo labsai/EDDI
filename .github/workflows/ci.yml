@@ -7,6 +7,15 @@ on:
   pull_request:
     branches: [main]
 
+# Three pushes to a PR branch used to leave three full pipelines in flight —
+# three `mvn clean test` runs over ~19,800 tests, three Testcontainers runs,
+# three CodeQL builds — with the superseded ones never cancelled, so an older
+# run could report onto a commit that is no longer the head. Pushes to main and
+# tag pushes are NOT cancelled: a release must never be interrupted mid-publish.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
@@ -39,17 +48,32 @@ jobs:
         uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3
         with:
           filters: |
+            # Everything the build, the image or the scanners are GOVERNED by has
+            # to be here. A skipped required check still satisfies branch
+            # protection (see the note on `scripts` below), so a config file that
+            # is in no filter merges without a single job having evaluated it —
+            # which is how a `.trivyignore` suppression or a relaxed
+            # checkstyle.xml rule could land unreviewed by CI. The root-anchored
+            # 'Dockerfile*' matched nothing: every Dockerfile lives under
+            # src/main/docker/ or mcp-sidecar/.
             code:
               - 'src/**'
               - 'pom.xml'
               - '.github/workflows/**'
-              - 'Dockerfile*'
+              - '**/Dockerfile*'
+              - '**/.dockerignore'
               - 'docker-compose*.yml'
-              - '.dockerignore'
+              - 'mcp-sidecar/**'
               - 'k8s/**'
               - 'helm/**'
               - 'mvnw*'
               - '.mvn/**'
+              - 'checkstyle.xml'
+              - 'eclipse-formatter.xml'
+              - 'mise.toml'
+              - '.trivyignore'
+              - '.gitleaksignore'
+              - 'licenses/**'
             # The installers are the README's headline `curl | bash` path and were
             # in NO filter at all, so a PR touching only them skipped the whole
             # pipeline — and a skipped required check still satisfies branch
@@ -59,6 +83,7 @@ jobs:
               - 'install.ps1'
               - 'scripts/**'
               - '.githooks/**'
+              - 'mvnw*'
 
       - name: Resolve
         id: result
@@ -101,6 +126,26 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Assert executable bits
+        # mvnw is committed 100755 and .githooks/pre-push was committed 100644 —
+        # and git runs a hook only if it is executable, so the force-push guard
+        # AGENTS.md tells contributors to activate was silently ignored on Linux
+        # and macOS (Windows is unaffected: core.filemode is false there, which
+        # is what kept this invisible). Six jobs used to `chmod +x mvnw` on every
+        # run and none of them touched the hook. One assertion replaces all six.
+        run: |
+          failed=0
+          for f in mvnw .githooks/*; do
+            [ -f "$f" ] || continue
+            if [ ! -x "$f" ]; then
+              echo "::error file=$f::$f is not executable in git — run: git update-index --chmod=+x $f"
+              failed=1
+            else
+              echo "$f is executable"
+            fi
+          done
+          exit $failed
 
       - name: Bash syntax check
         # Catches the class of error that makes `curl | bash` fail at the worst
@@ -178,9 +223,6 @@ jobs:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
           cache: maven
-
-      - name: Set execute permission for mvnw
-        run: chmod +x mvnw
 
       - name: Build and test
         run: ./mvnw clean test -B
@@ -279,9 +321,6 @@ jobs:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
           cache: maven
-
-      - name: Set execute permission for mvnw
-        run: chmod +x mvnw
 
       - name: Run integration tests
         run: ./mvnw verify -DskipITs=false -Dquarkus.bootstrap.effective-model-builder=true -B
@@ -411,9 +450,6 @@ jobs:
         with:
           languages: java-kotlin
           queries: security-extended
-
-      - name: Set execute permission for mvnw
-        run: chmod +x mvnw
 
       - name: Build for CodeQL
         run: ./mvnw compile -DskipTests -B --no-transfer-progress
@@ -551,9 +587,6 @@ jobs:
           java-version: ${{ env.JAVA_VERSION }}
           cache: maven
 
-      - name: Set execute permission for mvnw
-        run: chmod +x mvnw
-
       - name: Generate CycloneDX SBOM
         run: ./mvnw org.cyclonedx:cyclonedx-maven-plugin:2.9.1:makeBom -DskipTests -B --no-transfer-progress
 
@@ -608,9 +641,6 @@ jobs:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
           cache: maven
-
-      - name: Set execute permission for mvnw
-        run: chmod +x mvnw
 
       - name: Compute Docker tags
         id: meta
@@ -699,6 +729,80 @@ jobs:
           ignore-unfixed: true
           format: table
           trivyignores: .trivyignore
+
+      - name: Verify the image boots
+        # Until this step existed, the ONLY thing that ever started the container
+        # was the smoke-test job - and that job is `needs: docker`, i.e. it runs
+        # after "Push to Docker Hub" has already published the tag, the :latest
+        # alias, the cosign signature and the SLSA attestation. A container that
+        # exits on startup (a bad JAVA_OPTS_APPEND, a missing file in a COPY, a
+        # broken /deployments layout after a Quarkus packaging change) was
+        # therefore fully released before anything tried to boot it - exactly the
+        # shape this workflow rejected when it deleted the ZAP job further down.
+        # This runs against the image already in the local daemon, before login,
+        # so a failure stops the publish. The post-push smoke test keeps the
+        # signature verification, which genuinely can only run after publication.
+        run: |
+          set -uo pipefail
+          PRIMARY_TAG="${{ steps.meta.outputs.primary-tag }}"
+          MONGO_URI="mongodb://localhost:27017/eddi?retryWrites=true&w=majority&connectTimeoutMS=10000&socketTimeoutMS=30000"
+
+          docker run -d --name eddi-boot-mongodb --network host mongo:7.0.14
+          for _ in $(seq 1 30); do
+            if docker exec eddi-boot-mongodb mongosh --eval "db.runCommand({ping:1})" > /dev/null 2>&1; then
+              echo "MongoDB ready"
+              break
+            fi
+            sleep 1
+          done
+
+          docker run -d --name eddi-boot --network host -e "MONGODB_CONNECTIONSTRING=${MONGO_URI}" -e "EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true" -e "EDDI_MCP_ALLOW_UNAUTHENTICATED=true" -e "EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED=true" "${DOCKER_IMAGE}:${PRIMARY_TAG}"
+
+          READY=0
+          for i in $(seq 1 45); do
+            if curl -sf http://localhost:7070/q/health/ready > /dev/null 2>&1; then
+              echo "Image is ready after $((i * 2))s"
+              READY=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "$READY" != "1" ]; then
+            echo "::error::The built image did not become ready within 90s - refusing to publish"
+            docker logs eddi-boot
+            docker logs eddi-boot-mongodb
+            exit 1
+          fi
+
+          # Docker's OWN verdict on the Dockerfile HEALTHCHECK, which the host
+          # curl above does not exercise: it runs INSIDE the container and needs
+          # curl to exist in the UBI base - an inherited property of a digest
+          # Dependabot and base-image-check.yml bump every week. Nothing ran it,
+          # so an image whose healthcheck can never pass would ship, report
+          # `unhealthy` forever, and get restart-looped by Kubernetes and Swarm.
+          STATUS=""
+          for _ in $(seq 1 60); do
+            STATUS=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' eddi-boot)
+            if [ "$STATUS" = "healthy" ]; then
+              echo "Docker HEALTHCHECK reports healthy"
+              echo "### Image boots and reports healthy before publish" >> $GITHUB_STEP_SUMMARY
+              exit 0
+            fi
+            if [ "$STATUS" = "none" ]; then
+              echo "::error::The image declares no HEALTHCHECK - src/main/docker/Dockerfile should"
+              exit 1
+            fi
+            sleep 2
+          done
+          echo "::error::HEALTHCHECK never reported healthy (last status: ${STATUS})"
+          docker inspect --format '{{json .State.Health}}' eddi-boot
+          docker logs eddi-boot
+          exit 1
+
+      - name: Stop boot-check containers
+        if: always()
+        run: |
+          docker rm -f eddi-boot eddi-boot-mongodb 2>/dev/null || true
 
       - name: Login to Docker Hub
         uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4
@@ -822,9 +926,12 @@ jobs:
 
       - name: Start MongoDB
         run: |
+          # Same tag as docker-compose.yml, so the release gate exercises the
+          # MongoDB users actually run. It was 6.0 (EOL July 2025), which meant
+          # a 7.x-specific regression could not be caught here at all.
           docker run -d --name mongodb \
             --network host \
-            mongo:6.0
+            mongo:7.0.14
           echo "Waiting for MongoDB..."
           for i in $(seq 1 15); do
             if docker exec mongodb mongosh --eval "db.runCommand({ping:1})" > /dev/null 2>&1; then
@@ -953,15 +1060,21 @@ jobs:
           java-version: ${{ env.JAVA_VERSION }}
           cache: maven
 
-      - name: Set execute permission for mvnw
-        run: chmod +x mvnw
-
       - name: Build application
         run: ./mvnw clean package -DskipTests -Plicense-gen -B
 
       - name: Build Docker image with Red Hat labels
         run: |
+          # EDDI_VERSION has to be passed here exactly as the docker job passes it.
+          # Without it this dry-run certifies an image labelled with the
+          # Dockerfile's ARG default instead of the real version - it reported
+          # `version` present and correct even when a release would have carried a
+          # stale one, which is the single failure this job exists to catch.
+          POM_VERSION=$(grep -m1 '<version>' pom.xml | cut -d'>' -f2 | cut -d'<' -f1)
+          echo "Building with EDDI_VERSION=${POM_VERSION}"
           docker build \
+            --build-arg EDDI_VERSION="${POM_VERSION}" \
+            --build-arg EDDI_RELEASE="${{ github.run_number }}" \
             -f src/main/docker/Dockerfile \
             -t eddi-preflight-check:test \
             .
@@ -984,6 +1097,19 @@ jobs:
             echo "::error::Required Red Hat labels are missing"
             exit 1
           fi
+
+          # Presence is not enough. The `version` label is what a Red Hat
+          # certification submission is filed under, and it comes from an ARG the
+          # build has to pass; the old check reported "present and correct" for
+          # whatever literal the Dockerfile happened to default to, so the one
+          # failure this dry-run exists to catch was the one it could not see.
+          POM_VERSION=$(grep -m1 '<version>' pom.xml | cut -d'>' -f2 | cut -d'<' -f1)
+          LABEL_VERSION=$(docker inspect eddi-preflight-check:test --format '{{index .Config.Labels "version"}}')
+          if [ "$LABEL_VERSION" != "$POM_VERSION" ]; then
+            echo "::error::version label is '${LABEL_VERSION}' but pom.xml says '${POM_VERSION}' — the build did not pass --build-arg EDDI_VERSION"
+            exit 1
+          fi
+          echo "✅ Label 'version' matches pom.xml (${POM_VERSION})"
 
       - name: Verify /licenses in container
         run: |
@@ -1229,7 +1355,13 @@ jobs:
           # and docker only starts if they pass. Nothing to normalise here.
 
           # Overall status
-          if [ "$BUILD" = "success" ] && [ "$IT" != "failure" ] && [ "$DOCKER" != "failure" ] && [ "$SMOKE" != "failure" ] && [ "$GITLEAKS" != "failure" ] && [ "$TRIVY" != "failure" ] && [ "$CODEQL" != "failure" ]; then
+          # PREFLIGHT belongs in this condition, not only in the icon list below.
+          # Without it a run where everything else was green but preflight failed
+          # was classified "Build Passed", and the next block then exited without
+          # posting anything - so the one signal saying the image would not pass
+          # Red Hat certification never left GitHub. On a tag it did post, with
+          # "Build Passed" in the header beside a red Red Hat Preflight field.
+          if [ "$BUILD" = "success" ] && [ "$IT" != "failure" ] && [ "$DOCKER" != "failure" ] && [ "$SMOKE" != "failure" ] && [ "$GITLEAKS" != "failure" ] && [ "$TRIVY" != "failure" ] && [ "$CODEQL" != "failure" ] && [ "$PREFLIGHT" != "failure" ]; then
             OVERALL_ICON="✅"
             OVERALL_TEXT="Build Passed"
           else

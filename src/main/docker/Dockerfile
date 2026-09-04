@@ -78,10 +78,38 @@
 #   accessed directly. (example: "foo.example.com,bar.example.com")
 #
 ###
+
+# --- Stage: docs ---
+# The four internal-only pages are pruned HERE, in a throwaway stage, so they
+# never enter a layer of the published image. They used to be copied in and then
+# `RUN rm`-ed, which only writes whiteout entries: the 1.1 MB engineering
+# changelog and the breach-response runbook (detection indicators, escalation
+# contacts) stayed byte-for-byte in the preceding COPY layer, recoverable by
+# anyone holding the image (`docker save ... | tar -x`). Only the runtime
+# filesystem view was ever cleaned, so the stated goal of the step was not
+# achieved and the image was ~1.2 MB larger than intended on every pull.
+#
+# Same digest as the runtime stage below, deliberately: base-image-check.yml
+# parses the LAST FROM line, and its sed rewrites every line carrying the pin,
+# so the two stages move together.
+FROM registry.access.redhat.com/ubi9/openjdk-25-runtime:1.24@sha256:6b320cbb20bd8b74ed4b44d0ea086cc9651bfc64396fbe6c0d906a8da12bdd20 AS docs
+# COPY writes as root, and the UBI runtime base's default USER is 185, which
+# could not then delete from /docs.
+USER root
+COPY docs/*.md /docs/
+RUN rm -f /docs/changelog.md \
+      /docs/code-review-standards.md \
+      /docs/incident-response.md \
+      /docs/SUMMARY.md
+
+# --- Stage: runtime ---
 FROM registry.access.redhat.com/ubi9/openjdk-25-runtime:1.24@sha256:6b320cbb20bd8b74ed4b44d0ea086cc9651bfc64396fbe6c0d906a8da12bdd20
 
 ### Red Hat Container Certification — required labels
-ARG EDDI_VERSION=6.3.0
+# A sentinel default, so an un-parameterised build is obviously not a release.
+# CI passes the real version in the docker job AND in the PR preflight dry-run,
+# which used to certify an image carrying whatever this literal happened to say.
+ARG EDDI_VERSION=dev
 ARG EDDI_RELEASE=1
 
 LABEL name="labsai/eddi" \
@@ -122,18 +150,14 @@ COPY --chown=185 licenses/ /licenses/
 # rejects any name containing '/', so nothing under docs/agent-configs/,
 # docs/templates/, docs/creating-your-first-agent/ etc. can be requested.
 # Copying the whole tree (~2.2 MB) shipped those subdirectories as dead weight.
-COPY --chown=185 docs/*.md /deployments/docs/
-
-# Drop the internal-only pages that have no business being served to an MCP
-# client: the 1.1 MB running engineering changelog, the breach-response runbook
-# (detection indicators and escalation contacts), our internal code-review
-# process, and the GitBook table of contents (whose links point at
-# subdirectories that are intentionally not in the image).
-# docs/security-review.md is kept — it is a published OpenSSF Gold artefact.
-RUN rm -f /deployments/docs/changelog.md \
-      /deployments/docs/code-review-standards.md \
-      /deployments/docs/incident-response.md \
-      /deployments/docs/SUMMARY.md
+#
+# The `docs` stage above has already dropped the internal-only pages: the 1.1 MB
+# running engineering changelog, the breach-response runbook (detection
+# indicators and escalation contacts), our internal code-review process, and the
+# GitBook table of contents (whose links point at subdirectories that are
+# intentionally not in the image). docs/security-review.md is kept - it is a
+# published OpenSSF Gold artefact.
+COPY --from=docs --chown=185 /docs/ /deployments/docs/
 
 # Run as non-root user (UID 185 = jboss user from UBI base image)
 # This is a security requirement — containers MUST NOT run as root

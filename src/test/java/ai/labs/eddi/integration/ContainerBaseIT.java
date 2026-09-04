@@ -43,9 +43,15 @@ public abstract class ContainerBaseIT extends BaseIntegrationIT {
 
     static final Network NETWORK = Network.newNetwork();
 
+    /**
+     * The same tag docker-compose.yml pins and the release smoke test now starts,
+     * so the pre-publish gate exercises the MongoDB users actually run. It was
+     * {@code mongo:6.0} (EOL July 2025) while every other Mongo pin in the repo
+     * said 7.0.14, which left a 7.x-specific regression with nowhere to be caught.
+     */
     @SuppressWarnings("resource")
     @Container
-    static final MongoDBContainer MONGO = new MongoDBContainer("mongo:6.0")
+    static final MongoDBContainer MONGO = new MongoDBContainer("mongo:7.0.14")
             .withNetwork(NETWORK)
             .withNetworkAliases("mongodb");
 
@@ -68,27 +74,25 @@ public abstract class ContainerBaseIT extends BaseIntegrationIT {
                     .withStartupTimeout(Duration.ofSeconds(180)));
 
     /**
-     * Builds the EDDI Docker image using a test-specific inline Dockerfile with
-     * flat build context paths.
+     * Builds the EDDI Docker image from <b>the production Dockerfile</b>
+     * ({@code src/main/docker/Dockerfile}), rewritten only where the ITs' build
+     * context differs from the release one.
      * <p>
-     * <b>Why not use the production Dockerfile?</b> The production Dockerfile
-     * ({@code src/main/docker/Dockerfile}) uses
-     * {@code COPY target/quarkus-app/lib/ ...} — paths nested under
-     * {@code target/}. When Testcontainers sends the project root as build context,
-     * the project's {@code .dockerignore} (which uses a deny-all {@code *} +
-     * exception pattern) is included in the tar. Docker/BuildKit processes this
-     * {@code .dockerignore} and fails to re-include paths under excluded parent
-     * directories, causing {@code COPY failed: file not found}.
+     * This used to embed a whole second Dockerfile as a text block, so the image
+     * the ITs proved bootable was not the image that gets pushed — and the copy had
+     * already drifted (see {@link EddiImageDockerfile} for the three divergences).
+     * {@link EddiImageDockerfile#forTestContext()} performs the one transformation
+     * the context genuinely needs and fails loudly if the production file stops
+     * matching, rather than quietly building something else.
      * <p>
-     * This method avoids the problem entirely by:
-     * <ol>
-     * <li>Using an inline Dockerfile with <b>flat</b> COPY paths
-     * ({@code quarkus-app/lib/} instead of {@code target/quarkus-app/lib/})</li>
-     * <li>Adding only needed directories to the build context — no
-     * {@code .dockerignore} is present in the context</li>
-     * <li>Keeping the context minimal (~250 MB instead of the full project
-     * tree)</li>
-     * </ol>
+     * <b>Why the context is assembled file by file.</b> Sending the project root
+     * would include the root {@code .dockerignore}, whose deny-all {@code *} plus
+     * allowlist form the classic builder cannot re-include paths through —
+     * {@code COPY failed: file not found}. Adding only the needed directories
+     * avoids that and keeps the context at ~250 MB instead of the full tree.
+     * {@code target/quarkus-app} is mapped in as {@code quarkus-app}, which is the
+     * sole reason the COPY prefix is rewritten; {@code licenses/} and {@code docs/}
+     * keep their names and are used verbatim.
      *
      * @param imageName
      *            Docker image name for caching
@@ -101,31 +105,8 @@ public abstract class ContainerBaseIT extends BaseIntegrationIT {
                     "target/quarkus-app/ not found. Run 'mvn package -DskipTests' before running container-based ITs.");
         }
 
-        // Inline Dockerfile — mirrors the production Dockerfile but uses
-        // flat COPY source paths (quarkus-app/ instead of target/quarkus-app/)
-        // because target/quarkus-app is mapped to quarkus-app in the build context.
-        String testDockerfile = """
-                FROM registry.access.redhat.com/ubi9/openjdk-25-runtime:1.24
-                ENV LANG='C.utf8' LANGUAGE='C.utf8'
-                USER root
-                RUN mkdir -p /deployments/tmp/import && \\
-                    chown -R 185:0 /deployments/tmp && \\
-                    chmod -R 775 /deployments/tmp
-                COPY --chown=185 quarkus-app/lib/ /deployments/lib/
-                COPY --chown=185 quarkus-app/*.jar /deployments/
-                COPY --chown=185 quarkus-app/app/ /deployments/app/
-                COPY --chown=185 quarkus-app/quarkus/ /deployments/quarkus/
-                COPY --chown=185 licenses/ /licenses/
-                COPY --chown=185 docs/ /deployments/docs/
-                USER 185
-                EXPOSE 7070
-                ENV JAVA_OPTS_APPEND="-Dquarkus.http.host=0.0.0.0 -Djava.util.logging.manager=org.jboss.logmanager.LogManager -Dfile.encoding=UTF8 -Deddi.docs.path=/deployments/docs"
-                ENV JAVA_APP_JAR="/deployments/quarkus-run.jar"
-                ENTRYPOINT [ "/opt/jboss/container/java/run/run-java.sh" ]
-                """;
-
         var image = new ImageFromDockerfile(imageName, false)
-                .withFileFromString("Dockerfile", testDockerfile)
+                .withFileFromString("Dockerfile", EddiImageDockerfile.forTestContext())
                 .withFileFromPath("quarkus-app", quarkusAppDir);
 
         // licenses/ and docs/ are required by the Dockerfile COPY instructions.

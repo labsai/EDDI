@@ -49,6 +49,45 @@ bottom of this file and are never archived.
 
 ---
 
+## 🚦 fix(build): make the style, coverage and image gates able to fail (2026-09-04)
+
+**Repo:** EDDI (`fix/review-quality-gates`)
+
+From the whole-repository code review. Several of this project's quality gates were wired
+so that they could not fail — which is the root cause the review named for why the other
+findings shipped at all.
+
+- **Checkstyle ran with `failOnViolation=false`.** The import and file-size rules AGENTS.md
+  calls mandatory could not fail anything, and are violated on `main` today.
+- **The formatter's `format` goal rewrote tracked sources on every compile** instead of
+  checking them, so a contributor's build silently edited files rather than reporting them.
+- **The JaCoCo 90/80 gate graded `jacoco-merged.exec`** in runs where the integration tests
+  never produced it, so `./mvnw verify` failed a clean, all-green tree at 89 %. It now
+  carries `<skip>${skipITs}</skip>` and runs where the data actually exists.
+- **Failsafe was pinned to Surefire's version property**, so the two could silently diverge.
+- **The container integration tests built a hand-copied Dockerfile** that had already
+  drifted from the production one, so what CI verified was not what ships. They now build
+  the real image.
+- **The project version was duplicated as a literal** in the OpenAPI info block and in
+  `application.properties`; both now resolve from the build.
+
+### Regression coverage
+
+`BuildQualityGatesTest` and `ReleaseVersionSourceTest` assert the gates are armed — that
+Checkstyle fails on violation, that the coverage check is skip-aware rather than
+unconditionally disabled, and that no version literal is reintroduced. `EddiImageDockerfileTest`
+pins the integration image to the production Dockerfile.
+
+Recorded honestly as unverifiable here: the image build itself and the two version
+assertions need Docker and MongoDB Dev Services, so they compile but have never executed
+locally. CI is the authority for those.
+
+**Reviewer note.** This branch changes the local build contract: `./mvnw compile` now fails
+on unformatted or badly-imported sources instead of quietly rewriting them. AGENTS.md is
+updated to say so, because the previous wording described the old behaviour.
+
+---
+
 ## 📋 docs(config): document the four workspace properties that were breaking `main` (2026-08-30)
 
 **Repo:** EDDI (`fix/connection-extra-auth-params-code-verifier`)

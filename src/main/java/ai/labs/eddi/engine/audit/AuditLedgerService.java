@@ -208,11 +208,22 @@ public class AuditLedgerService {
     }
 
     /**
+     * Dead-letter sink for {@link #createForTesting}. An absolute path under the
+     * JVM's temp directory, deliberately: this used to be the bare relative
+     * {@code "eddi-audit-deadletter.jsonl"}, which resolves against the process CWD
+     * — the repository root during a test run — so unit tests wrote a file into the
+     * source tree that {@code mvn clean} could not remove and {@code .gitignore}
+     * had to hide. The CDI constructor above defaults to an absolute
+     * {@code /opt/eddi/data/...}; the test factory now matches that shape.
+     */
+    static final String TEST_DEAD_LETTER_PATH = Path.of(System.getProperty("java.io.tmpdir"), "eddi-audit-deadletter.jsonl").toString();
+
+    /**
      * Factory method for unit testing with an explicit queue bound.
      */
     static AuditLedgerService createForTesting(IAuditStore auditStore, boolean enabled, int flushIntervalSeconds, String masterKeyConfig,
                                                MeterRegistry meterRegistry, int maxQueueSize) {
-        return new AuditLedgerService(auditStore, enabled, flushIntervalSeconds, Optional.ofNullable(masterKeyConfig), "eddi-audit-deadletter.jsonl",
+        return new AuditLedgerService(auditStore, enabled, flushIntervalSeconds, Optional.ofNullable(masterKeyConfig), TEST_DEAD_LETTER_PATH,
                 false, "default", maxQueueSize, true, 500, meterRegistry, null, null, new ObjectMapper());
     }
 

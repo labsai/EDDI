@@ -13,21 +13,26 @@
         <maven.compiler.release>25</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
-        <quarkus.microprofile.version>3.0.0.Final</quarkus.microprofile.version>
         <quarkus.platform.artifact-id>quarkus-bom</quarkus.platform.artifact-id>
         <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
         <quarkus.platform.version>3.38.3</quarkus.platform.version>
-        <langchain4j-beta.version>1.19.0-beta29</langchain4j-beta.version>
+        <!-- langchain4j ships two release lines from the same reactor. Every
+             dev.langchain4j artifact below is pinned to ONE of these two, and
+             they must be bumped together: a split leaves modules resolving
+             different langchain4j-core versions, which surfaces as a runtime
+             NoSuchMethodError rather than a build failure. There used to be four
+             properties for these two values (langchain4j-libs.version and
+             langchain4j-community.version were byte-identical duplicates of
+             langchain4j.version and langchain4j-beta.version), which made a
+             half-finished bump the likely outcome of any upgrade. -->
         <langchain4j.version>1.19.0</langchain4j.version>
-        <langchain4j-libs.version>1.19.0</langchain4j-libs.version>
+        <langchain4j-beta.version>1.19.0-beta29</langchain4j-beta.version>
         <jandex-maven-plugin.version>3.6.0</jandex-maven-plugin.version>
         <maven.compiler.parameters>true</maven.compiler.parameters>
         <surefire-plugin.version>3.5.6</surefire-plugin.version>
         <failsafe-plugin.version>3.5.6</failsafe-plugin.version>
         <failsafe.useModulePath>false</failsafe.useModulePath>
-        <war-plugin.version>3.4.0</war-plugin.version>
         <quarkus-mcp-server.version>1.13.1</quarkus-mcp-server.version>
-        <langchain4j-community.version>1.19.0-beta29</langchain4j-community.version>
         <skipITs>true</skipITs>
     </properties>
     <dependencyManagement>
@@ -92,6 +97,24 @@
                 <groupId>org.bouncycastle</groupId>
                 <artifactId>bcprov-lts8on</artifactId>
                 <version>2.73.12.1</version>
+            </dependency>
+            <!-- swagger-annotations is a VERSION PIN, not a usage. No source imports
+                 io.swagger.v3.oas.annotations, so the direct <dependency> was removed
+                 from <dependencies> below — but the jar still ships, because
+                 swagger-parser (which McpApiToolBuilder does use, via
+                 io.swagger.v3.oas.models) drags it in transitively at 2.2.52. Dropping
+                 the declaration outright would therefore not have removed the artifact
+                 from target/quarkus-app/lib, the container image, the CycloneDX SBOM or
+                 the Trivy scan; it would only have DOWNGRADED it two patch versions,
+                 silently reversing the deliberate bump in aa6c48bf ("every safe
+                 patch/minor before release"). Managing it here keeps the shipped version
+                 exactly where that bump put it while removing the compile-scope
+                 dependency nothing compiles against.
+                 Pinned by BuildQualityGatesTest#swaggerAnnotationsKeepsItsShippedVersion. -->
+            <dependency>
+                <groupId>io.swagger.core.v3</groupId>
+                <artifactId>swagger-annotations</artifactId>
+                <version>2.2.54</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
@@ -158,10 +181,6 @@
         </dependency>
         <dependency>
             <groupId>io.quarkus</groupId>
-            <artifactId>quarkus-keycloak-authorization</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>io.quarkus</groupId>
             <artifactId>quarkus-cache</artifactId>
         </dependency>
         <!-- Caffeine is used DIRECTLY (Caffeine.newBuilder()) by ten classes — the
@@ -192,17 +211,17 @@
         <dependency>
             <groupId>dev.langchain4j</groupId>
             <artifactId>langchain4j-open-ai</artifactId>
-            <version>${langchain4j-libs.version}</version>
+            <version>${langchain4j.version}</version>
         </dependency>
         <dependency>
             <groupId>dev.langchain4j</groupId>
             <artifactId>langchain4j-anthropic</artifactId>
-            <version>${langchain4j-libs.version}</version>
+            <version>${langchain4j.version}</version>
         </dependency>
         <dependency>
             <groupId>dev.langchain4j</groupId>
             <artifactId>langchain4j-ollama</artifactId>
-            <version>${langchain4j-libs.version}</version>
+            <version>${langchain4j.version}</version>
         </dependency>
         <dependency>
             <groupId>dev.langchain4j</groupId>
@@ -217,12 +236,12 @@
         <dependency>
             <groupId>dev.langchain4j</groupId>
             <artifactId>langchain4j-google-ai-gemini</artifactId>
-            <version>${langchain4j-libs.version}</version>
+            <version>${langchain4j.version}</version>
         </dependency>
         <dependency>
             <groupId>dev.langchain4j</groupId>
             <artifactId>langchain4j-http-client-jdk</artifactId>
-            <version>${langchain4j-libs.version}</version>
+            <version>${langchain4j.version}</version>
         </dependency>
         <dependency>
             <groupId>dev.langchain4j</groupId>
@@ -248,22 +267,22 @@
         <dependency>
             <groupId>dev.langchain4j</groupId>
             <artifactId>langchain4j-mistral-ai</artifactId>
-            <version>${langchain4j-libs.version}</version>
+            <version>${langchain4j.version}</version>
         </dependency>
         <dependency>
             <groupId>dev.langchain4j</groupId>
             <artifactId>langchain4j-azure-open-ai</artifactId>
-            <version>${langchain4j-libs.version}</version>
+            <version>${langchain4j.version}</version>
         </dependency>
         <dependency>
             <groupId>dev.langchain4j</groupId>
             <artifactId>langchain4j-bedrock</artifactId>
-            <version>${langchain4j-libs.version}</version>
+            <version>${langchain4j.version}</version>
         </dependency>
         <dependency>
             <groupId>dev.langchain4j</groupId>
             <artifactId>langchain4j-community-oci-genai</artifactId>
-            <version>${langchain4j-community.version}</version>
+            <version>${langchain4j-beta.version}</version>
         </dependency>
         <!-- RAG Provider Expansion: additional embedding stores + models -->
         <dependency>
@@ -333,11 +352,6 @@
         </dependency>
 
         <dependency>
-            <groupId>io.swagger.core.v3</groupId>
-            <artifactId>swagger-annotations</artifactId>
-            <version>2.2.54</version>
-        </dependency>
-        <dependency>
             <groupId>de.undercouch</groupId>
             <artifactId>bson4jackson</artifactId>
             <version>2.15.1</version>
@@ -405,10 +419,6 @@
             <artifactId>vertx-web-client</artifactId>
         </dependency>
         <dependency>
-            <groupId>jakarta.transaction</groupId>
-            <artifactId>jakarta.transaction-api</artifactId>
-        </dependency>
-        <dependency>
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-junit</artifactId>
             <scope>test</scope>
@@ -429,14 +439,6 @@
         <dependency>
             <groupId>org.mockito</groupId>
             <artifactId>mockito-core</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <!-- Mozilla Rhino: JavaScript engine for CalculatorTool tests -->
-        <!-- Pure Java implementation, works in all environments, auto-registers with ScriptEngineManager -->
-        <dependency>
-            <groupId>org.mozilla</groupId>
-            <artifactId>rhino-engine</artifactId>
-            <version>1.9.1</version>
             <scope>test</scope>
         </dependency>
         <!-- WireMock: embedded HTTP mock server for LlmTask and ApiCallsTask integration tests -->
@@ -593,7 +595,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-failsafe-plugin</artifactId>
-                <version>${surefire-plugin.version}</version>
+                <version>${failsafe-plugin.version}</version>
                 <executions>
                     <execution>
                         <goals>
@@ -627,7 +629,15 @@
                     </systemPropertyVariables>
                 </configuration>
             </plugin>
-            <!-- Checkstyle: code style enforcement (warnings only) -->
+            <!-- Checkstyle: code style enforcement.
+                 failOnViolation was false, which made the whole ruleset decorative:
+                 `mvn validate` reported violations and exited 0, so the import rules
+                 AGENTS.md calls mandatory could never block anything, and dead imports
+                 reached main. It fails now, but only on the rules the project actually
+                 wants enforced: violationSeverity=error means only the checkstyle.xml
+                 modules marked severity="error" (UnusedImports, RedundantImport) break
+                 the build, while the aspirational ones (FileLength, LineLength) stay at
+                 the Checker's default "warning" and remain advisory. -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-checkstyle-plugin</artifactId>
@@ -635,9 +645,19 @@
                 <configuration>
                     <configLocation>checkstyle.xml</configLocation>
                     <consoleOutput>true</consoleOutput>
-                    <failsOnError>false</failsOnError>
-                    <failOnViolation>false</failOnViolation>
-                    <violationSeverity>warning</violationSeverity>
+                    <failsOnError>true</failsOnError>
+                    <failOnViolation>true</failOnViolation>
+                    <violationSeverity>error</violationSeverity>
+                    <!-- Scope, stated rather than defaulted: the blocking import rules
+                         grade src/main/java ONLY. Turning this on today would fail the
+                         build on 163 pre-existing unused imports in src/test/java, which
+                         is a cleanup of its own and not something to smuggle into a
+                         gate-wiring change; formatter:validate already covers both source
+                         roots, so test sources are not unguarded, only un-Checkstyled.
+                         AGENTS.md §4.7 says so in as many words, and
+                         BuildQualityGatesTest#checkstyleImportGateScopeMatchesTheDocs
+                         fails if this flag and that sentence ever disagree. -->
+                    <includeTestSourceDirectory>false</includeTestSourceDirectory>
                     <linkXRef>false</linkXRef>
                 </configuration>
                 <executions>
@@ -651,7 +671,17 @@
                     </execution>
                 </executions>
             </plugin>
-            <!-- Code Formatter -->
+            <!-- Code Formatter.
+                 Bound to `validate`, NOT `format`. The format goal defaults to the
+                 process-sources phase, so it used to rewrite tracked source files on
+                 every `mvn compile`/`test`/`package` — including files the developer
+                 never touched, which then appear in `git status` next to the real work
+                 (AGENTS.md rule 5 forbids `git add .` for exactly this reason). It also
+                 meant formatting was "enforced" by mutating the working tree: CI
+                 reformatted its own checkout and reported nothing, so unformatted code
+                 could merge. `validate` checks and fails instead, and
+                 `./mvnw formatter:format` — the command AGENTS.md documents — is still
+                 how you fix a violation. -->
             <plugin>
                 <groupId>net.revelc.code.formatter</groupId>
                 <artifactId>formatter-maven-plugin</artifactId>
@@ -662,8 +692,9 @@
                 </configuration>
                 <executions>
                     <execution>
+                        <id>validate</id>
                         <goals>
-                            <goal>format</goal>
+                            <goal>validate</goal>
                         </goals>
                     </execution>
                 </executions>
@@ -724,6 +755,7 @@
                             <goal>merge</goal>
                         </goals>
                         <configuration>
+                            <skip>${skipITs}</skip>
                             <fileSets>
                                 <fileSet>
                                     <directory>${project.build.directory}</directory>
@@ -743,6 +775,7 @@
                             <goal>report</goal>
                         </goals>
                         <configuration>
+                            <skip>${skipITs}</skip>
                             <dataFile>${project.build.directory}/jacoco-it-all.exec</dataFile>
                             <outputDirectory>${project.reporting.outputDirectory}/jacoco-it</outputDirectory>
                         </configuration>
@@ -755,6 +788,7 @@
                             <goal>merge</goal>
                         </goals>
                         <configuration>
+                            <skip>${skipITs}</skip>
                             <fileSets>
                                 <fileSet>
                                     <directory>${project.build.directory}</directory>
@@ -775,13 +809,22 @@
                             <goal>report</goal>
                         </goals>
                         <configuration>
+                            <skip>${skipITs}</skip>
                             <dataFile>${project.build.directory}/jacoco-merged.exec</dataFile>
                             <outputDirectory>${project.reporting.outputDirectory}/jacoco-merged</outputDirectory>
                         </configuration>
                     </execution>
                     <!-- Coverage gate (merged UT+IT): the single authoritative threshold.
-                         Enforced during `mvn verify` against combined unit + integration test data.
-                         Target: 90/80 for OpenSSF Gold. -->
+                         Target: 90/80 for OpenSSF Gold.
+
+                         Skipped together with the ITs, because jacoco-merged.exec is only
+                         a merged file when the ITs ran. `mvn verify` defaults to
+                         skipITs=true (see the property at the top of this file), which
+                         left jacoco.exec as the sole input and graded unit-test-only
+                         coverage against a threshold that assumes both suites — so a
+                         clean tree with every test green failed the build at 89%. The
+                         gate now runs exactly where the data it grades is produced: the
+                         CI integration job, which passes -DskipITs=false. -->
                     <execution>
                         <id>merged-check</id>
                         <phase>verify</phase>
@@ -789,6 +832,7 @@
                             <goal>check</goal>
                         </goals>
                         <configuration>
+                            <skip>${skipITs}</skip>
                             <dataFile>${project.build.directory}/jacoco-merged.exec</dataFile>
                             <rules>
                                 <rule>
