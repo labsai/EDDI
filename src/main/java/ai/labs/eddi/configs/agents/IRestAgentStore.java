@@ -62,7 +62,10 @@ public interface IRestAgentStore extends IRestVersionInfo {
     @Path("descriptors")
     @Consumes(MediaType.TEXT_PLAIN)
     @Produces(MediaType.APPLICATION_JSON)
-    @Operation(operationId = "readAgentDescriptorsWithWorkflow", description = "Read list of Agent descriptors including a given workflowUri.")
+    @Operation(operationId = "readAgentDescriptorsWithWorkflow", description = "Read list of Agent descriptors including a given workflowUri. "
+            + "filter, index and limit are applied to the result AFTER the reverse-reference lookup, which "
+            + "takes neither. They used to be accepted and ignored, so a client that never paged received the "
+            + "full list; with limit defaulting to 20 such a client now receives at most 20 rows per page.")
     // @formatter:off
     List<DocumentDescriptor> readAgentDescriptors(@QueryParam("filter") @DefaultValue("") String filter,
             @QueryParam("index") @DefaultValue("0") Integer index,
@@ -117,21 +120,28 @@ public interface IRestAgentStore extends IRestVersionInfo {
             + "and their extension resources (behavior sets, HTTP calls, output sets, langchains, "
             + "property setters, dictionaries). Shared resources (packages used by other agents, "
             + "extensions used by other packages) are skipped. "
-            + "Partial failures are logged but do not prevent the Agent from being deleted.")
+            + "Partial failures are logged but do not prevent the Agent from being deleted. "
+            + "With cascade=true the version must be the Agent's current one, otherwise the request is "
+            + "refused with 409 before anything is deleted.")
     @APIResponse(responseCode = "200", description = "Agent deleted successfully.")
     @APIResponse(responseCode = "404", description = "Agent not found.")
+    @APIResponse(responseCode = "409", description = "cascade=true against a version that is not the current one; nothing was deleted.")
     // @formatter:off
     Response deleteAgent(@PathParam("id") String id,
             @Parameter(name = "version", required = true, example = "1",
                     description = "Version of the Agent to delete.")
             @QueryParam("version") Integer version,
-            @Parameter(description = "If true, permanently remove from database. "
-                    + "If false (default), soft-delete only.")
+            @Parameter(description = "If true, permanently remove from database, and additionally destroy this "
+                    + "Agent's signing keys in the secrets vault — irreversibly, since no endpoint can "
+                    + "regenerate them, so an Agent restored from a backup afterwards cannot sign again. "
+                    + "If false (default), soft-delete only: the vault keys are kept so the Agent stays "
+                    + "restorable.")
             @QueryParam("permanent") @DefaultValue("false") Boolean permanent,
             @Parameter(description = "If true, also delete all packages "
                     + "and extension resources referenced by this agent. "
-                    + "Resources shared with other agents are still deleted "
-                    + "— use with care.")
+                    + "Workflows still referenced by another agent are skipped. "
+                    + "Cascaded resources are always soft-deleted, even when permanent=true, "
+                    + "so a resource shared at a different pinned version can be recovered.")
             @QueryParam("cascade") @DefaultValue("false") Boolean cascade);
     // @formatter:on
 }

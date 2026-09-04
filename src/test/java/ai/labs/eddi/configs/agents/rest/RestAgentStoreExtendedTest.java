@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.agents.rest;
 
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.configs.agents.AgentSigningService;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
@@ -62,11 +63,14 @@ class RestAgentStoreExtendedTest {
     private RestAgentStore restAgentStore;
 
     @BeforeEach
-    void setUp() {
+    void setUp() throws Exception {
         openMocks(this);
         restAgentStore = new RestAgentStore(agentStore, restWorkflowStore,
                 documentDescriptorStore, jsonSchemaCreator, scheduleStore, capabilityRegistryService, deploymentStore,
-                permissiveGuard());
+                permissiveGuard(), mock(AgentSigningService.class), "default");
+        // The Agent is live at v1. A cascade only runs against the CURRENT version —
+        // it tears workflows and schedules down before the delete's own version check.
+        when(agentStore.getCurrentResourceId(AGENT_ID)).thenReturn(createResourceId(AGENT_ID, 1));
     }
 
     // ==================== readJsonSchema ====================
@@ -121,6 +125,45 @@ class RestAgentStoreExtendedTest {
 
             assertEquals(1, result.size());
         }
+
+        /**
+         * {@code filter}, {@code index} and {@code limit} are declared on this POST
+         * overload (with {@code @DefaultValue("20")} on limit, advertising paging) and
+         * were then never referenced: a client paging through got the whole list back
+         * on every page.
+         */
+        @Test
+        @DisplayName("index and limit actually page the result")
+        void pagesTheResult() throws Exception {
+            String wfUri = "eddi://ai.labs.workflow/workflowstore/workflows/" + WF1_ID + "?version=1";
+            when(agentStore.getAgentDescriptorsContainingWorkflow(WF1_ID, 1, false))
+                    .thenReturn(List.of(named("a"), named("b"), named("c"), named("d"), named("e")));
+
+            assertEquals(List.of("a", "b"), names(restAgentStore.readAgentDescriptors(null, 0, 2, wfUri, false)));
+            assertEquals(List.of("c", "d"), names(restAgentStore.readAgentDescriptors(null, 1, 2, wfUri, false)));
+            assertEquals(List.of("e"), names(restAgentStore.readAgentDescriptors(null, 2, 2, wfUri, false)));
+            assertTrue(restAgentStore.readAgentDescriptors(null, 9, 2, wfUri, false).isEmpty(), "past the end must be empty, not the full list");
+        }
+
+        @Test
+        @DisplayName("filter narrows the result")
+        void filtersTheResult() throws Exception {
+            String wfUri = "eddi://ai.labs.workflow/workflowstore/workflows/" + WF1_ID + "?version=1";
+            when(agentStore.getAgentDescriptorsContainingWorkflow(WF1_ID, 1, false))
+                    .thenReturn(List.of(named("support agent"), named("Sales Agent"), named("triage")));
+
+            assertEquals(List.of("Sales Agent"), names(restAgentStore.readAgentDescriptors("sales", 0, 20, wfUri, false)));
+        }
+
+        private DocumentDescriptor named(String name) {
+            DocumentDescriptor descriptor = new DocumentDescriptor();
+            descriptor.setName(name);
+            return descriptor;
+        }
+
+        private List<String> names(List<DocumentDescriptor> descriptors) {
+            return descriptors.stream().map(DocumentDescriptor::getName).toList();
+        }
     }
 
     // ==================== updateResourceInAgent ====================
@@ -157,6 +200,29 @@ class RestAgentStoreExtendedTest {
             Response response = restAgentStore.updateResourceInAgent(AGENT_ID, 1, newUri);
 
             assertEquals(Response.Status.BAD_REQUEST.getStatusCode(), response.getStatus());
+        }
+
+        /**
+         * The 400 body names the resource that was not updated, and this is the AGENT
+         * store: the constant was copy-pasted from the workflow-store twin, so the body
+         * came back as {@code eddi://ai.labs.workflow/workflowstore/workflows/} built
+         * from an AGENT id — a URI no resource has, which callers that parse the entity
+         * (UpgradeExecutor, the Manager) read as the wrong resource type. Only the
+         * status code was asserted, so the wrong URI went unnoticed.
+         */
+        @Test
+        @DisplayName("the 400 body names this agent, not a workflow")
+        void nonMatchingUriReportsTheAgentUri() throws Exception {
+            AgentConfiguration config = new AgentConfiguration();
+            config.setWorkflows(new ArrayList<>(List.of(
+                    URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + WF1_ID + "?version=1"))));
+            when(agentStore.read(AGENT_ID, 1)).thenReturn(config);
+
+            URI newUri = URI.create("eddi://ai.labs.workflow/workflowstore/workflows/differentId?version=2");
+            Response response = restAgentStore.updateResourceInAgent(AGENT_ID, 1, newUri);
+
+            assertEquals(URI.create("eddi://ai.labs.agent/agentstore/agents/" + AGENT_ID + "?version=1"),
+                    response.getEntity());
         }
     }
 
@@ -304,6 +370,33 @@ class RestAgentStoreExtendedTest {
             assertNotNull(response);
             assertEquals(201, response.getStatus());
             verify(restWorkflowStore, never()).duplicateWorkflow(anyString(), anyInt(), anyBoolean());
+        }
+
+        /**
+         * {@code ?version=0} is the documented "current version" shorthand that PUT and
+         * DELETE honour. {@code validateParameters} maps it, but its return value was
+         * discarded here, so {@code agentStore.read(id, 0)} matched nothing — neither
+         * the current row nor the history fallback — and duplicating the current
+         * version answered 404.
+         */
+        @Test
+        @DisplayName("version=0 duplicates the current version instead of 404")
+        void versionZeroDuplicatesCurrent() throws Exception {
+            AgentConfiguration sourceConfig = new AgentConfiguration();
+            sourceConfig.setSecurity(null);
+            sourceConfig.setWorkflows(new ArrayList<>());
+            when(agentStore.getCurrentResourceId(AGENT_ID)).thenReturn(createResourceId(AGENT_ID, 3));
+            when(agentStore.read(AGENT_ID, 3)).thenReturn(sourceConfig);
+            when(agentStore.create(any())).thenReturn(createResourceId("newagent1122334455", 1));
+
+            var oldDescriptor = new DocumentDescriptor();
+            oldDescriptor.setName("Original Agent");
+            when(documentDescriptorStore.readDescriptor(AGENT_ID, 3)).thenReturn(oldDescriptor);
+
+            Response response = restAgentStore.duplicateAgent(AGENT_ID, 0, false);
+
+            assertEquals(201, response.getStatus());
+            verify(agentStore).read(AGENT_ID, 3);
         }
 
         @Test
@@ -471,6 +564,9 @@ class RestAgentStoreExtendedTest {
         ResourceAccessGuard guard = mock(ResourceAccessGuard.class);
         lenient().when(guard.seesEverything()).thenReturn(true);
         lenient().when(guard.canAccess(any(), any())).thenReturn(true);
+        // Without this the bare mock returns null from redactForCaller and visibleOnly
+        // hands back a list of nulls — which every size-only assertion passes anyway.
+        lenient().when(guard.redactForCaller(any())).thenAnswer(invocation -> invocation.getArgument(0));
         return guard;
     }
 }

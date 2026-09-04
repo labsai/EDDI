@@ -12,6 +12,7 @@ import ai.labs.eddi.backup.model.ImportPreview.ResourceDiff;
 import ai.labs.eddi.backup.model.SyncMapping;
 import ai.labs.eddi.backup.model.SyncRequest;
 import ai.labs.eddi.configs.IRestVersionInfo;
+import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.apicalls.IApiCallsStore;
 import ai.labs.eddi.configs.dictionary.IDictionaryStore;
@@ -735,10 +736,16 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     // ==================== Resource Creation ====================
     //
     // All create methods use direct I*Store.create() via CDI instead of going
-    // through
-    // the IRest*Store layer. This bypasses Response.getLocation() which returns
-    // null
-    // for eddi:// scheme URIs when called in-process (CDI direct calls).
+    // through the IRest*Store layer, because what an import needs is the new id and
+    // version, not an HTTP envelope to unwrap again — and because the store call
+    // has no JAX-RS filters to run, which is why createResourceDirect writes the
+    // DocumentDescriptor itself.
+    //
+    // NOT because Response.getLocation() is broken for eddi:// URIs. It is not:
+    // RestWorkflowStoreCrudTest.duplicateDeepCopyWithParserDictionaries builds a
+    // Response.created(eddi://...) with the real JAX-RS RuntimeDelegate and reads
+    // the Location back. That claim used to sit here and in four other classes; it
+    // was wrong in all five.
 
     /**
      * Creates a resource directly via CDI store lookup, bypassing the REST layer
@@ -775,7 +782,38 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     }
 
     private URI createNewAgent(AgentConfiguration agentConfiguration, ImportTransaction transaction) {
-        return createResourceDirect(IAgentStore.class, agentConfiguration, IRestAgentStore.resourceURI, transaction);
+        URI createdAgentUri = createResourceDirect(IAgentStore.class, agentConfiguration, IRestAgentStore.resourceURI, transaction);
+        registerCapabilities(createdAgentUri, agentConfiguration);
+        return createdAgentUri;
+    }
+
+    /**
+     * Adds an imported Agent's skills to the capability index.
+     *
+     * <p>
+     * The index has no observer mechanism: it is seeded once at startup and then
+     * maintained by explicit {@code register}/{@code unregister} calls from
+     * {@code RestAgentStore}. Import creates Agents through the store directly, so
+     * without this an imported Agent's skills stayed invisible to
+     * {@code capabilityMatch} behaviour rules and to A2A discovery until the node
+     * was restarted, with no error to explain it.
+     * </p>
+     *
+     * <p>
+     * Best-effort: a discovery index that cannot be updated must not fail an import
+     * whose Agent is already written.
+     * </p>
+     */
+    private void registerCapabilities(URI createdAgentUri, AgentConfiguration agentConfiguration) {
+        if (createdAgentUri == null || agentConfiguration.getCapabilities() == null || agentConfiguration.getCapabilities().isEmpty()) {
+            return;
+        }
+        try {
+            IResourceId resourceId = RestUtilities.extractResourceId(createdAgentUri);
+            CDI.current().select(CapabilityRegistryService.class).get().register(resourceId.getId(), agentConfiguration);
+        } catch (Exception e) {
+            LOGGER.warnf("Imported Agent %s could not be added to the capability registry: %s", createdAgentUri, e.getMessage());
+        }
     }
 
     private URI createNewWorkflow(String workflowFileString, ImportTransaction transaction) throws IOException {
@@ -981,9 +1019,11 @@ public class RestImportService extends AbstractBackupService implements IRestImp
      * and a partial import leaves them behind, contradicting the guarantee
      * {@link #importAgentZipFile} advertises.
      * <p>
-     * The id is read from the {@code X-Resource-URI} header rather than
-     * {@code Response.getLocation()}, which JAX-RS reports as {@code null} for the
-     * {@code eddi://} scheme on an in-process call. A snippet that was only
+     * The id is read from the {@code X-Resource-URI} header, which
+     * {@code RestVersionInfo.create} sets alongside {@code Location}. Either would
+     * do — {@code Response.getLocation()} works for {@code eddi://} URIs, contrary
+     * to the claim that used to stand here — but the header is the one this method
+     * has always read and there is no reason to move it. A snippet that was only
      * <em>updated</em> during a merge is deliberately not recorded: it already
      * existed and is not an orphan.
      */
@@ -1130,6 +1170,31 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 LOGGER.warnf("Rollback could not delete descriptor of '%s': %s", LogSanitizer.sanitize(resource.id()),
                         LogSanitizer.sanitize(e.getMessage()));
             }
+            unregisterCapabilities(resource);
+        }
+    }
+
+    /**
+     * Takes a rolled-back Agent back out of the capability index.
+     *
+     * <p>
+     * {@link #createNewAgent} registers an imported Agent's skills, and the index
+     * is a process-local map that nothing else prunes. Without this, a ZIP that
+     * created an Agent and then failed on a later resource deleted the Agent row
+     * while leaving its skills in the index, so {@code findBySkill} and A2A
+     * discovery answered with an agent id that no longer exists — until the next
+     * restart.
+     * </p>
+     */
+    private void unregisterCapabilities(ImportTransaction.CreatedResource resource) {
+        if (!IAgentStore.class.equals(resource.storeClass())) {
+            return;
+        }
+        try {
+            CDI.current().select(CapabilityRegistryService.class).get().unregister(resource.id());
+        } catch (Exception e) {
+            LOGGER.warnf("Rollback could not clear the capability registration of Agent '%s': %s",
+                    LogSanitizer.sanitize(resource.id()), LogSanitizer.sanitize(e.getMessage()));
         }
     }
 
@@ -1266,7 +1331,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         // Use direct CDI lookup instead of HTTP loopback proxy.
         // The MP REST Client proxy strips response headers (Location, X-Resource-URI)
         // and runs on the Vert.x IO event loop, causing deadlocks during import.
-        return jakarta.enterprise.inject.spi.CDI.current().select(clazz).get();
+        return CDI.current().select(clazz).get();
     }
 
     @SuppressWarnings("unchecked")

@@ -7,6 +7,7 @@ package ai.labs.eddi.backup.impl;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.backup.IZipArchive;
 import ai.labs.eddi.backup.model.ImportPreview;
+import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
@@ -37,6 +38,7 @@ import java.io.InputStream;
 import java.net.URI;
 import java.nio.file.Files;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -70,6 +72,8 @@ import static org.mockito.Mockito.when;
 class RestImportServiceRollbackAndCleanupTest {
 
     private static final String AGENT_ORIGIN_ID = "aaaa11112222333344445555";
+    private static final String SECOND_AGENT_ORIGIN_ID = "ffff11112222333344445555";
+    private static final String NEW_AGENT_ID = "dddd11112222333344445555";
     private static final String WORKFLOW_ORIGIN_ID = "bbbb11112222333344445555";
     private static final String NEW_WORKFLOW_ID = "cccc11112222333344445555";
     private static final String NEW_SNIPPET_ID = "eeee11112222333344445555";
@@ -221,6 +225,42 @@ class RestImportServiceRollbackAndCleanupTest {
             }
         }
 
+        /**
+         * Import creates Agents through the store directly, so it registers their
+         * skills itself — and the capability index is a process-local map that nothing
+         * else prunes. A ZIP that landed one Agent and then failed therefore deleted
+         * the Agent row while leaving its skills behind, so {@code findBySkill} and A2A
+         * discovery kept answering with an agent id that no longer existed, until the
+         * next restart.
+         */
+        @Test
+        @DisplayName("a rolled-back Agent is taken back out of the capability index")
+        void rolledBackAgentIsUnregisteredFromTheCapabilityIndex() throws Exception {
+            var workflowStore = mock(IWorkflowStore.class);
+            var agentStore = mock(IAgentStore.class);
+            var capabilityRegistry = mock(CapabilityRegistryService.class);
+            stubTwoCapableAgentsZip();
+
+            when(workflowStore.create(any())).thenReturn(resourceId(NEW_WORKFLOW_ID, 1));
+            // The first Agent lands and is registered; the second blows up, so
+            // everything this ZIP created so far is rolled back.
+            when(agentStore.create(any()))
+                    .thenReturn(resourceId(NEW_AGENT_ID, 1))
+                    .thenThrow(new IResourceStore.ResourceStoreException("agent store unavailable"));
+
+            try (MockedStatic<CDI> cdiMock = mockStatic(CDI.class)) {
+                stubCdi(cdiMock, workflowStore, agentStore, capabilityRegistry);
+
+                assertThrows(InternalServerErrorException.class,
+                        () -> importService.importAgent(
+                                new ByteArrayInputStream(new byte[0]), "create", null, null, null));
+
+                verify(capabilityRegistry).register(eq(NEW_AGENT_ID), any());
+                verify(agentStore).deleteAllPermanently(NEW_AGENT_ID);
+                verify(capabilityRegistry).unregister(NEW_AGENT_ID);
+            }
+        }
+
         @Test
         @DisplayName("a successful import deletes nothing")
         void successfulImportDoesNotRollBack() throws Exception {
@@ -365,6 +405,36 @@ class RestImportServiceRollbackAndCleanupTest {
     }
 
     /**
+     * A ZIP holding TWO capability-declaring agents over one workflow — the shape
+     * that makes a half-imported ZIP reachable: the first agent is created (and
+     * registered) before the second one fails. Both files deserialize to the same
+     * configuration, so the assertions do not depend on the order
+     * {@code Files.newDirectoryStream} happens to return them in.
+     */
+    private void stubTwoCapableAgentsZip() throws Exception {
+        URI workflowUri = URI.create(
+                "eddi://ai.labs.workflow/workflowstore/workflows/" + WORKFLOW_ORIGIN_ID + "?version=1");
+
+        doAnswer(inv -> {
+            File dir = inv.getArgument(1);
+            dir.mkdirs();
+            Files.writeString(new File(dir, AGENT_ORIGIN_ID + ".agent.json").toPath(), "AGENTJSON");
+            Files.writeString(new File(dir, SECOND_AGENT_ORIGIN_ID + ".agent.json").toPath(), "AGENTJSON");
+            File workflowDir = new File(new File(dir, WORKFLOW_ORIGIN_ID), "1");
+            workflowDir.mkdirs();
+            Files.writeString(new File(workflowDir, WORKFLOW_ORIGIN_ID + ".workflow.json").toPath(), "WORKFLOWJSON");
+            return null;
+        }).when(zipArchive).unzip(any(InputStream.class), any(File.class));
+
+        var agentConfig = new AgentConfiguration();
+        agentConfig.setWorkflows(List.of(workflowUri));
+        agentConfig.setCapabilities(List.of(new AgentConfiguration.Capability("translation", Map.of(), "high")));
+        when(jsonSerialization.deserialize(eq("AGENTJSON"), eq(AgentConfiguration.class))).thenReturn(agentConfig);
+        when(jsonSerialization.deserialize(eq("WORKFLOWJSON"), eq(WorkflowConfiguration.class)))
+                .thenReturn(new WorkflowConfiguration());
+    }
+
+    /**
      * Same ZIP as {@link #stubAgentWithOneWorkflowZip()} plus a {@code snippets/}
      * directory holding one snippet — the layout {@code findSnippetsDir} looks for
      * directly under the unzipped root.
@@ -422,6 +492,25 @@ class RestImportServiceRollbackAndCleanupTest {
         Instance<IAgentStore> agentInstance = mock(Instance.class);
         when(cdi.select(IAgentStore.class)).thenReturn(agentInstance);
         when(agentInstance.get()).thenReturn(agentStore);
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static void stubCdi(MockedStatic<CDI> cdiMock, IWorkflowStore workflowStore, IAgentStore agentStore,
+                                CapabilityRegistryService capabilityRegistry) {
+        CDI cdi = mock(CDI.class);
+        cdiMock.when(CDI::current).thenReturn(cdi);
+
+        Instance<IWorkflowStore> workflowInstance = mock(Instance.class);
+        when(cdi.select(IWorkflowStore.class)).thenReturn(workflowInstance);
+        when(workflowInstance.get()).thenReturn(workflowStore);
+
+        Instance<IAgentStore> agentInstance = mock(Instance.class);
+        when(cdi.select(IAgentStore.class)).thenReturn(agentInstance);
+        when(agentInstance.get()).thenReturn(agentStore);
+
+        Instance<CapabilityRegistryService> registryInstance = mock(Instance.class);
+        when(cdi.select(CapabilityRegistryService.class)).thenReturn(registryInstance);
+        when(registryInstance.get()).thenReturn(capabilityRegistry);
     }
 
     @SuppressWarnings({"unchecked", "rawtypes"})

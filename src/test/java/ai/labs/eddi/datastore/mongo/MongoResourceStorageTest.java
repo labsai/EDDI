@@ -8,10 +8,12 @@ import ai.labs.eddi.datastore.IResourceFilter;
 import ai.labs.eddi.datastore.IResourceStorage;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
+import com.mongodb.MongoClientSettings;
 import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
 import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.model.ReplaceOptions;
 import org.bson.Document;
 import org.bson.conversions.Bson;
@@ -19,6 +21,7 @@ import org.bson.types.ObjectId;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 
 import java.io.IOException;
@@ -168,6 +171,76 @@ class MongoResourceStorageTest {
         storage.removeAllPermanently(VALID_ID);
         verify(currentCollection).deleteOne(any(Document.class));
         verify(historyCollection).deleteMany(any(Document.class));
+    }
+
+    /**
+     * A history row's {@code _id} is the embedded document {@code {_id: ObjectId,
+     * _version: int}}, and BSON compares embedded documents field by field. The old
+     * filter was a range — {@code $gt {_id, _version: 0}} — so a row archived at
+     * version 0 compared EQUAL to the lower bound and was excluded. Conversation
+     * descriptors are created at version 0, so permanent delete and GDPR erasure
+     * left an undeletable tombstone carrying {@code userId} behind, on MongoDB
+     * only; Postgres deletes by id and did not have the bug.
+     */
+    @Test
+    @DisplayName("removeAllPermanently — matches history rows by nested id, so version 0 is not skipped")
+    void removeAllPermanentlyCoversVersionZero() {
+        ArgumentCaptor<Document> filter = ArgumentCaptor.forClass(Document.class);
+
+        storage.removeAllPermanently(VALID_ID);
+
+        verify(historyCollection).deleteMany(filter.capture());
+        assertEquals(new ObjectId(VALID_ID), filter.getValue().get("_id._id"), "history rows must be matched by the nested id");
+        assertFalse(filter.getValue().toJson().contains("$gt"), "no range bound may exclude version 0: " + filter.getValue().toJson());
+        assertFalse(filter.getValue().toJson().contains("$lt"), "no range bound may exclude version 0: " + filter.getValue().toJson());
+    }
+
+    /** @see #removeAllPermanentlyCoversVersionZero() — same bound, same defect. */
+    @Test
+    @DisplayName("readHistoryLatest — matches by nested id and sorts on the nested version")
+    void readHistoryLatestCoversVersionZero() {
+        when(historyCollection.countDocuments(any(Document.class))).thenReturn(1L);
+
+        Document idDoc = new Document("_id", new ObjectId(VALID_ID)).append("_version", 0);
+        Document doc = new Document("_id", idDoc).append("data", "archived at v0");
+        FindIterable<Document> iterable = mock(FindIterable.class);
+        when(historyCollection.find(any(Document.class))).thenReturn(iterable);
+        when(iterable.sort(any(Document.class))).thenReturn(iterable);
+        when(iterable.limit(1)).thenReturn(iterable);
+        when(iterable.first()).thenReturn(doc);
+
+        IResourceStorage.IHistoryResource<String> result = storage.readHistoryLatest(VALID_ID);
+
+        assertNotNull(result);
+        assertEquals(0, result.getVersion());
+
+        ArgumentCaptor<Document> filter = ArgumentCaptor.forClass(Document.class);
+        verify(historyCollection).find(filter.capture());
+        assertEquals(new ObjectId(VALID_ID), filter.getValue().get("_id._id"));
+
+        ArgumentCaptor<Document> sort = ArgumentCaptor.forClass(Document.class);
+        verify(iterable).sort(sort.capture());
+        assertEquals(-1, sort.getValue().get("_id._version"), "sorting on the composite _id would order by ObjectId, not by version");
+    }
+
+    /**
+     * The nested-id filter that fixed the version-0 escape is only servable by an
+     * index on that dotted path: MongoDB's built-in {@code _id} index covers the
+     * whole embedded subdocument, so without this one every
+     * {@code removeAllPermanently} and {@code readHistoryLatest} is a COLLSCAN of
+     * the history collection — once per conversation in
+     * {@code GdprComplianceService}'s erasure loop.
+     */
+    @Test
+    @DisplayName("the history collection is indexed on the nested id the history filter matches")
+    void historyCollectionIsIndexedOnTheNestedId() {
+        ArgumentCaptor<Bson> keys = ArgumentCaptor.forClass(Bson.class);
+        verify(historyCollection, atLeastOnce()).createIndex(keys.capture(), any(IndexOptions.class));
+
+        boolean indexed = keys.getAllValues().stream()
+                .map(key -> key.toBsonDocument(Document.class, MongoClientSettings.getDefaultCodecRegistry()).toString())
+                .anyMatch(key -> key.contains("_id._id"));
+        assertTrue(indexed, "no index on '_id._id' — the history filter would COLLSCAN: " + keys.getAllValues());
     }
 
     // ==================== readHistory ====================

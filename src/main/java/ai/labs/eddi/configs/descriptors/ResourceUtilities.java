@@ -17,6 +17,7 @@ import jakarta.ws.rs.core.Response;
 import java.net.URI;
 import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 import static jakarta.ws.rs.core.Response.Status.BAD_REQUEST;
@@ -36,11 +37,82 @@ public class ResourceUtilities {
         return null;
     }
 
-    public static List<DocumentDescriptor> createMalFormattedResourceUriException(String containingResourceUri) {
+    /**
+     * The 400 for a resource URI that is not in the expected shape.
+     *
+     * <p>
+     * Returns the exception for the caller to {@code throw}, rather than being
+     * declared to return {@code List<DocumentDescriptor>} and throwing from inside
+     * — a signature that existed only so call sites could write
+     * {@code return createMalFormatted…(uri);} to satisfy the compiler, and that
+     * read as if a value came back.
+     * </p>
+     */
+    public static BadRequestException malformedResourceUri(String containingResourceUri) {
         String message = String.format(
                 "Bad resource uri. Needs to be of this format: " + "eddi://ai.labs.<type>/<path>/<ID>?version=<VERSION>" + "\n actual: '%s'",
                 containingResourceUri);
-        throw new BadRequestException(Response.status(BAD_REQUEST).entity(message).type(MediaType.TEXT_PLAIN).build());
+        return new BadRequestException(Response.status(BAD_REQUEST).entity(message).type(MediaType.TEXT_PLAIN).build());
+    }
+
+    /**
+     * Applies {@code filter}, {@code index} and {@code limit} to an
+     * already-materialised descriptor list.
+     *
+     * <p>
+     * The reverse-reference listings ("which agents contain this workflow?") answer
+     * from a store lookup that takes neither a filter nor a page, so those three
+     * REST parameters were accepted and then silently dropped: a client paging with
+     * {@code index}/{@code limit} got the whole list back on every page, and a
+     * resource referenced by thousands of workflows returned all of them at once.
+     * Post-filtering is an approximation of the store-side filter — a
+     * case-insensitive substring over the same descriptor fields the descriptor
+     * store matches on — and it is applied here rather than pushed down because
+     * there is no query to push it into.
+     * </p>
+     *
+     * @param index
+     *            page number, not offset — the same meaning the descriptor store
+     *            gives it
+     */
+    public static List<DocumentDescriptor> filterAndPage(List<DocumentDescriptor> descriptors, String filter, Integer index,
+                                                         Integer limit) {
+        if (descriptors == null || descriptors.isEmpty()) {
+            return descriptors;
+        }
+
+        List<DocumentDescriptor> matching = descriptors;
+        if (!isNullOrEmpty(filter)) {
+            String needle = filter.toLowerCase(Locale.ROOT);
+            matching = descriptors.stream().filter(descriptor -> matches(descriptor, needle)).toList();
+        }
+
+        // null or non-positive means "no page": an in-process caller may pass either,
+        // even though the REST overloads declare @DefaultValue("20"). Paging on a
+        // limit of 0 would return an empty page and silently drop every row.
+        if (limit == null || limit <= 0) {
+            return matching;
+        }
+        int page = index == null || index < 0 ? 0 : index;
+        int from = Math.min(page * limit, matching.size());
+        int to = Math.min(from + limit, matching.size());
+        return matching.subList(from, to);
+    }
+
+    /**
+     * The descriptor fields this post-filter matches on, deliberately the same set
+     * the descriptor store's own filter searches — a narrower set would make one
+     * query string select different rows depending on which listing answered it.
+     */
+    private static boolean matches(DocumentDescriptor descriptor, String needle) {
+        return containsIgnoreCase(descriptor.getName(), needle)
+                || containsIgnoreCase(descriptor.getDescription(), needle)
+                || containsIgnoreCase(descriptor.getOwnerId(), needle)
+                || (descriptor.getResource() != null && containsIgnoreCase(descriptor.getResource().toString(), needle));
+    }
+
+    private static boolean containsIgnoreCase(String value, String needle) {
+        return value != null && value.toLowerCase(Locale.ROOT).contains(needle);
     }
 
     /**

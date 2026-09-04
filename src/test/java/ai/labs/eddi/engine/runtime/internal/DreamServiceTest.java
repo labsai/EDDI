@@ -1144,18 +1144,27 @@ class DreamServiceTest {
         verify(store, times(1)).deleteEntry(anyString());
     }
 
+    /**
+     * These two used to assert that the SETTER throws, and so pinned a defect:
+     * Jackson calls it on every MongoDB read, ZIP import and instance sync, so an
+     * agent already stored with {@code summarizeTargetEntries: 0} — legal when it
+     * was written — could no longer be read, deployed, exported, or even repaired
+     * by PUT, because the read comes first.
+     * {@code AbstractResourceStore.validate}'s Javadoc states the rule outright: "a
+     * document already in the database must keep loading even if the rules
+     * tightened". The bound is a WRITE-path rule and now lives in
+     * {@code AgentStore.create}/{@code update} next to {@code HitlConfigValidation}
+     * — see {@code AgentStoreTest.UserMemoryConfigValidation}.
+     */
     @Test
-    void setSummarizeTargetEntries_rejectsZero() {
+    void setSummarizeTargetEntries_acceptsStoredOutOfRangeValuesSoTheAgentStillLoads() {
         var config = new AgentConfiguration.DreamConfig();
-        assertThrows(IllegalArgumentException.class,
-                () -> config.setSummarizeTargetEntries(0));
-    }
 
-    @Test
-    void setSummarizeTargetEntries_rejectsNegative() {
-        var config = new AgentConfiguration.DreamConfig();
-        assertThrows(IllegalArgumentException.class,
-                () -> config.setSummarizeTargetEntries(-1));
+        assertDoesNotThrow(() -> config.setSummarizeTargetEntries(0));
+        assertEquals(0, config.getSummarizeTargetEntries());
+
+        assertDoesNotThrow(() -> config.setSummarizeTargetEntries(-1));
+        assertEquals(-1, config.getSummarizeTargetEntries());
     }
 
     // === Agent ownership: a cycle configured by one agent must not act on another

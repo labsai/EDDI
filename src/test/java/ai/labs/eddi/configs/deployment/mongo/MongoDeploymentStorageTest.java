@@ -7,15 +7,20 @@ package ai.labs.eddi.configs.deployment.mongo;
 import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
+import com.mongodb.MongoClientSettings;
+import com.mongodb.MongoCommandException;
 import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
 import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.IndexOptions;
+import com.mongodb.client.model.ReplaceOptions;
 import org.bson.Document;
 import org.bson.conversions.Bson;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.io.IOException;
 import java.util.List;
@@ -43,24 +48,73 @@ class MongoDeploymentStorageTest {
 
     // ==================== setDeploymentInfo ====================
 
+    /**
+     * These replace a pair that pinned the old check-then-act (findOneAndReplace,
+     * then insertOne when it came back null). Two concurrent deploys of the same
+     * agent/version both saw null and both inserted, so those assertions described
+     * the defect rather than the requirement.
+     */
     @Test
-    @DisplayName("setDeploymentInfo — replaces when existing")
-    void setDeploymentInfoReplace() {
-        Document existing = new Document("environment", "production");
-        when(collection.findOneAndReplace(any(Document.class), any(Document.class))).thenReturn(existing);
+    @DisplayName("setDeploymentInfo — one atomic upsert, never a check-then-act")
+    void setDeploymentInfoUpserts() {
+        ArgumentCaptor<Document> filterCaptor = ArgumentCaptor.forClass(Document.class);
+        ArgumentCaptor<Document> docCaptor = ArgumentCaptor.forClass(Document.class);
+        ArgumentCaptor<ReplaceOptions> optionsCaptor = ArgumentCaptor.forClass(ReplaceOptions.class);
 
         storage.setDeploymentInfo("production", "agent-1", 1, DeploymentInfo.DeploymentStatus.deployed);
-        verify(collection).findOneAndReplace(any(Document.class), any(Document.class));
+
+        verify(collection).replaceOne(filterCaptor.capture(), docCaptor.capture(), optionsCaptor.capture());
+        verify(collection, never()).findOneAndReplace(any(Document.class), any(Document.class));
         verify(collection, never()).insertOne(any(Document.class));
+
+        assertTrue(optionsCaptor.getValue().isUpsert(), "the replace must upsert, or the first deploy writes nothing");
+        assertEquals("production", filterCaptor.getValue().get("environment"));
+        assertEquals("agent-1", filterCaptor.getValue().get("agentId"));
+        assertEquals(1, filterCaptor.getValue().get("agentVersion"));
+        assertEquals("deployed", docCaptor.getValue().get("deploymentStatus"));
     }
 
     @Test
-    @DisplayName("setDeploymentInfo — inserts when not existing")
-    void setDeploymentInfoInsert() {
-        when(collection.findOneAndReplace(any(Document.class), any(Document.class))).thenReturn(null);
+    @DisplayName("a unique index on (environment, agentId, agentVersion) backs the upsert")
+    void uniqueIndexOnDeploymentKey() {
+        ArgumentCaptor<Bson> keyCaptor = ArgumentCaptor.forClass(Bson.class);
+        ArgumentCaptor<IndexOptions> optionsCaptor = ArgumentCaptor.forClass(IndexOptions.class);
 
-        storage.setDeploymentInfo("production", "agent-1", 1, DeploymentInfo.DeploymentStatus.deployed);
-        verify(collection).insertOne(any(Document.class));
+        verify(collection).createIndex(keyCaptor.capture(), optionsCaptor.capture());
+
+        assertEquals(Boolean.TRUE, optionsCaptor.getValue().isUnique());
+        String key = keyCaptor.getValue().toBsonDocument(Document.class, MongoClientSettings.getDefaultCodecRegistry()).toString();
+        assertTrue(key.contains("environment") && key.contains("agentId") && key.contains("agentVersion"),
+                "unexpected unique index key: " + key);
+    }
+
+    /**
+     * A unique index cannot be built over a collection that already holds
+     * duplicates — which is exactly the state of the deployments this index exists
+     * to protect, since those duplicates are what the check-then-act upsert used to
+     * write. Letting the E11000 out of the constructor made the bean
+     * unconstructable on precisely those installations, and an unconstructable
+     * {@code IDeploymentStore} takes {@code RestAgentStore},
+     * {@code RestAgentAdministration} and the startup redeploy with it: the fix
+     * bricked the deployments that had the bug.
+     */
+    @Test
+    @DisplayName("a duplicate-key failure building the unique index does not break construction")
+    void duplicateRowsDoNotBreakConstruction() {
+        MongoDatabase database = mock(MongoDatabase.class);
+        MongoCollection<Document> failingCollection = mock(MongoCollection.class);
+        when(database.getCollection("deployments")).thenReturn(failingCollection);
+        when(failingCollection.createIndex(any(Bson.class), any(IndexOptions.class)))
+                .thenThrow(mock(MongoCommandException.class));
+
+        MongoDeploymentStorage constructed = assertDoesNotThrow(
+                () -> new MongoDeploymentStorage(database, documentBuilder),
+                "duplicate rows must not make the deployment store unconstructable");
+
+        // and the store stays usable: the atomic upsert is what actually closes the
+        // race, the index is only its backstop.
+        constructed.setDeploymentInfo("production", "agent-1", 1, DeploymentInfo.DeploymentStatus.deployed);
+        verify(failingCollection).replaceOne(any(Document.class), any(Document.class), any(ReplaceOptions.class));
     }
 
     // ==================== readDeploymentInfo ====================

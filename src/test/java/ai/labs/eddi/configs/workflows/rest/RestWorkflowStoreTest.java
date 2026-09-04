@@ -14,6 +14,7 @@ import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.runtime.client.configuration.ResourceClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
+import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -43,10 +44,29 @@ class RestWorkflowStoreTest {
     private RestWorkflowStore restWorkflowStore;
 
     @BeforeEach
-    void setUp() {
+    void setUp() throws Exception {
         openMocks(this);
         restWorkflowStore = new RestWorkflowStore(WorkflowStore, resourceClientLibrary, documentDescriptorStore, jsonSchemaCreator,
                 mock(ResourceAccessGuard.class));
+        // Both fixtures are live at v1. A cascade only runs against the CURRENT
+        // version: it tears the referenced configs down before the delete — the only
+        // place the version used to be checked — has run.
+        when(WorkflowStore.getCurrentResourceId("pkg1")).thenReturn(resourceId("pkg1", 1));
+        when(WorkflowStore.getCurrentResourceId("wf1")).thenReturn(resourceId("wf1", 1));
+    }
+
+    private static IResourceStore.IResourceId resourceId(String id, int version) {
+        return new IResourceStore.IResourceId() {
+            @Override
+            public String getId() {
+                return id;
+            }
+
+            @Override
+            public Integer getVersion() {
+                return version;
+            }
+        };
     }
 
     /**
@@ -96,9 +116,14 @@ class RestWorkflowStoreTest {
 
             restWorkflowStore.deleteWorkflow("pkg1", 1, true, true);
 
-            verify(resourceClientLibrary).deleteResource(URI.create("eddi://ai.labs.rules/rulestore/rulesets/beh1?version=1"), true);
-            verify(resourceClientLibrary).deleteResource(URI.create("eddi://ai.labs.apicalls/apicallstore/apicalls/http1?version=3"), true);
-            verify(resourceClientLibrary).deleteResource(URI.create("eddi://ai.labs.output/outputstore/outputsets/out1?version=1"), true);
+            // permanent=false on every cascaded resource, even though the request asked
+            // for permanent=true. These three assertions used to read `true` and so
+            // pinned the defect: the "is anyone else using this?" guard is version-scoped
+            // while deleteAllPermanently is id-scoped and erases every version plus all
+            // history, so a workflow pinning a different version lost the config outright.
+            verify(resourceClientLibrary).deleteResource(URI.create("eddi://ai.labs.rules/rulestore/rulesets/beh1?version=1"), false);
+            verify(resourceClientLibrary).deleteResource(URI.create("eddi://ai.labs.apicalls/apicallstore/apicalls/http1?version=3"), false);
+            verify(resourceClientLibrary).deleteResource(URI.create("eddi://ai.labs.output/outputstore/outputsets/out1?version=1"), false);
         }
 
         @Test
@@ -126,7 +151,7 @@ class RestWorkflowStoreTest {
 
             restWorkflowStore.deleteWorkflow("pkg1", 1, true, true);
 
-            verify(resourceClientLibrary).deleteResource(URI.create("eddi://ai.labs.dictionary/dictionarystore/dictionaries/dict1?version=1"), true);
+            verify(resourceClientLibrary).deleteResource(URI.create("eddi://ai.labs.dictionary/dictionarystore/dictionaries/dict1?version=1"), false);
         }
 
         @Test
@@ -163,7 +188,7 @@ class RestWorkflowStoreTest {
 
             // Only the unique resource should be deleted
             verify(resourceClientLibrary, never()).deleteResource(eq(URI.create(sharedUri)), anyBoolean());
-            verify(resourceClientLibrary).deleteResource(URI.create(uniqueUri), true);
+            verify(resourceClientLibrary).deleteResource(URI.create(uniqueUri), false);
         }
 
         @Test
@@ -223,9 +248,9 @@ class RestWorkflowStoreTest {
             config.getWorkflowSteps().add(ext2);
 
             when(WorkflowStore.read("pkg1", 1)).thenReturn(config);
-            when(resourceClientLibrary.deleteResource(URI.create("eddi://ai.labs.rules/rulestore/rulesets/beh1?version=1"), true))
+            when(resourceClientLibrary.deleteResource(URI.create("eddi://ai.labs.rules/rulestore/rulesets/beh1?version=1"), false))
                     .thenThrow(new ServiceException("DB error"));
-            when(resourceClientLibrary.deleteResource(URI.create("eddi://ai.labs.output/outputstore/outputsets/out1?version=1"), true))
+            when(resourceClientLibrary.deleteResource(URI.create("eddi://ai.labs.output/outputstore/outputsets/out1?version=1"), false))
                     .thenReturn(Response.ok().build());
 
             assertDoesNotThrow(() -> restWorkflowStore.deleteWorkflow("pkg1", 1, true, true));
@@ -257,6 +282,111 @@ class RestWorkflowStoreTest {
             assertDoesNotThrow(() -> restWorkflowStore.deleteWorkflow("pkg1", 1, true, true));
 
             verify(resourceClientLibrary, never()).deleteResource(any(), anyBoolean());
+        }
+    }
+
+    @Nested
+    @DisplayName("deleteWorkflow — cascade version guard")
+    class CascadeVersionGuard {
+
+        /**
+         * {@code workflowStore.read} falls back to history for a superseded version,
+         * and the version was only checked at the very end, inside
+         * {@code restVersionInfo.delete()}. So a cascade addressed at a stale version
+         * tore down that version's rule sets, output sets and dictionaries and only
+         * then answered 409 — leaving the live workflow pointing at configs that no
+         * longer existed.
+         */
+        @Test
+        @DisplayName("refuses a stale version with 409 before deleting any referenced resource")
+        void staleVersionRefusedBeforeAnyDeletion() throws Exception {
+            when(WorkflowStore.getCurrentResourceId("pkg1")).thenReturn(resourceId("pkg1", 2));
+
+            var thrown = assertThrows(WebApplicationException.class,
+                    () -> restWorkflowStore.deleteWorkflow("pkg1", 1, false, true));
+
+            assertEquals(Response.Status.CONFLICT.getStatusCode(), thrown.getResponse().getStatus());
+            verify(WorkflowStore, never()).read(anyString(), anyInt());
+            verify(resourceClientLibrary, never()).deleteResource(any(), anyBoolean());
+            verify(WorkflowStore, never()).delete(anyString(), anyInt());
+        }
+
+        @Test
+        @DisplayName("version=0 resolves to the current version and does cascade")
+        void versionZeroCascades() throws Exception {
+            mockSingleReference();
+
+            WorkflowConfiguration config = new WorkflowConfiguration();
+            WorkflowStep outputStep = new WorkflowStep();
+            outputStep.setType(URI.create("eddi://ai.labs.output"));
+            outputStep.setConfig(new HashMap<>(Map.of("uri", "eddi://ai.labs.output/outputstore/outputsets/out1?version=1")));
+            config.getWorkflowSteps().add(outputStep);
+            when(WorkflowStore.read("pkg1", 1)).thenReturn(config);
+            when(resourceClientLibrary.deleteResource(any(), anyBoolean())).thenReturn(Response.ok().build());
+
+            restWorkflowStore.deleteWorkflow("pkg1", 0, false, true);
+
+            verify(resourceClientLibrary).deleteResource(URI.create("eddi://ai.labs.output/outputstore/outputsets/out1?version=1"), false);
+            verify(WorkflowStore).delete("pkg1", 1);
+        }
+
+        /**
+         * The ordinary "purge what I already soft-deleted" flow: a workflow with no
+         * current row makes {@code getCurrentResourceId} throw. The contract is to skip
+         * the cascade and still purge the remaining history — so the guard has to
+         * answer false rather than propagate or dereference the missing current id,
+         * which on this path would abort a destructive operation partway through.
+         */
+        @Test
+        @DisplayName("an already soft-deleted workflow skips the cascade and still purges")
+        void softDeletedWorkflowSkipsCascadeButStillPurges() throws Exception {
+            when(WorkflowStore.getCurrentResourceId("pkg1"))
+                    .thenThrow(new IResourceStore.ResourceNotFoundException("no current version"));
+
+            assertDoesNotThrow(() -> restWorkflowStore.deleteWorkflow("pkg1", 1, true, true));
+
+            verify(WorkflowStore, never()).read(anyString(), anyInt());
+            verify(resourceClientLibrary, never()).deleteResource(any(), anyBoolean());
+            verify(WorkflowStore).deleteAllPermanently("pkg1");
+        }
+    }
+
+    /**
+     * Stored shapes the cascade walks. {@code "extensions": null} is what Jackson
+     * leaves for an explicit JSON null, and this runs on the DESTRUCTIVE path: an
+     * NPE here aborts the cascade mid-way, after some referenced resources have
+     * already been deleted.
+     */
+    @Nested
+    @DisplayName("deleteWorkflow — malformed stored steps")
+    class MalformedStepsOnTheCascade {
+
+        @Test
+        @DisplayName("a parser step with null extensions does not abort the cascade")
+        void nullExtensionsOnAParserStepDoesNotAbortTheCascade() throws Exception {
+            mockSingleReference();
+
+            WorkflowConfiguration config = new WorkflowConfiguration();
+
+            WorkflowStep parserStep = new WorkflowStep();
+            parserStep.setType(URI.create("eddi://ai.labs.parser"));
+            parserStep.setExtensions(null);
+            config.getWorkflowSteps().add(parserStep);
+
+            // Ordered after the malformed step, so it is only reached if the cascade
+            // survived it.
+            WorkflowStep outputStep = new WorkflowStep();
+            outputStep.setType(URI.create("eddi://ai.labs.output"));
+            outputStep.setConfig(new HashMap<>(Map.of("uri", "eddi://ai.labs.output/outputstore/outputsets/out1?version=1")));
+            config.getWorkflowSteps().add(outputStep);
+
+            when(WorkflowStore.read("pkg1", 1)).thenReturn(config);
+            when(resourceClientLibrary.deleteResource(any(), anyBoolean())).thenReturn(Response.ok().build());
+
+            restWorkflowStore.deleteWorkflow("pkg1", 1, false, true);
+
+            verify(resourceClientLibrary).deleteResource(URI.create("eddi://ai.labs.output/outputstore/outputsets/out1?version=1"), false);
+            verify(WorkflowStore).delete("pkg1", 1);
         }
     }
 }

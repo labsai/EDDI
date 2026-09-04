@@ -11,6 +11,7 @@ import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
+import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration.WorkflowStep;
@@ -71,24 +72,29 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
      */
     private static final int MAX_PAGES = 100;
 
+    private static final String WORKFLOW_TYPE = "ai.labs.workflow";
+
     private final IAgentStore agentStore;
     private final IWorkflowStore workflowStore;
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final IResourceClientLibrary resourceClientLibrary;
+    private final IRestWorkflowStore restWorkflowStore;
 
     @Inject
     public RestOrphanAdmin(IAgentStore agentStore, IWorkflowStore workflowStore, IDocumentDescriptorStore documentDescriptorStore,
-            IResourceClientLibrary resourceClientLibrary) {
+            IResourceClientLibrary resourceClientLibrary, IRestWorkflowStore restWorkflowStore) {
         this.agentStore = agentStore;
         this.workflowStore = workflowStore;
         this.documentDescriptorStore = documentDescriptorStore;
         this.resourceClientLibrary = resourceClientLibrary;
+        this.restWorkflowStore = restWorkflowStore;
     }
 
     @Override
     public OrphanReport scanOrphans(Boolean includeDeleted) {
-        List<OrphanInfo> orphans = findOrphans(includeDeleted);
-        return new OrphanReport(orphans.size(), 0, orphans);
+        ReferenceScan scan = scanReferencedUris();
+        List<OrphanInfo> orphans = collectOrphans(scan.referencedResources(), includeDeleted);
+        return new OrphanReport(orphans.size(), 0, orphans, scan.complete(), scan.failureReason());
     }
 
     @Override
@@ -111,12 +117,12 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
                     .type(MediaType.APPLICATION_JSON).build());
         }
 
-        List<OrphanInfo> orphans = collectOrphans(scan.referencedUris(), includeDeleted);
+        List<OrphanInfo> orphans = collectOrphans(scan.referencedResources(), includeDeleted);
         int deletedCount = 0;
 
         for (OrphanInfo orphan : orphans) {
             try {
-                resourceClientLibrary.deleteResource(orphan.getResourceUri(), true);
+                deleteOrphan(orphan);
                 deletedCount++;
                 log.infof("Purged orphan: %s [%s]", orphan.getResourceUri(), orphan.getType());
             } catch (Exception e) {
@@ -125,29 +131,90 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
         }
 
         log.infof("Orphan purge complete: %d/%d deleted", deletedCount, orphans.size());
-        return new OrphanReport(orphans.size(), deletedCount, orphans);
+        return new OrphanReport(orphans.size(), deletedCount, orphans, true, null);
     }
 
     /**
-     * Outcome of building the referenced-URI set.
+     * Deletes one orphan, or throws so the caller does not count it.
      *
-     * @param referencedUris
-     *            every URI referenced by at least one Agent or workflow
+     * <p>
+     * Workflows go through {@link IRestWorkflowStore} directly:
+     * {@code ResourceClientLibrary} registers no {@code ai.labs.workflow} proxy, so
+     * routing them there deleted nothing. Cascade is deliberately off — every
+     * resource a workflow references is itself enumerated by this scan, and is only
+     * an orphan if nothing else points at it.
+     * </p>
+     */
+    private void deleteOrphan(OrphanInfo orphan) throws Exception {
+        if (!WORKFLOW_TYPE.equals(orphan.getType())) {
+            resourceClientLibrary.deleteResource(orphan.getResourceUri(), true);
+            return;
+        }
+
+        // deletedCount is the operator's only feedback for an irreversible operation,
+        // so each way this can fail to delete anything has to raise rather than fall
+        // through to the caller's deletedCount++.
+        var resourceId = RestUtilities.extractResourceId(orphan.getResourceUri());
+        if (resourceId == null || isNullOrEmpty(resourceId.getId())) {
+            throw new IllegalStateException("Orphan workflow URI carries no resource id: " + orphan.getResourceUri());
+        }
+
+        Response response = restWorkflowStore.deleteWorkflow(resourceId.getId(), resourceId.getVersion(), true, false);
+        if (response == null) {
+            throw new IllegalStateException("Workflow delete answered -1 for " + orphan.getResourceUri());
+        }
+        if (response.getStatus() < 200 || response.getStatus() >= 300) {
+            throw new IllegalStateException("Workflow delete answered " + response.getStatus() + " for " + orphan.getResourceUri());
+        }
+    }
+
+    /**
+     * Outcome of building the referenced-resource set.
+     *
+     * @param referencedResources
+     *            every resource referenced by at least one Agent or workflow, keyed
+     *            by {@link #resourceKey(URI)} — identity WITHOUT the pinned version
      * @param complete
      *            false when any part of the traversal failed, meaning the set may
      *            be missing references and is therefore unsafe to delete against
      * @param failureReason
      *            human-readable cause when {@code complete} is false
      */
-    private record ReferenceScan(Set<String> referencedUris, boolean complete, String failureReason) {
+    private record ReferenceScan(Set<String> referencedResources, boolean complete, String failureReason) {
     }
 
-    private List<OrphanInfo> findOrphans(boolean includeDeleted) {
-        return collectOrphans(scanReferencedUris().referencedUris(), includeDeleted);
+    /**
+     * A resource's identity, independent of the version a reference pins.
+     *
+     * <p>
+     * References are version-pinned by design, and {@code DocumentDescriptorFilter}
+     * rewrites a descriptor's {@code resource} to the NEW version on every PUT. So
+     * one edit of a rule set leaves the descriptor saying {@code ?version=2} while
+     * every workflow that was not re-pointed still says {@code ?version=1}. Under a
+     * literal string compare that rule set looked unreferenced, and the purge —
+     * which deletes ALL versions — destroyed a config a live workflow was still
+     * resolving. Comparing identity means any referenced version protects the
+     * resource.
+     * </p>
+     *
+     * <p>
+     * Note the remaining, deliberate gap: only the CURRENT version of each agent
+     * and workflow contributes references, so a resource referenced solely by a
+     * superseded agent version is still reported. That is the documented meaning of
+     * "orphan" here — history is not a reference — but it does mean rolling an
+     * agent back to an older version after a purge can leave it unresolvable.
+     * </p>
+     */
+    private static String resourceKey(URI uri) {
+        if (uri == null) {
+            return null;
+        }
+        String withoutVersion = RestUtilities.pathWithoutVersionQuery(uri);
+        return withoutVersion != null ? withoutVersion : uri.toString();
     }
 
-    private List<OrphanInfo> collectOrphans(Set<String> referencedUris, boolean includeDeleted) {
-        log.infof("Orphan scan: found %d referenced resource URIs", referencedUris.size());
+    private List<OrphanInfo> collectOrphans(Set<String> referencedResources, boolean includeDeleted) {
+        log.infof("Orphan scan: found %d referenced resources", referencedResources.size());
 
         List<OrphanInfo> orphans = new ArrayList<>();
 
@@ -158,7 +225,7 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
                 List<DocumentDescriptor> descriptors = readAllDescriptors(type, includeDeleted);
                 for (DocumentDescriptor descriptor : descriptors) {
                     URI resourceUri = descriptor.getResource();
-                    if (resourceUri != null && !referencedUris.contains(resourceUri.toString())) {
+                    if (resourceUri != null && !referencedResources.contains(resourceKey(resourceUri))) {
                         orphans.add(new OrphanInfo(resourceUri, type, descriptor.getName() != null ? descriptor.getName() : "(unnamed)",
                                 descriptor.isDeleted()));
                     }
@@ -187,7 +254,7 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
      * </p>
      */
     private ReferenceScan scanReferencedUris() {
-        Set<String> referencedUris = new HashSet<>();
+        Set<String> referencedResources = new HashSet<>();
         String failureReason = null;
 
         try {
@@ -202,7 +269,7 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
                     AgentConfiguration agentConfig = agentStore.read(resourceId.getId(), resourceId.getVersion());
                     if (agentConfig.getWorkflows() != null) {
                         for (URI workflowUri : agentConfig.getWorkflows()) {
-                            referencedUris.add(workflowUri.toString());
+                            referencedResources.add(resourceKey(workflowUri));
                         }
                     }
                 } catch (IResourceStore.ResourceNotFoundException e) {
@@ -223,7 +290,7 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
                         continue;
 
                     WorkflowConfiguration workflowConfig = workflowStore.read(resourceId.getId(), resourceId.getVersion());
-                    collectExtensionUris(workflowConfig, referencedUris);
+                    collectExtensionUris(workflowConfig, referencedResources);
                 } catch (IResourceStore.ResourceNotFoundException e) {
                     // Workflow descriptor exists but resource doesn't — genuinely
                     // unreferenced, so this does not make the scan incomplete.
@@ -238,21 +305,21 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
             failureReason = "could not enumerate Agent/workflow descriptors: " + e.getMessage();
         }
 
-        return new ReferenceScan(referencedUris, failureReason == null, failureReason);
+        return new ReferenceScan(referencedResources, failureReason == null, failureReason);
     }
 
     /**
      * Extract all extension resource URIs from a workflow configuration. Follows
      * the same traversal as RestWorkflowStore.deleteWorkflowCascade().
      */
-    private void collectExtensionUris(WorkflowConfiguration workflowConfig, Set<String> referencedUris) {
+    private void collectExtensionUris(WorkflowConfiguration workflowConfig, Set<String> referencedResources) {
         for (WorkflowStep ext : workflowConfig.getWorkflowSteps()) {
             // Main extension resource URI (config.uri)
             Map<String, Object> config = ext.getConfig();
             if (config != null) {
                 Object uriObj = config.get("uri");
                 if (uriObj != null && !isNullOrEmpty(uriObj.toString())) {
-                    referencedUris.add(uriObj.toString());
+                    addReference(referencedResources, uriObj);
                 }
             }
 
@@ -267,13 +334,31 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
                             if (dictConfig instanceof Map<?, ?> dictConfigMap) {
                                 Object dictUri = dictConfigMap.get("uri");
                                 if (dictUri != null && !isNullOrEmpty(dictUri.toString())) {
-                                    referencedUris.add(dictUri.toString());
+                                    addReference(referencedResources, dictUri);
                                 }
                             }
                         }
                     }
                 }
             }
+        }
+    }
+
+    /**
+     * Records a workflow-step reference, keyed by identity. A value that is not a
+     * parsable URI is still recorded verbatim: it protects nothing that way, but
+     * dropping it silently would be worse than an entry that simply never matches.
+     */
+    private static void addReference(Set<String> referencedResources, Object uriObj) {
+        String raw = uriObj.toString();
+        try {
+            referencedResources.add(resourceKey(URI.create(raw)));
+        } catch (IllegalArgumentException e) {
+            // Letting this out would cost the scan every OTHER reference this workflow
+            // holds — the per-workflow catch upstream discards the whole traversal —
+            // and that is exactly what promotes live resources to "orphan".
+            log.warnf("Workflow references a malformed resource uri '%s'; recording it verbatim: %s", raw, e.getMessage());
+            referencedResources.add(raw);
         }
     }
 

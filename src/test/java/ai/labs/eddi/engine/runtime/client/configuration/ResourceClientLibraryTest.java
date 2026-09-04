@@ -252,13 +252,22 @@ class ResourceClientLibraryTest {
             assertEquals(200, result.getStatus());
         }
 
+        /**
+         * This assertion used to read {@code assertEquals(200, …)} and so pinned the
+         * defect. Answering 200 for a type with no registered proxy made
+         * {@code RestOrphanAdmin.purgeOrphans} count every such orphan as purged and
+         * log it as purged while nothing was deleted — the whole
+         * {@code ai.labs.workflow} category, which is the biggest one. A caller must
+         * either delete or be told it did not; {@code duplicateResource} already throws
+         * for an unknown type.
+         */
         @Test
-        @DisplayName("should return OK for unknown type (graceful skip)")
-        void gracefulSkipForUnknown() throws Exception {
-            Response result = library.deleteResource(
-                    URI.create("eddi://ai.labs.unknown/store/items/" + VALID_ID + "?version=1"), false);
+        @DisplayName("an unregistered type is an error, not a silent skip")
+        void unknownTypeThrows() {
+            ServiceException thrown = assertThrows(ServiceException.class, () -> library.deleteResource(
+                    URI.create("eddi://ai.labs.unknown/store/items/" + VALID_ID + "?version=1"), false));
 
-            assertEquals(200, result.getStatus());
+            assertTrue(thrown.getMessage().contains("ai.labs.unknown"), "the message must name the type: " + thrown.getMessage());
         }
 
         @Test

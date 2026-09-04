@@ -50,7 +50,10 @@ public interface IRestWorkflowStore extends IRestVersionInfo {
     @Path("descriptors")
     @Consumes(MediaType.TEXT_PLAIN)
     @Produces(MediaType.APPLICATION_JSON)
-    @Operation(operationId = "readWorkflowDescriptorsWithResource", description = "Read list of workflow descriptors including a given resourceUri.")
+    @Operation(operationId = "readWorkflowDescriptorsWithResource", description = "Read list of workflow descriptors including a given resourceUri. "
+            + "filter, index and limit are applied to the result AFTER the reverse-reference lookup, which "
+            + "takes neither. They used to be accepted and ignored, so a client that never paged received the "
+            + "full list; with limit defaulting to 20 such a client now receives at most 20 rows per page.")
     List<DocumentDescriptor> readWorkflowDescriptors(@QueryParam("filter")
     @DefaultValue("") String filter,
                                                      @QueryParam("index")
@@ -104,21 +107,27 @@ public interface IRestWorkflowStore extends IRestVersionInfo {
     @Operation(summary = "Delete package", description = "Delete a workflow configuration. When cascade=true, also deletes extension "
             + "resources referenced by this package: behavior sets, HTTP calls, output sets, "
             + "LLM configs, property setters, and parser dictionaries. " + "Shared resources (used by other packages) are skipped. "
-            + "Partial failures are logged but do not prevent the workflow from being deleted.")
+            + "Partial failures are logged but do not prevent the workflow from being deleted. "
+            + "With cascade=true the version must be the workflow's current one, otherwise the request is "
+            + "refused with 409 before anything is deleted.")
     @APIResponse(responseCode = "200", description = "Workflow deleted successfully.")
     @APIResponse(responseCode = "404", description = "Workflow not found.")
+    @APIResponse(responseCode = "409", description = "cascade=true against a version that is not the current one; nothing was deleted.")
     // @formatter:off
     Response deleteWorkflow(@PathParam("id") String id,
             @Parameter(name = "version", required = true, example = "1",
-                    description = "Version of the workflow to delete.")
+                    description = "Version of the workflow to delete. 0 means the current version.")
             @QueryParam("version") Integer version,
-            @Parameter(description = "If true, permanently remove from database. "
-                    + "If false (default), soft-delete only.")
+            @Parameter(description = "If true, permanently remove this workflow from the database. "
+                    + "If false (default), soft-delete only. It never applies to cascaded resources — "
+                    + "see cascade.")
             @QueryParam("permanent") @DefaultValue("false") Boolean permanent,
             @Parameter(description = "If true, also delete all extension resources "
                     + "referenced by this package (behavior, httpcalls, "
                     + "output, langchain, propertysetter, parser "
-                    + "dictionaries).")
+                    + "dictionaries). Extensions still referenced by another workflow are skipped, and "
+                    + "cascaded resources are always soft-deleted even when permanent=true, so an "
+                    + "extension shared at a different pinned version can be recovered.")
             @QueryParam("cascade") @DefaultValue("false") Boolean cascade);
     // @formatter:on
 }

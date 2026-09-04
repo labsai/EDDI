@@ -49,6 +49,56 @@ bottom of this file and are never archived.
 
 ---
 
+## 🗑️ fix(configs): make destructive configuration deletes safe, atomic and honest (2026-09-04)
+
+**Repo:** EDDI (`fix/review-config-delete`)
+
+From the whole-repository code review. The destructive configuration paths destroyed data
+that was still in use, and reported success while doing it.
+
+**Orphan purge deleted live configuration.** References are version-pinned by design, and
+`DocumentDescriptorFilter` rewrites a descriptor's `resource` to the new version on every
+PUT. So a single edit of a rule set leaves the descriptor saying `?version=2` while every
+workflow that was not re-pointed still says `?version=1`. The scan compared those full
+versioned URI strings, found no match, classified the config an orphan, and
+`DELETE /administration/orphans` removed **all** of its versions — destroying a config a
+live workflow was still resolving. The comparison is now on version-independent identity,
+so any referenced version protects the resource. The remaining deliberate gap (only the
+current version of each agent is scanned) is documented rather than silently present.
+
+**Cascade delete tore down workflows before the guard that could still reject it.** A
+version-mismatched cascade deleted the workflows and schedules of the version it read, then
+answered 409. And the reference check asked whether *one pinned version* was still
+referenced before deleting *every* version, so a workflow another agent still used was
+destroyed.
+
+**Reverse lookups crashed on soft-deleted rows.** `AgentStore` and `WorkflowStore` threw
+`ResourceNotFoundException` as soon as one referencing document had been soft-deleted,
+which disabled the "is this still referenced?" check entirely — the check is caught and
+logged, so cascade delete simply stopped protecting shared resources.
+
+**Version-0 history rows escaped permanent deletion** on MongoDB, so `deletePermanently`
+and GDPR erasure both reported success while leaving an undeletable descriptor tombstone
+behind forever.
+
+### Regression coverage
+
+Every behavioural change is pinned by a test proven to fail with its fix reverted.
+
+Two things the auditor caught and this branch corrects rather than ships: the signing
+keypair was being destroyed from the vault on a **soft** delete, on the path that exists
+precisely to be recoverable; and a unique compound index was created unconditionally at
+startup, which fails with a duplicate-key error on exactly the deployments the finding says
+already hold duplicates. Both are now conditional and safe.
+
+Six pre-existing cascade assertions were flipped from `permanent=true` to `permanent=false`.
+That inversion is deliberate and correct: permanently removing a shared resource stays an
+explicit, non-cascading request. A functional regression in `RetryConfiguration`'s new
+backoff budget was found by the auditor while the class's own suite stayed green, and is
+fixed with a test that fails without it.
+
+---
+
 ## 📋 docs(config): document the four workspace properties that were breaking `main` (2026-08-30)
 
 **Repo:** EDDI (`fix/connection-extra-auth-params-code-verifier`)

@@ -13,6 +13,7 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.utils.RestUtilities;
 import ai.labs.eddi.utils.RuntimeUtilities;
+import org.jboss.logging.Logger;
 
 import jakarta.ws.rs.core.Response;
 import java.net.URI;
@@ -40,6 +41,8 @@ import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
  * @author ginccc
  */
 public class RestVersionInfo<T> implements IRestVersionInfo {
+    private static final Logger LOGGER = Logger.getLogger(RestVersionInfo.class);
+
     private final String resourceURI;
     private final IResourceStore<T> resourceStore;
     protected final IDocumentDescriptorStore documentDescriptorStore;
@@ -159,9 +162,12 @@ public class RestVersionInfo<T> implements IRestVersionInfo {
      * Creates a new resource and returns the {@link IResourceStore.IResourceId}
      * directly, bypassing the JAX-RS {@link Response} wrapper entirely.
      * <p>
-     * Use this method for in-process callers (CDI direct calls, import service,
-     * duplicate operations) where {@code Response.getLocation()} returns
-     * {@code null} for {@code eddi://} scheme URIs.
+     * For in-process callers (CDI direct calls, import service, duplicate
+     * operations) that want the id and version, not an HTTP envelope to unwrap
+     * again. It is <em>not</em> a workaround for {@code Response.getLocation()}:
+     * that works for {@code eddi://} URIs, as
+     * {@code RestWorkflowStoreCrudTest.duplicateDeepCopyWithParserDictionaries}
+     * demonstrates against the real JAX-RS {@code RuntimeDelegate}.
      *
      * @param document
      *            the resource to create
@@ -186,6 +192,12 @@ public class RestVersionInfo<T> implements IRestVersionInfo {
         // and sharing belong to the resource, so reading an old version of a resource
         // that was since re-shared must not be decided against stale sharing.
         requireViewAccess(id);
+
+        // After the access check, and by the same rule update/delete follow: version 0
+        // means "current". Reading it literally made GET ?version=0 a 404 while
+        // PUT ?version=0 and DELETE ?version=0 acted on the current version, so no
+        // single convention worked across the three verbs.
+        version = validateParameters(id, version);
 
         try {
             return resourceStore.read(id, version);
@@ -230,9 +242,55 @@ public class RestVersionInfo<T> implements IRestVersionInfo {
             } else {
                 resourceStore.delete(id, version);
             }
+            markDescriptorDeleted(id, version);
             return Response.ok().build();
         } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceModifiedException | IResourceStore.ResourceNotFoundException e) {
             throw sneakyThrow(e);
+        }
+    }
+
+    /**
+     * Flags the resource's descriptor as deleted, here rather than only in
+     * {@code DocumentDescriptorFilter}.
+     *
+     * <p>
+     * That filter is a JAX-RS {@code ContainerResponseFilter}, so it runs for an
+     * HTTP DELETE and for nothing else. Every in-process delete — the agent
+     * cascade, the workflow cascade, the orphan purge — reaches the store through a
+     * direct CDI call and never touched a descriptor, while the store layer itself
+     * (neither {@code deleteAllPermanently} nor {@code HistorizedResourceStore
+     * .delete}) touches one either. The result: a cascade-deleted rule set kept
+     * {@code deleted=false}, so {@code readDescriptors(includeDeleted=false)} still
+     * listed it, opening it answered 404, and the orphan scan kept re-reporting
+     * resources it had already purged. Marking it at this level makes the two paths
+     * converge; the filter then repeats the same idempotent write on the HTTP path.
+     * </p>
+     *
+     * <p>
+     * The descriptor is <em>flagged</em>, never removed, even for
+     * {@code permanent=true}. {@code documentDescriptorStore.deleteAllDescriptor}
+     * would be the tidier cleanup, but on the HTTP path
+     * {@code DocumentDescriptorFilter} runs after this and reads the descriptor
+     * back — a missing row there becomes a {@code NotFoundException}, so erasing it
+     * would answer 404 to a delete that in fact succeeded.
+     * </p>
+     *
+     * <p>
+     * Best-effort by design: the resource IS gone by the time we get here, so a
+     * descriptor that cannot be updated must not turn a completed delete into an
+     * error response.
+     * </p>
+     */
+    private void markDescriptorDeleted(String id, Integer version) {
+        try {
+            DocumentDescriptor descriptor = documentDescriptorStore.readDescriptor(id, version);
+            if (descriptor != null && !descriptor.isDeleted()) {
+                descriptor.setDeleted(true);
+                documentDescriptorStore.setDescriptor(id, version, descriptor);
+            }
+        } catch (Exception e) {
+            LOGGER.warnf("Deleted %s '%s' (v%s) but could not flag its descriptor as deleted: %s", resourceTypeLabel, id, version,
+                    e.getMessage());
         }
     }
 

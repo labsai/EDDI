@@ -38,6 +38,9 @@ import java.util.TreeMap;
  */
 public final class JacksonCanonicalizer {
 
+    // ORDER_MAP_ENTRIES_BY_KEYS is deliberately kept even though sortKeys() already
+    // rebuilds every ObjectNode through a TreeMap: it also covers any Map value
+    // serialized directly, so the two are belt and braces rather than redundant.
     private static final ObjectMapper MAPPER = new ObjectMapper(
             JsonFactory.builder()
                     .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
@@ -49,7 +52,15 @@ public final class JacksonCanonicalizer {
     }
 
     /**
-     * Canonicalize a JSON string per RFC 8785.
+     * Canonicalize a JSON string: object keys sorted lexicographically (recursive),
+     * no insignificant whitespace.
+     * <p>
+     * <strong>Not RFC 8785 (JCS).</strong> Numbers keep Jackson's default
+     * serialization, so a payload containing numbers may canonicalize to different
+     * bytes than a true JCS implementation would produce — see the class-level
+     * note. This method's Javadoc used to claim RFC 8785 outright, which would send
+     * a peer implementing verification against JCS number formatting straight into
+     * failing signature checks.
      *
      * @param json
      *            the input JSON string
