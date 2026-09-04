@@ -8,8 +8,12 @@ import ai.labs.eddi.engine.httpclient.ICompleteListener;
 import ai.labs.eddi.engine.httpclient.IHttpClient;
 import ai.labs.eddi.engine.httpclient.IRequest;
 import ai.labs.eddi.engine.httpclient.IResponse;
+import io.vertx.core.AsyncResult;
+import io.vertx.core.Future;
+import io.vertx.core.Handler;
 import io.vertx.core.MultiMap;
 import io.vertx.core.buffer.Buffer;
+import io.vertx.core.http.HttpMethod;
 import io.vertx.ext.web.client.HttpRequest;
 import io.vertx.ext.web.client.HttpResponse;
 import io.vertx.ext.web.client.WebClientSession;
@@ -22,7 +26,6 @@ import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
-import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -61,7 +64,7 @@ public class HttpClientWrapper implements IHttpClient {
 
     @Override
     public IRequest newRequest(URI uri, Method method) {
-        io.vertx.core.http.HttpMethod vertxMethod = io.vertx.core.http.HttpMethod.valueOf(method.name());
+        HttpMethod vertxMethod = HttpMethod.valueOf(method.name());
         // WebClient's requestAbs handles absolute URIs
         HttpRequest<Buffer> request = webClient.requestAbs(vertxMethod, uri.toString());
         request.putHeader("User-Agent", userAgent);
@@ -80,20 +83,29 @@ public class HttpClientWrapper implements IHttpClient {
     private class RequestWrapper implements IRequest {
         private final URI uri;
         private final HttpRequest<Buffer> request;
-        private final io.vertx.core.http.HttpMethod method;
+        private final HttpMethod method;
         private int maxLength = 8 * 1024 * 1024;
         private String requestBody;
         private String requestEncoding;
         private long currentTimeout = 60000; // Default timeout fallback
         private final Map<String, List<String>> queryParamsMap = new HashMap<>();
 
-        RequestWrapper(URI uri, HttpRequest<Buffer> request, io.vertx.core.http.HttpMethod method) {
+        RequestWrapper(URI uri, HttpRequest<Buffer> request, HttpMethod method) {
             this.uri = uri;
             this.request = request;
             this.method = method;
 
-            // Parse initial query params from URI if any
-            String query = uri.getQuery();
+            // Parse initial query params from the RAW query, decoding exactly once.
+            //
+            // uri.getQuery() hands back an ALREADY-decoded string, so splitting and
+            // decoding that decoded it a second time. For "?q=100%25&r=a%2Bb&s=a%26b"
+            // getQuery() yields "q=100%&r=a+b&s=a&b", and then: "100%" made URLDecoder
+            // throw ("Incomplete trailing escape (%) pattern"), which escaped this
+            // constructor and failed the whole ApiCallsTask turn for a perfectly valid
+            // URI; "a+b" silently became "a b"; and "a&b" split into two parameters.
+            // The raw query keeps every escape intact so one decode is correct, and
+            // splitting on the raw '&' only splits real separators.
+            String query = uri.getRawQuery();
             if (query != null && !query.isEmpty()) {
                 String[] pairs = query.split(KEY_LOGICAL_AND);
                 for (String pair : pairs) {
@@ -101,13 +113,30 @@ public class HttpClientWrapper implements IHttpClient {
                     String key = idx > 0 ? pair.substring(0, idx) : pair;
                     String value = idx > 0 && pair.length() > idx + 1 ? pair.substring(idx + 1) : null;
 
-                    if (key != null)
-                        key = URLDecoder.decode(key, StandardCharsets.UTF_8);
-                    if (value != null)
-                        value = URLDecoder.decode(value, StandardCharsets.UTF_8);
+                    key = decodeQueryComponent(key);
+                    value = decodeQueryComponent(value);
 
                     queryParamsMap.computeIfAbsent(key, k -> new ArrayList<>()).add(value);
                 }
+            }
+        }
+
+        /**
+         * Percent-decode one raw query component. A component the JDK refuses to decode
+         * (a stray '%' that is not a valid escape) is kept verbatim rather than thrown:
+         * this map is a RECORD of the request for conversation memory and the
+         * approval-preview fingerprint, and the request itself is sent from the
+         * untouched URI. Failing to describe a request must never fail the request.
+         */
+        private String decodeQueryComponent(String raw) {
+            if (raw == null) {
+                return null;
+            }
+            try {
+                return URLDecoder.decode(raw, StandardCharsets.UTF_8);
+            } catch (IllegalArgumentException e) {
+                log.debug("Could not percent-decode a query component; recording it verbatim", e);
+                return raw;
             }
         }
 
@@ -201,7 +230,7 @@ public class HttpClientWrapper implements IHttpClient {
             }
         }
 
-        private void doSend(io.vertx.core.Handler<io.vertx.core.AsyncResult<IResponse>> handler) {
+        private void doSend(Handler<AsyncResult<IResponse>> handler) {
             // Buffer entire response in memory; check size limits in handleResponse to
             // mitigate large responses.
             if (requestBody != null) {
@@ -209,7 +238,7 @@ public class HttpClientWrapper implements IHttpClient {
                 try {
                     buffer = requestEncoding != null ? Buffer.buffer(requestBody, requestEncoding) : Buffer.buffer(requestBody);
                 } catch (IllegalArgumentException e) {
-                    handler.handle(io.vertx.core.Future.failedFuture(new HttpRequestException("Invalid encoding: " + requestEncoding, e)));
+                    handler.handle(Future.failedFuture(new HttpRequestException("Invalid encoding: " + requestEncoding, e)));
                     return;
                 }
                 request.sendBuffer(buffer, ar -> handleResponse(ar, handler));
@@ -218,8 +247,8 @@ public class HttpClientWrapper implements IHttpClient {
             }
         }
 
-        private void handleResponse(io.vertx.core.AsyncResult<HttpResponse<Buffer>> ar,
-                                    io.vertx.core.Handler<io.vertx.core.AsyncResult<IResponse>> handler) {
+        private void handleResponse(AsyncResult<HttpResponse<Buffer>> ar,
+                                    Handler<AsyncResult<IResponse>> handler) {
             if (ar.succeeded()) {
                 HttpResponse<Buffer> response = ar.result();
                 // Check Content-Length header if available
@@ -230,7 +259,7 @@ public class HttpClientWrapper implements IHttpClient {
                         if (contentLength > maxLength) {
                             String message = String.format("Response Content-Length %d exceeds maximum allowed length %d", contentLength, maxLength);
                             log.warn(message);
-                            handler.handle(io.vertx.core.Future.failedFuture(new IResponse.HttpResponseException(message)));
+                            handler.handle(Future.failedFuture(new IResponse.HttpResponseException(message)));
                             return;
                         }
                     } catch (NumberFormatException e) {
@@ -242,7 +271,7 @@ public class HttpClientWrapper implements IHttpClient {
                 if (body != null && body.length() > maxLength) {
                     String message = String.format("Response body length %d exceeds maximum allowed length %d", body.length(), maxLength);
                     log.warn(message);
-                    handler.handle(io.vertx.core.Future.failedFuture(new IResponse.HttpResponseException(message)));
+                    handler.handle(Future.failedFuture(new IResponse.HttpResponseException(message)));
                     return;
                 }
 
@@ -256,9 +285,9 @@ public class HttpClientWrapper implements IHttpClient {
                 responseWrapper.setHttpCode(response.statusCode());
                 responseWrapper.setHttpCodeMessage(response.statusMessage());
                 responseWrapper.setHttpHeader(convertHeaderToMap(response.headers()));
-                handler.handle(io.vertx.core.Future.succeededFuture(responseWrapper));
+                handler.handle(Future.succeededFuture(responseWrapper));
             } else {
-                handler.handle(io.vertx.core.Future.failedFuture(ar.cause()));
+                handler.handle(Future.failedFuture(ar.cause()));
             }
         }
 

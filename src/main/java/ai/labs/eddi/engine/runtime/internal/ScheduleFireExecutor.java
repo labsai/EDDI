@@ -12,16 +12,22 @@ import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.internal.HitlTimeoutHandler;
 import ai.labs.eddi.engine.model.Context;
+import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
+import ai.labs.eddi.modules.llm.tools.ToolCostTracker;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Executes a scheduled fire by resolving the conversation strategy and calling
@@ -53,6 +59,8 @@ public class ScheduleFireExecutor {
 
     private static final Logger LOGGER = Logger.getLogger(ScheduleFireExecutor.class);
 
+    private static final Duration DEFAULT_FIRE_TIMEOUT = Duration.ofMinutes(5);
+
     @Inject
     IConversationService conversationService;
 
@@ -67,6 +75,21 @@ public class ScheduleFireExecutor {
 
     @Inject
     TeamCadenceService teamCadenceService;
+
+    @Inject
+    ToolCostTracker toolCostTracker;
+
+    /**
+     * How long a single conversation fire may take before it is abandoned as
+     * failed.
+     * <p>
+     * Defaults to the same 5 minutes the hard-coded constant used, and to the same
+     * value as {@code eddi.schedule.lease-timeout} — the window after which another
+     * instance may reclaim the schedule anyway, so waiting longer than the lease
+     * serves no purpose. A deployment that raises the lease can now raise this too.
+     */
+    @ConfigProperty(name = "eddi.schedule.fire-timeout", defaultValue = "5m")
+    Duration fireTimeout = DEFAULT_FIRE_TIMEOUT;
 
     /**
      * Execute a schedule fire. Returns the fire log entry.
@@ -131,6 +154,7 @@ public class ScheduleFireExecutor {
         String status;
         double cost = 0.0;
         boolean interrupted = false;
+        double costBefore = 0.0;
 
         try {
             Environment env = resolveEnvironment(schedule.getEnvironment());
@@ -138,27 +162,55 @@ public class ScheduleFireExecutor {
             // 1. Resolve conversation
             conversationId = resolveConversation(schedule, env);
 
+            // The fire log's cost column was hard-wired to 0.0 on this path, so the
+            // number operators (and Dream) read for a scheduled agent was meaningless.
+            // Take a DELTA rather than the running total: a conversationStrategy=
+            // persistent schedule reuses one conversation across every fire, so its
+            // accumulated total would grow monotonically and attribute the whole
+            // history to whichever fire happened to read it.
+            costBefore = conversationCost(conversationId);
+
             // 2. Build InputData with scheduled context
             InputData inputData = buildInputData(schedule);
 
             // 3. Execute via ConversationService.say()
             // This enforces tenant quotas, audit trail, conversation ordering
             var latch = new CountDownLatch(1);
+            // The outcome must come from the SNAPSHOT, not from the latch. The latch is
+            // counted down from Conversation.runStep's finally block, which also runs on
+            // the failure branch, and ConversationService.say swallows the
+            // LifecycleException — so "the handler was called" only means the turn was
+            // attempted. Reporting COMPLETED there made every in-pipeline failure (LLM
+            // outage, tool error, unresolvable workflow config) look like a green fire:
+            // failCount never incremented, backoff never applied, nothing ever
+            // dead-lettered.
+            var outcome = new AtomicReference<SimpleConversationMemorySnapshot>();
             conversationService.say(env, schedule.getAgentId(), conversationId, false, // returnDetailed
                     true, // returnCurrentStepOnly
                     List.of(), // returningFields (empty = all)
                     inputData, false, // rerunOnly
-                    snapshot -> latch.countDown() // responseHandler
-            );
+                    snapshot -> { // responseHandler
+                        outcome.set(snapshot);
+                        latch.countDown();
+                    });
 
-            // Wait for workflow completion (max 5 minutes)
-            if (!latch.await(5, TimeUnit.MINUTES)) {
-                throw new RuntimeException("Schedule fire timed out after 5 minutes");
+            Duration timeout = fireTimeout != null ? fireTimeout : DEFAULT_FIRE_TIMEOUT;
+            if (!latch.await(timeout.toMillis(), TimeUnit.MILLISECONDS)) {
+                throw new RuntimeException("Schedule fire timed out after " + timeout);
             }
 
-            status = ScheduleConfiguration.FireStatus.COMPLETED.name();
-            LOGGER.infof("[SCHEDULE] Fired schedule '%s' (id=%s, type=%s) for Agent %s → conversation %s", schedule.getName(), schedule.getId(),
-                    schedule.getTriggerType(), schedule.getAgentId(), conversationId);
+            SimpleConversationMemorySnapshot snapshot = outcome.get();
+            ConversationState state = snapshot != null ? snapshot.getConversationState() : null;
+            if (state == ConversationState.ERROR) {
+                status = ScheduleConfiguration.FireStatus.FAILED.name();
+                errorMessage = "Conversation ended in state " + state;
+                LOGGER.warnf("[SCHEDULE] Fire of schedule '%s' (id=%s) left conversation %s in state %s", schedule.getName(),
+                        schedule.getId(), conversationId, state);
+            } else {
+                status = ScheduleConfiguration.FireStatus.COMPLETED.name();
+                LOGGER.infof("[SCHEDULE] Fired schedule '%s' (id=%s, type=%s) for Agent %s → conversation %s", schedule.getName(),
+                        schedule.getId(), schedule.getTriggerType(), schedule.getAgentId(), conversationId);
+            }
 
         } catch (Exception e) {
             // B2: latch.await() above CLEARS the interrupt flag when it throws
@@ -173,6 +225,11 @@ public class ScheduleFireExecutor {
             LOGGER.warnf(e, "[SCHEDULE] Fire failed for schedule '%s' (id=%s): %s", schedule.getName(), schedule.getId(), errorMessage);
         }
 
+        // Charged whether the fire succeeded or failed: a turn that errored after
+        // calling three tools still cost money, and a cost of 0.0 on every failure
+        // would hide exactly the schedules worth investigating.
+        cost = Math.max(0.0, conversationCost(conversationId) - costBefore);
+
         // 4. Log the fire attempt (Fix #4: use caller-provided attemptNumber)
         ScheduleFireLog fireLog = new ScheduleFireLog(fireLogId, schedule.getId(), schedule.getFireId(), schedule.getNextFire(), startedAt,
                 Instant.now(), status, instanceId, conversationId, errorMessage, attemptNumber, cost);
@@ -186,6 +243,24 @@ public class ScheduleFireExecutor {
         }
 
         return fireLog;
+    }
+
+    /**
+     * Tool spend accumulated so far on a conversation, or {@code 0.0} when nothing
+     * has been tracked for it (a brand-new conversation, or a turn that called no
+     * tools). Never throws — a fire must not fail because its accounting did.
+     */
+    private double conversationCost(String conversationId) {
+        if (conversationId == null) {
+            return 0.0;
+        }
+        try {
+            var metrics = toolCostTracker.getConversationCosts(conversationId);
+            return metrics != null ? metrics.getTotalCost() : 0.0;
+        } catch (RuntimeException e) {
+            LOGGER.debugf(e, "[SCHEDULE] Could not read tool cost for conversation %s", conversationId);
+            return 0.0;
+        }
     }
 
     /**
@@ -335,7 +410,7 @@ public class ScheduleFireExecutor {
     }
 
     private String createNewConversation(ScheduleConfiguration schedule, Environment env) throws Exception {
-        var userId = schedule.getUserId() != null ? schedule.getUserId() : "system:scheduler";
+        var userId = schedule.getUserId() != null ? schedule.getUserId() : DreamService.SCHEDULER_PLACEHOLDER_USER_ID;
 
         var result = conversationService.startConversation(env, schedule.getAgentId(), userId, Collections.emptyMap());
 
@@ -355,11 +430,19 @@ public class ScheduleFireExecutor {
             }
         }
 
-        // Create new and update the schedule
+        // Create new and record it with a SINGLE-FIELD write.
+        //
+        // Never updateSchedule() from here. `schedule` is the copy findDueSchedules
+        // returned BEFORE tryClaim ran, so its fireStatus is still PENDING, its claim
+        // columns are empty and its nextFire is still the past due time. Writing the
+        // whole object back therefore un-claimed the row in the middle of its own fire:
+        // the next poll (15s by default, while a fire may run for minutes) matched it
+        // again, claimed it again, and pushed a second concurrent turn into this very
+        // same persistent conversation.
         String newConversationId = createNewConversation(schedule, env);
         schedule.setPersistentConversationId(newConversationId);
         try {
-            scheduleStore.updateSchedule(schedule.getId(), schedule);
+            scheduleStore.setPersistentConversationId(schedule.getId(), newConversationId);
         } catch (Exception e) {
             LOGGER.warnf(e, "[SCHEDULE] Failed to update persistent conversation ID on schedule %s", schedule.getId());
         }
@@ -396,7 +479,7 @@ public class ScheduleFireExecutor {
         contextMap.put("schedule", new Context(Context.ContextType.object, scheduleContext));
 
         // Set userId context
-        String userId = schedule.getUserId() != null ? schedule.getUserId() : "system:scheduler";
+        String userId = schedule.getUserId() != null ? schedule.getUserId() : DreamService.SCHEDULER_PLACEHOLDER_USER_ID;
         contextMap.put("userId", new Context(Context.ContextType.string, userId));
 
         inputData.setContext(contextMap);

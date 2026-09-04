@@ -36,6 +36,12 @@ public interface IScheduleStore {
     /**
      * Atomic field-level update to enable/disable a schedule. Avoids
      * read-then-write races.
+     * <p>
+     * Enabling always clears the failure state — {@code fireStatus} back to
+     * PENDING, {@code failCount} to 0, {@code nextRetryAt} cleared — whether or not
+     * a {@code nextFire} is supplied. Gating that reset on a non-null nextFire left
+     * a re-enabled schedule stuck in FAILED/DEAD_LETTERED and therefore
+     * unclaimable.
      *
      * @param scheduleId
      *            the schedule to update
@@ -46,6 +52,26 @@ public interface IScheduleStore {
      */
     void setScheduleEnabled(String scheduleId, boolean enabled, Instant nextFire)
             throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException;
+
+    /**
+     * Atomically record the conversation a {@code conversationStrategy=persistent}
+     * schedule reuses across fires. Writes that ONE field and nothing else.
+     * <p>
+     * This exists because the fire path must never write a whole schedule back. The
+     * object a fire holds is the copy {@link #findDueSchedules} returned
+     * <em>before</em> {@link #tryClaim} ran, so its {@code fireStatus} is still
+     * PENDING and its claim columns are still empty. Persisting it with
+     * {@link #updateSchedule} un-claimed the row mid-fire, with {@code nextFire}
+     * still in the past — the next poll (15s by default) then re-claimed and
+     * re-fired a schedule that was still running, pushing a second turn into the
+     * very same persistent conversation and billing the LLM twice.
+     *
+     * @param scheduleId
+     *            the schedule to update
+     * @param conversationId
+     *            the persistent conversation id to store
+     */
+    void setPersistentConversationId(String scheduleId, String conversationId) throws IResourceStore.ResourceStoreException;
 
     void deleteSchedule(String scheduleId) throws IResourceStore.ResourceStoreException;
 
@@ -120,7 +146,31 @@ public interface IScheduleStore {
 
     List<ScheduleConfiguration> readAllSchedules(int limit) throws IResourceStore.ResourceStoreException;
 
+    /**
+     * One page of schedules, ordered deterministically (newest created first, ties
+     * broken by id) so that paging through them cannot skip or repeat a row.
+     * <p>
+     * Without an offset the listing surface was a single hard-capped page: a
+     * deployment holding more schedules than the cap showed an arbitrary, unordered
+     * subset, and the schedules outside it could not be found, disabled or deleted
+     * through the list at all. HITL timeouts, per-user dream schedules and team
+     * cadences are all created programmatically, so the cap is reachable without
+     * anyone creating a schedule by hand.
+     *
+     * @param limit
+     *            maximum rows to return
+     * @param offset
+     *            rows to skip; 0 for the first page
+     */
+    List<ScheduleConfiguration> readAllSchedules(int limit, int offset) throws IResourceStore.ResourceStoreException;
+
     List<ScheduleConfiguration> readSchedulesByAgentId(String agentId) throws IResourceStore.ResourceStoreException;
+
+    /**
+     * Paged, deterministically ordered variant — see
+     * {@link #readAllSchedules(int, int)}.
+     */
+    List<ScheduleConfiguration> readSchedulesByAgentId(String agentId, int limit, int offset) throws IResourceStore.ResourceStoreException;
 
     // --- Polling & Claiming ---
 
@@ -163,6 +213,19 @@ public interface IScheduleStore {
     boolean tryClaim(String scheduleId, String instanceId, Instant now, Instant leaseExpiry) throws IResourceStore.ResourceStoreException;
 
     /**
+     * The idempotency key {@link #tryClaim} persists for a claim.
+     * <p>
+     * Single source of truth for the formula. {@code tryClaim} returns only a
+     * boolean, so the poller has to reconstruct the value it just wrote in order to
+     * correlate the fire log and the agent context with the claimed row — and it
+     * did so by re-typing the expression, in a third place. Any edit to one copy
+     * silently broke that correlation.
+     */
+    static String fireIdOf(String scheduleId, Instant claimedAt) {
+        return scheduleId + "_" + claimedAt;
+    }
+
+    /**
      * Mark a schedule fire as completed. Resets fire state and sets nextFire. If
      * nextFire is null (one-shot schedule), the schedule is disabled.
      */
@@ -190,4 +253,25 @@ public interface IScheduleStore {
     List<ScheduleFireLog> readFireLogs(String scheduleId, int limit) throws IResourceStore.ResourceStoreException;
 
     List<ScheduleFireLog> readFailedFireLogs(int limit) throws IResourceStore.ResourceStoreException;
+
+    /**
+     * Delete the fire logs of a schedule. Called whenever the schedule itself is
+     * deleted, so a removed agent, an erased user or a resolved HITL pause does not
+     * leave orphaned fire logs (each carrying a conversationId) behind forever.
+     *
+     * @return number of fire logs deleted
+     */
+    int deleteFireLogsByScheduleId(String scheduleId) throws IResourceStore.ResourceStoreException;
+
+    /**
+     * Delete fire logs that started before {@code cutoff} — the retention sweep.
+     * <p>
+     * Nothing used to prune this collection: a 60-second heartbeat writes ~525,600
+     * rows a year, per schedule, and {@code readFailedFireLogs} then scans an
+     * ever-growing table. AGENTS.md §4.7 ("Unbounded growth") asks for a
+     * configurable cap; {@code eddi.schedule.fire-log-retention} is it.
+     *
+     * @return number of fire logs deleted
+     */
+    int deleteFireLogsOlderThan(Instant cutoff) throws IResourceStore.ResourceStoreException;
 }

@@ -208,4 +208,84 @@ class PathNavigatorTest {
         assertDoesNotThrow(() -> PathNavigator.setValue(null, Map.of(), "value"));
         assertDoesNotThrow(() -> PathNavigator.setValue("a", null, "value"));
     }
+
+    // --- Multi-operand concatenation (the class's own documented example) ---
+
+    /**
+     * The class Javadoc advertises {@code "properties.first+' '+properties.last"},
+     * but ARITHMETIC_PATTERN splits reluctantly: the remainder
+     * {@code ' '+properties.last} went straight to parseLiteral, which found no
+     * closing quote, failed both number parses and returned the raw text. The
+     * documented form therefore produced the literal garbage
+     * {@code John' '+properties.last} — silently, into a conversation property or a
+     * behaviour-rule comparison.
+     */
+    @Test
+    void shouldEvaluateThreeOperandConcatenation() {
+        Map<String, Object> root = Map.of("properties", Map.of("first", "John", "last", "Doe"));
+
+        assertEquals("John Doe", PathNavigator.getValue("properties.first+' '+properties.last", root));
+    }
+
+    @Test
+    void shouldStillEvaluateTwoOperandForms() {
+        Map<String, Object> root = Map.of("properties", Map.of("first", "John", "last", "Doe", "count", 10));
+
+        assertEquals("JohnDoe", PathNavigator.getValue("properties.first+properties.last", root));
+        assertEquals("John ", PathNavigator.getValue("properties.first+' '", root));
+        assertEquals(11, PathNavigator.getValue("properties.count+1", root));
+        assertEquals(9, PathNavigator.getValue("properties.count-1", root));
+    }
+
+    // --- Hyphenated keys ---
+
+    /**
+     * A missing hyphenated key used to resolve to the value of a shorter path that
+     * did exist: {@code properties.my-key} split into left={@code properties.my}
+     * (10), op='-', right="key", and applyOperator returned the left operand
+     * unchanged. Callers read null as "not found" and any non-null as a match, so
+     * an absent key could make a behaviour rule fire or pull a neighbouring value
+     * into a property, with no error and no log line.
+     */
+    @Test
+    void shouldReturnNullForAbsentHyphenatedKeyWithAResolvablePrefix() {
+        Map<String, Object> root = Map.of("properties", Map.of("my", 10));
+
+        assertNull(PathNavigator.getValue("properties.my-key", root));
+    }
+
+    @Test
+    void shouldStillResolveHyphenatedKeysThatExist() {
+        Map<String, Object> root = Map.of("properties", Map.of("my-key", "present"));
+
+        assertEquals("present", PathNavigator.getValue("properties.my-key", root));
+    }
+
+    /**
+     * An opening quote with no closing quote is a malformed literal, and
+     * {@code parseLiteral} used to fall through every branch and hand the raw text
+     * back — so {@code properties.first+'oops} concatenated it and produced
+     * {@code John'oops}, a broken expression dressed up as a plausible value.
+     * <p>
+     * The left operand must RESOLVE for this to test parseLiteral at all. The
+     * earlier version of this test used {@code properties.missing-'oops}, whose
+     * left path does not resolve, so {@code getValue} returned null at its own
+     * {@code leftValue != null} guard and parseLiteral was never reached — it
+     * passed against the old code just as happily (see
+     * {@link #shouldReturnNullWhenTheLeftOperandDoesNotResolve}, which is what that
+     * expression actually pins).
+     */
+    @Test
+    void shouldDropAnUnterminatedStringLiteralInsteadOfConcatenatingItRaw() {
+        Map<String, Object> root = Map.of("properties", Map.of("first", "John"));
+
+        assertEquals("John", PathNavigator.getValue("properties.first+'oops", root));
+    }
+
+    @Test
+    void shouldReturnNullWhenTheLeftOperandDoesNotResolve() {
+        Map<String, Object> root = Map.of("properties", Map.of("first", "John"));
+
+        assertNull(PathNavigator.getValue("properties.missing-'oops", root));
+    }
 }

@@ -35,8 +35,13 @@ import static com.mongodb.client.model.Updates.*;
 /**
  * MongoDB implementation of {@link IScheduleStore}.
  * <p>
- * Uses {@code findOneAndUpdate} for atomic CAS (compare-and-swap) claiming,
- * ensuring exactly-one-instance execution in clustered deployments.
+ * Uses {@code findOneAndUpdate} for atomic CAS (compare-and-swap) claiming, so
+ * exactly one instance owns a schedule per claim. That is <em>not</em>
+ * exactly-once delivery — see {@link IScheduleStore} and
+ * {@code SchedulePollerService}: an expired lease may be stolen while the
+ * original, wedged fire can still commit, so fire targets must be idempotent.
+ * This Javadoc used to claim exactly-once, which is precisely the assumption
+ * that stops someone writing that idempotency.
  * <p>
  * Annotated {@code @DefaultBean} so PostgreSQL can override.
  * <p>
@@ -73,6 +78,8 @@ public class MongoScheduleStore implements IScheduleStore {
     private static final String SCHEDULE_ID = "scheduleId";
     private static final String STARTED_AT = "startedAt";
     private static final String STATUS = "status";
+    private static final String METADATA = "metadata";
+    private static final String PERSISTENT_CONVERSATION_ID = "persistentConversationId";
 
     private final MongoCollection<Document> scheduleCollection;
     private final MongoCollection<Document> fireLogCollection;
@@ -82,8 +89,8 @@ public class MongoScheduleStore implements IScheduleStore {
     /**
      * Max schedules claimed per poll cycle. Raise for deployments that must drain
      * large bursts of one-shot HITL timeouts quickly (they are dispatched
-     * concurrently by the poller); the CAS claim still guarantees exactly-once
-     * execution across the cluster.
+     * concurrently by the poller); the CAS claim still keeps a schedule owned by
+     * one instance at a time.
      */
     private final int pollBatchSize;
 
@@ -131,6 +138,10 @@ public class MongoScheduleStore implements IScheduleStore {
             Document doc = toDocument(schedule);
             doc.put(ID, id);
             doc.remove("id"); // use _id instead
+            // cronDescription is computed for the API response, not state. The `transient`
+            // marker does not stop Jackson (PROPAGATE_TRANSIENT_MARKER is off), so a PUT
+            // that echoed a GET body used to persist a stale description here.
+            doc.remove("cronDescription");
             // Store every Instant field as an epoch-millis Long read straight from
             // the getters — never trusting whatever numeric format the shared mapper
             // produced (see writeScheduleInstants).
@@ -160,17 +171,57 @@ public class MongoScheduleStore implements IScheduleStore {
         }
     }
 
+    /**
+     * Update the editable fields of a schedule.
+     * <p>
+     * Deliberately a {@code $set} of an explicit field list rather than a
+     * {@code replaceOne} of the serialized object, mirroring
+     * {@link ai.labs.eddi.datastore.postgres.PostgresScheduleStore}'s UPDATE column
+     * list. A whole-document replace wrote whatever the caller's object happened to
+     * hold into EVERY field — so a normal PUT that omitted the read-only fields
+     * (the shape the Manager, curl and MCP all send) nulled {@code createdAt},
+     * {@code createdBy} and {@code lastFired}, and wiped the claim record
+     * ({@code claimedBy}/{@code claimedAt}/{@code fireId}) of a fire that was still
+     * running. Postgres never had that behaviour, so the two supported backends
+     * disagreed about what an update means.
+     * <p>
+     * Provenance ({@code createdAt}, {@code createdBy}), fire history
+     * ({@code lastFired}), the claim/retry lifecycle and
+     * {@code persistentConversationId} are therefore NOT written here — they are
+     * owned by {@link #createSchedule}, the claim/completion methods and
+     * {@link #setPersistentConversationId}.
+     */
     @Override
     public void updateSchedule(String scheduleId, ScheduleConfiguration schedule)
             throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
         try {
-            schedule.setUpdatedAt(Instant.now());
-            Document doc = toDocument(schedule);
-            doc.remove("id");
-            doc.remove(ID);
-            writeScheduleInstants(doc, schedule);
+            Instant now = Instant.now();
+            schedule.setUpdatedAt(now);
 
-            var result = scheduleCollection.replaceOne(eq(ID, scheduleId), doc);
+            var updates = new ArrayList<Bson>();
+            updates.add(set(NAME, schedule.getName()));
+            updates.add(set(AGENT_ID, schedule.getAgentId()));
+            updates.add(set("agentVersion", schedule.getAgentVersion()));
+            updates.add(set("environment", schedule.getEnvironment()));
+            updates.add(set(TENANT_ID, schedule.getTenantId()));
+            updates.add(set(USER_ID, schedule.getUserId()));
+            updates.add(set("triggerType", schedule.getTriggerType() != null ? schedule.getTriggerType().name() : null));
+            updates.add(set("cronExpression", schedule.getCronExpression()));
+            updates.add(set("heartbeatIntervalSeconds", schedule.getHeartbeatIntervalSeconds()));
+            updates.add(set("oneTimeAt", schedule.getOneTimeAt()));
+            updates.add(set("timeZone", schedule.getTimeZone()));
+            updates.add(set("message", schedule.getMessage()));
+            updates.add(set("conversationStrategy", schedule.getConversationStrategy()));
+            updates.add(set("maxCostPerFire", schedule.getMaxCostPerFire()));
+            updates.add(set("allowSelfScheduling", schedule.isAllowSelfScheduling()));
+            updates.add(set(ENABLED, schedule.isEnabled()));
+            updates.add(set(NEXT_FIRE, schedule.getNextFire() == null ? null : epochMillis(schedule.getNextFire())));
+            updates.add(set(FIRE_STATUS, schedule.getFireStatus() != null ? schedule.getFireStatus().name() : FireStatus.PENDING.name()));
+            updates.add(set(FAIL_COUNT, schedule.getFailCount()));
+            updates.add(set(METADATA, schedule.getMetadata()));
+            updates.add(set(UPDATED_AT, epochMillis(now)));
+
+            UpdateResult result = scheduleCollection.updateOne(eq(ID, scheduleId), combine(updates));
             if (result.getMatchedCount() == 0) {
                 throw new IResourceStore.ResourceNotFoundException("Schedule with id=" + scheduleId + " not found");
             }
@@ -178,6 +229,22 @@ public class MongoScheduleStore implements IScheduleStore {
             throw e;
         } catch (Exception e) {
             throw new IResourceStore.ResourceStoreException("Failed to update schedule " + scheduleId, e);
+        }
+    }
+
+    /**
+     * Single-field {@code $set} of the persistent conversation id — see
+     * {@link IScheduleStore#setPersistentConversationId} for why the fire path must
+     * not go through {@link #updateSchedule}.
+     */
+    @Override
+    public void setPersistentConversationId(String scheduleId, String conversationId) throws IResourceStore.ResourceStoreException {
+        try {
+            long nowMs = epochMillis(Instant.now());
+            scheduleCollection.updateOne(eq(ID, scheduleId),
+                    combine(set(PERSISTENT_CONVERSATION_ID, conversationId), set(UPDATED_AT, nowMs)));
+        } catch (Exception e) {
+            throw new IResourceStore.ResourceStoreException("Failed to set persistent conversation id for " + scheduleId, e);
         }
     }
 
@@ -192,10 +259,17 @@ public class MongoScheduleStore implements IScheduleStore {
             updates.add(set(ENABLED, enabled));
             updates.add(set(UPDATED_AT, epochMillis(now)));
 
-            if (enabled && nextFire != null) {
-                updates.add(set(NEXT_FIRE, epochMillis(nextFire)));
+            if (enabled) {
+                // Clearing the failure state is what "enable" MEANS, and it must not
+                // depend on whether a nextFire could be computed: a re-enabled schedule
+                // that stays FAILED/DEAD_LETTERED with a non-zero failCount can never be
+                // claimed again.
                 updates.add(set(FIRE_STATUS, FireStatus.PENDING.name()));
                 updates.add(set(FAIL_COUNT, 0));
+                updates.add(set(NEXT_RETRY_AT, null));
+                if (nextFire != null) {
+                    updates.add(set(NEXT_FIRE, epochMillis(nextFire)));
+                }
             }
 
             UpdateResult result = scheduleCollection.updateOne(eq(ID, scheduleId), combine(updates));
@@ -212,8 +286,14 @@ public class MongoScheduleStore implements IScheduleStore {
     @Override
     public void deleteSchedule(String scheduleId) throws IResourceStore.ResourceStoreException {
         try {
+            // Fire logs first: they are unreachable once the schedule is gone, and each
+            // one carries a conversationId — leaving them behind orphans personal data
+            // that no erasure path can find again.
+            deleteFireLogsByScheduleId(scheduleId);
             scheduleCollection.deleteOne(eq(ID, scheduleId));
             LOGGER.infof("Deleted schedule id=%s", sanitize(scheduleId));
+        } catch (IResourceStore.ResourceStoreException e) {
+            throw e;
         } catch (Exception e) {
             throw new IResourceStore.ResourceStoreException("Failed to delete schedule " + scheduleId, e);
         }
@@ -222,6 +302,7 @@ public class MongoScheduleStore implements IScheduleStore {
     @Override
     public int deleteSchedulesByAgentId(String agentId) throws IResourceStore.ResourceStoreException {
         try {
+            deleteFireLogsOfSchedulesMatching(eq(AGENT_ID, agentId));
             var result = scheduleCollection.deleteMany(eq(AGENT_ID, agentId));
             int count = (int) result.getDeletedCount();
             if (count > 0) {
@@ -244,6 +325,9 @@ public class MongoScheduleStore implements IScheduleStore {
             return 0;
         }
         try {
+            // The fire logs go with them: each carries a conversationId of the user
+            // being erased, and once the schedule row is gone nothing can find them.
+            deleteFireLogsOfSchedulesMatching(eq(USER_ID, userId));
             var result = scheduleCollection.deleteMany(eq(USER_ID, userId));
             int count = (int) result.getDeletedCount();
             if (count > 0) {
@@ -258,6 +342,7 @@ public class MongoScheduleStore implements IScheduleStore {
     @Override
     public int deleteSchedulesByName(String name) throws IResourceStore.ResourceStoreException {
         try {
+            deleteFireLogsOfSchedulesMatching(eq(NAME, name));
             var result = scheduleCollection.deleteMany(eq(NAME, name));
             int count = (int) result.getDeletedCount();
             if (count > 0) {
@@ -276,8 +361,18 @@ public class MongoScheduleStore implements IScheduleStore {
     }
 
     @Override
+    public List<ScheduleConfiguration> readAllSchedules(int limit, int offset) throws IResourceStore.ResourceStoreException {
+        return readSchedulePage(new Document(), limit, offset);
+    }
+
+    @Override
     public List<ScheduleConfiguration> readSchedulesByAgentId(String agentId) throws IResourceStore.ResourceStoreException {
         return readSchedulesWithFilter(new Document(AGENT_ID, agentId), 500);
+    }
+
+    @Override
+    public List<ScheduleConfiguration> readSchedulesByAgentId(String agentId, int limit, int offset) throws IResourceStore.ResourceStoreException {
+        return readSchedulePage(new Document(AGENT_ID, agentId), limit, offset);
     }
 
     // ========================= Polling & Claiming =========================
@@ -324,7 +419,7 @@ public class MongoScheduleStore implements IScheduleStore {
                             and(eq(FIRE_STATUS, FireStatus.CLAIMED.name()), lte(CLAIMED_AT, leaseMs))));
 
             Bson update = combine(set(FIRE_STATUS, FireStatus.CLAIMED.name()), set(CLAIMED_BY, instanceId), set(CLAIMED_AT, nowMs),
-                    set(FIRE_ID, scheduleId + "_" + now.toString()), set(UPDATED_AT, nowMs));
+                    set(FIRE_ID, IScheduleStore.fireIdOf(scheduleId, now)), set(UPDATED_AT, nowMs));
 
             Document result = scheduleCollection.findOneAndUpdate(filter, update);
             if (result != null) {
@@ -462,6 +557,66 @@ public class MongoScheduleStore implements IScheduleStore {
             return result;
         } catch (Exception e) {
             throw new IResourceStore.ResourceStoreException("Failed to read schedules", e);
+        }
+    }
+
+    /**
+     * A deterministically ordered page — newest created first, {@code _id} breaking
+     * ties. Both halves matter: an unsorted {@code find().limit()} returns an
+     * arbitrary subset, and {@code createdAt} alone is not unique (schedules
+     * created in a burst share a millisecond), so paging without the tie-breaker
+     * skips and repeats rows.
+     */
+    private List<ScheduleConfiguration> readSchedulePage(Bson filter, int limit, int offset) throws IResourceStore.ResourceStoreException {
+        try {
+            List<ScheduleConfiguration> result = new ArrayList<>();
+            var cursor = scheduleCollection.find(filter).sort(new Document("createdAt", -1).append(ID, -1)).skip(Math.max(0, offset)).limit(limit);
+            for (var doc : cursor) {
+                result.add(fromDocument(doc));
+            }
+            return result;
+        } catch (Exception e) {
+            throw new IResourceStore.ResourceStoreException("Failed to read schedules", e);
+        }
+    }
+
+    @Override
+    public int deleteFireLogsByScheduleId(String scheduleId) throws IResourceStore.ResourceStoreException {
+        try {
+            return (int) fireLogCollection.deleteMany(eq(SCHEDULE_ID, scheduleId)).getDeletedCount();
+        } catch (Exception e) {
+            throw new IResourceStore.ResourceStoreException("Failed to delete fire logs for schedule " + scheduleId, e);
+        }
+    }
+
+    @Override
+    public int deleteFireLogsOlderThan(Instant cutoff) throws IResourceStore.ResourceStoreException {
+        try {
+            return (int) fireLogCollection.deleteMany(lt(STARTED_AT, epochMillis(cutoff))).getDeletedCount();
+        } catch (Exception e) {
+            throw new IResourceStore.ResourceStoreException("Failed to prune fire logs", e);
+        }
+    }
+
+    /**
+     * Cascade the fire logs of every schedule matching {@code filter}. Two steps
+     * because the fire log only carries the scheduleId — resolve the ids first,
+     * then delete their logs in one call.
+     */
+    private void deleteFireLogsOfSchedulesMatching(Bson filter) throws IResourceStore.ResourceStoreException {
+        try {
+            List<String> ids = new ArrayList<>();
+            for (var doc : scheduleCollection.find(filter).projection(new Document(ID, 1))) {
+                Object id = doc.get(ID);
+                if (id != null) {
+                    ids.add(id.toString());
+                }
+            }
+            if (!ids.isEmpty()) {
+                fireLogCollection.deleteMany(in(SCHEDULE_ID, ids));
+            }
+        } catch (Exception e) {
+            throw new IResourceStore.ResourceStoreException("Failed to cascade-delete fire logs", e);
         }
     }
 

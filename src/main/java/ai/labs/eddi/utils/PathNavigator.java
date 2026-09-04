@@ -14,9 +14,18 @@ import java.util.regex.Pattern;
  * Replaces explicit OGNL calls (Ognl.getValue/Ognl.setValue) to eliminate the
  * security surface from arbitrary method invocation.
  * <p>
- * Supports: - Dot-path navigation: "a.b.c" - Array index access:
- * "items[0].name" - Simple arithmetic on final value: "properties.count+1" -
- * String concatenation: "properties.first+' '+properties.last"
+ * Supports:
+ * <ul>
+ * <li>Dot-path navigation: {@code a.b.c}</li>
+ * <li>Array index access: {@code items[0].name}</li>
+ * <li>Simple arithmetic on the final value: {@code properties.count+1}</li>
+ * <li>String concatenation, any number of operands, evaluated left to right:
+ * {@code properties.first+' '+properties.last}</li>
+ * </ul>
+ * An expression that cannot be resolved yields {@code null} — including a
+ * subtraction whose operands are not both numbers, which is how an absent
+ * hyphenated key ({@code properties.my-key}) used to resolve to the value of a
+ * shorter path that did exist.
  * <p>
  * Does NOT support method invocation, static class access, or object
  * instantiation.
@@ -59,19 +68,47 @@ public class PathNavigator {
             String operator = arithmeticMatcher.group(2);
             String rightOperand = arithmeticMatcher.group(3).trim();
 
+            // The LEFT operand of a top-level expression must be a real path: an
+            // unresolvable one means "not found", not "a bare string literal".
             Object leftValue = navigatePath(leftPath, root);
             if (leftValue != null) {
-                // Try to resolve right operand as a path first, then as a literal
-                Object rightValue = navigatePath(rightOperand, root);
-                if (rightValue == null) {
-                    rightValue = parseLiteral(rightOperand);
-                }
-
-                return applyOperator(leftValue, operator, rightValue);
+                return applyOperator(leftValue, operator, evaluateOperand(rightOperand, root));
             }
         }
 
         return null;
+    }
+
+    /**
+     * Resolve one operand: a path if it navigates, otherwise a nested expression if
+     * it contains an operator, otherwise a literal.
+     * <p>
+     * The nested case is what makes more than two operands work. ARITHMETIC_PATTERN
+     * splits reluctantly, so the class's own documented example
+     * {@code properties.first+' '+properties.last} splits into
+     * {@code properties.first} and the remainder {@code ' '+properties.last} — and
+     * the remainder used to go straight to {@link #parseLiteral}, which found no
+     * closing quote, failed both number parses and handed back the raw text. The
+     * documented three-operand form therefore produced the literal garbage
+     * {@code John' '+properties.last}, silently, into a conversation property or a
+     * behaviour-rule comparison. Recursing here evaluates the remainder instead;
+     * because each split strictly shortens the string, the recursion terminates.
+     */
+    private static Object evaluateOperand(String expression, Object root) {
+        Object direct = navigatePath(expression, root);
+        if (direct != null) {
+            return direct;
+        }
+
+        Matcher matcher = ARITHMETIC_PATTERN.matcher(expression);
+        if (matcher.matches()) {
+            Object leftValue = evaluateOperand(matcher.group(1).trim(), root);
+            if (leftValue != null) {
+                return applyOperator(leftValue, matcher.group(2), evaluateOperand(matcher.group(3).trim(), root));
+            }
+        }
+
+        return parseLiteral(expression);
     }
 
     /**
@@ -208,7 +245,16 @@ public class PathNavigator {
             return leftStr + rightStr;
         }
 
-        return left;
+        // Subtraction whose operands are not both numbers is not an expression at all
+        // — and answering with the left operand made a MISSING key resolve to the
+        // value of a shorter one. "properties.my-key", with no such key but a
+        // "properties.my" present, split into left=10 / op='-' / right="key" and
+        // returned 10. Hyphenated keys are ordinary in EDDI's template data, and the
+        // callers (MatchingUtilities, PropertySetterTask, SizeMatcher) read null as
+        // "not found" and any non-null as a match — so an absent key could make a rule
+        // fire, or pull a neighbouring value into a property, with no error and no log
+        // line. Null is the honest answer.
+        return null;
     }
 
     private static Object parseLiteral(String value) {
@@ -217,8 +263,12 @@ public class PathNavigator {
         }
 
         // String literal: 'some text'
-        if (value.startsWith("'") && value.endsWith("'") && value.length() >= 2) {
-            return value.substring(1, value.length() - 1);
+        if (value.startsWith("'")) {
+            // An opening quote with no closing quote is a malformed literal. It used to
+            // fall through every branch below and be returned as raw text, which is how
+            // a broken expression turned into a plausible-looking value instead of a
+            // "not found".
+            return value.length() >= 2 && value.endsWith("'") ? value.substring(1, value.length() - 1) : null;
         }
 
         // Integer

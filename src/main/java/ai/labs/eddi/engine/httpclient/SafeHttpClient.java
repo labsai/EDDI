@@ -208,8 +208,15 @@ public class SafeHttpClient {
             // 307/308: preserve original HTTP method and body
             builder.method(request.method(),
                     request.bodyPublisher().orElse(HttpRequest.BodyPublishers.noBody()));
+        } else if ("HEAD".equals(request.method())) {
+            // HEAD survives EVERY redirect code. RFC 9110 §15.4 only requires the
+            // POST→GET rewrite; applying it to HEAD downloads the entire body of the
+            // target, the exact opposite of why a caller chose HEAD (an existence or
+            // size probe) — and it made the effective method depend on which redirect
+            // code the server happened to answer with: 307 kept HEAD, 302 did not.
+            builder.method("HEAD", HttpRequest.BodyPublishers.noBody());
         } else {
-            // 301/302/303: always downgrade to GET per RFC 7231
+            // 301/302/303: downgrade to GET per RFC 9110 §15.4
             builder.GET();
         }
 

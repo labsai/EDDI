@@ -11,13 +11,17 @@ import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.TriggerType;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.internal.HitlTimeoutHandler;
+import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
+import ai.labs.eddi.modules.llm.tools.ToolCostTracker;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.mockito.ArgumentCaptor;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -37,6 +41,7 @@ class ScheduleFireExecutorTest {
     private HitlTimeoutHandler hitlTimeoutHandler;
     private DreamService dreamService;
     private TeamCadenceService teamCadenceService;
+    private ToolCostTracker toolCostTracker;
     private ScheduleFireExecutor executor;
 
     @BeforeEach
@@ -46,6 +51,7 @@ class ScheduleFireExecutorTest {
         hitlTimeoutHandler = mock(HitlTimeoutHandler.class);
         dreamService = mock(DreamService.class);
         teamCadenceService = mock(TeamCadenceService.class);
+        toolCostTracker = mock(ToolCostTracker.class);
 
         executor = new ScheduleFireExecutor();
         // Inject mocks via reflection (field injection)
@@ -54,6 +60,165 @@ class ScheduleFireExecutorTest {
         setField(executor, "hitlTimeoutHandler", hitlTimeoutHandler);
         setField(executor, "dreamService", dreamService);
         setField(executor, "teamCadenceService", teamCadenceService);
+        setField(executor, "toolCostTracker", toolCostTracker);
+    }
+
+    /**
+     * The outcome of a fire has to come from the SNAPSHOT, not from the latch.
+     * <p>
+     * The latch is counted down from {@code Conversation.runStep}'s finally block,
+     * which also runs on the failure branch, and {@code ConversationService.say}
+     * swallows the {@code LifecycleException} — so "the handler was called" only
+     * ever meant "the turn was attempted". Reporting COMPLETED there made every
+     * in-pipeline failure (LLM outage, tool error, unresolvable workflow config)
+     * look like a green fire: failCount never incremented, backoff never applied,
+     * nothing was ever dead-lettered, and the deadlettered counter operators are
+     * told to alert on stayed flat while a nightly agent errored for a month.
+     */
+    @Test
+    void fire_conversationEndedInError_isRecordedFailedNotCompleted() throws Exception {
+        var schedule = makeCronSchedule("sched-err", "new");
+        when(conversationService.startConversation(any(), eq("agent-1"), eq("system:scheduler"), any()))
+                .thenReturn(new IConversationService.ConversationResult("conv-err", null));
+
+        var errored = new SimpleConversationMemorySnapshot();
+        errored.setConversationState(ConversationState.ERROR);
+        doAnswer(inv -> {
+            ((IConversationService.ConversationResponseHandler) inv.getArgument(8)).onComplete(errored);
+            return null;
+        }).when(conversationService).say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+
+        ScheduleFireLog result = executor.fire(schedule, "instance-1", 1);
+
+        assertEquals(FireStatus.FAILED.name(), result.status());
+        assertNotNull(result.errorMessage(), "a failed fire must record why, or the fire log says nothing went wrong");
+
+        ArgumentCaptor<ScheduleFireLog> logged = ArgumentCaptor.forClass(ScheduleFireLog.class);
+        verify(scheduleStore).logFire(logged.capture());
+        assertEquals(FireStatus.FAILED.name(), logged.getValue().status());
+    }
+
+    @Test
+    void fire_conversationEndedReady_isStillCompleted() throws Exception {
+        var schedule = makeCronSchedule("sched-ok", "new");
+        when(conversationService.startConversation(any(), eq("agent-1"), eq("system:scheduler"), any()))
+                .thenReturn(new IConversationService.ConversationResult("conv-ok", null));
+
+        var ready = new SimpleConversationMemorySnapshot();
+        ready.setConversationState(ConversationState.READY);
+        doAnswer(inv -> {
+            ((IConversationService.ConversationResponseHandler) inv.getArgument(8)).onComplete(ready);
+            return null;
+        }).when(conversationService).say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+
+        assertEquals(FireStatus.COMPLETED.name(), executor.fire(schedule, "instance-1", 1).status());
+    }
+
+    /**
+     * The persistent strategy must record its conversation with a single-field
+     * write. Calling {@code updateSchedule} here persisted the PRE-claim copy of
+     * the schedule — fireStatus still PENDING, claim columns empty, nextFire still
+     * the past due time — which un-claimed the row in the middle of its own fire.
+     * The next poll then claimed it again and pushed a second concurrent turn into
+     * this very same persistent conversation.
+     */
+    @Test
+    void fire_persistentStrategy_recordsConversationWithoutRewritingTheWholeSchedule() throws Exception {
+        var schedule = makeCronSchedule("sched-persist", "persistent");
+        schedule.setPersistentConversationId(null);
+        when(conversationService.startConversation(any(), eq("agent-1"), eq("system:scheduler"), any()))
+                .thenReturn(new IConversationService.ConversationResult("conv-new", null));
+        doAnswer(inv -> {
+            ((IConversationService.ConversationResponseHandler) inv.getArgument(8)).onComplete(null);
+            return null;
+        }).when(conversationService).say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+
+        executor.fire(schedule, "instance-1", 1);
+
+        verify(scheduleStore).setPersistentConversationId("sched-persist", "conv-new");
+        verify(scheduleStore, never()).updateSchedule(anyString(), any());
+    }
+
+    /**
+     * The fire log's cost was hard-wired to 0.0 on the conversation path, so the
+     * number shown to operators (and read by Dream) meant nothing. It is a DELTA: a
+     * persistent schedule reuses one conversation across every fire, so the running
+     * total would otherwise attribute the whole history to a single fire.
+     */
+    @Test
+    void fire_recordsTheCostThisFireAdded_notTheConversationTotal() throws Exception {
+        var schedule = makeCronSchedule("sched-cost", "new");
+        when(conversationService.startConversation(any(), eq("agent-1"), eq("system:scheduler"), any()))
+                .thenReturn(new IConversationService.ConversationResult("conv-cost", null));
+
+        var before = new ToolCostTracker.ConversationCostMetrics("conv-cost");
+        before.addToolCost("websearch", 2.0);
+        var after = new ToolCostTracker.ConversationCostMetrics("conv-cost");
+        after.addToolCost("websearch", 2.0);
+        after.addToolCost("websearch", 0.5);
+        when(toolCostTracker.getConversationCosts("conv-cost")).thenReturn(before, after);
+
+        doAnswer(inv -> {
+            ((IConversationService.ConversationResponseHandler) inv.getArgument(8)).onComplete(null);
+            return null;
+        }).when(conversationService).say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+
+        assertEquals(0.5, executor.fire(schedule, "instance-1", 1).cost(), 1e-9);
+    }
+
+    /**
+     * The wait was a hard-coded five minutes while {@code lease-timeout} — the
+     * window after which another instance may reclaim the schedule — was already
+     * configurable, so a deployment that raised the lease still had its fires
+     * abandoned at five minutes with no way to change it. The bound now comes from
+     * {@code eddi.schedule.fire-timeout}.
+     * <p>
+     * The {@code @Timeout} is load-bearing: against the hard-coded constant this
+     * test does not fail with a wrong value, it blocks for five minutes.
+     */
+    @Test
+    @Timeout(30)
+    void fire_waitIsBoundedByTheConfiguredFireTimeout_notAHardCodedFiveMinutes() throws Exception {
+        var schedule = makeCronSchedule("sched-timeout", "new");
+        setField(executor, "fireTimeout", Duration.ofMillis(50));
+        when(conversationService.startConversation(any(), eq("agent-1"), eq("system:scheduler"), any()))
+                .thenReturn(new IConversationService.ConversationResult("conv-timeout", null));
+        // The response handler is never invoked: the turn is still running when the
+        // configured bound elapses.
+        doNothing().when(conversationService)
+                .say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+
+        ScheduleFireLog result = executor.fire(schedule, "instance-1", 1);
+
+        assertEquals(FireStatus.FAILED.name(), result.status());
+        assertNotNull(result.errorMessage());
+        assertTrue(result.errorMessage().contains("PT0.05S"),
+                "the configured bound must be the one enforced, and the message must name it: " + result.errorMessage());
+    }
+
+    /**
+     * An absent or unconvertible {@code eddi.schedule.fire-timeout} must fall back
+     * to the same five minutes the constant used, not NPE the fire. A fire that
+     * dies on its own configuration lookup is recorded FAILED and retried, so one
+     * typo in a properties file would take every scheduled agent in the deployment
+     * down without saying why.
+     */
+    @Test
+    void fire_nullFireTimeout_fallsBackToTheDefaultInsteadOfFailingTheFire() throws Exception {
+        var schedule = makeCronSchedule("sched-null-timeout", "new");
+        setField(executor, "fireTimeout", null);
+        when(conversationService.startConversation(any(), eq("agent-1"), eq("system:scheduler"), any()))
+                .thenReturn(new IConversationService.ConversationResult("conv-null-timeout", null));
+        doAnswer(inv -> {
+            ((IConversationService.ConversationResponseHandler) inv.getArgument(8)).onComplete(null);
+            return null;
+        }).when(conversationService).say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+
+        ScheduleFireLog result = executor.fire(schedule, "instance-null-timeout", 1);
+
+        assertEquals(FireStatus.COMPLETED.name(), result.status(),
+                "a null timeout must resolve to the default, not throw inside the fire");
+        assertNull(result.errorMessage());
     }
 
     @Test

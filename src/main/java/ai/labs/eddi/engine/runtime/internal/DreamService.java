@@ -94,8 +94,13 @@ public class DreamService {
      * Placeholder identity the schedule surface assigns when no {@code userId} is
      * supplied. Dream must never run under it: it is not a real user, so every
      * cycle would silently consolidate an empty memory set.
+     * <p>
+     * Public because it is the single source of truth for the literal: the fire
+     * executor defaults a schedule's identity to it and the REST surface exempts it
+     * from ownership checks, and three copies of the same string were drifting
+     * apart.
      */
-    static final String SCHEDULER_PLACEHOLDER_USER_ID = "system:scheduler";
+    public static final String SCHEDULER_PLACEHOLDER_USER_ID = "system:scheduler";
 
     /**
      * Max key length for consolidated entries (matches UserMemoryConfig.Guardrails

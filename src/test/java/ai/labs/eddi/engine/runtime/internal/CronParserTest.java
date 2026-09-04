@@ -163,6 +163,75 @@ class CronParserTest {
         assertEquals(900, interval); // 15 * 60
     }
 
+    /**
+     * The result must be a property of the EXPRESSION, not of the moment the
+     * request happened to arrive. Measuring only the gap after
+     * {@code Instant.now()} made "0 9,10 * * MON" report ~6 days 23 h when
+     * submitted on a Monday between its two fires (accepted by the min-interval
+     * policy) and 3600 s at any other time (rejectable) — the same configuration
+     * passed or failed validation depending on when the operator clicked save.
+     * Scanning a horizon and taking the minimum returns the tightest burst the
+     * expression can actually produce, which is what the policy is about.
+     */
+    @Test
+    void computeMinIntervalSeconds_findsTheTightestGapWhicheverMomentWeAskFrom() {
+        assertEquals(3600, CronParser.computeMinIntervalSeconds("0 9,10 * * MON", UTC));
+    }
+
+    @Test
+    void computeMinIntervalSeconds_burstWithinAnHour() {
+        // 09:00, 09:01, 09:02 then a day's gap — the policy cares about the 60s pair
+        assertEquals(60, CronParser.computeMinIntervalSeconds("0,1,2 9 * * *", UTC));
+    }
+
+    /**
+     * A sparse expression must stop at the scan horizon instead of walking into
+     * {@code computeNextFire}'s own two-year limit, which would throw.
+     */
+    @Test
+    void computeMinIntervalSeconds_yearlyExpressionDoesNotThrow() {
+        long interval = assertDoesNotThrow(() -> CronParser.computeMinIntervalSeconds("0 0 1 1 *", UTC));
+        assertTrue(interval >= 365L * 24 * 3600, "a yearly cron's tightest gap is a year: " + interval);
+    }
+
+    /**
+     * An expression with a first fire but no SECOND one inside the parser's own
+     * two-year horizon has no measurable gap at all, and the scan returns
+     * {@link Long#MAX_VALUE} to say so. That sentinel matters: it is what makes
+     * such an expression pass the minimum-interval policy, where letting the
+     * {@code IllegalStateException} out (the old behaviour) rejected it, and
+     * returning 0 would have rejected it even harder.
+     * <p>
+     * 29 February is the case: it fires once every four years, so from the first
+     * fire the next one is provably beyond the horizon. Which branch applies
+     * depends on the calendar — for roughly half of any four-year cycle the FIRST
+     * fire is out of reach too, and then the expression is unsatisfiable and the
+     * exception is correct. The test therefore asks the parser which situation it
+     * is in and asserts the matching outcome exactly, rather than skipping half the
+     * time or hard-coding an assertion that expires on the next leap day.
+     */
+    @Test
+    void computeMinIntervalSeconds_noSecondFireInTheHorizon_returnsTheSentinelNotZero() {
+        String leapDay = "0 0 29 2 *";
+        boolean firstFireIsReachable;
+        try {
+            CronParser.computeNextFire(leapDay, Instant.now(), UTC);
+            firstFireIsReachable = true;
+        } catch (IllegalStateException e) {
+            firstFireIsReachable = false;
+        }
+
+        if (firstFireIsReachable) {
+            assertEquals(Long.MAX_VALUE, CronParser.computeMinIntervalSeconds(leapDay, UTC),
+                    "no second fire within the horizon means no measurable gap — the scan must say so with the "
+                            + "sentinel, not throw and not report 0");
+        } else {
+            assertThrows(IllegalStateException.class, () -> CronParser.computeMinIntervalSeconds(leapDay, UTC),
+                    "the next 29 February is beyond the parser's horizon, so there is no fire to measure from "
+                            + "at all — that is the unsatisfiable-expression branch, not the sentinel");
+        }
+    }
+
     // --- Day-of-week 7 = Sunday (standard cron compatibility) ---
 
     @Test

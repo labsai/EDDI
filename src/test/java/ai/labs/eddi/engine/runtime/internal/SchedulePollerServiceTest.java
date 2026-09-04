@@ -46,7 +46,8 @@ class SchedulePollerServiceTest {
                 15, // backoffBaseSeconds
                 4, // backoffMultiplier
                 Optional.of("test-instance"), // instanceId
-                "UTC" // defaultTimeZone
+                "UTC", // defaultTimeZone
+                Duration.ofDays(90) // fireLogRetention
         );
         poller.init();
     }
@@ -66,7 +67,7 @@ class SchedulePollerServiceTest {
     @Test
     void init_disabledScheduler() {
         var disabled = new SchedulePollerService(scheduleStore, fireExecutor, new SimpleMeterRegistry(), false, Duration.ofMinutes(5), 5, 15, 4,
-                Optional.empty(), "UTC");
+                Optional.empty(), "UTC", Duration.ofDays(90));
         disabled.init();
         assertFalse(disabled.isEnabled());
     }
@@ -74,7 +75,7 @@ class SchedulePollerServiceTest {
     @Test
     void init_autoDetectsHostnameIfNotConfigured() {
         var autoId = new SchedulePollerService(scheduleStore, fireExecutor, new SimpleMeterRegistry(), true, Duration.ofMinutes(5), 5, 15, 4,
-                Optional.empty(), "UTC");
+                Optional.empty(), "UTC", Duration.ofDays(90));
         autoId.init();
         assertNotNull(autoId.getInstanceId());
         assertFalse(autoId.getInstanceId().isBlank());
@@ -85,7 +86,7 @@ class SchedulePollerServiceTest {
     @Test
     void poll_skipsWhenDisabled() throws Exception {
         var disabled = new SchedulePollerService(scheduleStore, fireExecutor, new SimpleMeterRegistry(), false, Duration.ofMinutes(5), 5, 15, 4,
-                Optional.empty(), "UTC");
+                Optional.empty(), "UTC", Duration.ofDays(90));
         disabled.init();
 
         disabled.pollDueSchedules();
@@ -159,7 +160,7 @@ class SchedulePollerServiceTest {
         // bounded by leaseTimeout — use a short one so the test itself stays fast.
         var shortLeasePoller = new SchedulePollerService(scheduleStore, fireExecutor, new SimpleMeterRegistry(), true,
                 Duration.ofMillis(200), // leaseTimeout — the bound under test
-                5, 15, 4, Optional.of("test-instance"), "UTC");
+                5, 15, 4, Optional.of("test-instance"), "UTC", Duration.ofDays(90));
         shortLeasePoller.init();
 
         var schedule = makeCronSchedule("sched-stalled", "0 9 * * *", "Hello");
@@ -187,7 +188,7 @@ class SchedulePollerServiceTest {
         // cycle near a single leaseTimeout regardless of N.
         var shortLeasePoller = new SchedulePollerService(scheduleStore, fireExecutor, new SimpleMeterRegistry(), true,
                 Duration.ofMillis(200), // leaseTimeout — the ONE shared batch bound
-                5, 15, 4, Optional.of("test-instance"), "UTC");
+                5, 15, 4, Optional.of("test-instance"), "UTC", Duration.ofDays(90));
         shortLeasePoller.init();
 
         var s1 = makeCronSchedule("stall-1", "0 9 * * *", "a");
@@ -219,7 +220,7 @@ class SchedulePollerServiceTest {
         // forever. shutdownNow() + no awaitTermination must keep the poll cycle live.
         var shortLeasePoller = new SchedulePollerService(scheduleStore, fireExecutor, new SimpleMeterRegistry(), true,
                 Duration.ofMillis(200), // leaseTimeout — the per-fire bound
-                5, 15, 4, Optional.of("test-instance"), "UTC");
+                5, 15, 4, Optional.of("test-instance"), "UTC", Duration.ofDays(90));
         shortLeasePoller.init();
 
         var schedule = makeCronSchedule("sched-wedged", "0 9 * * *", "Hello");
@@ -336,21 +337,24 @@ class SchedulePollerServiceTest {
 
     // --- Heartbeat scheduling ---
 
+    /**
+     * This test used to assert {@code now + interval}, which is the DRIFT the
+     * "drift-proof" contract on {@code TriggerType.HEARTBEAT} exists to rule out:
+     * anchoring on the moment a fire finished pushes the cadence out by the
+     * duration of every turn. {@code makeHeartbeatSchedule} arms nextFire 60s in
+     * the past, so the correct answer is due + interval — 240s from now, not 300.
+     */
     @Test
-    void poll_heartbeat_completedSetsIntervalBasedNextFire() throws Exception {
+    void poll_heartbeat_completedAnchorsNextFireOnTheDueTime() throws Exception {
         var schedule = makeHeartbeatSchedule("hb-1", 300L, "check");
+        Instant due = schedule.getNextFire();
         when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
         when(scheduleStore.tryClaim(any(), any(), any(), any())).thenReturn(true);
         when(fireExecutor.fire(any(), any(), anyInt())).thenReturn(makeFireLog("hb-1", FireStatus.COMPLETED.name()));
 
         poller.pollDueSchedules();
 
-        // Should pass a non-null nextFire to markCompleted (now + 300s)
-        verify(scheduleStore).markCompleted(eq("hb-1"), argThat(nextFire -> {
-            assertNotNull(nextFire);
-            long diff = Duration.between(Instant.now(), nextFire).getSeconds();
-            return diff > 295 && diff <= 305; // ~300 seconds from now
-        }));
+        verify(scheduleStore).markCompleted(eq("hb-1"), eq(due.plusSeconds(300)));
     }
 
     @Test
@@ -420,6 +424,241 @@ class SchedulePollerServiceTest {
 
         verify(fireExecutor).fire(eq(mine), any(), anyInt());
         verify(fireExecutor, never()).fire(eq(theirs), any(), anyInt());
+    }
+
+    // --- Heartbeat drift ---
+
+    /**
+     * "Drift-proof" is the documented contract of HEARTBEAT, on both this class and
+     * {@code TriggerType.HEARTBEAT}. The implementation added the interval to
+     * {@code Instant.now()} AFTER the fire finished, so every heartbeat drifted by
+     * the duration of each turn: a 40 s turn on a 60 s heartbeat actually fired
+     * every ~100 s. Anchoring on the fire time that was DUE keeps the cadence.
+     */
+    @Test
+    void heartbeat_nextFireIsAnchoredOnTheDueTime_notOnWhenTheFireFinished() throws Exception {
+        var schedule = makeHeartbeatSchedule("hb-drift", 60, "tick");
+        Instant due = Instant.now().minusSeconds(20); // fired 20s late
+        schedule.setNextFire(due);
+
+        when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
+        when(scheduleStore.tryClaim(eq("hb-drift"), any(), any(), any())).thenReturn(true);
+        when(fireExecutor.fire(any(), any(), anyInt())).thenReturn(makeFireLog("hb-drift", FireStatus.COMPLETED.name()));
+
+        poller.pollDueSchedules();
+
+        var nextFire = org.mockito.ArgumentCaptor.forClass(Instant.class);
+        verify(scheduleStore).markCompleted(eq("hb-drift"), nextFire.capture());
+        assertEquals(due.plusSeconds(60), nextFire.getValue(),
+                "the cadence must be due + interval, not finish-time + interval");
+    }
+
+    /**
+     * A fire that overran a whole interval must not schedule itself into the past —
+     * that is a tight re-fire loop, not catching up — and the clamp that prevents
+     * it must engage <em>only</em> then.
+     * <p>
+     * Both halves are needed, because either one alone is satisfied by code that is
+     * wrong. {@code assertTrue(next.isAfter(now))} was satisfied by the pre-fix
+     * {@code Instant.now().plusSeconds(interval)} as well, so it pinned nothing;
+     * and the clamp's own value is deliberately identical to that pre-fix formula,
+     * so asserting it alone cannot tell the two apart either. What distinguishes
+     * them is the boundary: overrun by more than an interval clamps to
+     * {@code now + interval}, overrun by less keeps the cadence at
+     * {@code due + interval}. Assert both and the test fails whether the anchor is
+     * reverted or the clamp is deleted.
+     */
+    @Test
+    void heartbeat_overrunFire_doesNotScheduleIntoThePast() throws Exception {
+        // (a) overran by ten intervals: the anchored time is long past, so the clamp
+        // engages and the next fire is now + interval — never the anchored past value.
+        var overrun = makeHeartbeatSchedule("hb-overrun", 60, "tick");
+        overrun.setNextFire(Instant.now().minusSeconds(600));
+
+        when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(overrun));
+        when(scheduleStore.tryClaim(eq("hb-overrun"), any(), any(), any())).thenReturn(true);
+        when(fireExecutor.fire(any(), any(), anyInt())).thenReturn(makeFireLog("hb-overrun", FireStatus.COMPLETED.name()));
+
+        Instant beforePoll = Instant.now();
+        poller.pollDueSchedules();
+        Instant afterPoll = Instant.now();
+
+        var clamped = org.mockito.ArgumentCaptor.forClass(Instant.class);
+        verify(scheduleStore).markCompleted(eq("hb-overrun"), clamped.capture());
+        assertFalse(clamped.getValue().isBefore(beforePoll.plusSeconds(60)),
+                "an overrun fire must be clamped to now + interval, not left in the past: " + clamped.getValue());
+        assertFalse(clamped.getValue().isAfter(afterPoll.plusSeconds(60)),
+                "an overrun fire must be clamped to now + interval, not pushed further out: " + clamped.getValue());
+
+        // (b) overran by less than one interval: the anchored time is still in the
+        // future, so the clamp must NOT engage and the cadence is kept exactly.
+        reset(scheduleStore, fireExecutor);
+        var late = makeHeartbeatSchedule("hb-late", 60, "tick");
+        Instant due = Instant.now().minusSeconds(10);
+        late.setNextFire(due);
+
+        when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(late));
+        when(scheduleStore.tryClaim(eq("hb-late"), any(), any(), any())).thenReturn(true);
+        when(fireExecutor.fire(any(), any(), anyInt())).thenReturn(makeFireLog("hb-late", FireStatus.COMPLETED.name()));
+
+        poller.pollDueSchedules();
+
+        var kept = org.mockito.ArgumentCaptor.forClass(Instant.class);
+        verify(scheduleStore).markCompleted(eq("hb-late"), kept.capture());
+        assertEquals(due.plusSeconds(60), kept.getValue(),
+                "a fire that ran late but inside the interval keeps the cadence — the clamp is for "
+                        + "overruns only, and must not quietly re-anchor every fire on now");
+    }
+
+    // --- Fire log retention ---
+
+    /**
+     * Nothing pruned eddi_schedule_fire_logs: a 60-second heartbeat writes ~525,600
+     * rows a year on its own, every HITL pause adds a one-shot schedule whose log
+     * outlives it, and readFailedFireLogs scans the lot.
+     */
+    @Test
+    void pruneFireLogs_deletesLogsOlderThanTheRetentionWindow() throws Exception {
+        when(scheduleStore.deleteFireLogsOlderThan(any())).thenReturn(12);
+
+        poller.pruneFireLogs();
+
+        var cutoff = org.mockito.ArgumentCaptor.forClass(Instant.class);
+        verify(scheduleStore).deleteFireLogsOlderThan(cutoff.capture());
+        assertTrue(cutoff.getValue().isBefore(Instant.now().minus(Duration.ofDays(89))), "cutoff: " + cutoff.getValue());
+    }
+
+    @Test
+    void pruneFireLogs_zeroRetentionKeepsEverything() throws Exception {
+        var keepAll = new SchedulePollerService(scheduleStore, fireExecutor, new SimpleMeterRegistry(), true, Duration.ofMinutes(5), 5, 15, 4,
+                Optional.of("test-instance"), "UTC", Duration.ZERO);
+        keepAll.init();
+
+        keepAll.pruneFireLogs();
+
+        verify(scheduleStore, never()).deleteFireLogsOlderThan(any());
+    }
+
+    @Test
+    void pruneFireLogs_storeFailureDoesNotPropagate() throws Exception {
+        when(scheduleStore.deleteFireLogsOlderThan(any())).thenThrow(new RuntimeException("db down"));
+
+        assertDoesNotThrow(() -> poller.pruneFireLogs());
+    }
+
+    // --- Manual fires (REST) ---
+
+    /**
+     * A manual fire must claim on the poller's own terms. Passing {@code now} as
+     * the lease expiry would match the CAS clause that steals a CRASHED instance's
+     * claim ({@code claimedAt <= leaseExpiry}) and so would seize the claim of a
+     * fire that is still running — the opposite of what claiming is for.
+     */
+    @Test
+    void claimForManualFire_usesTheConfiguredLeaseAsTheStealThreshold() throws Exception {
+        var schedule = makeCronSchedule("manual-1", "0 9 * * *", "hi");
+        when(scheduleStore.tryClaim(eq("manual-1"), any(), any(), any())).thenReturn(true);
+
+        assertTrue(poller.claimForManualFire(schedule));
+
+        var now = org.mockito.ArgumentCaptor.forClass(Instant.class);
+        var leaseExpiry = org.mockito.ArgumentCaptor.forClass(Instant.class);
+        verify(scheduleStore).tryClaim(eq("manual-1"), eq("test-instance"), now.capture(), leaseExpiry.capture());
+        assertEquals(now.getValue().minus(Duration.ofMinutes(5)), leaseExpiry.getValue(),
+                "a manual fire must not be able to steal a live claim");
+        assertEquals("manual-1_" + now.getValue(), schedule.getFireId(), "the in-memory copy must mirror the persisted fireId");
+    }
+
+    @Test
+    void claimForManualFire_refusesWhenTheScheduleIsAlreadyClaimed() throws Exception {
+        var schedule = makeCronSchedule("manual-2", "0 9 * * *", "hi");
+        when(scheduleStore.tryClaim(eq("manual-2"), any(), any(), any())).thenReturn(false);
+
+        assertFalse(poller.claimForManualFire(schedule));
+    }
+
+    @Test
+    void recordManualFireOutcome_completedReArmsThroughTheSameStateMachine() throws Exception {
+        var schedule = makeCronSchedule("manual-3", "0 9 * * *", "hi");
+
+        poller.recordManualFireOutcome(schedule, makeFireLog("manual-3", FireStatus.COMPLETED.name()));
+
+        verify(scheduleStore).markCompleted(eq("manual-3"), any());
+        verify(scheduleStore, never()).markFailed(anyString(), any());
+    }
+
+    @Test
+    void recordManualFireOutcome_failedRecordsAFailureSoRetryAndBackoffStillApply() throws Exception {
+        var schedule = makeCronSchedule("manual-4", "0 9 * * *", "hi");
+
+        poller.recordManualFireOutcome(schedule, makeFireLog("manual-4", FireStatus.FAILED.name()));
+
+        verify(scheduleStore).markFailed(eq("manual-4"), any());
+        verify(scheduleStore, never()).markCompleted(anyString(), any());
+    }
+
+    /**
+     * A manual fire that threw returns no fire log at all — the claim must still be
+     * released, or the schedule stays CLAIMED and blocks the poller until the lease
+     * expires.
+     */
+    @Test
+    void recordManualFireOutcome_nullFireLogIsTreatedAsAFailure() throws Exception {
+        var schedule = makeCronSchedule("manual-5", "0 9 * * *", "hi");
+
+        assertDoesNotThrow(() -> poller.recordManualFireOutcome(schedule, null));
+
+        verify(scheduleStore).markFailed(eq("manual-5"), any());
+    }
+
+    /**
+     * Routing a manual fire through the poller's state machine has a consequence
+     * only the HEARTBEAT path shows, and nothing pinned it: re-arming uses the
+     * drift-proof rule, so the next fire is anchored on the schedule's own
+     * {@code nextFire} rather than on the moment the manual turn finished. Firing
+     * manually while the next fire is still in the future therefore CONSUMES it and
+     * moves the cadence out by one interval. That is deliberate — see
+     * {@code recordManualFireOutcome}'s Javadoc — and this test is what keeps it
+     * from changing by accident.
+     */
+    @Test
+    void recordManualFireOutcome_heartbeatAnchorsTheNextFireOnTheDueTimeNotOnNow() throws Exception {
+        var schedule = makeHeartbeatSchedule("manual-6", 3600, "hi");
+        schedule.setNextFire(Instant.parse("2099-01-01T00:00:00Z"));
+
+        poller.recordManualFireOutcome(schedule, makeFireLog("manual-6", FireStatus.COMPLETED.name()));
+
+        verify(scheduleStore).markCompleted("manual-6", Instant.parse("2099-01-01T01:00:00Z"));
+    }
+
+    /**
+     * The fourth consequence of routing a manual fire through this state machine,
+     * and the one an operator is most likely to be surprised by: a successful
+     * manual fire CONSUMES a one-shot.
+     * <p>
+     * {@link SchedulePollerService#computeNextFire} has no {@code oneTimeAt} branch
+     * — deliberately, because {@code null} is the signal {@code markCompleted} uses
+     * to disable a finished one-shot — so pressing "Fire now" on a pending one-shot
+     * is the run, not a rehearsal. Pinning it here means the day someone decides a
+     * manual fire should leave a one-shot armed, they have to change this test and
+     * the Javadoc that documents it rather than discovering it in production.
+     */
+    @Test
+    void recordManualFireOutcome_oneShotIsConsumed_notLeftArmed() throws Exception {
+        var oneShot = new ScheduleConfiguration();
+        oneShot.setId("manual-7");
+        oneShot.setName("One shot");
+        oneShot.setTriggerType(TriggerType.CRON);
+        oneShot.setAgentId("agent-1");
+        oneShot.setOneTimeAt("2099-01-01T00:00:00Z");
+        oneShot.setNextFire(Instant.parse("2099-01-01T00:00:00Z"));
+        oneShot.setFireStatus(FireStatus.PENDING);
+
+        poller.recordManualFireOutcome(oneShot, makeFireLog("manual-7", FireStatus.COMPLETED.name()));
+
+        // null nextFire is what markCompleted reads as "one-shot finished — disable
+        // it".
+        verify(scheduleStore).markCompleted("manual-7", null);
     }
 
     // --- Helpers ---

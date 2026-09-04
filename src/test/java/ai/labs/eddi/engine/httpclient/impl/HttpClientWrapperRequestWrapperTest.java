@@ -131,6 +131,43 @@ class HttpClientWrapperRequestWrapperTest {
             assertTrue(queryParams.containsKey("key"));
         }
 
+        /**
+         * The query was decoded TWICE: {@code uri.getQuery()} already returns a decoded
+         * string, and each pair was then run through URLDecoder again. For
+         * {@code ?q=100%25} that second pass saw the bare "100%" and threw "Incomplete
+         * trailing escape (%) pattern" — out of this constructor, up through
+         * ApiCallExecutor.buildRequest, and into a LifecycleException that failed the
+         * whole ApiCallsTask turn for a perfectly valid URI.
+         */
+        @Test
+        @DisplayName("percent-encoded '%' does not abort the request")
+        void encodedPercentSign() {
+            IRequest request = assertDoesNotThrow(
+                    () -> wrapper.newRequest(URI.create("http://example.com/search?filter=100%25")));
+
+            @SuppressWarnings("unchecked")
+            var queryParams = (Map<String, ?>) request.toMap().get("queryParams");
+            assertEquals("[100%]", String.valueOf(queryParams.get("filter")));
+        }
+
+        /**
+         * Double decoding also silently mangled what was RECORDED: an encoded '+'
+         * turned into a space, and an encoded '&' split one parameter into two — so the
+         * ResolvedRequest fingerprint shown to a human approver did not match what was
+         * actually sent.
+         */
+        @Test
+        @DisplayName("encoded '+' and '&' are recorded verbatim, not re-split")
+        void encodedPlusAndAmpersand() {
+            IRequest request = wrapper.newRequest(URI.create("http://example.com/path?r=a%2Bb&s=a%26b"));
+
+            @SuppressWarnings("unchecked")
+            var queryParams = (Map<String, ?>) request.toMap().get("queryParams");
+            assertEquals(2, queryParams.size(), "an encoded '&' must not create a third parameter: " + queryParams);
+            assertEquals("[a+b]", String.valueOf(queryParams.get("r")));
+            assertEquals("[a&b]", String.valueOf(queryParams.get("s")));
+        }
+
         @Test
         @DisplayName("URI with URL-encoded query params — decoded correctly")
         void urlEncodedParams() {
