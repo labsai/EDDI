@@ -16,6 +16,8 @@ import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -32,6 +34,27 @@ class AuditLedgerServiceTest {
     void setUp() {
         MockitoAnnotations.openMocks(this);
         meterRegistry = new SimpleMeterRegistry();
+        // "The store holds no chain position for this conversation." A bare Mockito
+        // mock would answer 0 for a long-returning method, which the seed reads as
+        // "position 0 is taken" and turns into a first sequence of 1. Tests that
+        // care about the seed override this.
+        when(auditStore.maxSequence(anyString())).thenReturn(AuditEntry.UNSEQUENCED);
+    }
+
+    /**
+     * A store that is genuinely unavailable refuses the batch <em>and</em> the
+     * per-entry retry the ledger falls back to. Stubbing only {@code appendBatch}
+     * would exercise the recovery path instead of the outage.
+     */
+    private void storeIsDown() {
+        doThrow(new RuntimeException("db error")).when(auditStore).appendBatch(anyList());
+        doThrow(new RuntimeException("db error")).when(auditStore).appendEntry(any());
+    }
+
+    /** Undo {@link #storeIsDown()} — both write paths accept again. */
+    private void storeIsUp() {
+        doNothing().when(auditStore).appendBatch(anyList());
+        doNothing().when(auditStore).appendEntry(any());
     }
 
     private AuditLedgerService createService(boolean enabled, String masterKey) {
@@ -356,7 +379,7 @@ class AuditLedgerServiceTest {
         // A store outage dead-letters this conversation, so position 0 is
         // consumed but never persisted. Its counter is pinned from here on: the
         // store count can no longer tell us where the chain resumes.
-        doThrow(new RuntimeException("db error")).when(auditStore).appendBatch(anyList());
+        storeIsDown();
         service.submit(entry("pinned-1", "pinned", "agent1"));
         service.flush();
         service.flush();
@@ -365,7 +388,7 @@ class AuditLedgerServiceTest {
                 "precondition: the outage left an unattributed position for this conversation");
 
         // Store recovers. Fill the table with conversations that DO persist.
-        doAnswer(invocation -> null).when(auditStore).appendBatch(anyList());
+        storeIsUp();
         for (int i = 0; i < AuditLedgerService.MAX_TRACKED_CONVERSATIONS + 5; i++) {
             service.submit(entry("fill-" + i, "filler-" + i, "agent1"));
         }
@@ -412,7 +435,7 @@ class AuditLedgerServiceTest {
     @DisplayName("flush — retries on failure (less than MAX_FLUSH_RETRIES)")
     void flushRetriesOnFailure() {
         service = createService(true, null);
-        doThrow(new RuntimeException("db error")).when(auditStore).appendBatch(any());
+        storeIsDown();
 
         service.submit(entry("1", "conv1", "agent1"));
         service.flush(); // First failure — requeues
@@ -424,14 +447,227 @@ class AuditLedgerServiceTest {
     @DisplayName("flush — drops entries after MAX_FLUSH_RETRIES consecutive failures")
     void flushDropsAfterMaxRetries() {
         service = createService(true, null);
-        doThrow(new RuntimeException("db error")).when(auditStore).appendBatch(any());
+        storeIsDown();
 
         service.submit(entry("1", "conv1", "agent1"));
         service.flush(); // Failure 1 — requeue
+        assertEquals(1, service.getQueueSize());
         service.flush(); // Failure 2 — requeue
+        assertEquals(1, service.getQueueSize());
         service.flush(); // Failure 3 — drop + dead letter
 
         assertEquals(0, service.getQueueSize()); // Dropped
+        assertEquals(1.0, meterRegistry.counter("eddi_audit_entries_dropped_total").count());
+    }
+
+    /**
+     * The point of the per-entry fallback (finding 02). A bulk write is atomic in
+     * neither backend, so re-offering the whole batch punished every entry for one
+     * bad row: the rows that HAD landed were carried back into the store as
+     * duplicate keys, nothing new was written, and after three flush windows every
+     * record in them — from unrelated conversations — was dead-lettered together.
+     */
+    @Test
+    @DisplayName("one unstorable entry does not take its whole batch down with it")
+    void aPoisonEntryOnlyCostsItself() {
+        service = createService(true, null);
+        // The batch write always fails; the per-entry retry accepts everything
+        // except the poison row. That is exactly the shape of a NOT NULL violation
+        // on one entry inside a JDBC batch.
+        doThrow(new RuntimeException("batch aborted")).when(auditStore).appendBatch(anyList());
+        doAnswer(invocation -> {
+            AuditEntry e = invocation.getArgument(0);
+            if ("poison".equals(e.id())) {
+                throw new RuntimeException("null value in column violates not-null constraint");
+            }
+            return null;
+        }).when(auditStore).appendEntry(any());
+
+        service.submit(entry("good-1", "conv-a", "agent-1"));
+        service.submit(entry("poison", "conv-b", "agent-1"));
+        service.submit(entry("good-2", "conv-c", "agent-1"));
+        service.flush();
+
+        var captor = ArgumentCaptor.forClass(AuditEntry.class);
+        verify(auditStore, times(3)).appendEntry(captor.capture());
+        assertEquals(List.of("good-1", "poison", "good-2"), captor.getAllValues().stream().map(AuditEntry::id).toList(),
+                "every entry of the failed batch must be retried on its own");
+
+        assertEquals(1, service.getQueueSize(), "only the entry that genuinely could not be stored comes back");
+        assertEquals(0.0, meterRegistry.counter("eddi_audit_entries_dropped_total").count(),
+                "the good entries landed, so nothing is dropped on the first failure");
+    }
+
+    /**
+     * Finding 06: the final flush has no next attempt, so re-queuing loses the
+     * entries silently — no dead-letter record, no dropped-counter increment, and
+     * the queue is never drained again.
+     */
+    @Test
+    @DisplayName("shutdown — a failing final flush dead-letters instead of re-queuing")
+    void shutdownDeadLettersInsteadOfRequeuing() {
+        service = createService(true, null);
+        storeIsDown();
+
+        service.submit(entry("1", "conv1", "agent1"));
+        service.shutdown();
+
+        assertEquals(0, service.getQueueSize(), "nothing may be left in a queue that will never be drained");
+        assertEquals(1.0, meterRegistry.counter("eddi_audit_entries_dropped_total").count(),
+                "an abandoned entry must be counted, not lost between a re-queue and the JVM exiting");
+    }
+
+    /**
+     * Finding 07. The re-queue loop ran backwards under a comment claiming it put
+     * entries "at the front" — which a {@code ConcurrentLinkedQueue} has no way to
+     * do, so all it achieved was reversing the batch. The next flush then persisted
+     * the retried entries in reverse submission order.
+     */
+    @Test
+    @DisplayName("a re-queued batch keeps its submission order")
+    void requeuedEntriesKeepTheirSubmissionOrder() {
+        service = createService(true, null);
+        storeIsDown();
+
+        service.submit(entry("1", "conv1", "agent1"));
+        service.submit(entry("2", "conv1", "agent1"));
+        service.submit(entry("3", "conv1", "agent1"));
+        service.flush(); // fails on both paths — all three come back
+
+        storeIsUp();
+        service.flush();
+
+        var captor = ArgumentCaptor.forClass(List.class);
+        verify(auditStore, times(2)).appendBatch(captor.capture());
+        @SuppressWarnings("unchecked")
+        List<AuditEntry> retried = (List<AuditEntry>) captor.getAllValues().get(1);
+        assertEquals(List.of("1", "2", "3"), retried.stream().map(AuditEntry::id).toList(),
+                "the retry must not reverse the batch");
+    }
+
+    /**
+     * The per-entry fallback must not turn an outage into an unbounded blocking
+     * loop. It runs on the writer thread inside {@code synchronized flush()} — the
+     * monitor the {@code @PreDestroy} final flush also waits on — so an uncapped
+     * pass over a queue grown toward the 100k bound, against a PostgreSQL whose
+     * connect timeout is measured in tens of seconds, would hold both for hours,
+     * where the old whole-batch retry failed once per flush window.
+     */
+    @Test
+    @DisplayName("the per-entry retry stops calling a store that has refused N entries in a row")
+    void perEntryRetryGivesUpOnAStoreThatIsSimplyDown() {
+        service = createService(true, null);
+        storeIsDown();
+
+        int batchSize = AuditLedgerService.MAX_CONSECUTIVE_ENTRY_FAILURES + 5;
+        for (int i = 0; i < batchSize; i++) {
+            service.submit(entry("id-" + i, "conv-" + i, "agent-1"));
+        }
+        service.flush();
+
+        verify(auditStore, times(AuditLedgerService.MAX_CONSECUTIVE_ENTRY_FAILURES)).appendEntry(any());
+        assertEquals(batchSize, service.getQueueSize(),
+                "the entries the pass skipped must still come back for the next flush, not be lost");
+    }
+
+    /**
+     * An entry submitted while the final flush is draining the queue is still
+     * perfectly storable, but nothing scheduled will ever pick it up. Recording it
+     * as dropped without offering it to a healthy store once more turns a clean
+     * shutdown into avoidable audit loss.
+     */
+    @Test
+    @DisplayName("shutdown — an entry submitted during the final flush is stored, not dead-lettered")
+    void shutdownStoresEntriesSubmittedDuringTheFinalFlush() {
+        service = createService(true, null);
+        var lateSubmissionDone = new AtomicBoolean(false);
+        doAnswer(invocation -> {
+            if (lateSubmissionDone.compareAndSet(false, true)) {
+                // Arrives after the final flush has already drained the queue.
+                service.submit(entry("late", "conv1", "agent1"));
+            }
+            return null;
+        }).when(auditStore).appendBatch(anyList());
+
+        service.submit(entry("1", "conv1", "agent1"));
+        service.shutdown();
+
+        var captor = ArgumentCaptor.forClass(List.class);
+        verify(auditStore, times(2)).appendBatch(captor.capture());
+        @SuppressWarnings("unchecked")
+        List<AuditEntry> lastBatch = (List<AuditEntry>) captor.getAllValues().get(1);
+        assertEquals(List.of("late"), lastBatch.stream().map(AuditEntry::id).toList(),
+                "the late entry must be offered to the store, not written straight to the dead-letter sink");
+        assertEquals(0, service.getQueueSize());
+        assertEquals(0.0, meterRegistry.counter("eddi_audit_entries_dropped_total").count(),
+                "a healthy store means nothing was dropped");
+    }
+
+    /**
+     * The window {@code drainQueueToDeadLetter} actually exists for, and the one no
+     * test reached. {@link #shutdownStoresEntriesSubmittedDuringTheFinalFlush}
+     * covers an entry that arrives during the FIRST final flush — the second flush
+     * stores it and the drain finds nothing, which is why that test asserts
+     * {@code dropped == 0}. An entry that arrives during the SECOND flush has no
+     * flush left: the executor is already down and the scheduled task will never
+     * run again, so the drain is the only thing standing between it and silent
+     * loss.
+     * <p>
+     * Both halves of the drain are pinned, because either could be deleted without
+     * any existing test noticing: the {@code droppedCounter} increment (an operator
+     * has to be able to see that the ledger abandoned something) and the sink write
+     * — asserted through {@code undeliveredSequences}, which only
+     * {@code writeToDeadLetter} populates, so a drain that counted the entry and
+     * threw it away would still fail here.
+     */
+    @Test
+    @DisplayName("shutdown — an entry submitted during the SECOND final flush is drained to the dead-letter sink")
+    void shutdownDrainsEntriesSubmittedDuringTheSecondFinalFlush() {
+        // A store that assigns chain positions, so the abandoned entry has a sequence
+        // for undeliveredSequences to record — an UNSEQUENCED entry is skipped there
+        // by design and the sink assertion below could not tell that apart from a
+        // drain that never wrote.
+        when(auditStore.supportsSequence()).thenReturn(true);
+        service = createService(true, null);
+        var flushes = new AtomicInteger();
+        doAnswer(invocation -> {
+            switch (flushes.incrementAndGet()) {
+                // Arrives after the first final flush drained the queue; the second
+                // flush is still to come, so this one is storable.
+                case 1 -> service.submit(entry("late", "conv1", "agent1"));
+                // Arrives after the SECOND flush drained the queue. Nothing will ever
+                // flush again.
+                case 2 -> service.submit(entry("very-late", "conv1", "agent1"));
+                default -> {
+                }
+            }
+            return null;
+        }).when(auditStore).appendBatch(anyList());
+
+        service.submit(entry("1", "conv1", "agent1"));
+        service.shutdown();
+
+        verify(auditStore, times(2)).appendBatch(anyList());
+        assertEquals(0, service.getQueueSize(),
+                "nothing may be left in a queue that will never be drained again");
+        assertEquals(1.0, meterRegistry.counter("eddi_audit_entries_dropped_total").count(),
+                "the entry the ledger abandoned must be counted, not lost between the last flush and the JVM exiting");
+        assertEquals(1, service.undeliveredSequences("conv1").size(),
+                "and it must actually reach the dead-letter sink — undelivered is only populated by writeToDeadLetter");
+    }
+
+    /**
+     * Finding 24: an operator setting 0 in the hope of "flush immediately" used to
+     * abort startup with {@code IllegalArgumentException("period <= 0")} thrown
+     * from inside the executor API — a stack trace that never names the property.
+     */
+    @Test
+    @DisplayName("a non-positive flush interval falls back to the default instead of failing startup")
+    void nonPositiveFlushIntervalFallsBackToTheDefault() {
+        var svc = AuditLedgerService.createForTesting(auditStore, true, 0, null, meterRegistry);
+        assertDoesNotThrow(svc::init);
+        assertEquals(AuditLedgerService.DEFAULT_FLUSH_INTERVAL_SECONDS, svc.getFlushIntervalSeconds());
+        svc.shutdown();
     }
 
     // ==================== scrub secrets ====================
@@ -461,6 +697,71 @@ class AuditLedgerServiceTest {
         String json = service.serializeDeadLetterEntry(e, "audit_dead_letter");
         assertTrue(json.contains("\"type\":\"audit_dead_letter\""));
         assertTrue(json.contains("\"conversationId\":\"conv1\""));
+    }
+
+    /**
+     * Finding 05. The record used to be five fields — timestamp of the drop,
+     * conversationId, agentId, taskId, taskType. With no {@code sequence} in it an
+     * operator who restarted after a dead-letter event could not prove which
+     * positions the ledger itself had abandoned, so every self-inflicted gap read
+     * as {@code BROKEN} forever; and the audit content, the HMAC and the agent
+     * signature were gone outright, which is not the "durable evidence"
+     * {@code undeliveredSequences} rests its verdict on.
+     */
+    @Test
+    @DisplayName("serializeDeadLetterEntry — carries the whole entry, not a five-field summary")
+    void deadLetterRecordIsReplayable() {
+        service = createService(true, null);
+        Instant written = Instant.parse("2026-01-02T03:04:05Z");
+        var e = new AuditEntry("dl-1", "conv1", "agent1", 1, "user1", "production",
+                2, "taskId", "LlmTask", 3, 100L,
+                Map.of("text", "hello"), Map.of("text", "response"),
+                Map.of("model", "gpt"), Map.of("tool", "calc"), List.of("action1"), 0.25, written,
+                "v4:abcdef", "sig-1", 42L);
+
+        String json = service.serializeDeadLetterEntry(e, "audit_dead_letter");
+
+        assertTrue(json.contains("\"id\":\"dl-1\""), json);
+        assertTrue(json.contains("\"sequence\":42"), json);
+        assertTrue(json.contains("\"hmac\":\"v4:abcdef\""), json);
+        assertTrue(json.contains("\"agentSignature\":\"sig-1\""), json);
+        assertTrue(json.contains("\"entryTimestamp\":\"2026-01-02T03:04:05Z\""), json);
+        assertTrue(json.contains("\"llmDetail\""), json);
+        assertTrue(json.contains("\"toolCalls\""), json);
+        // The wrapper fields existing consumers already read are unchanged.
+        assertTrue(json.contains("\"conversationId\":\"conv1\""), json);
+        assertTrue(json.contains("\"type\":\"audit_dead_letter\""), json);
+    }
+
+    /**
+     * The price of making the record replayable, pinned so it stays a deliberate
+     * decision. Widening the record from five metadata fields to the whole entry
+     * put the user id and the verbatim prompts and responses into a plaintext JSONL
+     * file on disk — content the old record did not contain — and the GDPR erasure
+     * cascade pseudonymises the ledger and the database logs but touches nothing
+     * under {@code eddi.audit.dead-letter-path}. So an Art. 17 erasure now leaves
+     * user content behind unless the operator handles that file, which is why
+     * {@code docs/audit-ledger.md} and {@code docs/gdpr-compliance.md} both say so.
+     * <p>
+     * Assert it explicitly rather than leaving it implied by "the whole entry":
+     * whoever next changes what goes into this record should have to change a test
+     * that names the retention obligation.
+     */
+    @Test
+    @DisplayName("serializeDeadLetterEntry — the sink holds personal data, which erasure does not reach")
+    void deadLetterRecordCarriesPersonalDataAndIsOutsideTheErasureCascade() {
+        service = createService(true, null);
+        var e = new AuditEntry("dl-2", "conv1", "agent1", 1, "subject-42", "production",
+                0, "taskId", "LlmTask", 0, 100L,
+                Map.of("text", "my name is Alice"), Map.of("text", "hello Alice"),
+                null, null, List.of(), 0.0, Instant.now(), null, null, 7L);
+
+        String json = service.serializeDeadLetterEntry(e, null);
+
+        assertTrue(json.contains("\"userId\":\"subject-42\""),
+                "the sink identifies the data subject, so it is in scope for Art. 17: " + json);
+        assertTrue(json.contains("my name is Alice"), "and carries their verbatim prompt: " + json);
+        assertTrue(json.contains("hello Alice"), "and the verbatim response: " + json);
     }
 
     @Test
@@ -578,6 +879,9 @@ class AuditLedgerServiceTest {
             svc.submit(entry("late-2", "conv-1", "agent-1"));
             throw new RuntimeException("store down");
         }).when(auditStore).appendBatch(anyList());
+        // The store is down, so the per-entry retry the ledger falls back to
+        // refuses as well; only then is the batch re-offered to the queue.
+        doThrow(new RuntimeException("store down")).when(auditStore).appendEntry(any());
 
         svc.submit(entry("id-1", "conv-1", "agent-1")); // sequence 0
         svc.submit(entry("id-2", "conv-1", "agent-1")); // sequence 1
@@ -595,7 +899,7 @@ class AuditLedgerServiceTest {
         when(auditStore.supportsSequence()).thenReturn(true);
         when(auditStore.countByConversation("conv-1")).thenReturn(0L);
         service = createService(true, "master-key-1234567890");
-        doThrow(new RuntimeException("db error")).when(auditStore).appendBatch(anyList());
+        storeIsDown();
 
         service.submit(entry("id-1", "conv-1", "agent-1"));
         service.flush(); // failure 1 — requeue
@@ -659,8 +963,13 @@ class AuditLedgerServiceTest {
         assertEquals(0L, written.get(2).sequence(), "a different conversation has its own chain");
     }
 
+    /**
+     * The fallback path: a store that cannot answer {@link IAuditStore#maxSequence}
+     * (it returns {@code UNSEQUENCED}) is seeded from the row count, which is what
+     * the ledger did for every store before finding 03.
+     */
     @Test
-    @DisplayName("the sequence continues from what is already stored")
+    @DisplayName("the sequence continues from the row count when the store cannot report a max")
     void sequenceIsSeededFromTheStore() {
         when(auditStore.supportsSequence()).thenReturn(true);
         when(auditStore.countByConversation("conv-a")).thenReturn(7L);
@@ -674,6 +983,35 @@ class AuditLedgerServiceTest {
         @SuppressWarnings("unchecked")
         List<AuditEntry> written = captor.getValue();
         assertEquals(7L, written.getFirst().sequence());
+    }
+
+    /**
+     * Finding 03. {@code countByConversation} counts rows that landed, which stops
+     * matching the next free position the moment one was handed out and never
+     * stored. Sequences 0-9 issued with 3 and 5 dead-lettered leaves a count of 8
+     * while the next free position is 10 — so a restart (or a second cluster node)
+     * seeded from the count re-issues 8 and 9, and {@code /auditstore/verify}
+     * grades a duplicate exactly like a deletion: {@code BROKEN}. Seeding from
+     * {@code max + 1} cannot do that, and unlike the in-memory "undelivered" pin it
+     * survives the process.
+     */
+    @Test
+    @DisplayName("the sequence is seeded from max+1, so a dead-lettered gap is never re-issued")
+    void sequenceIsSeededFromMaxNotCount() {
+        when(auditStore.supportsSequence()).thenReturn(true);
+        when(auditStore.countByConversation("conv-a")).thenReturn(8L); // 3 and 5 never landed
+        when(auditStore.maxSequence("conv-a")).thenReturn(9L);
+        service = createService(true, "master-key-1234567890");
+
+        service.submit(entry("id-1", "conv-a", "agent-1"));
+        service.flush();
+
+        var captor = ArgumentCaptor.forClass(List.class);
+        verify(auditStore).appendBatch(captor.capture());
+        @SuppressWarnings("unchecked")
+        List<AuditEntry> written = captor.getValue();
+        assertEquals(10L, written.getFirst().sequence(),
+                "the chain must resume past the highest stored position, not at the row count");
     }
 
     /**

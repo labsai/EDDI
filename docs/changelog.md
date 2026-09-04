@@ -49,6 +49,52 @@ bottom of this file and are never archived.
 
 ---
 
+## 📒 fix(audit,gdpr,tenancy): repair ledger persistence, erasure reporting and quota windows (2026-09-04)
+
+**Repo:** EDDI (`fix/review-audit-gdpr`)
+
+From the whole-repository code review. The subsystem a regulated buyer is actually paying
+for did not work on a supported backend.
+
+**The PostgreSQL audit backend could not store entries EDDI legitimately produces.**
+`conversation_id`, `AGENT_ID` and `AGENT_VERSION` were `NOT NULL`, and the insert unboxed a
+nullable `agentVersion` with `setInt`, throwing an NPE that escaped `appendBatch`'s catch
+entirely. Six shipped call sites pass a literal null — ordinary HITL approvals and group
+turns among them — so a single compliance or oversight entry **discarded roughly three
+flush windows of unrelated conversations' audit data**, while the compliance event itself
+was never recorded. On the read side `getInt` mapped a stored SQL NULL to `0`, which the
+HMAC canonical form renders differently, so any such row would have verified as tampered.
+
+The ledger is append-only evidence, not logs. Losing other conversations' entries because
+one entry is malformed is the worst possible failure mode for it.
+
+**GDPR erasure returned 200 and "complete" even when steps failed**, and reported memories
+as deleted before deleting them. It now reports per-step outcomes and answers 207 when the
+cascade is partial. The MCP admin surface for the same operation hardcoded
+`"status": "completed"` and is now driven by the real result, so an operator — or an agent
+calling the tool — is no longer told a lossy erasure succeeded.
+
+**Quota windows** were compared against a stale in-memory view, and the bootstrap silently
+ignored later configuration changes; both now warn when stored and configured values
+diverge instead of quietly preferring one.
+
+### Regression coverage
+
+Every behavioural change is pinned by a test proven to fail with its fix reverted.
+
+Three pre-existing tests were **failing on the first attempt at this branch** while the
+work reported itself green — caught by an independent reviewer running them. They are now
+genuinely closed, and closed the right way: the fixtures were corrected to stub what
+production actually calls. Five more tests in the same classes had begun passing
+*vacuously*, because the change bypassed the dead-letter branch they were written to cover;
+their stubs are restored so they exercise it again.
+
+`maxMonthlyCostUsd` is stored and displayed but never enforced, because
+`TenantQuotaService.recordCost` has no production caller. That is left as a product gap and
+now surfaces as an explicit warning rather than a silent no-op.
+
+---
+
 ## 📋 docs(config): document the four workspace properties that were breaking `main` (2026-08-30)
 
 **Repo:** EDDI (`fix/connection-extra-auth-params-code-verifier`)

@@ -17,6 +17,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 import java.util.List;
 import java.util.Map;
+import java.time.Clock;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -36,8 +37,12 @@ import java.util.concurrent.ConcurrentHashMap;
  * microseconds (a few field reads, one integer increment, one timestamp
  * comparison). No I/O or allocation occurs under the lock.
  * <p>
- * This is the default bean; a DB-backed store can override it via
- * {@code @LookupIfProperty} in future phases.
+ * <strong>Not what production runs.</strong> {@code DataStoreProducers} selects
+ * {@link PostgresTenantQuotaStore} or {@link MongoTenantQuotaStore} for every
+ * deployment, so this implementation is reachable only from tests and from an
+ * embedded use where no datastore producer applies. Its Javadoc used to call it
+ * "the default bean", which invited readers to reason about production
+ * behaviour — including its rolling-window semantics — from this class.
  */
 @ApplicationScoped
 @DefaultBean
@@ -48,6 +53,9 @@ public class InMemoryTenantQuotaStore implements ITenantQuotaStore {
     private final Map<String, TenantQuota> quotas = new ConcurrentHashMap<>();
     private final Map<String, TenantUsageCounters> usageMap = new ConcurrentHashMap<>();
 
+    /** See {@code TenantUsageCounters}. Production always gets systemUTC. */
+    private final Clock clock;
+
     @Inject
     public InMemoryTenantQuotaStore(@ConfigProperty(name = "eddi.tenant.default-id", defaultValue = "default") String defaultTenantId,
             @ConfigProperty(name = "eddi.tenant.quota.enabled", defaultValue = "false") boolean enabled,
@@ -56,6 +64,7 @@ public class InMemoryTenantQuotaStore implements ITenantQuotaStore {
             @ConfigProperty(name = "eddi.tenant.quota.max-api-calls-per-minute", defaultValue = "-1") int maxApiCalls,
             @ConfigProperty(name = "eddi.tenant.quota.max-monthly-cost-usd", defaultValue = "-1") double maxCost) {
 
+        this.clock = Clock.systemUTC();
         var defaultQuota = new TenantQuota(defaultTenantId, maxConvPerDay, maxAgents, maxApiCalls, maxCost, enabled);
         quotas.put(defaultTenantId, defaultQuota);
 
@@ -67,6 +76,15 @@ public class InMemoryTenantQuotaStore implements ITenantQuotaStore {
      * Test-only constructor — no CDI injection.
      */
     public InMemoryTenantQuotaStore(TenantQuota defaultQuota) {
+        this(defaultQuota, Clock.systemUTC());
+    }
+
+    /**
+     * Test-only constructor taking the clock, so a test can pin "now" and step
+     * across a window boundary deliberately — parity with the two DB-backed stores.
+     */
+    public InMemoryTenantQuotaStore(TenantQuota defaultQuota, Clock clock) {
+        this.clock = clock;
         quotas.put(defaultQuota.tenantId(), defaultQuota);
     }
 
@@ -178,6 +196,6 @@ public class InMemoryTenantQuotaStore implements ITenantQuotaStore {
     }
 
     private TenantUsageCounters getOrCreateCounters(String tenantId) {
-        return usageMap.computeIfAbsent(tenantId, k -> new TenantUsageCounters());
+        return usageMap.computeIfAbsent(tenantId, k -> new TenantUsageCounters(clock));
     }
 }

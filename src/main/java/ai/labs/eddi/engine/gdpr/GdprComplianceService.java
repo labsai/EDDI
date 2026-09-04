@@ -29,6 +29,7 @@ import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
 
@@ -66,6 +67,15 @@ public class GdprComplianceService {
     private final Instance<ISharedArtifactStore> sharedArtifactStoreInstance;
     private final IScheduleStore scheduleStore;
     private final ICache<String, UserConversation> userConversationCache;
+    /**
+     * Art. 18 restriction flags, short-TTL. {@code isProcessingRestricted} is
+     * called at conversation start and on every {@code say}/{@code sayStreaming},
+     * so an uncached lookup is a store round trip per turn on the hottest path in
+     * the system — to read a flag only an admin endpoint ever changes. Both of
+     * those endpoints invalidate the entry explicitly, so the TTL is only a
+     * backstop for another cluster node's write.
+     */
+    private final ICache<String, Boolean> restrictionCache;
 
     @Inject
     public GdprComplianceService(IUserMemoryStore userMemoryStore,
@@ -96,7 +106,20 @@ public class GdprComplianceService {
         this.sharedArtifactStoreInstance = sharedArtifactStoreInstance;
         this.scheduleStore = scheduleStore;
         this.userConversationCache = cacheFactory.getCache(USER_CONVERSATION_CACHE_NAME);
+        this.restrictionCache = cacheFactory.getCache(RESTRICTION_CACHE_NAME, RESTRICTION_CACHE_TTL);
     }
+
+    /** Name of the short-TTL cache behind {@link #isProcessingRestricted}. */
+    static final String RESTRICTION_CACHE_NAME = "gdprProcessingRestrictions";
+
+    /**
+     * Backstop TTL for {@link #RESTRICTION_CACHE_NAME}. Short, because a
+     * restriction applied on another cluster node has to take effect quickly;
+     * explicit invalidation in
+     * {@code restrictProcessing}/{@code unrestrictProcessing} covers the
+     * single-node case immediately.
+     */
+    static final Duration RESTRICTION_CACHE_TTL = Duration.ofSeconds(30);
 
     /**
      * Name of the Caffeine cache {@code RestUserConversationStore} reads managed
@@ -153,16 +176,27 @@ public class GdprComplianceService {
         String pseudonym = AuditHmac.pseudonymFor(userId);
         LOGGER.infof("[GDPR] Starting erasure cascade for pseudonym '%s'", pseudonym);
 
+        // Every step below is allowed to fail without aborting the cascade — but a
+        // failure must be visible in the response, or an admin files an Art. 17
+        // request as fulfilled while the data is still there.
+        var failedSteps = new ArrayList<String>();
+
         // 1. Delete user memories
         long memoriesDeleted = 0;
         try {
-            memoriesDeleted = userMemoryStore.countEntries(userId);
+            long countedMemories = userMemoryStore.countEntries(userId);
             userMemoryStore.deleteAllForUser(userId);
+            // The restriction flag lives in the same store and has just been deleted
+            // with everything else, so a cached "restricted" verdict is now wrong.
+            forgetRestriction(userId);
+            // Assigned only once the delete returned: assigning before it made the
+            // response claim N memories deleted when the delete had thrown and zero
+            // were.
+            memoriesDeleted = countedMemories;
             LOGGER.infof("[GDPR] Deleted %d user memory entries [%s]",
                     memoriesDeleted, pseudonym);
         } catch (Exception e) {
-            LOGGER.errorf(e, "[GDPR] Failed to delete user memories [%s]",
-                    pseudonym);
+            recordFailure(failedSteps, "userMemories", e, pseudonym);
         }
 
         // 2. Delete attachments for all user conversations
@@ -175,15 +209,24 @@ public class GdprComplianceService {
         try {
             conversationIds = conversationMemoryStore.getConversationIdsByUserId(userId);
         } catch (Exception e) {
-            LOGGER.errorf(e, "[GDPR] Failed to resolve conversation ids for user [%s]",
-                    pseudonym);
+            recordFailure(failedSteps, "conversationIdLookup", e, pseudonym);
         }
 
+        // The per-conversation loops below wrap EACH conversation in its own try.
+        // With the try outside the loop, the first conversation whose attachment
+        // (or journal, or descriptor, or checkpoint) delete threw ended the sweep:
+        // every remaining conversation kept the PII the cascade exists to remove,
+        // and the response still looked plausible. The export path in this class
+        // already isolates per conversation for exactly this reason.
         try {
             if (attachmentStorageInstance.isResolvable()) {
                 var attachmentStorage = attachmentStorageInstance.get();
                 for (String convId : conversationIds) {
-                    attachmentsDeleted += attachmentStorage.deleteByConversation(convId);
+                    try {
+                        attachmentsDeleted += attachmentStorage.deleteByConversation(convId);
+                    } catch (Exception e) {
+                        recordFailure(failedSteps, "attachments", e, pseudonym);
+                    }
                 }
                 if (attachmentsDeleted > 0) {
                     LOGGER.infof("[GDPR] Deleted %d attachments across %d conversations [%s]",
@@ -191,41 +234,39 @@ public class GdprComplianceService {
                 }
             }
         } catch (Exception e) {
-            LOGGER.errorf(e, "[GDPR] Failed to delete attachments [%s]", pseudonym);
+            recordFailure(failedSteps, "attachments", e, pseudonym);
         }
 
         // 3. Delete HITL tool execution journal entries for user conversations.
         // Must run BEFORE the conversations themselves are deleted (step 4b), since
         // the journal entries reference conversation ids.
         long journalEntriesDeleted = 0;
-        try {
-            for (String convId : conversationIds) {
+        for (String convId : conversationIds) {
+            try {
                 journalEntriesDeleted += hitlToolJournalStore.deleteByConversationId(convId);
+            } catch (Exception e) {
+                recordFailure(failedSteps, "hitlToolJournal", e, pseudonym);
             }
-            if (journalEntriesDeleted > 0) {
-                LOGGER.infof("[GDPR] Deleted %d HITL tool journal entries [%s]",
-                        journalEntriesDeleted, pseudonym);
-            }
-        } catch (Exception e) {
-            LOGGER.errorf(e, "[GDPR] Failed to delete HITL tool journal entries [%s]",
-                    pseudonym);
+        }
+        if (journalEntriesDeleted > 0) {
+            LOGGER.infof("[GDPR] Deleted %d HITL tool journal entries [%s]",
+                    journalEntriesDeleted, pseudonym);
         }
 
         // 4a. Delete conversation descriptors (must run BEFORE or alongside
         // the snapshot delete so the ids are still available)
         long descriptorsDeleted = 0;
-        try {
-            for (String convId : conversationIds) {
+        for (String convId : conversationIds) {
+            try {
                 conversationDescriptorStore.deleteAllDescriptor(convId);
                 descriptorsDeleted++;
+            } catch (Exception e) {
+                recordFailure(failedSteps, "conversationDescriptors", e, pseudonym);
             }
-            if (descriptorsDeleted > 0) {
-                LOGGER.infof("[GDPR] Deleted %d conversation descriptors [%s]",
-                        descriptorsDeleted, pseudonym);
-            }
-        } catch (Exception e) {
-            LOGGER.errorf(e, "[GDPR] Failed to delete conversation descriptors [%s]",
-                    pseudonym);
+        }
+        if (descriptorsDeleted > 0) {
+            LOGGER.infof("[GDPR] Deleted %d conversation descriptors [%s]",
+                    descriptorsDeleted, pseudonym);
         }
 
         // 4b. Delete conversation memory checkpoints.
@@ -233,17 +274,16 @@ public class GdprComplianceService {
         // same PII the conversation holds — so an erasure that stopped at the
         // snapshots left a full copy of it behind.
         long checkpointsDeleted = 0;
-        try {
-            for (String convId : conversationIds) {
+        for (String convId : conversationIds) {
+            try {
                 checkpointsDeleted += checkpointStore.deleteByConversationId(convId);
+            } catch (Exception e) {
+                recordFailure(failedSteps, "conversationCheckpoints", e, pseudonym);
             }
-            if (checkpointsDeleted > 0) {
-                LOGGER.infof("[GDPR] Deleted %d conversation checkpoints [%s]",
-                        checkpointsDeleted, pseudonym);
-            }
-        } catch (Exception e) {
-            LOGGER.errorf(e, "[GDPR] Failed to delete conversation checkpoints [%s]",
-                    pseudonym);
+        }
+        if (checkpointsDeleted > 0) {
+            LOGGER.infof("[GDPR] Deleted %d conversation checkpoints [%s]",
+                    checkpointsDeleted, pseudonym);
         }
 
         // 4c. Delete conversation memory snapshots
@@ -254,8 +294,7 @@ public class GdprComplianceService {
             LOGGER.infof("[GDPR] Deleted %d conversations [%s]",
                     conversationsDeleted, pseudonym);
         } catch (Exception e) {
-            LOGGER.errorf(e, "[GDPR] Failed to delete conversations [%s]",
-                    pseudonym);
+            recordFailure(failedSteps, "conversations", e, pseudonym);
         }
 
         // 5. Delete managed conversation mappings.
@@ -269,8 +308,7 @@ public class GdprComplianceService {
                     .filter(Objects::nonNull)
                     .toList();
         } catch (Exception e) {
-            LOGGER.errorf(e, "[GDPR] Failed to resolve conversation mapping intents [%s]",
-                    pseudonym);
+            recordFailure(failedSteps, "conversationMappingIntents", e, pseudonym);
         }
 
         try {
@@ -278,8 +316,7 @@ public class GdprComplianceService {
             LOGGER.infof("[GDPR] Deleted %d conversation mappings [%s]",
                     mappingsDeleted, pseudonym);
         } catch (Exception e) {
-            LOGGER.errorf(e, "[GDPR] Failed to delete conversation mappings [%s]",
-                    pseudonym);
+            recordFailure(failedSteps, "conversationMappings", e, pseudonym);
         }
 
         // 5b. Evict the mappings from the read-through cache.
@@ -291,8 +328,7 @@ public class GdprComplianceService {
                 userConversationCache.remove(userConversationCacheKey(intent, userId));
             }
         } catch (Exception e) {
-            LOGGER.errorf(e, "[GDPR] Failed to invalidate conversation mapping cache [%s]",
-                    pseudonym);
+            recordFailure(failedSteps, "conversationMappingCache", e, pseudonym);
         }
 
         // 5c. Delete group conversation transcripts. A GroupConversation stores the
@@ -307,8 +343,7 @@ public class GdprComplianceService {
                 }
             }
         } catch (Exception e) {
-            LOGGER.errorf(e, "[GDPR] Failed to delete group conversations [%s]",
-                    pseudonym);
+            recordFailure(failedSteps, "groupConversations", e, pseudonym);
         }
 
         // 5c2. Delete shared artifacts (I17). Artifacts carry ownerUserId (the
@@ -324,8 +359,7 @@ public class GdprComplianceService {
                 }
             }
         } catch (Exception e) {
-            LOGGER.errorf(e, "[GDPR] Failed to delete shared artifacts [%s]",
-                    pseudonym);
+            recordFailure(failedSteps, "sharedArtifacts", e, pseudonym);
         }
 
         // 5d. Delete schedules owned by the user. Left behind, they keep firing new
@@ -337,7 +371,7 @@ public class GdprComplianceService {
                 LOGGER.infof("[GDPR] Deleted %d schedules [%s]", schedulesDeleted, pseudonym);
             }
         } catch (Exception e) {
-            LOGGER.errorf(e, "[GDPR] Failed to delete schedules [%s]", pseudonym);
+            recordFailure(failedSteps, "schedules", e, pseudonym);
         }
 
         // 6. Pseudonymize database logs (not deleted — operational data)
@@ -347,8 +381,7 @@ public class GdprComplianceService {
             LOGGER.infof("[GDPR] Pseudonymized %d log entries [%s]",
                     logsPseudonymized, pseudonym);
         } catch (Exception e) {
-            LOGGER.errorf(e, "[GDPR] Failed to pseudonymize logs [%s]",
-                    pseudonym);
+            recordFailure(failedSteps, "databaseLogs", e, pseudonym);
         }
 
         // 7. Pseudonymize audit ledger (retained under Art. 17(3)(e))
@@ -358,20 +391,30 @@ public class GdprComplianceService {
             LOGGER.infof("[GDPR] Pseudonymized %d audit entries [%s]",
                     auditPseudonymized, pseudonym);
         } catch (Exception e) {
-            LOGGER.errorf(e, "[GDPR] Failed to pseudonymize audit entries [%s]",
-                    pseudonym);
+            recordFailure(failedSteps, "auditLedger", e, pseudonym);
         }
 
         var result = new GdprDeletionResult(userId, memoriesDeleted,
                 conversationsDeleted, mappingsDeleted, logsPseudonymized,
-                auditPseudonymized, Instant.now());
+                auditPseudonymized, attachmentsDeleted, journalEntriesDeleted,
+                checkpointsDeleted, groupConversationsDeleted, sharedArtifactsDeleted,
+                schedulesDeleted, failedSteps, Instant.now());
 
-        LOGGER.infof("[GDPR] Erasure cascade complete [%s]: "
-                + "memories=%d, conversations=%d, checkpoints=%d, mappings=%d, "
-                + "groupConversations=%d, sharedArtifacts=%d, schedules=%d, logs=%d, audit=%d",
-                pseudonym, memoriesDeleted, conversationsDeleted, checkpointsDeleted,
-                mappingsDeleted, groupConversationsDeleted, sharedArtifactsDeleted, schedulesDeleted,
-                logsPseudonymized, auditPseudonymized);
+        if (result.complete()) {
+            LOGGER.infof("[GDPR] Erasure cascade complete [%s]: "
+                    + "memories=%d, conversations=%d, checkpoints=%d, mappings=%d, "
+                    + "groupConversations=%d, sharedArtifacts=%d, schedules=%d, logs=%d, audit=%d",
+                    pseudonym, memoriesDeleted, conversationsDeleted, checkpointsDeleted,
+                    mappingsDeleted, groupConversationsDeleted, sharedArtifactsDeleted, schedulesDeleted,
+                    logsPseudonymized, auditPseudonymized);
+        } else {
+            LOGGER.errorf("[GDPR] Erasure cascade INCOMPLETE [%s] — failed steps: %s. "
+                    + "memories=%d, conversations=%d, checkpoints=%d, mappings=%d, "
+                    + "groupConversations=%d, sharedArtifacts=%d, schedules=%d, logs=%d, audit=%d",
+                    pseudonym, result.failedSteps(), memoriesDeleted, conversationsDeleted, checkpointsDeleted,
+                    mappingsDeleted, groupConversationsDeleted, sharedArtifactsDeleted, schedulesDeleted,
+                    logsPseudonymized, auditPseudonymized);
+        }
 
         // Write compliance event to immutable audit ledger
         var auditDetails = new LinkedHashMap<String, Object>();
@@ -386,9 +429,25 @@ public class GdprComplianceService {
         auditDetails.put("schedulesDeleted", schedulesDeleted);
         auditDetails.put("logsPseudonymized", logsPseudonymized);
         auditDetails.put("auditPseudonymized", auditPseudonymized);
+        auditDetails.put("complete", result.complete());
+        auditDetails.put("failedSteps", result.failedSteps());
         submitComplianceAuditEntry("GDPR_ERASURE", pseudonym, auditDetails);
 
         return result;
+    }
+
+    /**
+     * Log a failed cascade step and record its name for the result.
+     * <p>
+     * Recorded once per step even when a per-conversation loop fails repeatedly —
+     * the caller needs to know <em>which</em> category is incomplete, not how many
+     * conversations were affected; the log carries that.
+     */
+    private static void recordFailure(List<String> failedSteps, String step, Exception e, String pseudonym) {
+        LOGGER.errorf(e, "[GDPR] Failed step '%s' [%s]", step, pseudonym);
+        if (!failedSteps.contains(step)) {
+            failedSteps.add(step);
+        }
     }
 
     /**
@@ -410,31 +469,44 @@ public class GdprComplianceService {
             LOGGER.errorf(e, "[GDPR] Failed to export memories [%s]", pseudonym);
         }
 
+        // Resolved ONCE and reused by the conversation and attachment blocks below.
+        // Both used to call getConversationIdsByUserId separately, which is a second
+        // full lookup for the same list.
+        List<String> conversationIds = List.of();
+        try {
+            conversationIds = conversationMemoryStore.getConversationIdsByUserId(userId);
+        } catch (Exception e) {
+            LOGGER.errorf(e, "[GDPR] Failed to resolve conversation ids for export [%s]", pseudonym);
+        }
+
         // 2. Conversation snapshots (lightweight export)
         var conversations = new ArrayList<UserDataExport.ConversationExportEntry>();
-        try {
-            var conversationIds = conversationMemoryStore
-                    .getConversationIdsByUserId(userId);
-            for (var convId : conversationIds) {
-                try {
-                    var snapshot = conversationMemoryStore
-                            .loadConversationMemorySnapshot(convId);
-                    if (snapshot != null) {
-                        conversations.add(new UserDataExport.ConversationExportEntry(
-                                convId,
-                                snapshot.getAgentId(),
-                                snapshot.getAgentVersion(),
-                                snapshot.getConversationState(),
-                                snapshot.getConversationOutputs()));
-                    }
-                } catch (Exception e) {
-                    LOGGER.warnf("[GDPR] Skipping conversation %s during export: %s",
-                            convId, e.getMessage());
+        // Each snapshot is a full document load and the whole bundle is assembled in
+        // memory on the request thread, so the same cap that already bounds the audit
+        // entries bounds these. A user with thousands of conversations otherwise held
+        // a JAX-RS worker for minutes and produced a response measured in hundreds of
+        // megabytes.
+        int exportable = Math.min(conversationIds.size(), CONVERSATION_EXPORT_LIMIT);
+        if (conversationIds.size() > CONVERSATION_EXPORT_LIMIT) {
+            LOGGER.warnf("[GDPR] User has %d conversations; exporting the first %d [%s]",
+                    conversationIds.size(), CONVERSATION_EXPORT_LIMIT, pseudonym);
+        }
+        for (var convId : conversationIds.subList(0, exportable)) {
+            try {
+                var snapshot = conversationMemoryStore
+                        .loadConversationMemorySnapshot(convId);
+                if (snapshot != null) {
+                    conversations.add(new UserDataExport.ConversationExportEntry(
+                            convId,
+                            snapshot.getAgentId(),
+                            snapshot.getAgentVersion(),
+                            snapshot.getConversationState(),
+                            snapshot.getConversationOutputs()));
                 }
+            } catch (Exception e) {
+                LOGGER.warnf("[GDPR] Skipping conversation %s during export: %s",
+                        convId, e.getMessage());
             }
-        } catch (Exception e) {
-            LOGGER.errorf(e, "[GDPR] Failed to export conversations [%s]",
-                    pseudonym);
         }
 
         // 3. Managed conversation mappings
@@ -465,7 +537,7 @@ public class GdprComplianceService {
         try {
             if (attachmentStorageInstance.isResolvable()) {
                 var store = attachmentStorageInstance.get();
-                for (var convId : conversationMemoryStore.getConversationIdsByUserId(userId)) {
+                for (var convId : conversationIds) {
                     try {
                         for (var a : store.listByConversation(convId)) {
                             attachmentEntries.add(new UserDataExport.AttachmentExportEntry(
@@ -506,6 +578,13 @@ public class GdprComplianceService {
     private static final int AUDIT_EXPORT_LIMIT = 10_000;
 
     /**
+     * Cap on conversation snapshots in one export bundle — the counterpart of
+     * {@link #AUDIT_EXPORT_LIMIT}, which already bounded the audit half of the same
+     * response while the conversation half was unbounded.
+     */
+    static final int CONVERSATION_EXPORT_LIMIT = 1_000;
+
+    /**
      * Restrict processing for a user (GDPR Art. 18). Data is preserved but new
      * conversations and message processing are blocked.
      *
@@ -523,7 +602,11 @@ public class GdprComplianceService {
                     List.of(), null, false, 0,
                     Instant.now(), Instant.now());
             userMemoryStore.upsert(entry);
+            restrictionCache.put(userId, true);
         } catch (Exception e) {
+            // Drop any cached verdict rather than leaving a stale "not restricted"
+            // in place after a half-applied write.
+            forgetRestriction(userId);
             LOGGER.errorf(e, "[GDPR] Failed to restrict processing [%s]",
                     pseudonym);
             throw new RuntimeException("Failed to restrict processing", e);
@@ -548,7 +631,15 @@ public class GdprComplianceService {
             if (existing.isPresent()) {
                 userMemoryStore.deleteEntry(existing.get().id());
             }
+            // Publish the lift, do not merely forget it. A cached "true" that
+            // outlives the removal keeps answering "restricted" for up to
+            // RESTRICTION_CACHE_TTL on this node, so a user an admin has just
+            // cleared keeps receiving 403 "Processing is restricted for this user
+            // (GDPR Art. 18)" on every turn — a false legal statement about someone
+            // who is no longer restricted.
+            restrictionCache.put(userId, false);
         } catch (Exception e) {
+            forgetRestriction(userId);
             LOGGER.errorf(e, "[GDPR] Failed to unrestrict processing [%s]",
                     pseudonym);
             throw new RuntimeException("Failed to unrestrict processing", e);
@@ -558,22 +649,58 @@ public class GdprComplianceService {
     }
 
     /**
+     * Drop a cached restriction verdict. Null-safe because it is called from catch
+     * blocks, where throwing would replace the failure being reported (Caffeine
+     * rejects a null key outright).
+     */
+    private void forgetRestriction(String userId) {
+        if (userId != null) {
+            restrictionCache.remove(userId);
+        }
+    }
+
+    /**
      * Check if processing is restricted for a user.
+     * <p>
+     * Read through a short-TTL cache: this runs at conversation start and again on
+     * every {@code say}/{@code sayStreaming}, so an uncached lookup is a store
+     * round trip per turn on the hottest path in the system — to read a flag only
+     * {@link #restrictProcessing} and {@link #unrestrictProcessing} ever change,
+     * and both publish through the cache.
      *
      * @param userId
      *            the user to check
      * @return true if a processing restriction is in effect
+     * @throws ProcessingRestrictionUnavailableException
+     *             if the flag cannot be read at all. Still fail-closed — the caller
+     *             must not process the turn — but reported as the availability
+     *             failure it is rather than as a restriction nobody applied.
      */
     public boolean isProcessingRestricted(String userId) {
+        if (userId == null) {
+            // Nothing to look up and nothing to cache — Caffeine rejects a null key
+            // outright, so this must not reach the cache.
+            return false;
+        }
+        Boolean cached = restrictionCache.get(userId);
+        if (cached != null) {
+            return cached;
+        }
         try {
             var entry = userMemoryStore.getByKey(userId, RESTRICTION_KEY);
-            return entry.isPresent() && "true".equals(String.valueOf(entry.get().value()));
+            boolean restricted = entry.isPresent() && "true".equals(String.valueOf(entry.get().value()));
+            restrictionCache.put(userId, restricted);
+            return restricted;
         } catch (Exception e) {
-            // Fail-closed: if we can't verify restriction status, block processing
-            // to prevent accidental processing of a restricted user during outages
+            // Still fail-closed — the turn does not proceed — but no longer
+            // fail-dishonest. Returning true here told the user "Processing is
+            // restricted for this user (GDPR Art. 18)" with a 403 whenever the store
+            // hiccuped, which is a false statement about them and hides the outage
+            // from 5xx-based monitoring.
             LOGGER.errorf("[GDPR] Failed to check processing restriction for user " +
-                    "(fail-closed — blocking processing): %s", e.getMessage());
-            return true;
+                    "(blocking processing): %s", e.getMessage());
+            throw new ProcessingRestrictionUnavailableException(
+                    "Cannot determine processing-restriction status right now; the request was not processed", e);
         }
     }
 

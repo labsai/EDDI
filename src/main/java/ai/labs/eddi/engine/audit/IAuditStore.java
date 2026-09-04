@@ -130,4 +130,31 @@ public interface IAuditStore {
     default boolean supportsSequence() {
         return false;
     }
+
+    /**
+     * The highest chain position this store holds for a conversation, or
+     * {@link AuditEntry#UNSEQUENCED} when it holds none (or cannot answer).
+     * <p>
+     * This is what a sequence counter must be seeded from.
+     * {@link #countByConversation} counts <em>persisted rows</em>, which is a
+     * different number the moment any position was handed out but never stored:
+     * with positions 0-9 issued and 3 and 5 dead-lettered, the count is 8 while the
+     * next free position is 10 — so a re-seed from the count hands 8 and 9 out a
+     * second time, and {@code /auditstore/verify} grades duplicates exactly like
+     * deletions ({@code BROKEN}). The ledger would then accuse the deployment of
+     * tampering because of its own bookkeeping. Seeding from {@code max + 1} cannot
+     * do that, and it survives a restart and a second cluster node, which the
+     * in-memory "undelivered" pin does not.
+     * <p>
+     * The default returns {@link AuditEntry#UNSEQUENCED} so a store that does not
+     * implement it falls back to the count — the previous behaviour, and harmless
+     * for stores that do not persist a sequence at all.
+     *
+     * @param conversationId
+     *            the conversation to ask about
+     * @return the highest stored sequence, or {@link AuditEntry#UNSEQUENCED}
+     */
+    default long maxSequence(String conversationId) {
+        return AuditEntry.UNSEQUENCED;
+    }
 }

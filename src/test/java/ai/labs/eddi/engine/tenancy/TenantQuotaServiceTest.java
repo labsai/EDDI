@@ -266,6 +266,12 @@ class TenantQuotaServiceTest {
 
     // --- Dynamic quota update ---
 
+    /**
+     * The gates read quota configuration through a short-TTL cache (it used to be a
+     * store round trip per turn, twice per request on the hottest path in the
+     * system), so a tightened limit reaches enforcement through the service's
+     * write-through — the path {@code RestTenantQuota} uses.
+     */
     @Test
     @DisplayName("should enforce tightened quota at runtime")
     void shouldUpdateQuotaAtRuntime() {
@@ -275,11 +281,50 @@ class TenantQuotaServiceTest {
         assertTrue(quotaService.acquireApiCallSlot().allowed());
 
         // Tighten the limit to 1
-        quotaStore.setQuota(new TenantQuota(TENANT_ID, -1, -1, 1, -1, true));
+        quotaService.setQuota(new TenantQuota(TENANT_ID, -1, -1, 1, -1, true));
 
         // Now exceeded (1 already acquired)
         QuotaCheckResult result = quotaService.acquireApiCallSlot();
         assertFalse(result.allowed());
+        assertEquals(1, quotaStore.getQuota(TENANT_ID).maxApiCallsPerMinute(),
+                "the write must reach the store, not just drop a cache entry");
+    }
+
+    /**
+     * Finding 16. {@code ConversationService} calls a gate at conversation start
+     * and again on every say/sayStreaming, and each one opened with
+     * {@code quotaStore.getQuota(tenantId)} — a pooled-connection checkout per turn
+     * on PostgreSQL, usually only to learn that quotas are disabled.
+     */
+    @Test
+    @DisplayName("quota configuration is read once per tenant, not once per turn")
+    void quotaConfigurationIsCachedAcrossTurns() {
+        var countingStore = new CountingQuotaStore(new TenantQuota(TENANT_ID, -1, -1, -1, -1, false));
+        var service = new TenantQuotaService(countingStore, meterRegistry, TENANT_ID);
+
+        for (int turn = 0; turn < 10; turn++) {
+            assertTrue(service.acquireApiCallSlot().allowed());
+        }
+
+        assertEquals(1, countingStore.reads,
+                "the disabled-quota short-circuit must not cost a store round trip per turn");
+    }
+
+    /**
+     * Counts {@code getQuota} calls; everything else is the in-memory store.
+     */
+    private static final class CountingQuotaStore extends InMemoryTenantQuotaStore {
+        private int reads;
+
+        private CountingQuotaStore(TenantQuota defaultQuota) {
+            super(defaultQuota);
+        }
+
+        @Override
+        public TenantQuota getQuota(String tenantId) {
+            reads++;
+            return super.getQuota(tenantId);
+        }
     }
 
     // --- Metrics ---

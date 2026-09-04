@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.gdpr;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
 /**
@@ -30,11 +31,30 @@ public class RestGdprAdmin implements IRestGdprAdmin {
         this.gdprComplianceService = gdprComplianceService;
     }
 
+    /** HTTP 207 Multi-Status, which {@link Response.Status} does not define. */
+    static final int MULTI_STATUS = 207;
+
+    /**
+     * Answers 207 when any cascade step failed.
+     * <p>
+     * The cascade deliberately continues past a failing store so the remaining
+     * categories are still erased — which used to mean the admin got a 200 and a
+     * result whose {@code conversationsDeleted=0} was indistinguishable from "this
+     * user had no conversations", and filed the Art. 17 request as fulfilled while
+     * the conversations were still there. The status now carries that distinction
+     * even for a caller that does not read the body.
+     */
     @Override
-    public GdprDeletionResult deleteUserData(String userId) {
+    public Response deleteUserData(String userId) {
         validateUserId(userId);
         LOGGER.info("GDPR erasure request received");
-        return gdprComplianceService.deleteUserData(userId);
+        GdprDeletionResult result = gdprComplianceService.deleteUserData(userId);
+        if (!result.complete()) {
+            LOGGER.warnf("GDPR erasure incomplete — failed steps: %s", result.failedSteps());
+        }
+        return Response.status(result.complete() ? Response.Status.OK.getStatusCode() : MULTI_STATUS)
+                .entity(result)
+                .build();
     }
 
     @Override
