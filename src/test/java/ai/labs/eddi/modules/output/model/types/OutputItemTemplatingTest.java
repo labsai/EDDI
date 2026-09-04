@@ -11,6 +11,8 @@ import org.junit.jupiter.api.Test;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.function.UnaryOperator;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -153,7 +155,13 @@ class OutputItemTemplatingTest {
     void everyRegisteredSubTypeDeclaresItsOwnTemplating() throws Exception {
         var subTypes = OutputItem.class.getAnnotation(JsonSubTypes.class);
         assertNotNull(subTypes);
-        assertEquals(8, subTypes.value().length);
+        // Count CLASSES, not registrations. A retired type id is registered as a
+        // second, read-only name for the class that replaced it (botFace ->
+        // AgentFaceOutputItem), so ids legitimately outnumber classes; what this guard
+        // is about is that no output CLASS reachable from the wire format skips
+        // declaring its templating.
+        var distinctTypes = Stream.of(subTypes.value()).map(JsonSubTypes.Type::value).collect(Collectors.toSet());
+        assertEquals(8, distinctTypes.size(), () -> "output classes: " + distinctTypes);
 
         for (var subType : subTypes.value()) {
             Class<?> type = subType.value();

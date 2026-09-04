@@ -13,6 +13,13 @@ import java.util.function.UnaryOperator;
 @JsonTypeInfo(visible = true, property = "type", use = JsonTypeInfo.Id.NAME, include = JsonTypeInfo.As.EXISTING_PROPERTY)
 @JsonSubTypes({@JsonSubTypes.Type(value = TextOutputItem.class, name = "text"), @JsonSubTypes.Type(value = ImageOutputItem.class, name = "image"),
         @JsonSubTypes.Type(value = AgentFaceOutputItem.class, name = "agentFace"),
+        // Read-only alias for the retired v5 id: EDDI 5.x registered this very class
+        // under "botFace". An unrecognized type id is fatal no matter what
+        // FAIL_ON_UNKNOWN_PROPERTIES says, so without this entry a single legacy avatar
+        // item makes the whole output document unreadable and the agent fails to
+        // deploy. Writes stay on "agentFace" — AgentFaceOutputItem.initType() sets it
+        // and its setType() canonicalizes the legacy id fed in by visible = true.
+        @JsonSubTypes.Type(value = AgentFaceOutputItem.class, name = "botFace"),
         @JsonSubTypes.Type(value = QuickReplyOutputItem.class, name = "quickReply"),
         @JsonSubTypes.Type(value = InputFieldOutputItem.class, name = "inputField"),
         @JsonSubTypes.Type(value = ApplicationLinkOutputItem.class, name = "applicationLink"),
