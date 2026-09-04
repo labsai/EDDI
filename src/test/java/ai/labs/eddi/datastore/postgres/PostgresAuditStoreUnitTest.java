@@ -9,6 +9,7 @@ import ai.labs.eddi.engine.audit.model.AuditEntry;
 import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
@@ -115,6 +116,106 @@ class PostgresAuditStoreUnitTest {
         verify(statement).execute("ALTER TABLE audit_ledger ADD COLUMN IF NOT EXISTS agent_signature TEXT");
     }
 
+    /**
+     * Findings c1 and 01. {@code agentVersion} is a nullable {@link Integer}
+     * precisely because "unknown" is a value the rest of the system produces: the
+     * GDPR compliance entries have no conversation and no agent at all, and the
+     * HITL and group oversight entries know the conversation but not the agent
+     * version. This backend bound it with
+     * {@code ps.setInt(4, entry.agentVersion())}, which auto-unboxes — so every one
+     * of those entries threw an NPE before the statement was even sent,
+     * {@code appendBatch}'s {@code SQLException|IOException} catch did not see it,
+     * and the escaping exception took the ledger's whole flush batch down. On
+     * PostgreSQL that repeated every time an approval was cancelled, a paused
+     * conversation was ended, a group HITL decision was recorded or a facilitator
+     * emitted a checkpoint.
+     */
+    @Test
+    void appendEntry_acceptsANullAgentVersion() throws Exception {
+        AuditEntry entry = new AuditEntry("id-1", "conv-1", null, null, "user-1", "production",
+                0, "task-1", "hitl.approval", 0, 100L, null, null, null, null, null, 0.0, Instant.now(), "hmac", null, 0L);
+        when(jsonSerialization.serialize(any())).thenReturn("{}");
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+
+        assertDoesNotThrow(() -> store.appendEntry(entry));
+        verify(preparedStatement).setObject(4, null, Types.INTEGER);
+    }
+
+    /**
+     * The three columns those entries leave empty were {@code NOT NULL}, so even
+     * once the binding is fixed an existing ledger would reject the row. Dropping a
+     * constraint a column does not have is a no-op in PostgreSQL, so the ALTERs are
+     * idempotent and safe on every start.
+     */
+    @Test
+    void ensureSchema_relaxesTheNotNullConstraintsOnExistingLedgers() throws Exception {
+        when(jsonSerialization.serialize(any())).thenReturn("{}");
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+
+        store.appendEntry(createEntry());
+
+        verify(statement).execute("ALTER TABLE audit_ledger ALTER COLUMN conversation_id DROP NOT NULL");
+        verify(statement).execute("ALTER TABLE audit_ledger ALTER COLUMN AGENT_ID DROP NOT NULL");
+        verify(statement).execute("ALTER TABLE audit_ledger ALTER COLUMN AGENT_VERSION DROP NOT NULL");
+    }
+
+    /**
+     * Finding 02: the ledger recovers from a failed bulk write by retrying the
+     * batch one entry at a time, and a JDBC batch in autocommit stops at the first
+     * failing statement having already committed the ones before it. Without
+     * {@code ON CONFLICT (id) DO NOTHING} that retry collides with the rows that
+     * did land, so every entry fails again and the whole batch is dead-lettered —
+     * exactly the outcome the per-entry fallback exists to avoid.
+     */
+    @Test
+    void insert_isIdempotentSoThePerEntryRetryCanReofferRowsThatLanded() throws Exception {
+        when(jsonSerialization.serialize(any())).thenReturn("{}");
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+
+        store.appendEntry(createEntry());
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+        assertTrue(sql.getValue().contains("ON CONFLICT (id) DO NOTHING"),
+                "the single-entry insert must accept a row the aborted batch already committed: " + sql.getValue());
+    }
+
+    /**
+     * Finding 09: GDPR export and erasure both select on {@code user_id}, and the
+     * ledger is the largest never-pruned table in the system.
+     */
+    @Test
+    void ensureSchema_indexesUserIdForTheGdprScans() throws Exception {
+        when(jsonSerialization.serialize(any())).thenReturn("{}");
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+
+        store.appendEntry(createEntry());
+
+        verify(statement).execute("CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_ledger (user_id)");
+    }
+
+    /**
+     * Finding 03: seeding a sequence counter from {@code MAX(sequence)} rather than
+     * a row count is what stops a dead-lettered gap turning into a re-issued
+     * position, which {@code /auditstore/verify} grades as {@code BROKEN}. SQL
+     * {@code MAX} over an empty set is NULL, which {@code getLong} reports as 0 —
+     * indistinguishable from a real position 0 without {@code wasNull()}.
+     */
+    @Test
+    void maxSequence_distinguishesAnEmptyChainFromPositionZero() throws Exception {
+        when(preparedStatement.executeQuery()).thenReturn(resultSet);
+        when(resultSet.next()).thenReturn(true);
+
+        when(resultSet.getLong(1)).thenReturn(9L);
+        when(resultSet.wasNull()).thenReturn(false);
+        assertEquals(9L, store.maxSequence("conv-1"));
+
+        when(resultSet.getLong(1)).thenReturn(0L);
+        when(resultSet.wasNull()).thenReturn(true);
+        assertEquals(AuditEntry.UNSEQUENCED, store.maxSequence("conv-1"),
+                "an empty chain must not look like a chain whose position 0 is taken");
+    }
+
     @Test
     void supportsSequence_isTrueSoTheChainIsActuallyChecked() {
         assertTrue(store.supportsSequence(),
@@ -210,6 +311,33 @@ class PostgresAuditStoreUnitTest {
         List<AuditEntry> entries = store.getEntries("conv-1", 0, 10);
         assertEquals(1, entries.size());
         assertEquals("conv-1", entries.get(0).conversationId());
+        assertEquals(1, entries.get(0).agentVersion(), "the stored agent version must survive the round trip");
+    }
+
+    /**
+     * The read half of the null-agentVersion fix, and the half nothing asserted.
+     * <p>
+     * {@code getInt} maps SQL NULL to {@code 0}, so every entry the system
+     * legitimately stores without a version — GDPR compliance events, HITL
+     * approvals, group oversight, facilitator checkpoints — read back as version 0.
+     * The HMAC canonical form renders {@code null} and {@code 0} differently, so
+     * {@code /auditstore/verify} would grade every one of those rows as tampered,
+     * permanently, and precisely on the EU-AI-Act human-oversight records the
+     * ledger exists to hold.
+     */
+    @Test
+    void getEntries_mapsASqlNullAgentVersionToNullNotZero() throws Exception {
+        when(preparedStatement.executeQuery()).thenReturn(resultSet);
+        when(resultSet.next()).thenReturn(true, false);
+        mockAuditResultSet();
+        // A row written by one of the six call sites that have no agent version.
+        when(resultSet.getObject("AGENT_VERSION", Integer.class)).thenReturn(null);
+
+        List<AuditEntry> entries = store.getEntries("conv-1", 0, 10);
+
+        assertEquals(1, entries.size());
+        assertNull(entries.get(0).agentVersion(),
+                "a stored SQL NULL must read back as null; 0 is a different HMAC input and verifies as tampered");
     }
 
     @Test
@@ -237,6 +365,7 @@ class PostgresAuditStoreUnitTest {
 
         List<AuditEntry> entries = store.getEntriesByAgent("agent-1", 1, 0, 10);
         assertEquals(1, entries.size());
+        assertEquals(1, entries.get(0).agentVersion(), "the stored agent version must survive the round trip");
     }
 
     @Test
@@ -247,6 +376,7 @@ class PostgresAuditStoreUnitTest {
 
         List<AuditEntry> entries = store.getEntriesByAgent("agent-1", null, 0, 10);
         assertEquals(1, entries.size());
+        assertEquals(1, entries.get(0).agentVersion(), "the stored agent version must survive the round trip");
     }
 
     // ─── countByConversation ───
@@ -276,6 +406,7 @@ class PostgresAuditStoreUnitTest {
 
         List<AuditEntry> entries = store.getEntriesByUserId("user-1", 0, 10);
         assertEquals(1, entries.size());
+        assertEquals(1, entries.get(0).agentVersion(), "the stored agent version must survive the round trip");
     }
 
     // ─── GDPR: pseudonymizeByUserId ───
@@ -308,7 +439,12 @@ class PostgresAuditStoreUnitTest {
         when(resultSet.getString("id")).thenReturn("entry-1");
         when(resultSet.getString("conversation_id")).thenReturn("conv-1");
         when(resultSet.getString("AGENT_ID")).thenReturn("agent-1");
-        when(resultSet.getInt("AGENT_VERSION")).thenReturn(1);
+        // getObject, not getInt: fromRow reads the nullable Integer through
+        // getObject("AGENT_VERSION", Integer.class). The getInt stub this fixture
+        // used to carry was dead — Mockito is not in strict-stubs mode here, so it
+        // was silent — and every test built on the fixture quietly round-tripped
+        // agentVersion = null while claiming to exercise version 1.
+        when(resultSet.getObject("AGENT_VERSION", Integer.class)).thenReturn(1);
         when(resultSet.getString("user_id")).thenReturn("user-1");
         when(resultSet.getString("environment")).thenReturn("production");
         when(resultSet.getInt("step_index")).thenReturn(0);

@@ -15,6 +15,7 @@ import io.quarkus.security.ForbiddenException;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.NotFoundException;
+import jakarta.ws.rs.ServiceUnavailableException;
 import org.jboss.logging.Logger;
 
 import java.util.ArrayList;
@@ -353,6 +354,18 @@ public class ResourceSharingService {
         return descriptor == null ? null : new VersionedDescriptor(descriptor, current.getVersion());
     }
 
+    /**
+     * Load a descriptor for a caller that has already passed
+     * {@code accessGuard.requireAccess}.
+     * <p>
+     * A {@link ResourceStoreException} is the store's I/O failure type — a MongoDB
+     * failover, an exhausted PostgreSQL pool — not an access decision. It used to
+     * be translated into {@link ForbiddenException}, so during an outage the
+     * sharing dialog told an operator they were not allowed to view the sharing
+     * state of a resource they in fact own, and the outage never showed up in
+     * monitoring keyed on 5xx. By the time this runs the authorization question is
+     * settled; anything thrown here is infrastructure, and 503 says so.
+     */
     private DocumentDescriptor loadOrThrow(String id) {
         try {
             VersionedDescriptor loaded = loadOrNull(id);
@@ -363,7 +376,8 @@ public class ResourceSharingService {
         } catch (ResourceNotFoundException e) {
             throw new NotFoundException("No such resource: " + id);
         } catch (ResourceStoreException e) {
-            throw new ForbiddenException("Unable to read the sharing state of this resource");
+            LOGGER.errorf(e, "Could not read the sharing state of resource %s", sanitize(id));
+            throw new ServiceUnavailableException("Unable to read the sharing state of this resource right now");
         }
     }
 }

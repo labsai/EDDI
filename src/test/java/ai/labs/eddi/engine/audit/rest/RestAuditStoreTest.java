@@ -76,6 +76,35 @@ class RestAuditStoreTest {
         verify(auditStore).getEntriesByAgent("agent-1", 1, 0, 100);
     }
 
+    /**
+     * Finding 08. The read endpoints used to pass the query parameter through
+     * untouched, and the two backends disagree about what an out-of-range value
+     * means: MongoDB reads {@code limit <= 0} as "no limit" and materialises every
+     * audit entry ever written for the scope — millions of rows carrying full
+     * prompts — into one response on the request thread, while PostgreSQL answers a
+     * 500 for a negative {@code LIMIT} or {@code OFFSET}. The verification
+     * endpoints in the same class already clamped for exactly this reason.
+     */
+    @Test
+    @DisplayName("getAuditTrail clamps an unusable limit instead of returning the whole collection")
+    void getAuditTrail_clampsSkipAndLimit() {
+        restAuditStore.getAuditTrail("conv-1", -5, 0);
+        verify(auditStore).getEntries("conv-1", 0, RestAuditStore.DEFAULT_READ_LIMIT);
+
+        restAuditStore.getAuditTrail("conv-1", 0, 10_000);
+        verify(auditStore).getEntries("conv-1", 0, RestAuditStore.MAX_READ_LIMIT);
+    }
+
+    @Test
+    @DisplayName("getAuditTrailByAgent clamps the same way")
+    void getAuditTrailByAgent_clampsSkipAndLimit() {
+        restAuditStore.getAuditTrailByAgent("agent-1", 1, -1, -1);
+        verify(auditStore).getEntriesByAgent("agent-1", 1, 0, RestAuditStore.DEFAULT_READ_LIMIT);
+
+        restAuditStore.getAuditTrailByAgent("agent-1", 1, 0, 999_999);
+        verify(auditStore).getEntriesByAgent("agent-1", 1, 0, RestAuditStore.MAX_READ_LIMIT);
+    }
+
     @Test
     @DisplayName("getAuditTrailByAgent with null version delegates correctly")
     void getAuditTrailByAgent_nullVersion_delegatesToStore() {

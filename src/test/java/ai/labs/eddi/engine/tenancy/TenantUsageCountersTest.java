@@ -8,6 +8,11 @@ import ai.labs.eddi.engine.tenancy.model.UsageSnapshot;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
@@ -101,6 +106,90 @@ class TenantUsageCountersTest {
         assertEquals(1, counters.getConversationsToday());
         assertEquals(1, counters.getApiCallsThisMinute());
         assertEquals(0.5, counters.getMonthlyCostUsd(), 0.001);
+    }
+
+    /**
+     * Finding 15. These counters used to run their windows from the first hit
+     * (first call + 60s, first call + 24h) while both DB-backed stores truncate to
+     * the calendar minute and UTC day — so identical configuration enforced a
+     * different limit depending on which backend was selected, and neither matched
+     * the "sliding window" {@code TenantQuota} documented. Calendar alignment is
+     * the one semantics a multi-instance deployment can agree on without shared
+     * state.
+     */
+    @Test
+    @DisplayName("windows are aligned to the calendar minute and UTC day, not to the first hit")
+    void windowsAreCalendarAligned() {
+        var clock = new MutableClock(Instant.parse("2026-03-04T12:00:30Z"));
+        var counters = new TenantUsageCounters(clock);
+
+        assertEquals(Instant.parse("2026-03-04T12:00:00Z"), counters.toSnapshot("t").minuteWindowStart());
+        assertEquals(Instant.parse("2026-03-04T00:00:00Z"), counters.toSnapshot("t").dayStart());
+    }
+
+    @Test
+    @DisplayName("the minute window rolls at the calendar boundary, not 60s after the first call")
+    void minuteWindowRollsAtTheCalendarBoundary() {
+        var clock = new MutableClock(Instant.parse("2026-03-04T12:00:30Z"));
+        var counters = new TenantUsageCounters(clock);
+        counters.incrementApiCalls();
+
+        // 35 seconds later — same calendar minute, so the count stands. Under the
+        // old "first hit + 60s" rule it would also have stood, which is the point:
+        // the two rules only diverge at the boundary.
+        clock.set(Instant.parse("2026-03-04T12:00:55Z"));
+        counters.resetExpiredWindows();
+        assertEquals(1, counters.getApiCallsThisMinute());
+
+        // 5 seconds later still, but a new calendar minute: the window rolls here,
+        // where the DB-backed stores also roll it. "First hit + 60s" would have
+        // waited until 12:01:30.
+        clock.set(Instant.parse("2026-03-04T12:01:00Z"));
+        counters.resetExpiredWindows();
+        assertEquals(0, counters.getApiCallsThisMinute());
+        assertEquals(Instant.parse("2026-03-04T12:01:00Z"), counters.toSnapshot("t").minuteWindowStart());
+    }
+
+    @Test
+    @DisplayName("the daily window rolls at UTC midnight")
+    void dayWindowRollsAtUtcMidnight() {
+        var clock = new MutableClock(Instant.parse("2026-03-04T23:59:00Z"));
+        var counters = new TenantUsageCounters(clock);
+        counters.incrementConversations();
+
+        clock.set(Instant.parse("2026-03-05T00:00:00Z"));
+        counters.resetExpiredWindows();
+
+        assertEquals(0, counters.getConversationsToday());
+        assertEquals(Instant.parse("2026-03-05T00:00:00Z"), counters.toSnapshot("t").dayStart());
+    }
+
+    /** A {@link Clock} whose "now" a test can step forward deliberately. */
+    private static final class MutableClock extends Clock {
+        private volatile Instant now;
+
+        private MutableClock(Instant now) {
+            this.now = now;
+        }
+
+        private void set(Instant instant) {
+            this.now = instant;
+        }
+
+        @Override
+        public ZoneId getZone() {
+            return ZoneOffset.UTC;
+        }
+
+        @Override
+        public Clock withZone(ZoneId zone) {
+            return this;
+        }
+
+        @Override
+        public Instant instant() {
+            return now;
+        }
     }
 
     @Test

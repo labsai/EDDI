@@ -13,11 +13,15 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.MockedStatic;
 
 import javax.sql.DataSource;
 import java.sql.*;
+import java.time.Clock;
+import java.time.Instant;
 import java.time.YearMonth;
 import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -389,8 +393,73 @@ class PostgresTenantQuotaStoreTest {
                     "the roll must reset to zero and let the increment statement do the counting, was: " + upsert);
         }
 
+        /**
+         * Finding m3. The fast path matched the window with {@code day_start = ?}, so a
+         * stored window that is <em>ahead</em> of the caller's clock was unmatchable in
+         * every direction: the fast path missed (M+1 != M), the materialise-or-roll
+         * missed (its guard is {@code stored < now}), and the retry missed — so a node
+         * whose clock stepped backwards (NTP correction, VM suspend/resume) or lagged
+         * another instance by a minute denied every single request with "limit reached"
+         * until wall-clock time caught up. MongoDB's equivalent predicate is
+         * {@code gte} and allowed the same request.
+         */
         @Test
-        @DisplayName("should return denied on SQL exception")
+        @DisplayName("the fast-path window match tolerates a stored window ahead of this node's clock")
+        void fastPathWindowMatchIsInclusive() throws Exception {
+            when(resultSet.next()).thenReturn(false);
+
+            sut.tryIncrementConversations(TENANT_ID, 10);
+
+            String increment = capturedStatement(connection, "conversations_today = conversations_today + 1");
+            assertTrue(increment.contains("day_start >= ?"),
+                    "an exact match denies every request on a clock-skewed node, was: " + increment);
+        }
+
+        /**
+         * The cost of finding m3's fix, pinned so it is a decision rather than a
+         * surprise.
+         * <p>
+         * The fast path now counts into a window that is <em>ahead</em> of this node's
+         * clock ({@code day_start >= ?}), while the materialise-or-roll still only ever
+         * moves a window <em>forward</em> ({@code tenant_usage.day_start < ?}). For
+         * ordinary skew that is exactly right — a window an instant ahead is the
+         * current window, and MongoDB has always treated it that way. For a row whose
+         * {@code day_start} is far in the future (a corrupted or badly skewed write)
+         * the two clauses combine into a trap: the counter is incremented but never
+         * reset, so once it reaches the limit the tenant sits at "Daily conversation
+         * limit reached" until wall-clock time passes the stored date.
+         * <p>
+         * That is still strictly better than the old behaviour, which denied
+         * <em>immediately</em> on any future window rather than only after the limit
+         * was spent, and it matches the MongoDB backend. But it is a new failure mode,
+         * so both halves are asserted together: change either clause in isolation and
+         * this test says which invariant moved.
+         */
+        @Test
+        @DisplayName("a window ahead of the clock is counted into, and is never rolled backwards")
+        void aFutureWindowIsCountedIntoButNeverRolledBack() throws Exception {
+            when(resultSet.next()).thenReturn(false);
+
+            sut.tryIncrementConversations(TENANT_ID, 10);
+
+            String increment = capturedStatement(connection, "conversations_today = conversations_today + 1");
+            String upsert = capturedStatement(connection, "ON CONFLICT (tenant_id) DO UPDATE");
+
+            assertTrue(increment.contains("day_start >= ?"),
+                    "a future window is treated as current and counted into, was: " + increment);
+            assertTrue(upsert.contains("WHERE tenant_usage.day_start < ?"),
+                    "and it is never rolled back, so the counter it holds is never reset, was: " + upsert);
+        }
+
+        /**
+         * Finding 18. Still fail-closed on a store error — a lost increment silently
+         * voids a limit that IS configured — but the reason must not be "Daily
+         * conversation limit reached (10)". That told the caller a 429 with
+         * {@code Retry-After} for what is an infrastructure fault and spiked the
+         * denied-counter metric as if the tenant were over quota.
+         */
+        @Test
+        @DisplayName("a SQL exception denies with an accounting-unavailable reason, not a fake limit breach")
         void sqlException() throws Exception {
             when(dataSource.getConnection())
                     .thenReturn(connection) // schema init
@@ -399,7 +468,9 @@ class PostgresTenantQuotaStoreTest {
             QuotaCheckResult result = sut.tryIncrementConversations(TENANT_ID, 10);
 
             assertFalse(result.allowed());
-            assertTrue(result.reason().contains("Daily conversation limit"));
+            assertEquals(PostgresTenantQuotaStore.ACCOUNTING_UNAVAILABLE, result.reason());
+            assertFalse(result.reason().contains("Daily conversation limit"),
+                    "an outage must be distinguishable from a tenant that is genuinely over quota");
         }
     }
 
@@ -455,8 +526,29 @@ class PostgresTenantQuotaStoreTest {
                     "the roll must reset to zero and let the increment statement do the counting, was: " + upsert);
         }
 
+        /**
+         * The per-minute twin of
+         * {@code TryIncrementConversations.fastPathWindowMatchIsInclusive} — finding m3
+         * relaxed both predicates but only the daily one was fenced. This is the one
+         * that bites first: a minute of clock skew between two instances is ordinary,
+         * and with an exact match the lagging node denied every {@code say} with "API
+         * rate limit reached" until wall-clock time caught up.
+         */
         @Test
-        @DisplayName("should return denied on SQL exception")
+        @DisplayName("the fast-path window match tolerates a stored minute window ahead of this node's clock")
+        void fastPathWindowMatchIsInclusive() throws Exception {
+            when(resultSet.next()).thenReturn(false);
+
+            sut.tryIncrementApiCalls(TENANT_ID, 60);
+
+            String increment = capturedStatement(connection, "api_calls_this_minute = api_calls_this_minute + 1");
+            assertTrue(increment.contains("minute_start >= ?"),
+                    "an exact match denies every request on a clock-skewed node, was: " + increment);
+        }
+
+        /** See {@code TryIncrementConversations.sqlException} — finding 18. */
+        @Test
+        @DisplayName("a SQL exception denies with an accounting-unavailable reason, not a fake rate-limit breach")
         void sqlException() throws Exception {
             when(dataSource.getConnection())
                     .thenReturn(connection) // schema init
@@ -465,7 +557,9 @@ class PostgresTenantQuotaStoreTest {
             QuotaCheckResult result = sut.tryIncrementApiCalls(TENANT_ID, 10);
 
             assertFalse(result.allowed());
-            assertTrue(result.reason().contains("API rate limit"));
+            assertEquals(PostgresTenantQuotaStore.ACCOUNTING_UNAVAILABLE, result.reason());
+            assertFalse(result.reason().contains("API rate limit"),
+                    "an outage must be distinguishable from a tenant that is genuinely over quota");
         }
     }
 
@@ -555,21 +649,64 @@ class PostgresTenantQuotaStoreTest {
         @Test
         @DisplayName("should return snapshot when tenant has usage data")
         void usageFound() throws Exception {
+            // Windows in the CURRENT period — the fixture used to hold 1000L/2000L,
+            // millis in 1970, i.e. windows that expired half a century ago, which the
+            // read now zeroes out. "Now" is pinned rather than taken from the wall
+            // clock: with a system-clock store, a minute (or midnight UTC) rolling
+            // between the stub and the read would expire the window this test declares
+            // current and fail it at random.
+            Instant now = Instant.parse("2026-03-04T12:00:30Z");
+            var pinned = new PostgresTenantQuotaStore(dataSourceInstance, Clock.fixed(now, ZoneOffset.UTC));
             when(resultSet.next()).thenReturn(true);
             when(resultSet.getInt("conversations_today")).thenReturn(5);
             when(resultSet.getInt("api_calls_this_minute")).thenReturn(3);
             when(resultSet.getDouble("monthly_cost_usd")).thenReturn(42.0);
-            when(resultSet.getLong("minute_start")).thenReturn(1000L);
-            when(resultSet.getLong("day_start")).thenReturn(2000L);
-            when(resultSet.getString("cost_month")).thenReturn(YearMonth.now(ZoneOffset.UTC).toString());
+            when(resultSet.getLong("minute_start")).thenReturn(now.truncatedTo(ChronoUnit.MINUTES).toEpochMilli());
+            when(resultSet.getLong("day_start")).thenReturn(now.truncatedTo(ChronoUnit.DAYS).toEpochMilli());
+            when(resultSet.getString("cost_month")).thenReturn(YearMonth.from(now.atOffset(ZoneOffset.UTC)).toString());
 
-            UsageSnapshot snapshot = sut.getUsage(TENANT_ID);
+            UsageSnapshot snapshot = pinned.getUsage(TENANT_ID);
 
             assertNotNull(snapshot);
             assertEquals(TENANT_ID, snapshot.tenantId());
             assertEquals(5, snapshot.conversationsToday());
             assertEquals(3, snapshot.apiCallsThisMinute());
             assertEquals(42.0, snapshot.monthlyCostUsd());
+        }
+
+        /**
+         * Finding 14. {@code ITenantQuotaStore.getUsage} documents that the snapshot
+         * "reflects current-window values only", and enforcement does roll the windows
+         * — but this read did not, so
+         * {@code GET /administration/quotas/&#123;id&#125;/usage} showed yesterday's
+         * {@code conversationsToday} and the last active minute's
+         * {@code apiCallsThisMinute} until the next increment happened to roll them. An
+         * operator saw a tenant "at its daily limit" the morning after while the very
+         * next request would have been allowed.
+         */
+        @Test
+        @DisplayName("expired windows read as zero, and the stored row is left untouched")
+        void expiredWindowsAreZeroedOnRead() throws Exception {
+            Instant now = Instant.parse("2026-03-04T12:00:30Z");
+            var pinned = new PostgresTenantQuotaStore(dataSourceInstance, Clock.fixed(now, ZoneOffset.UTC));
+
+            when(resultSet.next()).thenReturn(true);
+            when(resultSet.getInt("conversations_today")).thenReturn(5);
+            when(resultSet.getInt("api_calls_this_minute")).thenReturn(3);
+            when(resultSet.getDouble("monthly_cost_usd")).thenReturn(42.0);
+            when(resultSet.getLong("minute_start")).thenReturn(Instant.parse("2026-03-04T11:59:00Z").toEpochMilli());
+            when(resultSet.getLong("day_start")).thenReturn(Instant.parse("2026-03-03T00:00:00Z").toEpochMilli());
+            when(resultSet.getString("cost_month")).thenReturn("2026-02");
+
+            UsageSnapshot snapshot = pinned.getUsage(TENANT_ID);
+
+            assertEquals(0, snapshot.conversationsToday(), "yesterday's daily counter is not today's");
+            assertEquals(0, snapshot.apiCallsThisMinute(), "the previous minute's rate counter is not this minute's");
+            assertEquals(0.0, snapshot.monthlyCostUsd(), "last month's spend is not this month's");
+            // A read must not write: the window starts are reported as stored so the
+            // caller can still see when the counters were last touched.
+            assertEquals(Instant.parse("2026-03-03T00:00:00Z"), snapshot.dayStart());
+            verify(preparedStatement, never()).executeUpdate();
         }
 
         @Test
@@ -738,6 +875,71 @@ class PostgresTenantQuotaStoreTest {
             verify(connection, atLeastOnce()).prepareStatement(sqlCaptor.capture());
             assertTrue(sqlCaptor.getAllValues().stream()
                     .anyMatch(sql -> sql.contains("ON CONFLICT (tenant_id) DO NOTHING")));
+        }
+
+        /**
+         * Finding 17 on the PostgreSQL side. {@code ON CONFLICT DO NOTHING} means the
+         * properties take effect exactly once, on the first start against an empty
+         * database; an operator who later enables quotas or raises a limit by
+         * environment variable and redeploys changes nothing. The {@code inserted == 0}
+         * branch is what tells them so, and it happened to run in
+         * {@link #bootstrapsAtomically} only because Mockito's default
+         * {@code executeUpdate()} is 0 — nothing verified the extra SELECT or the
+         * comparison, so the whole branch could have been deleted silently.
+         */
+        @Test
+        @DisplayName("an existing row is re-read and compared against the configured properties")
+        void warnsWhenAStoredRowAlreadyExists() throws Exception {
+            // 0 rows inserted — ON CONFLICT DO NOTHING fired, the row was already there.
+            when(preparedStatement.executeUpdate()).thenReturn(0);
+            // First next() answers the bootstrap re-read; the second answers the
+            // getQuota("any") call that triggers ensureSchema.
+            when(resultSet.next()).thenReturn(true, false);
+            when(resultSet.getString("tenant_id")).thenReturn("default");
+            when(resultSet.getInt("max_conversations_per_day")).thenReturn(25);
+            when(resultSet.getInt("max_agents_per_tenant")).thenReturn(3);
+            when(resultSet.getInt("max_api_calls_per_minute")).thenReturn(7);
+            when(resultSet.getDouble("max_monthly_cost_usd")).thenReturn(12.5);
+            when(resultSet.getBoolean("enabled")).thenReturn(false);
+
+            try (MockedStatic<TenantQuotaBootstrapCheck> check = mockStatic(TenantQuotaBootstrapCheck.class)) {
+                var bootstrapStore = new PostgresTenantQuotaStore(
+                        dataSourceInstance, "default", true, 1000, 5, 60, 100.0);
+                bootstrapStore.getQuota("any");
+
+                ArgumentCaptor<TenantQuota> stored = ArgumentCaptor.forClass(TenantQuota.class);
+                ArgumentCaptor<TenantQuota> configured = ArgumentCaptor.forClass(TenantQuota.class);
+                check.verify(() -> TenantQuotaBootstrapCheck.warnIfStoredQuotaDiffersFromConfig(
+                        stored.capture(), configured.capture()));
+
+                assertEquals(new TenantQuota("default", 25, 3, 7, 12.5, false), stored.getValue(),
+                        "the stored row must be re-read with the same column names the INSERT writes");
+                assertEquals(new TenantQuota("default", 1000, 5, 60, 100.0, true), configured.getValue(),
+                        "and compared against what eddi.tenant.quota.* asks for");
+            }
+
+            assertEquals("SELECT * FROM tenant_quotas WHERE tenant_id = ?",
+                    capturedStatement(connection, "SELECT * FROM tenant_quotas"),
+                    "the divergence check needs the row, so the branch costs one extra SELECT per start");
+        }
+
+        /**
+         * The first-boot half: the INSERT applied the properties, so there is nothing
+         * to tell the operator.
+         */
+        @Test
+        @DisplayName("a genuine first boot does not run the divergence check")
+        void silentOnFirstBoot() throws Exception {
+            when(preparedStatement.executeUpdate()).thenReturn(1);
+            when(resultSet.next()).thenReturn(false);
+
+            try (MockedStatic<TenantQuotaBootstrapCheck> check = mockStatic(TenantQuotaBootstrapCheck.class)) {
+                var bootstrapStore = new PostgresTenantQuotaStore(
+                        dataSourceInstance, "default", true, 1000, 5, 60, 100.0);
+                bootstrapStore.getQuota("any");
+
+                check.verifyNoInteractions();
+            }
         }
     }
 }

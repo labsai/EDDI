@@ -170,7 +170,7 @@ public record AuditVerificationReport(String scope, String scopeId, boolean sign
     }
 
     /**
-     * One entry that did not verify cleanly.
+     * One entry the sweep could not mark VALID.
      *
      * @param entryId
      *            the audit entry id
@@ -182,10 +182,6 @@ public record AuditVerificationReport(String scope, String scopeId, boolean sign
      *            when the entry was written
      * @param status
      *            why it is listed here
-     */
-    /**
-     * One entry the sweep could not mark VALID.
-     *
      * @param hmacVersion
      *            which canonical form the stored HMAC names ({@code v1}–{@code v4},
      *            or {@code null} for UNSIGNED). This is the triage field: an

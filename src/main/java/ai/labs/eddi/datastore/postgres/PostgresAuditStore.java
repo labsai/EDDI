@@ -34,12 +34,27 @@ import java.util.*;
 @DefaultBean
 public class PostgresAuditStore implements IAuditStore {
 
+    /**
+     * {@code conversation_id}, {@code AGENT_ID} and {@code AGENT_VERSION} are
+     * deliberately nullable.
+     * <p>
+     * They used to be {@code NOT NULL}, which made this backend unable to store
+     * entries the rest of the system legitimately produces: GDPR compliance events
+     * have no conversation and no agent, and the HITL/group oversight entries know
+     * the conversation but not the agent version. {@link AuditEntry#agentVersion()}
+     * is an {@code Integer} precisely because "unknown" is a value, and MongoDB
+     * stores and returns it as null. On PostgreSQL those entries failed on write —
+     * and because {@code AuditLedgerService.flush} re-queued the whole batch, a
+     * single one of them discarded three flush windows of unrelated conversations'
+     * audit data every time a pending approval was cancelled or a facilitator
+     * emitted a checkpoint.
+     */
     private static final String CREATE_TABLE = """
             CREATE TABLE IF NOT EXISTS audit_ledger (
                 id UUID PRIMARY KEY,
-                conversation_id TEXT NOT NULL,
-                AGENT_ID TEXT NOT NULL,
-                AGENT_VERSION INTEGER NOT NULL,
+                conversation_id TEXT,
+                AGENT_ID TEXT,
+                AGENT_VERSION INTEGER,
                 user_id TEXT,
                 environment TEXT,
                 step_index INTEGER NOT NULL,
@@ -79,6 +94,16 @@ public class PostgresAuditStore implements IAuditStore {
      */
     private static final String ADD_AGENT_SIGNATURE_COLUMN = "ALTER TABLE audit_ledger ADD COLUMN IF NOT EXISTS agent_signature TEXT";
 
+    /**
+     * Relaxes the three {@code NOT NULL} constraints on ledgers created before this
+     * fix. Dropping a constraint a column does not have is a no-op in PostgreSQL,
+     * so these are idempotent and safe to run on every start.
+     */
+    private static final String[] DROP_NOT_NULL_CONSTRAINTS = {
+            "ALTER TABLE audit_ledger ALTER COLUMN conversation_id DROP NOT NULL",
+            "ALTER TABLE audit_ledger ALTER COLUMN AGENT_ID DROP NOT NULL",
+            "ALTER TABLE audit_ledger ALTER COLUMN AGENT_VERSION DROP NOT NULL"};
+
     private static final String CREATE_INDEX_CONV = "CREATE INDEX IF NOT EXISTS idx_audit_conv ON audit_ledger (conversation_id)";
     /** Chain verification reads a conversation's entries in sequence order. */
     private static final String CREATE_INDEX_CONV_SEQ = "CREATE INDEX IF NOT EXISTS idx_audit_conv_seq ON audit_ledger (conversation_id, sequence)";
@@ -86,12 +111,41 @@ public class PostgresAuditStore implements IAuditStore {
     private static final String CREATE_INDEX_AGENT = "CREATE INDEX IF NOT EXISTS idx_audit_agent ON audit_ledger (AGENT_ID, AGENT_VERSION)";
     private static final String CREATE_INDEX_TS = "CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_ledger (created_at DESC)";
 
+    /**
+     * GDPR export and erasure both scan the ledger by {@code user_id} — it is the
+     * largest, append-only, never-pruned table in the system, and both operations
+     * are legally deadline-bound. Without this index they are sequential scans.
+     * <p>
+     * <strong>Upgrade note.</strong> On the first start after this change the index
+     * is built on an existing ledger, and a plain (non-{@code CONCURRENTLY})
+     * {@code CREATE INDEX} takes a {@code SHARE} lock: audit inserts block for the
+     * duration of the build, which on a multi-million-row table is minutes.
+     * {@code CREATE INDEX CONCURRENTLY} is not an option here because it cannot run
+     * inside {@code ensureSchema}'s statement batch (PostgreSQL forbids it in a
+     * transaction block) and it can leave an INVALID index behind on failure, which
+     * nothing in this class would notice or repair. Operators of large existing
+     * ledgers who cannot take that pause should build {@code idx_audit_user} with
+     * {@code CREATE INDEX CONCURRENTLY} out of band before deploying;
+     * {@code IF NOT EXISTS} then makes this statement a no-op.
+     */
+    private static final String CREATE_INDEX_USER = "CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_ledger (user_id)";
+
+    /**
+     * {@code ON CONFLICT (id) DO NOTHING} makes the insert idempotent, which is
+     * what lets {@code AuditLedgerService} retry a failed batch entry by entry: a
+     * JDBC batch in autocommit stops at the first failing statement and commits the
+     * ones before it, so a plain retry of the whole batch would collide with rows
+     * that already landed. Re-inserting an entry with a different body under the
+     * same id is not a scenario the ledger has — entry ids are per-submission
+     * UUIDs.
+     */
     private static final String INSERT_SQL = """
             INSERT INTO audit_ledger
                 (id, conversation_id, AGENT_ID, AGENT_VERSION, user_id, environment,
                  step_index, task_id, task_type, task_index, duration_ms, cost, hmac, created_at, data, sequence,
                  agent_signature)
             VALUES (?::uuid, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?)
+            ON CONFLICT (id) DO NOTHING
             """;
 
     private static final String SELECT_ALL = """
@@ -117,10 +171,14 @@ public class PostgresAuditStore implements IAuditStore {
             stmt.execute(CREATE_TABLE);
             stmt.execute(ADD_SEQUENCE_COLUMN); // idempotent upgrades for pre-existing ledgers
             stmt.execute(ADD_AGENT_SIGNATURE_COLUMN);
+            for (String alter : DROP_NOT_NULL_CONSTRAINTS) {
+                stmt.execute(alter);
+            }
             stmt.execute(CREATE_INDEX_CONV);
             stmt.execute(CREATE_INDEX_CONV_SEQ);
             stmt.execute(CREATE_INDEX_AGENT);
             stmt.execute(CREATE_INDEX_TS);
+            stmt.execute(CREATE_INDEX_USER);
             schemaInitialized = true;
         } catch (SQLException e) {
             throw new RuntimeException("Failed to initialize audit_ledger table", e);
@@ -198,6 +256,26 @@ public class PostgresAuditStore implements IAuditStore {
     }
 
     @Override
+    public long maxSequence(String conversationId) {
+        ensureSchema();
+        String sql = "SELECT MAX(sequence) FROM audit_ledger WHERE conversation_id = ?";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, conversationId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    long max = rs.getLong(1);
+                    // MAX over an empty set is SQL NULL, which getLong reports as 0 —
+                    // indistinguishable from a real position 0 without wasNull().
+                    return rs.wasNull() ? AuditEntry.UNSEQUENCED : max;
+                }
+            }
+            return AuditEntry.UNSEQUENCED;
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to read max audit sequence", e);
+        }
+    }
+
+    @Override
     public List<AuditEntry> getEntriesByUserId(String userId, int skip, int limit) {
         ensureSchema();
         String sql = "SELECT " + SELECT_ALL + " FROM audit_ledger"
@@ -224,7 +302,10 @@ public class PostgresAuditStore implements IAuditStore {
         ps.setString(1, entry.id() != null ? entry.id() : UUID.randomUUID().toString());
         ps.setString(2, entry.conversationId());
         ps.setString(3, entry.agentId());
-        ps.setInt(4, entry.agentVersion());
+        // setObject, not setInt: agentVersion is a nullable Integer and unboxing a
+        // null here threw an NPE that escaped appendBatch's SQLException|IOException
+        // catch entirely, taking the whole flush batch down with it.
+        ps.setObject(4, entry.agentVersion(), Types.INTEGER);
         ps.setString(5, entry.userId());
         ps.setString(6, entry.environment());
         ps.setInt(7, entry.stepIndex());
@@ -266,7 +347,11 @@ public class PostgresAuditStore implements IAuditStore {
     @SuppressWarnings("unchecked")
     private AuditEntry fromRow(ResultSet rs, Map<String, Object> data) throws SQLException {
         Timestamp ts = rs.getTimestamp("created_at");
-        return new AuditEntry(rs.getString("id"), rs.getString("conversation_id"), rs.getString("AGENT_ID"), rs.getInt("AGENT_VERSION"),
+        // getObject, not getInt: getInt maps SQL NULL to 0, and the HMAC canonical
+        // form renders null and 0 differently — so a null-versioned entry would read
+        // back as version 0 and report as tampered forever.
+        Integer agentVersion = rs.getObject("AGENT_VERSION", Integer.class);
+        return new AuditEntry(rs.getString("id"), rs.getString("conversation_id"), rs.getString("AGENT_ID"), agentVersion,
                 rs.getString("user_id"), rs.getString("environment"), rs.getInt("step_index"), rs.getString("task_id"), rs.getString("task_type"),
                 rs.getInt("task_index"), rs.getLong("duration_ms"), (Map<String, Object>) data.get("input"), (Map<String, Object>) data.get("output"),
                 (Map<String, Object>) data.get("llmDetail"), (Map<String, Object>) data.get("toolCalls"),

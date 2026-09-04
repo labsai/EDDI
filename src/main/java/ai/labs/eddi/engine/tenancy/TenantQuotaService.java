@@ -4,6 +4,9 @@
  */
 package ai.labs.eddi.engine.tenancy;
 
+import ai.labs.eddi.engine.caching.CacheFactory;
+import ai.labs.eddi.engine.caching.ICache;
+import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.engine.tenancy.model.TenantQuota;
 import ai.labs.eddi.engine.tenancy.model.UsageSnapshot;
@@ -14,6 +17,8 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
+
+import java.time.Duration;
 
 /**
  * Tenant quota enforcement engine.
@@ -39,6 +44,35 @@ public class TenantQuotaService {
     @Inject
     MeterRegistry meterRegistry;
 
+    @Inject
+    ICacheFactory cacheFactory;
+
+    /** Name of the short-TTL cache behind {@link #quotaFor}. */
+    static final String QUOTA_CACHE_NAME = "tenantQuotas";
+
+    /**
+     * How long a tenant's quota configuration is reused before it is read again.
+     * <p>
+     * Short enough that a change made on another cluster node takes effect within
+     * seconds, long enough that the configuration is not fetched twice per
+     * conversation turn. {@code RestTenantQuota} invalidates explicitly on write,
+     * so this only bounds the cross-node case.
+     */
+    static final Duration QUOTA_CACHE_TTL = Duration.ofSeconds(5);
+
+    /**
+     * Quota configuration, cached per tenant.
+     * <p>
+     * Every gate in this class opened with {@code quotaStore.getQuota(tenantId)},
+     * and {@code ConversationService} calls two of them per request — so each turn
+     * paid a store round trip (two pooled connection checkouts on PostgreSQL) on
+     * the hottest path in the system, usually only to learn that quotas are
+     * disabled. Only non-null results are cached: a tenant with no quota row is the
+     * "unlimited" case, it is rare once the default tenant is bootstrapped, and a
+     * {@code ConcurrentMap} cannot hold a null anyway.
+     */
+    private ICache<String, TenantQuota> quotaCache;
+
     @ConfigProperty(name = "eddi.tenant.default-id", defaultValue = "default")
     String defaultTenantId;
 
@@ -60,6 +94,7 @@ public class TenantQuotaService {
     @PostConstruct
     void init() {
         quotaAllowedCounter = meterRegistry.counter("eddi.tenant.quota.allowed");
+        quotaCache = cacheFactory.getCache(QUOTA_CACHE_NAME, QUOTA_CACHE_TTL);
         LOGGER.info("Tenant quota service initialized");
     }
 
@@ -77,6 +112,54 @@ public class TenantQuotaService {
         this.meterRegistry = meterRegistry;
         this.defaultTenantId = defaultTenantId;
         this.quotaAllowedCounter = meterRegistry.counter("eddi.tenant.quota.allowed");
+        this.cacheFactory = new CacheFactory();
+        this.quotaCache = this.cacheFactory.getCache(QUOTA_CACHE_NAME, QUOTA_CACHE_TTL);
+    }
+
+    /**
+     * The tenant's quota configuration, from the short-TTL cache when possible.
+     *
+     * @return the quota, or null when the tenant has none configured
+     */
+    private TenantQuota quotaFor(String tenantId) {
+        if (tenantId == null || quotaCache == null) {
+            return quotaStore.getQuota(tenantId);
+        }
+        TenantQuota cached = quotaCache.get(tenantId);
+        if (cached != null) {
+            return cached;
+        }
+        TenantQuota resolved = quotaStore.getQuota(tenantId);
+        if (resolved != null) {
+            quotaCache.put(tenantId, resolved);
+        }
+        return resolved;
+    }
+
+    /**
+     * Store a tenant's quota and make it effective on this node immediately.
+     * <p>
+     * The enforcement gates read configuration through {@link #QUOTA_CACHE_TTL}, so
+     * a write straight to the store would not apply until the entry expired.
+     * Writing through here is the supported path; a write made on another cluster
+     * node is still bounded by the TTL.
+     */
+    public void setQuota(TenantQuota quota) {
+        quotaStore.setQuota(quota);
+        if (quota != null) {
+            invalidateQuotaCache(quota.tenantId());
+        }
+    }
+
+    /**
+     * Forget a tenant's cached quota configuration. Call after any write that did
+     * not go through {@link #setQuota}, so the change takes effect on this node
+     * immediately rather than after {@link #QUOTA_CACHE_TTL}.
+     */
+    public void invalidateQuotaCache(String tenantId) {
+        if (quotaCache != null && tenantId != null) {
+            quotaCache.remove(tenantId);
+        }
     }
 
     /**
@@ -103,7 +186,7 @@ public class TenantQuotaService {
      * counter and returns OK.
      */
     public QuotaCheckResult acquireConversationSlot(String tenantId) {
-        TenantQuota quota = quotaStore.getQuota(tenantId);
+        TenantQuota quota = quotaFor(tenantId);
         if (quota == null || !quota.enabled()) {
             return QuotaCheckResult.OK;
         }
@@ -137,7 +220,7 @@ public class TenantQuotaService {
      * the counter and returns OK.
      */
     public QuotaCheckResult acquireApiCallSlot(String tenantId) {
-        TenantQuota quota = quotaStore.getQuota(tenantId);
+        TenantQuota quota = quotaFor(tenantId);
         if (quota == null || !quota.enabled()) {
             return QuotaCheckResult.OK;
         }
@@ -181,7 +264,7 @@ public class TenantQuotaService {
      *            excluding the agent being deployed
      */
     public QuotaCheckResult checkAgentQuota(String tenantId, int currentDistinctAgents) {
-        TenantQuota quota = quotaStore.getQuota(tenantId);
+        TenantQuota quota = quotaFor(tenantId);
         if (quota == null || !quota.enabled()) {
             return QuotaCheckResult.OK;
         }
@@ -220,7 +303,7 @@ public class TenantQuotaService {
      * needed here.
      */
     public QuotaCheckResult checkCostBudget(String tenantId) {
-        TenantQuota quota = quotaStore.getQuota(tenantId);
+        TenantQuota quota = quotaFor(tenantId);
         if (quota == null || !quota.enabled()) {
             return QuotaCheckResult.OK;
         }
@@ -271,7 +354,7 @@ public class TenantQuotaService {
      * effects than its name suggests.
      */
     public QuotaCheckResult recordCost(String tenantId, double cost) {
-        TenantQuota quota = quotaStore.getQuota(tenantId);
+        TenantQuota quota = quotaFor(tenantId);
         if (quota == null || !quota.enabled()) {
             return QuotaCheckResult.OK;
         }

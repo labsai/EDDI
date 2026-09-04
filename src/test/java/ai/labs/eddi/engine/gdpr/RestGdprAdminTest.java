@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.gdpr;
 
 import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -70,10 +71,30 @@ class RestGdprAdminTest {
                 Instant.now());
         when(gdprService.deleteUserData("user-1")).thenReturn(expected);
 
-        GdprDeletionResult result = restAdmin.deleteUserData("user-1");
+        Response response = restAdmin.deleteUserData("user-1");
 
-        assertSame(expected, result);
+        assertEquals(200, response.getStatus());
+        assertSame(expected, response.getEntity());
         verify(gdprService).deleteUserData("user-1");
+    }
+
+    /**
+     * A cascade that lost a step must not answer 200. An admin who sees 200 with
+     * {@code conversationsDeleted=0} cannot tell "the user had none" from "the
+     * delete threw", and files the Art. 17 request as fulfilled either way.
+     */
+    @Test
+    void deleteUserData_reports207WhenACascadeStepFailed() {
+        var incomplete = new GdprDeletionResult("user-1", 5, 0, 2, 10, 15,
+                0, 0, 0, 0, 0, 0, List.of("conversations"), Instant.now());
+        when(gdprService.deleteUserData("user-1")).thenReturn(incomplete);
+
+        Response response = restAdmin.deleteUserData("user-1");
+
+        assertEquals(RestGdprAdmin.MULTI_STATUS, response.getStatus());
+        assertSame(incomplete, response.getEntity());
+        assertFalse(incomplete.complete());
+        assertEquals(List.of("conversations"), incomplete.failedSteps());
     }
 
     @Test

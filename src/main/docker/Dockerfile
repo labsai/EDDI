@@ -109,6 +109,17 @@ RUN mkdir -p /deployments/tmp/import && \
       chown -R 185:0 /deployments/tmp && \
       chmod -R 775 /deployments/tmp
 
+# Default location of eddi.audit.dead-letter-path — the audit ledger's last-resort
+# sink for entries it has to abandon. Nothing in this image created it, and UID 185
+# cannot create a directory under /opt at runtime, so on the documented
+# `docker run` / docker-compose quick start every dead-letter write threw
+# NoSuchFileException into a swallowed catch and the abandoned audit entries were
+# gone outright rather than recoverable. Only the Kubernetes manifests mount a
+# volume here; the image has to provide the directory for everyone else.
+RUN mkdir -p /opt/eddi/data && \
+      chown -R 185:0 /opt/eddi && \
+      chmod -R 775 /opt/eddi
+
 COPY --chown=185 target/quarkus-app/lib/ /deployments/lib/
 COPY --chown=185 target/quarkus-app/*.jar /deployments/
 COPY --chown=185 target/quarkus-app/app/ /deployments/app/

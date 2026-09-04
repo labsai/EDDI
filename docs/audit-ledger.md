@@ -144,6 +144,12 @@ Redaction is applied recursively to nested maps and lists.
 
 If a database write fails, entries are **re-queued** for the next flush cycle. After 3 consecutive failures, the batch is dropped from the queue and written to a **dead-letter sink** — NATS JetStream (subject `eddi.deadletter.audit`) when a connection is available, otherwise the JSONL file at `eddi.audit.dead-letter-path`. The re-queue path respects the bound set by `eddi.audit.max-queue-size`: entries that no longer fit go to the same sink instead of growing the heap. This prevents unbounded memory growth while keeping the missing entries recoverable rather than lost.
 
+> **The dead-letter record is the whole entry, and that makes the sink a personal-data location.** It carries the `userId`, the verbatim input and output, the LLM detail and tool calls, plus the entry's own timestamp, sequence, HMAC and agent signature — anything less is not replayable, and without the `sequence` an operator cannot prove which chain positions the ledger itself abandoned, so every self-inflicted gap reads as `BROKEN` rather than `INCOMPLETE`. Secret redaction has already been applied, but user content has not.
+>
+> The GDPR erasure cascade pseudonymizes the ledger and the database logs; it does **not** touch `eddi.audit.dead-letter-path` or the `eddi.deadletter.audit` subject. Give the sink the same access controls, encryption at rest and retention handling as the ledger, and include it in your Art. 17 procedure — see [The audit dead-letter sink holds personal data](gdpr-compliance.md#the-audit-dead-letter-sink-holds-personal-data-and-erasure-does-not-reach-it).
+>
+> The image creates the default directory (`/opt/eddi/data`) and hands it to the runtime user, and the ledger reports at startup if the configured location is not writable — the sink's unavailability should be discovered before the incident that needs it, not from an error line nested inside the error line reporting the drop.
+
 ## Storage
 
 ### MongoDB (default)

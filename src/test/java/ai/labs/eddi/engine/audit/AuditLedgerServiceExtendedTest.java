@@ -53,6 +53,18 @@ class AuditLedgerServiceExtendedTest {
                 null, null, List.of("action1"), 0.0, Instant.now(), null, null);
     }
 
+    /**
+     * A store that is genuinely unavailable refuses the batch <em>and</em> the
+     * per-entry retry the ledger falls back to. Stubbing only {@code appendBatch}
+     * leaves {@code appendEntry} answering successfully on the mock, so the entry
+     * is quietly stored by the recovery path and the re-queue / dead-letter branch
+     * these tests exist to cover is never reached.
+     */
+    private void storeIsDown() {
+        doThrow(new RuntimeException("db error")).when(auditStore).appendBatch(anyList());
+        doThrow(new RuntimeException("db error")).when(auditStore).appendEntry(any());
+    }
+
     // ==================== scrubSecrets — nested maps and lists
     // ====================
 
@@ -242,8 +254,12 @@ class AuditLedgerServiceExtendedTest {
         void retryCounterResets() {
             var service = createService(true, null);
 
-            // First: fail once
+            // First: fail once, on BOTH write paths — the batch and the per-entry
+            // retry it falls back to. Stubbing only the batch would let the mock's
+            // default appendEntry store the entry and there would be nothing to
+            // re-queue.
             doThrow(new RuntimeException("db error")).doNothing().when(auditStore).appendBatch(any());
+            doThrow(new RuntimeException("db error")).when(auditStore).appendEntry(any());
 
             service.submit(entry("1", "conv1", "agent1"));
             service.flush(); // Failure 1 — requeue
@@ -253,23 +269,31 @@ class AuditLedgerServiceExtendedTest {
             // Second flush should succeed and reset counter
             service.flush();
             assertEquals(0, service.getQueueSize());
+            assertEquals(0.0, meterRegistry.counter("eddi_audit_entries_dropped_total").count(),
+                    "a recovered store must not have dropped anything");
         }
 
         @Test
         @DisplayName("multiple entries all dropped after max retries")
         void multipleEntriesDropped() {
             var service = createService(true, null);
-            doThrow(new RuntimeException("db error")).when(auditStore).appendBatch(any());
+            storeIsDown();
 
             service.submit(entry("1", "c1", "a1"));
             service.submit(entry("2", "c2", "a2"));
             service.submit(entry("3", "c3", "a3"));
 
             service.flush(); // Failure 1
+            assertEquals(3, service.getQueueSize(), "all three come back for retry while attempts remain");
             service.flush(); // Failure 2
+            assertEquals(3, service.getQueueSize());
             service.flush(); // Failure 3 — drops all
 
             assertEquals(0, service.getQueueSize());
+            // An empty queue on its own is also what "everything was stored" looks
+            // like, which is exactly how this test went vacuous. Pin the drop.
+            assertEquals(3.0, meterRegistry.counter("eddi_audit_entries_dropped_total").count(),
+                    "all three entries must be counted as dropped, not quietly stored by the per-entry retry");
         }
     }
 

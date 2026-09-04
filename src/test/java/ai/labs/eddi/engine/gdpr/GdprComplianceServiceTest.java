@@ -34,6 +34,7 @@ import java.time.Instant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -416,6 +417,58 @@ class GdprComplianceServiceTest {
         assertEquals("conv-ok", export.conversations().getFirst().conversationId());
     }
 
+    /**
+     * Finding 12. The conversation block and the attachment block each called
+     * {@code getConversationIdsByUserId} — a second full lookup of the same list on
+     * an operation that is already the heaviest read in the system.
+     */
+    @Test
+    void exportUserData_resolvesTheConversationIdListOnce() throws Exception {
+        when(userMemoryStore.getAllEntries(USER_ID)).thenReturn(List.of());
+        when(conversationMemoryStore.getConversationIdsByUserId(USER_ID)).thenReturn(List.of("conv-1"));
+        when(conversationMemoryStore.loadConversationMemorySnapshot("conv-1")).thenReturn(null);
+        when(userConversationStore.getAllForUser(USER_ID)).thenReturn(List.of());
+        when(auditStore.getEntriesByUserId(eq(USER_ID), anyInt(), anyInt())).thenReturn(List.of());
+        when(attachmentStorageInstance.isResolvable()).thenReturn(true);
+        when(attachmentStorageInstance.get()).thenReturn(attachmentStore);
+        when(attachmentStore.listByConversation("conv-1")).thenReturn(List.of());
+
+        newService(attachmentStorageInstance).exportUserData(USER_ID);
+
+        verify(conversationMemoryStore, times(1)).getConversationIdsByUserId(USER_ID);
+    }
+
+    /**
+     * Finding 12. Each snapshot is a full document load and the whole bundle is
+     * assembled in memory on the request thread, so the same cap that already
+     * bounded the audit half of the response now bounds the conversation half. A
+     * user with thousands of conversations otherwise held a JAX-RS worker for
+     * minutes and produced a response measured in hundreds of megabytes.
+     */
+    @Test
+    void exportUserData_capsTheNumberOfConversationSnapshots() throws Exception {
+        var manyIds = new ArrayList<String>();
+        for (int i = 0; i < GdprComplianceService.CONVERSATION_EXPORT_LIMIT + 25; i++) {
+            manyIds.add("conv-" + i);
+        }
+        var snapshot = new ConversationMemorySnapshot();
+        snapshot.setAgentId("agent-1");
+        snapshot.setAgentVersion(1);
+        snapshot.setConversationState(ConversationState.READY);
+
+        when(userMemoryStore.getAllEntries(USER_ID)).thenReturn(List.of());
+        when(conversationMemoryStore.getConversationIdsByUserId(USER_ID)).thenReturn(manyIds);
+        when(conversationMemoryStore.loadConversationMemorySnapshot(anyString())).thenReturn(snapshot);
+        when(userConversationStore.getAllForUser(USER_ID)).thenReturn(List.of());
+        when(auditStore.getEntriesByUserId(eq(USER_ID), anyInt(), anyInt())).thenReturn(List.of());
+
+        UserDataExport export = service.exportUserData(USER_ID);
+
+        assertEquals(GdprComplianceService.CONVERSATION_EXPORT_LIMIT, export.conversations().size());
+        verify(conversationMemoryStore, times(GdprComplianceService.CONVERSATION_EXPORT_LIMIT))
+                .loadConversationMemorySnapshot(anyString());
+    }
+
     @Test
     void exportUserData_handlesMemoryStoreFailure() throws Exception {
         // Given — memory store throws
@@ -618,14 +671,85 @@ class GdprComplianceServiceTest {
         assertTrue(service.isProcessingRestricted(USER_ID));
     }
 
+    /**
+     * Still fail-closed — the turn does not proceed — but no longer fail-dishonest.
+     * Returning {@code true} here made every turn for every user a {@code 403}
+     * carrying "Processing is restricted for this user (GDPR Art. 18)" whenever the
+     * store hiccuped: a false legal statement about the user, and a status code
+     * that hides the outage from monitoring keyed on 5xx. The distinct exception is
+     * mapped to 503.
+     */
     @Test
-    void isProcessingRestricted_failsClosedOnException() throws Exception {
+    void isProcessingRestricted_failsClosedButHonestlyOnException() throws Exception {
         // Given — store throws
         when(userMemoryStore.getByKey(eq(USER_ID), any()))
                 .thenThrow(new RuntimeException("Connection refused"));
 
-        // When/Then — should return true (fail-closed) for safety
-        assertTrue(service.isProcessingRestricted(USER_ID));
+        // When/Then — processing is still blocked, but as an availability failure
+        assertThrows(ProcessingRestrictionUnavailableException.class,
+                () -> service.isProcessingRestricted(USER_ID));
+    }
+
+    /**
+     * The flag is read at conversation start and again on every say/sayStreaming,
+     * so an uncached lookup is a store round trip per turn on the hottest path in
+     * the system — for a value only an admin endpoint ever changes.
+     */
+    @Test
+    void isProcessingRestricted_isCachedAcrossTurns() throws Exception {
+        when(userMemoryStore.getByKey(USER_ID, "_gdpr_processing_restricted"))
+                .thenReturn(Optional.empty());
+
+        assertFalse(service.isProcessingRestricted(USER_ID));
+        assertFalse(service.isProcessingRestricted(USER_ID));
+        assertFalse(service.isProcessingRestricted(USER_ID));
+
+        verify(userMemoryStore, times(1)).getByKey(USER_ID, "_gdpr_processing_restricted");
+    }
+
+    /**
+     * A cache that outlived a restriction would keep processing a user an admin has
+     * just restricted, so both admin endpoints have to publish through it.
+     */
+    @Test
+    void restrictProcessing_takesEffectImmediatelyDespiteTheCache() throws Exception {
+        when(userMemoryStore.getByKey(USER_ID, "_gdpr_processing_restricted"))
+                .thenReturn(Optional.empty());
+        assertFalse(service.isProcessingRestricted(USER_ID), "precondition: cached as unrestricted");
+
+        service.restrictProcessing(USER_ID);
+
+        assertTrue(service.isProcessingRestricted(USER_ID),
+                "the restriction must apply to the very next turn, not after the cache TTL");
+    }
+
+    /**
+     * The other direction, and the one the caching change actually regressed. A
+     * cached {@code true} that outlives the lift keeps answering "restricted" for
+     * up to {@code RESTRICTION_CACHE_TTL} on that node, so a user whose Art. 18
+     * restriction an admin has just removed keeps receiving 403 "Processing is
+     * restricted for this user (GDPR Art. 18)" on every turn — a false legal
+     * statement about someone the admin has already cleared.
+     * <p>
+     * The store deliberately keeps answering "restricted" below: only the cache
+     * publish in {@code unrestrictProcessing} can make the next read come back
+     * false, so nothing else can satisfy this assertion.
+     */
+    @Test
+    void unrestrictProcessing_takesEffectImmediatelyDespiteTheCache() throws Exception {
+        var flag = new UserMemoryEntry(
+                "entry-id", USER_ID, "_gdpr_processing_restricted", "true",
+                "gdpr", Property.Visibility.global,
+                null, List.of(), null, false, 0,
+                Instant.now(), Instant.now());
+        when(userMemoryStore.getByKey(USER_ID, "_gdpr_processing_restricted"))
+                .thenReturn(Optional.of(flag));
+        assertTrue(service.isProcessingRestricted(USER_ID), "precondition: cached as restricted");
+
+        service.unrestrictProcessing(USER_ID);
+
+        assertFalse(service.isProcessingRestricted(USER_ID),
+                "the lift must apply to the very next turn, not after the cache TTL");
     }
 
     @Test
@@ -659,6 +783,116 @@ class GdprComplianceServiceTest {
         // Then — conversations count is 0, but cascade continued
         assertEquals(0, result.conversationsDeleted());
         verify(userConversationStore).deleteAllForUser(USER_ID);
+
+        // ...and the caller can tell that 0 from "the user had no conversations".
+        // Without this an admin files the Art. 17 request as fulfilled while the
+        // conversations are still there.
+        assertFalse(result.complete());
+        assertEquals(List.of("conversations"), result.failedSteps());
+    }
+
+    /**
+     * The clean run is the other half of the same contract: nothing failed, so
+     * nothing may be reported as failed.
+     */
+    @Test
+    void deleteUserData_reportsCompleteWhenNothingFailed() throws Exception {
+        when(userMemoryStore.countEntries(USER_ID)).thenReturn(1L);
+        when(conversationMemoryStore.deleteConversationsByUserId(USER_ID)).thenReturn(1L);
+        when(userConversationStore.deleteAllForUser(USER_ID)).thenReturn(0L);
+        when(databaseLogs.pseudonymizeByUserId(eq(USER_ID), anyString())).thenReturn(0L);
+        when(auditStore.pseudonymizeByUserId(eq(USER_ID), anyString())).thenReturn(0L);
+
+        GdprDeletionResult result = service.deleteUserData(USER_ID);
+
+        assertTrue(result.complete());
+        assertEquals(List.of(), result.failedSteps());
+    }
+
+    /**
+     * The count was assigned <em>before</em> the delete, so a delete that threw
+     * still reported N memories erased when zero were — the response claiming work
+     * the store never did.
+     */
+    @Test
+    void deleteUserData_doesNotClaimMemoriesItFailedToDelete() throws Exception {
+        when(userMemoryStore.countEntries(USER_ID)).thenReturn(42L);
+        doThrow(new RuntimeException("memory store unavailable")).when(userMemoryStore).deleteAllForUser(USER_ID);
+        when(conversationMemoryStore.deleteConversationsByUserId(USER_ID)).thenReturn(0L);
+        when(userConversationStore.deleteAllForUser(USER_ID)).thenReturn(0L);
+        when(databaseLogs.pseudonymizeByUserId(eq(USER_ID), anyString())).thenReturn(0L);
+        when(auditStore.pseudonymizeByUserId(eq(USER_ID), anyString())).thenReturn(0L);
+
+        GdprDeletionResult result = service.deleteUserData(USER_ID);
+
+        assertEquals(0, result.memoriesDeleted(), "nothing was deleted, so nothing may be reported as deleted");
+        assertFalse(result.complete());
+        assertTrue(result.failedSteps().contains("userMemories"));
+    }
+
+    /**
+     * Finding m1: the per-conversation loops used to sit inside one try, so the
+     * first conversation whose delete threw ended the sweep — every remaining
+     * conversation kept the PII the cascade exists to remove, and the response
+     * still looked plausible.
+     */
+    @Test
+    void deleteUserData_oneFailingConversationDoesNotStopTheCascade() throws Exception {
+        when(userMemoryStore.countEntries(USER_ID)).thenReturn(0L);
+        when(conversationMemoryStore.getConversationIdsByUserId(USER_ID))
+                .thenReturn(List.of("conv-1", "conv-2", "conv-3"));
+        when(hitlToolJournalStore.deleteByConversationId("conv-1")).thenReturn(1L);
+        when(hitlToolJournalStore.deleteByConversationId("conv-2"))
+                .thenThrow(new RuntimeException("GridFS chunk missing"));
+        when(hitlToolJournalStore.deleteByConversationId("conv-3")).thenReturn(1L);
+        when(checkpointStore.deleteByConversationId(anyString())).thenReturn(1L);
+        when(conversationMemoryStore.deleteConversationsByUserId(USER_ID)).thenReturn(3L);
+        when(userConversationStore.deleteAllForUser(USER_ID)).thenReturn(0L);
+        when(databaseLogs.pseudonymizeByUserId(eq(USER_ID), anyString())).thenReturn(0L);
+        when(auditStore.pseudonymizeByUserId(eq(USER_ID), anyString())).thenReturn(0L);
+
+        GdprDeletionResult result = service.deleteUserData(USER_ID);
+
+        verify(hitlToolJournalStore).deleteByConversationId("conv-3");
+        verify(conversationDescriptorStore).deleteAllDescriptor("conv-3");
+        verify(checkpointStore).deleteByConversationId("conv-3");
+        assertEquals(2, result.journalEntriesDeleted(), "the conversations either side of the failure must still be erased");
+        assertEquals(3, result.checkpointsDeleted());
+        assertFalse(result.complete());
+        assertTrue(result.failedSteps().contains("hitlToolJournal"));
+    }
+
+    /**
+     * Finding 11: attachments, journal entries, checkpoints, group transcripts,
+     * artifacts and schedules were computed and written to the audit ledger but
+     * never returned, so the DPO producing an Art. 17 confirmation had to read the
+     * server log to learn whether they had been touched.
+     */
+    @Test
+    void deleteUserData_reportsEveryCounterItComputes() throws Exception {
+        when(userMemoryStore.countEntries(USER_ID)).thenReturn(0L);
+        when(conversationMemoryStore.getConversationIdsByUserId(USER_ID)).thenReturn(List.of("conv-1"));
+        when(attachmentStorageInstance.isResolvable()).thenReturn(true);
+        when(attachmentStorageInstance.get()).thenReturn(attachmentStore);
+        when(attachmentStore.deleteByConversation("conv-1")).thenReturn(4L);
+        when(hitlToolJournalStore.deleteByConversationId("conv-1")).thenReturn(3L);
+        when(checkpointStore.deleteByConversationId("conv-1")).thenReturn(2L);
+        when(groupConversationStore.deleteAllForUser(USER_ID)).thenReturn(6L);
+        when(sharedArtifactStore.deleteAllForUser(USER_ID)).thenReturn(7L);
+        when(scheduleStore.deleteSchedulesByUserId(USER_ID)).thenReturn(8);
+        when(conversationMemoryStore.deleteConversationsByUserId(USER_ID)).thenReturn(1L);
+        when(userConversationStore.deleteAllForUser(USER_ID)).thenReturn(0L);
+        when(databaseLogs.pseudonymizeByUserId(eq(USER_ID), anyString())).thenReturn(0L);
+        when(auditStore.pseudonymizeByUserId(eq(USER_ID), anyString())).thenReturn(0L);
+
+        GdprDeletionResult result = newService(attachmentStorageInstance).deleteUserData(USER_ID);
+
+        assertEquals(4, result.attachmentsDeleted());
+        assertEquals(3, result.journalEntriesDeleted());
+        assertEquals(2, result.checkpointsDeleted());
+        assertEquals(6, result.groupConversationsDeleted());
+        assertEquals(7, result.sharedArtifactsDeleted());
+        assertEquals(8, result.schedulesDeleted());
     }
 
     @Test

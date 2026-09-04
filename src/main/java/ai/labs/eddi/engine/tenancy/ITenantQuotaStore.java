@@ -56,6 +56,14 @@ public interface ITenantQuotaStore {
 
     /**
      * Delete quota configuration for a tenant.
+     * <p>
+     * <strong>No REST surface and no production caller today</strong> —
+     * {@code IRestTenantQuota} exposes list/get/update but no DELETE, so this is
+     * reached only from tests and from embedded use. Whether to publish a DELETE
+     * endpoint is an open question (a tenant with no quota row is treated as
+     * <em>unlimited</em>, so deleting the bootstrapped default tenant's row
+     * silently turns enforcement off), which is why the method is documented rather
+     * than removed or wired up on the reviewer's behalf.
      *
      * @param tenantId
      *            tenant identifier

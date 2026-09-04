@@ -17,9 +17,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.util.*;
 
@@ -63,6 +66,18 @@ class AuditLedgerServiceBranchTest {
         var svc = AuditLedgerService.createForTesting(auditStore, enabled, 60, masterKey, meterRegistry);
         svc.init();
         return svc;
+    }
+
+    /**
+     * A store that is genuinely unavailable refuses the batch <em>and</em> the
+     * per-entry retry the ledger falls back to. Stubbing only {@code appendBatch}
+     * leaves {@code appendEntry} answering successfully on the mock, so the entry
+     * is quietly stored by the recovery path and the re-queue / dead-letter branch
+     * these tests exist to cover is never reached.
+     */
+    private void storeIsDown() {
+        doThrow(new RuntimeException("db error")).when(auditStore).appendBatch(anyList());
+        doThrow(new RuntimeException("db error")).when(auditStore).appendEntry(any());
     }
 
     // ==================== scrubSecrets — null maps ====================
@@ -284,8 +299,12 @@ class AuditLedgerServiceBranchTest {
     void flushSuccessResetsFailures() throws Exception {
         var service = createSimple(true, null);
 
-        // First flush fails
+        // First flush fails on BOTH write paths — the batch and the per-entry retry
+        // it falls back to — which is what an unavailable store looks like. The
+        // second flush finds the batch path healthy again and never reaches the
+        // per-entry stub.
         doThrow(new RuntimeException("fail")).doNothing().when(auditStore).appendBatch(any());
+        doThrow(new RuntimeException("fail")).when(auditStore).appendEntry(any());
         service.submit(entry("1", "c1", "a1"));
         service.flush(); // fail 1
 
@@ -294,6 +313,9 @@ class AuditLedgerServiceBranchTest {
         // Second flush succeeds
         service.flush();
         assertEquals(0, service.getQueueSize());
+        verify(auditStore, times(2)).appendBatch(any());
+        assertEquals(0.0, meterRegistry.counter("eddi_audit_entries_dropped_total").count(),
+                "a recovered store must not have dropped anything");
     }
 
     // ==================== writeToDeadLetter — NATS path ====================
@@ -317,7 +339,7 @@ class AuditLedgerServiceBranchTest {
         service.init();
 
         // Make flush fail 3 times to trigger dead letter
-        doThrow(new RuntimeException("fail")).when(auditStore).appendBatch(any());
+        storeIsDown();
 
         service.submit(entry("1", "c1", "a1"));
         service.flush(); // fail 1
@@ -325,6 +347,8 @@ class AuditLedgerServiceBranchTest {
         service.flush(); // fail 3 → drop → writeToDeadLetter
 
         verify(js).publish(eq("eddi.deadletter.audit"), any(byte[].class));
+        assertEquals(1.0, meterRegistry.counter("eddi_audit_entries_dropped_total").count(),
+                "the abandoned entry must be counted as dropped, not silently stored by the per-entry retry");
 
         service.shutdown();
     }
@@ -353,14 +377,60 @@ class AuditLedgerServiceBranchTest {
                 true, 500, meterRegistry, natsInstance, null, new ObjectMapper());
         service.init();
 
-        doThrow(new RuntimeException("fail")).when(auditStore).appendBatch(any());
+        storeIsDown();
 
         service.submit(entry("1", "c1", "a1"));
         service.flush();
         service.flush();
         service.flush(); // triggers dead letter
 
+        verify(js).publish(eq("eddi.deadletter.audit"), any(byte[].class));
+        assertEquals(1.0, meterRegistry.counter("eddi_audit_entries_dropped_total").count(),
+                "the dead-letter path must actually have been reached");
+
         // Should not throw even though both NATS and file fail
+        service.shutdown();
+    }
+
+    /**
+     * Finding 26. {@code StandardOpenOption.CREATE} creates the file, never its
+     * parent — and the default {@code eddi.audit.dead-letter-path} lives under
+     * {@code /opt/eddi/data}, which the shipped image does not create and UID 185
+     * cannot create at runtime. So on the documented docker quick start every
+     * dead-letter write threw {@code NoSuchFileException} into a swallowed catch
+     * and the entries the ledger abandoned were gone outright, while the class's
+     * own Javadoc rests its INCOMPLETE-not-BROKEN verdict on that sink being
+     * "durable evidence". {@code init()} now creates the directory up front and the
+     * write re-creates it if it went away in between.
+     */
+    @SuppressWarnings("unchecked")
+    @Test
+    @DisplayName("writeToDeadLetter creates the parent directory rather than silently writing nothing")
+    void deadLetterWriteCreatesItsMissingParentDirectory(@TempDir Path tempDir) throws Exception {
+        Instance<Connection> natsInstance = mock(Instance.class);
+        doReturn(false).when(natsInstance).isResolvable();
+
+        Path deadLetterFile = tempDir.resolve("opt").resolve("eddi").resolve("data").resolve("audit-deadletter.jsonl");
+        var service = new AuditLedgerService(auditStore, true, 60,
+                Optional.empty(), deadLetterFile.toString(), false, "default", AuditLedgerService.DEFAULT_MAX_QUEUE_SIZE,
+                true, 500, meterRegistry, natsInstance, null, new ObjectMapper());
+        service.init();
+
+        assertTrue(Files.isDirectory(deadLetterFile.getParent()),
+                "startup must report — and provision — the sink before the incident that needs it");
+        // Take it away again, so the write itself has to cope.
+        Files.delete(deadLetterFile.getParent());
+
+        storeIsDown();
+        service.submit(entry("dl-1", "c1", "a1"));
+        service.flush();
+        service.flush();
+        service.flush(); // triggers dead letter
+
+        assertTrue(Files.exists(deadLetterFile), "the abandoned entry must actually reach the sink");
+        assertTrue(Files.readString(deadLetterFile).contains("\"conversationId\":\"c1\""),
+                "and it must be the entry that was abandoned");
+
         service.shutdown();
     }
 
@@ -380,12 +450,17 @@ class AuditLedgerServiceBranchTest {
                 true, 500, meterRegistry, natsInstance, null, new ObjectMapper());
         service.init();
 
-        doThrow(new RuntimeException("fail")).when(auditStore).appendBatch(any());
+        storeIsDown();
 
         service.submit(entry("1", "c1", "a1"));
         service.flush();
         service.flush();
         service.flush(); // triggers dead letter
+
+        verify(natsInstance).isResolvable();
+        verify(natsInstance, never()).get(); // unresolvable → straight to the file branch
+        assertEquals(1.0, meterRegistry.counter("eddi_audit_entries_dropped_total").count(),
+                "the dead-letter path must actually have been reached");
 
         // Should handle file write failure gracefully
         service.shutdown();
@@ -458,13 +533,15 @@ class AuditLedgerServiceBranchTest {
                 true, 500, meterRegistry, natsInstance, null, new ObjectMapper());
         service.init();
 
-        doThrow(new RuntimeException("fail")).when(auditStore).appendBatch(any());
+        storeIsDown();
 
         service.submit(entry("1", "c1", "a1"));
         service.flush();
         service.flush();
         service.flush();
 
+        assertEquals(1.0, meterRegistry.counter("eddi_audit_entries_dropped_total").count(),
+                "the dead-letter path must actually have been reached");
         // Should not call jetStream since connection is CLOSED
         verify(conn, never()).jetStream();
 

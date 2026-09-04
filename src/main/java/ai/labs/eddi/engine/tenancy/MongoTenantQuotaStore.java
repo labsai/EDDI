@@ -110,7 +110,7 @@ public class MongoTenantQuotaStore implements ITenantQuotaStore {
         // InMemoryTenantQuotaStore).
         // Uses $setOnInsert so an existing quota is never overwritten, even under
         // races.
-        quotas.findOneAndUpdate(
+        Document existing = quotas.findOneAndUpdate(
                 Filters.eq("tenantId", defaultTenantId),
                 Updates.combine(
                         Updates.setOnInsert("tenantId", defaultTenantId),
@@ -122,6 +122,14 @@ public class MongoTenantQuotaStore implements ITenantQuotaStore {
                 new FindOneAndUpdateOptions().upsert(true));
         LOGGER.infof("Ensured default tenant quota exists: tenantId=%s, enabled=%s, maxConv=%d, maxAgents=%d, maxApi=%d, maxCost=%.2f",
                 defaultTenantId, enabled, maxConvPerDay, maxAgents, maxApiCalls, maxCost);
+        // findOneAndUpdate returns the document as it was BEFORE the upsert, so a
+        // non-null result means the row already existed and $setOnInsert did
+        // nothing. See TenantQuotaBootstrapCheck for why an operator has to be told
+        // rather than silently overridden.
+        if (existing != null) {
+            TenantQuotaBootstrapCheck.warnIfStoredQuotaDiffersFromConfig(toQuota(existing),
+                    new TenantQuota(defaultTenantId, maxConvPerDay, maxAgents, maxApiCalls, maxCost, enabled));
+        }
     }
 
     /**
@@ -426,21 +434,43 @@ public class MongoTenantQuotaStore implements ITenantQuotaStore {
                 doc.getBoolean("enabled", false));
     }
 
+    /**
+     * Map a stored usage document to a snapshot, zeroing every counter whose window
+     * has already expired.
+     * <p>
+     * {@link ITenantQuotaStore#getUsage} documents that the snapshot "reflects
+     * current-window values only", and enforcement does roll the windows — but this
+     * read did not, so the dashboard showed yesterday's {@code conversationsToday}
+     * and the last active minute's {@code apiCallsThisMinute} until the next
+     * increment happened to roll them. An operator saw a tenant "at its daily
+     * limit" the morning after while the very next request would have been allowed.
+     * The predicate is the same one {@code rollWindowIfExpired} uses, so read and
+     * enforcement agree; the stored document is left untouched, because a read must
+     * not write.
+     */
     private UsageSnapshot toSnapshot(String tenantId, Document doc) {
+        Instant now = clock.instant();
+        Instant currentMinuteStart = now.truncatedTo(ChronoUnit.MINUTES);
+        Instant currentDayStart = now.truncatedTo(ChronoUnit.DAYS);
+        YearMonth currentMonth = YearMonth.now(clock.withZone(ZoneOffset.UTC));
+
         Instant minuteStart = doc.getLong("minuteStart") != null
                 ? Instant.ofEpochMilli(doc.getLong("minuteStart"))
-                : clock.instant();
+                : now;
         Instant dayStart = doc.getLong("dayStart") != null
                 ? Instant.ofEpochMilli(doc.getLong("dayStart"))
-                : clock.instant();
+                : now;
         YearMonth costMonth = doc.getString("costMonth") != null
                 ? YearMonth.parse(doc.getString("costMonth"))
-                : YearMonth.now(clock.withZone(ZoneOffset.UTC));
-        return new UsageSnapshot(
-                tenantId,
-                doc.getInteger("conversationsToday", 0),
-                doc.getInteger("apiCallsThisMinute", 0),
-                doc.getDouble("monthlyCostUsd") != null ? doc.getDouble("monthlyCostUsd") : 0.0,
+                : currentMonth;
+
+        int conversationsToday = dayStart.isBefore(currentDayStart) ? 0 : doc.getInteger("conversationsToday", 0);
+        int apiCallsThisMinute = minuteStart.isBefore(currentMinuteStart) ? 0 : doc.getInteger("apiCallsThisMinute", 0);
+        double monthlyCost = costMonth.equals(currentMonth) && doc.getDouble("monthlyCostUsd") != null
+                ? doc.getDouble("monthlyCostUsd")
+                : 0.0;
+
+        return new UsageSnapshot(tenantId, conversationsToday, apiCallsThisMinute, monthlyCost,
                 minuteStart, dayStart, costMonth);
     }
 }
