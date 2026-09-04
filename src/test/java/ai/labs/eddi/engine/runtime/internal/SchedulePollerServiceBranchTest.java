@@ -37,7 +37,7 @@ class SchedulePollerServiceBranchTest {
         fireExecutor = mock(ScheduleFireExecutor.class);
         poller = new SchedulePollerService(scheduleStore, fireExecutor, new SimpleMeterRegistry(),
                 true, Duration.ofMinutes(5), 3, 15, 4,
-                Optional.of("test-instance"), "UTC");
+                Optional.of("test-instance"), "UTC", Duration.ofDays(90));
         poller.init();
     }
 
@@ -50,7 +50,7 @@ class SchedulePollerServiceBranchTest {
         void blankConfiguredId() {
             var p = new SchedulePollerService(scheduleStore, fireExecutor, new SimpleMeterRegistry(),
                     true, Duration.ofMinutes(5), 3, 15, 4,
-                    Optional.of("   "), "UTC");
+                    Optional.of("   "), "UTC", Duration.ofDays(90));
             p.init();
             assertNotNull(p.getInstanceId());
             assertFalse(p.getInstanceId().isBlank());
@@ -61,7 +61,7 @@ class SchedulePollerServiceBranchTest {
         void emptyOptional() {
             var p = new SchedulePollerService(scheduleStore, fireExecutor, new SimpleMeterRegistry(),
                     true, Duration.ofMinutes(5), 3, 15, 4,
-                    Optional.empty(), "UTC");
+                    Optional.empty(), "UTC", Duration.ofDays(90));
             p.init();
             assertNotNull(p.getInstanceId());
         }

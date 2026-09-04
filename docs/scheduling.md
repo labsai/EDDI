@@ -130,7 +130,7 @@ Heartbeats are **drift-proof** — after a fire completes, the next fire is calc
 | Method | Path | Description |
 |--------|------|-------------|
 | `POST` | `/schedulestore/schedules` | Create a schedule |
-| `GET` | `/schedulestore/schedules` | List all schedules (optional `?agentId=` filter) |
+| `GET` | `/schedulestore/schedules` | List schedules, newest first (optional `?agentId=` filter; `?limit=` default 500, max 1000; `?offset=` default 0) |
 | `GET` | `/schedulestore/schedules/{id}` | Get a specific schedule |
 | `PUT` | `/schedulestore/schedules/{id}` | Update a schedule |
 | `DELETE` | `/schedulestore/schedules/{id}` | Delete a schedule |
@@ -138,12 +138,30 @@ Heartbeats are **drift-proof** — after a fire completes, the next fire is calc
 | `POST` | `/schedulestore/schedules/{id}/disable` | Disable a schedule |
 | `POST` | `/schedulestore/schedules/{id}/fire` | Manually trigger a fire immediately |
 
+> **Paging (wire change).** The listing used to be one hard-capped page of 500 in
+> whatever order the store returned; past that, the surplus schedules could not be
+> found, disabled or deleted through the list at all. It is now ordered (newest
+> `createdAt` first, id breaking ties) and takes `limit`/`offset`. A response
+> holding exactly `limit` entries may be truncated — ask for the next page to find
+> out.
+>
+> **`limit=0` is now `400`, on all three listing endpoints.** It used to be passed
+> through to the store, where the two backends read it opposite ways: the MongoDB
+> driver treats `limit(0)` as *no limit* and dumped every row, while PostgreSQL's
+> `LIMIT 0` returned nothing. A client that sent `limit=0` and got away with it
+> must send a positive value.
+>
+> **Firing a one-shot consumes it.** `POST /{id}/fire` runs the same state machine
+> a polled fire does, so a successful manual fire of a `oneTimeAt` schedule
+> disables it — it is the run, not a rehearsal. Re-arm it with
+> `POST /{id}/enable`.
+
 ### Admin Endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/schedulestore/schedules/{id}/fires` | Read fire history (optional `?limit=20`) |
-| `GET` | `/schedulestore/schedules/admin/failed` | List all failed/dead-lettered fires |
+| `GET` | `/schedulestore/schedules/{id}/fires` | Read fire history, newest first (`?limit=` default 20, must be > 0, capped at 500) |
+| `GET` | `/schedulestore/schedules/admin/failed` | List all failed/dead-lettered fires (`?limit=` default 50, must be > 0, capped at 500) |
 | `POST` | `/schedulestore/schedules/{id}/retry` | Re-queue a dead-lettered schedule |
 | `POST` | `/schedulestore/schedules/{id}/dismiss` | Reset dead-letter without immediate retry |
 
@@ -269,6 +287,9 @@ variables — Quarkus maps `eddi.schedule.poll-interval` to
 | `eddi.schedule.min-interval-seconds` | `60` | Smallest cron interval a schedule may request. Guards against schedule bombing; a rejected create returns a message naming this property |
 | `eddi.schedule.instance-id` | *(hostname)* | Identity used for cluster claim tracking |
 | `eddi.schedule.default-timezone` | `UTC` | IANA zone applied to schedules that do not name one |
+| `eddi.schedule.fire-timeout` | `5m` | How long one conversation fire may run before it is abandoned as failed. Keep it at or below `lease-timeout` — past the lease another instance may reclaim the schedule regardless |
+| `eddi.schedule.fire-log-retention` | `90d` | Fire logs older than this are deleted by a periodic sweep. `0` keeps everything — note that a 60-second heartbeat alone writes ~525,600 rows a year |
+| `eddi.schedule.fire-log-prune-interval` | `1h` | How often that sweep runs. The DELETE is by timestamp and therefore idempotent, so it needs no cluster claim |
 
 ### Observability
 
@@ -280,6 +301,7 @@ variables — Quarkus maps `eddi.schedule.poll-interval` to
 | `eddi.schedule.fire.deadlettered` | Counter | Fires that exhausted `max-retries`. **Alert on any increase** — these need manual retry or dismissal |
 | `eddi.schedule.fire.duration` | Timer | If p99 approaches `lease-timeout`, double execution is imminent |
 | `eddi.schedule.claim.conflict` | Counter | Instances racing for the same schedule. Normal and expected in a cluster; a sharp rise alongside falling `fire.count` suggests contention rather than work |
+| `eddi.schedule.firelog.pruned` | Counter | Fire logs removed by the retention sweep. Flat while the table grows means retention is disabled (`fire-log-retention=0`) or the sweep is failing — check the logs |
 
 ## Best Practices
 

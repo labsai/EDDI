@@ -149,4 +149,19 @@ class CharacterUtilitiesTest {
         String result = CharacterUtilities.convertSpecialCharacter("á");
         assertEquals("a", result);
     }
+
+    /**
+     * The loop answered true for "" (no character disproved it), so
+     * IntegerDictionary.lookupTerm("") minted an integer("") expression out of
+     * nothing.
+     */
+    @Test
+    void isStringInteger_emptyString_returnsFalse() {
+        assertFalse(CharacterUtilities.isStringInteger(""));
+    }
+
+    @Test
+    void isStringInteger_null_returnsFalse() {
+        assertFalse(CharacterUtilities.isStringInteger(null));
+    }
 }

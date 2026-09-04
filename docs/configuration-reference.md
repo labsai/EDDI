@@ -116,6 +116,9 @@ Full narrative and metrics: [scheduling.md → Deployment Configuration](schedul
 | `eddi.schedule.min-interval-seconds` | `60` | Smallest cron interval a schedule may request |
 | `eddi.schedule.instance-id` | *(hostname)* | Cluster claim identity. Set explicitly where hostnames are recycled |
 | `eddi.schedule.default-timezone` | `UTC` | IANA zone for schedules that name none |
+| `eddi.schedule.fire-timeout` | `5m` | How long one conversation fire may run before it is abandoned as failed. **Keep it at or below `lease-timeout`** — past the lease another instance may reclaim the schedule regardless |
+| `eddi.schedule.fire-log-retention` | `90d` | Fire logs older than this are deleted by a periodic sweep. `0` keeps everything — a 60-second heartbeat alone writes ~525,600 rows a year |
+| `eddi.schedule.fire-log-prune-interval` | `1h` | How often that sweep runs. The `DELETE` is by timestamp and therefore idempotent, so it needs no cluster claim |
 
 ---
 

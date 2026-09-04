@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.runtime.internal;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
@@ -124,14 +125,54 @@ public final class CronParser {
     }
 
     /**
-     * Compute the minimum interval in seconds between two successive fires. Used
-     * for validating the minimum interval policy.
+     * How many fires to look ahead when measuring an expression's tightest gap. A
+     * week of one-minute fires is 10,080, so this horizon covers every sub-daily
+     * pattern in full and samples a long enough stretch of the rarer ones to find
+     * their tightest pair.
+     */
+    private static final int MIN_INTERVAL_SCAN_FIRES = 64;
+
+    /**
+     * Time bound on the same scan, so a sparse expression stops early instead of
+     * walking into {@link #computeNextFire}'s two-year limit.
+     */
+    private static final Duration SCAN_HORIZON = Duration.ofDays(366);
+
+    /**
+     * The <em>smallest</em> gap between two successive fires of this expression, in
+     * seconds. Used to enforce the minimum-interval policy.
+     * <p>
+     * Scans a horizon rather than measuring the single gap after
+     * {@code Instant.now()}, because that one gap is not a property of the
+     * expression — it is a property of the moment the request arrived. Under the
+     * old measurement {@code 0 9,10 * * MON} reported ~6 days 23 h when submitted
+     * on a Monday between the two fires (and was accepted), but 3600 s at any other
+     * time (and could be rejected): the same configuration passed or failed
+     * validation depending on when the operator clicked save. Taking the minimum
+     * over a horizon makes the answer deterministic and makes it the number the
+     * policy is actually about — the tightest burst the expression can produce.
      */
     public static long computeMinIntervalSeconds(String cronExpression, ZoneId zoneId) {
-        Instant now = Instant.now();
-        Instant first = computeNextFire(cronExpression, now, zoneId);
-        Instant second = computeNextFire(cronExpression, first, zoneId);
-        return second.getEpochSecond() - first.getEpochSecond();
+        Instant cursor = computeNextFire(cronExpression, Instant.now(), zoneId);
+        // computeNextFire only looks two years ahead and throws beyond that, so a rare
+        // expression (say "0 0 1 1 *", once a year) must stop the scan rather than run
+        // into that limit. Its gap is far above any plausible minimum anyway.
+        Instant horizon = cursor.plus(SCAN_HORIZON);
+        long min = Long.MAX_VALUE;
+        for (int i = 0; i < MIN_INTERVAL_SCAN_FIRES; i++) {
+            Instant next;
+            try {
+                next = computeNextFire(cronExpression, cursor, zoneId);
+            } catch (IllegalStateException e) {
+                break; // no further fire within the parser's own horizon
+            }
+            min = Math.min(min, next.getEpochSecond() - cursor.getEpochSecond());
+            cursor = next;
+            if (cursor.isAfter(horizon)) {
+                break;
+            }
+        }
+        return min;
     }
 
     // --- Internal helpers ---

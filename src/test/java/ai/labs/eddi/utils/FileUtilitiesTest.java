@@ -9,6 +9,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
@@ -68,5 +69,47 @@ class FileUtilitiesTest {
         String path = FileUtilities.buildPath("dir1" + File.separator, "dir2");
         // Should not double up separators
         assertFalse(path.contains(File.separator + File.separator));
+    }
+
+    /**
+     * {@code buildPath("foo")} threw StringIndexOutOfBoundsException: with one
+     * segment there is no separator, so lastIndexOf returned -1 and substring(-1)
+     * blew up inside a path helper.
+     */
+    @Test
+    void buildPath_singleSegment_doesNotThrow() {
+        String path = assertDoesNotThrow(() -> FileUtilities.buildPath("foo"));
+        assertEquals("foo" + File.separator, path);
+    }
+
+    /** Same crash from the other end: endsWith() on an empty builder. */
+    @Test
+    void buildPath_emptyFirstSegment_isSkippedRatherThanFatal() {
+        String path = assertDoesNotThrow(() -> FileUtilities.buildPath("", "x"));
+        assertEquals("x" + File.separator, path);
+    }
+
+    @Test
+    void buildPath_noSegments_returnsEmpty() {
+        assertEquals("", FileUtilities.buildPath());
+        assertEquals("", FileUtilities.buildPath("", ""));
+    }
+
+    @Test
+    void buildPath_nullSegment_isSkipped() {
+        assertEquals("dir1" + File.separator + "file.txt", FileUtilities.buildPath("dir1", null, "file.txt"));
+    }
+
+    @Test
+    void readTextFromFile_readsUtf8Exactly(@TempDir Path tempDir) throws IOException {
+        // ready() is "can I read without blocking", not "is there more" — the old loop
+        // used it as an EOF test and could return a silently truncated string. It also
+        // read with the platform default charset, so the same file decoded differently
+        // on different hosts.
+        String content = "grüße\nzeile2\n";
+        Path file = tempDir.resolve("utf8.txt");
+        Files.writeString(file, content, StandardCharsets.UTF_8);
+
+        assertEquals(content, FileUtilities.readTextFromFile(file.toFile()));
     }
 }

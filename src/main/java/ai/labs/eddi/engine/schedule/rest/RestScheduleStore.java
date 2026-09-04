@@ -13,6 +13,7 @@ import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.runtime.internal.CronDescriber;
 import ai.labs.eddi.engine.runtime.internal.CronParser;
+import ai.labs.eddi.engine.runtime.internal.DreamService;
 import ai.labs.eddi.engine.runtime.internal.ScheduleFireExecutor;
 import ai.labs.eddi.engine.runtime.internal.SchedulePollerService;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
@@ -22,6 +23,7 @@ import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.core.Response;
@@ -31,6 +33,7 @@ import org.jboss.logging.Logger;
 import java.net.URI;
 import java.time.Instant;
 import java.time.ZoneId;
+import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.Map;
 
@@ -62,7 +65,13 @@ public class RestScheduleStore implements IRestScheduleStore {
      * specific end user. It is not a real principal — {@code DreamService} refuses
      * to consolidate memories for it — so ownership checks treat it as unowned.
      */
-    private static final String SCHEDULER_USER_ID = "system:scheduler";
+    private static final String SCHEDULER_USER_ID = DreamService.SCHEDULER_PLACEHOLDER_USER_ID;
+
+    /** Server-side ceiling for the schedule listing page size. */
+    private static final int MAX_LIST_LIMIT = 1000;
+
+    /** Server-side ceiling for fire-log page sizes. */
+    private static final int MAX_FIRE_LOG_LIMIT = 500;
 
     @Inject
     IScheduleStore scheduleStore;
@@ -89,13 +98,20 @@ public class RestScheduleStore implements IRestScheduleStore {
     long minIntervalSeconds;
 
     @Override
-    public List<ScheduleConfiguration> readAllSchedules(String agentId) {
+    public List<ScheduleConfiguration> readAllSchedules(String agentId, int limit, int offset) {
         try {
+            // Paged and deterministically ordered. The listing used to be a single
+            // hard-capped page of 500 in whatever order the store returned, so once a
+            // deployment held more than that — HITL timeouts, per-user dream schedules
+            // and team cadences are all created programmatically — the surplus was
+            // invisible and could not be disabled or deleted through the list at all.
+            int pageSize = boundedLimit(limit, MAX_LIST_LIMIT);
+            int pageOffset = Math.max(0, offset);
             List<ScheduleConfiguration> schedules;
             if (agentId != null && !agentId.isBlank()) {
-                schedules = scheduleStore.readSchedulesByAgentId(agentId);
+                schedules = scheduleStore.readSchedulesByAgentId(agentId, pageSize, pageOffset);
             } else {
-                schedules = scheduleStore.readAllSchedules(500); // Fix #12
+                schedules = scheduleStore.readAllSchedules(pageSize, pageOffset);
             }
             // Redact HITL timeout schedules from non-admins so a plain editor
             // cannot enumerate hitl-timeout-* entries to locate and fire them.
@@ -105,6 +121,9 @@ public class RestScheduleStore implements IRestScheduleStore {
             // Enrich with cron descriptions
             schedules.forEach(this::enrichCronDescription);
             return schedules;
+        } catch (IllegalArgumentException e) {
+            LOGGER.warn("Invalid schedule listing request: " + e.getMessage());
+            throw new BadRequestException(e.getMessage());
         } catch (Exception e) {
             LOGGER.error("Failed to read schedules", e);
             throw new InternalServerErrorException("Failed to read schedules");
@@ -160,6 +179,12 @@ public class RestScheduleStore implements IRestScheduleStore {
 
             // Apply trigger-type-aware defaults
             applyDefaults(schedule);
+
+            // Stamp the creator from the authenticated identity rather than trusting
+            // the body. createdBy exists to answer "who created this schedule" when a
+            // rogue one keeps starting conversations, and nothing on this path ever
+            // set it — every schedule created through the public API had it null.
+            schedule.setCreatedBy(callerPrincipal());
 
             // Compute initial nextFire
             computeInitialNextFire(schedule);
@@ -247,6 +272,14 @@ public class RestScheduleStore implements IRestScheduleStore {
             // caller actually sent rather than what defaulting turned it into.
             applyDefaults(schedule);
 
+            // A PUT edits CONFIGURATION; it must not rewrite provenance or the fire
+            // lifecycle. Both are absent from the normal request shape (the Manager,
+            // curl and MCP all send the editable fields only), so taking them from the
+            // body meant an edit nulled createdAt/createdBy/lastFired and reset an
+            // in-flight fire's state — re-opening a claim on a schedule that was
+            // running. Carry them over from the stored row instead.
+            carryOverNonEditableFields(scheduleId, schedule);
+
             // Recompute nextFire
             computeInitialNextFire(schedule);
 
@@ -333,7 +366,50 @@ public class RestScheduleStore implements IRestScheduleStore {
             if (ownerGuard != null) {
                 return ownerGuard;
             }
-            ScheduleFireLog fireLog = fireExecutor.fire(schedule, pollerService.getInstanceId(), 1);
+            // Claim it first, on the poller's own terms. Without a claim a manual fire
+            // ran concurrently with the poller's fire of the same schedule — and with
+            // conversationStrategy=persistent both pushed a turn into the SAME
+            // conversation. A refused claim is a conflict, not a server error — but
+            // WHY it was refused matters to the operator, so say which state blocked
+            // it (see manualFireRefusalReason).
+            if (!pollerService.claimForManualFire(schedule)) {
+                LOGGER.warnf("Refused manual fire of schedule %s — could not claim it (fireStatus=%s)",
+                        sanitize(scheduleId), schedule.getFireStatus());
+                return Response.status(Response.Status.CONFLICT)
+                        .entity(manualFireRefusalReason(schedule))
+                        .build();
+            }
+            // The attempt this actually is, not a constant 1: a schedule already on its
+            // third failed attempt used to log a manual retry as "attempt 1", so the
+            // fire log read as a fresh first try and hid the failure history.
+            int attemptNumber = schedule.getFailCount() + 1;
+            ScheduleFireLog fireLog = null;
+            try {
+                fireLog = fireExecutor.fire(schedule, pollerService.getInstanceId(), attemptNumber);
+            } finally {
+                // Always release the claim, whatever happened — a manual fire that left
+                // the row CLAIMED would block the poller until the lease expired.
+                //
+                // Park the interrupt across that write, exactly as
+                // SchedulePollerService.fireClaimedSchedule does. ScheduleFireExecutor
+                // re-asserts a consumed interrupt before returning, so on the interrupted
+                // path (client disconnect, shutdown, RESTEasy cancellation) this block
+                // would otherwise run with the flag set — and the synchronous Mongo driver
+                // throws MongoInterruptedException on connection checkout.
+                // recordManualFireOutcome swallows that, so the claim would never be
+                // released and failCount never incremented: precisely the leak this
+                // finally exists to prevent, self-healing only once the lease expires. The
+                // flag is re-asserted immediately afterwards so the cancellation signal
+                // still reaches the caller.
+                boolean wasInterrupted = Thread.interrupted();
+                try {
+                    pollerService.recordManualFireOutcome(schedule, fireLog);
+                } finally {
+                    if (wasInterrupted) {
+                        Thread.currentThread().interrupt();
+                    }
+                }
+            }
             return Response.ok(fireLog).build();
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NotFoundException("Schedule not found: " + scheduleId);
@@ -346,7 +422,10 @@ public class RestScheduleStore implements IRestScheduleStore {
     @Override
     public List<ScheduleFireLog> readFireLogs(String scheduleId, int limit) {
         try {
-            return scheduleStore.readFireLogs(scheduleId, limit);
+            return scheduleStore.readFireLogs(scheduleId, boundedLimit(limit, MAX_FIRE_LOG_LIMIT));
+        } catch (IllegalArgumentException e) {
+            LOGGER.warn("Invalid fire log limit: " + e.getMessage());
+            throw new BadRequestException(e.getMessage());
         } catch (Exception e) {
             LOGGER.error("Failed to read fire logs for schedule " + scheduleId, e);
             throw new InternalServerErrorException("Failed to read fire logs");
@@ -356,11 +435,31 @@ public class RestScheduleStore implements IRestScheduleStore {
     @Override
     public List<ScheduleFireLog> readFailedFires(int limit) {
         try {
-            return scheduleStore.readFailedFireLogs(limit);
+            return scheduleStore.readFailedFireLogs(boundedLimit(limit, MAX_FIRE_LOG_LIMIT));
+        } catch (IllegalArgumentException e) {
+            LOGGER.warn("Invalid fire log limit: " + e.getMessage());
+            throw new BadRequestException(e.getMessage());
         } catch (Exception e) {
             LOGGER.error("Failed to read failed fires", e);
             throw new InternalServerErrorException("Failed to read failed fires");
         }
+    }
+
+    /**
+     * Validate and cap a caller-supplied {@code limit}.
+     * <p>
+     * The value used to be passed straight through, and the two backends read it
+     * differently: the MongoDB driver treats {@code limit(0)} as "no limit" while
+     * PostgreSQL's {@code LIMIT 0} returns nothing, so {@code ?limit=0} dumped
+     * every fire log ever written on one backend and an empty list on the other. An
+     * unbounded positive value was accepted on both. Rejecting non-positive values
+     * and capping the rest gives the parameter one meaning everywhere.
+     */
+    private static int boundedLimit(int limit, int max) {
+        if (limit <= 0) {
+            throw new IllegalArgumentException("limit must be greater than 0");
+        }
+        return Math.min(limit, max);
     }
 
     @Override
@@ -409,6 +508,100 @@ public class RestScheduleStore implements IRestScheduleStore {
     }
 
     // --- Helpers ---
+
+    /**
+     * Why a manual fire could not claim the schedule, phrased for the operator who
+     * just pressed "Fire now".
+     * <p>
+     * {@code tryClaim} accepts exactly three states — PENDING, FAILED whose
+     * {@code nextRetryAt} has fallen due, and a CLAIMED row whose lease has expired
+     * — so a refusal is by no means always "someone else is firing it". A schedule
+     * still waiting out its retry backoff, or one that has been dead-lettered, is
+     * refused too, and those are precisely the states an operator reaches for the
+     * manual fire from. Answering all three with "already being fired" sends them
+     * hunting for a fire that does not exist, and hides the one endpoint that would
+     * actually help.
+     */
+    private static String manualFireRefusalReason(ScheduleConfiguration schedule) {
+        FireStatus status = schedule != null ? schedule.getFireStatus() : null;
+        if (FireStatus.DEAD_LETTERED == status) {
+            return "This schedule is dead-lettered after " + schedule.getFailCount()
+                    + " failed attempt(s) and will not fire until it is requeued. "
+                    + "Use POST /schedulestore/schedules/{id}/retry.";
+        }
+        if (FireStatus.FAILED == status) {
+            return "This schedule is in the FAILED state and its retry is not due yet"
+                    + (schedule.getNextRetryAt() != null ? " (next retry at " + schedule.getNextRetryAt() + ")" : "")
+                    + ". Use POST /schedulestore/schedules/{id}/retry to clear the failure state, "
+                    + "or wait for the retry to fall due.";
+        }
+        return "This schedule is already being fired (claimed by another instance or the poller). Try again shortly.";
+    }
+
+    /**
+     * Copy the fields a PUT may not edit from the stored schedule onto the incoming
+     * body: provenance ({@code createdAt}, {@code createdBy}), fire history
+     * ({@code lastFired}), the claim/retry lifecycle ({@code fireStatus},
+     * {@code failCount}, {@code claimedBy}, {@code claimedAt}, {@code fireId},
+     * {@code nextRetryAt}) and {@code persistentConversationId}.
+     * <p>
+     * Two things went wrong without this. On MongoDB the update was a
+     * whole-document replace, so every one of these read back null after any edit
+     * that did not echo them — the audit trail simply vanished. And on BOTH
+     * backends {@code fireStatus} was taken from the body, defaulting to PENDING
+     * when absent: editing a schedule while it was firing un-claimed the running
+     * fire and let the next poll claim and fire it a second time.
+     * <p>
+     * Recovering a FAILED or DEAD_LETTERED schedule is therefore deliberately NOT a
+     * side effect of editing it: {@code POST /schedules/{id}/enable} and
+     * {@code POST /schedules/{id}/retry} both clear the failure state explicitly.
+     * <p>
+     * A schedule that is NOT FOUND is left alone rather than failing here — the
+     * store's own update call is about to surface the 404. Every other store
+     * failure aborts the update instead of being logged and shrugged off: without
+     * the stored row this method has nothing to carry over, and
+     * {@link #applyDefaults} has already stamped {@code fireStatus = PENDING} onto
+     * the body — so proceeding would write exactly the mid-fire un-claim this
+     * method exists to prevent, on nothing worse than a transient store blip.
+     */
+    private void carryOverNonEditableFields(String scheduleId, ScheduleConfiguration schedule)
+            throws IResourceStore.ResourceStoreException {
+        ScheduleConfiguration stored;
+        try {
+            stored = scheduleStore.readSchedule(scheduleId);
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            LOGGER.warn("Stored schedule " + sanitize(scheduleId) + " not found while preserving its non-editable fields", e);
+            return;
+        }
+        if (stored == null) {
+            return;
+        }
+        schedule.setCreatedAt(stored.getCreatedAt());
+        schedule.setCreatedBy(stored.getCreatedBy());
+        schedule.setLastFired(stored.getLastFired());
+        schedule.setFireStatus(stored.getFireStatus());
+        schedule.setFailCount(stored.getFailCount());
+        schedule.setClaimedBy(stored.getClaimedBy());
+        schedule.setClaimedAt(stored.getClaimedAt());
+        schedule.setFireId(stored.getFireId());
+        schedule.setNextRetryAt(stored.getNextRetryAt());
+        schedule.setPersistentConversationId(stored.getPersistentConversationId());
+    }
+
+    /**
+     * The authenticated caller's principal name, or {@value #SCHEDULER_USER_ID}
+     * when there is none (authorization disabled, or a system-initiated call).
+     * Never throws — an audit stamp must not be able to fail a create.
+     */
+    private String callerPrincipal() {
+        try {
+            var principal = identity != null ? identity.getPrincipal() : null;
+            String name = principal != null ? principal.getName() : null;
+            return name != null && !name.isBlank() ? name : SCHEDULER_USER_ID;
+        } catch (RuntimeException e) {
+            return SCHEDULER_USER_ID;
+        }
+    }
 
     /** True if the schedule carries the HITL approval-timeout metadata marker. */
     private static boolean isHitlSchedule(ScheduleConfiguration schedule) {
@@ -572,7 +765,7 @@ public class RestScheduleStore implements IRestScheduleStore {
             if (enabled) {
                 // Need to read schedule to compute nextFire
                 ScheduleConfiguration schedule = scheduleStore.readSchedule(scheduleId);
-                nextFire = computeNextFireForSchedule(schedule);
+                nextFire = computeRearmNextFire(schedule);
             }
             scheduleStore.setScheduleEnabled(scheduleId, enabled, nextFire);
             return Response.ok().build();
@@ -635,28 +828,111 @@ public class RestScheduleStore implements IRestScheduleStore {
     }
 
     private void computeInitialNextFire(ScheduleConfiguration schedule) {
-        if (schedule.getTriggerType() == TriggerType.HEARTBEAT && schedule.getHeartbeatIntervalSeconds() != null) {
-            // Heartbeat: first fire = now + interval
-            schedule.setNextFire(Instant.now().plusSeconds(schedule.getHeartbeatIntervalSeconds()));
-        } else if (schedule.getCronExpression() != null && !schedule.getCronExpression().isBlank()) {
-            Instant nextFire = CronParser.computeNextFire(schedule.getCronExpression(), Instant.now(), zoneOf(schedule));
+        Instant nextFire = computeRearmNextFire(schedule);
+        if (nextFire != null) {
             schedule.setNextFire(nextFire);
-        } else if (schedule.getOneTimeAt() != null && !schedule.getOneTimeAt().isBlank()) {
-            schedule.setNextFire(Instant.parse(schedule.getOneTimeAt()));
         }
     }
 
+    /**
+     * The next fire of a <em>recurring</em> schedule, or {@code null} when it has
+     * no recurrence.
+     * <p>
+     * {@code oneTimeAt} is deliberately absent: this feeds {@code markCompleted},
+     * where {@code null} is the signal that a one-shot is finished and must be
+     * disabled. Answering with a one-shot's (now past) instant here would re-arm
+     * the schedule to fire again immediately. Arming a one-shot is
+     * {@link #computeRearmNextFire}'s job.
+     */
     private Instant computeNextFireForSchedule(ScheduleConfiguration schedule) {
         if (schedule.getTriggerType() == TriggerType.HEARTBEAT && schedule.getHeartbeatIntervalSeconds() != null) {
             return Instant.now().plusSeconds(schedule.getHeartbeatIntervalSeconds());
         }
         if (schedule.getCronExpression() != null && !schedule.getCronExpression().isBlank()) {
-            return CronParser.computeNextFire(schedule.getCronExpression(), Instant.now(), zoneOf(schedule));
+            return computeNextFire(schedule);
         }
         return null;
     }
 
+    /**
+     * {@link CronParser#computeNextFire} for a schedule, with the "syntactically
+     * valid but can never match" case (e.g. {@code 0 0 30 2 *} — February 30th)
+     * reported as a client error. The parser signals it with
+     * {@link IllegalStateException}, which is not an
+     * {@link IllegalArgumentException}, so it used to escape as a 500.
+     */
+    private Instant computeNextFire(ScheduleConfiguration schedule) {
+        try {
+            return CronParser.computeNextFire(schedule.getCronExpression(), Instant.now(), zoneOf(schedule));
+        } catch (IllegalStateException e) {
+            throw new IllegalArgumentException(
+                    "cronExpression '" + schedule.getCronExpression() + "' has no matching fire time within the next two years", e);
+        }
+    }
+
+    /** See {@link #computeNextFire} — same unsatisfiable-cron translation. */
+    private long computeMinIntervalSeconds(ScheduleConfiguration schedule) {
+        try {
+            return CronParser.computeMinIntervalSeconds(schedule.getCronExpression(), zoneOf(schedule));
+        } catch (IllegalStateException e) {
+            throw new IllegalArgumentException(
+                    "cronExpression '" + schedule.getCronExpression() + "' has no matching fire time within the next two years", e);
+        }
+    }
+
+    /**
+     * The instant a schedule should next fire when it is being (re-)armed — on
+     * create, on update, and on {@code POST /schedules/{id}/enable}.
+     * <p>
+     * Unlike {@link #computeNextFireForSchedule} this handles a one-shot
+     * ({@code oneTimeAt}) schedule, and that is the whole point. Enabling used to
+     * fall through to {@code null} for one-shots, and both stores skip the re-arm
+     * when nextFire is null — so the endpoint answered 200, the row read back
+     * {@code enabled=true}, and {@code nextFire} stayed NULL, which
+     * {@code findDueSchedules} can never match ({@code next_fire <= ?} is UNKNOWN
+     * for NULL on Postgres, and BSON type bracketing excludes null on Mongo). The
+     * schedule sat enabled-but-dead forever, with no error anywhere.
+     * <p>
+     * A {@code oneTimeAt} that has already passed arms for {@code now} rather than
+     * the past instant, so a re-enabled one-shot fires on the next poll instead of
+     * relying on {@code <=} semantics against a stale timestamp.
+     */
+    private Instant computeRearmNextFire(ScheduleConfiguration schedule) {
+        Instant recurring = computeNextFireForSchedule(schedule);
+        if (recurring != null) {
+            return recurring;
+        }
+        if (schedule.getOneTimeAt() != null && !schedule.getOneTimeAt().isBlank()) {
+            Instant at = parseOneTimeAt(schedule.getOneTimeAt());
+            Instant now = Instant.now();
+            return at.isBefore(now) ? now : at;
+        }
+        return null;
+    }
+
+    /**
+     * Parse a {@code oneTimeAt} value, reporting a malformed one as a client error.
+     * <p>
+     * {@link Instant#parse} throws {@link DateTimeParseException}, which is a
+     * {@link java.time.DateTimeException} and NOT an
+     * {@link IllegalArgumentException} — so it slipped past the 400 handler on
+     * create/update and surfaced as a 500 "Failed to create schedule" with a stack
+     * trace, for nothing worse than a typo such as {@code "2026-09-03 10:00"}.
+     */
+    private static Instant parseOneTimeAt(String oneTimeAt) {
+        try {
+            return Instant.parse(oneTimeAt);
+        } catch (DateTimeParseException e) {
+            throw new IllegalArgumentException("oneTimeAt must be an ISO-8601 instant (e.g. 2026-09-03T10:00:00Z), got: " + oneTimeAt, e);
+        }
+    }
+
     private void validateSchedule(ScheduleConfiguration schedule) {
+        // An empty POST/PUT body deserializes to null. Dereferencing it produced an
+        // NPE and a 500 for what is plainly a client mistake.
+        if (schedule == null) {
+            throw new IllegalArgumentException("request body is required");
+        }
         if (schedule.getAgentId() == null || schedule.getAgentId().isBlank()) {
             throw new IllegalArgumentException("agentId is required");
         }
@@ -704,12 +980,17 @@ public class RestScheduleStore implements IRestScheduleStore {
                 throw new IllegalArgumentException("Cannot set both cronExpression and oneTimeAt");
             }
 
+            // A malformed one-shot instant is a client error, not a server error.
+            if (hasOneTime) {
+                parseOneTimeAt(schedule.getOneTimeAt());
+            }
+
             // Validate cron
             if (hasCron) {
                 CronParser.validate(schedule.getCronExpression());
 
                 // Enforce minimum interval
-                long intervalSec = CronParser.computeMinIntervalSeconds(schedule.getCronExpression(), zoneOf(schedule));
+                long intervalSec = computeMinIntervalSeconds(schedule);
                 if (intervalSec < minIntervalSeconds) {
                     throw new IllegalArgumentException(String.format(
                             "Cron interval (%ds) is below minimum allowed (%ds). "
@@ -734,18 +1015,27 @@ public class RestScheduleStore implements IRestScheduleStore {
         }
     }
 
+    /**
+     * Human-readable heartbeat interval.
+     * <p>
+     * A coarser unit is only used when the interval divides into it exactly.
+     * Truncating integer division described 90 s as "Every minute", 5400 s as
+     * "Every hour" and 129600 s as "Every day" — telling an operator the agent
+     * fires 1.5x more often than it does.
+     */
     private static String describeHeartbeat(long seconds) {
-        if (seconds < 60)
+        if (seconds < 60 || seconds % 60 != 0) {
             return "Every " + seconds + " seconds";
-        if (seconds < 3600) {
-            long min = seconds / 60;
-            return min == 1 ? "Every minute" : "Every " + min + " minutes";
         }
-        if (seconds < 86400) {
-            long hours = seconds / 3600;
+        long minutes = seconds / 60;
+        if (minutes < 60 || minutes % 60 != 0) {
+            return minutes == 1 ? "Every minute" : "Every " + minutes + " minutes";
+        }
+        long hours = minutes / 60;
+        if (hours < 24 || hours % 24 != 0) {
             return hours == 1 ? "Every hour" : "Every " + hours + " hours";
         }
-        long days = seconds / 86400;
+        long days = hours / 24;
         return days == 1 ? "Every day" : "Every " + days + " days";
     }
 }

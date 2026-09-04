@@ -11,8 +11,8 @@ import io.vertx.ext.web.client.WebClientSession;
 import io.vertx.ext.web.client.WebClientOptions;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Disposes;
+import jakarta.enterprise.inject.Produces;
 import jakarta.inject.Inject;
-import jakarta.ws.rs.Produces;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 @ApplicationScoped
@@ -21,6 +21,20 @@ public class HttpClientModule {
     @Inject
     Vertx vertx;
 
+    /**
+     * The CDI producer for the one and only {@link VertxHttpClient} — i.e. for
+     * every outbound httpcalls request in every agent.
+     * <p>
+     * {@code @Produces} here MUST be {@code jakarta.enterprise.inject.Produces}.
+     * This declaration carried the JAX-RS media-type annotation of the same simple
+     * name instead, and the bean existed only because ArC's
+     * {@code quarkus.arc.auto-producer-methods} default promotes any method with a
+     * scope annotation to a producer. Turning that default off, or moving
+     * {@code @ApplicationScoped} off this method, would have made
+     * {@code VertxHttpClient} unsatisfied with nothing pointing at the wrong import
+     * as the cause. The paired {@code @Disposes} below was always the real CDI
+     * annotation, so the two halves disagreed.
+     */
     @Produces
     @ApplicationScoped
     public VertxHttpClient provideHttpClient(@ConfigProperty(name = "httpClient.maxConnectionPerRoute") Integer maxConnectionPerRoute,

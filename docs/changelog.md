@@ -49,6 +49,64 @@ bottom of this file and are never archived.
 
 ---
 
+## ⏰ fix(schedule): correct fire bookkeeping, persistence and manual-fire claiming (2026-09-04)
+
+**Repo:** EDDI (`fix/review-schedules`)
+
+From the whole-repository code review. Scheduled fires were reporting success they had
+not earned, and losing state they had been given.
+
+**PostgreSQL lost the payload entirely.** `eddi_schedules` had no column for `message` —
+the text a CRON schedule sends to the agent, which `RestScheduleStore` makes mandatory on
+save — nor for `time_zone`, `one_time_at`, `environment`, `agent_version`, `created_by` or
+`persistent_conversation_id`. The value was written, silently dropped, read back null, and
+the scheduled turn ran with **null input**. Scheduling is enabled by default and PostgreSQL
+is a documented, supported backend. The columns are added with
+`ADD COLUMN IF NOT EXISTS` statements so existing databases upgrade in place, and the
+dropped `persistent_conversation_id` was separately re-opening the CAS claim on every
+heartbeat fire, breaking exactly-once execution.
+
+**Failures were recorded as successes.** The executor read its outcome from a latch that
+counts down on the failure branch too, so an error inside the pipeline looked like a green
+fire: retry, backoff and dead-lettering never engaged, and `docs/scheduling.md` documents a
+state machine that could not be reached.
+
+**Persistent fires un-claimed themselves mid-flight.** The strategy wrote the pre-claim
+schedule back with `replaceOne`, so the poller re-claimed and re-fired a schedule that was
+still running, routing both turns into the *same* persistent conversation — two interleaved
+turns, two cost charges, one memory.
+
+**Heartbeats drifted.** The next fire re-anchored on the moment a turn *finished* rather
+than when it was *due*, so a 40-second turn on a 60-second cadence actually fired every 100
+seconds.
+
+**A manual "fire now" took no cluster claim at all**, so it could run concurrently with the
+poller's own fire of the same schedule.
+
+Also: `PUT /schedulestore/schedules/{id}` silently erased `createdAt`, `createdBy`,
+`lastFired` and the claim state on MongoDB (PostgreSQL preserved them — a parity gap in the
+same feature), and `CronDescriber` rejected day-of-week `7`, which `CronParser.validate`
+accepts, so a valid stored schedule 400'd on read.
+
+### Regression coverage
+
+Every behavioural change is pinned by a test proven to fail with its fix reverted. Four
+tests that the auditor found could pass with the fix removed were rewritten to assert the
+corrected value precisely rather than a property the buggy code also satisfied — one had
+asserted only that the next fire time lies in the future, which the drifting formula did too.
+
+Three of this repository's own guard tests were failing and are now satisfied properly
+rather than relaxed: the three new `eddi.schedule.*` properties are documented in
+`docs/configuration-reference.md`, and the new `eddi.schedule.firelog.pruned` counter is
+both documented in `docs/metrics.md` and charted in the Grafana dashboard, because
+`MetricsDashboardCoverageTest` requires both.
+
+Recorded honestly as unverifiable locally: the `SafeHttpClient` redirect tests need a
+loopback socket, and the new DDL and Mongo codec paths are only exercised against real
+backends in CI.
+
+---
+
 ## 📋 docs(config): document the four workspace properties that were breaking `main` (2026-08-30)
 
 **Repo:** EDDI (`fix/connection-extra-auth-params-code-verifier`)

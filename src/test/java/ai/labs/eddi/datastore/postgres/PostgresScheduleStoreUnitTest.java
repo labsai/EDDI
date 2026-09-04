@@ -13,6 +13,7 @@ import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
 import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import javax.sql.DataSource;
 import java.sql.*;
@@ -219,6 +220,257 @@ class PostgresScheduleStoreUnitTest {
 
         // then — fire_status is param 12 (user_id was inserted at 4)
         verify(preparedStatement).setString(12, FireStatus.PENDING.name());
+    }
+
+    // ─── schedule payload columns ───────────────────────────────
+    //
+    // eddi_schedules had no column at all for message, timeZone, environment,
+    // agentVersion, oneTimeAt, persistentConversationId, createdBy or
+    // allowSelfScheduling. Every one of them was dropped on write and read back
+    // null on PostgreSQL, while MongoDB (which serializes the whole document) kept
+    // them — so the same schedule behaved differently on the two backends: a CRON
+    // fire ran with a null message, a Europe/Vienna cron was recomputed in UTC, a
+    // test-environment schedule fired against production, and
+    // conversationStrategy=persistent started a fresh conversation on every fire.
+
+    @Test
+    void createSchedule_persistsMessageTimeZoneEnvironmentAndTheRestOfThePayload() throws Exception {
+        var config = newScheduleConfig();
+        config.setMessage("generate the daily report");
+        config.setTimeZone("Europe/Vienna");
+        config.setEnvironment("test");
+        config.setAgentVersion(7);
+        config.setOneTimeAt("2026-09-03T10:00:00Z");
+        config.setPersistentConversationId("conv-1");
+        config.setCreatedBy("alice");
+        config.setAllowSelfScheduling(true);
+
+        sut.createSchedule(config);
+
+        verify(preparedStatement).setString(17, "generate the daily report");
+        verify(preparedStatement).setString(18, "2026-09-03T10:00:00Z");
+        verify(preparedStatement).setString(19, "Europe/Vienna");
+        verify(preparedStatement).setString(20, "test");
+        verify(preparedStatement).setInt(21, 7);
+        verify(preparedStatement).setString(22, "conv-1");
+        verify(preparedStatement).setString(23, "alice");
+        verify(preparedStatement).setBoolean(24, true);
+    }
+
+    @Test
+    void updateSchedule_persistsTheEditablePayloadFields() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+        var config = newScheduleConfig();
+        config.setMessage("changed");
+        config.setTimeZone("Europe/Vienna");
+        config.setEnvironment("test");
+        config.setAgentVersion(3);
+        config.setAllowSelfScheduling(true);
+
+        sut.updateSchedule("sched-1", config);
+
+        verify(preparedStatement).setString(16, "changed");
+        verify(preparedStatement).setString(18, "Europe/Vienna");
+        verify(preparedStatement).setString(19, "test");
+        verify(preparedStatement).setInt(20, 3);
+        verify(preparedStatement).setBoolean(21, true);
+    }
+
+    /**
+     * The claim/provenance columns are owned by createSchedule and by the
+     * claim/completion methods — an ordinary PUT must not be able to write them.
+     * Writing persistent_conversation_id from here in particular un-claimed a fire
+     * that was still running.
+     */
+    @Test
+    void updateSchedule_doesNotWriteProvenanceOrClaimColumns() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+
+        sut.updateSchedule("sched-1", newScheduleConfig());
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+        assertFalse(sql.getValue().contains("created_at="), "created_at must not be in the UPDATE SET list");
+        assertFalse(sql.getValue().contains("created_by="), "created_by must not be in the UPDATE SET list");
+        assertFalse(sql.getValue().contains("last_fired="), "last_fired must not be in the UPDATE SET list");
+        assertFalse(sql.getValue().contains("claimed_by="), "claimed_by must not be in the UPDATE SET list");
+        assertFalse(sql.getValue().contains("persistent_conversation_id="),
+                "persistent_conversation_id is owned by setPersistentConversationId");
+    }
+
+    @Test
+    void setPersistentConversationId_writesThatOneFieldOnly() throws Exception {
+        sut.setPersistentConversationId("sched-1", "conv-42");
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+        assertTrue(sql.getValue().startsWith("UPDATE eddi_schedules SET persistent_conversation_id=?"));
+        assertFalse(sql.getValue().contains("fire_status"), "must not touch the claim state mid-fire");
+        assertFalse(sql.getValue().contains("next_fire"), "must not touch the arming mid-fire");
+        verify(preparedStatement).setString(1, "conv-42");
+        verify(preparedStatement).setString(3, "sched-1");
+    }
+
+    @Test
+    void readSchedule_readsBackTheFullPayload() throws Exception {
+        setupResultSetForSchedule();
+        when(resultSet.next()).thenReturn(true);
+        when(resultSet.getString("message")).thenReturn("generate the daily report");
+        when(resultSet.getString("time_zone")).thenReturn("Europe/Vienna");
+        when(resultSet.getString("environment")).thenReturn("test");
+        when(resultSet.getString("one_time_at")).thenReturn("2026-09-03T10:00:00Z");
+        when(resultSet.getInt("agent_version")).thenReturn(7);
+        when(resultSet.getString("persistent_conversation_id")).thenReturn("conv-1");
+        when(resultSet.getString("created_by")).thenReturn("alice");
+        when(resultSet.getBoolean("allow_self_scheduling")).thenReturn(true);
+
+        ScheduleConfiguration result = sut.readSchedule("sched-1");
+
+        assertEquals("generate the daily report", result.getMessage());
+        assertEquals("Europe/Vienna", result.getTimeZone());
+        assertEquals("test", result.getEnvironment());
+        assertEquals("2026-09-03T10:00:00Z", result.getOneTimeAt());
+        assertEquals(7, result.getAgentVersion());
+        assertEquals("conv-1", result.getPersistentConversationId());
+        assertEquals("alice", result.getCreatedBy());
+        assertTrue(result.isAllowSelfScheduling());
+    }
+
+    /**
+     * Enabling clears the failure state whether or not a nextFire could be
+     * computed. Gating that reset on a non-null nextFire left a re-enabled schedule
+     * stuck in FAILED/DEAD_LETTERED with a non-zero failCount, so it could never be
+     * claimed again.
+     */
+    @Test
+    void setScheduleEnabled_withoutNextFire_stillClearsTheFailureState() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+
+        sut.setScheduleEnabled("sched-1", true, null);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+        assertTrue(sql.getValue().contains("fire_status=?"));
+        assertTrue(sql.getValue().contains("fail_count=0"));
+        assertTrue(sql.getValue().contains("next_retry_at=NULL"));
+        verify(preparedStatement).setString(2, FireStatus.PENDING.name());
+    }
+
+    @Test
+    void deleteSchedule_cascadesTheFireLogs() throws Exception {
+        sut.deleteSchedule("sched-1");
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection, atLeastOnce()).prepareStatement(sql.capture());
+        assertTrue(sql.getAllValues().stream().anyMatch(s -> s.contains("DELETE FROM eddi_schedule_fire_logs")),
+                "fire logs must be deleted with their schedule — nothing can find them afterwards");
+    }
+
+    /**
+     * The three bulk delete paths cascade too, and GDPR erasure is the reason the
+     * cascade exists: every fire log carries a conversationId of the user being
+     * erased, and once the schedule row is gone nothing can find those logs again.
+     * An erasure that reports success while leaving them behind is a compliance
+     * failure. Only the single-schedule path was pinned; these cover the rest.
+     */
+    @Test
+    void deleteSchedulesByUserId_cascadesTheFireLogsBeforeTheSchedules() throws Exception {
+        sut.deleteSchedulesByUserId("user-1");
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection, atLeastOnce()).prepareStatement(sql.capture());
+        assertTrue(sql.getAllValues().stream().anyMatch(s -> s.contains("DELETE FROM eddi_schedule_fire_logs")
+                && s.contains("SELECT id FROM eddi_schedules WHERE user_id = ?")),
+                "an erased user's fire logs must go with their schedules: " + sql.getAllValues());
+        // Ordering matters: resolving the ids after the schedules are gone finds none.
+        int cascade = indexOfSqlContaining(sql.getAllValues(), "eddi_schedule_fire_logs");
+        int scheduleDelete = indexOfSqlContaining(sql.getAllValues(), "DELETE FROM eddi_schedules");
+        assertTrue(cascade < scheduleDelete,
+                "the cascade must run BEFORE the schedules are deleted: " + sql.getAllValues());
+    }
+
+    @Test
+    void deleteSchedulesByAgentId_cascadesTheFireLogs() throws Exception {
+        sut.deleteSchedulesByAgentId("agent-1");
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection, atLeastOnce()).prepareStatement(sql.capture());
+        assertTrue(sql.getAllValues().stream().anyMatch(s -> s.contains("DELETE FROM eddi_schedule_fire_logs")
+                && s.contains("SELECT id FROM eddi_schedules WHERE agent_id = ?")),
+                "a deleted agent must not leave orphaned fire logs: " + sql.getAllValues());
+    }
+
+    @Test
+    void deleteSchedulesByName_cascadesTheFireLogs() throws Exception {
+        sut.deleteSchedulesByName("hitl-timeout-conv-1");
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection, atLeastOnce()).prepareStatement(sql.capture());
+        assertTrue(sql.getAllValues().stream().anyMatch(s -> s.contains("DELETE FROM eddi_schedule_fire_logs")
+                && s.contains("SELECT id FROM eddi_schedules WHERE name = ?")),
+                "a resolved HITL pause must not leave its fire log behind: " + sql.getAllValues());
+    }
+
+    /**
+     * The eight payload columns never existed on this table, so a deployment
+     * upgrading into this build has to gain them — the same idempotent
+     * {@code ADD COLUMN IF NOT EXISTS} pattern the metadata and user_id upgrades
+     * already use. Without them a schedule reads back with a null message, a null
+     * timeZone and a null environment, and {@code conversationStrategy=persistent}
+     * can never work. A fresh CREATE TABLE declaring the columns is not enough:
+     * every existing install already has the table.
+     */
+    @Test
+    void ensureSchema_addsEveryMissingPayloadColumnToAPreExistingTable() throws Exception {
+        // Any store call triggers the one-time ensureSchema.
+        when(resultSet.next()).thenReturn(false);
+        sut.readAllSchedules(10);
+
+        ArgumentCaptor<String> ddl = ArgumentCaptor.forClass(String.class);
+        verify(statement, atLeastOnce()).execute(ddl.capture());
+        for (String column : List.of("agent_version", "environment", "one_time_at", "time_zone", "message",
+                "persistent_conversation_id", "allow_self_scheduling", "created_by")) {
+            assertTrue(ddl.getAllValues().stream().anyMatch(s -> s.contains("ADD COLUMN IF NOT EXISTS " + column)),
+                    column + " has no idempotent upgrade — an existing install would never gain it");
+        }
+        // A NOT NULL column added to a populated table needs a DEFAULT, or the ALTER
+        // fails on every row already there.
+        assertTrue(ddl.getAllValues().stream()
+                .anyMatch(s -> s.contains("allow_self_scheduling BOOLEAN NOT NULL DEFAULT false")),
+                "a NOT NULL upgrade column must carry a DEFAULT: " + ddl.getAllValues());
+    }
+
+    private static int indexOfSqlContaining(List<String> statements, String needle) {
+        for (int i = 0; i < statements.size(); i++) {
+            if (statements.get(i).contains(needle)) {
+                return i;
+            }
+        }
+        return Integer.MAX_VALUE;
+    }
+
+    @Test
+    void deleteFireLogsOlderThan_deletesByStartedAt() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(3);
+        Instant cutoff = Instant.now().minus(90, ChronoUnit.DAYS);
+
+        assertEquals(3, sut.deleteFireLogsOlderThan(cutoff));
+
+        verify(preparedStatement).setLong(1, cutoff.toEpochMilli());
+    }
+
+    @Test
+    void readAllSchedules_paged_ordersDeterministicallyAndBindsOffset() throws Exception {
+        when(resultSet.next()).thenReturn(false);
+
+        sut.readAllSchedules(50, 100);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+        assertTrue(sql.getValue().contains("ORDER BY created_at DESC NULLS LAST, id DESC"),
+                "paging without a deterministic order skips and repeats rows");
+        verify(preparedStatement).setInt(1, 50);
+        verify(preparedStatement).setInt(2, 100);
     }
 
     // ─── deleteSchedule ─────────────────────────────────────────

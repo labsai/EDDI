@@ -32,8 +32,12 @@ public interface IRestScheduleStore {
 
     @GET
     @Produces(MediaType.APPLICATION_JSON)
-    @Operation(description = "List all schedules. Optional filter by agentId.")
-    List<ScheduleConfiguration> readAllSchedules(@QueryParam("agentId") String agentId);
+    @Operation(description = "List schedules, newest first. Optional filter by agentId. "
+            + "Paged: 'limit' is capped at 1000 (default 500) and 'offset' skips that many rows. "
+            + "A response holding exactly 'limit' entries may be truncated — request the next page to find out.")
+    List<ScheduleConfiguration> readAllSchedules(@QueryParam("agentId") String agentId, @QueryParam("limit")
+    @DefaultValue("500") int limit, @QueryParam("offset")
+    @DefaultValue("0") int offset);
 
     @GET
     @Path("/{scheduleId}")
@@ -79,7 +83,8 @@ public interface IRestScheduleStore {
     @GET
     @Path("/{scheduleId}/fires")
     @Produces(MediaType.APPLICATION_JSON)
-    @Operation(description = "Read fire history for a schedule.")
+    @Operation(description = "Read fire history for a schedule, newest first. "
+            + "'limit' must be > 0 and is capped at 500.")
     List<ScheduleFireLog> readFireLogs(@PathParam("scheduleId") String scheduleId, @QueryParam("limit")
     @DefaultValue("20") int limit);
 
@@ -88,7 +93,8 @@ public interface IRestScheduleStore {
     @GET
     @Path("/admin/failed")
     @Produces(MediaType.APPLICATION_JSON)
-    @Operation(description = "List all failed and dead-lettered fire logs across all schedules.")
+    @Operation(description = "List all failed and dead-lettered fire logs across all schedules, newest first. "
+            + "'limit' must be > 0 and is capped at 500.")
     List<ScheduleFireLog> readFailedFires(@QueryParam("limit")
     @DefaultValue("50") int limit);
 

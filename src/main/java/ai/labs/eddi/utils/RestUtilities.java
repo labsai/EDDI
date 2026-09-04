@@ -8,7 +8,6 @@ import ai.labs.eddi.datastore.IResourceStore;
 import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
-import org.jboss.resteasy.reactive.server.jaxrs.ResponseBuilderImpl;
 
 import java.net.URI;
 import java.util.HashMap;
@@ -27,12 +26,16 @@ public class RestUtilities {
     public static WebApplicationException createConflictException(String containerUri, IResourceStore.IResourceId currentId) {
         URI resourceUri = RestUtilities.createURI(containerUri, currentId.getId(), versionQueryParam, currentId.getVersion());
 
-        Response.ResponseBuilder builder = new ResponseBuilderImpl();
-        builder.status(Response.Status.CONFLICT);
-        builder.entity(resourceUri.toString());
-        builder.type(MediaType.TEXT_PLAIN);
+        // Response.status(...) is the portable JAX-RS API. This built the response by
+        // instantiating RESTEasy Reactive's internal ResponseBuilderImpl directly,
+        // which couples a general-purpose utility to a non-API package that a
+        // framework upgrade is free to move or rename.
+        Response response = Response.status(Response.Status.CONFLICT)
+                .entity(resourceUri.toString())
+                .type(MediaType.TEXT_PLAIN)
+                .build();
 
-        return new WebApplicationException(builder.build());
+        return new WebApplicationException(response);
     }
 
     public static URI createURI(Object... uriParts) {

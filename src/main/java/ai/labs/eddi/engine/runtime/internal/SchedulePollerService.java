@@ -47,8 +47,9 @@ import java.util.concurrent.TimeoutException;
  * Supports two trigger types:
  * <ul>
  * <li>{@code CRON} — wall-clock aligned via cron expression</li>
- * <li>{@code HEARTBEAT} — interval-based, drift-proof (nextFire = lastFired +
- * interval)</li>
+ * <li>{@code HEARTBEAT} — interval-based and drift-proof: nextFire is the fire
+ * time that was DUE plus the interval, not the moment the fire finished, so the
+ * duration of a turn does not push the cadence out</li>
  * </ul>
  *
  * @author ginccc
@@ -71,6 +72,7 @@ public class SchedulePollerService {
     private final int backoffMultiplier;
     private final Optional<String> configuredInstanceId;
     private final String defaultTimeZone;
+    private final Duration fireLogRetention;
 
     private String instanceId;
     private Counter pollCounter;
@@ -78,6 +80,7 @@ public class SchedulePollerService {
     private Counter fireFailedCounter;
     private Counter claimConflictCounter;
     private Counter deadLetterCounter;
+    private Counter fireLogsPrunedCounter;
     private Timer fireDurationTimer;
 
     @Inject
@@ -88,7 +91,8 @@ public class SchedulePollerService {
             @ConfigProperty(name = "eddi.schedule.backoff-base-seconds", defaultValue = "15") int backoffBaseSeconds,
             @ConfigProperty(name = "eddi.schedule.backoff-multiplier", defaultValue = "4") int backoffMultiplier,
             @ConfigProperty(name = "eddi.schedule.instance-id") Optional<String> configuredInstanceId,
-            @ConfigProperty(name = "eddi.schedule.default-timezone", defaultValue = "UTC") String defaultTimeZone) {
+            @ConfigProperty(name = "eddi.schedule.default-timezone", defaultValue = "UTC") String defaultTimeZone,
+            @ConfigProperty(name = "eddi.schedule.fire-log-retention", defaultValue = "90d") Duration fireLogRetention) {
         this.scheduleStore = scheduleStore;
         this.fireExecutor = fireExecutor;
         this.meterRegistry = meterRegistry;
@@ -99,6 +103,7 @@ public class SchedulePollerService {
         this.backoffMultiplier = backoffMultiplier;
         this.configuredInstanceId = configuredInstanceId;
         this.defaultTimeZone = defaultTimeZone;
+        this.fireLogRetention = fireLogRetention;
     }
 
     @PostConstruct
@@ -120,6 +125,7 @@ public class SchedulePollerService {
         fireFailedCounter = meterRegistry.counter("eddi.schedule.fire.failed");
         claimConflictCounter = meterRegistry.counter("eddi.schedule.claim.conflict");
         deadLetterCounter = meterRegistry.counter("eddi.schedule.fire.deadlettered");
+        fireLogsPrunedCounter = meterRegistry.counter("eddi.schedule.firelog.pruned");
         fireDurationTimer = meterRegistry.timer("eddi.schedule.fire.duration");
 
         if (schedulingEnabled) {
@@ -172,6 +178,38 @@ public class SchedulePollerService {
     }
 
     /**
+     * Retention sweep for the fire log.
+     * <p>
+     * Nothing pruned {@code eddi_schedule_fire_logs}: a 60-second heartbeat writes
+     * ~525,600 rows a year on its own, every HITL pause adds a one-shot schedule
+     * whose log outlives it, and {@code readFailedFireLogs} scans the lot. This is
+     * the configurable cap AGENTS.md §4.7 asks for — set
+     * {@code eddi.schedule.fire-log-retention} to {@code 0} (or a negative
+     * duration) to keep everything.
+     * <p>
+     * Deliberately a second method on the existing poller rather than a new
+     * scheduler, and deliberately NOT guarded by a cluster claim: a DELETE by
+     * timestamp is idempotent, so several instances running it concurrently is
+     * merely redundant, never wrong.
+     */
+    @Scheduled(every = "${eddi.schedule.fire-log-prune-interval:1h}", identity = "schedule-fire-log-prune",
+               concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
+    void pruneFireLogs() {
+        if (!schedulingEnabled || fireLogRetention == null || fireLogRetention.isZero() || fireLogRetention.isNegative()) {
+            return;
+        }
+        try {
+            int deleted = scheduleStore.deleteFireLogsOlderThan(Instant.now().minus(fireLogRetention));
+            if (deleted > 0) {
+                fireLogsPrunedCounter.increment(deleted);
+                LOGGER.infof("[SCHEDULE] Pruned %d fire log(s) older than %s", deleted, fireLogRetention);
+            }
+        } catch (Exception e) {
+            LOGGER.errorf(e, "[SCHEDULE] Fire log retention sweep failed");
+        }
+    }
+
+    /**
      * Atomically claim a schedule for this instance. Returns true only if the CAS
      * claim succeeded.
      */
@@ -191,7 +229,7 @@ public class SchedulePollerService {
             // and PostgresScheduleStore derive the persisted fireId identically as
             // `scheduleId + "_" + now` — mirror that here to keep the in-memory copy in
             // sync with what was actually written.
-            schedule.setFireId(schedule.getId() + "_" + now);
+            schedule.setFireId(IScheduleStore.fireIdOf(schedule.getId(), now));
             return true;
         } catch (Exception e) {
             LOGGER.errorf(e, "[SCHEDULE] Error claiming schedule %s", schedule.getId());
@@ -325,14 +363,29 @@ public class SchedulePollerService {
                     ZoneId zoneId = resolveTimeZone(schedule.getTimeZone());
                     yield CronParser.computeNextFire(schedule.getCronExpression(), Instant.now(), zoneId);
                 }
+                // Deliberately NO oneTimeAt branch: null is the signal markCompleted uses
+                // to disable a finished one-shot. Re-arming it here would fire it again
+                // immediately, forever.
                 // One-shot CRON with no expression → done
                 yield null;
             }
             case HEARTBEAT -> {
-                // Interval-based: nextFire = now + interval (drift-proof from last actual fire)
+                // Drift-proof: anchor the next fire on the time this fire was DUE, not on
+                // the moment the turn happened to finish. Adding the interval to
+                // Instant.now() after the fact made every heartbeat drift by the duration
+                // of each fire — a 40s turn on a 60s heartbeat actually fired every ~100s
+                // — contradicting the documented contract on both this class and
+                // TriggerType.HEARTBEAT.
                 Long intervalSec = schedule.getHeartbeatIntervalSeconds();
                 if (intervalSec != null && intervalSec > 0) {
-                    yield Instant.now().plusSeconds(intervalSec);
+                    Instant now = Instant.now();
+                    Instant due = schedule.getNextFire();
+                    Instant anchored = due != null ? due.plusSeconds(intervalSec) : now.plusSeconds(intervalSec);
+                    // Clamp: a fire that overran a WHOLE interval would otherwise be
+                    // scheduled into the past, which is a tight re-fire loop rather than
+                    // catching up. Only then does the clamp engage — a fire that ran late
+                    // but inside the interval keeps its cadence.
+                    yield anchored.isBefore(now) ? now.plusSeconds(intervalSec) : anchored;
                 }
                 // Fallback: try cron expression if set
                 if (schedule.getCronExpression() != null && !schedule.getCronExpression().isBlank()) {
@@ -375,6 +428,68 @@ public class SchedulePollerService {
             }
         }
         return ZoneId.of(defaultTimeZone);
+    }
+
+    // --- Manual (REST-initiated) fires ---
+
+    /**
+     * Claim a schedule on behalf of a manual {@code POST /schedules/{id}/fire}, on
+     * exactly the terms the poller itself claims on.
+     * <p>
+     * The lease expiry is the whole point of routing this through here. Passing
+     * {@code now} as the expiry would match the CAS clause that steals a
+     * <em>crashed</em> instance's claim ({@code claimedAt <= leaseExpiry}) and so
+     * would seize the claim of a fire that is still running — the opposite of what
+     * claiming is for. {@code now - leaseTimeout} steals only a genuinely stale
+     * claim.
+     *
+     * @return {@code true} when this call now owns the schedule; {@code false} when
+     *         the poller or another operator is already firing it
+     */
+    public boolean claimForManualFire(ScheduleConfiguration schedule) {
+        Instant now = Instant.now();
+        return claimSchedule(schedule, now, now.minus(leaseTimeout));
+    }
+
+    /**
+     * Record the outcome of a manual fire and release its claim, through the very
+     * same state machine a polled fire goes through — so retry backoff,
+     * dead-lettering and one-shot disabling behave identically no matter who
+     * triggered the fire. Never throws: the fire already happened, and the caller's
+     * HTTP response must not turn into a 500 because a bookkeeping write failed.
+     * <p>
+     * Sharing the state machine has four consequences a manual fire inherits whole,
+     * and they are deliberate rather than accidental:
+     * <ul>
+     * <li>A successful fire re-arms the schedule. For HEARTBEAT that means
+     * {@link #computeNextFire} anchors on {@code nextFire} (the drift-proof rule),
+     * so firing manually while the next fire is still in the future moves it out by
+     * one further interval — the cadence is not additionally advanced by the manual
+     * turn, but the fire the operator pre-empted is consumed.</li>
+     * <li>{@code markCompleted} clears {@code failCount} and rewrites
+     * {@code lastFired}: a manual fire that succeeds is a genuine successful fire,
+     * so a schedule that had been failing stops being in backoff.</li>
+     * <li>A failed manual fire increments {@code failCount} and can therefore
+     * dead-letter the schedule, exactly as a polled failure would.</li>
+     * <li>A successful manual fire CONSUMES a one-shot. {@link #computeNextFire}
+     * has no {@code oneTimeAt} branch — by design, since {@code null} is what tells
+     * {@code markCompleted} a one-shot is finished — so the schedule is disabled
+     * with {@code nextFire} cleared, just as a polled fire of it would. "Fire now"
+     * on a pending one-shot is therefore not a rehearsal: it is the run. An
+     * operator who wants it back must re-arm it through {@code POST
+     * /schedules/{id}/enable}, which does handle {@code oneTimeAt}.</li>
+     * </ul>
+     */
+    public void recordManualFireOutcome(ScheduleConfiguration schedule, ScheduleFireLog fireLog) {
+        try {
+            if (fireLog != null && FireStatus.COMPLETED.name().equals(fireLog.status())) {
+                onFireCompleted(schedule);
+            } else {
+                onFireFailed(schedule);
+            }
+        } catch (Exception e) {
+            LOGGER.errorf(e, "[SCHEDULE] Could not record the outcome of a manual fire of schedule %s", schedule.getId());
+        }
     }
 
     // --- Accessors for admin/status ---

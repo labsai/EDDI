@@ -206,6 +206,39 @@ class TeamCadenceServiceTest {
         assertEquals(1.25, workspace.getMetrics().getTotalCost(), 1e-9);
     }
 
+    /**
+     * {@code reconcile} returns false for two different reasons, and the skip
+     * message has to tell them apart: a discussion genuinely in flight, and a
+     * settle CAS this caller lost. In the second case {@code settle} has already
+     * cleared {@code runningDiscussionId} on this very workspace object, so reading
+     * it after {@code reconcile} produced "Previous cadence discussion is still
+     * running" — an empty id, and a claim about a run that had in fact just
+     * finished. The id is now read before reconciling, and the wording covers both
+     * outcomes.
+     */
+    @Test
+    @DisplayName("a lost settle race names the discussion it lost to, and does not claim it is still running")
+    void fire_lostSettleRace_skipReasonNamesTheDiscussion() throws Exception {
+        var workspace = workspace(cadence(5, null), new TaskItem("T", "", 0));
+        workspace.setRunningDiscussionId("settled-gc");
+        var doneGc = new GroupConversation();
+        doneGc.setId("settled-gc");
+        doneGc.setState(GroupConversationState.COMPLETED);
+        when(conversationStore.read("settled-gc")).thenReturn(doneGc);
+        // Another reconciler got there first.
+        when(workspaceStore.casRunningDiscussion(any(), anyString())).thenReturn(false);
+
+        var result = service.processScheduledFire(metadata());
+
+        assertTrue(result.isSuccess());
+        assertNotNull(result.skippedReason());
+        assertTrue(result.skippedReason().contains("settled-gc"),
+                "the operator cannot act on a skip that names no discussion: " + result.skippedReason());
+        assertFalse(result.skippedReason().contains("discussion  "),
+                "an empty id means the message was built after settle() cleared it: " + result.skippedReason());
+        verify(groupConversationService, never()).startCadenceDiscussionAsync(any(), any(), any(), any(), any(), any());
+    }
+
     @Test
     @DisplayName("a lost claim cancels the just-started discussion and stands down")
     void fire_lostClaim_cancelsAndSkips() throws Exception {

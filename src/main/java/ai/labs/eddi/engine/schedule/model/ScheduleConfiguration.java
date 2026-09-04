@@ -17,8 +17,9 @@ import java.util.Map;
  * conversation</li>
  * </ul>
  * <p>
- * State machine: PENDING → CLAIMED → EXECUTING → COMPLETED | FAILED →
- * DEAD_LETTERED
+ * State machine, as actually implemented: PENDING → CLAIMED → PENDING (fire
+ * completed, re-armed) | FAILED → PENDING (retry) | DEAD_LETTERED (retries
+ * exhausted).
  *
  * @author ginccc
  * @since 6.0.0
@@ -28,7 +29,15 @@ public class ScheduleConfiguration {
     // --- Enums ---
 
     public enum FireStatus {
-        PENDING, CLAIMED, EXECUTING, COMPLETED, FAILED, DEAD_LETTERED
+        PENDING, CLAIMED,
+        /**
+         * Reserved and never assigned: a fire runs while the row is CLAIMED, and no
+         * code path writes this value. Kept only so a row persisted by an older build
+         * still deserializes. Do not introduce it without also teaching
+         * {@code findDueSchedules} and {@code tryClaim} about it — both currently treat
+         * an EXECUTING row as unclaimable and unreclaimable, i.e. permanently stuck.
+         */
+        EXECUTING, COMPLETED, FAILED, DEAD_LETTERED
     }
 
     public enum TriggerType {
@@ -36,7 +45,8 @@ public class ScheduleConfiguration {
         CRON,
         /**
          * Fixed-interval heartbeat. Default conversation strategy: "persistent". After
-         * fire, nextFire = lastFired + interval (drift-proof).
+         * a fire, nextFire = the fire time that was DUE + interval, so the duration of
+         * the turn does not push the cadence out (drift-proof).
          */
         HEARTBEAT
     }
@@ -51,7 +61,7 @@ public class ScheduleConfiguration {
     // -- Target --
     private String agentId;
     private int agentVersion; // 0 = latest deployed
-    private String environment; // "production" | "production" | "test"
+    private String environment; // "production" | "test"
     private String tenantId;
 
     // -- Timing --
@@ -87,7 +97,13 @@ public class ScheduleConfiguration {
     private Instant createdAt;
     private Instant updatedAt;
 
-    // -- Computed (read-only, not persisted) --
+    // -- Computed (serialized to API clients, but never persisted) --
+    //
+    // `transient` is a Java-serialization marker and does NOT stop Jackson: this
+    // project does not enable PROPAGATE_TRANSIENT_MARKER, so the field is part of
+    // the JSON both ways. That is wanted for the API (the Manager renders it), but
+    // it also meant a PUT echoing a GET body stored a stale description; the stores
+    // therefore strip it explicitly on write.
     private transient String cronDescription;
 
     public ScheduleConfiguration() {

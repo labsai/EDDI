@@ -266,7 +266,13 @@ eddi_schedule_fire_failed_total             # Fire failures
 eddi_schedule_claim_conflict_total          # Claim conflicts (multi-instance)
 eddi_schedule_fire_deadlettered_total       # Dead-lettered schedules
 eddi_schedule_fire_duration_seconds         # Fire latency (timer)
+eddi_schedule_firelog_pruned_total          # Fire-log rows removed by the retention sweep
 ```
+
+`eddi_schedule_firelog_pruned_total` counts rows, not sweeps. Flat while the
+fire-log table keeps growing means either retention is switched off
+(`eddi.schedule.fire-log-retention=0`) or the sweep is throwing — the poller
+logs that failure at ERROR.
 
 ### Tenant Quota Metrics
 

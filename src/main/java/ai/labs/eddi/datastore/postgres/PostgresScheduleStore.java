@@ -28,8 +28,11 @@ import java.util.UUID;
 /**
  * PostgreSQL implementation of {@link IScheduleStore}.
  * <p>
- * Uses {@code SELECT ... FOR UPDATE SKIP LOCKED} for atomic CAS claiming,
- * ensuring exactly-one-instance execution in clustered deployments.
+ * Uses a conditional {@code UPDATE} for atomic CAS claiming, so exactly one
+ * instance owns a schedule per claim. That is <em>not</em> exactly-once
+ * delivery — see {@link IScheduleStore}: an expired lease may be stolen while
+ * the original, wedged fire can still commit, so fire targets must be
+ * idempotent.
  * <p>
  * Activated via {@code @DefaultBean}.
  *
@@ -47,13 +50,21 @@ public class PostgresScheduleStore implements IScheduleStore {
                 id VARCHAR(64) PRIMARY KEY,
                 name VARCHAR(512),
                 agent_id VARCHAR(255),
+                agent_version INTEGER,
+                environment VARCHAR(64),
                 tenant_id VARCHAR(255),
                 user_id VARCHAR(255),
                 trigger_type VARCHAR(64),
                 cron_expression VARCHAR(128),
                 heartbeat_interval_seconds BIGINT,
+                one_time_at VARCHAR(64),
+                time_zone VARCHAR(64),
+                message TEXT,
                 conversation_strategy VARCHAR(64),
+                persistent_conversation_id VARCHAR(255),
                 max_cost_per_fire DOUBLE PRECISION,
+                allow_self_scheduling BOOLEAN NOT NULL DEFAULT false,
+                created_by VARCHAR(255),
                 enabled BOOLEAN NOT NULL DEFAULT false,
                 next_fire BIGINT,
                 last_fired BIGINT,
@@ -90,6 +101,42 @@ public class PostgresScheduleStore implements IScheduleStore {
     private static final String ADD_USER_ID_COLUMN = "ALTER TABLE eddi_schedules ADD COLUMN IF NOT EXISTS user_id VARCHAR(255)";
 
     /**
+     * Adds the eight {@link ScheduleConfiguration} fields that never had a column
+     * here at all, so a schedule created on PostgreSQL read back with them null.
+     * Mongo serializes the whole document and has always kept them, which is why
+     * the loss only ever showed up on a PostgreSQL deployment:
+     * <ul>
+     * <li>{@code message} — the text a CRON schedule sends to the agent. Null meant
+     * the fire ran with no input at all (only HEARTBEAT has a default).</li>
+     * <li>{@code time_zone} — dropping it silently re-evaluated every cron against
+     * {@code eddi.schedule.default-timezone}, so a 09:00 Europe/Vienna job fired at
+     * the wrong hour.</li>
+     * <li>{@code environment} — {@code resolveEnvironment(null)} falls back to
+     * production, so a schedule created against {@code test} fired against
+     * production.</li>
+     * <li>{@code persistent_conversation_id} — without it
+     * {@code conversationStrategy=persistent} (the default for every HEARTBEAT)
+     * could never work: each fire started a brand-new conversation.</li>
+     * <li>{@code one_time_at}, {@code agent_version}, {@code created_by},
+     * {@code allow_self_scheduling} — the remaining persisted fields.</li>
+     * </ul>
+     * Each statement is a separate idempotent {@code ADD COLUMN IF NOT EXISTS}, the
+     * same upgrade pattern as {@link #ADD_METADATA_COLUMN} and
+     * {@link #ADD_USER_ID_COLUMN}, so existing installs pick them up on the next
+     * start. Values for rows written before the upgrade stay null — there is
+     * nothing to backfill from.
+     */
+    private static final String[] ADD_PAYLOAD_COLUMNS = {
+            "ALTER TABLE eddi_schedules ADD COLUMN IF NOT EXISTS agent_version INTEGER",
+            "ALTER TABLE eddi_schedules ADD COLUMN IF NOT EXISTS environment VARCHAR(64)",
+            "ALTER TABLE eddi_schedules ADD COLUMN IF NOT EXISTS one_time_at VARCHAR(64)",
+            "ALTER TABLE eddi_schedules ADD COLUMN IF NOT EXISTS time_zone VARCHAR(64)",
+            "ALTER TABLE eddi_schedules ADD COLUMN IF NOT EXISTS message TEXT",
+            "ALTER TABLE eddi_schedules ADD COLUMN IF NOT EXISTS persistent_conversation_id VARCHAR(255)",
+            "ALTER TABLE eddi_schedules ADD COLUMN IF NOT EXISTS allow_self_scheduling BOOLEAN NOT NULL DEFAULT false",
+            "ALTER TABLE eddi_schedules ADD COLUMN IF NOT EXISTS created_by VARCHAR(255)"};
+
+    /**
      * Bulk delete by user, overriding the portable scan-and-delete default.
      * <p>
      * The default in {@link IScheduleStore} reads every schedule and filters in
@@ -111,6 +158,9 @@ public class PostgresScheduleStore implements IScheduleStore {
         // user_id column) may not exist yet, and an erasure that fails with a SQL
         // error is a compliance incident, not a retry.
         ensureSchema();
+        // The fire logs go with them: each carries a conversationId of the user being
+        // erased, and once the schedule row is gone nothing can find them again.
+        deleteFireLogsWhereScheduleMatches("user_id", userId);
         try (Connection conn = dataSourceInstance.get().getConnection();
                 PreparedStatement ps = conn.prepareStatement("DELETE FROM eddi_schedules WHERE user_id = ?")) {
             ps.setString(1, userId);
@@ -201,6 +251,9 @@ public class PostgresScheduleStore implements IScheduleStore {
             stmt.execute(CREATE_SCHEDULES_TABLE);
             stmt.execute(ADD_METADATA_COLUMN); // idempotent upgrade for pre-existing tables
             stmt.execute(ADD_USER_ID_COLUMN); // idempotent upgrade for pre-existing tables (GDPR erasure)
+            for (String addColumn : ADD_PAYLOAD_COLUMNS) {
+                stmt.execute(addColumn); // idempotent upgrade for pre-existing tables (schedule payload)
+            }
             warnAboutUnattributableSchedules(stmt);
             stmt.execute(CREATE_FIRE_LOGS_TABLE);
             for (String idx : CREATE_INDEXES.split(";")) {
@@ -227,11 +280,16 @@ public class PostgresScheduleStore implements IScheduleStore {
         schedule.setCreatedAt(now);
         schedule.setUpdatedAt(now);
 
+        // New columns are appended at the END of the list on purpose: the existing
+        // parameter indices stay put, so the upgrade cannot silently re-bind a value
+        // to the wrong column.
         String sql = """
                 INSERT INTO eddi_schedules (id, name, agent_id, tenant_id, user_id, trigger_type, cron_expression,
                     heartbeat_interval_seconds, conversation_strategy, max_cost_per_fire,
-                    enabled, next_fire, fire_status, fail_count, metadata, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?::jsonb, ?, ?)
+                    enabled, next_fire, fire_status, fail_count, metadata, created_at, updated_at,
+                    message, one_time_at, time_zone, environment, agent_version,
+                    persistent_conversation_id, created_by, allow_self_scheduling)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """;
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, id);
@@ -253,6 +311,16 @@ public class PostgresScheduleStore implements IScheduleStore {
             ps.setString(14, serializeMetadata(schedule.getMetadata()));
             setNullableEpoch(ps, 15, now);
             setNullableEpoch(ps, 16, now);
+            // The eight fields that had no column before — see ADD_PAYLOAD_COLUMNS for
+            // what each one silently did when it read back null.
+            ps.setString(17, schedule.getMessage());
+            ps.setString(18, schedule.getOneTimeAt());
+            ps.setString(19, schedule.getTimeZone());
+            ps.setString(20, schedule.getEnvironment());
+            ps.setInt(21, schedule.getAgentVersion());
+            ps.setString(22, schedule.getPersistentConversationId());
+            ps.setString(23, schedule.getCreatedBy());
+            ps.setBoolean(24, schedule.isAllowSelfScheduling());
             ps.executeUpdate();
             LOGGER.infof("Created schedule '%s' (id=%s, type=%s) for Agent %s", schedule.getName(), id, schedule.getTriggerType(),
                     schedule.getAgentId());
@@ -287,10 +355,16 @@ public class PostgresScheduleStore implements IScheduleStore {
             throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
         ensureSchema();
         schedule.setUpdatedAt(Instant.now());
+        // created_at, created_by, last_fired, the claim columns (claimed_by/claimed_at/
+        // fire_id/next_retry_at) and persistent_conversation_id are deliberately NOT in
+        // this SET list: they are provenance or runtime state, owned by createSchedule,
+        // the claim/completion methods and setPersistentConversationId respectively. A
+        // PUT body that omits them must not be able to erase them.
         String sql = """
                 UPDATE eddi_schedules SET name=?, agent_id=?, tenant_id=?, user_id=?, trigger_type=?, cron_expression=?,
                     heartbeat_interval_seconds=?, conversation_strategy=?, max_cost_per_fire=?,
-                    enabled=?, next_fire=?, fire_status=?, fail_count=?, metadata=?::jsonb, updated_at=?
+                    enabled=?, next_fire=?, fire_status=?, fail_count=?, metadata=?::jsonb, updated_at=?,
+                    message=?, one_time_at=?, time_zone=?, environment=?, agent_version=?, allow_self_scheduling=?
                 WHERE id=?
                 """;
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -309,7 +383,13 @@ public class PostgresScheduleStore implements IScheduleStore {
             ps.setInt(13, schedule.getFailCount());
             ps.setString(14, serializeMetadata(schedule.getMetadata()));
             setNullableEpoch(ps, 15, schedule.getUpdatedAt());
-            ps.setString(16, scheduleId);
+            ps.setString(16, schedule.getMessage());
+            ps.setString(17, schedule.getOneTimeAt());
+            ps.setString(18, schedule.getTimeZone());
+            ps.setString(19, schedule.getEnvironment());
+            ps.setInt(20, schedule.getAgentVersion());
+            ps.setBoolean(21, schedule.isAllowSelfScheduling());
+            ps.setString(22, scheduleId);
             int rows = ps.executeUpdate();
             if (rows == 0) {
                 throw new IResourceStore.ResourceNotFoundException("Schedule with id=" + scheduleId + " not found");
@@ -322,11 +402,31 @@ public class PostgresScheduleStore implements IScheduleStore {
     }
 
     @Override
+    public void setPersistentConversationId(String scheduleId, String conversationId) throws IResourceStore.ResourceStoreException {
+        ensureSchema();
+        try (Connection conn = dataSourceInstance.get().getConnection();
+                PreparedStatement ps = conn
+                        .prepareStatement("UPDATE eddi_schedules SET persistent_conversation_id=?, updated_at=? WHERE id=?")) {
+            ps.setString(1, conversationId);
+            ps.setLong(2, Instant.now().toEpochMilli());
+            ps.setString(3, scheduleId);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new IResourceStore.ResourceStoreException("Failed to set persistent conversation id for " + scheduleId, e);
+        }
+    }
+
+    @Override
     public void setScheduleEnabled(String scheduleId, boolean enabled, Instant nextFire)
             throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
         ensureSchema();
-        String sql = enabled && nextFire != null
-                ? "UPDATE eddi_schedules SET enabled=?, next_fire=?, fire_status=?, fail_count=0, updated_at=? WHERE id=?"
+        // Re-enabling always clears the failure state. Doing it only when a nextFire
+        // was supplied left a one-shot schedule enabled but stuck in FAILED/
+        // DEAD_LETTERED with a non-zero failCount, so it could never be claimed again.
+        String sql = enabled
+                ? (nextFire != null
+                        ? "UPDATE eddi_schedules SET enabled=?, next_fire=?, fire_status=?, fail_count=0, next_retry_at=NULL, updated_at=? WHERE id=?"
+                        : "UPDATE eddi_schedules SET enabled=?, fire_status=?, fail_count=0, next_retry_at=NULL, updated_at=? WHERE id=?")
                 : "UPDATE eddi_schedules SET enabled=?, updated_at=? WHERE id=?";
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             long now = Instant.now().toEpochMilli();
@@ -336,6 +436,11 @@ public class PostgresScheduleStore implements IScheduleStore {
                 ps.setString(3, FireStatus.PENDING.name());
                 ps.setLong(4, now);
                 ps.setString(5, scheduleId);
+            } else if (enabled) {
+                ps.setBoolean(1, true);
+                ps.setString(2, FireStatus.PENDING.name());
+                ps.setLong(3, now);
+                ps.setString(4, scheduleId);
             } else {
                 ps.setBoolean(1, enabled);
                 ps.setLong(2, now);
@@ -355,6 +460,10 @@ public class PostgresScheduleStore implements IScheduleStore {
     @Override
     public void deleteSchedule(String scheduleId) throws IResourceStore.ResourceStoreException {
         ensureSchema();
+        // Fire logs first: a schedule's logs are unreachable once the schedule is gone,
+        // and each one carries a conversationId — leaving them behind orphans personal
+        // data that no erasure path can find.
+        deleteFireLogsByScheduleId(scheduleId);
         try (Connection conn = dataSourceInstance.get().getConnection();
                 PreparedStatement ps = conn.prepareStatement("DELETE FROM eddi_schedules WHERE id = ?")) {
             ps.setString(1, scheduleId);
@@ -368,6 +477,7 @@ public class PostgresScheduleStore implements IScheduleStore {
     @Override
     public int deleteSchedulesByAgentId(String agentId) throws IResourceStore.ResourceStoreException {
         ensureSchema();
+        deleteFireLogsWhereScheduleMatches("agent_id", agentId);
         try (Connection conn = dataSourceInstance.get().getConnection();
                 PreparedStatement ps = conn.prepareStatement("DELETE FROM eddi_schedules WHERE agent_id = ?")) {
             ps.setString(1, agentId);
@@ -384,6 +494,7 @@ public class PostgresScheduleStore implements IScheduleStore {
     @Override
     public int deleteSchedulesByName(String name) throws IResourceStore.ResourceStoreException {
         ensureSchema();
+        deleteFireLogsWhereScheduleMatches("name", name);
         try (Connection conn = dataSourceInstance.get().getConnection();
                 PreparedStatement ps = conn.prepareStatement("DELETE FROM eddi_schedules WHERE name = ?")) {
             ps.setString(1, name);
@@ -394,6 +505,45 @@ public class PostgresScheduleStore implements IScheduleStore {
             return count;
         } catch (SQLException e) {
             throw new IResourceStore.ResourceStoreException("Failed to delete schedules by name: " + name, e);
+        }
+    }
+
+    @Override
+    public int deleteFireLogsByScheduleId(String scheduleId) throws IResourceStore.ResourceStoreException {
+        ensureSchema();
+        try (Connection conn = dataSourceInstance.get().getConnection();
+                PreparedStatement ps = conn.prepareStatement("DELETE FROM eddi_schedule_fire_logs WHERE schedule_id = ?")) {
+            ps.setString(1, scheduleId);
+            return ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new IResourceStore.ResourceStoreException("Failed to delete fire logs for schedule " + scheduleId, e);
+        }
+    }
+
+    @Override
+    public int deleteFireLogsOlderThan(Instant cutoff) throws IResourceStore.ResourceStoreException {
+        ensureSchema();
+        try (Connection conn = dataSourceInstance.get().getConnection();
+                PreparedStatement ps = conn.prepareStatement("DELETE FROM eddi_schedule_fire_logs WHERE started_at < ?")) {
+            ps.setLong(1, cutoff.toEpochMilli());
+            return ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new IResourceStore.ResourceStoreException("Failed to prune fire logs", e);
+        }
+    }
+
+    /**
+     * Cascade the fire logs of every schedule matching {@code column = value}. The
+     * column name is a compile-time literal supplied by this class only — never
+     * caller input — so it cannot carry SQL injection; the value is always bound.
+     */
+    private void deleteFireLogsWhereScheduleMatches(String column, String value) throws IResourceStore.ResourceStoreException {
+        String sql = "DELETE FROM eddi_schedule_fire_logs WHERE schedule_id IN (SELECT id FROM eddi_schedules WHERE " + column + " = ?)";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, value);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new IResourceStore.ResourceStoreException("Failed to cascade-delete fire logs by " + column, e);
         }
     }
 
@@ -410,11 +560,34 @@ public class PostgresScheduleStore implements IScheduleStore {
     }
 
     @Override
-    public List<ScheduleConfiguration> readSchedulesByAgentId(String agentId) throws IResourceStore.ResourceStoreException {
+    public List<ScheduleConfiguration> readAllSchedules(int limit, int offset) throws IResourceStore.ResourceStoreException {
         ensureSchema();
-        try (Connection conn = dataSourceInstance.get().getConnection();
-                PreparedStatement ps = conn.prepareStatement("SELECT * FROM eddi_schedules WHERE agent_id = ? LIMIT 500")) {
+        // id is the tie-breaker: created_at alone is not unique (bulk-created HITL
+        // timeout or cadence schedules share a millisecond), and a non-deterministic
+        // order makes paging skip and repeat rows.
+        String sql = "SELECT * FROM eddi_schedules ORDER BY created_at DESC NULLS LAST, id DESC LIMIT ? OFFSET ?";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setInt(1, limit);
+            ps.setInt(2, Math.max(0, offset));
+            return readScheduleList(ps);
+        } catch (SQLException e) {
+            throw new IResourceStore.ResourceStoreException("Failed to read all schedules", e);
+        }
+    }
+
+    @Override
+    public List<ScheduleConfiguration> readSchedulesByAgentId(String agentId) throws IResourceStore.ResourceStoreException {
+        return readSchedulesByAgentId(agentId, 500, 0);
+    }
+
+    @Override
+    public List<ScheduleConfiguration> readSchedulesByAgentId(String agentId, int limit, int offset) throws IResourceStore.ResourceStoreException {
+        ensureSchema();
+        String sql = "SELECT * FROM eddi_schedules WHERE agent_id = ? ORDER BY created_at DESC NULLS LAST, id DESC LIMIT ? OFFSET ?";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, agentId);
+            ps.setInt(2, limit);
+            ps.setInt(3, Math.max(0, offset));
             return readScheduleList(ps);
         } catch (SQLException e) {
             throw new IResourceStore.ResourceStoreException("Failed to read schedules for agent " + agentId, e);
@@ -457,7 +630,7 @@ public class PostgresScheduleStore implements IScheduleStore {
         ensureSchema();
         long nowMs = now.toEpochMilli();
         long leaseMs = leaseExpiry.toEpochMilli();
-        String fireId = scheduleId + "_" + now;
+        String fireId = IScheduleStore.fireIdOf(scheduleId, now);
 
         // The CLAIMED+lease-expired clause steals a crashed/wedged instance's claim
         // and MUST mirror findDueSchedules, else expired CLAIMED rows are returned
@@ -669,7 +842,15 @@ public class PostgresScheduleStore implements IScheduleStore {
         config.setCronExpression(rs.getString("cron_expression"));
         long intervalSeconds = rs.getLong("heartbeat_interval_seconds");
         config.setHeartbeatIntervalSeconds(rs.wasNull() ? null : intervalSeconds);
+        config.setOneTimeAt(rs.getString("one_time_at"));
+        config.setTimeZone(rs.getString("time_zone"));
+        config.setMessage(rs.getString("message"));
+        config.setEnvironment(rs.getString("environment"));
+        config.setAgentVersion(rs.getInt("agent_version"));
         config.setConversationStrategy(rs.getString("conversation_strategy"));
+        config.setPersistentConversationId(rs.getString("persistent_conversation_id"));
+        config.setCreatedBy(rs.getString("created_by"));
+        config.setAllowSelfScheduling(rs.getBoolean("allow_self_scheduling"));
         config.setMaxCostPerFire(rs.getDouble("max_cost_per_fire"));
         config.setEnabled(rs.getBoolean("enabled"));
         config.setNextFire(instantFromEpoch(rs, "next_fire"));
