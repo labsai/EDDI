@@ -44,7 +44,24 @@ eddi:
   # Database backend: "mongodb" or "postgres"
   datastoreType: mongodb
 
-  # Messaging: "in-memory" (single replica) or "nats" (multi-replica)
+  # Bring your own database (MongoDB Atlas, RDS, Cloud SQL, …).
+  #
+  # Required when both mongodb.enabled and postgres.enabled are false —
+  # rendering fails with an explanation otherwise. Without these the chart used
+  # to emit no connection string at all and the pod fell back to the built-in
+  # default mongodb://mongodb:27017/eddi, which resolves to nothing.
+  # Set eddi.datastoreType to match whichever one you fill in.
+  datastore:
+    externalConnectionString: ""   # mongodb://user:pass@host:27017/eddi?...
+    externalJdbcUrl: ""            # jdbc:postgresql://host:5432/eddi
+
+  # Messaging. Only "in-memory" works with the published image.
+  #
+  # Anything else needs an EDDI image BUILT with -Dquarkus.profile=nats: the
+  # NATS coordinator is gated on @IfBuildProfile("nats") and no Java code reads
+  # eddi.messaging.type at runtime. The chart refuses to render otherwise —
+  # see nats.buildProfileImage. Neither value changes the replica count; EDDI is
+  # fixed at one replica regardless (see eddi.replicas).
   messagingType: in-memory
 
   # CORS origins
@@ -67,8 +84,29 @@ eddi:
   # OIDC / Keycloak authentication
   oidc:
     enabled: false
-    authServerUrl: "http://keycloak:8080/realms/eddi"
+
+    # The identity provider's realm URL as EDDI reaches it IN-CLUSTER.
+    # REQUIRED when oidc.enabled=true and keycloak.enabled=false; ignored when
+    # the chart deploys Keycloak (it uses its own Service name then).
+    # No default: the old one named a bare `keycloak` Service that this chart
+    # never creates, so bring-your-own-IdP installs died on a DNS error instead
+    # of being told they had forgotten to set this.
+    authServerUrl: ""
+
     clientId: "eddi-backend"
+
+    # The identity provider URL the BROWSER uses. REQUIRED when oidc.enabled.
+    #
+    # It reaches the Manager SPA through window.__EDDI_AUTH__.url and the CSP
+    # connect-src; without it the SPA has no authority to redirect to and the
+    # browser blocks the call anyway. It cannot be derived — the in-cluster
+    # Service name is not resolvable from a browser and the ingress fronts only
+    # EDDI. For `kubectl port-forward svc/<release>-eddi-keycloak 8080:8080`
+    # that is "http://localhost:8080".
+    #
+    # When the chart deploys Keycloak this also becomes KC_HOSTNAME and pins
+    # QUARKUS_OIDC_TOKEN_ISSUER, so tokens and discovery agree.
+    publicUrl: ""
 
   resources:
     requests:
@@ -117,6 +155,17 @@ postgres:
   username: eddi
   # REQUIRED when postgres.enabled=true — no default is shipped.
   # Generate: openssl rand -base64 24
+  #
+  # ⚠️  Set this BEFORE the first install. The postgres image reads
+  # POSTGRES_PASSWORD only during initdb, against an empty PGDATA — and PGDATA
+  # lives on the StatefulSet's volumeClaimTemplate, which survives every
+  # upgrade. Changing it on a `helm upgrade` therefore rotates EDDI's half of
+  # the credential while the database keeps the old one, and every datasource
+  # connection fails authentication with an error that names neither. To rotate
+  # afterwards, change the database first:
+  #   kubectl exec -n <ns> statefulset/<release>-eddi-postgres -- \
+  #     psql -U eddi -d eddi -c "ALTER ROLE eddi PASSWORD '<new>'"
+  # then run the upgrade.
   password: ""
   storage:
     size: 10Gi
@@ -130,9 +179,20 @@ postgres:
       memory: 1Gi
 
 # ── NATS JetStream ─────────────────────────────────────────
+#
+# ⚠️  Inert with the published image. NatsConversationCoordinator is gated on
+# @IfBuildProfile("nats") — a BUILD-time switch — and labsai/eddi is published
+# without it, while `eddi.messaging.type` is read by no Java code at runtime.
+# Enabling this against a stock image provisions a JetStream StatefulSet and a
+# PVC that EDDI never connects to.
 
 nats:
   enabled: false
+  # Set true ONLY if eddi.image points at an image you built with
+  # -Dquarkus.profile=nats. It is what unlocks eddi.messagingType != in-memory;
+  # the chart refuses to render otherwise rather than shipping a setting that
+  # nothing reads.
+  buildProfileImage: false
   image:
     repository: nats
     tag: "2.10-alpine"
@@ -157,6 +217,23 @@ keycloak:
   # REQUIRED when keycloak.enabled=true — no default is shipped.
   # Generate: openssl rand -base64 24
   adminPassword: ""
+
+  # The realm in files/eddi-realm.json is imported on FIRST boot only. It ships
+  # allowing redirects to localhost and to the https://eddi.example.com
+  # placeholder; set publicOrigin to your own scheme+host and the placeholder is
+  # substituted in both redirectUris and webOrigins. A realm that does not list
+  # your host answers "Invalid parameter: redirect_uri" and login cannot finish.
+  # Leave empty for the port-forward flow, which localhost already covers.
+  publicOrigin: ""
+
+  # Keycloak runs `start-dev` on its embedded H2 database. This PVC is what
+  # keeps realms, clients and users across a restart — without it a rollout,
+  # eviction or OOM kill wipes the identity provider. Run `start` against an
+  # external database for anything past dev/demo.
+  storage:
+    size: 1Gi
+    # storageClassName: standard
+
   resources:
     requests:
       cpu: 250m
@@ -166,19 +243,14 @@ keycloak:
       memory: 1Gi
 
 # ── Manager UI ─────────────────────────────────────────────
-
-manager:
-  enabled: false
-  image:
-    repository: labsai/eddi-config-ui
-    tag: "latest"
-  resources:
-    requests:
-      cpu: 50m
-      memory: 64Mi
-    limits:
-      cpu: 250m
-      memory: 256Mi
+#
+# No values, and no templates/manager.yaml. The Manager is bundled INTO the EDDI
+# image (IRestManagerResource serves /manage, and manage.html ships in the jar),
+# so it is already reachable through the eddi Service. The chart used to offer a
+# `manager.*` block deploying a second Deployment from labsai/eddi-config-ui —
+# a UI generation this repository no longer builds or publishes, pulled at the
+# mutable `:latest` tag that every other image reference here deliberately
+# avoids. Reach the Manager at http://<eddi-service>:7070/manage instead.
 
 # ── Ingress ────────────────────────────────────────────────
 
@@ -237,14 +309,23 @@ networkPolicy:
   extraEgressPorts: []
 
 # ── Monitoring ─────────────────────────────────────────────
-
-monitoring:
-  prometheus:
-    enabled: false
-  grafana:
-    enabled: false
+#
+# No values. The chart ships no Prometheus or Grafana templates, and a
+# `monitoring.prometheus.enabled` / `monitoring.grafana.enabled` pair used to sit
+# here that no template consumed — `--set monitoring.prometheus.enabled=true`
+# rendered nothing and exited 0, so an operator believed metrics collection was
+# deployed and had none. (Exactly the failure templates/networkpolicy.yaml was
+# written to fix, left in place two values further down the file.)
+#
+# EDDI exposes Prometheus metrics at /q/metrics and the pod already carries the
+# scrape annotations, so any cluster Prometheus picks it up. For a stack in the
+# same namespace use the Kustomize component: k8s/overlays/monitoring/.
 
 # ── Service Account ────────────────────────────────────────
+#
+# create=false plus a name is the bring-your-own-SA shape (EKS IRSA, GKE
+# Workload Identity, AKS pod identity): the SA is provisioned and annotated
+# outside the chart and the Deployment just references it.
 
 serviceAccount:
   create: true
@@ -252,5 +333,7 @@ serviceAccount:
   annotations: {}
 
 # ── Namespace ──────────────────────────────────────────────
-
-namespace: eddi
+#
+# No value. Helm takes the namespace from `--namespace`; a `namespace: eddi`
+# value used to sit here that no template read, so `--set namespace=foo` put the
+# release somewhere else entirely without an error.

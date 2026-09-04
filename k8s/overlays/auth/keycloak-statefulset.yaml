@@ -1,0 +1,149 @@
+# Keycloak — OpenID Connect identity provider for EDDI
+#
+# ⚠️  DEVELOPMENT / EVALUATION POSTURE. `start-dev` runs Keycloak against its
+# embedded H2 file database. The StatefulSet below gives that database a
+# PersistentVolumeClaim so a pod restart no longer wipes every realm, client and
+# user — but a production identity provider should run `start` against a real
+# external database (KC_DB / KC_DB_URL) with more than one replica.
+#
+# A StatefulSet rather than a Deployment: the H2 data directory is
+# ReadWriteOnce, and a Deployment's default RollingUpdate would try to run the
+# new pod alongside the old one and deadlock on the volume.
+#
+# ⚠️  UPGRADING AN EXISTING INSTALL — DELETE THE OLD DEPLOYMENT FIRST:
+#
+#     kubectl delete deployment keycloak -n eddi
+#
+# This workload used to be a Deployment, also named `keycloak`, with byte-
+# identical pod labels. `kubectl apply -k` never prunes, so applying this
+# component over an older install leaves that Deployment's ReplicaSet running:
+# two Keycloak pods then match the `keycloak` Service selector below, one with
+# the imported eddi realm and one without. Requests round-robin between them and
+# /realms/eddi answers 404 on roughly half of them — alternating login failures
+# with nothing in `kubectl get` to explain it. Delete the Deployment before the
+# first apply of this version, or immediately after if you already applied it.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: keycloak
+  labels:
+    app.kubernetes.io/name: keycloak
+    app.kubernetes.io/component: auth
+    app.kubernetes.io/part-of: eddi
+spec:
+  serviceName: keycloak
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: keycloak
+      app.kubernetes.io/component: auth
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: keycloak
+        app.kubernetes.io/component: auth
+        app.kubernetes.io/part-of: eddi
+    spec:
+      containers:
+        - name: keycloak
+          image: quay.io/keycloak/keycloak:26.0
+          # --import-realm reads /opt/keycloak/data/import. Without it Keycloak
+          # boots with only the built-in `master` realm and every request to
+          # .../realms/eddi returns 404. Import is ONE-SHOT: it seeds an empty
+          # database and is skipped once the realm exists, so edits made in the
+          # admin console survive restarts and edits to the ConfigMap do not
+          # reach an already-imported realm.
+          args: ["start-dev", "--import-realm"]
+          ports:
+            - containerPort: 8080
+              name: http
+            # Since Keycloak 25 the health and metrics endpoints live on the
+            # management interface, NOT on the main HTTP port.
+            - containerPort: 9000
+              name: management
+          env:
+            - name: KC_BOOTSTRAP_ADMIN_USERNAME
+              value: "admin"
+            # ⚠️  Dev credential. Replace before exposing this outside a
+            # throwaway cluster — it is the master-realm superuser.
+            - name: KC_BOOTSTRAP_ADMIN_PASSWORD
+              value: "admin"
+            - name: KC_HTTP_PORT
+              value: "8080"
+            # /health/* are disabled unless this is set — without it the probes
+            # below get 404 on every attempt, the pod never becomes Ready, the
+            # Service gets no endpoints and the liveness probe restart-loops.
+            - name: KC_HEALTH_ENABLED
+              value: "true"
+            # ⚠️  Must equal the URL the BROWSER uses to reach Keycloak, because
+            # it is what Keycloak embeds as the token issuer. The default suits
+            # `kubectl port-forward svc/keycloak 8080:8080`. Behind an ingress,
+            # change this, EDDI_KEYCLOAK_PUBLIC_URL and QUARKUS_OIDC_TOKEN_ISSUER
+            # in kustomization.yaml, and the redirectUris/webOrigins in
+            # eddi-realm.json — all four together.
+            - name: KC_HOSTNAME
+              value: "http://localhost:8080"
+            # Lets the backchannel (EDDI -> http://keycloak:8080) keep using the
+            # in-cluster address while tokens carry the public issuer above.
+            - name: KC_HOSTNAME_BACKCHANNEL_DYNAMIC
+              value: "true"
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          volumeMounts:
+            - name: keycloak-data
+              mountPath: /opt/keycloak/data
+            - name: realm-import
+              mountPath: /opt/keycloak/data/import
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: management
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: management
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 5
+      volumes:
+        - name: realm-import
+          configMap:
+            name: keycloak-realm
+  volumeClaimTemplates:
+    - metadata:
+        name: keycloak-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        # Uncomment if your cluster has no default StorageClass:
+        # storageClassName: standard
+        resources:
+          requests:
+            storage: 1Gi
+---
+# Keycloak Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak
+  labels:
+    app.kubernetes.io/name: keycloak
+    app.kubernetes.io/component: auth
+    app.kubernetes.io/part-of: eddi
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: keycloak
+    app.kubernetes.io/component: auth
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

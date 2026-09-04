@@ -13,6 +13,9 @@
 [CmdletBinding(SupportsShouldProcess)]
 param(
     [switch]$Auto,
+    # Replace an existing eddi-secrets. DESTROYS the current master key —
+    # everything encrypted with it is then unrecoverable.
+    [switch]$Force,
     [string]$Key = "",
     [string]$Namespace = "eddi",
     [switch]$Help
@@ -27,6 +30,7 @@ if ($Help) {
     Write-Information -MessageData "" -InformationAction Continue
     Write-Information -MessageData "Options:" -InformationAction Continue
     Write-Information -MessageData "  -Auto                  Auto-generate key, no prompts" -InformationAction Continue
+    Write-Information -MessageData "  -Force                 Replace an existing eddi-secrets (DESTROYS the current key)" -InformationAction Continue
     Write-Information -MessageData "  -Key <key>             Use a specific vault key (min 16 chars)" -InformationAction Continue
     Write-Information -MessageData "  -Namespace <ns>        Kubernetes namespace (default: eddi)" -InformationAction Continue
     Write-Information -MessageData "" -InformationAction Continue
@@ -49,6 +53,31 @@ function New-RandomKey {
 Write-Information -MessageData "" -InformationAction Continue
 Write-Information -MessageData "  EDDI — Kubernetes Secret Generator" -InformationAction Continue
 Write-Information -MessageData "" -InformationAction Continue
+
+# Refuse to replace a live master key.
+#
+# This script installs a NEW key, so replacing the Secret makes every API key and
+# secret already encrypted under the old one permanently undecryptable. Dropping
+# the Secret from the shipped manifests closed that trap for `kubectl apply -k`;
+# it must not reopen here, now that the docs route every install through this
+# script. Checked BEFORE the key is generated or prompted for, so nobody types a
+# passphrase that is then thrown away.
+if (-not $Force) {
+    $existing = kubectl get secret eddi-secrets --namespace=$Namespace --ignore-not-found 2>$null
+    if ($existing) {
+        Write-Information -MessageData "  ⚠️  eddi-secrets already exists in namespace $Namespace — nothing was changed." -InformationAction Continue
+        Write-Information -MessageData "" -InformationAction Continue
+        Write-Information -MessageData "  Replacing it installs a NEW master key, and everything encrypted under the" -InformationAction Continue
+        Write-Information -MessageData "  current one becomes PERMANENTLY UNDECRYPTABLE." -InformationAction Continue
+        Write-Information -MessageData "" -InformationAction Continue
+        Write-Information -MessageData "  To read the key already in the cluster:" -InformationAction Continue
+        Write-Information -MessageData "    kubectl get secret eddi-secrets -n $Namespace -o jsonpath='{.data.application-secrets\.properties}'" -InformationAction Continue
+        Write-Information -MessageData "" -InformationAction Continue
+        Write-Information -MessageData "  To rotate deliberately, re-run with -Force." -InformationAction Continue
+        Write-Information -MessageData "" -InformationAction Continue
+        exit 1
+    }
+}
 
 $VaultKey = ""
 

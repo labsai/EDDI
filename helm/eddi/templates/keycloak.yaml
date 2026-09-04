@@ -1,12 +1,56 @@
 {{- if .Values.keycloak.enabled }}
+{{- /*
+  The realm Keycloak imports on first boot, from files/eddi-realm.json.
+
+  Without an import Keycloak comes up with only the built-in `master` realm, so
+  QUARKUS_OIDC_AUTH_SERVER_URL (.../realms/eddi) 404s, none of the five roles
+  the Java code enforces exist, and there is nobody to log in as.
+
+  The shipped file allows redirects to localhost (the port-forward flow) and to
+  the https://eddi.example.com placeholder. keycloak.publicOrigin replaces that
+  placeholder, because a realm that does not list your actual host answers
+  "Invalid parameter: redirect_uri" and login cannot complete.
+*/}}
+{{- $realmOrigin := default "https://eddi.example.com" .Values.keycloak.publicOrigin }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "eddi.fullname" . }}-keycloak-realm
+  labels:
+    {{- include "eddi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: auth
+data:
+  eddi-realm.json: |
+{{ .Files.Get "files/eddi-realm.json" | replace "https://eddi.example.com" $realmOrigin | indent 4 }}
+---
+{{- /*
+  A StatefulSet, not a Deployment. `start-dev` keeps Keycloak's H2 database
+  under ${kc.home.dir}/data, which without a volume is the container's ephemeral
+  writable layer — so every rollout, eviction, node drain or OOM kill discarded
+  every realm, client and user. The claim below is ReadWriteOnce, and a
+  Deployment's default RollingUpdate would deadlock trying to schedule the new
+  pod alongside the old one.
+
+  ⚠️  start-dev is a DEVELOPMENT mode. A production identity provider runs
+  `start` against an external database (KC_DB / KC_DB_URL).
+
+  ⚠️  UPGRADE. This used to be a Deployment under the same name. `helm upgrade`
+  removes resources that left the release, so no manual delete is needed here —
+  but the pod IS replaced, and the old Deployment had no volume, so there is no
+  Keycloak state to carry over: the new pod imports the realm into an empty
+  database and anything configured by hand in the old admin console is gone.
+  The kustomize overlay additionally needs `kubectl delete deployment keycloak`
+  by hand, because `kubectl apply -k` does not prune — see docs/kubernetes.md.
+*/}}
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
   name: {{ include "eddi.fullname" . }}-keycloak
   labels:
     {{- include "eddi.labels" . | nindent 4 }}
     app.kubernetes.io/component: auth
 spec:
+  serviceName: {{ include "eddi.fullname" . }}-keycloak
   replicas: 1
   selector:
     matchLabels:
@@ -22,10 +66,20 @@ spec:
       containers:
         - name: keycloak
           image: "{{ .Values.keycloak.image.repository }}:{{ .Values.keycloak.image.tag }}"
-          args: ["start-dev"]
+          # --import-realm reads /opt/keycloak/data/import. Import is ONE-SHOT:
+          # it seeds an empty database and is skipped once the realm exists, so
+          # console edits survive restarts and ConfigMap edits do not reach an
+          # already-imported realm.
+          args: ["start-dev", "--import-realm"]
           ports:
             - containerPort: 8080
               name: http
+            # Since Keycloak 25 the health endpoints live on the management
+            # interface, NOT on the main HTTP port. Probing /health/ready on
+            # 8080 returned 404, so the pod never became Ready, the Service got
+            # no endpoints, and the liveness probe restart-looped the container.
+            - containerPort: 9000
+              name: management
           env:
             - name: KC_BOOTSTRAP_ADMIN_USERNAME
               value: {{ .Values.keycloak.adminUsername | quote }}
@@ -36,22 +90,56 @@ spec:
               value: {{ required "keycloak.adminPassword is required when keycloak.enabled=true — the chart no longer ships a default. Generate one: openssl rand -base64 24" .Values.keycloak.adminPassword | quote }}
             - name: KC_HTTP_PORT
               value: "8080"
+            # /health/* stay disabled unless this is set, whatever port you probe.
+            - name: KC_HEALTH_ENABLED
+              value: "true"
+            {{- if .Values.eddi.oidc.publicUrl }}
+            # Must equal the URL the BROWSER uses, because it is what Keycloak
+            # embeds as the token issuer.
+            - name: KC_HOSTNAME
+              value: {{ .Values.eddi.oidc.publicUrl | quote }}
+            # Lets the backchannel (EDDI -> the in-cluster Service) keep using
+            # the internal address while tokens carry the public issuer.
+            - name: KC_HOSTNAME_BACKCHANNEL_DYNAMIC
+              value: "true"
+            {{- end }}
           resources:
             {{- toYaml .Values.keycloak.resources | nindent 12 }}
+          volumeMounts:
+            - name: keycloak-data
+              mountPath: /opt/keycloak/data
+            - name: realm-import
+              mountPath: /opt/keycloak/data/import
+              readOnly: true
           readinessProbe:
             httpGet:
               path: /health/ready
-              port: http
+              port: management
             initialDelaySeconds: 30
             periodSeconds: 10
             timeoutSeconds: 5
           livenessProbe:
             httpGet:
               path: /health/live
-              port: http
+              port: management
             initialDelaySeconds: 60
             periodSeconds: 30
             timeoutSeconds: 5
+      volumes:
+        - name: realm-import
+          configMap:
+            name: {{ include "eddi.fullname" . }}-keycloak-realm
+  volumeClaimTemplates:
+    - metadata:
+        name: keycloak-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if .Values.keycloak.storage.storageClassName }}
+        storageClassName: {{ .Values.keycloak.storage.storageClassName | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.keycloak.storage.size }}
 ---
 apiVersion: v1
 kind: Service

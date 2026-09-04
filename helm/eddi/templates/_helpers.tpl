@@ -26,10 +26,16 @@ Create a default fully qualified app name.
 {{- end }}
 
 {{/*
-Common labels
+Common labels.
+
+helm.sh/chart carries the chart NAME AND VERSION. It used to render just the
+name, which made the label the constant string "eddi" on every release of every
+chart version — so `kubectl get all -l helm.sh/chart=eddi-1.0.1`, the standard
+way to ask a live cluster which chart revision produced an object, matched
+nothing.
 */}}
 {{- define "eddi.labels" -}}
-helm.sh/chart: {{ include "eddi.name" . }}
+helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 app.kubernetes.io/part-of: eddi

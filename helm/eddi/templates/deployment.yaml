@@ -34,9 +34,13 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
     spec:
-      {{- if .Values.serviceAccount.create }}
+      # Always rendered. Gating this on serviceAccount.create discarded
+      # serviceAccount.name whenever create=false — the bring-your-own-SA shape
+      # used for EKS IRSA, GKE Workload Identity and AKS pod identity — and the
+      # pod then ran under the namespace's `default` ServiceAccount, so the
+      # cloud IAM role bound to the named SA was never assumed and Helm printed
+      # nothing. The helper returns the right name in both branches.
       serviceAccountName: {{ include "eddi.serviceAccountName" . }}
-      {{- end }}
       securityContext:
         runAsNonRoot: true
         runAsUser: 185

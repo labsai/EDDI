@@ -1,3 +1,31 @@
+{{- /*
+  Datastore guard. The chart fails loudly everywhere else (deployment.yaml:2,
+  secret.yaml, postgres.yaml, keycloak.yaml) but used to fail SILENTLY here:
+  with both in-chart datastores disabled it emitted no connection string at all,
+  NOTES.txt reported "Database: None (external)", and the pod started against
+  application.properties' baked-in default mongodb://mongodb:27017/eddi, which
+  resolves to nothing. There was no value for an external datastore to set.
+*/}}
+{{- $externalMongo := .Values.eddi.datastore.externalConnectionString }}
+{{- $externalJdbc := .Values.eddi.datastore.externalJdbcUrl }}
+{{- if and (not .Values.mongodb.enabled) (not .Values.postgres.enabled) }}
+{{- if and (not $externalMongo) (not $externalJdbc) }}
+{{- fail "No datastore configured: mongodb.enabled and postgres.enabled are both false and no external datastore was supplied. Set eddi.datastore.externalConnectionString (MongoDB, e.g. an Atlas SRV URI) or eddi.datastore.externalJdbcUrl (PostgreSQL, e.g. jdbc:postgresql://host:5432/eddi), and match eddi.datastoreType to it. Without one of these EDDI starts against the built-in default mongodb://mongodb:27017/eddi and dies on the readiness probe with a DNS failure." }}
+{{- end }}
+{{- end }}
+{{- /*
+  Messaging guard. eddi.messaging.type is read by NO Java code:
+  NatsConversationCoordinator is gated on @IfBuildProfile("nats"), a BUILD-time
+  switch, and the published labsai/eddi image is built without it. Setting this
+  to "nats" used to provision a JetStream StatefulSet with a PVC that EDDI could
+  never connect to, print "Messaging: nats" in the install notes, and quietly go
+  on using in-memory queues.
+*/}}
+{{- if ne (lower (toString .Values.eddi.messagingType)) "in-memory" }}
+{{- if not .Values.nats.buildProfileImage }}
+{{- fail "eddi.messagingType is not \"in-memory\": the NATS coordinator is gated on @IfBuildProfile(\"nats\"), so it exists only in an image BUILT with -Dquarkus.profile=nats. The published labsai/eddi image is not, and no Java code reads eddi.messaging.type at runtime — the setting would be inert while still provisioning a NATS StatefulSet and PVC. Build your own image with -Dquarkus.profile=nats and set nats.buildProfileImage=true to confirm, or leave eddi.messagingType at \"in-memory\". NATS is a durability/ordering primitive either way: it does not permit a second replica (see eddi.replicas)." }}
+{{- end }}
+{{- end }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -8,10 +36,15 @@ data:
   EDDI_DATASTORE_TYPE: {{ .Values.eddi.datastoreType | quote }}
   {{- if .Values.mongodb.enabled }}
   MONGODB_CONNECTIONSTRING: "mongodb://{{ include "eddi.fullname" . }}-mongodb:27017/eddi?retryWrites=true&w=majority&connectTimeoutMS=10000&socketTimeoutMS=30000"
+  {{- else if $externalMongo }}
+  MONGODB_CONNECTIONSTRING: {{ $externalMongo | quote }}
   {{- end }}
   {{- if .Values.postgres.enabled }}
   QUARKUS_PROFILE: "postgres"
   QUARKUS_DATASOURCE_JDBC_URL: "jdbc:postgresql://{{ include "eddi.fullname" . }}-postgres:5432/{{ .Values.postgres.database }}"
+  {{- else if $externalJdbc }}
+  QUARKUS_PROFILE: "postgres"
+  QUARKUS_DATASOURCE_JDBC_URL: {{ $externalJdbc | quote }}
   {{- end }}
   EDDI_MESSAGING_TYPE: {{ .Values.eddi.messagingType | quote }}
   {{- if .Values.nats.enabled }}
@@ -46,7 +79,38 @@ data:
   {{- if .Values.keycloak.enabled }}
   QUARKUS_OIDC_AUTH_SERVER_URL: "http://{{ include "eddi.fullname" . }}-keycloak:8080/realms/eddi"
   {{- else }}
-  QUARKUS_OIDC_AUTH_SERVER_URL: {{ .Values.eddi.oidc.authServerUrl | quote }}
+  {{- /*
+    Required, not defaulted. The default used to be
+    http://keycloak:8080/realms/eddi — a Service this chart never creates (its
+    own Keycloak Service is <release>-eddi-keycloak), copied over from the
+    kustomize overlay. Bring-your-own-IdP installs therefore pointed at a host
+    that does not resolve and died on OIDC discovery with a DNS error instead of
+    being told they had forgotten to set it.
+  */}}
+  QUARKUS_OIDC_AUTH_SERVER_URL: {{ required "eddi.oidc.authServerUrl is required when eddi.oidc.enabled=true and keycloak.enabled=false — point it at your identity provider's realm URL, e.g. https://idp.example.com/realms/eddi" .Values.eddi.oidc.authServerUrl | quote }}
   {{- end }}
   QUARKUS_OIDC_CLIENT_ID: {{ .Values.eddi.oidc.clientId | quote }}
+  {{- /*
+    The browser-facing identity provider URL. RestManagerResource splices it
+    into window.__EDDI_AUTH__.url and application.properties splices it into the
+    CSP connect-src. Neither delivery path used to set it, so /manage
+    /__auth_config__.js shipped without a `url` key — the Keycloak adapter had no
+    authority to redirect to — and the CSP blocked the call it would have made.
+    It cannot be derived: the in-cluster Service name is not reachable from a
+    browser, and the ingress only fronts EDDI, not Keycloak.
+  */}}
+  {{- $publicUrl := .Values.eddi.oidc.publicUrl }}
+  {{- if not $publicUrl }}
+  {{- fail "eddi.oidc.publicUrl is required when eddi.oidc.enabled=true: it is the identity provider URL the BROWSER uses (never the in-cluster Service name), and the Manager SPA cannot start a login without it. For the port-forward flow that is http://localhost:8080; behind an ingress it is your Keycloak hostname." }}
+  {{- end }}
+  EDDI_KEYCLOAK_PUBLIC_URL: {{ $publicUrl | quote }}
+  {{- if .Values.keycloak.enabled }}
+  {{- /*
+    Tokens carry the public issuer (KC_HOSTNAME) while EDDI fetches discovery
+    over the in-cluster Service address, so the two disagree and validation
+    fails unless the issuer is pinned. Same reasoning as
+    docker-compose.auth.yml's QUARKUS_OIDC_TOKEN_ISSUER.
+  */}}
+  QUARKUS_OIDC_TOKEN_ISSUER: "{{ trimSuffix "/" $publicUrl }}/realms/eddi"
+  {{- end }}
   {{- end }}

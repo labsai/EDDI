@@ -1,18 +1,51 @@
-# Keycloak authentication overlay
+# Keycloak authentication component
 #
-# ⚠️  This is a COMPONENT overlay — it does NOT include the base EDDI manifests.
-# You MUST apply it together with a database overlay.
+# ⚠️  This is a kustomize COMPONENT, not a standalone overlay. `kubectl apply -k`
+# on this directory does not work by design — a component has no resource set of
+# its own. Reference it from a kustomization that already includes the base:
 #
-# Pre-configured test users:
-#   eddi  / eddi   (admin)
-#   viewer / viewer (read-only)
-apiVersion: kustomize.config.k8s.io/v1beta1
-kind: Kustomization
-
-namespace: eddi
+#   resources:
+#     - ../../overlays/mongodb
+#   components:
+#     - ../../overlays/auth
+#
+# It used to be `kind: Kustomization` carrying the same patches. That silently
+# did nothing: a directory listed under `resources:` is built as its OWN root
+# first, so the patches below ran against a resource set containing only
+# Keycloak, matched zero objects — and kustomize exits 0 on a patch that matches
+# nothing. Operators got Keycloak plus an EDDI with OIDC still disabled. A
+# component's patches are applied into the PARENT's resource set, which is what
+# makes them reach eddi-config.
+#
+# Pre-configured test users, seeded from eddi-realm.json — DEV ONLY:
+#   eddi   / eddi    (eddi-admin + eddi-editor)
+#   viewer / viewer  (eddi-viewer — read-only)
+#   user   / user    (eddi-user)
+#
+# ⚠️  Exposing this beyond `kubectl port-forward`? Four settings must agree on
+# the URL the BROWSER uses for Keycloak, and none of them can be derived:
+#   1. KC_HOSTNAME in keycloak-statefulset.yaml
+#   2. EDDI_KEYCLOAK_PUBLIC_URL below
+#   3. QUARKUS_OIDC_TOKEN_ISSUER below
+#   4. redirectUris / webOrigins of the eddi-frontend client in eddi-realm.json
+#      (shipped with a https://eddi.example.com/* placeholder — replace it)
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
 
 resources:
-  - keycloak-deployment.yaml
+  - keycloak-statefulset.yaml
+
+# The realm Keycloak imports on first boot. Generated as a hashed ConfigMap so
+# editing the JSON rolls the StatefulSet — though the import itself only ever
+# seeds an EMPTY database (see keycloak-statefulset.yaml).
+#
+# This is a cluster-calibrated copy of keycloak/eddi-realm.json, which is
+# calibrated for docker-compose instead: that one allows redirects to localhost
+# only and names a login theme only the compose file mounts.
+configMapGenerator:
+  - name: keycloak-realm
+    files:
+      - eddi-realm.json
 
 # Patch EDDI to enable OIDC authentication
 patches:
@@ -29,3 +62,29 @@ patches:
       - op: add
         path: /data/QUARKUS_OIDC_CLIENT_ID
         value: "eddi-backend"
+      # Browser-facing Keycloak URL. RestManagerResource splices it into
+      # window.__EDDI_AUTH__.url and application.properties splices it into the
+      # CSP connect-src; without it the Manager SPA has no authority to redirect
+      # to, and the browser would block the call even if it had one.
+      # Must be reachable from the BROWSER — never the in-cluster Service name.
+      - op: add
+        path: /data/EDDI_KEYCLOAK_PUBLIC_URL
+        value: "http://localhost:8080"
+      # Tokens carry the public issuer (KC_HOSTNAME) while EDDI fetches OIDC
+      # discovery over the in-cluster address, so the issuer has to be pinned
+      # explicitly or validation fails on the mismatch.
+      - op: add
+        path: /data/QUARKUS_OIDC_TOKEN_ISSUER
+        value: "http://localhost:8080/realms/eddi"
+      # Close the escape hatches the base opens for the no-auth quickstart.
+      # Leaving them on lets every request through unauthenticated, which would
+      # make enabling OIDC decorative.
+      - op: replace
+        path: /data/EDDI_SECURITY_ALLOW_UNAUTHENTICATED
+        value: "false"
+      - op: replace
+        path: /data/EDDI_MCP_ALLOW_UNAUTHENTICATED
+        value: "false"
+      - op: replace
+        path: /data/EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED
+        value: "false"
