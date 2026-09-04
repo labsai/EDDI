@@ -1,8 +1,27 @@
-# Docker Compose for NATS JetStream + EDDI + MongoDB
-# Usage: docker compose -f docker-compose.nats.yml up
+# NATS JetStream overlay for EDDI.
 #
-# This extends the default docker-compose.yml with NATS JetStream for
-# durable, scalable conversation message ordering (Phase 5).
+# Usage — it is an OVERLAY and does not stand alone:
+#   docker compose -f docker-compose.yml -f docker-compose.nats.yml up
+#
+# It adds durable, scalable conversation message ordering (Phase 5) by pointing
+# the base file's `eddi` service at a JetStream server on the same network.
+#
+# It deliberately declares NOTHING the base file already provides. It used to
+# redefine `mongodb` and four keys on `eddi`, which silently broke the very
+# combination README.md documents ("overlays stack in any combination"):
+#   * MONGODB_CONNECTIONSTRING here dropped the credentials the base passes,
+#     while the base's MONGO_INITDB_ROOT_* kept auth switched ON in mongod — so
+#     EDDI authenticated as nobody and could not connect at all;
+#   * `mongo-data:/data/db` replaced the base's `mongodb-db` mount (volumes merge
+#     on the target path), so the stack came up against an empty volume with
+#     every agent and conversation still sitting in the old one — which is
+#     indistinguishable from data loss to the person looking at the screen;
+#   * `"27017:27017"` bound a second host port next to the base's
+#     `127.0.0.1:27017` (different host_ip, so both survive the merge);
+#   * `mongo:7.0` floated where the base pins `mongo:7.0.14`.
+#
+# If you want a standalone NATS + MongoDB + EDDI stack, compose the base file in
+# rather than duplicating its services here.
 
 services:
   nats:
@@ -20,29 +39,14 @@ services:
       timeout: 5s
       retries: 3
 
-  mongodb:
-    image: mongo:7.0
-    ports:
-      - "27017:27017"
-    volumes:
-      - mongo-data:/data/db
-    restart: unless-stopped
-
   eddi:
-    image: labsai/eddi:latest
-    ports:
-      - "7070:7070"
     environment:
       EDDI_MESSAGING_TYPE: nats
       EDDI_NATS_URL: nats://nats:4222
-      MONGODB_CONNECTIONSTRING: mongodb://mongodb:27017/eddi?retryWrites=true&w=majority
+    # Merges with the base file's `mongodb: condition: service_healthy`.
     depends_on:
       nats:
         condition: service_healthy
-      mongodb:
-        condition: service_started
-    restart: unless-stopped
 
 volumes:
   nats-data:
-  mongo-data:

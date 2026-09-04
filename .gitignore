@@ -87,7 +87,20 @@ test-output.txt
 # Event/marketing material — kept locally, not part of the product
 waic-2026/
 
-eddi-audit-deadletter.jsonl
+# (eddi-audit-deadletter.jsonl was listed here, and the entry was load-bearing:
+# the audit ledger's unit-test factory passed a RELATIVE dead-letter path, which
+# resolves against the process CWD — the repository root — so `mvn test` dropped
+# a JSONL file into the source tree that `mvn clean` did not remove and git had
+# to be taught to hide. That factory now writes under java.io.tmpdir, so nothing
+# produces THAT name any more. See AuditLedgerService.TEST_DEAD_LETTER_PATH,
+# pinned by AuditLedgerServiceTest#testDeadLetterPathIsOutsideTheSourceTree.
+#
+# Not a blanket guarantee about dead-letter files in general:
+# AuditLedgerServiceBranchTest still constructs the service directly with a
+# relative "deadletter.jsonl" — a different name, never covered by this entry.
+# Those cases exercise the NATS and serialization branches and never reach the
+# file write, so nothing lands. If you add a case that DOES drop a batch to
+# disk, give it an absolute path instead of re-adding an ignore rule here.)
 
 # Auto-generated license files (rebuilt during Maven build)
 licenses/third-party/

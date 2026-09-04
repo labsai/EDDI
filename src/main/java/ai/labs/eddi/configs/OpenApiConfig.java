@@ -16,10 +16,23 @@ import org.eclipse.microprofile.openapi.annotations.tags.Tag;
  * The {@code info} block values are overridden by
  * {@code application.properties} at build time. SmallRye merges both sources.
  * </p>
+ * <p>
+ * <b>{@code version} is a sentinel, not a release.</b> An annotation element
+ * can only hold a compile-time constant, so it can never derive from pom.xml —
+ * and {@code Info.version()} declares no default, so it cannot simply be
+ * dropped either. It used to read {@code "6.3.0"}: a sixth hand-copied release
+ * number, dead only because {@code quarkus.smallrye-openapi.info-version}
+ * (which now derives from {@code ${quarkus.application.version}}) wins the
+ * SmallRye merge. Dead is not the same as harmless — AGENTS.md §1 makes pom.xml
+ * the single source of truth for versions, and nothing would have caught this
+ * one on the next bump. The sentinel makes it obvious that the real value comes
+ * from the property, and {@code ReleaseVersionSourceTest} fails the build if a
+ * release-shaped literal comes back.
+ * </p>
  *
  * @since 6.0.0
  */
-@OpenAPIDefinition(info = @Info(title = "EDDI API", version = "6.3.0"), tags = {
+@OpenAPIDefinition(info = @Info(title = "EDDI API", version = "resolved-from-configuration"), tags = {
         // ── Agents ───────────────────────────────────────────────────────
         @Tag(name = "Agents", description = "Agent configuration CRUD"),
         @Tag(name = "Agents / Administration", description = "Deploy, undeploy, trigger, and monitor agents"),

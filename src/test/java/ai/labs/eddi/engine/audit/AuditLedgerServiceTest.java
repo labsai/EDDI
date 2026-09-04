@@ -11,6 +11,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
+import java.nio.file.Path;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
@@ -739,5 +740,24 @@ class AuditLedgerServiceTest {
 
         AuditEntry pseudonymised = stored.withUserId(AuditHmac.pseudonymFor("user1"));
         assertEquals(AuditVerificationStatus.VALID, service.verifyEntry(pseudonymised));
+    }
+
+    /**
+     * The test factory used to pass the bare relative
+     * {@code "eddi-audit-deadletter.jsonl"}, which resolves against the process CWD
+     * — the repository root under Maven — so any dropped batch in any unit test
+     * wrote a file into the source tree. {@code mvn clean} does not remove it, so
+     * {@code .gitignore} carried an entry to hide it instead. The CDI constructor
+     * has always defaulted to an absolute path; only the test path was relative.
+     */
+    @Test
+    @DisplayName("the test dead-letter sink is absolute and outside the source tree")
+    void testDeadLetterPathIsOutsideTheSourceTree() {
+        Path path = Path.of(AuditLedgerService.TEST_DEAD_LETTER_PATH);
+
+        assertTrue(path.isAbsolute(),
+                "a relative dead-letter path resolves against the CWD, which is the project root: " + path);
+        assertFalse(path.startsWith(Path.of("").toAbsolutePath()),
+                "the test dead-letter sink must not be written inside the project tree: " + path);
     }
 }
