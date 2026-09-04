@@ -51,6 +51,13 @@ class RestWorkflowStoreCrudTest {
         jsonSchemaCreator = mock(IJsonSchemaCreator.class);
         sut = new RestWorkflowStore(workflowStore, resourceClientLibrary, documentDescriptorStore, jsonSchemaCreator,
                 permissiveGuard());
+        try {
+            // The workflow is live at v1: a cascade only runs against the CURRENT
+            // version, since it deletes referenced configs before the version check.
+            when(workflowStore.getCurrentResourceId(WORKFLOW_ID)).thenReturn(dummyResourceId(WORKFLOW_ID, 1));
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     private IResourceStore.IResourceId dummyResourceId(String id, int version) {
@@ -125,9 +132,51 @@ class RestWorkflowStoreCrudTest {
         @Test
         @DisplayName("should reject malformed resource URI")
         void malformedUri() {
-            // Malformed URI — createMalFormattedResourceUriException throws
+            // Malformed URI — malformedResourceUri is thrown
             // BadRequestException
             assertThrows(jakarta.ws.rs.BadRequestException.class, () -> sut.readWorkflowDescriptors("", 0, 20, "not-a-valid-uri", false));
+        }
+
+        /**
+         * The reverse-reference overload declares {@code filter}, {@code index} and
+         * {@code limit} — with {@code @DefaultValue("20")} on limit, advertising paging
+         * — and used to drop all three: a paging client got the whole list back on
+         * every page. The agent-store twin got tests for this; the workflow side is the
+         * one where a wrong argument order at the call site would go unseen, because
+         * the only other test here returns a single-element list.
+         */
+        @Test
+        @DisplayName("index and limit actually page the result")
+        void pagesTheResult() throws Exception {
+            String containingUri = "eddi://ai.labs.rules/rulestore/rulesets/abc123456789012345?version=1";
+            when(workflowStore.getWorkflowDescriptorsContainingResource(containingUri, false))
+                    .thenReturn(List.of(named("a"), named("b"), named("c"), named("d"), named("e")));
+
+            assertEquals(List.of("a", "b"), names(sut.readWorkflowDescriptors(null, 0, 2, containingUri, false)));
+            assertEquals(List.of("c", "d"), names(sut.readWorkflowDescriptors(null, 1, 2, containingUri, false)));
+            assertEquals(List.of("e"), names(sut.readWorkflowDescriptors(null, 2, 2, containingUri, false)));
+            assertTrue(sut.readWorkflowDescriptors(null, 9, 2, containingUri, false).isEmpty(),
+                    "past the end must be empty, not the full list");
+        }
+
+        @Test
+        @DisplayName("filter narrows the result")
+        void filtersTheResult() throws Exception {
+            String containingUri = "eddi://ai.labs.rules/rulestore/rulesets/abc123456789012345?version=1";
+            when(workflowStore.getWorkflowDescriptorsContainingResource(containingUri, false))
+                    .thenReturn(List.of(named("support workflow"), named("Sales Workflow"), named("triage")));
+
+            assertEquals(List.of("Sales Workflow"), names(sut.readWorkflowDescriptors("sales", 0, 20, containingUri, false)));
+        }
+
+        private DocumentDescriptor named(String name) {
+            DocumentDescriptor descriptor = new DocumentDescriptor();
+            descriptor.setName(name);
+            return descriptor;
+        }
+
+        private List<String> names(List<DocumentDescriptor> descriptors) {
+            return descriptors.stream().map(DocumentDescriptor::getName).toList();
         }
     }
 
@@ -288,6 +337,51 @@ class RestWorkflowStoreCrudTest {
 
             assertEquals(400, response.getStatus());
         }
+
+        /**
+         * Stored shapes the endpoint used to blind-cast: {@code "extensions": null}, an
+         * extension value that is an object rather than an array, and a
+         * present-but-null {@code "uri"}. Each turned this endpoint into a 500 — and it
+         * is the endpoint the re-point cascade walks for every config edit, so one
+         * malformed step blocked re-pointing the whole workflow.
+         */
+        @Test
+        @DisplayName("malformed stored steps are skipped, not a 500")
+        void malformedStepsDoNotCrash() throws Exception {
+            var config = new WorkflowConfiguration();
+
+            var nullExtensions = new WorkflowStep();
+            nullExtensions.setType(URI.create("eddi://ai.labs.parser"));
+            nullExtensions.setExtensions(null);
+            config.getWorkflowSteps().add(nullExtensions);
+
+            var objectValuedExtension = new WorkflowStep();
+            objectValuedExtension.setType(URI.create("eddi://ai.labs.parser"));
+            objectValuedExtension.getExtensions().put("dictionaries", new HashMap<String, Object>());
+            config.getWorkflowSteps().add(objectValuedExtension);
+
+            var nullUri = new WorkflowStep();
+            nullUri.setType(URI.create("eddi://ai.labs.rules"));
+            var configMap = new HashMap<String, Object>();
+            configMap.put("uri", null);
+            nullUri.setConfig(configMap);
+            config.getWorkflowSteps().add(nullUri);
+
+            // The one well-formed step, so the update still has something to re-point.
+            var good = new WorkflowStep();
+            good.setType(URI.create("eddi://ai.labs.rules"));
+            good.setConfig(new HashMap<>(Map.of("uri", "eddi://ai.labs.rules/rulestore/rulesets/111111111111111111111111?version=1")));
+            config.getWorkflowSteps().add(good);
+
+            when(workflowStore.read(WORKFLOW_ID, 1)).thenReturn(config);
+            when(workflowStore.update(eq(WORKFLOW_ID), eq(1), any())).thenReturn(2);
+
+            URI newResourceUri = URI.create("eddi://ai.labs.rules/rulestore/rulesets/111111111111111111111111?version=2");
+            Response response = sut.updateResourceInWorkflow(WORKFLOW_ID, 1, newResourceUri);
+
+            assertEquals(200, response.getStatus());
+            assertEquals(newResourceUri, good.getConfig().get("uri"));
+        }
     }
 
     // ─── getResourceURI / getCurrentResourceId ─────────────────────────────────
@@ -326,6 +420,8 @@ class RestWorkflowStoreCrudTest {
         @Test
         @DisplayName("should log warning and still delete when ResourceStoreException occurs during cascade")
         void cascadeWithResourceStoreException() throws Exception {
+            when(workflowStore.getCurrentResourceId("aabbccddeeff112233445566"))
+                    .thenReturn(dummyResourceId("aabbccddeeff112233445566", 1));
             when(workflowStore.read("aabbccddeeff112233445566", 1))
                     .thenThrow(new IResourceStore.ResourceStoreException("DB failure"));
 
@@ -336,6 +432,8 @@ class RestWorkflowStoreCrudTest {
         @Test
         @DisplayName("should log warning and still delete when ResourceNotFoundException occurs during cascade")
         void cascadeWithResourceNotFoundException() throws Exception {
+            when(workflowStore.getCurrentResourceId("aabbccddeeff112233445566"))
+                    .thenReturn(dummyResourceId("aabbccddeeff112233445566", 1));
             when(workflowStore.read("aabbccddeeff112233445566", 1))
                     .thenThrow(new IResourceStore.ResourceNotFoundException("not found"));
 
@@ -451,6 +549,88 @@ class RestWorkflowStoreCrudTest {
             // duplicateResource should throw ServiceException wrapped by sneakyThrow
             assertThrows(Exception.class, () -> sut.duplicateWorkflow(WORKFLOW_ID, 1, true));
         }
+
+        /**
+         * {@code WorkflowStore.create} only rejects null <em>elements</em>, so a stored
+         * step without a {@code type}, or a dictionary entry without one, is legal.
+         * deleteWorkflow guarded both; the deep-copy path dereferenced them and
+         * answered 500 — after the sub-resources earlier in the loop had already been
+         * created and persisted.
+         */
+        @Test
+        @DisplayName("a step or dictionary without a type is skipped, not an NPE")
+        void deepCopyToleratesMissingTypes() throws Exception {
+            var config = new WorkflowConfiguration();
+
+            var typelessStep = new WorkflowStep();
+            typelessStep.setType(null);
+            config.getWorkflowSteps().add(typelessStep);
+
+            var parserStep = new WorkflowStep();
+            parserStep.setType(URI.create("eddi://ai.labs.parser"));
+            Map<String, Object> typelessDictionary = new HashMap<>();
+            typelessDictionary.put("config",
+                    new HashMap<>(Map.of("uri", "eddi://ai.labs.dictionary/dictionarystore/dictionaries/222222222222222222222222?version=1")));
+            List<Map<String, Object>> dictionaries = new ArrayList<>();
+            dictionaries.add(typelessDictionary);
+            parserStep.getExtensions().put("dictionaries", dictionaries);
+            config.getWorkflowSteps().add(parserStep);
+
+            when(workflowStore.read(WORKFLOW_ID, 1)).thenReturn(config);
+            when(workflowStore.create(any())).thenReturn(dummyResourceId("newwf112233445566aabb", 1));
+            when(documentDescriptorStore.readDescriptor(anyString(), any())).thenReturn(new DocumentDescriptor());
+
+            Response response = sut.duplicateWorkflow(WORKFLOW_ID, 1, true);
+
+            assertEquals(201, response.getStatus());
+            verify(resourceClientLibrary, never()).duplicateResource(any());
+        }
+
+        /**
+         * {@code ?version=0} is the documented "current version" shorthand that PUT and
+         * DELETE honour. {@code validateParameters}' normalised return value was
+         * discarded here, so {@code workflowStore.read(id, 0)} matched nothing and the
+         * endpoint answered 404.
+         */
+        @Test
+        @DisplayName("version=0 duplicates the current version instead of 404")
+        void versionZeroDuplicatesCurrent() throws Exception {
+            var config = new WorkflowConfiguration();
+            when(workflowStore.read(WORKFLOW_ID, 1)).thenReturn(config);
+            when(workflowStore.create(any())).thenReturn(dummyResourceId("newwf112233445566aabb", 1));
+            when(documentDescriptorStore.readDescriptor(anyString(), any())).thenReturn(new DocumentDescriptor());
+
+            Response response = sut.duplicateWorkflow(WORKFLOW_ID, 0, false);
+
+            assertEquals(201, response.getStatus());
+            verify(workflowStore).read(WORKFLOW_ID, 1);
+        }
+
+        /**
+         * {@code "extensions": null} is what Jackson leaves for an explicit JSON null.
+         * The deep-copy walk dereferenced it, so one such stored step turned
+         * {@code ?deepCopy=true} into a 500 — after the sub-resources earlier in the
+         * loop had already been created and persisted.
+         */
+        @Test
+        @DisplayName("a parser step with null extensions is skipped, not an NPE")
+        void deepCopyToleratesNullExtensions() throws Exception {
+            var config = new WorkflowConfiguration();
+
+            var parserStep = new WorkflowStep();
+            parserStep.setType(URI.create("eddi://ai.labs.parser"));
+            parserStep.setExtensions(null);
+            config.getWorkflowSteps().add(parserStep);
+
+            when(workflowStore.read(WORKFLOW_ID, 1)).thenReturn(config);
+            when(workflowStore.create(any())).thenReturn(dummyResourceId("newwf112233445566aabb", 1));
+            when(documentDescriptorStore.readDescriptor(anyString(), any())).thenReturn(new DocumentDescriptor());
+
+            Response response = sut.duplicateWorkflow(WORKFLOW_ID, 1, true);
+
+            assertEquals(201, response.getStatus());
+            verify(resourceClientLibrary, never()).duplicateResource(any());
+        }
     }
 
     // ─── deleteResourceSafely edge cases ───────────────────────────────────────
@@ -468,6 +648,8 @@ class RestWorkflowStoreCrudTest {
             ext.setConfig(new HashMap<>(Map.of("uri", "eddi://ai.labs.rules/rulestore/rulesets/111111111111111111111111?version=1")));
             config.getWorkflowSteps().add(ext);
 
+            when(workflowStore.getCurrentResourceId("aabbccddeeff112233445566"))
+                    .thenReturn(dummyResourceId("aabbccddeeff112233445566", 1));
             when(workflowStore.read("aabbccddeeff112233445566", 1)).thenReturn(config);
 
             // Resource referenced by 3 workflows — should skip
@@ -489,6 +671,8 @@ class RestWorkflowStoreCrudTest {
             ext.setConfig(new HashMap<>(Map.of("uri", "eddi://ai.labs.output/outputstore/outputsets/222222222222222222222222?version=1")));
             config.getWorkflowSteps().add(ext);
 
+            when(workflowStore.getCurrentResourceId("aabbccddeeff112233445566"))
+                    .thenReturn(dummyResourceId("aabbccddeeff112233445566", 1));
             when(workflowStore.read("aabbccddeeff112233445566", 1)).thenReturn(config);
             when(workflowStore.getWorkflowDescriptorsContainingResource(anyString(), eq(false)))
                     .thenReturn(List.of(new DocumentDescriptor())); // single reference
@@ -511,6 +695,9 @@ class RestWorkflowStoreCrudTest {
         ResourceAccessGuard guard = mock(ResourceAccessGuard.class);
         lenient().when(guard.seesEverything()).thenReturn(true);
         lenient().when(guard.canAccess(any(), any())).thenReturn(true);
+        // Without this the bare mock returns null from redactForCaller and visibleOnly
+        // hands back a list of nulls — which every size-only assertion passes anyway.
+        lenient().when(guard.redactForCaller(any())).thenAnswer(invocation -> invocation.getArgument(0));
         return guard;
     }
 }

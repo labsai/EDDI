@@ -471,6 +471,39 @@ class StreamingLegacyChatExecutorRetryTest {
             assertEquals(1, callCount.get());
             assertEquals("Hi there", result.response());
         }
+
+        /**
+         * The engine ceiling on {@code maxAttempts} bounds how long one config can hold
+         * a pipeline thread (AGENTS.md §4.1 rule 5). This path read
+         * {@code getMaxAttempts()} raw, so the identical {@code retry} block was capped
+         * on the tool-loop path and unbounded here — a streaming task really did run
+         * all 50 attempts.
+         */
+        @Test
+        @DisplayName("should stop at the engine ceiling, not at a configured maxAttempts above it")
+        void maxAttemptsIsCappedByTheEngineCeiling() {
+            var callCount = new AtomicInteger(0);
+
+            StreamingChatModel model = new StreamingChatModel() {
+                @Override
+                public void chat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
+                    callCount.incrementAndGet();
+                    handler.onError(new RuntimeException("persistent failure"));
+                }
+            };
+
+            var retryConfig = createRetryConfig(50, 1L);
+            // keeps the whole run in single-digit milliseconds
+            retryConfig.setMaxBackoffDelayMs(1L);
+            var task = createTask();
+            task.setRetry(retryConfig);
+
+            assertThrows(RuntimeException.class,
+                    () -> executor.execute(model, createMessages("Hi"), eventSink, task));
+
+            assertEquals(RetryConfiguration.MAX_ATTEMPTS_CEILING, callCount.get(),
+                    "a configured maxAttempts of 50 must stop at the engine ceiling");
+        }
     }
 
     // ==================== Configurable Timeout ====================

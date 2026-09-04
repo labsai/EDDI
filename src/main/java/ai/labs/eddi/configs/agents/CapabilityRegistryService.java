@@ -6,11 +6,16 @@ package ai.labs.eddi.configs.agents;
 
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration.Capability;
+import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.datastore.serialization.IDescriptorStore;
+import ai.labs.eddi.utils.RestUtilities;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
+import io.quarkus.runtime.StartupEvent;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.event.Observes;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
@@ -29,15 +34,27 @@ import java.util.stream.Collectors;
  * the registry to find agents that match a required skill. Selection strategies
  * (highest_confidence, round_robin, all) are deterministic algorithms, not LLM
  * guesses.
+ *
+ * <h3>How the index is maintained</h3> It is seeded once at startup from
+ * {@link IAgentStore} (see {@link #onStartup}), and kept current by
+ * <em>explicit</em> {@link #register}/{@link #unregister} calls from
+ * {@code RestAgentStore}'s create/update/delete. There is no observer
+ * mechanism: {@code @ConfigurationUpdate} is an interceptor binding with no
+ * interceptor behind it (AGENTS.md §4.3), and the Javadoc here used to claim
+ * otherwise — which is why agent-creating paths that bypass the REST facade
+ * (ZIP import, MCP) were written without a {@code register} call and their
+ * agents were never discoverable. Any new creation path must call
+ * {@link #register} itself.
  * <p>
- * The registry is rebuilt from {@code AgentConfiguration} on agent
- * create/update/delete via {@code @ConfigurationUpdate} observer events.
+ * The index is process-local. A cluster node learns about another node's edits
+ * only on its own restart.
  *
  * @since 6.0.0
  */
 @ApplicationScoped
 public class CapabilityRegistryService {
     private static final Logger LOGGER = Logger.getLogger(CapabilityRegistryService.class);
+    private static final String AGENT_DESCRIPTOR_TYPE = "ai.labs.agent";
 
     /**
      * Index: skill name → list of (agentId, capability) pairs. Rebuilt on agent
@@ -52,18 +69,65 @@ public class CapabilityRegistryService {
     private final Map<String, AtomicInteger> roundRobinCounters = new ConcurrentHashMap<>();
 
     private final MeterRegistry meterRegistry;
+    private final IAgentStore agentStore;
+    private final IDocumentDescriptorStore documentDescriptorStore;
     private Counter queryCounter;
     private Timer queryTimer;
 
     @Inject
-    public CapabilityRegistryService(MeterRegistry meterRegistry) {
+    public CapabilityRegistryService(MeterRegistry meterRegistry, IAgentStore agentStore,
+            IDocumentDescriptorStore documentDescriptorStore) {
         this.meterRegistry = meterRegistry;
+        this.agentStore = agentStore;
+        this.documentDescriptorStore = documentDescriptorStore;
     }
 
     @PostConstruct
     void initMetrics() {
         queryCounter = meterRegistry.counter("eddi.capability.query.count");
         queryTimer = meterRegistry.timer("eddi.capability.query.time");
+    }
+
+    /**
+     * Seeds the index from every stored agent, once, at startup.
+     *
+     * <p>
+     * This used to be a {@code @PostConstruct} on {@code RestAgentStore} — an
+     * {@code @ApplicationScoped} JAX-RS resource that ArC instantiates lazily, on
+     * first client-proxy call. Nothing eager touches that bean, so on a fresh node
+     * the index stayed EMPTY until an admin happened to open the Manager: a
+     * {@code capabilityMatch} behaviour rule simply never fired, and A2A discovery
+     * returned nothing, with no error to explain it. Observing {@link StartupEvent}
+     * on the bean that owns the index makes the seeding independent of who is
+     * injected where.
+     * </p>
+     */
+    void onStartup(@Observes StartupEvent event) {
+        populateFromStore();
+    }
+
+    void populateFromStore() {
+        try {
+            var descriptors = documentDescriptorStore.readDescriptors(AGENT_DESCRIPTOR_TYPE, null, 0, IDescriptorStore.NO_LIMIT, false);
+            int registered = 0;
+            for (var descriptor : descriptors) {
+                try {
+                    var resourceId = RestUtilities.extractResourceId(descriptor.getResource());
+                    var config = agentStore.read(resourceId.getId(), resourceId.getVersion());
+                    if (config.getCapabilities() != null && !config.getCapabilities().isEmpty()) {
+                        register(resourceId.getId(), config);
+                        registered++;
+                    }
+                } catch (Exception e) {
+                    LOGGER.debugf("Skipping capability registration for agent: %s", e.getMessage());
+                }
+            }
+            if (registered > 0) {
+                LOGGER.infof("Capability registry populated: %d agent(s) with capabilities", registered);
+            }
+        } catch (Exception e) {
+            LOGGER.warnf("Failed to populate capability registry at startup: %s", e.getMessage());
+        }
     }
 
     /**
@@ -74,7 +138,7 @@ public class CapabilityRegistryService {
      * @param config
      *            the agent's configuration containing capabilities
      */
-    public void register(String agentId, AgentConfiguration config) {
+    public synchronized void register(String agentId, AgentConfiguration config) {
         // Remove any previous entries for this agent
         unregister(agentId);
 
@@ -99,8 +163,18 @@ public class CapabilityRegistryService {
 
     /**
      * Remove all capability entries for an agent.
+     *
+     * <p>
+     * {@code synchronized}, like {@link #register}, because the two are not safe
+     * against each other on a {@code ConcurrentHashMap} alone: registering is
+     * get-list-then-add, and an interleaved {@code removeIf} could observe the
+     * freshly created EMPTY list between those two steps, drop the map entry, and
+     * leave the registering thread adding to an orphaned list — the skill silently
+     * missing from the index until the next full re-registration. These are rare
+     * admin operations, so a lock costs nothing that matters.
+     * </p>
      */
-    public void unregister(String agentId) {
+    public synchronized void unregister(String agentId) {
         skillIndex.values().forEach(entries -> entries.removeIf(e -> e.agentId().equals(agentId)));
         // Clean up empty skill entries and reset round-robin counters
         skillIndex.entrySet().removeIf(entry -> {
@@ -127,7 +201,7 @@ public class CapabilityRegistryService {
         return queryTimer.record(() -> {
             queryCounter.increment();
             String resolvedStrategy = strategy != null ? strategy.toLowerCase(Locale.ROOT) : "all";
-            meterRegistry.counter("eddi.capability.strategy.applied", "strategy", resolvedStrategy).increment();
+            meterRegistry.counter("eddi.capability.strategy.applied", "strategy", knownStrategy(resolvedStrategy)).increment();
 
             List<CapabilityMatch> matches = lookupBySkill(skill);
             if (matches.isEmpty()) {
@@ -152,7 +226,13 @@ public class CapabilityRegistryService {
         List<AgentCapabilityEntry> entries = skillIndex.getOrDefault(normalizedSkill, Collections.emptyList());
 
         if (entries.isEmpty()) {
-            meterRegistry.counter("eddi.capability.miss.count", "skill", normalizedSkill).increment();
+            // Deliberately untagged. The skill string arrives from GET /capabilities,
+            // A2A discovery, a templated capabilityMatch rule, and the LLM-invoked
+            // FindAgentsByCapabilityTool — a model that invents skill names mints an
+            // unbounded number of Meters, one per distinct miss, for the lifetime of the
+            // process. Which skill was missed belongs in a log line, not a metric label.
+            meterRegistry.counter("eddi.capability.miss.count").increment();
+            LOGGER.debugf("No agent registered for skill '%s'", normalizedSkill);
             return Collections.emptyList();
         }
 
@@ -236,6 +316,19 @@ public class CapabilityRegistryService {
                 yield shuffled;
             }
             default -> matches; // "all" — return in natural order
+        };
+    }
+
+    /**
+     * Folds an arbitrary caller-supplied strategy onto the four the switch in
+     * {@link #applyStrategy} actually understands, so the {@code strategy} meter
+     * tag has a bounded value set. Anything else behaves as "all" and is tagged
+     * {@code other}.
+     */
+    private static String knownStrategy(String strategy) {
+        return switch (strategy) {
+            case "highest_confidence", "round_robin", "random", "all" -> strategy;
+            default -> "other";
         };
     }
 

@@ -12,8 +12,11 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -268,8 +271,114 @@ class AgentSigningServiceTest {
                 () -> signingService.sign("tenant-1", "agent-1", "payload"));
     }
 
+    /**
+     * A rotated agent has no legacy unversioned key, and the vault answers
+     * {@code SecretNotFoundException} for it. That exception used to escape into
+     * the method-wide catch, so the versioned scan below it never ran at all and
+     * every rotated key stayed in the vault forever — the exact leak this method
+     * exists to prevent, on the agents most likely to have one.
+     */
+    @Test
+    void deleteKeyPair_deletesVersionedKeysWhenNoLegacyKeyExists() throws Exception {
+        signingService.generateKeyPairVersioned("tenant-1", "agent-1", 1);
+        signingService.generateKeyPairVersioned("tenant-1", "agent-1", 2);
+
+        signingService.deleteKeyPair("tenant-1", "agent-1");
+
+        assertFalse(secretProvider.contains("tenant-1", "agent-signing-key:agent-1:v1"),
+                "v1 was left in the vault: the absent legacy key aborted the versioned scan");
+        assertFalse(secretProvider.contains("tenant-1", "agent-signing-key:agent-1:v2"),
+                "v2 was left in the vault: the absent legacy key aborted the versioned scan");
+    }
+
+    /**
+     * {@code rotateKey} takes an arbitrary version number from its caller, so
+     * versions can be sparse. Stopping the scan at the first missing version left
+     * every key past the gap behind.
+     */
+    @Test
+    void deleteKeyPair_deletesVersionsPastAGap() throws Exception {
+        signingService.generateKeyPair("tenant-1", "agent-1");
+        signingService.generateKeyPairVersioned("tenant-1", "agent-1", 1);
+        signingService.generateKeyPairVersioned("tenant-1", "agent-1", 3);
+
+        signingService.deleteKeyPair("tenant-1", "agent-1");
+
+        assertFalse(secretProvider.contains("tenant-1", "agent-signing-key:agent-1:v3"),
+                "v3 was left in the vault: the scan stopped at the missing v2");
+    }
+
+    /**
+     * The scan is deliberately exhaustive rather than stopping at the first gap, so
+     * the cost of one permanent agent delete is fixed and worth pinning: the legacy
+     * key plus every version in {@code 1..MAX_KEY_VERSION_SCAN}, once each. An
+     * early {@code break} leaks the keys past a rotation gap; a wider or unbounded
+     * loop turns one delete into an unbounded number of vault round trips.
+     */
+    @Test
+    void deleteKeyPair_scansTheLegacyKeyAndTheWholeVersionRangeExactlyOnce() {
+        signingService.deleteKeyPair("tenant-1", "agent-1");
+
+        assertEquals(AgentSigningService.MAX_KEY_VERSION_SCAN + 1, secretProvider.deleteAttempts.size(),
+                "one delete per version, plus the legacy key; attempted: " + secretProvider.deleteAttempts.size());
+        assertTrue(secretProvider.deleteAttempts.contains("tenant-1:agent-signing-key:agent-1"), "the legacy key must be attempted");
+        assertTrue(secretProvider.deleteAttempts.contains("tenant-1:agent-signing-key:agent-1:v1"));
+        assertTrue(
+                secretProvider.deleteAttempts
+                        .contains("tenant-1:agent-signing-key:agent-1:v" + AgentSigningService.MAX_KEY_VERSION_SCAN),
+                "the last version in the documented range must be attempted");
+        assertFalse(
+                secretProvider.deleteAttempts
+                        .contains("tenant-1:agent-signing-key:agent-1:v" + (AgentSigningService.MAX_KEY_VERSION_SCAN + 1)),
+                "the scan must stay inside its documented bound");
+    }
+
+    /**
+     * "Absent" and "vault unreachable" are different, and only the first is
+     * expected. A vault error on one key must be reported and stepped over, not
+     * abandon the keys after it — a failure mid-scan is the same leak this method
+     * exists to prevent, wearing a success message.
+     */
+    @Test
+    void deleteKeyPair_continuesPastAVaultFailureOnOneKey() throws Exception {
+        signingService.generateKeyPair("tenant-1", "agent-1");
+        signingService.generateKeyPairVersioned("tenant-1", "agent-1", 1);
+        signingService.generateKeyPairVersioned("tenant-1", "agent-1", 2);
+        // The vault answers for everything except the legacy key, which is the first
+        // thing the scan touches.
+        secretProvider.failDeleteFor("tenant-1:agent-signing-key:agent-1");
+
+        assertDoesNotThrow(() -> signingService.deleteKeyPair("tenant-1", "agent-1"));
+
+        assertFalse(secretProvider.contains("tenant-1", "agent-signing-key:agent-1:v1"),
+                "a vault error on an earlier key must not abandon the rest of the scan");
+        assertFalse(secretProvider.contains("tenant-1", "agent-signing-key:agent-1:v2"),
+                "a vault error on an earlier key must not abandon the rest of the scan");
+    }
+
     // ==================== sign error path with SecretNotFoundException
     // ====================
+
+    /**
+     * The envelope path and the plain path used to report the identical failure
+     * differently: {@code sign} said "No signing key found", {@code signEnvelope}
+     * said "Envelope signing failed … InvalidKeySpecException". Only the exception
+     * TYPE was asserted, so the two were free to drift apart again.
+     */
+    @Test
+    void signEnvelope_reportsAMissingKeyTheSameWaySignDoes() {
+        var envelope = SignedEnvelope.forSigning("agent-1", "agent-2", Map.of("data", "test"));
+
+        var envelopeFailure = assertThrows(AgentSigningService.AgentSigningException.class,
+                () -> signingService.signEnvelope("t1", "nonexistent", envelope, 0));
+        var plainFailure = assertThrows(AgentSigningService.AgentSigningException.class,
+                () -> signingService.sign("t1", "nonexistent", "payload"));
+
+        assertEquals("No signing key found for agent nonexistent", envelopeFailure.getMessage());
+        assertEquals(plainFailure.getMessage(), envelopeFailure.getMessage(), "the two signing paths must not drift apart again");
+        assertInstanceOf(ISecretProvider.SecretNotFoundException.class, envelopeFailure.getCause(),
+                "the original cause must survive the unwrapping");
+    }
 
     @Test
     void sign_throwsWithSecretNotFoundCauseMessage() {
@@ -284,6 +393,24 @@ class AgentSigningServiceTest {
      */
     private static class InMemorySecretProvider implements ISecretProvider {
         private final ConcurrentHashMap<String, String> store = new ConcurrentHashMap<>();
+
+        /** Every key a delete was attempted for, in order — for pinning the scan. */
+        private final List<String> deleteAttempts = new ArrayList<>();
+
+        /**
+         * Keys whose delete reports the vault as unreachable, not the key as absent.
+         */
+        private final Set<String> unreachable = new HashSet<>();
+
+        /** Whether a key is still in the vault — for asserting what a delete left. */
+        boolean contains(String tenantId, String keyName) {
+            return store.containsKey(tenantId + ":" + keyName);
+        }
+
+        /** Makes {@code delete} answer {@code SecretProviderException} for this key. */
+        void failDeleteFor(String fullKey) {
+            unreachable.add(fullKey);
+        }
 
         /**
          * Reversible obfuscation, not encryption — this is a test double, and the
@@ -325,8 +452,12 @@ class AgentSigningServiceTest {
         }
 
         @Override
-        public void delete(SecretReference reference) throws SecretNotFoundException {
+        public void delete(SecretReference reference) throws SecretNotFoundException, SecretProviderException {
             String key = reference.tenantId() + ":" + reference.keyName();
+            deleteAttempts.add(key);
+            if (unreachable.contains(key)) {
+                throw new SecretProviderException("Vault unreachable for: " + key);
+            }
             if (store.remove(key) == null) {
                 throw new SecretNotFoundException("Secret not found: " + key);
             }

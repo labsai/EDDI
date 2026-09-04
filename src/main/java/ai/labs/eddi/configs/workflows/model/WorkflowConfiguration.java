@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.configs.workflows.model;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
+
 import java.net.URI;
 import java.util.HashMap;
 import java.util.LinkedList;
@@ -58,7 +60,7 @@ public class WorkflowConfiguration {
     // schemas (ZIP files / MongoDB)
     // where the property was natively named "workflowExtensions" instead of
     // "workflowSteps".
-    @com.fasterxml.jackson.annotation.JsonAlias("workflowExtensions")
+    @JsonAlias("workflowExtensions")
     public void setWorkflowSteps(List<WorkflowStep> workflowSteps) {
         this.workflowSteps = workflowSteps;
     }

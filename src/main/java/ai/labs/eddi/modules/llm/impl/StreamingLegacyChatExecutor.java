@@ -165,15 +165,26 @@ class StreamingLegacyChatExecutor {
     }
 
     /**
-     * Resolve the attempt count from the task's retry config, clamped to at least
-     * one: {@code maxAttempts <= 0} means "don't retry", not "never call the
-     * model". Without the clamp the retry loop body never runs and the caller gets
-     * a null response indistinguishable from silence.
+     * Resolve the attempt count from the task's retry config, bounded at both ends.
+     *
+     * <p>
+     * At least one: {@code maxAttempts <= 0} means "don't retry", not "never call
+     * the model". Without that the retry loop body never runs and the caller gets a
+     * null response indistinguishable from silence.
+     * </p>
+     *
+     * <p>
+     * And at most {@code RetryConfiguration.MAX_ATTEMPTS_CEILING}. This used to
+     * read {@code getMaxAttempts()} raw, so the engine ceiling that bounds the tool
+     * loop did not apply here: the identical {@code retry} block was capped on one
+     * path and unbounded on the other, and a streaming task could hold its worker
+     * for as many attempts as the config asked for.
+     * </p>
      */
     private static int resolveMaxAttempts(LlmConfiguration.Task task) {
         RetryConfiguration retryConfig = task != null ? task.getRetry() : null;
         int configured = retryConfig != null && retryConfig.getMaxAttempts() != null ? retryConfig.getMaxAttempts() : 1;
-        return Math.max(1, configured);
+        return Math.max(1, RetryConfiguration.clampAttempts(configured));
     }
 
     /**

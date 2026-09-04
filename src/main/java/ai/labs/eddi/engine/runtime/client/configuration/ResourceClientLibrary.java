@@ -26,7 +26,6 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.utils.RestUtilities;
 import ai.labs.eddi.utils.RuntimeUtilities;
-import org.jboss.logging.Logger;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -90,8 +89,6 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
     private final IRestRagStore restRagStore;
 
     private Map<String, IResourceService> resourceServices;
-
-    private static final Logger log = Logger.getLogger(ResourceClientLibrary.class);
 
     @Inject
     public ResourceClientLibrary(IParserStore parserStore, IDictionaryStore dictionaryStore, IRuleSetStore ruleSetStore,
@@ -342,13 +339,26 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
         return proxy.duplicate(resourceId.getId(), resourceId.getVersion());
     }
 
+    /**
+     * Deletes the resource a reference names.
+     *
+     * <p>
+     * An unregistered type is an error, not a silent skip. Returning
+     * {@code Response.ok()} here made {@code RestOrphanAdmin.purgeOrphans} count
+     * every unhandled orphan as "purged" — the whole {@code ai.labs.workflow}
+     * category, which is the largest one, since a deleted agent is exactly what
+     * leaves workflows unreferenced. The operator got a converged-looking report
+     * for an operation that had deleted nothing, forever. Matching
+     * {@link #duplicateResource}'s behaviour means a caller either deletes or is
+     * told it did not.
+     * </p>
+     */
     @Override
     public Response deleteResource(URI uri, boolean permanent) throws ServiceException {
         String type = uri.getHost();
         IResourceService proxy = resourceServices.get(type);
         if (RuntimeUtilities.isNullOrEmpty(proxy)) {
-            log.warnf("Could not find proxy for type '%s' in uri '%s' — skipping delete", type, uri);
-            return Response.ok().build();
+            throw new ServiceException(String.format("Could not find proxy for type '%s' in uri '%s' — nothing was deleted", type, uri));
         }
 
         IResourceId resourceId = RestUtilities.extractResourceId(uri);

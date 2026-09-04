@@ -6,13 +6,18 @@ package ai.labs.eddi.configs.rest;
 
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.net.URI;
+
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
 /**
@@ -104,5 +109,92 @@ class RestVersionInfoTest {
         // Assert
         assertEquals(3, resolvedVersion);
         verifyNoInteractions(resourceStore);
+    }
+
+    /**
+     * {@code read} took the version literally while {@code update} and
+     * {@code delete} both routed it through {@code validateParameters}, so
+     * {@code GET ?version=0} was a 404 while {@code PUT ?version=0} and
+     * {@code DELETE ?version=0} acted on the current version — no single convention
+     * worked across the three verbs.
+     */
+    @Test
+    void read_versionZero_readsTheCurrentVersion() throws Exception {
+        IResourceId currentResourceId = mock(IResourceId.class);
+        when(currentResourceId.getVersion()).thenReturn(5);
+        when(resourceStore.getCurrentResourceId(TEST_ID)).thenReturn(currentResourceId);
+        Object document = new Object();
+        when(resourceStore.read(TEST_ID, 5)).thenReturn(document);
+
+        assertSame(document, restVersionInfo.read(TEST_ID, 0));
+        verify(resourceStore).read(TEST_ID, 5);
+    }
+
+    /**
+     * Only {@code DocumentDescriptorFilter} — a JAX-RS response filter — used to
+     * flag a descriptor deleted, so it ran for an HTTP DELETE and for nothing else.
+     * Every in-process delete (the agent cascade, the workflow cascade, the orphan
+     * purge) left {@code deleted=false}, so the resource stayed in every listing,
+     * answered 404 when opened, and kept being re-reported by the orphan scan.
+     */
+    @Test
+    void delete_marksTheDescriptorDeleted() throws Exception {
+        var descriptor = new DocumentDescriptor();
+        when(documentDescriptorStore.readDescriptor(TEST_ID, 2)).thenReturn(descriptor);
+
+        restVersionInfo.delete(TEST_ID, 2, false);
+
+        assertTrue(descriptor.isDeleted());
+        verify(documentDescriptorStore).setDescriptor(TEST_ID, 2, descriptor);
+    }
+
+    /**
+     * Four classes used to assert in comments that {@code Response.getLocation()}
+     * returns null for {@code eddi://} scheme URIs, and a parallel creation API
+     * plus a three-strategy URI extractor were built around that belief. It is
+     * false, and this pins it against the real JAX-RS {@code RuntimeDelegate} on
+     * the Response {@code create} actually builds — so the next author does not
+     * reintroduce the workaround.
+     */
+    @Test
+    void create_locationHeaderCarriesTheEddiUri() throws Exception {
+        IResourceId created = mock(IResourceId.class);
+        when(created.getId()).thenReturn(TEST_ID);
+        when(created.getVersion()).thenReturn(1);
+        when(resourceStore.create(any())).thenReturn(created);
+
+        var response = restVersionInfo.create(new Object());
+
+        assertEquals(201, response.getStatus());
+        assertEquals(URI.create(RESOURCE_URI + TEST_ID + "?version=1"), response.getLocation());
+    }
+
+    /**
+     * Even a permanent delete only FLAGS the descriptor. Erasing the row would be
+     * tidier, but on the HTTP path {@code DocumentDescriptorFilter} runs after this
+     * and reads the descriptor back — a missing row there becomes a 404 answer to a
+     * delete that in fact succeeded.
+     */
+    @Test
+    void delete_permanent_flagsTheDescriptorRatherThanErasingIt() throws Exception {
+        var descriptor = new DocumentDescriptor();
+        when(documentDescriptorStore.readDescriptor(TEST_ID, 2)).thenReturn(descriptor);
+
+        restVersionInfo.delete(TEST_ID, 2, true);
+
+        assertTrue(descriptor.isDeleted());
+        verify(documentDescriptorStore).setDescriptor(TEST_ID, 2, descriptor);
+        verify(documentDescriptorStore, never()).deleteAllDescriptor(anyString());
+    }
+
+    @Test
+    void delete_descriptorFailureDoesNotFailTheDelete() throws Exception {
+        // The resource IS gone by then — a descriptor that cannot be updated must not
+        // turn a completed delete into an error response.
+        when(documentDescriptorStore.readDescriptor(TEST_ID, 2))
+                .thenThrow(new ResourceNotFoundException("no descriptor"));
+
+        assertEquals(200, restVersionInfo.delete(TEST_ID, 2, false).getStatus());
+        verify(resourceStore).delete(TEST_ID, 2);
     }
 }

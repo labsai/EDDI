@@ -91,7 +91,7 @@ public class RestWorkflowStore implements IRestWorkflowStore {
                                                             Boolean includePreviousVersions) {
 
         if (validateUri(containingResourceUri) == null) {
-            return createMalFormattedResourceUriException(containingResourceUri);
+            throw malformedResourceUri(containingResourceUri);
         }
 
         try {
@@ -102,7 +102,14 @@ public class RestWorkflowStore implements IRestWorkflowStore {
             // with the full descriptor payload. The page can come back short; that is the
             // right trade for a diagnostic listing bounded by how many things reference
             // one resource.
-            return visibleOnly(workflowStore.getWorkflowDescriptorsContainingResource(containingResourceUri, includePreviousVersions));
+            //
+            // filter/index/limit are applied here for the same reason, and used to be
+            // accepted and then dropped: paging clients got the whole list back on every
+            // page, and a resource referenced by thousands of workflows returned all of
+            // them at once.
+            return filterAndPage(
+                    visibleOnly(workflowStore.getWorkflowDescriptorsContainingResource(containingResourceUri, includePreviousVersions)), filter,
+                    index, limit);
         } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {
             throw sneakyThrow(e);
         }
@@ -139,14 +146,24 @@ public class RestWorkflowStore implements IRestWorkflowStore {
                 updated = true;
             }
 
+            // Pattern-matched rather than blind-cast (as RestOrphanAdmin already walks
+            // the same shape). A stored step with "extensions": null, or an extension
+            // value that is an object rather than an array, turned this endpoint into a
+            // 500 — and this is the endpoint the re-point cascade walks for every config
+            // edit, so one malformed step blocked re-pointing the whole workflow.
             Map<String, Object> extensions = workflowStep.getExtensions();
-            for (String extensionKey : extensions.keySet()) {
-                @SuppressWarnings("unchecked")
-                var extensionElements = (List<Map<String, Object>>) extensions.get(extensionKey);
-                for (Map<String, Object> extensionElement : extensionElements) {
-                    if (extensionElement.containsKey(KEY_CONFIG)) {
+            if (extensions == null) {
+                continue;
+            }
+            for (Object extensionValue : extensions.values()) {
+                if (!(extensionValue instanceof List<?> extensionElements)) {
+                    continue;
+                }
+                for (Object extensionElement : extensionElements) {
+                    if (extensionElement instanceof Map<?, ?> elementMap
+                            && elementMap.get(KEY_CONFIG) instanceof Map<?, ?> configMap) {
                         @SuppressWarnings("unchecked")
-                        var config = (Map<String, Object>) extensionElement.get(KEY_CONFIG);
+                        var config = (Map<String, Object>) configMap;
                         if (updateResourceURI(resourceURI, resourceURIWithoutVersion, config)) {
                             updated = true;
                         }
@@ -164,13 +181,16 @@ public class RestWorkflowStore implements IRestWorkflowStore {
     }
 
     private boolean updateResourceURI(URI resourceURI, String resourceURIWithoutVersion, Map<String, Object> config) {
-        if (config.containsKey(KEY_URI)) {
-            Object uri = config.get(KEY_URI);
-            if (uri.toString().startsWith(resourceURIWithoutVersion)) {
-                // found resource URI to update
-                config.put(KEY_URI, resourceURI);
-                return true;
-            }
+        // Null-tolerant on both sides: a step may have no config at all, and a
+        // present-but-null "uri" (JSON `"uri": null`) used to NPE on uri.toString().
+        if (config == null) {
+            return false;
+        }
+        Object uri = config.get(KEY_URI);
+        if (uri != null && uri.toString().startsWith(resourceURIWithoutVersion)) {
+            // found resource URI to update
+            config.put(KEY_URI, resourceURI);
+            return true;
         }
 
         return false;
@@ -186,14 +206,20 @@ public class RestWorkflowStore implements IRestWorkflowStore {
         // Before the cascade, not after: restVersionInfo.delete() checks at the end,
         // by which point the referenced resources would already be gone.
         restVersionInfo.requireOwnAccess(id);
-        if (cascade) {
+
+        // '0' means current, and resolving it here rather than only inside
+        // restVersionInfo.delete() is what makes ?version=0&cascade=true cascade at
+        // all — the read below would otherwise match nothing and skip silently.
+        version = restVersionInfo.validateParameters(id, version);
+
+        if (cascade && isCurrentVersion(id, version)) {
             try {
                 WorkflowConfiguration workflowConfig = workflowStore.read(id, version);
                 for (var workflowStep : workflowConfig.getWorkflowSteps()) {
                     // Delete parser dictionaries
                     URI type = workflowStep.getType();
                     if (type != null && "ai.labs.parser".equals(type.getHost())) {
-                        deleteParserDictionaries(workflowStep, permanent);
+                        deleteParserDictionaries(workflowStep);
                     }
 
                     // Delete main extension resource (via config.uri)
@@ -201,7 +227,7 @@ public class RestWorkflowStore implements IRestWorkflowStore {
                     if (!isNullOrEmpty(config)) {
                         Object resourceUriObj = config.get(KEY_URI);
                         if (!isNullOrEmpty(resourceUriObj)) {
-                            deleteResourceSafely(URI.create(resourceUriObj.toString()), permanent);
+                            deleteResourceSafely(URI.create(resourceUriObj.toString()));
                         }
                     }
                 }
@@ -214,9 +240,48 @@ public class RestWorkflowStore implements IRestWorkflowStore {
         return restVersionInfo.delete(id, version, permanent);
     }
 
+    /**
+     * Whether {@code version} is the workflow's live version, i.e. whether a
+     * cascade addressed at it may run.
+     *
+     * <p>
+     * Same ordering hazard as the agent store: {@code workflowStore.read} falls
+     * back to history, so a stale version's extension resources were torn down
+     * before {@code restVersionInfo.delete()} rejected the request. Refuse first,
+     * touch nothing.
+     * </p>
+     *
+     * @return true when the versions match; false when the workflow has no live
+     *         version (already soft-deleted), so a {@code permanent=true} purge of
+     *         the remaining history still works
+     */
+    private boolean isCurrentVersion(String id, Integer version) {
+        IResourceStore.IResourceId current;
+        try {
+            current = workflowStore.getCurrentResourceId(id);
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            // Already soft-deleted: no live version to protect, so skip the cascade
+            // and let the delete below purge whatever history is left.
+            return false;
+        }
+
+        if (!current.getVersion().equals(version)) {
+            throw RestUtilities.createConflictException(resourceURI, current);
+        }
+        return true;
+    }
+
     @SuppressWarnings("unchecked")
-    private void deleteParserDictionaries(WorkflowStep workflowStep, boolean permanent) {
-        var dictionaries = (List<Map<String, Object>>) workflowStep.getExtensions().get("dictionaries");
+    private void deleteParserDictionaries(WorkflowStep workflowStep) {
+        // A parser step with no extensions block at all is legal stored data (Jackson
+        // leaves it null for an absent or explicitly null "extensions"). This runs on
+        // the destructive cascade, where an NPE aborts it mid-way — after some
+        // resources have already been deleted — so the step is skipped, not thrown on.
+        Map<String, Object> extensions = workflowStep.getExtensions();
+        if (extensions == null) {
+            return;
+        }
+        var dictionaries = (List<Map<String, Object>>) extensions.get("dictionaries");
         if (!isNullOrEmpty(dictionaries)) {
             for (var dictionary : dictionaries) {
                 var dictType = dictionary.get("type");
@@ -225,7 +290,7 @@ public class RestWorkflowStore implements IRestWorkflowStore {
                     if (!isNullOrEmpty(config)) {
                         Object dictionaryUriObj = config.get(KEY_URI);
                         if (!isNullOrEmpty(dictionaryUriObj)) {
-                            deleteResourceSafely(URI.create(dictionaryUriObj.toString()), permanent);
+                            deleteResourceSafely(URI.create(dictionaryUriObj.toString()));
                         }
                     }
                 }
@@ -233,7 +298,21 @@ public class RestWorkflowStore implements IRestWorkflowStore {
         }
     }
 
-    private void deleteResourceSafely(URI resourceUri, boolean permanent) {
+    /**
+     * Soft-deletes a referenced resource, if nothing else still references it.
+     *
+     * <p>
+     * The cascade never deletes permanently, whatever the request asked for. The
+     * guard below is VERSION-scoped — it asks who references
+     * {@code R?version=<pinned>} — while a permanent delete is ID-scoped:
+     * {@code deleteAllPermanently} drops every version and every history row. A
+     * workflow pinning a different version of the same rule set is invisible to the
+     * guard and would lose it outright, unrecoverably. Soft-deleting the pinned
+     * version keeps guard and effect on the same scope; erasing a shared resource
+     * stays an explicit, non-cascading request against that resource.
+     * </p>
+     */
+    private void deleteResourceSafely(URI resourceUri) {
         List<DocumentDescriptor> referencingWorkflows;
         try {
             // Is this resource still referenced by other workflows?
@@ -263,7 +342,7 @@ public class RestWorkflowStore implements IRestWorkflowStore {
         }
 
         try {
-            resourceClientLibrary.deleteResource(resourceUri, permanent);
+            resourceClientLibrary.deleteResource(resourceUri, false);
             log.infof("Cascade-deleted resource %s", resourceUri);
         } catch (Exception e) {
             log.warnf("Failed to cascade-delete resource %s: %s", resourceUri, e.getMessage());
@@ -273,13 +352,21 @@ public class RestWorkflowStore implements IRestWorkflowStore {
     @Override
     public Response duplicateWorkflow(String id, Integer version, Boolean deepCopy) {
         restVersionInfo.requireViewAccess(id);
-        restVersionInfo.validateParameters(id, version);
+        // Keep the normalised version — validateParameters maps 0 -> current, and
+        // discarding it left workflowStore.read(id, 0) matching nothing, so the
+        // documented '0 means current' shorthand 404'd here while PUT and DELETE
+        // honoured it.
+        version = restVersionInfo.validateParameters(id, version);
         try {
             WorkflowConfiguration workflowConfig = workflowStore.read(id, version);
             if (deepCopy) {
                 for (var workflowStep : workflowConfig.getWorkflowSteps()) {
+                    // Guarded exactly as deleteWorkflow guards it: a stored step without a
+                    // type is accepted by WorkflowStore.create, and an unguarded getHost()
+                    // made ?deepCopy=true a bare NPE/500 — after sub-resources earlier in
+                    // the loop had already been created and persisted.
                     URI type = workflowStep.getType();
-                    if ("ai.labs.parser".equals(type.getHost())) {
+                    if (type != null && "ai.labs.parser".equals(type.getHost())) {
                         duplicateDictionaryInParser(workflowStep);
                     }
 
@@ -294,8 +381,12 @@ public class RestWorkflowStore implements IRestWorkflowStore {
                 }
             }
 
-            // Use createDocument() — bypasses broken Response.getLocation() for eddi://
-            // URIs
+            // createDocument() because the id and version are what this method needs;
+            // wrapping them in a Response only to unwrap it again would be the detour.
+            // NOT because Response.getLocation() is broken for eddi:// URIs — it is not,
+            // and duplicateResource() below depends on it working
+            // (RestWorkflowStoreCrudTest.duplicateDeepCopyWithParserDictionaries pins
+            // that with the real JAX-RS RuntimeDelegate).
             IResourceStore.IResourceId resourceId = restVersionInfo.createDocument(workflowConfig);
             URI createdUri = RestUtilities.createURI(resourceURI, resourceId.getId(), versionQueryParam, resourceId.getVersion());
             createDocumentDescriptorForDuplicate(documentDescriptorStore, resourceAccessGuard, id, version, createdUri);
@@ -309,12 +400,24 @@ public class RestWorkflowStore implements IRestWorkflowStore {
     }
 
     private void duplicateDictionaryInParser(WorkflowStep workflowStep) throws ServiceException {
-        URI type;
+        // Same guard as deleteParserDictionaries: a stored parser step may carry no
+        // extensions block at all, and a deep copy that NPEs leaves the sub-resources
+        // it already created behind.
+        Map<String, Object> extensions = workflowStep.getExtensions();
+        if (extensions == null) {
+            return;
+        }
         @SuppressWarnings("unchecked")
-        var dictionaries = (List<Map<String, Object>>) workflowStep.getExtensions().get("dictionaries");
+        var dictionaries = (List<Map<String, Object>>) extensions.get("dictionaries");
         if (!isNullOrEmpty(dictionaries)) {
             for (var dictionary : dictionaries) {
-                type = URI.create(dictionary.get("type").toString());
+                // Same null guard as deleteParserDictionaries — the two walked the same
+                // stored shape but disagreed about whether "type" may be absent.
+                var dictTypeObj = dictionary.get("type");
+                if (dictTypeObj == null) {
+                    continue;
+                }
+                URI type = URI.create(dictTypeObj.toString());
                 if ("ai.labs.parser.dictionaries.regular".equals(type.getHost())) {
                     @SuppressWarnings("unchecked")
                     var config = (Map<String, URI>) dictionary.get("config");
@@ -350,7 +453,8 @@ public class RestWorkflowStore implements IRestWorkflowStore {
         }
 
         if (isNullOrEmpty(newResourceLocation)) {
-            String errorMsg = String.format("New resource for %s could not be created. " + "Mission Location Header.", resourceUriObj);
+            String errorMsg = String.format("New resource for %s could not be created: the duplicate response carried no Location header.",
+                    resourceUriObj);
             throw new ServiceException(errorMsg);
         }
 
