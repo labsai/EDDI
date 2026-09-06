@@ -49,6 +49,30 @@ bottom of this file and are never archived.
 
 ---
 
+## 🕵️ fix(gdpr): log the pseudonym, not the identifier the erasure just removed (2026-09-07)
+
+**Repo:** EDDI (`fix/review-audit-gdpr`)
+
+A reviewer pushed further than the previous round did, and was right to. Sanitising the `userId` in
+the GDPR delete-all log stopped a caller forging log records, but it left the identifier itself
+sitting in the log — on the one code path whose entire purpose is to remove that identifier. Logs
+outlive the database and travel further than it does, so an erasure that writes the user's id into
+them has not finished the job (CWE-532).
+
+Both user-memory stores now log `AuditHmac.pseudonymFor(userId)`: the same deterministic SHA-256 the
+erasure cascade already substitutes into the audit ledger. An operator can still correlate the log
+line with the ledger entry, and neither holds the identifier. The pseudonym is hex, so it also
+cannot carry a record boundary — the injection fix is subsumed rather than discarded.
+
+`PostgresUserMemoryStore.deleteAllForUser` gained the null guard `MongoUserMemoryStore` has always
+had. Erasing "all entries for user null" is not a request anyone means, and the pseudonym refuses a
+null identifier rather than hashing one.
+
+The regression test asserts the stronger contract: the raw id must not appear in the captured log at
+all, and the pseudonym prefix must. Reverting the change fails it with the offending line quoted.
+
+---
+
 ## 📤 fix(gdpr): stop calling an export complete while four data categories are missing (2026-09-07)
 
 **Repo:** EDDI (`fix/review-audit-gdpr`)

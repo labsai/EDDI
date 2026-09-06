@@ -26,6 +26,7 @@ import java.util.logging.LogRecord;
 import java.util.logging.Logger;
 import java.util.ArrayList;
 import java.util.List;
+import ai.labs.eddi.engine.audit.AuditHmac;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -689,6 +690,17 @@ class PostgresUserMemoryStoreUnitTest {
         assertFalse(captured.isEmpty(), "nothing was captured, so this proves nothing - the logger was not open");
         assertTrue(captured.stream().anyMatch(value -> value.contains("GDPR delete-all")),
                 "the line under test did not fire; captured: " + captured);
+        // The stronger contract (CWE-532): this line records an ERASURE, so the raw
+        // identifier must not survive in the log at all - not merely survive with its
+        // newlines stripped. Logs outlive the database and travel further than it does.
+        for (String value : captured) {
+            assertFalse(value.contains("user1"),
+                    "the raw userId reached an erasure log line, so the log now holds the identifier the "
+                            + "erasure existed to remove; offending value: " + value);
+        }
+        assertTrue(captured.stream().anyMatch(value -> value.contains(AuditHmac.GDPR_PSEUDONYM_PREFIX)),
+                "the erasure log must carry the same pseudonym the cascade writes into the audit ledger, so "
+                        + "an operator can still correlate the two; captured: " + captured);
         for (String value : captured) {
             assertFalse(value.contains("\n") || value.contains("\r"),
                     "a CR/LF reached the log, so a caller can forge records (CWE-117); offending value: " + value);
