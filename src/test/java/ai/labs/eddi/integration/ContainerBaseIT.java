@@ -19,6 +19,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import org.jboss.logmanager.LogManager;
 
 /**
  * Base class for container-based integration tests.

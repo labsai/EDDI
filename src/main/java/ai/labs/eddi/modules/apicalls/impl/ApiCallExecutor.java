@@ -43,6 +43,7 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 
+import java.io.IOException;
 import static ai.labs.eddi.utils.MatchingUtilities.executeValuePath;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 import static jakarta.ws.rs.core.MediaType.TEXT_PLAIN;
@@ -300,7 +301,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
                         if (CONTENT_TYPE_APPLICATION_JSON.equals(actualContentType)) {
                             try {
                                 responseObject = jsonSerialization.deserialize(responseBody, Object.class);
-                            } catch (java.io.IOException jsonEx) {
+                            } catch (IOException jsonEx) {
                                 LOGGER.warnf("ApiCall (%s) returned application/json but body is not valid JSON, falling back to raw string: %s",
                                         call.getName(), jsonEx.getMessage());
                                 responseObject = responseBody;

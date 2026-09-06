@@ -1266,7 +1266,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         // Use direct CDI lookup instead of HTTP loopback proxy.
         // The MP REST Client proxy strips response headers (Location, X-Resource-URI)
         // and runs on the Vert.x IO event loop, causing deadlocks during import.
-        return jakarta.enterprise.inject.spi.CDI.current().select(clazz).get();
+        return CDI.current().select(clazz).get();
     }
 
     @SuppressWarnings("unchecked")

@@ -31,6 +31,7 @@ import java.util.*;
 import java.util.AbstractMap.SimpleEntry;
 import java.util.function.UnaryOperator;
 
+import java.security.SecureRandom;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
@@ -539,7 +540,7 @@ public class VaultSecretProvider implements ISecretProvider {
             boolean migratingFromLegacy = saltManager.isUsingLegacySalt();
             if (migratingFromLegacy) {
                 newSalt = new byte[16];
-                new java.security.SecureRandom().nextBytes(newSalt);
+                new SecureRandom().nextBytes(newSalt);
                 LOGGER.info("[VAULT] KEK rotation will also migrate from legacy salt to per-deployment random salt.");
             } else {
                 newSalt = saltManager.getSalt();

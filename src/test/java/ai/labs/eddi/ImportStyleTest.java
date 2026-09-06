@@ -44,23 +44,47 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ImportStyleTest {
 
     /**
-     * An inline FQN: a package path in EDDI's own namespace (or a common JDK one)
-     * followed by a capitalised type name.
+     * An inline FQN: a package path in EDDI's own namespace, a common JDK one, or
+     * one of the third-party roots this project actually depends on, followed by a
+     * capitalised type name.
+     * <p>
+     * The root list is explicit rather than a general lowercase-dotted-path shape:
+     * a generic pattern also matches method chains and builder idioms on a
+     * lowercase receiver, which are not FQNs at all.
+     * <p>
+     * It used to cover only {@code ai.labs.eddi}, {@code java.util},
+     * {@code java.time} and {@code java.nio.file}, while AGENTS.md 4.7 states the
+     * rule without any package restriction. That blind spot hid 381 inline
+     * third-party FQNs across 116 files - {@code jakarta.ws.rs.NotFoundException},
+     * {@code io.micrometer.core.instrument.Counter},
+     * {@code org.eclipse.microprofile.openapi.models.tags.Tag} and the like - none
+     * of which were disambiguation cases; they were simply missing imports.
      */
     // The trailing package segments are optional (*, not +). With '+' this missed
     // `java.util.List` entirely — there is no further lowercase segment after
     // `util` — which is exactly how the original audit under-counted.
     private static final Pattern INLINE_FQN = Pattern.compile(
-            "\\b((?:ai\\.labs\\.eddi|java\\.util|java\\.time|java\\.nio\\.file)(?:\\.[a-z][A-Za-z0-9_]*)*\\.[A-Z][A-Za-z0-9_]*)");
+            "\\b((?:ai\\.labs\\.eddi|java\\.util|java\\.time|java\\.io|java\\.net|java\\.lang|java\\.security|java\\.nio\\.file|jakarta|javax|org\\.eclipse|org\\.jboss|org\\.bson|org\\.postgresql|com\\.fasterxml|com\\.mongodb|io\\.quarkus|io\\.smallrye|io\\.micrometer|io\\.nats|dev\\.langchain4j)(?:\\.[a-z][A-Za-z0-9_]*)*\\.[A-Z][A-Za-z0-9_]*)");
 
     /**
-     * The only permitted inline FQNs: each of these files declares a class whose
-     * simple name collides with the superclass it extends, so one of the two can
-     * only be named in full.
+     * The only permitted inline FQNs, each a genuine collision where one of two
+     * same-named types can only be written in full.
+     * <ul>
+     * <li>The two {@code HistorizedResourceStore} files declare a class whose
+     * simple name collides with the superclass it extends.</li>
+     * <li>{@code NatsConversationCoordinator} imports {@code io.nats.client.api.*},
+     * which brings in {@code io.nats.client.api.Error}; its
+     * {@code catch (RuntimeException |
+     * java.lang.Error e)} clauses mean the JDK type. An explicit
+     * {@code import java.lang.Error} would resolve the ambiguity but is a redundant
+     * import (java.lang is implicit), which Checkstyle flags - so the inline FQN is
+     * the only clean spelling.</li>
+     * </ul>
      */
     private static final Set<String> ALLOWED = Set.of(
             "src/main/java/ai/labs/eddi/datastore/mongo/HistorizedResourceStore.java",
-            "src/main/java/ai/labs/eddi/datastore/mongo/ModifiableHistorizedResourceStore.java");
+            "src/main/java/ai/labs/eddi/datastore/mongo/ModifiableHistorizedResourceStore.java",
+            "src/main/java/ai/labs/eddi/engine/runtime/internal/NatsConversationCoordinator.java");
 
     /** Blanks out comments and string literals so neither is ever matched. */
     private static String stripNonCode(String source) {
