@@ -78,7 +78,23 @@
 #   accessed directly. (example: "foo.example.com,bar.example.com")
 #
 ###
-FROM registry.access.redhat.com/ubi9/openjdk-25-runtime:1.24@sha256:6b320cbb20bd8b74ed4b44d0ea086cc9651bfc64396fbe6c0d906a8da12bdd20
+# Red Hat UBI 10 OpenJDK 25 runtime, pinned by digest for OpenSSF supply-chain
+# compliance. Ships the same JDK build as the UBI 9 image it replaced
+# (Red_Hat-25.0.4.1.1-1), so this is an OS-layer change only.
+#
+# Two operational consequences of RHEL 10, both deliberate:
+#
+#   1. Host CPU baseline. RHEL 10 raises the microarchitecture floor from
+#      x86-64-v2 to x86-64-v3 — its glibc declares
+#      GNU_PROPERTY_X86_ISA_1_NEEDED = v3, so on a host without AVX2/BMI2/FMA
+#      (pre-2013 Intel, pre-2015 AMD) the container refuses to start rather
+#      than misbehaving. Every current cloud instance type clears this.
+#   2. TLS. RHEL 10's crypto policy additionally disables the static-RSA
+#      TLS 1.2 suites, and Red Hat's OpenJDK inherits the policy through
+#      /etc/crypto-policies/back-ends/java.config. Endpoints that negotiate
+#      ECDHE — every current LLM provider — are unaffected; an endpoint
+#      offering only non-forward-secret suites will no longer connect.
+FROM registry.access.redhat.com/ubi10/openjdk-25-runtime:1.24@sha256:c49d36c03d0a9472935b9f318f709c4cf158afa2dc204099f1f463cfbf9d4626
 
 ### Red Hat Container Certification — required labels
 ARG EDDI_VERSION=6.3.0

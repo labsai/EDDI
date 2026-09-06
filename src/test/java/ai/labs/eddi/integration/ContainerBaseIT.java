@@ -106,7 +106,7 @@ public abstract class ContainerBaseIT extends BaseIntegrationIT {
         // flat COPY source paths (quarkus-app/ instead of target/quarkus-app/)
         // because target/quarkus-app is mapped to quarkus-app in the build context.
         String testDockerfile = """
-                FROM registry.access.redhat.com/ubi9/openjdk-25-runtime:1.24
+                FROM registry.access.redhat.com/ubi10/openjdk-25-runtime:1.24
                 ENV LANG='C.utf8' LANGUAGE='C.utf8'
                 USER root
                 RUN mkdir -p /deployments/tmp/import && \\

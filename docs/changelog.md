@@ -49,6 +49,92 @@ bottom of this file and are never archived.
 
 ---
 
+## 🐧 chore(docker): move the production base image to UBI 10 (2026-09-06)
+
+**Repo:** EDDI (`chore/ubi10-base-image`)
+
+Companion to the UBI 9 digest bump on `fix/base-image-digest-and-check`, which is the immediate
+release unblock. This is the durable fix: `ubi9/openjdk-25-runtime` carries a standing CVE
+backlog that a digest bump only ever partially drains, and `ubi10/openjdk-25-runtime` is
+currently **clean at every severity**.
+
+| Base | CRITICAL/HIGH | MEDIUM/LOW | Layer size |
+|---|---|---|---|
+| `ubi9/openjdk-25-runtime:1.24` (newest digest) | 10 | 223 | 145.7 MB |
+| `ubi10/openjdk-25-runtime:1.24` | **0** | **0** | 127.0 MB |
+
+**The JDK does not change.** Both images ship Red Hat OpenJDK `25.0.4.1+1-LTS`
+(`Red_Hat-25.0.4.1.1-1`), so this is strictly an OS-layer move — no bytecode, JIT or GC
+behaviour differs. UID 185, the `run-java.sh` entrypoint, the `JBOSS_CONTAINER_*` module layout,
+`curl` (needed by `HEALTHCHECK`) and `microdnf` (needed by the stopgap escape hatch in
+`AGENTS.md`) are all present and identical. Only `JAVA_HOME` moves, from `/usr/lib/jvm/jre` to
+`/usr/lib/jvm/java-25-openjdk`, and nothing in this repo reads it.
+
+### Verified, not assumed
+
+Built the image, ran the CI image gate with its own flags (`--severity CRITICAL,HIGH
+--ignore-unfixed`) → zero findings, exit 0. Booted it against MongoDB: container `HEALTHCHECK`
+healthy, health `UP` on all four checks, `/openapi` 200, `/manage/` 200, all three security
+headers present, Red Hat certification labels and `/licenses` intact. Drove a two-turn
+rule-based conversation end to end — create ruleset → output set → workflow → agent → deploy →
+start → say — against a UBI 9 control on the same build; identical output and an identical set
+of startup warnings.
+
+### Two RHEL 10 constraints, both documented in the `FROM` block
+
+**1. Host CPU floor rises to x86-64-v3.** Verified by reading
+`GNU_PROPERTY_X86_ISA_1_NEEDED` out of each image's `libc.so.6`: UBI 9 declares
+`x86-64-v2`, UBI 10 declares `x86-64-v3`. So the host needs AVX2, BMI2 and FMA — Intel Haswell
+(2013) or AMD Excavator (2015) onward. Every current cloud instance type clears it; a pre-2013
+bare-metal host does not, and glibc refuses to start rather than failing later. `libjvm.so`
+carries no ISA note (HotSpot probes the CPU at run time), so glibc is the binding constraint.
+
+**2. Static-RSA TLS 1.2 suites are disabled.** RHEL 10's crypto policy adds
+`TLS_RSA_WITH_AES_{128,256}_{CBC,GCM}_*` to the disabled set, and Red Hat's OpenJDK inherits
+`/etc/crypto-policies/back-ends/java.config` — confirmed with
+`java -XshowSettings:security:properties`, where those suites appear in the JVM's
+`jdk.tls.disabledAlgorithms` on UBI 10 and not on UBI 9. Every current LLM provider negotiates
+ECDHE and is unaffected; TLS to the OpenAI, Anthropic and Google endpoints succeeds from inside
+the image. An on-prem endpoint offering only non-forward-secret suites would connect on UBI 9
+and fail on UBI 10.
+
+Both are stated in full in the `FROM` block of [`Dockerfile`](../src/main/docker/Dockerfile), so
+the next person to touch that line sees them without leaving the file, and summarized in
+[`docs/redhat-openshift.md`](redhat-openshift.md) for operators.
+
+### Red Hat support boundary
+
+A container supplies its own userspace, so the UBI 10 image runs on a RHEL 9 host. Red Hat's
+support policy covers a container only on a host of the **same or newer** major, so that
+combination is outside it. `redhat-openshift.md` now says so and points deployments that need
+support on RHEL 9 hosts at 6.3.x and earlier.
+
+### `ContainerBaseIT` moves with the Dockerfile
+
+`ContainerBaseIT` builds its own inline Dockerfile that mirrored the production `FROM` — on
+UBI 9, unpinned. Left behind, every container-based integration test would have gone on
+exercising the base production no longer uses. Moved to UBI 10 and called out in `AGENTS.md`,
+because a mirror that drifts is worse than no mirror.
+
+### The check that could not have told us
+
+`base-image-check.yml`'s tag probe only walks `MAJOR.MINOR+1…+5` **within the pinned
+repository**, so `ubi10` was invisible to it no matter how long it existed — the job would have
+reported `1.24 is the latest tag` forever. Added a `Check for newer UBI major` step that derives
+the `ubiN` segment from the image path and probes `ubiN+1` and `ubiN+2` (trying the pinned tag,
+then `latest`, so a renamed tag scheme still registers), plus a matching issue notification whose
+body lists what to confirm before a major move: CPU baseline, crypto policy, JDK build, and
+`ContainerBaseIT`. Verified against the live registry — `ubi11` and `ubi12` are 404 today, and
+running the same logic against the old `ubi9` pin resolves to `ubi10`, which is exactly the miss
+it closes.
+
+**Files:** [`src/main/docker/Dockerfile`](../src/main/docker/Dockerfile),
+[`ContainerBaseIT.java`](../src/test/java/ai/labs/eddi/integration/ContainerBaseIT.java),
+[`.github/workflows/base-image-check.yml`](../.github/workflows/base-image-check.yml),
+[`AGENTS.md`](../AGENTS.md), [`docs/redhat-openshift.md`](redhat-openshift.md)
+
+---
+
 ## 🔀 fix(build): repair `main` while merging it into the v5 compatibility branch (2026-09-06)
 
 **Repo:** EDDI (`fix/review-legacy-compat`)

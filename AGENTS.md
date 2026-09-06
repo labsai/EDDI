@@ -639,10 +639,13 @@ When designing any new feature, always consider these before finalizing the desi
 
 #### Base Image Management
 
-The production image (`Dockerfile`) uses a Red Hat UBI 9 base pinned by **SHA256 digest** for OpenSSF supply-chain compliance. This means:
+The production image (`Dockerfile`) uses a Red Hat UBI 10 base pinned by **SHA256 digest** for OpenSSF supply-chain compliance. This means:
 
 - The `FROM` line must always include `@sha256:...` — never use a bare tag like `:1.24`
 - Red Hat periodically republishes the same tag with security patches baked in
+- `ContainerBaseIT`'s inline Dockerfile mirrors this base — move both together, or the integration tests stop exercising what production runs
+
+RHEL 10 carries two constraints the `FROM` line documents in full and that any change here must preserve: a **x86-64-v3 host CPU floor** (glibc refuses to start below it) and a crypto policy that **disables the static-RSA TLS 1.2 suites** for the JVM as well as the OS.
 
 #### Trivy CVE Remediation Procedure
 
@@ -650,7 +653,7 @@ When Trivy (CI container scan) flags a base image CVE:
 
 1. **Check for a newer digest first** — pull the latest image for the same tag and compare:
    ```bash
-   docker pull registry.access.redhat.com/ubi9/openjdk-25-runtime:1.24
+   docker pull registry.access.redhat.com/ubi10/openjdk-25-runtime:1.24
    # Check the digest in the pull output
    docker run --rm <image> rpm -q <vulnerable-package>
    ```
