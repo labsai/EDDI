@@ -70,6 +70,11 @@ class RestAgentStoreTest {
         // version, since it tears down workflows and schedules before the delete —
         // the only place the version used to be checked — has run.
         when(AgentStore.getCurrentResourceId(AGENT_ID)).thenReturn(resourceId(AGENT_ID, 1));
+        // A workflow reference is version-pinned and is NOT re-pointed when the
+        // workflow is edited, so the cascade resolves each one to the version that
+        // EXISTS before it asks who else uses it or deletes anything.
+        when(restWorkflowStore.getCurrentResourceId(PKG1_ID)).thenReturn(resourceId(PKG1_ID, 2));
+        when(restWorkflowStore.getCurrentResourceId(PKG2_ID)).thenReturn(resourceId(PKG2_ID, 1));
     }
 
     static IResourceStore.IResourceId resourceId(String id, int version) {
@@ -145,8 +150,8 @@ class RestAgentStoreTest {
                     URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG2_ID + "?version=1"))));
             when(AgentStore.read(AGENT_ID, 1)).thenReturn(config);
             // Each package is only referenced by this one agent
-            when(AgentStore.getAgentDescriptorsContainingWorkflow(PKG1_ID, 2, false)).thenReturn(List.of(dummyDescriptor()));
-            when(AgentStore.getAgentDescriptorsContainingWorkflow(PKG2_ID, 1, false)).thenReturn(List.of(dummyDescriptor()));
+            when(AgentStore.getAgentDescriptorsContainingWorkflow(PKG1_ID, 2, true)).thenReturn(List.of(dummyDescriptor()));
+            when(AgentStore.getAgentDescriptorsContainingWorkflow(PKG2_ID, 1, true)).thenReturn(List.of(dummyDescriptor()));
             when(restWorkflowStore.deleteWorkflow(anyString(), anyInt(), anyBoolean(), anyBoolean())).thenReturn(Response.ok().build());
 
             restAgentStore.deleteAgent(AGENT_ID, 1, true, true);
@@ -168,7 +173,7 @@ class RestAgentStoreTest {
             AgentConfiguration config = new AgentConfiguration();
             config.setWorkflows(new ArrayList<>(List.of(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG1_ID + "?version=1"))));
             when(AgentStore.read(AGENT_ID, 1)).thenReturn(config);
-            when(AgentStore.getAgentDescriptorsContainingWorkflow(PKG1_ID, 1, false)).thenReturn(List.of(dummyDescriptor()));
+            when(AgentStore.getAgentDescriptorsContainingWorkflow(PKG1_ID, 2, true)).thenReturn(List.of(dummyDescriptor()));
             when(restWorkflowStore.deleteWorkflow(anyString(), anyInt(), anyBoolean(), anyBoolean())).thenReturn(Response.ok().build());
 
             restAgentStore.deleteAgent(AGENT_ID, 1, true, true);
@@ -184,9 +189,9 @@ class RestAgentStoreTest {
                     URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG2_ID + "?version=1"))));
             when(AgentStore.read(AGENT_ID, 1)).thenReturn(config);
             // PKG1 is shared with 2 agents — should be SKIPPED
-            when(AgentStore.getAgentDescriptorsContainingWorkflow(PKG1_ID, 2, false)).thenReturn(List.of(dummyDescriptor(), dummyDescriptor()));
+            when(AgentStore.getAgentDescriptorsContainingWorkflow(PKG1_ID, 2, true)).thenReturn(List.of(dummyDescriptor(), dummyDescriptor()));
             // PKG2 is only in this Agent — should be deleted
-            when(AgentStore.getAgentDescriptorsContainingWorkflow(PKG2_ID, 1, false)).thenReturn(List.of(dummyDescriptor()));
+            when(AgentStore.getAgentDescriptorsContainingWorkflow(PKG2_ID, 1, true)).thenReturn(List.of(dummyDescriptor()));
             when(restWorkflowStore.deleteWorkflow(anyString(), anyInt(), anyBoolean(), anyBoolean())).thenReturn(Response.ok().build());
 
             restAgentStore.deleteAgent(AGENT_ID, 1, true, true);
@@ -205,13 +210,13 @@ class RestAgentStoreTest {
                     URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG2_ID + "?version=1"))));
             when(AgentStore.read(AGENT_ID, 1)).thenReturn(config);
             // both packages only referenced by this agent
-            when(AgentStore.getAgentDescriptorsContainingWorkflow(anyString(), anyInt(), eq(false))).thenReturn(List.of(dummyDescriptor()));
-            when(restWorkflowStore.deleteWorkflow(PKG1_ID, 1, false, true)).thenThrow(new RuntimeException("Workflow in use"));
+            when(AgentStore.getAgentDescriptorsContainingWorkflow(anyString(), anyInt(), eq(true))).thenReturn(List.of(dummyDescriptor()));
+            when(restWorkflowStore.deleteWorkflow(PKG1_ID, 2, false, true)).thenThrow(new RuntimeException("Workflow in use"));
             when(restWorkflowStore.deleteWorkflow(PKG2_ID, 1, false, true)).thenReturn(Response.ok().build());
 
             assertDoesNotThrow(() -> restAgentStore.deleteAgent(AGENT_ID, 1, true, true));
 
-            verify(restWorkflowStore).deleteWorkflow(PKG1_ID, 1, false, true);
+            verify(restWorkflowStore).deleteWorkflow(PKG1_ID, 2, false, true);
             verify(restWorkflowStore).deleteWorkflow(PKG2_ID, 1, false, true);
             verify(AgentStore).deleteAllPermanently(AGENT_ID);
         }
@@ -279,12 +284,12 @@ class RestAgentStoreTest {
             AgentConfiguration config = new AgentConfiguration();
             config.setWorkflows(new ArrayList<>(List.of(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG1_ID + "?version=1"))));
             when(AgentStore.read(AGENT_ID, 1)).thenReturn(config);
-            when(AgentStore.getAgentDescriptorsContainingWorkflow(PKG1_ID, 1, false)).thenReturn(List.of(dummyDescriptor()));
+            when(AgentStore.getAgentDescriptorsContainingWorkflow(PKG1_ID, 2, true)).thenReturn(List.of(dummyDescriptor()));
             when(restWorkflowStore.deleteWorkflow(anyString(), anyInt(), anyBoolean(), anyBoolean())).thenReturn(Response.ok().build());
 
             restAgentStore.deleteAgent(AGENT_ID, 0, false, true);
 
-            verify(restWorkflowStore).deleteWorkflow(PKG1_ID, 1, false, true);
+            verify(restWorkflowStore).deleteWorkflow(PKG1_ID, 2, false, true);
             verify(AgentStore).delete(AGENT_ID, 1);
         }
 
@@ -341,11 +346,38 @@ class RestAgentStoreTest {
         @Test
         @DisplayName("removes the signing key from the vault when the Agent is permanently deleted")
         void deletesSigningKeyPair() throws Exception {
-            when(AgentStore.read(AGENT_ID, 1)).thenReturn(agentWithSigningIdentity());
+            when(AgentStore.readIncludingDeleted(AGENT_ID, 1)).thenReturn(agentWithSigningIdentity());
 
             restAgentStore.deleteAgent(AGENT_ID, 1, true, false);
 
-            verify(agentSigningService).deleteKeyPair("default", AGENT_ID);
+            // An EMPTY version list, not null: this Agent carries the legacy
+            // unversioned key and no rotated ones, and null is what asks for the
+            // blind 1..100 sweep.
+            verify(agentSigningService).deleteKeyPair("default", AGENT_ID, List.of());
+        }
+
+        /**
+         * The two-step purge the API documents as ordinary: soft-delete an Agent, then
+         * come back and {@code DELETE ?permanent=true}. The probe used to read through
+         * {@code agentStore.read}, which throws {@code ResourceNotFoundException} for a
+         * history row flagged deleted — i.e. for EVERY soft-deleted Agent — so it
+         * answered "no key material" and the Ed25519 private key stayed in the vault
+         * after the config and all of its history had been erased. That is the leak
+         * this cleanup exists to close, surviving on the only recommended path to
+         * closing it.
+         */
+        @Test
+        @DisplayName("purging an already soft-deleted Agent still removes its vault keys")
+        void purgingASoftDeletedAgentStillRemovesItsKeys() throws Exception {
+            when(AgentStore.getCurrentResourceId(AGENT_ID))
+                    .thenThrow(new IResourceStore.ResourceNotFoundException("no current version"));
+            when(AgentStore.read(AGENT_ID, 1)).thenThrow(new IResourceStore.ResourceNotFoundException("soft-deleted"));
+            when(AgentStore.readIncludingDeleted(AGENT_ID, 1)).thenReturn(agentWithRotatedKeys());
+
+            restAgentStore.deleteAgent(AGENT_ID, 1, true, false);
+
+            verify(agentSigningService).deleteKeyPair("default", AGENT_ID, List.of(1, 3));
+            verify(AgentStore).deleteAllPermanently(AGENT_ID);
         }
 
         /**
@@ -360,22 +392,22 @@ class RestAgentStoreTest {
         @Test
         @DisplayName("keeps the signing key in the vault on a soft delete")
         void keepsSigningKeyPairOnASoftDelete() throws Exception {
-            when(AgentStore.read(AGENT_ID, 1)).thenReturn(agentWithSigningIdentity());
+            when(AgentStore.readIncludingDeleted(AGENT_ID, 1)).thenReturn(agentWithSigningIdentity());
 
             restAgentStore.deleteAgent(AGENT_ID, 1, false, false);
 
             verify(AgentStore).delete(AGENT_ID, 1);
-            verify(agentSigningService, never()).deleteKeyPair(anyString(), anyString());
+            verify(agentSigningService, never()).deleteKeyPair(anyString(), anyString(), any());
         }
 
         @Test
         @DisplayName("does not probe the vault for an Agent with no key material")
         void skipsVaultForAgentWithoutIdentity() throws Exception {
-            when(AgentStore.read(AGENT_ID, 1)).thenReturn(new AgentConfiguration());
+            when(AgentStore.readIncludingDeleted(AGENT_ID, 1)).thenReturn(new AgentConfiguration());
 
             restAgentStore.deleteAgent(AGENT_ID, 1, true, false);
 
-            verify(agentSigningService, never()).deleteKeyPair(anyString(), anyString());
+            verify(agentSigningService, never()).deleteKeyPair(anyString(), anyString(), any());
         }
 
         /**
@@ -387,11 +419,138 @@ class RestAgentStoreTest {
         @Test
         @DisplayName("an unreadable Agent is still deleted, with the vault probe answering no")
         void unreadableAgentDoesNotBlockThePermanentDelete() throws Exception {
-            when(AgentStore.read(AGENT_ID, 1)).thenThrow(new IResourceStore.ResourceStoreException("mongo down"));
+            when(AgentStore.readIncludingDeleted(AGENT_ID, 1)).thenThrow(new IResourceStore.ResourceStoreException("mongo down"));
 
             assertDoesNotThrow(() -> restAgentStore.deleteAgent(AGENT_ID, 1, true, false));
 
-            verify(agentSigningService, never()).deleteKeyPair(anyString(), anyString());
+            verify(agentSigningService, never()).deleteKeyPair(anyString(), anyString(), any());
+            verify(AgentStore).deleteAllPermanently(AGENT_ID);
+        }
+
+        /**
+         * The pre-cascade version check is a check-then-act, exactly as it was in
+         * {@code RestWorkflowStore.deleteWorkflow}. A concurrent update committing
+         * between it and {@code restVersionInfo.delete()} — a PUT, or the 10-second
+         * deployment sweep touching this Agent — used to leave the schedules deleted
+         * and every exclusively owned workflow (and, through deleteWorkflow's own
+         * cascade, its extensions) torn down while the delete answered 409 "nothing was
+         * deleted". The live Agent kept its config and lost everything it pointed at,
+         * and the 409 contract {@code IRestAgentStore} documents was false on this
+         * path. Deleting the Agent FIRST makes the store's own version check the gate.
+         */
+        @Test
+        @DisplayName("an Agent that moved on between the guard and the delete loses neither workflows nor schedules")
+        void concurrentUpdateBetweenGuardAndDeleteCascadesNothing() throws Exception {
+            AgentConfiguration config = new AgentConfiguration();
+            config.setWorkflows(
+                    new ArrayList<>(List.of(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG1_ID + "?version=1"))));
+            when(AgentStore.read(AGENT_ID, 1)).thenReturn(config);
+            when(AgentStore.getAgentDescriptorsContainingWorkflow(PKG1_ID, 2, true)).thenReturn(List.of(dummyDescriptor()));
+            // The guard saw v1; by the time the delete runs the Agent is at v2.
+            doThrow(new IResourceStore.ResourceModifiedException("not the latest version")).when(AgentStore).delete(AGENT_ID, 1);
+
+            assertThrows(IResourceStore.ResourceModifiedException.class, () -> restAgentStore.deleteAgent(AGENT_ID, 1, false, true));
+
+            verify(restWorkflowStore, never()).deleteWorkflow(anyString(), anyInt(), anyBoolean(), anyBoolean());
+            verify(scheduleStore, never()).deleteSchedulesByAgentId(anyString());
+        }
+
+        /**
+         * The other half of the reordering: DECIDING still happens before the delete,
+         * so the reference guard counts this Agent among a workflow's referrers (hence
+         * the {@code > 1} test). Were the reverse lookup moved after the delete, the
+         * Agent would no longer count itself, a workflow shared with exactly one other
+         * Agent would come back as size 1, and the cascade would delete a workflow that
+         * is still in use.
+         */
+        @Test
+        @DisplayName("a workflow shared with another Agent survives the cascade")
+        void sharedWorkflowIsNotCascadeDeleted() throws Exception {
+            AgentConfiguration config = new AgentConfiguration();
+            config.setWorkflows(
+                    new ArrayList<>(List.of(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG1_ID + "?version=1"))));
+            when(AgentStore.read(AGENT_ID, 1)).thenReturn(config);
+            // This Agent plus one other — the guard must read that as "still referenced".
+            when(AgentStore.getAgentDescriptorsContainingWorkflow(PKG1_ID, 2, true))
+                    .thenReturn(List.of(dummyDescriptor(), dummyDescriptor()));
+
+            restAgentStore.deleteAgent(AGENT_ID, 1, false, true);
+
+            verify(AgentStore).delete(AGENT_ID, 1);
+            verify(restWorkflowStore, never()).deleteWorkflow(anyString(), anyInt(), anyBoolean(), anyBoolean());
+        }
+
+        /**
+         * A reference to a workflow that has no live version left is nothing to cascade
+         * at — there is no version to address the delete at, and guessing the pinned
+         * one would resurrect the very stale-version delete the guard exists to refuse.
+         * It is skipped, and the workflows after it in the list are still planned: one
+         * dangling reference must not disarm the whole cascade.
+         */
+        @Test
+        @DisplayName("a workflow with no live version left is skipped, and the rest of the cascade still runs")
+        void workflowWithNoLiveVersionIsSkipped() throws Exception {
+            AgentConfiguration config = new AgentConfiguration();
+            config.setWorkflows(new ArrayList<>(List.of(
+                    URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG1_ID + "?version=1"),
+                    URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG2_ID + "?version=1"))));
+            when(AgentStore.read(AGENT_ID, 1)).thenReturn(config);
+            when(restWorkflowStore.getCurrentResourceId(PKG1_ID))
+                    .thenThrow(new IResourceStore.ResourceNotFoundException("already soft-deleted"));
+            when(AgentStore.getAgentDescriptorsContainingWorkflow(PKG2_ID, 1, true)).thenReturn(List.of(dummyDescriptor()));
+
+            restAgentStore.deleteAgent(AGENT_ID, 1, false, true);
+
+            verify(restWorkflowStore, never()).deleteWorkflow(eq(PKG1_ID), anyInt(), anyBoolean(), anyBoolean());
+            verify(restWorkflowStore).deleteWorkflow(PKG2_ID, 1, false, true);
+            verify(AgentStore).delete(AGENT_ID, 1);
+        }
+
+        /**
+         * FAIL CLOSED per workflow. A reference check that cannot answer is not a
+         * licence to delete, and letting the throwable out of the planning step would
+         * abort the request before the Agent itself had been deleted — leaving the
+         * Agent undeletable for as long as the store misbehaves.
+         */
+        @Test
+        @DisplayName("a reference check that blows up skips that workflow and still deletes the Agent")
+        void referenceCheckFailureSkipsOnlyThatWorkflow() throws Exception {
+            AgentConfiguration config = new AgentConfiguration();
+            config.setWorkflows(new ArrayList<>(List.of(
+                    URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG1_ID + "?version=1"),
+                    URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG2_ID + "?version=1"))));
+            when(AgentStore.read(AGENT_ID, 1)).thenReturn(config);
+            when(AgentStore.getAgentDescriptorsContainingWorkflow(PKG1_ID, 2, true))
+                    .thenThrow(new IResourceStore.ResourceStoreException("reverse lookup broken"));
+            when(AgentStore.getAgentDescriptorsContainingWorkflow(PKG2_ID, 1, true)).thenReturn(List.of(dummyDescriptor()));
+
+            restAgentStore.deleteAgent(AGENT_ID, 1, false, true);
+
+            verify(restWorkflowStore, never()).deleteWorkflow(eq(PKG1_ID), anyInt(), anyBoolean(), anyBoolean());
+            verify(restWorkflowStore).deleteWorkflow(PKG2_ID, 1, false, true);
+            verify(AgentStore).delete(AGENT_ID, 1);
+        }
+
+        /**
+         * An {@code identity} block is not by itself key material: an Agent can carry
+         * one for its name or metadata with neither a legacy {@code publicKey} nor any
+         * rotated {@code keys}. Destroying vault entries is irreversible — there is no
+         * key-generation endpoint — so the cleanup must only run for an Agent that
+         * actually declares a key.
+         */
+        @Test
+        @DisplayName("an identity block with no key material does not trigger the vault cleanup")
+        void identityWithoutKeysDoesNotTriggerVaultCleanup() throws Exception {
+            var config = new AgentConfiguration();
+            var identity = new AgentConfiguration.AgentIdentity();
+            identity.setPublicKey("   ");
+            identity.setKeys(new ArrayList<>());
+            config.setIdentity(identity);
+            when(AgentStore.readIncludingDeleted(AGENT_ID, 1)).thenReturn(config);
+
+            restAgentStore.deleteAgent(AGENT_ID, 1, true, false);
+
+            verify(agentSigningService, never()).deleteKeyPair(anyString(), anyString(), any());
             verify(AgentStore).deleteAllPermanently(AGENT_ID);
         }
 
@@ -399,6 +558,18 @@ class RestAgentStoreTest {
             var config = new AgentConfiguration();
             var identity = new AgentConfiguration.AgentIdentity();
             identity.setPublicKey("MCowBQYDK2VwAyEA-not-a-real-key");
+            config.setIdentity(identity);
+            return config;
+        }
+
+        /**
+         * A rotated identity whose declared versions skip a number, as rotateKey
+         * allows.
+         */
+        private AgentConfiguration agentWithRotatedKeys() {
+            var config = new AgentConfiguration();
+            var identity = new AgentConfiguration.AgentIdentity();
+            identity.setKeys(new ArrayList<>(List.of(AgentPublicKey.createCurrent(1, "k1"), AgentPublicKey.createCurrent(3, "k3"))));
             config.setIdentity(identity);
             return config;
         }

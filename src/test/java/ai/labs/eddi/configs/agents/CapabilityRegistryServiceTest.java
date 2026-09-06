@@ -23,16 +23,24 @@ import org.junit.jupiter.api.Test;
 import java.lang.annotation.Annotation;
 import java.lang.reflect.Method;
 import java.net.URI;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class CapabilityRegistryServiceTest {
@@ -475,6 +483,72 @@ class CapabilityRegistryServiceTest {
             assertTrue(svc.getAllSkills().isEmpty());
         }
 
+        /**
+         * An empty {@code capabilities} array is what the Manager leaves behind when an
+         * author adds the block and then removes every entry. Registering it would put
+         * an agent id in the index under no skill at all — an entry no skill-keyed
+         * lookup can ever reach or clean up.
+         *
+         * <p>
+         * {@code getAllSkills().isEmpty()} alone cannot see the guard:
+         * {@code register()} on an empty list is itself a no-op, so the index looks
+         * identical with and without {@code && !config.getCapabilities().isEmpty()}.
+         * What the guard actually decides is whether this agent is <em>counted</em> as
+         * seeded — so the two observable consequences are asserted instead: the
+         * registry is never asked to register it, and the seeding does not report a
+         * populated registry. Drop the {@code isEmpty()} half of the guard and
+         * {@code registered} becomes 1, which logs "Capability registry populated: 1
+         * agent(s)" for an index that holds nothing.
+         * </p>
+         */
+        @Test
+        @DisplayName("skips an agent whose capabilities array is present but empty")
+        void skipsAgentWithEmptyCapabilities() throws Exception {
+            var agentStore = mock(IAgentStore.class);
+            var descriptorStore = mock(IDocumentDescriptorStore.class);
+            when(descriptorStore.readDescriptors("ai.labs.agent", null, 0, 0, false)).thenReturn(List.of(agentDescriptor()));
+
+            var config = new AgentConfiguration();
+            config.setCapabilities(List.of());
+            when(agentStore.read(AGENT_ID, 1)).thenReturn(config);
+
+            var svc = spy(new CapabilityRegistryService(new SimpleMeterRegistry(), agentStore, descriptorStore));
+            svc.initMetrics();
+
+            List<String> captured = captureLogsOf(CapabilityRegistryService.class, () -> svc.onStartup(null));
+
+            assertTrue(svc.getAllSkills().isEmpty());
+            verify(svc, never()).register(anyString(), any(AgentConfiguration.class));
+            assertTrue(captured.stream().noneMatch(value -> value.contains("Capability registry populated")),
+                    "an agent that was skipped must not be counted as seeded; captured: " + captured);
+        }
+
+        /**
+         * The complement of {@link #skipsAgentWithEmptyCapabilities}: an agent that
+         * DOES declare capabilities must be registered and counted, so the assertions
+         * above cannot be satisfied by a guard that rejects everything.
+         */
+        @Test
+        @DisplayName("an agent with capabilities is registered and counted as seeded")
+        void capableAgentIsRegisteredAndCounted() throws Exception {
+            var agentStore = mock(IAgentStore.class);
+            var descriptorStore = mock(IDocumentDescriptorStore.class);
+            when(descriptorStore.readDescriptors("ai.labs.agent", null, 0, 0, false)).thenReturn(List.of(agentDescriptor()));
+
+            var config = new AgentConfiguration();
+            config.setCapabilities(List.of(new Capability("greeting", Map.of(), "medium")));
+            when(agentStore.read(AGENT_ID, 1)).thenReturn(config);
+
+            var svc = spy(new CapabilityRegistryService(new SimpleMeterRegistry(), agentStore, descriptorStore));
+            svc.initMetrics();
+
+            List<String> captured = captureLogsOf(CapabilityRegistryService.class, () -> svc.onStartup(null));
+
+            verify(svc).register(AGENT_ID, config);
+            assertTrue(captured.stream().anyMatch(value -> value.contains("Capability registry populated")),
+                    "a seeded agent must be counted; captured: " + captured);
+        }
+
         @Test
         @DisplayName("one unreadable agent does not abort the seeding")
         void individualAgentFailure() throws Exception {
@@ -525,5 +599,74 @@ class CapabilityRegistryServiceTest {
             assertTrue(Stream.of(parameterAnnotations).anyMatch(a -> a.annotationType() == Observes.class),
                     "without @Observes this is an ordinary method nothing calls, and the index stays empty on a fresh node");
         }
+    }
+
+    /**
+     * CWE-117. The skill string reaches this lookup from GET /capabilities, from
+     * A2A discovery, from a templated {@code capabilityMatch} rule and from the
+     * LLM-invoked {@code FindAgentsByCapabilityTool} — all caller-controlled — and
+     * a newline in it forges a second log record that reads as the server's own.
+     * {@code LogSanitizer} is the sanitiser the rest of the codebase uses; this
+     * pins that this site uses it too.
+     */
+    @Test
+    @DisplayName("a miss logs the requested skill sanitized, so it cannot forge a log record")
+    void aMissedSkillIsLoggedSanitized() {
+        String poisonedSkill = "translation\nERROR [io.quarkus] forged log line";
+
+        List<String> captured = captureLogsOf(CapabilityRegistryService.class,
+                () -> assertTrue(service.findBySkill(poisonedSkill, "all").isEmpty()));
+
+        // lower-cased because the lookup normalises the skill before logging it; the
+        // point is the newline became '_' rather than a record boundary.
+        assertTrue(captured.stream().anyMatch(value -> value.contains("translation_error")),
+                "the miss must have been captured with the skill sanitized in place; captured: " + captured);
+        assertTrue(captured.stream().noneMatch(value -> value.contains("\n")),
+                "a newline reached the log, so a caller can forge log records; captured: " + captured);
+    }
+
+    /**
+     * Runs {@code body} with a JUL handler attached to {@code loggerClass}'s logger
+     * and returns every message and message parameter it emitted.
+     *
+     * <p>
+     * {@code logging.properties} turns the whole {@code ai.labs.eddi} namespace OFF
+     * for plain unit tests, so the logger has to be opened explicitly to see
+     * anything; the previous level is always put back.
+     * </p>
+     */
+    static List<String> captureLogsOf(Class<?> loggerClass, Runnable body) {
+        List<String> captured = new ArrayList<>();
+        Handler handler = new Handler() {
+            @Override
+            public void publish(LogRecord record) {
+                captured.add(String.valueOf(record.getMessage()));
+                if (record.getParameters() != null) {
+                    for (Object parameter : record.getParameters()) {
+                        captured.add(String.valueOf(parameter));
+                    }
+                }
+            }
+
+            @Override
+            public void flush() {
+            }
+
+            @Override
+            public void close() {
+            }
+        };
+
+        Logger julLogger = Logger.getLogger(loggerClass.getName());
+        Level previousLevel = julLogger.getLevel();
+        julLogger.setLevel(Level.ALL);
+        julLogger.addHandler(handler);
+        try {
+            body.run();
+        } finally {
+            julLogger.removeHandler(handler);
+            julLogger.setLevel(previousLevel);
+        }
+        return captured;
     }
 }

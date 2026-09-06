@@ -173,5 +173,24 @@ class ResourceUtilitiesTest {
             assertNull(ResourceUtilities.filterAndPage(null, "x", 0, 20));
             assertTrue(ResourceUtilities.filterAndPage(List.of(), "x", 0, 20).isEmpty());
         }
+
+        /**
+         * index and limit arrive straight off the query string. Multiplied as int,
+         * {@code page * limit} wraps negative for values a client can simply type, and
+         * {@code subList} then throws IndexOutOfBoundsException — a 500 for a paging
+         * request, instead of the empty page that lies past the end of the list.
+         */
+        @Test
+        @DisplayName("an index or limit near Integer.MAX_VALUE answers an empty page, it does not overflow")
+        void hugeIndexAndLimitDoNotOverflow() {
+            assertTrue(ResourceUtilities.filterAndPage(fixture(), null, Integer.MAX_VALUE, 20).isEmpty(),
+                    "page Integer.MAX_VALUE is past the end of a 3-row list");
+            assertTrue(ResourceUtilities.filterAndPage(fixture(), null, Integer.MAX_VALUE, Integer.MAX_VALUE).isEmpty());
+            assertTrue(ResourceUtilities.filterAndPage(fixture(), null, 1_000_000, 1_000_000).isEmpty());
+
+            // A limit past the end of the list is still the whole list on page 0 — the
+            // clamp must not turn a large limit into a short page.
+            assertEquals(List.of("alpha", "beta", "gamma"), names(ResourceUtilities.filterAndPage(fixture(), null, 0, Integer.MAX_VALUE)));
+        }
     }
 }

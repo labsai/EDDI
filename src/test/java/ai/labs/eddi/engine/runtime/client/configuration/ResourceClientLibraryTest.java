@@ -22,6 +22,7 @@ import ai.labs.eddi.configs.parser.IRestParserStore;
 import ai.labs.eddi.configs.propertysetter.IRestPropertySetterStore;
 import ai.labs.eddi.configs.rag.IRestRagStore;
 import ai.labs.eddi.configs.dictionary.IRestDictionaryStore;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
@@ -279,6 +280,86 @@ class ResourceClientLibraryTest {
                     URI.create("eddi://ai.labs.rag/ragstore/rags/" + VALID_ID + "?version=1"), true);
 
             verify(restRagStore).deleteRag(eq(VALID_ID), eq(1), eq(true));
+        }
+    }
+
+    /**
+     * Version resolution is what the agent and workflow cascades ask before they
+     * decide anything: a step reference keeps pinning {@code ?version=1} long after
+     * the resource it names has moved to v2, and asking the reference guard about
+     * one version while deleting another is how a cascade destroys something still
+     * in use. It resolves against the STORE, not the REST facade — a cascade must
+     * not need to own a configuration in order to ask which version of it exists —
+     * and reports "cannot resolve" as null rather than by throwing.
+     */
+    @Nested
+    @DisplayName("getCurrentResourceId")
+    class GetCurrentResourceId {
+
+        private IResourceStore.IResourceId resourceId(String id, Integer version) {
+            return new IResourceStore.IResourceId() {
+                @Override
+                public String getId() {
+                    return id;
+                }
+
+                @Override
+                public Integer getVersion() {
+                    return version;
+                }
+            };
+        }
+
+        @Test
+        @DisplayName("answers the live version, not the one the reference pins")
+        void resolvesAgainstTheStoreNotThePinnedVersion() throws Exception {
+            when(ruleSetStore.getCurrentResourceId(VALID_ID)).thenReturn(resourceId(VALID_ID, 7));
+
+            var current = library.getCurrentResourceId(
+                    URI.create("eddi://ai.labs.rules/rulestore/rulesets/" + VALID_ID + "?version=1"));
+
+            assertNotNull(current);
+            assertEquals(VALID_ID, current.getId());
+            assertEquals(7, current.getVersion(), "the pinned ?version=1 must not be echoed back");
+            verify(ruleSetStore).getCurrentResourceId(VALID_ID);
+        }
+
+        @Test
+        @DisplayName("resolves the legacy authority through the same store as the canonical one")
+        void resolvesLegacyHostAlias() throws Exception {
+            when(apiCallsStore.getCurrentResourceId(VALID_ID)).thenReturn(resourceId(VALID_ID, 3));
+
+            var legacy = library.getCurrentResourceId(
+                    URI.create("eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/" + VALID_ID + "?version=1"));
+            var canonical = library.getCurrentResourceId(
+                    URI.create("eddi://ai.labs.apicalls/apicallstore/apicalls/" + VALID_ID + "?version=1"));
+
+            assertEquals(3, legacy.getVersion(), "a reference written with the legacy authority must still resolve");
+            assertEquals(3, canonical.getVersion());
+        }
+
+        @Test
+        @DisplayName("a resource with no live version answers null rather than throwing")
+        void softDeletedResourceAnswersNull() throws Exception {
+            when(outputStore.getCurrentResourceId(VALID_ID))
+                    .thenThrow(new IResourceStore.ResourceNotFoundException("gone"));
+
+            assertNull(library.getCurrentResourceId(
+                    URI.create("eddi://ai.labs.output/outputstore/outputsets/" + VALID_ID + "?version=1")));
+        }
+
+        @Test
+        @DisplayName("an unregistered type answers null, and never reaches a store")
+        void unregisteredTypeAnswersNull() {
+            assertNull(library.getCurrentResourceId(
+                    URI.create("eddi://ai.labs.unknown/store/items/" + VALID_ID + "?version=1")));
+        }
+
+        @Test
+        @DisplayName("a null uri, or one carrying no resource id, answers null")
+        void unusableUriAnswersNull() {
+            assertNull(library.getCurrentResourceId(null));
+            assertNull(library.getCurrentResourceId(URI.create("eddi://ai.labs.llm/llmstore/llms/not-hex?version=1")));
         }
     }
 }

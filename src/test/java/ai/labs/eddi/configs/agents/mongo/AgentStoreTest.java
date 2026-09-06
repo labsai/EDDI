@@ -385,6 +385,82 @@ class AgentStoreTest {
             assertDoesNotThrow(() -> agentStore.create(config));
         }
 
+        /**
+         * The write-time check has to bound the update in BOTH directions, and one test
+         * asserts both because either half alone is satisfied by code that does not
+         * implement the rule.
+         *
+         * <p>
+         * A legal config must reach the store: only the rejecting cases were pinned at
+         * first, so a guard that refused every update — or one wired before the wrong
+         * call — would have looked exactly as green while every agent edit in the
+         * product failed with a 400.
+         * </p>
+         *
+         * <p>
+         * And an illegal one must be refused <em>before the store is touched at
+         * all</em> — not read, not versioned, not written. That is what
+         * {@code validateUserMemoryConfig(agentConfiguration)} sitting ahead of
+         * {@code super.update} buys: drop that call and the out-of-bounds config below
+         * is persisted as the next version like any other. Asserting only "a valid
+         * value is stored" cannot see that, because a valid value is stored either way.
+         * </p>
+         */
+        @Test
+        @DisplayName("update stores a value inside the bound and refuses one outside it before writing")
+        @SuppressWarnings("unchecked")
+        void updateAcceptsValidTargetEntries() throws Exception {
+            AgentConfiguration config = configWithTargetEntries(5);
+
+            IResourceStorage.IResource<AgentConfiguration> stored = mock(IResourceStorage.IResource.class);
+            when(stored.getId()).thenReturn("aabbccdd11223344eeff5566");
+            when(stored.getVersion()).thenReturn(2);
+            doReturn(stored).when(resourceStorage).read("aabbccdd11223344eeff5566", 2);
+
+            IResourceStorage.IResource<AgentConfiguration> successor = mock(IResourceStorage.IResource.class);
+            doReturn(successor).when(resourceStorage).newResource("aabbccdd11223344eeff5566", 3, config);
+
+            Integer newVersion = agentStore.update("aabbccdd11223344eeff5566", 2, config);
+
+            assertEquals(3, newVersion, "a valid update must be persisted as the next version");
+            verify(resourceStorage).storeHistoryAndUpdate(any(), eq(successor), eq(2));
+
+            // Same store, same id, same live version — only the value moves out of
+            // bounds. Nothing about this second call may reach the storage layer.
+            clearInvocations(resourceStorage);
+            AgentConfiguration outOfBounds = configWithTargetEntries(0);
+
+            assertThrows(IllegalArgumentException.class,
+                    () -> agentStore.update("aabbccdd11223344eeff5566", 2, outOfBounds));
+
+            verifyNoInteractions(resourceStorage);
+        }
+
+        /**
+         * The Dream block is optional at both levels. An Agent that configures user
+         * memory without configuring Dream consolidation must not be rejected by a rule
+         * about a field it never set.
+         */
+        @Test
+        @DisplayName("a userMemoryConfig without a dream block is accepted")
+        @SuppressWarnings("unchecked")
+        void userMemoryWithoutDreamIsAccepted() throws Exception {
+            var config = new AgentConfiguration();
+            config.setWorkflows(new ArrayList<>());
+            var userMemory = new AgentConfiguration.UserMemoryConfig();
+            // Explicitly absent, which is what `"dream": null` in stored JSON produces —
+            // the field defaults to an instance, so only this reaches the null branch.
+            userMemory.setDream(null);
+            config.setUserMemoryConfig(userMemory);
+
+            IResourceStorage.IResource<AgentConfiguration> mockResource = mock(IResourceStorage.IResource.class);
+            when(mockResource.getId()).thenReturn("aabbccdd11223344eeff5566");
+            when(mockResource.getVersion()).thenReturn(1);
+            doReturn(mockResource).when(resourceStorage).newResource(any());
+
+            assertDoesNotThrow(() -> agentStore.create(config));
+        }
+
         @Test
         @DisplayName("a document already stored with 0 still deserializes")
         void storedZeroStillLoads() {

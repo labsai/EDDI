@@ -49,6 +49,35 @@ bottom of this file and are never archived.
 
 ---
 
+## 🛡️ fix(configs): close the CodeQL alerts and the review round (2026-09-04)
+
+**Repo:** EDDI (`fix/review-config-delete`)
+
+Follow-up on the same branch, from two independent review rounds, a diff-coverage pass, and
+four CodeQL alerts this branch introduced.
+
+**CodeQL, all four fixed in code rather than dismissed.** Two high-severity integer overflows
+in the new `ResourceUtilities` paging helper, where a caller-supplied index and limit were
+combined without bounds so a large value wrapped and produced a nonsensical window; the inputs
+are now clamped before the arithmetic. Two log-injection sites where a user-provided value
+reached a log statement unsanitised, now routed through the sanitiser the codebase already
+uses elsewhere rather than a second one.
+
+**A functional regression the branch's own suite could not see.** `RetryConfiguration` gained a
+total-backoff budget, and every test in that class stayed green while the behaviour changed.
+Found by the reviewer, fixed, and pinned by a test that fails without it.
+
+**Four tests were proven vacuous by mutation.** One claimed to pin a new
+`!config.getCapabilities().isEmpty()` guard; removing that guard left it green. Another
+asserted the consequence of a stub the real collaborator refuses to produce. Each was rewritten
+to fail on the regression it names, or deleted with an honest gap recorded — a test that cannot
+fail is worse than none, because it hides the hole.
+
+**Diff coverage** of changed lines: 89.9% to 99.5% line, 80.1% to 92.7% branch, with 38 tests
+added and each proven against a mutation of the line it protects.
+
+---
+
 ## 🗑️ fix(configs): make destructive configuration deletes safe, atomic and honest (2026-09-04)
 
 **Repo:** EDDI (`fix/review-config-delete`)

@@ -20,6 +20,7 @@ import java.net.URI;
 import java.util.List;
 
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
  * The shared CRUD body behind all fifteen configuration resource types.
@@ -238,14 +239,73 @@ public class RestVersionInfo<T> implements IRestVersionInfo {
 
         try {
             if (permanent) {
+                // A permanent delete is ID-scoped — deleteAllPermanently drops every
+                // version and every history row — while `version` used to be accepted
+                // and then ignored on this branch. That made DELETE ?version=1
+                // &permanent=true from a stale tab erase a resource that is at v2,
+                // with no 409 anywhere, which is precisely the check the soft path
+                // gets for free from HistorizedResourceStore.delete. Refuse the stale
+                // claim before anything is destroyed.
+                requireCurrentVersion(id, version);
                 resourceStore.deleteAllPermanently(id);
+                // Flagged at the DESCRIPTOR's current version, not at the version the
+                // request addressed: descriptors outlive the resource (see below), so
+                // flagging a history row left the current descriptor saying
+                // deleted=false and the listing still showing a resource whose every
+                // version had just been erased.
+                markDescriptorDeleted(id, currentDescriptorVersion(id, version));
             } else {
                 resourceStore.delete(id, version);
+                markDescriptorDeleted(id, version);
             }
-            markDescriptorDeleted(id, version);
             return Response.ok().build();
         } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceModifiedException | IResourceStore.ResourceNotFoundException e) {
             throw sneakyThrow(e);
+        }
+    }
+
+    /**
+     * Refuses a permanent delete addressed at anything but the resource's live
+     * version.
+     *
+     * <p>
+     * A resource with no live version at all is <em>allowed</em> through: purging
+     * the history left behind by a soft delete is the documented two-step flow, and
+     * there is no current version for the request to be stale against.
+     * </p>
+     *
+     * <p>
+     * Raises the 409 {@link RestUtilities#createConflictException} builds, carrying
+     * the current resource URI, when the resource is live at a different version.
+     * </p>
+     */
+    private void requireCurrentVersion(String id, Integer version) {
+        IResourceStore.IResourceId current;
+        try {
+            current = resourceStore.getCurrentResourceId(id);
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            return;
+        }
+        // A null answer means the same thing the exception does — no live version —
+        // and some store implementations report it that way. Dereferencing it here
+        // would NPE in the middle of a destructive operation.
+        if (current == null || current.getVersion() == null) {
+            return;
+        }
+        if (!current.getVersion().equals(version)) {
+            throw RestUtilities.createConflictException(resourceURI, current);
+        }
+    }
+
+    /**
+     * The version the resource's descriptor currently lives at, falling back to
+     * {@code addressedVersion} when there is no descriptor row to ask.
+     */
+    private Integer currentDescriptorVersion(String id, Integer addressedVersion) {
+        try {
+            return documentDescriptorStore.getCurrentResourceId(id).getVersion();
+        } catch (Exception e) {
+            return addressedVersion;
         }
     }
 
@@ -289,8 +349,11 @@ public class RestVersionInfo<T> implements IRestVersionInfo {
                 documentDescriptorStore.setDescriptor(id, version, descriptor);
             }
         } catch (Exception e) {
-            LOGGER.warnf("Deleted %s '%s' (v%s) but could not flag its descriptor as deleted: %s", resourceTypeLabel, id, version,
-                    e.getMessage());
+            // id is a path parameter and the store message quotes it back, so both are
+            // sanitized before they reach the log: a newline in either would otherwise
+            // forge a log record (CWE-117).
+            LOGGER.warnf("Deleted %s '%s' (v%s) but could not flag its descriptor as deleted: %s", resourceTypeLabel, sanitize(id), version,
+                    sanitize(e.getMessage()));
         }
     }
 

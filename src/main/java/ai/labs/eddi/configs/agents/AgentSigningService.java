@@ -19,8 +19,12 @@ import java.security.*;
 import java.security.spec.PKCS8EncodedKeySpec;
 import java.security.spec.X509EncodedKeySpec;
 import java.util.Base64;
+import java.util.Collection;
 import java.util.List;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.IntStream;
 
 /**
  * Ed25519-based signing and verification service for agent identity.
@@ -196,13 +200,16 @@ public class AgentSigningService {
      * both the legacy unversioned key and any versioned keys.
      *
      * <p>
-     * The whole version range is scanned rather than stopped at the first gap:
-     * {@code rotateKey} takes an arbitrary version number from its caller, so a
-     * rotation that skipped a number (v1, v3) used to leave every key after the gap
-     * in the vault forever. And the legacy key is deleted in its own guard, because
-     * it not existing is the ordinary state of a rotated agent — letting that
-     * {@code SecretNotFoundException} out skipped the versioned scan entirely and
-     * leaked exactly the keys this method exists to remove.
+     * With no list of versions to work from this sweeps the whole range rather than
+     * stopping at the first gap: {@code rotateKey} takes an arbitrary version
+     * number from its caller, so a rotation that skipped a number (v1, v3) used to
+     * leave every key after the gap in the vault forever. Callers that have read
+     * the agent's configuration should pass its declared versions instead — see
+     * {@link #deleteKeyPair(String, String, Collection)}. And the legacy key is
+     * deleted in its own guard, because it not existing is the ordinary state of a
+     * rotated agent — letting that {@code SecretNotFoundException} out skipped the
+     * versioned scan entirely and leaked exactly the keys this method exists to
+     * remove.
      * </p>
      *
      * <p>
@@ -213,28 +220,135 @@ public class AgentSigningService {
      * </p>
      */
     public void deleteKeyPair(String tenantId, String agentId) {
-        deleteVaultKey(tenantId, agentId, vaultKeyName(agentId), cacheKey(tenantId, agentId));
+        deleteKeyPair(tenantId, agentId, null);
+    }
 
-        for (int v = 1; v <= MAX_KEY_VERSION_SCAN; v++) {
-            deleteVaultKey(tenantId, agentId, vaultKeyNameVersioned(agentId, v), cacheKey(tenantId, agentId) + ";v=" + v);
+    /**
+     * As {@link #deleteKeyPair(String, String)}, but told which rotated versions
+     * the agent's configuration actually declares.
+     *
+     * <p>
+     * The blind 1..{@value #MAX_KEY_VERSION_SCAN} sweep is the fallback, not the
+     * normal path. An agent holding one or two keys paid 101 vault round trips per
+     * delete — 101 {@code deleteSecret} calls and 101 increments of the vault
+     * delete metric — and on a vault-less dev instance every one of them failed
+     * with the same "may still hold private key material" WARN, for versions that
+     * never existed. The agent config lists its versions
+     * ({@code identity.keys[].version}) and the caller has already read it to
+     * decide whether there is anything to clean up at all.
+     * </p>
+     *
+     * <p>
+     * "Told which versions" bounds the sweep; it does not narrow it to exactly that
+     * list. Everything up to the highest declared version is attempted, because a
+     * key can exist in the vault without being listed — see
+     * {@link #versionsToSweep(Collection)}.
+     * </p>
+     *
+     * @param knownVersions
+     *            the rotated key versions the configuration declares, used as the
+     *            upper bound of the sweep, or {@code null} when they are unknown
+     *            and the whole 1..{@value #MAX_KEY_VERSION_SCAN} range has to be
+     *            swept
+     */
+    public void deleteKeyPair(String tenantId, String agentId, Collection<Integer> knownVersions) {
+        DeleteTally tally = new DeleteTally();
+
+        deleteVaultKey(tenantId, agentId, vaultKeyName(agentId), cacheKey(tenantId, agentId), tally);
+        for (int v : versionsToSweep(knownVersions)) {
+            deleteVaultKey(tenantId, agentId, vaultKeyNameVersioned(agentId, v), cacheKey(tenantId, agentId) + ";v=" + v, tally);
         }
-        LOGGER.infof("Deleted signing keys for agent '%s' in tenant '%s' (cache evicted)", agentId, tenantId);
+
+        // Reports what actually happened. The old unconditional "Deleted signing
+        // keys … (cache evicted)" claimed success after a vault outage had left
+        // every key behind — the leak wearing a success message this method's own
+        // Javadoc warns about — and equally after deleting nothing at all.
+        if (tally.failed > 0) {
+            LOGGER.warnf("Signing key cleanup for agent '%s' in tenant '%s': %d key(s) deleted, %d could NOT be deleted and may "
+                    + "still hold private key material (first failure: %s)", agentId, tenantId, tally.deleted, tally.failed,
+                    tally.firstFailure);
+        } else if (tally.deleted > 0) {
+            LOGGER.infof("Deleted %d signing key(s) for agent '%s' in tenant '%s' (cache evicted)", tally.deleted, agentId, tenantId);
+        } else {
+            LOGGER.debugf("No signing keys found in the vault for agent '%s' in tenant '%s' (cache evicted)", agentId, tenantId);
+        }
+    }
+
+    /**
+     * The versioned keys to attempt: the blind 1..{@value #MAX_KEY_VERSION_SCAN}
+     * range when the configuration is unknown, and otherwise everything up to the
+     * highest version it declares. Positive versions only — {@code rotateKey}
+     * rejects anything else, so a stored zero or negative names no vault entry.
+     *
+     * <p>
+     * Deliberately NOT just the declared list. {@code rotateKey} writes the vault
+     * entry and returns; adding the version to {@code identity.keys} is a SEPARATE
+     * config write by the caller, which can fail after the vault write succeeded —
+     * and {@code keys[]} is operator-editable JSON that nothing prunes. Sweeping
+     * only what is listed therefore left an Ed25519 private key in the vault
+     * forever after a permanent delete, while the tally reported "Deleted N signing
+     * key(s)": the same leak wearing a success message that this class's Javadoc
+     * warns about, on a narrower path. Covering the gaps and the skipped numbers
+     * {@code rotateKey} allows costs a handful of extra round trips for a normal
+     * agent — not the 101 the blind sweep cost, which is what the declared-versions
+     * path exists to avoid.
+     * </p>
+     *
+     * <p>
+     * The range is capped at {@value #MAX_KEY_VERSION_SCAN} so a stored version of,
+     * say, 50 000 cannot turn one delete into 50 000 vault calls. Declared versions
+     * ABOVE the cap are still attempted individually — they are known to exist,
+     * where the range is only a guess.
+     * </p>
+     */
+    private static List<Integer> versionsToSweep(Collection<Integer> knownVersions) {
+        if (knownVersions == null) {
+            return IntStream.rangeClosed(1, MAX_KEY_VERSION_SCAN).boxed().toList();
+        }
+        List<Integer> declared = knownVersions.stream().filter(v -> v != null && v > 0).distinct().sorted().toList();
+        if (declared.isEmpty()) {
+            // "Key material, but no rotated versions" — the legacy unversioned key,
+            // which deleteKeyPair removes on its own. Nothing to sweep for.
+            return List.of();
+        }
+        int highest = Math.min(declared.get(declared.size() - 1), MAX_KEY_VERSION_SCAN);
+        Set<Integer> versions = new TreeSet<>(declared);
+        IntStream.rangeClosed(1, highest).forEach(versions::add);
+        return List.copyOf(versions);
+    }
+
+    /** Running count of one {@link #deleteKeyPair} call's vault deletions. */
+    private static final class DeleteTally {
+        private int deleted;
+        private int failed;
+        private String firstFailure;
     }
 
     /**
      * Removes one vault entry and its cache line, treating "no such key" as the
-     * expected case and anything else as a leak worth reporting.
+     * expected case and anything else as a leak worth counting.
+     *
+     * <p>
+     * The cache line is dropped in a {@code finally}: a vault delete that fails
+     * leaves the private key in the vault, but leaving the loaded key in
+     * {@link #privateKeyCache} as well would let this process keep SIGNING as the
+     * deleted agent from memory, for as long as it lives — a strictly worse outcome
+     * than the vault entry the WARN is about.
+     * </p>
      */
-    private void deleteVaultKey(String tenantId, String agentId, String vaultKey, String cacheKeyStr) {
+    private void deleteVaultKey(String tenantId, String agentId, String vaultKey, String cacheKeyStr, DeleteTally tally) {
         try {
             secretProvider.delete(new SecretReference(tenantId, vaultKey));
-            privateKeyCache.remove(cacheKeyStr);
+            tally.deleted++;
         } catch (ISecretProvider.SecretNotFoundException e) {
             // Expected for every version this agent never had.
-            privateKeyCache.remove(cacheKeyStr);
         } catch (Exception e) {
-            LOGGER.warnf("Could not delete vault key '%s' for agent '%s' in tenant '%s' — it may still hold private key "
-                    + "material: %s", vaultKey, agentId, tenantId, e.getMessage());
+            tally.failed++;
+            if (tally.firstFailure == null) {
+                tally.firstFailure = vaultKey + ": " + e.getMessage();
+            }
+        } finally {
+            privateKeyCache.remove(cacheKeyStr);
         }
     }
 

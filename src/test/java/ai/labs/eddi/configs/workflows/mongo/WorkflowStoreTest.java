@@ -223,6 +223,29 @@ class WorkflowStoreTest {
         verifyNoInteractions(resourceStorage);
     }
 
+    /**
+     * The inputs that make {@code URI.create} itself blow up, rather than merely
+     * parsing to something unusable. This method is fed step {@code config.uri}
+     * values verbatim by the cascade, and an unchecked
+     * {@code IllegalArgumentException} is not in its {@code throws} clause: it
+     * escapes the caller's {@code catch (ResourceStoreException)} and takes the
+     * whole delete with it. Null, blank and syntactically illegal all have to come
+     * back as the same declared refusal.
+     */
+    @Test
+    @DisplayName("getWorkflowDescriptorsContainingResource — null, blank and unparsable URIs are the same declared refusal")
+    void rejectsUnparsableResourceUri() {
+        assertThrows(IResourceStore.ResourceStoreException.class,
+                () -> store.getWorkflowDescriptorsContainingResource(null, false), "null must be refused, not NPE");
+        assertThrows(IResourceStore.ResourceStoreException.class,
+                () -> store.getWorkflowDescriptorsContainingResource("   ", false), "blank must be refused");
+        // A space in the authority is a syntax error for java.net.URI.
+        assertThrows(IResourceStore.ResourceStoreException.class,
+                () -> store.getWorkflowDescriptorsContainingResource("eddi://ai labs/store/x?version=1", false),
+                "an unparsable URI must be refused, not raise IllegalArgumentException");
+        verifyNoInteractions(resourceStorage);
+    }
+
     // ==================== deleteAllPermanently ====================
 
     @Test

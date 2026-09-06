@@ -120,28 +120,40 @@ public interface IRestAgentStore extends IRestVersionInfo {
             + "and their extension resources (behavior sets, HTTP calls, output sets, langchains, "
             + "property setters, dictionaries). Shared resources (packages used by other agents, "
             + "extensions used by other packages) are skipped. "
+            + "An agent's workflow reference is version-pinned and routinely names an older version than the one that "
+            + "exists; the cascade resolves each reference to the workflow's CURRENT version before deciding, and asks "
+            + "'is anyone else using this?' against that same version. "
             + "Partial failures are logged but do not prevent the Agent from being deleted. "
-            + "With cascade=true the version must be the Agent's current one, otherwise the request is "
-            + "refused with 409 before anything is deleted.")
+            + "The version must be the Agent's current one whenever cascade=true or permanent=true, otherwise the "
+            + "request is refused with 409 before anything is deleted. An Agent that is already soft-deleted has no "
+            + "current version to be stale against: permanent=true still purges its history and its vault keys, and "
+            + "the cascade is skipped rather than refused.")
     @APIResponse(responseCode = "200", description = "Agent deleted successfully.")
     @APIResponse(responseCode = "404", description = "Agent not found.")
-    @APIResponse(responseCode = "409", description = "cascade=true against a version that is not the current one; nothing was deleted.")
+    @APIResponse(responseCode = "409",
+                 description = "cascade=true or permanent=true against a version that is not the current one; nothing was deleted.")
     // @formatter:off
     Response deleteAgent(@PathParam("id") String id,
             @Parameter(name = "version", required = true, example = "1",
                     description = "Version of the Agent to delete.")
             @QueryParam("version") Integer version,
-            @Parameter(description = "If true, permanently remove from database, and additionally destroy this "
+            @Parameter(description = "If true, permanently remove from database — every version and every history row, "
+                    + "so the version given must be the current one or the request is refused with 409 — and "
+                    + "additionally destroy this "
                     + "Agent's signing keys in the secrets vault — irreversibly, since no endpoint can "
                     + "regenerate them, so an Agent restored from a backup afterwards cannot sign again. "
+                    + "This also purges an Agent that was already soft-deleted, keys included. "
                     + "If false (default), soft-delete only: the vault keys are kept so the Agent stays "
                     + "restorable.")
             @QueryParam("permanent") @DefaultValue("false") Boolean permanent,
             @Parameter(description = "If true, also delete all packages "
-                    + "and extension resources referenced by this agent. "
-                    + "Workflows still referenced by another agent are skipped. "
+                    + "and extension resources referenced by this agent, each at its own current version. "
+                    + "Workflows still referenced by another agent — at any version — are skipped, as are workflows "
+                    + "that have no live version left. "
                     + "Cascaded resources are always soft-deleted, even when permanent=true, "
-                    + "so a resource shared at a different pinned version can be recovered.")
+                    + "so a resource shared at a different pinned version can be recovered. "
+                    + "The workflow delete this cascades into reports its own skipped extensions in "
+                    + "X-Cascade-Skipped; that header is not propagated onto this response.")
             @QueryParam("cascade") @DefaultValue("false") Boolean cascade);
     // @formatter:on
 }

@@ -261,6 +261,79 @@ class RestImportServiceRollbackAndCleanupTest {
             }
         }
 
+        /**
+         * Adding an imported Agent to the discovery index is best-effort: the Agent row
+         * is already written by the time it happens, so a registry that cannot be
+         * updated must not turn a completed import into a 500 — and must certainly not
+         * trigger the rollback, which would delete an Agent the caller was about to be
+         * told it had.
+         */
+        @Test
+        @DisplayName("a capability index that refuses the registration does not fail the import")
+        void registrationFailureDoesNotFailTheImport() throws Exception {
+            var workflowStore = mock(IWorkflowStore.class);
+            var agentStore = mock(IAgentStore.class);
+            var capabilityRegistry = mock(CapabilityRegistryService.class);
+            stubOneCapableAgentZip();
+
+            when(workflowStore.create(any())).thenReturn(resourceId(NEW_WORKFLOW_ID, 1));
+            when(agentStore.create(any())).thenReturn(resourceId(NEW_AGENT_ID, 1));
+            doThrow(new IllegalStateException("registry unavailable"))
+                    .when(capabilityRegistry).register(anyString(), any());
+
+            try (MockedStatic<CDI> cdiMock = mockStatic(CDI.class)) {
+                stubCdi(cdiMock, workflowStore, agentStore, capabilityRegistry);
+
+                Response response = importService.importAgent(
+                        new ByteArrayInputStream(new byte[0]), "create", null, null, null);
+
+                // An imported Agent's skills must be offered to the index at all —
+                // import creates Agents through the store directly, so without this
+                // call they stayed invisible to capabilityMatch rules and to A2A
+                // discovery until the node restarted, with no error to explain it.
+                verify(capabilityRegistry).register(eq(NEW_AGENT_ID), any());
+                assertEquals(201, response.getStatus(), "the Agent was written; a discovery-index failure is not the caller's problem");
+                verify(agentStore, never()).deleteAllPermanently(anyString());
+                verify(workflowStore, never()).deleteAllPermanently(anyString());
+            }
+        }
+
+        /**
+         * The rollback's own steps are each guarded so one failure cannot mask the
+         * original error or abandon the resources it has not reached yet. An
+         * unreachable capability index while unwinding must still leave every created
+         * resource deleted.
+         */
+        @Test
+        @DisplayName("a capability index that refuses the unregistration does not abandon the rest of the rollback")
+        void unregistrationFailureDoesNotAbandonTheRollback() throws Exception {
+            var workflowStore = mock(IWorkflowStore.class);
+            var agentStore = mock(IAgentStore.class);
+            var capabilityRegistry = mock(CapabilityRegistryService.class);
+            stubTwoCapableAgentsZip();
+
+            when(workflowStore.create(any())).thenReturn(resourceId(NEW_WORKFLOW_ID, 1));
+            when(agentStore.create(any()))
+                    .thenReturn(resourceId(NEW_AGENT_ID, 1))
+                    .thenThrow(new IResourceStore.ResourceStoreException("agent store unavailable"));
+            doThrow(new IllegalStateException("registry unavailable"))
+                    .when(capabilityRegistry).unregister(anyString());
+
+            try (MockedStatic<CDI> cdiMock = mockStatic(CDI.class)) {
+                stubCdi(cdiMock, workflowStore, agentStore, capabilityRegistry);
+
+                assertThrows(InternalServerErrorException.class,
+                        () -> importService.importAgent(
+                                new ByteArrayInputStream(new byte[0]), "create", null, null, null));
+
+                verify(capabilityRegistry).unregister(NEW_AGENT_ID);
+                verify(agentStore).deleteAllPermanently(NEW_AGENT_ID);
+                // Rolled back newest first, so this one comes AFTER the failing
+                // unregistration — it is the proof the loop was not abandoned.
+                verify(workflowStore).deleteAllPermanently(NEW_WORKFLOW_ID);
+            }
+        }
+
         @Test
         @DisplayName("a successful import deletes nothing")
         void successfulImportDoesNotRollBack() throws Exception {
@@ -402,6 +475,24 @@ class RestImportServiceRollbackAndCleanupTest {
         when(jsonSerialization.deserialize(eq("AGENTJSON"), eq(AgentConfiguration.class))).thenReturn(agentConfig);
         when(jsonSerialization.deserialize(eq("WORKFLOWJSON"), eq(WorkflowConfiguration.class)))
                 .thenReturn(new WorkflowConfiguration());
+    }
+
+    /**
+     * As {@link #stubAgentWithOneWorkflowZip()}, but the single agent declares a
+     * skill — so the import reaches the capability registration at all. One agent,
+     * not two, because a second agent re-reads the workflow directory under its
+     * already-remapped id and fails for a reason that has nothing to do with this
+     * test.
+     */
+    private void stubOneCapableAgentZip() throws Exception {
+        stubAgentWithOneWorkflowZip();
+
+        URI workflowUri = URI.create(
+                "eddi://ai.labs.workflow/workflowstore/workflows/" + WORKFLOW_ORIGIN_ID + "?version=1");
+        var agentConfig = new AgentConfiguration();
+        agentConfig.setWorkflows(List.of(workflowUri));
+        agentConfig.setCapabilities(List.of(new AgentConfiguration.Capability("translation", Map.of(), "high")));
+        when(jsonSerialization.deserialize(eq("AGENTJSON"), eq(AgentConfiguration.class))).thenReturn(agentConfig);
     }
 
     /**

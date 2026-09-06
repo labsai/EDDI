@@ -25,6 +25,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static com.mongodb.client.model.Filters.eq;
+import static com.mongodb.client.model.Filters.in;
 
 /**
  * MongoDB implementation of {@link IDeploymentStorage}.
@@ -40,6 +41,12 @@ public class MongoDeploymentStorage implements IDeploymentStorage {
     private static final String FIELD_ENVIRONMENT = "environment";
     private static final String FIELD_AGENT_ID = "agentId";
     private static final String FIELD_AGENT_VERSION = "agentVersion";
+    /**
+     * Aggregation-only field names used by
+     * {@link #removeDuplicateDeploymentRows()}.
+     */
+    private static final String FIELD_DUPLICATE_IDS = "duplicateIds";
+    private static final String FIELD_DUPLICATE_COUNT = "duplicateCount";
 
     private final MongoCollection<Document> deploymentsCollection;
     private final IDocumentBuilder documentBuilder;
@@ -60,37 +67,122 @@ public class MongoDeploymentStorage implements IDeploymentStorage {
      * CONFLICT target — without refusing to start where it cannot be added.
      *
      * <p>
-     * The index matters because {@code deleteDeploymentInfo} deletes ONE row and
-     * {@code readDeploymentInfos} returns whatever is there: a duplicated key makes
-     * an agent list twice, survive its own undeploy, and read as 'deployed' and
-     * 'undeployed' at the same time.
+     * The index matters because it is what actually closes the race.
+     * {@code replaceOne(upsert)} is atomic per operation, but an upsert whose
+     * filter fields are not uniquely indexed can still insert twice under
+     * concurrency: two callers whose filter matches nothing both take the insert
+     * branch. Only the unique index turns the loser into a duplicate-key error.
+     * Without it {@code deleteDeploymentInfo} (which deletes ONE row) and
+     * {@code readDeploymentInfos} (which returns whatever is there) let an agent
+     * list twice, survive its own undeploy, and read as 'deployed' and 'undeployed'
+     * at the same time.
      * </p>
      *
      * <p>
-     * But {@code createIndex(unique)} fails with E11000 against a collection that
-     * ALREADY holds duplicates — which is exactly the state of the deployments this
-     * index exists to protect, because those duplicates are what the check-then-act
-     * {@link #setDeploymentInfo} replaced used to write. Building it
-     * unconditionally in the constructor therefore broke bean construction on
-     * precisely the installations that hit the bug, and an unconstructable
-     * {@code IDeploymentStore} takes {@code RestAgentStore},
-     * {@code RestAgentAdministration} and the startup redeploy with it. So a
-     * failure is logged with the cleanup an operator has to do, and the collection
-     * keeps working without the index: {@code replaceOne(upsert)} is the actual fix
-     * for the race, the index only its backstop.
+     * {@code createIndex(unique)} fails with E11000 against a collection that
+     * ALREADY holds duplicates — exactly the state of the deployments this index
+     * exists to protect, because those duplicates are what the check-then-act
+     * {@link #setDeploymentInfo} replaced used to write. Letting that failure out
+     * broke bean construction on precisely the installations that hit the bug, and
+     * an unconstructable {@code IDeploymentStore} takes {@code RestAgentStore},
+     * {@code RestAgentAdministration} and the startup redeploy with it. So the
+     * duplicates are removed first — one row per (environment, agentId,
+     * agentVersion), the most recently written kept — and the index is retried. If
+     * even that does not get the index built, the collection keeps working and the
+     * failure is reported at ERROR: the race is then genuinely still open, which an
+     * operator has to know rather than read a comment claiming it is closed.
      * </p>
      */
     private void createDeploymentKeyIndex() {
         try {
-            deploymentsCollection.createIndex(Indexes.ascending(FIELD_ENVIRONMENT, FIELD_AGENT_ID, FIELD_AGENT_VERSION),
-                    new IndexOptions().unique(true));
+            createUniqueKeyIndex();
+            return;
         } catch (MongoException e) {
             LOGGER.warnf("Could not create the unique deployment-key index on '%s' (%s, %s, %s): %s. "
-                    + "Deployments keep working, but duplicate rows are no longer prevented. The usual cause is "
-                    + "duplicates already in the collection: keep one row per environment/agentId/agentVersion, "
-                    + "then restart to have the index created.",
-                    COLLECTION_DEPLOYMENTS, FIELD_ENVIRONMENT, FIELD_AGENT_ID, FIELD_AGENT_VERSION, e.getMessage());
+                    + "Removing duplicate rows and retrying.", COLLECTION_DEPLOYMENTS, FIELD_ENVIRONMENT, FIELD_AGENT_ID,
+                    FIELD_AGENT_VERSION, e.getMessage());
         }
+
+        int removed;
+        try {
+            removed = removeDuplicateDeploymentRows();
+        } catch (Exception e) {
+            // Nothing in this constructor may make the bean unconstructable — see
+            // above. A dedupe that cannot run leaves the collection exactly as it
+            // was, minus the index.
+            LOGGER.errorf("Could not deduplicate '%s': %s. Duplicate deployment records are NOT prevented on this "
+                    + "installation: an agent can list twice, survive its own undeploy, and read as both deployed and "
+                    + "undeployed. Keep one row per %s/%s/%s by hand, then restart.", COLLECTION_DEPLOYMENTS, e.getMessage(),
+                    FIELD_ENVIRONMENT, FIELD_AGENT_ID, FIELD_AGENT_VERSION);
+            return;
+        }
+
+        try {
+            createUniqueKeyIndex();
+            LOGGER.warnf("Removed %d duplicate deployment row(s) from '%s' and created the unique index.", removed,
+                    COLLECTION_DEPLOYMENTS);
+        } catch (Exception e) {
+            LOGGER.errorf("Removed %d duplicate deployment row(s) from '%s' but still could not create the unique index: %s. "
+                    + "Duplicate deployment records are NOT prevented on this installation.", removed, COLLECTION_DEPLOYMENTS,
+                    e.getMessage());
+        }
+    }
+
+    private void createUniqueKeyIndex() {
+        deploymentsCollection.createIndex(Indexes.ascending(FIELD_ENVIRONMENT, FIELD_AGENT_ID, FIELD_AGENT_VERSION),
+                new IndexOptions().unique(true));
+    }
+
+    /**
+     * Keeps one row per (environment, agentId, agentVersion) and removes the rest.
+     *
+     * <p>
+     * The survivor is the newest row: duplicates differ only in
+     * {@code deploymentStatus}, so the last-written one is what reflects the
+     * operator's last deploy/undeploy. Guessing is unavoidable here — the rows
+     * carry no timestamp of their own — but any single row is a consistent answer
+     * where two are not.
+     * </p>
+     *
+     * <p>
+     * "Newest" is established by the leading {@code $sort} on {@code _id}, and that
+     * stage is load-bearing rather than cosmetic. {@code $push} preserves the order
+     * the documents reach {@code $group} in, and without a sort that is the storage
+     * engine's natural order, which is not insertion order and is not stable
+     * between nodes. Two nodes deduplicating the same collection during a rolling
+     * restart could therefore each keep a DIFFERENT element and, between them,
+     * delete every row for a key — an agent that was deployed silently never
+     * redeployed by {@code checkDeployments} again. Rows are inserted without an
+     * explicit {@code _id}, so Mongo assigns an ObjectId whose leading bytes are
+     * the insert timestamp: ascending {@code _id} is insertion order, and every
+     * node computes the same survivor.
+     * </p>
+     *
+     * @return how many rows were removed
+     */
+    private int removeDuplicateDeploymentRows() {
+        List<Document> pipeline = List.of(
+                new Document("$sort", new Document("_id", 1)),
+                new Document("$group", new Document("_id",
+                        new Document(FIELD_ENVIRONMENT, "$" + FIELD_ENVIRONMENT).append(FIELD_AGENT_ID, "$" + FIELD_AGENT_ID)
+                                .append(FIELD_AGENT_VERSION, "$" + FIELD_AGENT_VERSION))
+                        .append(FIELD_DUPLICATE_IDS, new Document("$push", "$_id"))
+                        .append(FIELD_DUPLICATE_COUNT, new Document("$sum", 1))),
+                new Document("$match", new Document(FIELD_DUPLICATE_COUNT, new Document("$gt", 1))));
+
+        List<Object> doomed = new ArrayList<>();
+        for (Document group : deploymentsCollection.aggregate(pipeline)) {
+            List<Object> ids = group.getList(FIELD_DUPLICATE_IDS, Object.class);
+            if (ids == null || ids.size() < 2) {
+                continue;
+            }
+            doomed.addAll(ids.subList(0, ids.size() - 1));
+        }
+
+        if (doomed.isEmpty()) {
+            return 0;
+        }
+        return (int) deploymentsCollection.deleteMany(in("_id", doomed)).getDeletedCount();
     }
 
     /**
@@ -101,10 +193,13 @@ public class MongoDeploymentStorage implements IDeploymentStorage {
      * callers racing on the same (environment, agentId, agentVersion) — a
      * double-clicked deploy, two nodes running their startup redeploy, a deploy
      * overlapping the 10-second {@code checkDeployments} sweep — both saw
-     * {@code null} and both inserted. {@code replaceOne(upsert)} is decided by the
-     * server, so this alone closes the race; where
-     * {@link #createDeploymentKeyIndex()} succeeded, the unique index additionally
-     * turns any residual one into a duplicate-key error rather than a second row.
+     * {@code null} and both inserted. {@code replaceOne(upsert)} removes the
+     * application-side window, but it does not on its own make the write unique: an
+     * upsert whose filter matches nothing is still free to insert, and two of them
+     * running concurrently both can. The unique index from
+     * {@link #createDeploymentKeyIndex()} is what turns the second insert into a
+     * duplicate-key error — so where that index could not be built, this race stays
+     * open and is reported at ERROR rather than assumed away.
      * </p>
      */
     @Override

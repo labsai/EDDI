@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.agents.AgentSigningService;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
+import ai.labs.eddi.configs.agents.crypto.AgentPublicKey;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
@@ -31,6 +32,7 @@ import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import java.net.URI;
+import java.util.ArrayList;
 import java.util.List;
 
 import static ai.labs.eddi.configs.descriptors.ResourceUtilities.*;
@@ -298,13 +300,34 @@ public class RestAgentStore implements IRestAgentStore {
         // went through: cascade=true silently did not cascade.
         version = restVersionInfo.validateParameters(id, version);
 
-        // Read BEFORE the delete — afterwards there is no current row to ask whether
-        // this Agent had signing key material to clean out of the vault. Only asked
-        // on the permanent path; see the vault cleanup below for why.
-        boolean deleteSigningKeys = Boolean.TRUE.equals(permanent) && hasSigningIdentity(id, version);
+        // Read BEFORE the delete — afterwards there is no row at all to ask whether
+        // this Agent had signing key material to clean out of the vault, nor which
+        // rotated versions it declares. Only asked on the permanent path; see the
+        // vault cleanup below for why. null means "no key material".
+        List<Integer> signingKeyVersions = Boolean.TRUE.equals(permanent) ? signingKeyVersions(id, version) : null;
 
-        if (cascade && isCurrentVersion(id, version)) {
-            // Cascade-delete all schedules for this Agent first
+        // DECIDED before the delete, EXECUTED after it — the same split, and for the
+        // same reason, as RestWorkflowStore.deleteWorkflow.
+        //
+        // isCurrentVersion() is a check-then-act. A concurrent update committing
+        // between it and restVersionInfo.delete() — a PUT, or the 10-second
+        // deployment sweep touching this Agent — left the schedules deleted and every
+        // exclusively owned workflow (plus, through deleteWorkflow's own cascade, its
+        // extensions) torn down while the delete answered 409 "nothing was deleted":
+        // the live Agent kept its config and lost everything it pointed at, and the
+        // 409 contract IRestAgentStore documents was false on this path. The store's
+        // own delete is version-checked (HistorizedResourceStore.delete raises
+        // ResourceModifiedException), so making it the gate means an Agent that moved
+        // on raises before anything it references has been touched.
+        //
+        // Deciding first is what keeps the reference guard honest: the "> 1" below
+        // counts this Agent among a workflow's referrers, which it only is while it
+        // still exists.
+        List<IResourceId> cascadeTargets = cascade && isCurrentVersion(id, version) ? planCascade(id, version) : null;
+
+        Response response = restVersionInfo.delete(id, version, permanent);
+
+        if (cascadeTargets != null) {
             try {
                 int deletedSchedules = scheduleStore.deleteSchedulesByAgentId(id);
                 if (deletedSchedules > 0) {
@@ -314,42 +337,22 @@ public class RestAgentStore implements IRestAgentStore {
                 log.warnf("Failed to cascade-delete schedules for Agent %s: %s", id, e.getMessage());
             }
 
-            try {
-                AgentConfiguration agentConfig = agentStore.read(id, version);
-                for (URI workflowUri : agentConfig.getWorkflows()) {
-                    IResourceId resourceId = RestUtilities.extractResourceId(workflowUri);
-                    try {
-                        // Check if this package is referenced by other agents
-                        var referencingAgents = agentStore.getAgentDescriptorsContainingWorkflow(resourceId.getId(), resourceId.getVersion(), false);
-                        if (referencingAgents.size() > 1) {
-                            log.infof("Skipping cascade-delete of package %s (v%d) — " + "still referenced by %d other agent(s)", resourceId.getId(),
-                                    resourceId.getVersion(), referencingAgents.size() - 1);
-                            continue;
-                        }
-
-                        // NEVER permanent down a cascade, whatever the request asked for.
-                        // The guard above answers a VERSION-scoped question ("who references
-                        // W?version=1?") while permanent=true performs an ID-scoped delete —
-                        // deleteAllPermanently drops every version and every history row. An
-                        // agent pinning W?version=2 is invisible to the check and loses its
-                        // workflow with nothing to recover from. Soft-deleting the pinned
-                        // version keeps the two scopes in agreement; permanently removing a
-                        // shared resource stays an explicit, non-cascading request against
-                        // that resource.
-                        restWorkflowStore.deleteWorkflow(resourceId.getId(), resourceId.getVersion(), false, true);
-                        log.infof("Cascade-deleted package %s (v%d) for Agent %s", resourceId.getId(), resourceId.getVersion(), id);
-                    } catch (Exception e) {
-                        log.warnf("Failed to cascade-delete package %s: %s", resourceId.getId(), e.getMessage());
-                    }
+            for (IResourceId target : cascadeTargets) {
+                try {
+                    // NEVER permanent down a cascade, whatever the request asked for.
+                    // The guard in planCascade answers a VERSION-scoped question ("who
+                    // references W?version=2?") while permanent=true performs an
+                    // ID-scoped delete — deleteAllPermanently drops every version and
+                    // every history row. Soft-deleting the current version keeps the two
+                    // scopes in agreement; permanently removing a shared resource stays
+                    // an explicit, non-cascading request against that resource.
+                    restWorkflowStore.deleteWorkflow(target.getId(), target.getVersion(), false, true);
+                    log.infof("Cascade-deleted package %s (v%d) for Agent %s", target.getId(), target.getVersion(), id);
+                } catch (Exception e) {
+                    log.warnf("Failed to cascade-delete package %s: %s", target.getId(), e.getMessage());
                 }
-            } catch (IResourceStore.ResourceNotFoundException e) {
-                log.warnf("Agent %s (v%d) not found for cascade — deleting Agent only", id, version);
-            } catch (IResourceStore.ResourceStoreException e) {
-                log.warnf("Error reading Agent %s for cascade: %s", id, e.getMessage());
             }
         }
-
-        Response response = restVersionInfo.delete(id, version, permanent);
 
         // Deliberately after the delete, which throws on a stale or unknown version.
         // Clearing first would strip a still-live Agent of the capabilities that
@@ -371,8 +374,12 @@ public class RestAgentStore implements IRestAgentStore {
         // or unrecreatable material is an explicit request, never a side effect.
         // The residual leak (soft-delete then never purge) is the recoverable failure
         // of the two.
-        if (deleteSigningKeys) {
-            agentSigningService.deleteKeyPair(defaultTenantId, id);
+        if (signingKeyVersions != null) {
+            // Bounded BY the declared versions rather than a blind 1..100 sweep — but
+            // not narrowed to exactly them: a rotation whose follow-up config write
+            // failed leaves a vault entry that no keys[] entry names. See
+            // AgentSigningService.versionsToSweep.
+            agentSigningService.deleteKeyPair(defaultTenantId, id, signingKeyVersions);
         }
 
         // A record left behind makes the runtime retry a
@@ -390,28 +397,115 @@ public class RestAgentStore implements IRestAgentStore {
     }
 
     /**
-     * Whether this Agent declares signing key material, and therefore has a private
-     * key in the vault that its deletion must also remove.
+     * Decides — before the Agent is deleted — which of its workflows the cascade
+     * may remove.
      *
      * <p>
-     * Best-effort: an unreadable Agent simply reports {@code false}. Failing the
-     * delete because the key-cleanup probe could not run would be the wrong trade —
-     * a leaked vault entry is recoverable, a config that cannot be deleted is not.
+     * Deciding and deleting are separate steps so the reference guard still counts
+     * this Agent among the referrers (hence {@code > 1}) while the Agent itself is
+     * deleted first; see {@link #deleteAgent}.
+     * </p>
+     *
+     * @return the workflows to delete, addressed at their CURRENT version — never
+     *         null, so "nothing to cascade" and "no cascade requested" stay
+     *         distinct at the call site
+     */
+    private List<IResourceId> planCascade(String id, Integer version) {
+        List<IResourceId> targets = new ArrayList<>();
+        try {
+            AgentConfiguration agentConfig = agentStore.read(id, version);
+            for (URI workflowUri : agentConfig.getWorkflows()) {
+                IResourceId pinned = RestUtilities.extractResourceId(workflowUri);
+                try {
+                    // Resolve the reference to the version that EXISTS. An agent's
+                    // workflow reference is version-pinned and is NOT re-pointed when the
+                    // workflow is edited, so an agent pinning W?version=1 while W is at v2
+                    // is the normal state. Against the pinned version both steps here were
+                    // wrong at once: the reference check asked who else pins a version
+                    // nobody may still pin, and deleteWorkflow's own isCurrentVersion()
+                    // then answered 409 — swallowed as a bare WARN. cascade=true
+                    // consequently deleted nothing for any workflow that had ever been
+                    // edited.
+                    IResourceId target = restWorkflowStore.getCurrentResourceId(pinned.getId());
+
+                    // includePreviousVersions=true, starting from the CURRENT version:
+                    // the reverse lookup walks that version down to 1, so an agent still
+                    // pinning an older version protects the workflow, and there is no
+                    // newer version above for the walk to miss.
+                    var referencingAgents = agentStore.getAgentDescriptorsContainingWorkflow(target.getId(), target.getVersion(), true);
+                    if (referencingAgents.size() > 1) {
+                        log.infof("Skipping cascade-delete of package %s (v%d) — still referenced by %d other agent(s)", target.getId(),
+                                target.getVersion(), referencingAgents.size() - 1);
+                        continue;
+                    }
+                    targets.add(target);
+                } catch (IResourceStore.ResourceNotFoundException e) {
+                    log.infof("Skipping cascade-delete of package %s — it has no live version left", pinned.getId());
+                } catch (Exception e) {
+                    // FAIL CLOSED per workflow, exactly as the workflow store's own
+                    // cascade does: a reference check that cannot answer is not a licence
+                    // to delete, and letting the throwable out here would abort the whole
+                    // request before the Agent itself had been deleted.
+                    log.warnf("Failed to plan cascade-delete of package %s: %s", pinned.getId(), e.getMessage());
+                }
+            }
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            log.warnf("Agent %s (v%d) not found for cascade — deleting Agent only", id, version);
+        } catch (IResourceStore.ResourceStoreException e) {
+            log.warnf("Error reading Agent %s for cascade: %s", id, e.getMessage());
+        }
+        return targets;
+    }
+
+    /**
+     * The rotated signing key versions this Agent declares, or {@code null} when it
+     * declares no key material at all and its deletion has no vault entry to clean
+     * up.
+     *
+     * <p>
+     * Read through {@code readIncludingDeleted}, NOT {@code read}.
+     * {@code HistorizedResourceStore.read} throws {@code ResourceNotFoundException}
+     * for a history row flagged deleted — that is, for every soft-deleted Agent —
+     * and "soft-delete first, then purge with {@code permanent=true}" is exactly
+     * the two-step flow {@link #isCurrentVersion} documents as ordinary. On that
+     * flow the probe therefore answered "no key material", {@code deleteKeyPair}
+     * never ran, and the Ed25519 private key stayed in the vault after the config
+     * and its whole history had been erased: the leak this cleanup exists to close,
+     * surviving on the only recommended path to closing it.
+     * </p>
+     *
+     * <p>
+     * An empty list means "key material, but no rotated versions" — the legacy
+     * unversioned key — and is deliberately distinct from {@code null}.
+     * </p>
+     *
+     * <p>
+     * Best-effort: an unreadable Agent reports {@code null}. Failing the delete
+     * because the key-cleanup probe could not run would be the wrong trade — a
+     * leaked vault entry is recoverable, a config that cannot be deleted is not.
      * </p>
      */
-    private boolean hasSigningIdentity(String id, Integer version) {
+    private List<Integer> signingKeyVersions(String id, Integer version) {
         try {
-            AgentConfiguration config = agentStore.read(id, version);
+            AgentConfiguration config = agentStore.readIncludingDeleted(id, version);
             var identity = config == null ? null : config.getIdentity();
-            return identity != null && ((identity.getPublicKey() != null && !identity.getPublicKey().isBlank())
-                    || (identity.getKeys() != null && !identity.getKeys().isEmpty()));
+            if (identity == null) {
+                return null;
+            }
+            boolean hasLegacyKey = identity.getPublicKey() != null && !identity.getPublicKey().isBlank();
+            List<AgentPublicKey> keys = identity.getKeys();
+            boolean hasRotatedKeys = keys != null && !keys.isEmpty();
+            if (!hasLegacyKey && !hasRotatedKeys) {
+                return null;
+            }
+            return hasRotatedKeys ? keys.stream().map(AgentPublicKey::version).toList() : List.of();
         } catch (Exception e) {
-            // Every failure mode reports "no key material", deliberately: not found,
-            // store unreachable, an already soft-deleted Agent whose read answers null.
-            // The alternative is failing the delete on a probe, and a leaked vault entry
+            // Every remaining failure mode reports "no key material", deliberately:
+            // not found, store unreachable, a document that will not deserialize. The
+            // alternative is failing the delete on a probe, and a leaked vault entry
             // is recoverable where a config that cannot be deleted is not.
             log.debugf("Could not read Agent %s (v%s) to check for signing key material: %s", sanitize(id), version, e.getMessage());
-            return false;
+            return null;
         }
     }
 

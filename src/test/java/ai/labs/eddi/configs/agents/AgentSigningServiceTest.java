@@ -13,8 +13,13 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -334,6 +339,236 @@ class AgentSigningServiceTest {
     }
 
     /**
+     * The blind sweep is the FALLBACK, for callers that do not know which versions
+     * exist. The agent's configuration lists them, and the caller has already read
+     * it to decide whether there is anything to clean up at all — so an agent whose
+     * highest declared version is 3 must cost four vault round trips, not 101. On a
+     * vault-less dev instance those 101 were also 101 "may still hold private key
+     * material" WARNs for versions that never existed.
+     *
+     * <p>
+     * The declared versions BOUND the sweep; they do not enumerate it. See
+     * {@link #deleteKeyPair_withKnownVersions_stillRemovesAnUndeclaredKeyBelowTheHighest}
+     * for why.
+     * </p>
+     */
+    @Test
+    void deleteKeyPair_withKnownVersions_staysWithinTheHighestDeclaredVersion() throws Exception {
+        signingService.generateKeyPair("tenant-1", "agent-1");
+        signingService.generateKeyPairVersioned("tenant-1", "agent-1", 1);
+        signingService.generateKeyPairVersioned("tenant-1", "agent-1", 3);
+
+        signingService.deleteKeyPair("tenant-1", "agent-1", List.of(3, 1));
+
+        assertEquals(4, secretProvider.deleteAttempts.size(),
+                "the legacy key plus 1..3, and nothing above the highest declared version; attempted: " + secretProvider.deleteAttempts);
+        assertTrue(secretProvider.deleteAttempts.contains("tenant-1:agent-signing-key:agent-1"));
+        assertTrue(secretProvider.deleteAttempts.contains("tenant-1:agent-signing-key:agent-1:v1"));
+        assertTrue(secretProvider.deleteAttempts.contains("tenant-1:agent-signing-key:agent-1:v3"));
+        assertFalse(secretProvider.deleteAttempts.contains("tenant-1:agent-signing-key:agent-1:v4"),
+                "nothing above the highest declared version may be attempted — that is what keeps this off the 101-call path");
+        assertFalse(secretProvider.contains("tenant-1", "agent-signing-key:agent-1:v1"));
+        assertFalse(secretProvider.contains("tenant-1", "agent-signing-key:agent-1:v3"));
+    }
+
+    /**
+     * A vault key can exist at a version {@code identity.keys} does not list.
+     * {@code rotateKey} writes the vault entry and returns; adding the version to
+     * {@code keys[]} is a SEPARATE config write by the caller, which can fail after
+     * the vault write succeeded — and {@code keys[]} is operator-editable JSON that
+     * nothing prunes. Sweeping only the listed versions left that private key in
+     * the vault forever after a permanent delete, while the tally reported "Deleted
+     * N signing key(s)": the leak wearing a success message, on a narrower path
+     * than the blanket-catch one the tally was written to close.
+     */
+    @Test
+    void deleteKeyPair_withKnownVersions_stillRemovesAnUndeclaredKeyBelowTheHighest() throws Exception {
+        signingService.generateKeyPairVersioned("tenant-1", "agent-1", 1);
+        // v2 exists in the vault but the follow-up config write never landed, so
+        // identity.keys names only v1 and v3.
+        signingService.generateKeyPairVersioned("tenant-1", "agent-1", 2);
+        signingService.generateKeyPairVersioned("tenant-1", "agent-1", 3);
+
+        signingService.deleteKeyPair("tenant-1", "agent-1", List.of(1, 3));
+
+        assertFalse(secretProvider.contains("tenant-1", "agent-signing-key:agent-1:v2"),
+                "v2 was left in the vault: a private key that keys[] does not list is still a private key");
+        assertFalse(secretProvider.contains("tenant-1", "agent-signing-key:agent-1:v1"));
+        assertFalse(secretProvider.contains("tenant-1", "agent-signing-key:agent-1:v3"));
+    }
+
+    /**
+     * The cap is on the RANGE, which is a guess, not on the declared versions,
+     * which are known to exist. A stored version far above the cap must still be
+     * attempted — otherwise the one key we are certain about is the one we skip —
+     * while the range it implies stays bounded at {@code MAX_KEY_VERSION_SCAN}.
+     */
+    @Test
+    void deleteKeyPair_withAVersionAboveTheCap_attemptsItWithoutUnboundingTheSweep() throws Exception {
+        int aboveCap = AgentSigningService.MAX_KEY_VERSION_SCAN + 5;
+        signingService.generateKeyPairVersioned("tenant-1", "agent-1", aboveCap);
+
+        signingService.deleteKeyPair("tenant-1", "agent-1", List.of(aboveCap));
+
+        assertTrue(secretProvider.deleteAttempts.contains("tenant-1:agent-signing-key:agent-1:v" + aboveCap),
+                "a declared version is known to exist and must be attempted whatever the range cap says");
+        assertFalse(secretProvider.contains("tenant-1", "agent-signing-key:agent-1:v" + aboveCap));
+        assertEquals(AgentSigningService.MAX_KEY_VERSION_SCAN + 2, secretProvider.deleteAttempts.size(),
+                "the legacy key, the capped range 1..MAX, and the one declared version above it; attempted: "
+                        + secretProvider.deleteAttempts.size());
+    }
+
+    @Test
+    void deleteKeyPair_withNoDeclaredVersions_stillRemovesTheLegacyKey() throws Exception {
+        signingService.generateKeyPair("tenant-1", "agent-1");
+
+        signingService.deleteKeyPair("tenant-1", "agent-1", List.of());
+
+        assertEquals(1, secretProvider.deleteAttempts.size(), "attempted: " + secretProvider.deleteAttempts);
+        assertFalse(secretProvider.contains("tenant-1", "agent-signing-key:agent-1"));
+    }
+
+    @Test
+    void deleteKeyPair_withNullVersions_fallsBackToTheBlindSweep() {
+        signingService.deleteKeyPair("tenant-1", "agent-1", null);
+
+        assertEquals(AgentSigningService.MAX_KEY_VERSION_SCAN + 1, secretProvider.deleteAttempts.size(),
+                "null means the versions are unknown, so the whole documented range must still be swept");
+    }
+
+    /**
+     * {@code identity.keys} is operator-editable JSON, so it can carry a null entry
+     * or a zero/negative version. {@code rotateKey} rejects those, meaning they
+     * name no vault entry at all — and letting one set the upper bound of the sweep
+     * would either widen it needlessly or, for a null, throw out of a delete.
+     */
+    @Test
+    void deleteKeyPair_ignoresNullAndNonPositiveDeclaredVersions() throws Exception {
+        signingService.generateKeyPair("tenant-1", "agent-1");
+        signingService.generateKeyPairVersioned("tenant-1", "agent-1", 2);
+
+        signingService.deleteKeyPair("tenant-1", "agent-1", Arrays.asList(null, 0, -3, 2));
+
+        assertEquals(3, secretProvider.deleteAttempts.size(),
+                "the legacy key plus versions 1..2 — nothing more; attempted: " + secretProvider.deleteAttempts);
+        assertFalse(secretProvider.contains("tenant-1", "agent-signing-key:agent-1"));
+        assertFalse(secretProvider.contains("tenant-1", "agent-signing-key:agent-1:v2"));
+    }
+
+    /**
+     * A vault outage fails every key in the sweep. The sweep must not stop at the
+     * first one — the keys it has not reached yet are exactly the private key
+     * material this method exists to remove — and the tally must keep the FIRST
+     * failure rather than being overwritten by whichever key was swept last.
+     */
+    @Test
+    void deleteKeyPair_keepsSweepingAfterAVaultFailure() throws Exception {
+        signingService.generateKeyPair("tenant-1", "agent-1");
+        signingService.generateKeyPairVersioned("tenant-1", "agent-1", 1);
+        signingService.generateKeyPairVersioned("tenant-1", "agent-1", 2);
+        secretProvider.failDeleteFor("tenant-1:agent-signing-key:agent-1");
+        secretProvider.failDeleteFor("tenant-1:agent-signing-key:agent-1:v1");
+
+        signingService.deleteKeyPair("tenant-1", "agent-1", List.of(2));
+
+        assertEquals(3, secretProvider.deleteAttempts.size(),
+                "every key must still be attempted; attempted: " + secretProvider.deleteAttempts);
+        assertTrue(secretProvider.contains("tenant-1", "agent-signing-key:agent-1"), "the failed delete left this key behind");
+        assertTrue(secretProvider.contains("tenant-1", "agent-signing-key:agent-1:v1"), "the failed delete left this key behind");
+        assertFalse(secretProvider.contains("tenant-1", "agent-signing-key:agent-1:v2"),
+                "a vault outage on earlier keys must not stop the sweep");
+    }
+
+    /**
+     * The private key is cached after the first load, so a second signature must
+     * not go back to the vault. Pinned by removing the vault entry out from under
+     * it: the cached key has to carry the second signature on its own.
+     */
+    @Test
+    void sign_usesTheCachedPrivateKeyOnTheSecondCall() throws Exception {
+        String publicKey = signingService.generateKeyPair("tenant-1", "agent-1");
+        signingService.sign("tenant-1", "agent-1", "first");
+
+        secretProvider.forget("tenant-1:agent-signing-key:agent-1");
+        String second = signingService.sign("tenant-1", "agent-1", "second");
+
+        assertTrue(signingService.verify(publicKey, "second", second),
+                "the second signature must come from the cached key, not from a vault round trip");
+    }
+
+    /**
+     * A vault delete that fails leaves the private key in the vault — but leaving
+     * the loaded key in the in-process cache as well would let this node keep
+     * SIGNING as the deleted agent from memory, for as long as it lives. That is
+     * strictly worse than the vault entry the WARN is about, so the cache line goes
+     * regardless of what the vault answered.
+     */
+    @Test
+    void deleteKeyPair_evictsTheCacheEvenWhenTheVaultDeleteFails() throws Exception {
+        signingService.generateKeyPair("tenant-1", "agent-1");
+        // Populate the private-key cache.
+        signingService.sign("tenant-1", "agent-1", "message");
+        secretProvider.failDeleteFor("tenant-1:agent-signing-key:agent-1");
+
+        signingService.deleteKeyPair("tenant-1", "agent-1", List.of());
+
+        // The key is still in the vault (the delete failed), so a cached entry would
+        // otherwise keep signing working. Signing must now go back to the vault, and
+        // this proves it did: the vault answer is removed out from under it.
+        secretProvider.forget("tenant-1:agent-signing-key:agent-1");
+        assertThrows(AgentSigningService.AgentSigningException.class,
+                () -> signingService.sign("tenant-1", "agent-1", "message"),
+                "the private key survived in the cache, so this process can still sign as a deleted agent");
+    }
+
+    /**
+     * The closing line used to read "Deleted signing keys for agent … (cache
+     * evicted)" unconditionally — after a vault outage that left every key behind,
+     * and equally after deleting nothing at all. That is the leak wearing a success
+     * message this method's own Javadoc warns about, so the line has to report what
+     * actually happened.
+     */
+    @Test
+    void deleteKeyPair_doesNotReportSuccessWhenTheVaultRefusedEveryKey() throws Exception {
+        signingService.generateKeyPair("tenant-1", "agent-1");
+        secretProvider.failDeleteFor("tenant-1:agent-signing-key:agent-1");
+
+        List<String> captured = new ArrayList<>();
+        Handler handler = new Handler() {
+            @Override
+            public void publish(LogRecord record) {
+                captured.add(String.valueOf(record.getMessage()));
+            }
+
+            @Override
+            public void flush() {
+            }
+
+            @Override
+            public void close() {
+            }
+        };
+
+        // logging.properties turns the whole ai.labs.eddi namespace OFF for plain unit
+        // tests, so this logger has to be opened explicitly to see anything.
+        Logger julLogger = Logger.getLogger(AgentSigningService.class.getName());
+        Level previousLevel = julLogger.getLevel();
+        julLogger.setLevel(Level.ALL);
+        julLogger.addHandler(handler);
+        try {
+            signingService.deleteKeyPair("tenant-1", "agent-1", List.of());
+        } finally {
+            julLogger.removeHandler(handler);
+            julLogger.setLevel(previousLevel);
+        }
+
+        assertTrue(captured.stream().anyMatch(m -> m.contains("could NOT be deleted")),
+                "a vault outage must be reported, not summarised as a success; captured: " + captured);
+        assertTrue(captured.stream().noneMatch(m -> m.startsWith("Deleted ")),
+                "nothing was deleted, so nothing may claim it was; captured: " + captured);
+    }
+
+    /**
      * "Absent" and "vault unreachable" are different, and only the first is
      * expected. A vault error on one key must be reported and stepped over, not
      * abandon the keys after it — a failure mid-scan is the same leak this method
@@ -410,6 +645,14 @@ class AgentSigningServiceTest {
         /** Makes {@code delete} answer {@code SecretProviderException} for this key. */
         void failDeleteFor(String fullKey) {
             unreachable.add(fullKey);
+        }
+
+        /**
+         * Drops a key without going through {@link #delete} — for proving a cache
+         * eviction.
+         */
+        void forget(String fullKey) {
+            store.remove(fullKey);
         }
 
         /**

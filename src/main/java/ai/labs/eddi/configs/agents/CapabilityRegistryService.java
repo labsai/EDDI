@@ -26,6 +26,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 /**
  * In-memory capability registry for A2A agent discovery.
  * <p>
@@ -232,7 +234,10 @@ public class CapabilityRegistryService {
             // unbounded number of Meters, one per distinct miss, for the lifetime of the
             // process. Which skill was missed belongs in a log line, not a metric label.
             meterRegistry.counter("eddi.capability.miss.count").increment();
-            LOGGER.debugf("No agent registered for skill '%s'", normalizedSkill);
+            // Sanitized, not logged verbatim: the skill string is caller-supplied (GET
+            // /capabilities, A2A discovery, a templated capabilityMatch rule, an
+            // LLM-invoked tool), so a newline in it would forge a second log record.
+            LOGGER.debugf("No agent registered for skill '%s'", sanitize(normalizedSkill));
             return Collections.emptyList();
         }
 

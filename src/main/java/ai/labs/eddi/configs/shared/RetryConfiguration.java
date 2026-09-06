@@ -292,10 +292,37 @@ public class RetryConfiguration {
     }
 
     /**
-     * Sleeps for the appropriate backoff duration for the given attempt. Useful for
-     * callers that manage their own retry loop (e.g., streaming).
+     * Sleeps one backoff for the given attempt, with no accumulated budget to
+     * spend. Equivalent to {@code backoff(attempt, retryConfig, 0L)}.
      */
     public static void backoff(int attempt, RetryConfiguration retryConfig) {
+        backoff(attempt, retryConfig, 0L);
+    }
+
+    /**
+     * Sleeps the backoff for {@code attempt}, trimmed to what is left of this
+     * execution's total-backoff budget. For callers that manage their own retry
+     * loop (the streaming executor) rather than going through
+     * {@link #executeWithRetry}.
+     *
+     * <p>
+     * The per-sleep ceiling alone does not bound such a loop, and this method used
+     * to enforce only that: at {@link #MAX_ATTEMPTS_CEILING} attempts with a
+     * configured 30-second delay the streaming path could sleep nine times — 270
+     * seconds of a blocked pipeline thread, against the very
+     * {@value #MAX_TOTAL_BACKOFF_MS} ms budget {@code executeWithRetry} applies to
+     * every other retry loop in the engine. Passing the running total back in is
+     * what makes the two paths agree.
+     * </p>
+     *
+     * @param totalBackoffMs
+     *            what this execution has already slept
+     * @return how long this call actually slept, to be added to
+     *         {@code totalBackoffMs}, or {@code -1} when the budget is spent and
+     *         the caller must stop retrying (nothing was slept)
+     * @see #budgetedSleep(long, long)
+     */
+    public static long backoff(int attempt, RetryConfiguration retryConfig, long totalBackoffMs) {
         if (retryConfig == null) {
             retryConfig = new RetryConfiguration();
         }
@@ -305,11 +332,16 @@ public class RetryConfiguration {
 
         int exponent = Math.max(0, attempt - 1);
         long delay = Math.min((long) (baseDelay * Math.pow(multiplier, exponent)), maxDelay);
+        long sleepFor = budgetedSleep(delay, totalBackoffMs);
+        if (sleepFor < 0) {
+            return -1L;
+        }
         try {
-            Thread.sleep(delay);
+            Thread.sleep(sleepFor);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
+        return sleepFor;
     }
 
     // ========================== Retryable Error Detection
@@ -349,17 +381,26 @@ public class RetryConfiguration {
      * </p>
      */
     public static boolean isRetryableError(Exception e) {
-        Throwable current = e;
-
-        while (current != null) {
-            // 1. langchain4j's typed verdict — authoritative, in both directions
+        // Pass 1: langchain4j's typed verdict, over the WHOLE chain, before any
+        // fallback gets a say.
+        //
+        // Running the four signals interleaved down one walk did not implement the
+        // order above — it implemented "outermost exception wins", and the weakest
+        // signal is the one most likely to be present on the outermost wrapper.
+        // new RuntimeException("timeout", new AuthenticationException(...)) matched
+        // the message fallback on the wrapper and returned true, never reaching the
+        // NonRetriableException underneath: precisely the wrapped auth failure this
+        // ordering was written to stop from burning the retry budget.
+        for (Throwable current = e; current != null; current = current.getCause()) {
             if (current instanceof RetriableException) {
                 return true;
             }
             if (current instanceof NonRetriableException) {
                 return false;
             }
+        }
 
+        for (Throwable current = e; current != null; current = current.getCause()) {
             // 2. Untyped transport failures
             if (current instanceof SocketTimeoutException
                     || current instanceof TimeoutException
@@ -381,8 +422,6 @@ public class RetryConfiguration {
             if (message != null && RETRYABLE_MESSAGE.matcher(message).find()) {
                 return true;
             }
-
-            current = current.getCause();
         }
 
         return false;

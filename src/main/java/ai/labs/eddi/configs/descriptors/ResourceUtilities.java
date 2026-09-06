@@ -93,10 +93,18 @@ public class ResourceUtilities {
         if (limit == null || limit <= 0) {
             return matching;
         }
+        // Both operands are clamped to the list BEFORE they are multiplied, and the
+        // multiply itself is done in long. index and limit come straight off the
+        // query string, so `page * limit` in int overflows on values a client can
+        // simply type ({@code index=Integer.MAX_VALUE}): the product wraps negative
+        // and subList throws IndexOutOfBoundsException — a 500 for a paging request
+        // — instead of answering the empty page that lies past the end of the list.
+        int size = matching.size();
         int page = index == null || index < 0 ? 0 : index;
-        int from = Math.min(page * limit, matching.size());
-        int to = Math.min(from + limit, matching.size());
-        return matching.subList(from, to);
+        int pageSize = Math.min(limit, size);
+        long from = Math.min((long) page * pageSize, size);
+        long to = Math.min(from + pageSize, size);
+        return matching.subList((int) from, (int) to);
     }
 
     /**

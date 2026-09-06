@@ -21,9 +21,15 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -665,6 +671,248 @@ class StreamingLegacyChatExecutorRetryTest {
             // Should not throw even though task is null internally
             assertDoesNotThrow(() -> executor.execute(model, createMessages("Hi"), eventSink));
         }
+    }
+
+    /**
+     * The total-backoff budget, not the attempt count, is what stops this loop.
+     *
+     * <p>
+     * {@code executeWithRetry} has always applied
+     * {@code RetryConfiguration.MAX_TOTAL_BACKOFF_MS}; the streaming path ran its
+     * own retry loop and applied only the per-sleep ceiling, so ten attempts at a
+     * configured 30-second delay parked a pipeline thread for 270 seconds.
+     * Threading {@code totalBackoffMs} back into {@code backoff} is what makes the
+     * two agree, and the two "budget is spent" branches are the only places that
+     * say so.
+     * </p>
+     *
+     * <h3>Why this runs in milliseconds rather than a minute</h3>
+     * <p>
+     * Spending a 60-second budget does NOT require sleeping for 60 seconds. An
+     * interrupted {@code Thread.sleep} still reports the amount it was budgeted —
+     * that is exactly what {@code RetryConfigurationTest
+     * .interruptedBackoffRestoresTheInterruptFlag} pins — so a watcher that
+     * interrupts the pipeline thread while, and only while, it is parked inside
+     * {@code RetryConfiguration.backoff} spends the whole budget in two instant
+     * attempts. The watcher is armed by the fake model itself and matches on the
+     * pipeline thread's own stack, so it can never fire during {@code latch.await}:
+     * an interrupt there is a cancellation, which this executor deliberately
+     * refuses to retry ("Streaming chat interrupted"). The fake clears the pending
+     * flag at the start of each attempt for the same reason — a provider client
+     * that consumed the cancellation — leaving the retry decision itself untouched.
+     * </p>
+     */
+    @Nested
+    @DisplayName("total backoff budget")
+    class TotalBackoffBudgetTests {
+
+        /**
+         * A backoff configured AT the per-sleep ceiling: two of them exhaust the
+         * 60-second total budget, so the third attempt is refused by the budget rather
+         * than by {@code maxAttempts} (which is 6 here and never reached).
+         */
+        private LlmConfiguration.Task ceilingBackoffTask(int maxAttempts) {
+            var task = createTask();
+            var retry = new RetryConfiguration();
+            retry.setMaxAttempts(maxAttempts);
+            retry.setBackoffDelayMs(30_000L);
+            retry.setBackoffMultiplier(1.0);
+            retry.setMaxBackoffDelayMs(30_000L);
+            task.setRetry(retry);
+            return task;
+        }
+
+        @Test
+        @DisplayName("a retried error stops on the spent backoff budget, not on maxAttempts")
+        void errorRetryStopsWhenTheBackoffBudgetIsSpent() {
+            var callCount = new AtomicInteger(0);
+            try (var interrupter = new BackoffInterrupter(Thread.currentThread())) {
+                StreamingChatModel model = new StreamingChatModel() {
+                    @Override
+                    public void chat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
+                        // A provider client that consumed the cancellation; see the class
+                        // comment. Without this the flag left by the previous interrupted
+                        // backoff would make latch.await throw and the executor would
+                        // (correctly) refuse to retry a cancellation.
+                        Thread.interrupted();
+                        callCount.incrementAndGet();
+                        handler.onError(new RuntimeException("provider 503"));
+                        interrupter.arm();
+                    }
+                };
+
+                List<String> warnings = captureExecutorWarnings(
+                        () -> assertThrows(RuntimeException.class,
+                                () -> executor.execute(model, createMessages("Hi"), eventSink, ceilingBackoffTask(6))));
+
+                assertEquals(3, callCount.get(),
+                        "two full-ceiling backoffs spend the 60s budget, so the third attempt is the last");
+                assertTrue(warnings.stream().anyMatch(w -> w.contains("Streaming error with empty response and the retry backoff budget is spent")),
+                        "the operator has to be told the budget stopped this, not the attempt count; captured: " + warnings);
+                assertTrue(warnings.stream().noneMatch(w -> w.contains("retrying (attempt 3/")),
+                        "attempt 3 must not report itself as retrying — nothing was slept and nothing follows; captured: " + warnings);
+            } finally {
+                // Never leak an interrupt into whatever test runs next on this thread.
+                Thread.interrupted();
+            }
+        }
+
+        /**
+         * The same budget bound on the timeout branch. The first two attempts fail fast
+         * with an error so the budget is spent without any real waiting; only the third
+         * attempt takes the timeout path, at the shortest backstop the config allows.
+         */
+        @Test
+        @DisplayName("a retried timeout stops on the spent backoff budget and answers an empty result")
+        void timeoutRetryStopsWhenTheBackoffBudgetIsSpent() {
+            var callCount = new AtomicInteger(0);
+            try (var interrupter = new BackoffInterrupter(Thread.currentThread())) {
+                StreamingChatModel model = new StreamingChatModel() {
+                    @Override
+                    public void chat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
+                        Thread.interrupted();
+                        if (callCount.incrementAndGet() < 3) {
+                            handler.onError(new RuntimeException("provider 503"));
+                        }
+                        // Third attempt onwards: the provider never answers at all, so
+                        // the backstop expires and the timeout branch runs with the
+                        // budget already spent. Arming here is safe — and keeps a
+                        // regression fast rather than 90 seconds slow — because the
+                        // watcher requires a RetryConfiguration.backoff frame, which
+                        // latch.await does not have.
+                        interrupter.arm();
+                    }
+                };
+
+                var task = ceilingBackoffTask(6);
+                task.setStreamingTimeoutSeconds(1);
+
+                List<String> warnings = captureExecutorWarnings(
+                        () -> {
+                            var result = executor.execute(model, createMessages("Hi"), eventSink, task);
+                            assertEquals("", result.response(), "a spent budget on the timeout branch answers empty, it does not throw");
+                            assertEquals(true, result.metadata().get("streamingTimeout"));
+                        });
+
+                assertEquals(3, callCount.get(), "the budget, not maxAttempts=6, ended the loop");
+                assertTrue(
+                        warnings.stream().anyMatch(w -> w.contains("Streaming timed out with empty response and the retry backoff budget is spent")),
+                        "captured: " + warnings);
+                assertTrue(warnings.stream().noneMatch(w -> w.contains("Streaming timed out with empty response, retrying (attempt 3/")),
+                        "attempt 3 must not report itself as retrying; captured: " + warnings);
+            } finally {
+                Thread.interrupted();
+            }
+        }
+    }
+
+    /**
+     * Interrupts {@code target} while it is parked inside
+     * {@link RetryConfiguration#backoff}, and nowhere else.
+     *
+     * <p>
+     * The stack-frame match is what makes this safe rather than merely fast: the
+     * executor also parks in {@code CountDownLatch.await}, where an interrupt means
+     * "cancelled" and takes a completely different branch. One arm, one interrupt.
+     * </p>
+     */
+    private static final class BackoffInterrupter implements AutoCloseable {
+        private final Thread target;
+        private final Thread watcher;
+        private volatile boolean armed;
+        private volatile boolean stopped;
+
+        BackoffInterrupter(Thread target) {
+            this.target = target;
+            this.watcher = new Thread(this::run, "backoff-interrupter");
+            this.watcher.setDaemon(true);
+            this.watcher.start();
+        }
+
+        void arm() {
+            armed = true;
+        }
+
+        private void run() {
+            // Reading another thread's stack needs a safepoint, so it is probed on
+            // every Nth spin rather than continuously — cheap enough not to perturb
+            // the thread being watched, frequent enough that no sleep is needed.
+            int spins = 0;
+            while (!stopped) {
+                if (armed && (++spins & 0x3FF) == 0 && target.getState() == Thread.State.TIMED_WAITING && parkedInBackoff()) {
+                    armed = false;
+                    target.interrupt();
+                }
+                Thread.onSpinWait();
+            }
+        }
+
+        private boolean parkedInBackoff() {
+            for (StackTraceElement frame : target.getStackTrace()) {
+                if (RetryConfiguration.class.getName().equals(frame.getClassName()) && "backoff".equals(frame.getMethodName())) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        @Override
+        public void close() {
+            stopped = true;
+            try {
+                watcher.join();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+
+    /**
+     * Every WARN {@link StreamingLegacyChatExecutor} emits while {@code body} runs,
+     * with its parameters substituted into the format string.
+     * {@code logging.properties} turns the whole {@code ai.labs.eddi} namespace OFF
+     * for plain unit tests, so the logger is opened explicitly and put back.
+     */
+    private static List<String> captureExecutorWarnings(Runnable body) {
+        List<String> captured = new ArrayList<>();
+        Handler handler = new Handler() {
+            @Override
+            public void publish(LogRecord record) {
+                if (record.getLevel().intValue() < Level.WARNING.intValue()) {
+                    return;
+                }
+                String message = String.valueOf(record.getMessage());
+                Object[] parameters = record.getParameters();
+                if (parameters != null && parameters.length > 0) {
+                    try {
+                        message = String.format(message, parameters);
+                    } catch (RuntimeException ignored) {
+                        message = message + " " + Arrays.toString(parameters);
+                    }
+                }
+                captured.add(message);
+            }
+
+            @Override
+            public void flush() {
+            }
+
+            @Override
+            public void close() {
+            }
+        };
+
+        Logger julLogger = Logger.getLogger(StreamingLegacyChatExecutor.class.getName());
+        Level previousLevel = julLogger.getLevel();
+        julLogger.setLevel(Level.ALL);
+        julLogger.addHandler(handler);
+        try {
+            body.run();
+        } finally {
+            julLogger.removeHandler(handler);
+            julLogger.setLevel(previousLevel);
+        }
+        return captured;
     }
 
     // ==================== Helpers ====================
