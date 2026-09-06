@@ -134,6 +134,21 @@ and may be followed by a tab. Checked against thirteen shapes: both real Dockerf
 indent, a `# FROM` decoy comment, multi-stage last-wins, and the two malformed inputs that must
 throw.
 
+**The hardening broke the build first.** `FROM_INSTRUCTION` was declared below the `EDDI`
+container field, and static initialisers run in textual order — so that field's initialiser
+called into the parser while the pattern was still `null`, and all three container ITs died with
+`ExceptionInInitializerError` caused by a `NullPointerException`. Neither `test-compile` nor the
+standalone parsing harness could see it: one does not run static initialisers, the other does not
+reproduce this class's field order. Only the Integration Tests job did. The constant moved above
+the container fields, with a Javadoc saying why it must stay there. Verified by reproducing the
+mechanism in a two-class scratch file (declared-after throws, declared-before does not) and then
+by running `AgentUseCaseIT` locally end to end: 2 tests, 44 s, image built from the parsed
+`FROM` line, container healthy.
+
+That local run is itself worth noting, because a standing assumption said container ITs cannot
+run on this machine. They can. Had that been checked earlier, the null pattern would have been
+caught before the push rather than by CI.
+
 Worth recording how nearly that verification went wrong. The first harness reported the
 tab-separator case failing, which looked like a bug in the new regex. It was not: the harness had
 been written through a shell heredoc, which ate one backslash from `"\\s"`, and **Java 15 accepts

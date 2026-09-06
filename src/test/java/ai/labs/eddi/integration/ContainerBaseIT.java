@@ -48,6 +48,23 @@ import org.jboss.logmanager.LogManager;
 @Testcontainers
 public abstract class ContainerBaseIT extends BaseIntegrationIT {
 
+    /**
+     * A {@code FROM} instruction and its arguments. Dockerfile keywords are
+     * case-insensitive and may be followed by any whitespace, so this is looser
+     * than a {@code startsWith("FROM ")} check.
+     * <p>
+     * <b>Must stay above {@link #EDDI}.</b> Static initialisers run in textual
+     * order, and that field's initialiser calls {@link #buildEddiImage(String)},
+     * which reaches this pattern. Declared below it, this is still {@code null}
+     * when it is dereferenced, and every container-based IT dies with
+     * {@code ExceptionInInitializerError} caused by a {@code NullPointerException}.
+     * That is not hypothetical — it is how this constant was first written, and
+     * only the Integration Tests job caught it: {@code test-compile} is happy
+     * either way, and the standalone harness that exercised the parsing logic did
+     * not reproduce this class's initialisation order.
+     */
+    private static final Pattern FROM_INSTRUCTION = Pattern.compile("^\\s*FROM\\s+(.*)$", Pattern.CASE_INSENSITIVE);
+
     static final Network NETWORK = Network.newNetwork();
 
     @SuppressWarnings("resource")
@@ -118,13 +135,6 @@ public abstract class ContainerBaseIT extends BaseIntegrationIT {
                 .reduce((first, second) -> second)
                 .orElseThrow(() -> new IllegalStateException("No FROM instruction found in " + dockerfile));
     }
-
-    /**
-     * A {@code FROM} instruction and its arguments. Dockerfile keywords are
-     * case-insensitive and may be followed by any whitespace, so this is looser
-     * than a {@code startsWith("FROM ")} check.
-     */
-    private static final Pattern FROM_INSTRUCTION = Pattern.compile("^\\s*FROM\\s+(.*)$", Pattern.CASE_INSENSITIVE);
 
     /**
      * The image reference within a {@code FROM} instruction's arguments: the first
