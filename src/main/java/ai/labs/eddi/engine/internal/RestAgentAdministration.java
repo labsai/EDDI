@@ -25,6 +25,7 @@ import ai.labs.eddi.engine.runtime.ThreadContext;
 import ai.labs.eddi.engine.runtime.internal.IDeploymentListener;
 import ai.labs.eddi.engine.runtime.model.DeploymentEvent;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
+import ai.labs.eddi.engine.tenancy.QuotaAccountingUnavailableException;
 import ai.labs.eddi.engine.tenancy.QuotaExceededException;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.utils.LogSanitizer;
@@ -269,7 +270,15 @@ public class RestAgentAdministration implements IRestAgentAdministration {
         var result = tenantQuotaService.checkAgentQuota(tenantQuotaService.getDefaultTenantId(), deployedAgentIds.size());
         if (!result.allowed()) {
             log.warnf("Denying deployment of Agent %s to %s: %s", agentId, environment, result.reason());
-            throw new QuotaExceededException(result.reason());
+            // A store that could not answer is a 503, not a 429 — same split as the
+            // conversation and API-call gates in ConversationService. This one is
+            // synchronous, so QuotaAccountingUnavailableExceptionMapper runs and
+            // gives it the honest code; without the branch the deploy answered 429
+            // quota_exceeded with Retry-After: 60 for an outage the dashboard was
+            // already counting on eddi.tenant.quota.unavailable{type=agent}.
+            throw result.accountingUnavailable()
+                    ? new QuotaAccountingUnavailableException(result.reason())
+                    : new QuotaExceededException(result.reason());
         }
     }
 

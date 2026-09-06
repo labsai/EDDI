@@ -48,7 +48,13 @@ public class TenantQuotaService {
     ICacheFactory cacheFactory;
 
     /** Name of the short-TTL cache behind {@link #quotaFor}. */
-    static final String QUOTA_CACHE_NAME = "tenantQuotas";
+    /**
+     * Public for the reason {@code GdprComplianceService.RESTRICTION_CACHE_NAME}
+     * is: {@code CacheFactory.CACHE_SIZES} keys the sizing on this string and
+     * {@code CacheFactoryTest} binds the two, so a rename fails a test instead of
+     * silently reverting the cache to the default size.
+     */
+    public static final String QUOTA_CACHE_NAME = "tenantQuotas";
 
     /**
      * How long a tenant's quota configuration is reused before it is read again.
@@ -118,8 +124,15 @@ public class TenantQuotaService {
 
     /**
      * The tenant's quota configuration, from the short-TTL cache when possible.
+     * <p>
+     * Nothing is cached when the store cannot answer — only a non-null result is
+     * put — so a refusal is re-derived on the next turn rather than pinned for the
+     * TTL.
      *
      * @return the quota, or null when the tenant has none configured
+     * @throws QuotaAccountingUnavailableException
+     *             when the store could not be reached; every gate below turns that
+     *             into a counted {@link QuotaCheckResult}
      */
     private TenantQuota quotaFor(String tenantId) {
         if (tenantId == null || quotaCache == null) {
@@ -169,6 +182,29 @@ public class TenantQuotaService {
         return defaultTenantId;
     }
 
+    /**
+     * Refuse a request whose tenant configuration could not be read, and count it
+     * as the outage it is.
+     * <p>
+     * {@link ITenantQuotaStore#getQuota} raises
+     * {@link QuotaAccountingUnavailableException} rather than returning something,
+     * because {@code null} there already means "no quota configured" — i.e.
+     * unlimited. Converting it back into a {@link QuotaCheckResult} here keeps
+     * every gate's contract intact (callers still branch on {@code allowed()} and
+     * {@code accountingUnavailable()}) and routes it through {@link #recordDenial},
+     * so the READ half of a store outage lands on
+     * {@code eddi.tenant.quota.unavailable} and answers 503 exactly as the WRITE
+     * half already did. Before this, whichever call happened to fail first decided
+     * the outcome: the read is always first, so an outage exited as an opaque 500
+     * (MongoDB) or bypassed enforcement entirely (PostgreSQL), and the wrapped
+     * mutators were only reachable in the partial case where reads still worked.
+     */
+    private QuotaCheckResult quotaUnreadable(String tenantId, String type) {
+        QuotaCheckResult result = ITenantQuotaStore.accountingUnavailable();
+        recordDenial(result, tenantId, type);
+        return result;
+    }
+
     // ─── Atomic Slot Acquisition ───
 
     /**
@@ -186,7 +222,12 @@ public class TenantQuotaService {
      * counter and returns OK.
      */
     public QuotaCheckResult acquireConversationSlot(String tenantId) {
-        TenantQuota quota = quotaFor(tenantId);
+        TenantQuota quota;
+        try {
+            quota = quotaFor(tenantId);
+        } catch (QuotaAccountingUnavailableException e) {
+            return quotaUnreadable(tenantId, "conversation");
+        }
         if (quota == null || !quota.enabled()) {
             return QuotaCheckResult.OK;
         }
@@ -198,8 +239,7 @@ public class TenantQuotaService {
             quotaAllowedCounter.increment();
             meterRegistry.counter("eddi.tenant.usage.conversations", "tenant", tenantId).increment();
         } else {
-            meterRegistry.counter("eddi.tenant.quota.denied", "tenant", tenantId, "type", "conversation").increment();
-            LOGGER.warn(result.reason());
+            recordDenial(result, tenantId, "conversation");
         }
 
         return result;
@@ -220,7 +260,12 @@ public class TenantQuotaService {
      * the counter and returns OK.
      */
     public QuotaCheckResult acquireApiCallSlot(String tenantId) {
-        TenantQuota quota = quotaFor(tenantId);
+        TenantQuota quota;
+        try {
+            quota = quotaFor(tenantId);
+        } catch (QuotaAccountingUnavailableException e) {
+            return quotaUnreadable(tenantId, "api_call");
+        }
         if (quota == null || !quota.enabled()) {
             return QuotaCheckResult.OK;
         }
@@ -232,8 +277,7 @@ public class TenantQuotaService {
             quotaAllowedCounter.increment();
             meterRegistry.counter("eddi.tenant.usage.api_calls", "tenant", tenantId).increment();
         } else {
-            meterRegistry.counter("eddi.tenant.quota.denied", "tenant", tenantId, "type", "api_call").increment();
-            LOGGER.warn(result.reason());
+            recordDenial(result, tenantId, "api_call");
         }
 
         return result;
@@ -264,7 +308,12 @@ public class TenantQuotaService {
      *            excluding the agent being deployed
      */
     public QuotaCheckResult checkAgentQuota(String tenantId, int currentDistinctAgents) {
-        TenantQuota quota = quotaFor(tenantId);
+        TenantQuota quota;
+        try {
+            quota = quotaFor(tenantId);
+        } catch (QuotaAccountingUnavailableException e) {
+            return quotaUnreadable(tenantId, "agent");
+        }
         if (quota == null || !quota.enabled()) {
             return QuotaCheckResult.OK;
         }
@@ -303,7 +352,12 @@ public class TenantQuotaService {
      * needed here.
      */
     public QuotaCheckResult checkCostBudget(String tenantId) {
-        TenantQuota quota = quotaFor(tenantId);
+        TenantQuota quota;
+        try {
+            quota = quotaFor(tenantId);
+        } catch (QuotaAccountingUnavailableException e) {
+            return quotaUnreadable(tenantId, "cost");
+        }
         if (quota == null || !quota.enabled()) {
             return QuotaCheckResult.OK;
         }
@@ -354,7 +408,12 @@ public class TenantQuotaService {
      * effects than its name suggests.
      */
     public QuotaCheckResult recordCost(String tenantId, double cost) {
-        TenantQuota quota = quotaFor(tenantId);
+        TenantQuota quota;
+        try {
+            quota = quotaFor(tenantId);
+        } catch (QuotaAccountingUnavailableException e) {
+            return quotaUnreadable(tenantId, "cost");
+        }
         if (quota == null || !quota.enabled()) {
             return QuotaCheckResult.OK;
         }
@@ -364,11 +423,32 @@ public class TenantQuotaService {
         meterRegistry.counter("eddi.tenant.usage.cost", "tenant", tenantId).increment(cost);
 
         if (!result.allowed()) {
-            meterRegistry.counter("eddi.tenant.quota.denied", "tenant", tenantId, "type", "cost").increment();
-            LOGGER.warn(result.reason());
+            recordDenial(result, tenantId, "cost");
         }
 
         return result;
+    }
+
+    /**
+     * Count a refused request on the metric that describes what actually happened.
+     * <p>
+     * A store that cannot answer refuses the request for safety, which is right,
+     * but it is not a quota breach. Counting it on {@code eddi.tenant.quota.denied}
+     * made an accounting outage indistinguishable from a tenant burning through its
+     * allowance — the graph an operator uses to decide whether to raise a limit
+     * spiked for a database problem — and the WARN level buried an infrastructure
+     * fault among ordinary rate-limit noise. {@code eddi.tenant.quota.unavailable}
+     * carries the same {tenant, type} tags, so a dashboard can show them side by
+     * side.
+     */
+    private void recordDenial(QuotaCheckResult result, String tenantId, String type) {
+        if (result.accountingUnavailable()) {
+            meterRegistry.counter("eddi.tenant.quota.unavailable", "tenant", tenantId, "type", type).increment();
+            LOGGER.error(result.reason());
+            return;
+        }
+        meterRegistry.counter("eddi.tenant.quota.denied", "tenant", tenantId, "type", type).increment();
+        LOGGER.warn(result.reason());
     }
 
     // ─── Usage Reporting ───

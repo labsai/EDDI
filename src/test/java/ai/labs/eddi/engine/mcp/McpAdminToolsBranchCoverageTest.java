@@ -13,6 +13,8 @@ import ai.labs.eddi.engine.runtime.internal.SchedulePollerService;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
+import ai.labs.eddi.engine.tenancy.QuotaAccountingUnavailableException;
+import ai.labs.eddi.engine.tenancy.QuotaExceededException;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
@@ -166,6 +168,47 @@ class McpAdminToolsBranchCoverageTest {
 
             String result = tools.deployAgent("agent1", 1, null);
             assertTrue(result.contains("error"));
+            assertTrue(result.contains("Check server logs"),
+                    "an unrecognised failure must NOT leak its own message to an MCP client");
+        }
+
+        /**
+         * An over-limit refusal is actionable ("undeploy an agent first"), so its
+         * reason is passed through verbatim rather than replaced by "check server logs"
+         * — which a model driving an MCP client cannot self-correct from and will retry
+         * in a loop.
+         */
+        @Test
+        @DisplayName("an over-quota refusal returns the quota reason verbatim")
+        void quotaExceededReturnsTheReason() {
+            when(agentAdmin.deployAgent(any(), anyString(), anyInt(), anyBoolean(), anyBoolean()))
+                    .thenThrow(new QuotaExceededException("Agent limit reached (5)"));
+
+            String result = tools.deployAgent("agent1", 1, null);
+
+            assertEquals("{\"error\":\"Agent limit reached (5)\"}", result);
+        }
+
+        /**
+         * The regression the {@code QuotaRefusal} marker exists for.
+         * {@code QuotaAccountingUnavailableException} is a sibling of
+         * {@code QuotaExceededException}, not a subclass, so the previous
+         * {@code catch (QuotaExceededException)} stopped matching it and a quota-store
+         * outage fell into the generic branch — reaching the client as "Failed to
+         * deploy agent. Check server logs for details."
+         */
+        @Test
+        @DisplayName("a quota-store outage also returns its reason, not the generic 'check server logs'")
+        void quotaAccountingUnavailableReturnsTheReason() {
+            when(agentAdmin.deployAgent(any(), anyString(), anyInt(), anyBoolean(), anyBoolean()))
+                    .thenThrow(new QuotaAccountingUnavailableException(
+                            "Quota accounting unavailable — denying request for safety"));
+
+            String result = tools.deployAgent("agent1", 1, null);
+
+            assertEquals("{\"error\":\"Quota accounting unavailable — denying request for safety\"}", result);
+            assertFalse(result.contains("Check server logs"),
+                    "a store outage is not an unknown failure; the MCP client must be told what happened");
         }
     }
 

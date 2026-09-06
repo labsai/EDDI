@@ -4,10 +4,13 @@
  */
 package ai.labs.eddi.engine.tenancy;
 
+import static ai.labs.eddi.engine.tenancy.ITenantQuotaStore.accountingUnavailable;
+
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.engine.tenancy.model.TenantQuota;
 import ai.labs.eddi.engine.tenancy.model.UsageSnapshot;
 import ai.labs.eddi.utils.LogSanitizer;
+import com.mongodb.MongoException;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Filters;
@@ -182,10 +185,33 @@ public class MongoTenantQuotaStore implements ITenantQuotaStore {
 
     // ─── Quota Configuration ───
 
+    /**
+     * Fails closed and <em>honestly</em> on a driver error, exactly like the three
+     * mutators below.
+     * <p>
+     * This is the first store call every gate in {@code TenantQuotaService} makes,
+     * so on a real outage it is the one that throws — the mutators are never
+     * reached. Left unwrapped, a {@code MongoTimeoutException} travelled through
+     * {@code TenantQuotaService} (which does not catch) into
+     * {@code ConversationService}'s generic handler and out as an opaque 500, with
+     * no tick on {@code eddi.tenant.quota.unavailable} and nothing on the dashboard
+     * panel that promises it. Wrapping only the write half therefore covered just
+     * the partial outage where reads succeed and writes fail.
+     * <p>
+     * A {@code null} return cannot carry the outage: it already means "no quota
+     * configured for this tenant", which the service treats as unlimited. Hence the
+     * exception — see {@link QuotaAccountingUnavailableException}.
+     */
     @Override
     public TenantQuota getQuota(String tenantId) {
-        Document doc = quotas.find(Filters.eq("tenantId", tenantId)).first();
-        return doc != null ? toQuota(doc) : null;
+        try {
+            Document doc = quotas.find(Filters.eq("tenantId", tenantId)).first();
+            return doc != null ? toQuota(doc) : null;
+        } catch (MongoException e) {
+            LOGGER.errorf("Failed to read quota for tenant '%s': %s",
+                    LogSanitizer.sanitize(tenantId), LogSanitizer.sanitize(e.getMessage()));
+            throw new QuotaAccountingUnavailableException(ACCOUNTING_UNAVAILABLE, e);
+        }
     }
 
     @Override
@@ -238,8 +264,35 @@ public class MongoTenantQuotaStore implements ITenantQuotaStore {
     // the consequence is at worst a single false denial per window transition,
     // never over- or under-counting. Not a data corruption risk.
 
+    /**
+     * The three mutators below each wrap their body rather than letting a
+     * {@link MongoException} escape.
+     * <p>
+     * An escaping driver exception is not a quota answer at all: it travelled
+     * through {@code TenantQuotaService.acquireConversationSlot} (which does not
+     * catch) into {@code ConversationService}'s generic handler and out as a 500
+     * with a stack trace, while the same outage on PostgreSQL produced 503
+     * {@code quota_accounting_unavailable}, a {@code Retry-After} and a tick on
+     * {@code eddi.tenant.quota.unavailable}. Since {@code eddi.datastore.type}
+     * defaults to mongodb, the documented behaviour applied to neither the default
+     * deployment nor its dashboard panel.
+     * <p>
+     * Failing closed is unchanged — the request is still refused. Only its
+     * <em>description</em> changes, from "the server broke" to "quota accounting is
+     * down".
+     */
     @Override
     public QuotaCheckResult tryIncrementConversations(String tenantId, int limit) {
+        try {
+            return incrementConversationsWithinLimit(tenantId, limit);
+        } catch (MongoException e) {
+            LOGGER.errorf("Failed to increment conversations for tenant '%s': %s",
+                    LogSanitizer.sanitize(tenantId), LogSanitizer.sanitize(e.getMessage()));
+            return accountingUnavailable();
+        }
+    }
+
+    private QuotaCheckResult incrementConversationsWithinLimit(String tenantId, int limit) {
         if (limit < 0) {
             return QuotaCheckResult.OK;
         }
@@ -259,8 +312,19 @@ public class MongoTenantQuotaStore implements ITenantQuotaStore {
         return QuotaCheckResult.denied("Daily conversation limit reached (" + limit + ")");
     }
 
+    /** See {@link #tryIncrementConversations} for why the body is wrapped. */
     @Override
     public QuotaCheckResult tryIncrementApiCalls(String tenantId, int limit) {
+        try {
+            return incrementApiCallsWithinLimit(tenantId, limit);
+        } catch (MongoException e) {
+            LOGGER.errorf("Failed to increment API calls for tenant '%s': %s",
+                    LogSanitizer.sanitize(tenantId), LogSanitizer.sanitize(e.getMessage()));
+            return accountingUnavailable();
+        }
+    }
+
+    private QuotaCheckResult incrementApiCallsWithinLimit(String tenantId, int limit) {
         if (limit < 0) {
             return QuotaCheckResult.OK;
         }
@@ -280,8 +344,23 @@ public class MongoTenantQuotaStore implements ITenantQuotaStore {
         return QuotaCheckResult.denied("API rate limit reached (" + limit + "/min)");
     }
 
+    /**
+     * See {@link #tryIncrementConversations} for why the body is wrapped. Cost
+     * accounting fails closed for the same reason the PostgreSQL store does: a
+     * budget that cannot be read must not be treated as a budget with room left.
+     */
     @Override
     public QuotaCheckResult tryAddCost(String tenantId, double cost, double limit) {
+        try {
+            return addCostWithinBudget(tenantId, cost, limit);
+        } catch (MongoException e) {
+            LOGGER.errorf("Failed to add cost for tenant '%s': %s",
+                    LogSanitizer.sanitize(tenantId), LogSanitizer.sanitize(e.getMessage()));
+            return QuotaCheckResult.unavailable("Cost accounting failed — denying request for safety");
+        }
+    }
+
+    private QuotaCheckResult addCostWithinBudget(String tenantId, double cost, double limit) {
         String monthKey = YearMonth.now(clock.withZone(ZoneOffset.UTC)).toString();
 
         // Fast path: the document already carries the current month.

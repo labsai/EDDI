@@ -49,6 +49,42 @@ bottom of this file and are never archived.
 
 ---
 
+## 🔐 fix(gdpr): stop caching "not restricted" by default; make foreign audit sequences visible (2026-09-06)
+
+**Repo:** EDDI (`fix/review-audit-gdpr`)
+
+Two reviewer comments had been reported closed but were not. Both are now closed properly, and the
+second one is closed by admitting what is not fixed rather than by claiming it is.
+
+**The Art. 18 restriction cache failed open by default.** A previous pass added
+`eddi.gdpr.restriction-cache-ttl-seconds` and made `0` disable the cache, but left the default at
+30 seconds — so on a stock multi-replica deployment a node that had cached "not restricted" kept
+processing for up to 30 seconds after another node applied the restriction. That is exactly the
+window the comment described, and an opt-in switch does not close it. The default is now `0`:
+every turn reads the store, and caching becomes an explicit single-node or conversation-affinity
+optimisation, documented as such. The alternative considered was a positive-only cache, which was
+rejected because it would only ever help restricted users — the rare case — while still delaying
+an *un*restriction across the cluster.
+
+**Audit sequence allocation is still not cluster-safe, and now says so.** The reviewer asked for a
+storage-level atomic reservation plus a unique `(conversationId, sequence)` constraint and retry.
+That is deferred: it moves a store round trip from once per conversation to once per entry on the
+pipeline thread, and it is a schema change on two backends. The constraint must not land on its
+own either — for an audit ledger a rejected insert silently drops a record, which is worse than a
+duplicate the verifier can detect. What was genuinely missing and is cheap is *detection*:
+`flush()` now re-reads the store's maximum for each conversation it wrote and, if the store already
+holds a position at or beyond this node's next free one, increments
+`eddi_audit_sequence_collisions_total`, logs a WARN naming the conversation, and advances its
+counter past the foreign rows. An operator running multi-replica without affinity sees it in
+metrics instead of discovering it as a `BROKEN` verdict at verify time. The detector has no false
+positives and is documented as partial: two nodes handing out an identical range leave a maximum
+consistent with both counters and are still only caught at verify time.
+
+`IAuditStore` and `docs/audit-ledger.md` now lead with the limitation, the deferred fix, and why it
+is deferred, so the row can no longer be read as "already correct".
+
+---
+
 ## 📒 fix(audit,gdpr,tenancy): repair ledger persistence, erasure reporting and quota windows (2026-09-04)
 
 **Repo:** EDDI (`fix/review-audit-gdpr`)

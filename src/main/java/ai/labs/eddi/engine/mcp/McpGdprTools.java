@@ -119,7 +119,11 @@ public class McpGdprTools {
 
     @Tool(name = "export_user_data", description = "Export all data for a user "
             + "(GDPR Art. 15/20 Right of Access / Data Portability). "
-            + "Returns memories, conversations, and managed conversation mappings.")
+            + "Returns memories, conversations, and managed conversation mappings. "
+            + "'conversationsTruncated'=true means the per-request conversation cap bit "
+            + "and the bundle is INCOMPLETE — 'totalConversations' says how many the user "
+            + "has, and the export must NOT be handed to the data subject as a complete "
+            + "Art. 15 bundle.")
     public String exportUserData(
                                  @ToolArg(description = "User ID to export (required)") String userId) {
         requireRole(identity, authEnabled, "eddi-admin");
@@ -133,6 +137,10 @@ public class McpGdprTools {
             map.put("exportedAt", export.exportedAt().toString());
             map.put("memoriesCount", export.memories().size());
             map.put("conversationsCount", export.conversations().size());
+            // The REST surface says the same thing with a 206; an LLM agent calling
+            // this tool has only the payload to go on, so the cap has to be in it.
+            map.put("totalConversations", export.totalConversations());
+            map.put("conversationsTruncated", export.conversationsTruncated());
             map.put("managedConversationsCount",
                     export.managedConversations().size());
             map.put("memories", export.memories());

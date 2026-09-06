@@ -143,8 +143,39 @@ public interface IAuditStore {
      * second time, and {@code /auditstore/verify} grades duplicates exactly like
      * deletions ({@code BROKEN}). The ledger would then accuse the deployment of
      * tampering because of its own bookkeeping. Seeding from {@code max + 1} cannot
-     * do that, and it survives a restart and a second cluster node, which the
-     * in-memory "undelivered" pin does not.
+     * do that, and unlike the in-memory "undelivered" pin it survives a restart.
+     * <p>
+     * <strong>KNOWN LIMITATION — sequence allocation is not cluster-safe.</strong>
+     * This is a read, not an atomic reservation: entries sit in a node-local queue
+     * for up to {@code eddi.audit.flush-interval-seconds} before the store can see
+     * them, so two nodes serving consecutive turns of one conversation inside that
+     * window both read the same maximum and both hand out the positions after it.
+     * Neither backend indexes {@code (conversationId, sequence)} uniquely, so the
+     * duplicate is accepted and {@code /auditstore/verify} grades the conversation
+     * {@code BROKEN}. <strong>A multi-replica deployment therefore needs
+     * conversation affinity for chain integrity today</strong> — individual HMACs
+     * still verify; it is the chain-continuity check that is affected.
+     * <p>
+     * <strong>Deferred fix, and why.</strong> Removing that requirement needs a
+     * storage-level atomic counter — PostgreSQL {@code UPDATE ... RETURNING} on a
+     * per-conversation counter row, MongoDB {@code findOneAndUpdate} with
+     * {@code $inc} — plus a unique {@code (conversationId, sequence)} constraint
+     * and a retry on collision. It is a separate change because it moves a store
+     * round trip from once per conversation to once per <em>entry</em>, on the
+     * pipeline thread, and it is a schema change on both backends. The unique
+     * constraint must not be added on its own either: without the allocator that
+     * makes collisions impossible, a rejected insert silently drops an audit
+     * record, which is worse than the duplicate it prevents — a duplicate at least
+     * surfaces as a detectable {@code BROKEN} verdict.
+     * <p>
+     * <strong>Until then the condition is detected, not silent.</strong>
+     * {@code AuditLedgerService.detectForeignSequenceAllocation} re-reads this
+     * value after each flush and, when the store already holds a position this node
+     * has not handed out yet, logs a WARN naming the conversation and increments
+     * {@code eddi_audit_sequence_collisions_total}. A non-zero counter means
+     * "multi-replica without conversation affinity". It is a partial detector — two
+     * nodes that hand out an identical range are still only caught at verify time —
+     * and no substitute for the fix above.
      * <p>
      * The default returns {@link AuditEntry#UNSEQUENCED} so a store that does not
      * implement it falls back to the count — the previous behaviour, and harmless

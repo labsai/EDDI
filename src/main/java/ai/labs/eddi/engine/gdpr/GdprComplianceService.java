@@ -27,6 +27,7 @@ import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.time.Duration;
@@ -44,6 +45,14 @@ import java.util.*;
  * <strong>Export:</strong> Aggregates all user data into a single
  * JSON-serializable bundle (GDPR Art. 15/20 — Right of Access / Data
  * Portability).
+ * <p>
+ * <strong>Restriction (Art. 18):</strong> {@link #isProcessingRestricted} reads
+ * the store on every call by default — the verdict is <em>not</em> cached
+ * unless a deployment opts in with {@link #RESTRICTION_CACHE_TTL_PROPERTY}. The
+ * cache is node-local and has no cross-node invalidation, so a cached "not
+ * restricted" is exactly what would let a second replica keep processing a user
+ * who has just been restricted elsewhere. Caching is a single-node /
+ * conversation-affinity optimisation, not a default.
  *
  * @author ginccc
  * @since 6.0.0
@@ -68,12 +77,21 @@ public class GdprComplianceService {
     private final IScheduleStore scheduleStore;
     private final ICache<String, UserConversation> userConversationCache;
     /**
-     * Art. 18 restriction flags, short-TTL. {@code isProcessingRestricted} is
-     * called at conversation start and on every {@code say}/{@code sayStreaming},
-     * so an uncached lookup is a store round trip per turn on the hottest path in
-     * the system — to read a flag only an admin endpoint ever changes. Both of
-     * those endpoints invalidate the entry explicitly, so the TTL is only a
-     * backstop for another cluster node's write.
+     * Art. 18 restriction flags, short-TTL — <strong>off unless a deployment
+     * switches it on</strong>. {@code isProcessingRestricted} is called at
+     * conversation start and on every {@code say}/{@code sayStreaming}, so an
+     * uncached lookup is a store round trip per turn on the hottest path in the
+     * system — to read a flag only an admin endpoint ever changes. That is the
+     * whole case for caching, and it is only sound on one node (or with
+     * conversation affinity), which is why it is opt-in. Both admin endpoints
+     * invalidate the entry explicitly, so the TTL is only a backstop for another
+     * cluster node's write.
+     * <p>
+     * <strong>Null unless caching is switched on, which is not the default</strong>
+     * — see {@link #RESTRICTION_CACHE_TTL_PROPERTY}. Every access goes through
+     * {@link #cachedRestriction}, {@link #publishRestriction},
+     * {@link #offerUnrestricted} or {@link #forgetRestriction}, so the disabled
+     * case is handled in one place rather than at each call site.
      */
     private final ICache<String, Boolean> restrictionCache;
 
@@ -91,7 +109,9 @@ public class GdprComplianceService {
             Instance<GroupConversationStore> groupConversationStoreInstance,
             Instance<ISharedArtifactStore> sharedArtifactStoreInstance,
             IScheduleStore scheduleStore,
-            ICacheFactory cacheFactory) {
+            ICacheFactory cacheFactory,
+            @ConfigProperty(name = RESTRICTION_CACHE_TTL_PROPERTY,
+                            defaultValue = RESTRICTION_CACHE_TTL_DEFAULT) long restrictionCacheTtlSeconds) {
         this.userMemoryStore = userMemoryStore;
         this.conversationMemoryStore = conversationMemoryStore;
         this.userConversationStore = userConversationStore;
@@ -106,20 +126,81 @@ public class GdprComplianceService {
         this.sharedArtifactStoreInstance = sharedArtifactStoreInstance;
         this.scheduleStore = scheduleStore;
         this.userConversationCache = cacheFactory.getCache(USER_CONVERSATION_CACHE_NAME);
-        this.restrictionCache = cacheFactory.getCache(RESTRICTION_CACHE_NAME, RESTRICTION_CACHE_TTL);
+        this.restrictionCache = restrictionCacheTtlSeconds <= 0
+                ? null
+                : cacheFactory.getCache(RESTRICTION_CACHE_NAME, Duration.ofSeconds(restrictionCacheTtlSeconds));
+        if (this.restrictionCache == null) {
+            LOGGER.infof("[GDPR] Art. 18 restriction caching is off (%s=%d); every check reads the store.",
+                    RESTRICTION_CACHE_TTL_PROPERTY, restrictionCacheTtlSeconds);
+        }
     }
 
-    /** Name of the short-TTL cache behind {@link #isProcessingRestricted}. */
-    static final String RESTRICTION_CACHE_NAME = "gdprProcessingRestrictions";
+    /**
+     * Test seam: the shipped default (caching off), without a running
+     * configuration.
+     */
+    GdprComplianceService(IUserMemoryStore userMemoryStore,
+            IConversationMemoryStore conversationMemoryStore,
+            IUserConversationStore userConversationStore,
+            IDatabaseLogs databaseLogs,
+            IAuditStore auditStore,
+            AuditLedgerService auditLedgerService,
+            Instance<IAttachmentStore> attachmentStorageInstance,
+            IHitlToolJournalStore hitlToolJournalStore,
+            IConversationDescriptorStore conversationDescriptorStore,
+            IConversationCheckpointStore checkpointStore,
+            Instance<GroupConversationStore> groupConversationStoreInstance,
+            Instance<ISharedArtifactStore> sharedArtifactStoreInstance,
+            IScheduleStore scheduleStore,
+            ICacheFactory cacheFactory) {
+        this(userMemoryStore, conversationMemoryStore, userConversationStore, databaseLogs, auditStore,
+                auditLedgerService, attachmentStorageInstance, hitlToolJournalStore, conversationDescriptorStore,
+                checkpointStore, groupConversationStoreInstance, sharedArtifactStoreInstance, scheduleStore,
+                cacheFactory, Long.parseLong(RESTRICTION_CACHE_TTL_DEFAULT));
+    }
 
     /**
-     * Backstop TTL for {@link #RESTRICTION_CACHE_NAME}. Short, because a
-     * restriction applied on another cluster node has to take effect quickly;
-     * explicit invalidation in
-     * {@code restrictProcessing}/{@code unrestrictProcessing} covers the
-     * single-node case immediately.
+     * Name of the short-TTL cache behind {@link #isProcessingRestricted}.
+     * <p>
+     * Public because its sizing lives in {@code CacheFactory.CACHE_SIZES} under
+     * this exact string and {@code CacheFactoryTest} asserts the two still meet: a
+     * rename here with the map left alone silently drops the cache back to the
+     * 1,000 default, which nothing else would report.
      */
-    static final Duration RESTRICTION_CACHE_TTL = Duration.ofSeconds(30);
+    public static final String RESTRICTION_CACHE_NAME = "gdprProcessingRestrictions";
+
+    /**
+     * How long a restriction verdict may be reused without re-reading the store, in
+     * seconds. <strong>0 — the default — switches the cache off entirely</strong>,
+     * so every check reads the store.
+     * <p>
+     * The cache is node-local and there is no cross-node invalidation, so a
+     * <em>negative</em> verdict cached here is the one thing that can let a
+     * restricted user keep being processed: node A applies the Art. 18 restriction
+     * and evicts its own entry, while node B goes on answering "not restricted"
+     * from cache until the TTL expires — and, for the same reason, keeps answering
+     * from cache through a store outage instead of failing closed. Explicit
+     * invalidation in {@code restrictProcessing}/{@code unrestrictProcessing}
+     * closes that window on the node that served the admin call only.
+     * <p>
+     * That fail-open window is why the shipped default is 0 rather than a short
+     * TTL: a default has to be safe on every topology, and on a multi-replica
+     * deployment a cached {@code false} suspends a legal control for the length of
+     * the TTL. The cost of the default is one indexed lookup per turn.
+     * <p>
+     * Setting it above 0 is an <em>explicit single-node or conversation-affinity
+     * optimisation</em>: it says "every turn of a conversation, and every admin
+     * call, reaches the same node", which is what makes the explicit invalidation
+     * sufficient. Do not set it on a cluster without affinity until cluster-wide
+     * invalidation exists.
+     */
+    static final String RESTRICTION_CACHE_TTL_PROPERTY = "eddi.gdpr.restriction-cache-ttl-seconds";
+
+    /**
+     * Default for {@link #RESTRICTION_CACHE_TTL_PROPERTY}, as MicroProfile needs a
+     * String. Zero: no verdict is cached unless a deployment asks for it.
+     */
+    static final String RESTRICTION_CACHE_TTL_DEFAULT = "0";
 
     /**
      * Name of the Caffeine cache {@code RestUserConversationStore} reads managed
@@ -441,13 +522,27 @@ public class GdprComplianceService {
      * <p>
      * Recorded once per step even when a per-conversation loop fails repeatedly —
      * the caller needs to know <em>which</em> category is incomplete, not how many
-     * conversations were affected; the log carries that.
+     * conversations were affected.
+     * <p>
+     * The <em>stack trace</em> is logged once per step too, for the same reason.
+     * These calls sit inside per-conversation loops, so a user with 5,000
+     * conversations during a store outage produced 20,000 ERROR stack traces for
+     * one erasure request and buried the single line that matters. Repeats are
+     * still reported — at WARN, with the cause's message — so nothing goes
+     * unrecorded; only the identical trace is not repeated.
+     *
+     * @return whether this call logged the full stack trace (true on the first
+     *         failure of a step) — so a test can assert the dedup without scraping
+     *         the log
      */
-    private static void recordFailure(List<String> failedSteps, String step, Exception e, String pseudonym) {
-        LOGGER.errorf(e, "[GDPR] Failed step '%s' [%s]", step, pseudonym);
-        if (!failedSteps.contains(step)) {
-            failedSteps.add(step);
+    static boolean recordFailure(List<String> failedSteps, String step, Exception e, String pseudonym) {
+        if (failedSteps.contains(step)) {
+            LOGGER.warnf("[GDPR] Failed step '%s' again [%s]: %s", step, pseudonym, e.getMessage());
+            return false;
         }
+        LOGGER.errorf(e, "[GDPR] Failed step '%s' [%s]", step, pseudonym);
+        failedSteps.add(step);
+        return true;
     }
 
     /**
@@ -486,10 +581,21 @@ public class GdprComplianceService {
         // entries bounds these. A user with thousands of conversations otherwise held
         // a JAX-RS worker for minutes and produced a response measured in hundreds of
         // megabytes.
-        int exportable = Math.min(conversationIds.size(), CONVERSATION_EXPORT_LIMIT);
-        if (conversationIds.size() > CONVERSATION_EXPORT_LIMIT) {
-            LOGGER.warnf("[GDPR] User has %d conversations; exporting the first %d [%s]",
-                    conversationIds.size(), CONVERSATION_EXPORT_LIMIT, pseudonym);
+        // Residue, deliberately not fixed here: *which* conversations survive the cap
+        // is whatever order the store returned. MongoDB's natural order is not
+        // insertion order, so a truncated bundle is an arbitrary 200 of 1,200 rather
+        // than the oldest or the newest. The bundle says it is truncated and gives the
+        // total, which is what makes the response honest; making the subset itself
+        // predictable needs an ordered projection in both conversation stores.
+        int totalConversations = conversationIds.size();
+        int exportable = Math.min(totalConversations, CONVERSATION_EXPORT_LIMIT);
+        // Reported in the bundle, not only in the log: a subject access request that
+        // silently omits 200 of 1,200 conversations while answering 200 OK is the
+        // same misreporting the erasure half of this class answers 207 for.
+        boolean conversationsTruncated = totalConversations > CONVERSATION_EXPORT_LIMIT;
+        if (conversationsTruncated) {
+            LOGGER.warnf("[GDPR] User has %d conversations; exporting the first %d and marking the bundle truncated [%s]",
+                    totalConversations, CONVERSATION_EXPORT_LIMIT, pseudonym);
         }
         for (var convId : conversationIds.subList(0, exportable)) {
             try {
@@ -556,20 +662,23 @@ public class GdprComplianceService {
         }
 
         LOGGER.infof("[GDPR] Export complete [%s]: memories=%d, "
-                + "conversations=%d, managedConversations=%d, auditEntries=%d, attachments=%d",
-                pseudonym, memories.size(), conversations.size(),
+                + "conversations=%d of %d, truncated=%s, managedConversations=%d, auditEntries=%d, attachments=%d",
+                pseudonym, memories.size(), conversations.size(), totalConversations, conversationsTruncated,
                 managedConversations.size(), auditExportEntries.size(), attachmentEntries.size());
 
         // Write compliance event to immutable audit ledger
         submitComplianceAuditEntry("GDPR_EXPORT", pseudonym, Map.of(
                 "memoriesExported", memories.size(),
                 "conversationsExported", conversations.size(),
+                "totalConversations", totalConversations,
+                "conversationsTruncated", conversationsTruncated,
                 "managedConversationsExported", managedConversations.size(),
                 "auditEntriesExported", auditExportEntries.size(),
                 "attachmentsExported", attachmentEntries.size()));
 
         return new UserDataExport(userId, Instant.now(), memories,
-                conversations, managedConversations, auditExportEntries, attachmentEntries);
+                conversations, managedConversations, auditExportEntries, attachmentEntries,
+                totalConversations, conversationsTruncated);
     }
 
     // === Right to Restriction of Processing (GDPR Art. 18) ===
@@ -602,7 +711,7 @@ public class GdprComplianceService {
                     List.of(), null, false, 0,
                     Instant.now(), Instant.now());
             userMemoryStore.upsert(entry);
-            restrictionCache.put(userId, true);
+            publishRestriction(userId, true);
         } catch (Exception e) {
             // Drop any cached verdict rather than leaving a stale "not restricted"
             // in place after a half-applied write.
@@ -631,13 +740,13 @@ public class GdprComplianceService {
             if (existing.isPresent()) {
                 userMemoryStore.deleteEntry(existing.get().id());
             }
-            // Publish the lift, do not merely forget it. A cached "true" that
-            // outlives the removal keeps answering "restricted" for up to
-            // RESTRICTION_CACHE_TTL on this node, so a user an admin has just
+            // Publish the lift, do not merely forget it. Where caching is switched
+            // on, a cached "true" that outlives the removal keeps answering
+            // "restricted" for the whole TTL on this node, so a user an admin has just
             // cleared keeps receiving 403 "Processing is restricted for this user
             // (GDPR Art. 18)" on every turn — a false legal statement about someone
             // who is no longer restricted.
-            restrictionCache.put(userId, false);
+            publishRestriction(userId, false);
         } catch (Exception e) {
             forgetRestriction(userId);
             LOGGER.errorf(e, "[GDPR] Failed to unrestrict processing [%s]",
@@ -654,19 +763,62 @@ public class GdprComplianceService {
      * rejects a null key outright).
      */
     private void forgetRestriction(String userId) {
-        if (userId != null) {
+        if (userId != null && restrictionCache != null) {
             restrictionCache.remove(userId);
         }
     }
 
     /**
+     * The published verdict for a user, or null when nothing is published — which
+     * is always the case while caching is switched off, so the caller reads the
+     * store every time.
+     */
+    private Boolean cachedRestriction(String userId) {
+        return restrictionCache == null ? null : restrictionCache.get(userId);
+    }
+
+    /** Force a verdict into the cache, if there is one. */
+    private void publishRestriction(String userId, boolean restricted) {
+        if (restrictionCache != null) {
+            restrictionCache.put(userId, restricted);
+        }
+    }
+
+    /**
+     * Offer "not restricted" without displacing a restriction another writer
+     * already published; returns the value that ends up published, or null when
+     * caching is off and the caller should simply use its own store read.
+     */
+    private Boolean offerUnrestricted(String userId) {
+        return restrictionCache == null ? null : restrictionCache.putIfAbsent(userId, false);
+    }
+
+    /**
      * Check if processing is restricted for a user.
      * <p>
-     * Read through a short-TTL cache: this runs at conversation start and again on
-     * every {@code say}/{@code sayStreaming}, so an uncached lookup is a store
-     * round trip per turn on the hottest path in the system — to read a flag only
-     * {@link #restrictProcessing} and {@link #unrestrictProcessing} ever change,
-     * and both publish through the cache.
+     * <strong>By default this reads the store on every call.</strong>
+     * {@link #RESTRICTION_CACHE_TTL_PROPERTY} defaults to 0, so no verdict is
+     * cached: a restriction applied on any node takes effect on every node at once,
+     * and a store outage always raises
+     * {@link ProcessingRestrictionUnavailableException} rather than being absorbed
+     * by a cached verdict. The cost is one indexed lookup per turn — this runs at
+     * conversation start and again on every {@code say}/{@code sayStreaming}, which
+     * is the hottest path in the system, to read a flag only an admin endpoint ever
+     * changes.
+     * <p>
+     * A deployment that is a single node, or a cluster with conversation affinity,
+     * may buy that lookup back by setting the property above 0. The cache is then
+     * node-local, and {@link #restrictProcessing} and {@link #unrestrictProcessing}
+     * publish through it so the node serving the admin call applies the change on
+     * the very next turn.
+     * <p>
+     * With caching on, a miss publishes the value read from the store
+     * <em>monotonically toward restriction</em>: a {@code true} overwrites whatever
+     * is cached, a {@code false} is only offered and yields to any value already
+     * there. This method is not the only writer — concurrent misses publish too —
+     * so neither a plain {@code put} nor a plain {@code putIfAbsent} is safe on its
+     * own; see the comment at the publish site. The caller always gets a value that
+     * is at least as restrictive as its own store read.
      *
      * @param userId
      *            the user to check
@@ -682,15 +834,39 @@ public class GdprComplianceService {
             // outright, so this must not reach the cache.
             return false;
         }
-        Boolean cached = restrictionCache.get(userId);
+        Boolean cached = cachedRestriction(userId);
         if (cached != null) {
             return cached;
         }
         try {
             var entry = userMemoryStore.getByKey(userId, RESTRICTION_KEY);
             boolean restricted = entry.isPresent() && "true".equals(String.valueOf(entry.get().value()));
-            restrictionCache.put(userId, restricted);
-            return restricted;
+            // Publish monotonically toward restriction: within one TTL window a
+            // "restricted" observation always wins, whoever else is writing.
+            //
+            // This read is not atomic with restrictProcessing, and it is not the only
+            // writer either — two concurrent misses of this very method also publish.
+            // A plain put loses an administrative restriction applied mid-read (T1
+            // reads false, an admin writes the row and publishes true, T1 overwrites
+            // it with the stale false and the node processes a restricted user for
+            // the whole TTL). A plain putIfAbsent loses the opposite way,
+            // which is worse: T2 misses and publishes false, T1 misses, reads true
+            // from the store, and its putIfAbsent is refused — so T1 would return the
+            // sibling's false and process a turn its OWN read said must be blocked.
+            //
+            // So: a true is forced into the cache and returned; a false is only
+            // offered, and yields to whatever is already published (which may be a
+            // restriction from restrictProcessing or from a concurrent reader).
+            // Erring toward "restricted" for at most one TTL is the safe direction
+            // for an Art. 18 legal control — an unrestrictProcessing that loses this
+            // race delays a release by 30s, while the other direction processes data
+            // that must not be processed.
+            if (restricted) {
+                publishRestriction(userId, true);
+                return true;
+            }
+            Boolean published = offerUnrestricted(userId);
+            return published != null ? published : false;
         } catch (Exception e) {
             // Still fail-closed — the turn does not proceed — but no longer
             // fail-dishonest. Returning true here told the user "Processing is

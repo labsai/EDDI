@@ -57,11 +57,31 @@ public class RestGdprAdmin implements IRestGdprAdmin {
                 .build();
     }
 
+    /** HTTP 206 Partial Content, for a bundle the conversation cap truncated. */
+    static final int PARTIAL_CONTENT = Response.Status.PARTIAL_CONTENT.getStatusCode();
+
+    /**
+     * Answers 206 when the conversation cap truncated the bundle.
+     * <p>
+     * Same reasoning as the 207 above. The cap used to be visible only in the
+     * server log, so a data-portability request for a user with 1,200 conversations
+     * returned 200 with 200 of them silently missing — an arbitrary 200 on MongoDB,
+     * whose natural order is not insertion order. The body now carries
+     * {@code totalConversations} and {@code conversationsTruncated}; the status
+     * carries the same distinction for a caller that does not read the body.
+     */
     @Override
-    public UserDataExport exportUserData(String userId) {
+    public Response exportUserData(String userId) {
         validateUserId(userId);
         LOGGER.info("GDPR export request received");
-        return gdprComplianceService.exportUserData(userId);
+        UserDataExport export = gdprComplianceService.exportUserData(userId);
+        if (export.conversationsTruncated()) {
+            LOGGER.warnf("GDPR export truncated — %d of %d conversations returned",
+                    export.conversations().size(), export.totalConversations());
+        }
+        return Response.status(export.conversationsTruncated() ? PARTIAL_CONTENT : Response.Status.OK.getStatusCode())
+                .entity(export)
+                .build();
     }
 
     @Override

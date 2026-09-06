@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.gdpr;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
@@ -103,10 +105,48 @@ class RestGdprAdminTest {
                 List.of(), List.of(), List.of(), List.of());
         when(gdprService.exportUserData("user-1")).thenReturn(expected);
 
-        UserDataExport result = restAdmin.exportUserData("user-1");
+        Response response = restAdmin.exportUserData("user-1");
 
-        assertSame(expected, result);
+        assertEquals(200, response.getStatus());
+        assertSame(expected, response.getEntity());
         verify(gdprService).exportUserData("user-1");
+    }
+
+    /**
+     * Finding r4. A bundle the conversation cap truncated is an INCOMPLETE Art.
+     * 15/20 response, and it used to be indistinguishable from a complete one: 200
+     * OK, no marker in the payload, the warning in the server log only. The same
+     * distinction the 207 above draws for erasure.
+     */
+    @Test
+    void exportUserData_reports206WhenTheConversationCapTruncatedTheBundle() {
+        var truncated = new UserDataExport("user-1", Instant.now(),
+                List.of(), List.of(), List.of(), List.of(), List.of(), 1_200, true);
+        when(gdprService.exportUserData("user-1")).thenReturn(truncated);
+
+        Response response = restAdmin.exportUserData("user-1");
+
+        assertEquals(RestGdprAdmin.PARTIAL_CONTENT, response.getStatus());
+        assertSame(truncated, response.getEntity());
+    }
+
+    /**
+     * Finding r15. {@code complete()} is a derived method, not a record component
+     * and not a bean getter, so Jackson left it out of the REST entity while
+     * {@code McpGdprTools} puts it into the MCP payload explicitly — the same
+     * result in two different shapes, and a client written against the MCP JSON
+     * reading null from the REST one.
+     */
+    @Test
+    void deleteUserData_restBodyCarriesCompleteJustLikeTheMcpPayload() throws Exception {
+        var incomplete = new GdprDeletionResult("user-1", 5, 0, 2, 10, 15,
+                0, 0, 0, 0, 0, 0, List.of("conversations"), Instant.now());
+
+        String json = new ObjectMapper().registerModule(new JavaTimeModule()).writeValueAsString(incomplete);
+
+        assertTrue(json.contains("\"complete\":false"),
+                "the REST and MCP surfaces must report the same result in the same shape: " + json);
+        assertTrue(json.contains("\"failedSteps\":[\"conversations\"]"), json);
     }
 
     // ==================== Restriction endpoints ====================

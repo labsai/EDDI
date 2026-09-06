@@ -29,6 +29,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.nio.file.*;
+import java.time.Duration;
 import java.time.Instant;
 import java.nio.charset.StandardCharsets;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -42,18 +43,21 @@ import ai.labs.eddi.utils.LogSanitizer;
  * {@link ConcurrentLinkedQueue}, with a {@link ScheduledExecutorService}
  * flushing entries to {@link IAuditStore} at a configurable interval.
  * <p>
- * <strong>{@link #submit} does not touch the store, but it is not
- * free.</strong> Before an entry is queued the caller's thread scrubs it,
- * assigns its chain position, hashes it and signs it — CPU-bound work
- * proportional to the size of the prompts and responses being recorded. What it
- * no longer does is I/O: seeding a conversation's sequence counter reads the
- * store, and that read used to happen inside
- * {@code ConcurrentHashMap.computeIfAbsent} while holding the sequence read
- * lock, so one slow query stalled every other submitter that hashed to the same
- * bin as well as any eviction waiting for the write lock (a
+ * <strong>{@link #submit} is not free, and it is not I/O-free either.</strong>
+ * Before an entry is queued the caller's thread scrubs it, assigns its chain
+ * position, hashes it and signs it — CPU-bound work proportional to the size of
+ * the prompts and responses being recorded. On top of that, the <em>first</em>
+ * entry of a conversation (and the first after its counter is evicted) still
+ * pays one synchronous store read to seed the chain counter — see
+ * {@link #seedSequence}. What changed is only <em>where</em> that read happens:
+ * it used to run inside {@code ConcurrentHashMap.computeIfAbsent} while holding
+ * the sequence read lock, so one slow query stalled every other submitter that
+ * hashed to the same bin as well as any eviction waiting for the write lock (a
  * {@code ReentrantReadWriteLock} refuses new readers once a writer has queued).
- * The seed is now resolved by {@link #prewarmSequenceCounter} before either is
- * taken.
+ * {@link #prewarmSequenceCounter} now resolves the seed before either is taken,
+ * so a slow seed costs the calling turn and nothing else. Moving it off the
+ * caller thread entirely (assign {@link AuditEntry#UNSEQUENCED} on submit and
+ * back-fill on the flush thread before signing) is still open.
  * <p>
  * Before persisting, each entry passes through:
  * <ol>
@@ -76,8 +80,25 @@ public class AuditLedgerService {
      * How many consecutive refusals the per-entry fallback tolerates before it
      * declares the store unavailable and stops calling it for the rest of the
      * batch. See {@link #appendIndividually}.
+     * <p>
+     * Three, not ten: telling a poison row from a dead store needs <em>one</em>
+     * success, not ten failures, and every attempt against an unreachable store
+     * costs a full connection-acquisition timeout on the writer thread.
      */
-    static final int MAX_CONSECUTIVE_ENTRY_FAILURES = 10;
+    static final int MAX_CONSECUTIVE_ENTRY_FAILURES = 3;
+
+    /**
+     * Wall-clock budget for one per-entry retry pass, on top of
+     * {@link #MAX_CONSECUTIVE_ENTRY_FAILURES}.
+     * <p>
+     * The failure cap alone bounds the number of <em>calls</em>, not the time they
+     * take: against a store that is unreachable rather than refusing, each call
+     * blocks for the pool's acquisition timeout (Agroal's default is 5s), so even a
+     * small cap turns one flush into tens of seconds on the monitor the
+     * {@code @PreDestroy} final flush waits on. The budget is checked before every
+     * call, so a pass costs at most one in-flight call beyond it.
+     */
+    static final Duration ENTRY_RETRY_BUDGET = Duration.ofSeconds(2);
 
     /** Default bound for {@code eddi.audit.max-queue-size}. */
     static final int DEFAULT_MAX_QUEUE_SIZE = 100_000;
@@ -140,6 +161,14 @@ public class AuditLedgerService {
     private final int flushIntervalSeconds;
     private final Optional<String> masterKeyConfig;
     private final Counter droppedCounter;
+    /**
+     * Conversations observed with chain positions this node did not allocate — see
+     * {@link #detectForeignSequenceAllocation}. Non-zero means the deployment is
+     * running multiple replicas without conversation affinity, and
+     * {@code /auditstore/verify} will grade the affected conversations
+     * {@code BROKEN}.
+     */
+    private final Counter sequenceCollisionCounter;
     private final Instance<Connection> natsConnectionInstance;
     private final String deadLetterPath;
     private final boolean agentSigningEnabled;
@@ -234,6 +263,7 @@ public class AuditLedgerService {
         this.defaultTenantId = defaultTenantId;
         this.maxQueueSize = maxQueueSize > 0 ? maxQueueSize : DEFAULT_MAX_QUEUE_SIZE;
         this.droppedCounter = meterRegistry.counter("eddi_audit_entries_dropped_total");
+        this.sequenceCollisionCounter = meterRegistry.counter("eddi_audit_sequence_collisions_total");
         this.natsConnectionInstance = natsConnectionInstance;
         this.agentSigningService = agentSigningService;
         this.objectMapper = objectMapper;
@@ -253,7 +283,18 @@ public class AuditLedgerService {
      */
     static AuditLedgerService createForTesting(IAuditStore auditStore, boolean enabled, int flushIntervalSeconds, String masterKeyConfig,
                                                MeterRegistry meterRegistry, int maxQueueSize) {
-        return new AuditLedgerService(auditStore, enabled, flushIntervalSeconds, Optional.ofNullable(masterKeyConfig), "eddi-audit-deadletter.jsonl",
+        return createForTesting(auditStore, enabled, flushIntervalSeconds, masterKeyConfig, meterRegistry, maxQueueSize,
+                "eddi-audit-deadletter.jsonl");
+    }
+
+    /**
+     * Factory method for unit testing with an explicit dead-letter path — so a test
+     * can point the sink at a temporary location instead of the working directory,
+     * and assert what {@link #checkDeadLetterSinkReachable()} makes of it.
+     */
+    static AuditLedgerService createForTesting(IAuditStore auditStore, boolean enabled, int flushIntervalSeconds, String masterKeyConfig,
+                                               MeterRegistry meterRegistry, int maxQueueSize, String deadLetterPath) {
+        return new AuditLedgerService(auditStore, enabled, flushIntervalSeconds, Optional.ofNullable(masterKeyConfig), deadLetterPath,
                 false, "default", maxQueueSize, true, 500, meterRegistry, null, null, new ObjectMapper());
     }
 
@@ -295,19 +336,49 @@ public class AuditLedgerService {
      * during the incident, from an error line nested inside the error line that
      * reported the drop, is the wrong time; {@link #writeToDeadLetter} now also
      * creates the directory, and this says so up front if it cannot.
+     * <p>
+     * <strong>Existence is not writability.</strong> Checking only that the
+     * directory is there passed every case where it exists but cannot be written —
+     * a root-owned mount, {@code readOnlyRootFilesystem: true} without a volume at
+     * the path (a common CIS hardening setting), an {@code emptyDir} with the wrong
+     * {@code fsGroup}, or a {@code dead-letter-path} that names a directory rather
+     * than a file. So the check performs the exact operation
+     * {@link #writeToDeadLetter} performs: open the sink for append. A file the
+     * probe itself had to create is removed again, so a healthy deployment does not
+     * grow an empty dead-letter file that monitoring would read as an incident.
+     *
+     * @return true when the sink was proven writable — package-visible so a test
+     *         can assert the verdict instead of scraping the log
      */
-    private void checkDeadLetterSinkReachable() {
+    boolean checkDeadLetterSinkReachable() {
+        Path dlPath = Path.of(deadLetterPath).toAbsolutePath();
         try {
-            Path parent = Path.of(deadLetterPath).toAbsolutePath().getParent();
-            if (parent == null || Files.isDirectory(parent)) {
-                return;
+            Path parent = dlPath.getParent();
+            if (parent != null && !Files.isDirectory(parent)) {
+                Files.createDirectories(parent);
+                LOGGER.infov("Created audit dead-letter directory {0}", parent);
             }
-            Files.createDirectories(parent);
-            LOGGER.infov("Created audit dead-letter directory {0}", parent);
+            // notExists, not !exists: both are false when the answer cannot be
+            // determined (an I/O error while reading attributes — a network mount
+            // hiccup, or a Windows ACL granting FILE_APPEND_DATA without
+            // FILE_READ_ATTRIBUTES), and this guard has to fail in one direction
+            // only. Read as "exists, or we cannot prove otherwise", an undeterminable
+            // answer leaves the file alone; read as "does not exist" it would delete a
+            // real dead-letter file — the one place abandoned evidence is recoverable
+            // from — after an append-open that happened to succeed.
+            boolean existedBefore = !Files.notExists(dlPath);
+            try (var probe = Files.newOutputStream(dlPath, StandardOpenOption.CREATE, StandardOpenOption.APPEND)) {
+                probe.flush(); // opening is the check; nothing is written
+            }
+            if (!existedBefore) {
+                Files.deleteIfExists(dlPath);
+            }
+            return true;
         } catch (Exception e) {
             LOGGER.warnv("Audit dead-letter sink {0} is not writable ({1}). Entries the ledger has to abandon "
                     + "will be lost rather than recoverable — point eddi.audit.dead-letter-path at a writable "
                     + "location or mount a volume there.", deadLetterPath, e.getMessage());
+            return false;
         }
     }
 
@@ -758,11 +829,15 @@ public class AuditLedgerService {
                 // together. Retry per entry instead — both stores' single-entry
                 // inserts are idempotent — so only the entry that genuinely cannot
                 // be stored is abandoned.
-                List<AuditEntry> unstorable = appendIndividually(batch);
-                if (unstorable.isEmpty()) {
+                IndividualRetryOutcome outcome = appendIndividually(batch);
+                // Deferred entries were never offered to the store, so they are not
+                // evidence of anything: re-queue them and let the next pass continue
+                // where the budget cut this one off.
+                requeueDeferred(outcome.deferred());
+                if (outcome.unstorable().isEmpty()) {
                     consecutiveFailures.set(0);
                 } else {
-                    handlePersistentFailures(unstorable);
+                    handlePersistentFailures(outcome.unstorable());
                 }
             } finally {
                 // Every outcome has put these positions somewhere eviction can see
@@ -772,6 +847,78 @@ public class AuditLedgerService {
                 // find something. Bump last, once the move is visible.
                 flushGeneration.incrementAndGet();
             }
+            // Last, and outside the try: the rows this node wrote are now visible, so
+            // anything the store holds ABOVE them was written by somebody else.
+            detectForeignSequenceAllocation(batch);
+        }
+    }
+
+    /**
+     * Report a second writer allocating chain positions for a conversation this
+     * node is also allocating for — the multi-replica-without-affinity failure
+     * described on {@link IAuditStore#maxSequence}, made visible in metrics instead
+     * of at {@code /auditstore/verify} time.
+     * <p>
+     * The predicate is exact and has no false positives: if the store already holds
+     * a position greater than or equal to this node's <em>next free</em> one, then
+     * every position this node still has to hand out for that conversation is
+     * already taken, and handing it out produces the duplicate that
+     * {@code /auditstore/verify} grades {@code BROKEN}. In the healthy
+     * single-writer case the stored maximum is always below the next free position,
+     * because this node is the only source of those numbers. Reading the counter
+     * after the store can only make the check <em>less</em> sensitive (a concurrent
+     * submitter may have advanced it), never falsely positive.
+     * <p>
+     * It is not a complete detector, and must not be sold as one: two nodes that
+     * hand out exactly the same range leave a stored maximum that matches both of
+     * their counters, and only {@code /auditstore/verify} sees that duplicate.
+     * Complete detection at allocation time needs the atomic reservation this
+     * deliberately does not implement.
+     * <p>
+     * On a hit the counter is also advanced past the foreign rows. That is the
+     * correct chain position to continue from — the intervening positions exist, so
+     * nothing is skipped — and it keeps a permanently misconfigured deployment from
+     * re-reporting the same conversation on every flush.
+     * <p>
+     * Cost: one indexed {@code MAX(sequence)} read per conversation in the batch,
+     * on the writer thread, never on the pipeline thread. Skipped entirely for
+     * stores that do not sequence, during shutdown, and for conversations whose
+     * counter has been evicted (the next entry re-seeds from the store anyway).
+     */
+    private void detectForeignSequenceAllocation(List<AuditEntry> batch) {
+        if (shuttingDown || conversationSequences.isEmpty() || !auditStore.supportsSequence()) {
+            return;
+        }
+        var conversationIds = new LinkedHashSet<String>();
+        collectConversationIds(batch, conversationIds);
+        for (String conversationId : conversationIds) {
+            AtomicLong counter = conversationSequences.get(conversationId);
+            if (counter == null) {
+                continue;
+            }
+            long nextFree = counter.get();
+            long storedMax;
+            try {
+                storedMax = auditStore.maxSequence(conversationId);
+            } catch (Exception e) {
+                // A store that cannot answer is the flush's problem, not this
+                // check's: it has already been reported by the append above.
+                LOGGER.debugv("Could not read the stored audit sequence for conversation {0}: {1}",
+                        sanitize(conversationId), e.getMessage());
+                continue;
+            }
+            if (storedMax < nextFree) {
+                continue;
+            }
+            sequenceCollisionCounter.increment();
+            LOGGER.warnv("Audit chain position {0} for conversation {1} is already stored, but this node's next "
+                    + "free position is {2} — another replica is allocating positions for the same conversation. "
+                    + "Sequence allocation is not cluster-safe: route every turn of a conversation to the same "
+                    + "node (conversation affinity), or /auditstore/verify will grade this conversation BROKEN. "
+                    + "Continuing from {3}.", storedMax, sanitize(conversationId), nextFree, storedMax + 1);
+            // accumulateAndGet, not set: submitters increment this concurrently, and
+            // the counter must only ever move forward.
+            counter.accumulateAndGet(storedMax + 1, Math::max);
         }
     }
 
@@ -784,34 +931,85 @@ public class AuditLedgerService {
      * only the genuinely unstorable ones come back.
      *
      * <b>The pass gives up after {@link #MAX_CONSECUTIVE_ENTRY_FAILURES}
-     * consecutive refusals.</b> The fallback exists to isolate a poison entry from
-     * the batch around it, which needs only enough attempts to tell one bad row
-     * from a bad store. An outage refuses every one of them, and this method runs
-     * on the writer thread inside {@code synchronized flush()} — the same monitor
-     * the {@code @PreDestroy} final flush waits on. Without a cap, a queue grown
-     * toward {@link #DEFAULT_MAX_QUEUE_SIZE} against an unreachable PostgreSQL
-     * (connect timeouts measured in tens of seconds) would block both for hours,
-     * where the old whole-batch retry failed once per flush window. The remaining
-     * entries are returned unstorable without a store call, which puts them back on
-     * the queue for the next flush exactly as if they had been attempted.
+     * consecutive refusals or {@link #ENTRY_RETRY_BUDGET} of wall clock, and it
+     * does not run at all during shutdown.</b> The fallback exists to isolate a
+     * poison entry from the batch around it, which needs only enough attempts to
+     * tell one bad row from a bad store. An outage refuses every one of them, and
+     * this method runs on the writer thread inside {@code synchronized flush()} —
+     * the same monitor the {@code @PreDestroy} final flush waits on. A cap on the
+     * <em>number</em> of calls is not enough on its own: against a store that is
+     * unreachable rather than refusing, every call blocks for the connection pool's
+     * acquisition timeout, so the cap alone multiplied one flush's cost by itself.
+     * On the shutdown path that was fatal in a way the old whole-batch retry was
+     * not — {@link #shutdown()} runs two flushes around a 5s
+     * {@code awaitTermination} before {@link #drainQueueToDeadLetter}, and
+     * {@code terminationGracePeriodSeconds} is 30 in the shipped Kubernetes
+     * manifests, so a rolling deploy during a store failover was SIGKILLed inside
+     * this loop and the drain never ran. There is no later attempt to protect once
+     * {@link #shuttingDown} is set, so the whole batch goes straight back for
+     * dead-lettering instead; the sink carries the full entry, so nothing is lost
+     * that the store would have taken.
      *
-     * @return the entries that still could not be stored
+     * <b>Running out of budget is not a store failure — unless the store took
+     * nothing.</b> A pass that stops on the clock having stored at least one entry
+     * has met a store that is merely slow, so the tail it never offered is
+     * {@code deferred} — never offered, therefore not failed. Both groups used to
+     * come back as one list, and one poison row inside a large backlog on a
+     * healthy-but-slow store then dead-lettered thousands of storable entries after
+     * three flushes and counted them on {@code eddi_audit_entries_dropped_total},
+     * while the store had been accepting everything it was handed. But a pass that
+     * stops on the clock having stored <em>nothing</em> and refused at least one
+     * entry has met a store that is unavailable, and that it learned this from the
+     * clock rather than from {@link #MAX_CONSECUTIVE_ENTRY_FAILURES} is an accident
+     * of how long that store takes to say no: against a store whose per-call
+     * timeout exceeds {@link #ENTRY_RETRY_BUDGET} (Agroal's acquisition default is
+     * 5s, the budget is 2s) the failure cap is unreachable, because the pass never
+     * reaches a second call. Deferring that tail made the backlog circulate forever
+     * — one entry reached the sink per three flushes while the rest went round
+     * again — and once the queue reached its bound every newly submitted entry was
+     * discarded at {@code submit()} with no dead-letter record at all. The tail is
+     * therefore classified by what the pass <em>observed</em>, not by which stop
+     * condition fired; see {@link #abandonedTailReason}.
+     *
+     * @return what the store refused, and what this pass ran out of time to offer
      */
-    private List<AuditEntry> appendIndividually(List<AuditEntry> batch) {
+    private IndividualRetryOutcome appendIndividually(List<AuditEntry> batch) {
+        if (shuttingDown) {
+            LOGGER.errorv("Audit ledger is shutting down — not retrying {0} entries one by one; they go to the "
+                    + "dead-letter sink so the shutdown stays inside its grace period", batch.size());
+            // Not deferred: deferral means "the next flush takes these", and during
+            // shutdown there is no next flush.
+            return new IndividualRetryOutcome(new ArrayList<>(batch), List.of());
+        }
+
         List<AuditEntry> unstorable = new ArrayList<>();
         int consecutiveEntryFailures = 0;
+        int stored = 0;
+        long deadline = System.nanoTime() + ENTRY_RETRY_BUDGET.toNanos();
         for (int i = 0; i < batch.size(); i++) {
             AuditEntry entry = batch.get(i);
-            if (consecutiveEntryFailures >= MAX_CONSECUTIVE_ENTRY_FAILURES) {
-                int abandoned = batch.size() - i;
-                LOGGER.errorv("Audit store refused {0} entries in a row — treating it as unavailable and abandoning the "
-                        + "per-entry retry for the remaining {1} of this batch", MAX_CONSECUTIVE_ENTRY_FAILURES, abandoned);
-                unstorable.addAll(batch.subList(i, batch.size()));
-                break;
+            // Re-read shuttingDown every iteration: a SIGTERM can land while a
+            // scheduled flush is already inside this loop, and that flush holds the
+            // monitor the final flush is waiting on.
+            boolean shutdownStarted = shuttingDown;
+            boolean outOfBudget = System.nanoTime() - deadline >= 0;
+            boolean storeRefusing = consecutiveEntryFailures >= MAX_CONSECUTIVE_ENTRY_FAILURES;
+            if (storeRefusing || outOfBudget || shutdownStarted) {
+                List<AuditEntry> remaining = List.copyOf(batch.subList(i, batch.size()));
+                String abandonReason = abandonedTailReason(storeRefusing, shutdownStarted, stored, unstorable.size(),
+                        remaining.size());
+                if (abandonReason != null) {
+                    LOGGER.error(abandonReason);
+                    unstorable.addAll(remaining);
+                    return new IndividualRetryOutcome(unstorable, List.of());
+                }
+                LOGGER.warn(budgetExhaustedMessage(unstorable.size(), remaining.size()));
+                return new IndividualRetryOutcome(unstorable, remaining);
             }
             try {
                 auditStore.appendEntry(entry);
                 consecutiveEntryFailures = 0;
+                stored++;
             } catch (Exception e) {
                 consecutiveEntryFailures++;
                 LOGGER.errorv("Audit entry {0} (conversation {1}, sequence {2}) could not be stored: {3}", sanitize(entry.id()),
@@ -819,7 +1017,137 @@ public class AuditLedgerService {
                 unstorable.add(entry);
             }
         }
-        return unstorable;
+        return new IndividualRetryOutcome(unstorable, List.of());
+    }
+
+    /**
+     * Why a stopped per-entry pass hands its unoffered tail to
+     * {@link #handlePersistentFailures} rather than to the next flush — or
+     * {@code null} when deferral is the honest answer.
+     * <p>
+     * Deferral is only safe when a next flush exists and can be expected to do
+     * better than this one. Three cases say it cannot:
+     * <ul>
+     * <li><b>The failure cap fired.</b> The store is refusing, so the tail it never
+     * reached is at the same risk as the entries that were refused.</li>
+     * <li><b>A SIGTERM landed mid-pass.</b> There is no next flush to defer to —
+     * the same reason the pre-loop check dead-letters the whole batch. Re-queuing
+     * here was rescued only by {@link #shutdown()}'s own drain, while the log told
+     * the operator the entries had been deferred "to the next flush" that would
+     * never run.</li>
+     * <li><b>The budget expired and the store had accepted nothing.</b> Against a
+     * store whose per-call timeout exceeds {@link #ENTRY_RETRY_BUDGET} the failure
+     * cap cannot be reached — one call spends the whole budget — so this is the
+     * only signal that separates "unavailable" from "slow", and without it the
+     * backlog never escalates to the sink.</li>
+     * </ul>
+     *
+     * @param storeRefusing
+     *            whether {@link #MAX_CONSECUTIVE_ENTRY_FAILURES} was reached
+     * @param shutdownStarted
+     *            whether {@link #shuttingDown} was set while the loop was running
+     * @param stored
+     *            entries this pass offered and the store accepted
+     * @param refused
+     *            entries this pass offered and the store rejected
+     * @param remaining
+     *            entries the pass stopped before offering
+     * @return the sentence to log at ERROR, or {@code null} to defer the tail
+     */
+    static String abandonedTailReason(boolean storeRefusing, boolean shutdownStarted, int stored, int refused, int remaining) {
+        if (storeRefusing) {
+            return "Audit store refused " + MAX_CONSECUTIVE_ENTRY_FAILURES + " entries in a row — treating it as unavailable "
+                    + "and abandoning the per-entry retry for the remaining " + remaining + " of this batch";
+        }
+        if (shutdownStarted) {
+            return "Audit ledger started shutting down mid-pass — abandoning the per-entry retry for the remaining " + remaining
+                    + " entries of this batch. There is no next flush, so they are dead-lettered rather than deferred";
+        }
+        if (stored == 0 && refused > 0) {
+            return "Audit store refused every one of the " + refused + " entries this pass offered and the "
+                    + ENTRY_RETRY_BUDGET.toSeconds() + "s per-entry retry budget ran out before the remaining " + remaining
+                    + " could be offered — a store that has accepted nothing is unavailable rather than slow, so the tail is "
+                    + "escalated with the refusals instead of being deferred back onto the queue";
+        }
+        return null;
+    }
+
+    /**
+     * The sentence a budget-exhausted pass logs.
+     * <p>
+     * Refusing and running out of wall clock are not alternatives — a pass can
+     * refuse an entry, keep going, and only then hit the deadline. The message used
+     * to open with "accepted what it was offered" in every such case, so an
+     * operator reading it had no reason to look for the rows that the very same
+     * flush was re-queueing or dead-lettering two lines later in
+     * {@code handlePersistentFailures}. The verb is therefore chosen from
+     * {@code refused}, and both counts are named, because the two groups leave this
+     * flush by different doors.
+     * <p>
+     * This message covers deferral only. The stop conditions that abandon the tail
+     * instead — a refusing store, a SIGTERM mid-pass, or a budget that expired
+     * against a store which had accepted nothing — are worded by
+     * {@link #abandonedTailReason}, so no case reaches here that a "deferring to
+     * the next flush" sentence would misdescribe.
+     *
+     * @param refused
+     *            entries this pass offered and the store rejected
+     * @param deferred
+     *            entries the deadline stopped it from offering at all
+     */
+    static String budgetExhaustedMessage(int refused, int deferred) {
+        if (refused == 0) {
+            return "Audit store accepted what it was offered but the " + ENTRY_RETRY_BUDGET.toSeconds()
+                    + "s per-entry retry budget ran out — deferring the remaining " + deferred
+                    + " entries of this batch to the next flush";
+        }
+        return "Audit store refused " + refused + " of the entries it was offered and the "
+                + ENTRY_RETRY_BUDGET.toSeconds() + "s per-entry retry budget ran out"
+                + " before the remaining " + deferred + " could be offered — the " + refused
+                + " refused are re-queued or dead-lettered by this same flush, the " + deferred
+                + " unoffered are deferred to the next one";
+    }
+
+    /**
+     * What one per-entry retry pass produced.
+     *
+     * @param unstorable
+     *            entries the store refused, plus — when the pass stopped because
+     *            the store was refusing everything — the tail it did not get to
+     * @param deferred
+     *            entries the pass ran out of wall clock before offering. They have
+     *            failed at nothing, so they are re-queued without touching
+     *            {@code consecutiveFailures} and cannot be dead-lettered on the
+     *            strength of someone else's poison row.
+     */
+    private record IndividualRetryOutcome(List<AuditEntry> unstorable, List<AuditEntry> deferred) {
+    }
+
+    /**
+     * Put entries the retry budget never reached back on the queue.
+     * <p>
+     * Deliberately silent about {@code consecutiveFailures}: the store accepted
+     * everything it was offered in this pass, so there is nothing to escalate. The
+     * queue bound still applies — an overflow goes to the sink rather than the
+     * heap, exactly as on the failure path.
+     */
+    private void requeueDeferred(List<AuditEntry> deferred) {
+        if (deferred.isEmpty()) {
+            return;
+        }
+        List<AuditEntry> rejected = new ArrayList<>();
+        for (AuditEntry entry : deferred) {
+            if (!offerBounded(entry)) {
+                rejected.add(entry);
+            }
+        }
+        LOGGER.warnv("Re-queued {0} audit entries the retry budget did not reach", deferred.size() - rejected.size());
+        if (!rejected.isEmpty()) {
+            // Not counted here: reserveQueueSlot already increments droppedCounter
+            // once per refusal.
+            LOGGER.errorv("Audit queue full — dead-lettering {0} entries that did not fit when deferred", rejected.size());
+            writeToDeadLetter(rejected);
+        }
     }
 
     /**
@@ -842,6 +1170,12 @@ public class AuditLedgerService {
                     MAX_FLUSH_RETRIES);
             droppedCounter.increment(unstorable.size());
             writeToDeadLetter(unstorable);
+            // The budget restarts deliberately: it counts attempts spent on THESE
+            // entries, and they are now durably in the sink. Leaving it exhausted
+            // would dead-letter every subsequent flush on its first failure, so a
+            // store that recovers between two flushes would never get the two
+            // retries the policy promises. The cost of restarting it is bounded by
+            // ENTRY_RETRY_BUDGET per flush, not by the queue length.
             consecutiveFailures.set(0);
             return;
         }
@@ -1094,10 +1428,21 @@ public class AuditLedgerService {
     // ==================== Private Helpers ====================
 
     /**
-     * Scrub potential secrets from string values in the entry's maps.
+     * Scrub potential secrets from string values in the entry's maps, and stamp an
+     * id if the caller did not supply one.
+     * <p>
+     * The id has to be minted exactly once, here, because it is the conflict key
+     * both stores' idempotent single-entry inserts rest on ({@code ON CONFLICT (id)
+     * DO NOTHING}, {@code E11000} tolerated). {@code PostgresAuditStore} used to
+     * mint one per <em>attempt</em> instead, so a null-id entry that landed in an
+     * aborted batch was inserted a second time under a different primary key by the
+     * per-entry retry — and a duplicate sequence is graded {@code BROKEN}, exactly
+     * like a deletion. Stamping before the HMAC is computed also keeps the id
+     * inside what the signature covers.
      */
     private static AuditEntry scrubSecrets(AuditEntry entry) {
-        return new AuditEntry(entry.id(), entry.conversationId(), entry.agentId(), entry.agentVersion(), entry.userId(), entry.environment(),
+        String id = entry.id() != null ? entry.id() : UUID.randomUUID().toString();
+        return new AuditEntry(id, entry.conversationId(), entry.agentId(), entry.agentVersion(), entry.userId(), entry.environment(),
                 entry.stepIndex(), entry.taskId(), entry.taskType(), entry.taskIndex(), entry.durationMs(), scrubMap(entry.input()),
                 scrubMap(entry.output()), scrubMap(entry.llmDetail()), scrubMap(entry.toolCalls()), entry.actions(), entry.cost(), entry.timestamp(),
                 null, // HMAC not yet computed
@@ -1204,6 +1549,40 @@ public class AuditLedgerService {
      * @return JSON string
      */
     String serializeDeadLetterEntry(AuditEntry entry, String type) {
+        Map<String, Object> dlMap = metadataOnlyDeadLetterRecord(entry, type);
+        // userId, input and output make the sink a personal-data location that the
+        // GDPR erasure cascade does not reach — deliberately, because without them
+        // the record is neither replayable nor evidence of what was lost. See
+        // docs/gdpr-compliance.md, "The audit dead-letter sink holds personal data".
+        dlMap.put("userId", entry.userId());
+        dlMap.put("actions", entry.actions());
+        dlMap.put("input", entry.input());
+        dlMap.put("output", entry.output());
+        dlMap.put("llmDetail", entry.llmDetail());
+        dlMap.put("toolCalls", entry.toolCalls());
+
+        try {
+            return objectMapper.writeValueAsString(dlMap);
+        } catch (JsonProcessingException e) {
+            // Degrade to the metadata, do not vanish. The entry most likely to reach
+            // this branch is the one carrying a payload Jackson cannot render — which
+            // is also the one the store most likely rejected, so it is exactly the
+            // entry an operator needs to attribute a chain gap and to replay. The old
+            // {"error":"serialization_failed"} threw away its id, sequence and
+            // conversationId along with the payload that caused the failure, leaving
+            // the gap indistinguishable from a deletion.
+            LOGGER.errorv("Jackson serialization failed for dead-letter entry {0}: {1} — writing metadata only",
+                    sanitize(entry.id()), e.getMessage());
+            return serializeMetadataOnly(entry, type, e);
+        }
+    }
+
+    /**
+     * The fixed-shape half of a dead-letter record: identity, chain position and
+     * signatures. Everything here is a String, a number or null, so it cannot fail
+     * to serialize — which is what makes it a usable fallback for the payload half.
+     */
+    private Map<String, Object> metadataOnlyDeadLetterRecord(AuditEntry entry, String type) {
         Map<String, Object> dlMap = new LinkedHashMap<>();
         if (type != null) {
             dlMap.put("type", type);
@@ -1216,11 +1595,6 @@ public class AuditLedgerService {
         dlMap.put("id", entry.id());
         dlMap.put("sequence", entry.sequence());
         dlMap.put("agentVersion", entry.agentVersion());
-        // userId, input and output make the sink a personal-data location that the
-        // GDPR erasure cascade does not reach — deliberately, because without them
-        // the record is neither replayable nor evidence of what was lost. See
-        // docs/gdpr-compliance.md, "The audit dead-letter sink holds personal data".
-        dlMap.put("userId", entry.userId());
         dlMap.put("environment", entry.environment());
         dlMap.put("stepIndex", entry.stepIndex());
         dlMap.put("taskIndex", entry.taskIndex());
@@ -1229,18 +1603,28 @@ public class AuditLedgerService {
         dlMap.put("entryTimestamp", entry.timestamp() != null ? entry.timestamp().toString() : null);
         dlMap.put("hmac", entry.hmac());
         dlMap.put("agentSignature", entry.agentSignature());
-        dlMap.put("actions", entry.actions());
-        dlMap.put("input", entry.input());
-        dlMap.put("output", entry.output());
-        dlMap.put("llmDetail", entry.llmDetail());
-        dlMap.put("toolCalls", entry.toolCalls());
+        return dlMap;
+    }
 
+    /**
+     * The last-resort record: everything except the payload maps, plus a marker
+     * naming why the payload is missing. Still carries the id, the sequence and the
+     * conversation, which is what {@link #undeliveredSequences} needs to grade the
+     * gap {@code INCOMPLETE} rather than {@code BROKEN}, and what a replay needs to
+     * find the turn again.
+     */
+    private String serializeMetadataOnly(AuditEntry entry, String type, JsonProcessingException cause) {
+        Map<String, Object> dlMap = metadataOnlyDeadLetterRecord(entry, type);
+        dlMap.put("userId", entry.userId());
+        dlMap.put("actions", entry.actions());
+        dlMap.put("payloadError", "serialization_failed: " + cause.getOriginalMessage());
         try {
             return objectMapper.writeValueAsString(dlMap);
         } catch (JsonProcessingException e) {
-            // Absolute fallback — should never happen with simple string maps.
-            // Do NOT embed entry fields here: we'd reintroduce the escaping bug.
-            LOGGER.errorv("Jackson serialization failed for dead-letter entry: {0}", e.getMessage());
+            // Absolute fallback — should never happen, every value above is a String,
+            // a number or null. Do NOT embed entry fields here by hand: we'd
+            // reintroduce the escaping bug Jackson is used to avoid.
+            LOGGER.errorv("Jackson serialization failed even for the dead-letter metadata: {0}", e.getMessage());
             return "{\"error\":\"serialization_failed\"}";
         }
     }

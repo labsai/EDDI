@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.tenancy;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.engine.tenancy.model.TenantQuota;
 import ai.labs.eddi.engine.tenancy.model.UsageSnapshot;
+import static ai.labs.eddi.engine.tenancy.ITenantQuotaStore.accountingUnavailable;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -47,13 +48,6 @@ import java.util.List;
 public class PostgresTenantQuotaStore implements ITenantQuotaStore {
 
     private static final Logger LOGGER = Logger.getLogger(PostgresTenantQuotaStore.class);
-
-    /**
-     * Denial reason used when the store itself could not answer. Distinct from a
-     * real limit breach so an operator (and the metric) can tell an outage from a
-     * tenant that is genuinely over quota.
-     */
-    static final String ACCOUNTING_UNAVAILABLE = "Quota accounting unavailable — denying request for safety";
 
     private static final String CREATE_QUOTAS_TABLE = """
             CREATE TABLE IF NOT EXISTS tenant_quotas (
@@ -211,6 +205,15 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
         this.clock = clock;
     }
 
+    /**
+     * Every public method calls this first, and until the first call succeeds it
+     * takes a connection — so on a database that has been unreachable since
+     * startup, this is where the outage surfaces rather than in the method that
+     * called it. It therefore raises the same refusal the rest of the store does; a
+     * plain {@code RuntimeException} here escaped {@code TenantQuotaService}'s
+     * gates (which match the refusal type) and left that window answering an opaque
+     * 500 while the identical outage a moment later answered 503.
+     */
     private synchronized void ensureSchema() {
         if (schemaInitialized)
             return;
@@ -230,7 +233,7 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
 
             schemaInitialized = true;
         } catch (SQLException e) {
-            throw new RuntimeException("Failed to initialize tenant quota tables", e);
+            throw new QuotaAccountingUnavailableException(ACCOUNTING_UNAVAILABLE, e);
         }
     }
 
@@ -315,15 +318,25 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
     }
 
     /**
-     * Fails <em>open</em> on a store error, deliberately and unlike the accounting
-     * writes below.
+     * Fails <em>closed</em> on a store error, like the accounting writes below.
      * <p>
-     * A null return means "no quota configured", which {@code TenantQuotaService}
-     * treats as unlimited. Failing closed here would turn a database blip into a
-     * total outage for every tenant — quotas are a cost control, not an
-     * authorization boundary. Logged at ERROR so the silent bypass is visible; the
-     * accounting writes fail closed because a lost increment silently voids a limit
-     * that IS configured.
+     * It used to return null, which {@code TenantQuotaService} reads as "no quota
+     * configured" and therefore as unlimited. That made the same outage produce
+     * opposite policies depending on which call happened to fail first: the read
+     * half silently disabled enforcement for every tenant, the write half refused
+     * the request with an honest 503. It cannot be both. The read is the one that
+     * runs first on every gate, so fail-open won in practice and the write-side
+     * refusal was mostly unreachable.
+     * <p>
+     * The "a database blip should not become a total outage" argument for fail-open
+     * does not survive contact with the deployment: {@code tenant_quotas} lives in
+     * the same database as conversation memory, so a store that cannot answer this
+     * query cannot serve the turn either. All that changed is the error the caller
+     * sees — an honest 503 with {@code Retry-After} and a tick on
+     * {@code eddi.tenant.quota.unavailable} instead of a bypassed limit.
+     * <p>
+     * A {@code null} return still means exactly one thing: this tenant has no quota
+     * row. Hence the exception rather than a sentinel.
      */
     @Override
     public TenantQuota getQuota(String tenantId) {
@@ -331,10 +344,9 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
         try (Connection conn = dataSourceInstance.get().getConnection()) {
             return getQuotaInternal(conn, tenantId);
         } catch (SQLException e) {
-            LOGGER.errorf("Failed to read quota for tenant '%s' — quota enforcement is bypassed for this request: %s",
-                    sanitize(tenantId), sanitize(e.getMessage()));
+            LOGGER.errorf("Failed to read quota for tenant '%s': %s", sanitize(tenantId), sanitize(e.getMessage()));
+            throw new QuotaAccountingUnavailableException(ACCOUNTING_UNAVAILABLE, e);
         }
-        return null;
     }
 
     @Override
@@ -445,7 +457,7 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
             // "Daily conversation limit reached (1000)" with Retry-After for a
             // SQLException, and the denied-counter metric spiked as if the tenant
             // were over quota.
-            return QuotaCheckResult.denied(ACCOUNTING_UNAVAILABLE);
+            return accountingUnavailable();
         }
 
         return QuotaCheckResult.denied("Daily conversation limit reached (" + limit + ")");
@@ -482,7 +494,7 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
             LOGGER.errorf("Failed to increment API calls for tenant '%s': %s", sanitize(tenantId), sanitize(e.getMessage()));
             // See tryIncrementConversations: fail closed, but say what actually
             // happened.
-            return QuotaCheckResult.denied(ACCOUNTING_UNAVAILABLE);
+            return accountingUnavailable();
         }
 
         return QuotaCheckResult.denied("API rate limit reached (" + limit + "/min)");
@@ -530,8 +542,9 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
         } catch (SQLException e) {
             LOGGER.errorf("Failed to add cost for tenant '%s': %s", sanitize(tenantId), sanitize(e.getMessage()));
             // Fail closed — if cost accounting fails, deny the request rather than
-            // silently bypassing budget enforcement
-            return QuotaCheckResult.denied("Cost accounting failed — denying request for safety");
+            // silently bypassing budget enforcement. Flagged as an outage rather
+            // than a budget breach, for the reason accountingUnavailable() gives.
+            return QuotaCheckResult.unavailable("Cost accounting failed — denying request for safety");
         }
         return QuotaCheckResult.OK;
     }

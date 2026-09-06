@@ -121,6 +121,21 @@ public class AuditStore implements IAuditStore {
      * carries {@code ON CONFLICT (id) DO NOTHING}: a retry of a partially-applied
      * batch must be able to re-offer the documents that already landed. Every other
      * write error is still raised, so a genuinely broken store is not hidden.
+     * <p>
+     * <strong>A write-concern error is not a duplicate.</strong>
+     * {@code MongoBulkWriteException} is also how the driver reports a failure of
+     * the write concern itself — a {@code w=majority} acknowledgement timing out
+     * during a replica-set election, say — and in that shape
+     * {@link MongoBulkWriteException#getWriteErrors()} is <em>empty</em> while
+     * {@link MongoBulkWriteException#getWriteConcernError()} is set. Filtering only
+     * the per-document errors therefore returned normally for a batch whose
+     * durability was never confirmed: {@code AuditLedgerService} cleared its
+     * in-flight batch, reset its failure counter and left the chain counters past
+     * positions a rollback could still erase — no retry, no dead-letter record, no
+     * dropped-counter increment, and {@code /auditstore/verify} reporting the
+     * conversation {@code BROKEN} later on. The production connection string sets
+     * {@code w=majority}, so this is the ordinary failover shape rather than an
+     * exotic one.
      */
     @Override
     public void appendBatch(List<AuditEntry> entries) {
@@ -135,6 +150,9 @@ public class AuditStore implements IAuditStore {
         try {
             collection.insertMany(documents, new InsertManyOptions().ordered(false));
         } catch (MongoBulkWriteException e) {
+            if (e.getWriteConcernError() != null) {
+                throw e;
+            }
             List<BulkWriteError> fatal = e.getWriteErrors().stream()
                     .filter(error -> error.getCode() != DUPLICATE_KEY_ERROR)
                     .toList();

@@ -605,7 +605,16 @@ class ToolLoopRunner {
         if (tenantQuotaService != null) {
             var costCheck = tenantQuotaService.checkCostBudget(tenantQuotaService.getDefaultTenantId());
             if (!costCheck.allowed()) {
-                LOGGER.warnf("Tenant cost budget exceeded during tool call: %s", costCheck.reason());
+                // The reason string already distinguishes the two, but the log line
+                // in front of it did not: an operator grepping for "cost budget
+                // exceeded" was told a tenant had spent its allowance when in fact
+                // the quota store could not answer.
+                if (costCheck.accountingUnavailable()) {
+                    LOGGER.warnf("Tenant cost accounting unavailable during tool call, refusing: %s",
+                            costCheck.reason());
+                } else {
+                    LOGGER.warnf("Tenant cost budget exceeded during tool call: %s", costCheck.reason());
+                }
 
                 Map<String, Object> quotaStep = new HashMap<>();
                 quotaStep.put("type", "tool_error");

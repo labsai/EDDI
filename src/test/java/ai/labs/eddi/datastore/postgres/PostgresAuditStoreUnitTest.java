@@ -216,6 +216,82 @@ class PostgresAuditStoreUnitTest {
                 "an empty chain must not look like a chain whose position 0 is taken");
     }
 
+    /**
+     * A driver that returns no row at all (rather than one NULL row) must reach the
+     * same verdict as an empty chain. Reading a stale local variable, or falling
+     * off the method, would hand the ledger a position it never verified — and the
+     * seed derived from it decides where the next signed entry sits in the chain.
+     */
+    @Test
+    void maxSequence_anEmptyResultSetIsAnEmptyChain() throws Exception {
+        when(preparedStatement.executeQuery()).thenReturn(resultSet);
+        when(resultSet.next()).thenReturn(false);
+
+        assertEquals(AuditEntry.UNSEQUENCED, store.maxSequence("conv-1"));
+        verify(resultSet, never()).getLong(1);
+    }
+
+    /**
+     * The seed must never be guessed. A failed read has to propagate so
+     * {@code AuditLedgerService.prewarmSequenceCounter} can fall back to
+     * {@code UNSEQUENCED} — returning 0 here would re-issue position 0 for a
+     * conversation that already has one, and the chain verifier grades a duplicate
+     * exactly like a deletion.
+     */
+    @Test
+    void maxSequence_aFailedReadThrowsRatherThanGuessingAPosition() throws Exception {
+        when(preparedStatement.executeQuery()).thenThrow(new SQLException("connection reset"));
+
+        var thrown = assertThrows(RuntimeException.class, () -> store.maxSequence("conv-1"));
+
+        assertEquals("Failed to read max audit sequence", thrown.getMessage());
+        assertInstanceOf(SQLException.class, thrown.getCause(),
+                "the driver failure has to stay attached or the outage is undiagnosable");
+    }
+
+    /**
+     * The ledger is the busiest reader in the system — {@code maxSequence} runs
+     * once per conversation and {@code getEntries} backs both the verify endpoint
+     * and the GDPR export — so a {@code ResultSet} left open here leaks a cursor
+     * per call until the pool starves. Every read path must close it, and on a mock
+     * only {@code verify(close())} can say so: a missing try-with-resources changes
+     * nothing else observable, which is exactly why nothing caught it.
+     */
+    @Test
+    void maxSequence_closesTheResultSet() throws Exception {
+        when(preparedStatement.executeQuery()).thenReturn(resultSet);
+        when(resultSet.next()).thenReturn(true);
+        when(resultSet.getLong(1)).thenReturn(9L);
+
+        store.maxSequence("conv-1");
+
+        verify(resultSet).close();
+    }
+
+    /** The same guard on the row-reading path. */
+    @Test
+    void getEntries_closesTheResultSet() throws Exception {
+        when(preparedStatement.executeQuery()).thenReturn(resultSet);
+        when(resultSet.next()).thenReturn(true, false);
+        mockAuditResultSet();
+
+        store.getEntries("conv-1", 0, 10);
+
+        verify(resultSet).close();
+    }
+
+    /** And on the path that counts, which returns before any row is read. */
+    @Test
+    void countByConversation_closesTheResultSet() throws Exception {
+        when(preparedStatement.executeQuery()).thenReturn(resultSet);
+        when(resultSet.next()).thenReturn(true);
+        when(resultSet.getLong(1)).thenReturn(5L);
+
+        store.countByConversation("conv-1");
+
+        verify(resultSet).close();
+    }
+
     @Test
     void supportsSequence_isTrueSoTheChainIsActuallyChecked() {
         assertTrue(store.supportsSequence(),

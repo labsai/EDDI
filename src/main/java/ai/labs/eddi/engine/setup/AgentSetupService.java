@@ -35,7 +35,7 @@ import ai.labs.eddi.engine.mcp.McpApiToolBuilder;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
-import ai.labs.eddi.engine.tenancy.QuotaExceededException;
+import ai.labs.eddi.engine.tenancy.QuotaRefusal;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
@@ -1696,21 +1696,25 @@ public class AgentSetupService {
                 result.put("deployed", false);
                 result.put("deployError", "Unexpected deploy response: HTTP " + httpStatus);
             }
-        } catch (QuotaExceededException quotaError) {
-            // agentAdmin is the CDI bean, not an HTTP proxy, so
-            // QuotaExceededExceptionMapper
-            // never runs here. Surface the reason verbatim — it is actionable ("undeploy an
-            // agent first") and the generic branch below would hide it behind "check the
-            // logs",
-            // leaving an agent designer or a sub-agent-creating model unable to
-            // self-correct.
-            LOGGER.warn("Deploy denied by quota for Agent " + agentId + ": " + quotaError.getMessage());
-            result.put("deployed", false);
-            result.put("deployError", quotaError.getMessage());
         } catch (Exception deployError) {
-            LOGGER.warn("Deploy failed for Agent " + agentId, deployError);
-            result.put("deployed", false);
-            result.put("deployError", "Deployment failed. Check server logs for details.");
+            // Match the QuotaRefusal marker rather than one concrete class: the
+            // accounting-outage refusal is a sibling of QuotaExceededException, not a
+            // subclass, so a catch naming only the latter drops a store outage into
+            // the generic branch below.
+            if (deployError instanceof QuotaRefusal) {
+                // agentAdmin is the CDI bean, not an HTTP proxy, so no exception mapper
+                // runs here. Surface the reason verbatim — it is actionable ("undeploy an
+                // agent first") and the generic branch would hide it behind "check the
+                // logs", leaving an agent designer or a sub-agent-creating model unable
+                // to self-correct.
+                LOGGER.warn("Deploy refused by quota layer for Agent " + agentId + ": " + deployError.getMessage());
+                result.put("deployed", false);
+                result.put("deployError", deployError.getMessage());
+            } else {
+                LOGGER.warn("Deploy failed for Agent " + agentId, deployError);
+                result.put("deployed", false);
+                result.put("deployError", "Deployment failed. Check server logs for details.");
+            }
         }
         return result;
     }

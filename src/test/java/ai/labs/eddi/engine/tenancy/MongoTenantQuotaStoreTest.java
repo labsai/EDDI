@@ -8,6 +8,7 @@ import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.engine.tenancy.model.TenantQuota;
 import ai.labs.eddi.engine.tenancy.model.UsageSnapshot;
 import com.mongodb.MongoClientSettings;
+import com.mongodb.MongoException;
 import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
@@ -267,6 +268,100 @@ class MongoTenantQuotaStoreTest {
             assertFalse(result.allowed());
             assertTrue(result.reason().contains("Daily conversation limit"));
             assertTrue(result.reason().contains("10"));
+        }
+    }
+
+    /**
+     * The honest-503 path was PostgreSQL-only, while {@code eddi.datastore.type}
+     * defaults to mongodb.
+     * <p>
+     * A {@link MongoException} escaping these three mutators is not a quota answer
+     * at all: it travelled through {@code TenantQuotaService} (which does not
+     * catch) into {@code ConversationService}'s generic handler and out as a 500
+     * with a stack trace, while the same outage on PostgreSQL produced 503
+     * {@code quota_accounting_unavailable}, a {@code Retry-After} and a tick on
+     * {@code eddi.tenant.quota.unavailable}. Failing closed is unchanged — the
+     * request is still refused — but it is now described correctly, and identically
+     * on both backends.
+     */
+    @Nested
+    @DisplayName("a driver failure is reported as an accounting outage, not as a denial or a 500")
+    class DriverFailures {
+
+        /**
+         * Finding f2-01. The three cases below fail the WRITE half, which a real outage
+         * never reaches: every gate in {@code TenantQuotaService} opens by reading the
+         * tenant's configuration, so {@code getQuota} is the call that throws.
+         * Unwrapped, it travelled out as an opaque 500 with no tick on
+         * {@code eddi.tenant.quota.unavailable} — and only a partial outage, reads up
+         * and writes down, ever exercised the wrapped mutators.
+         * <p>
+         * It cannot report the outage in its return value: {@code null} there already
+         * means "no quota configured", which the service treats as unlimited — i.e.
+         * exactly the silent bypass this must not become.
+         */
+        @Test
+        @DisplayName("getQuota — the call every gate makes first")
+        void quotaReadOutage() {
+            when(quotasCollection.find(any(Bson.class))).thenThrow(new MongoException("connection reset"));
+
+            var thrown = assertThrows(QuotaAccountingUnavailableException.class, () -> sut.getQuota(TENANT_ID));
+
+            assertEquals(ITenantQuotaStore.ACCOUNTING_UNAVAILABLE, thrown.getMessage(),
+                    "the same reason the mutators give, so the 503 body is identical whichever call failed");
+            assertInstanceOf(MongoException.class, thrown.getCause(),
+                    "the driver exception stays attached — a connection fault is not diagnosable without it");
+        }
+
+        @Test
+        @DisplayName("tryIncrementConversations")
+        void conversationsOutage() {
+            when(usageCollection.findOneAndUpdate(any(Bson.class), any(Bson.class), any()))
+                    .thenThrow(new MongoException("connection reset"));
+
+            QuotaCheckResult result = sut.tryIncrementConversations(TENANT_ID, 10);
+
+            assertFalse(result.allowed(), "fail closed — an unreadable counter is not permission to proceed");
+            assertTrue(result.accountingUnavailable(),
+                    "503 quota_accounting_unavailable, not 429 quota_exceeded: nothing is over a limit");
+            assertEquals(ITenantQuotaStore.ACCOUNTING_UNAVAILABLE, result.reason(),
+                    "the same reason PostgresTenantQuotaStore gives, so parity holds on the wire too");
+        }
+
+        @Test
+        @DisplayName("tryIncrementApiCalls")
+        void apiCallsOutage() {
+            when(usageCollection.findOneAndUpdate(any(Bson.class), any(Bson.class), any()))
+                    .thenThrow(new MongoException("connection reset"));
+
+            QuotaCheckResult result = sut.tryIncrementApiCalls(TENANT_ID, 60);
+
+            assertFalse(result.allowed());
+            assertTrue(result.accountingUnavailable());
+            assertEquals(ITenantQuotaStore.ACCOUNTING_UNAVAILABLE, result.reason());
+        }
+
+        @Test
+        @DisplayName("tryAddCost")
+        void costOutage() {
+            when(usageCollection.findOneAndUpdate(any(Bson.class), any(Bson.class), any()))
+                    .thenThrow(new MongoException("connection reset"));
+
+            QuotaCheckResult result = sut.tryAddCost(TENANT_ID, 10.0, 100.0);
+
+            assertFalse(result.allowed(), "a budget that cannot be read is not a budget with room left");
+            assertTrue(result.accountingUnavailable());
+        }
+
+        @Test
+        @DisplayName("an unlimited quota still short-circuits before touching the store")
+        void unlimitedNeverReachesTheFailingStore() {
+            when(usageCollection.findOneAndUpdate(any(Bson.class), any(Bson.class), any()))
+                    .thenThrow(new MongoException("connection reset"));
+
+            assertEquals(QuotaCheckResult.OK, sut.tryIncrementConversations(TENANT_ID, -1));
+            assertEquals(QuotaCheckResult.OK, sut.tryIncrementApiCalls(TENANT_ID, -1));
+            verify(usageCollection, never()).findOneAndUpdate(any(Bson.class), any(Bson.class), any());
         }
     }
 

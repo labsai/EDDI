@@ -116,17 +116,26 @@ public class PostgresAuditStore implements IAuditStore {
      * largest, append-only, never-pruned table in the system, and both operations
      * are legally deadline-bound. Without this index they are sequential scans.
      * <p>
-     * <strong>Upgrade note.</strong> On the first start after this change the index
-     * is built on an existing ledger, and a plain (non-{@code CONCURRENTLY})
-     * {@code CREATE INDEX} takes a {@code SHARE} lock: audit inserts block for the
-     * duration of the build, which on a multi-million-row table is minutes.
-     * {@code CREATE INDEX CONCURRENTLY} is not an option here because it cannot run
-     * inside {@code ensureSchema}'s statement batch (PostgreSQL forbids it in a
-     * transaction block) and it can leave an INVALID index behind on failure, which
-     * nothing in this class would notice or repair. Operators of large existing
-     * ledgers who cannot take that pause should build {@code idx_audit_user} with
-     * {@code CREATE INDEX CONCURRENTLY} out of band before deploying;
-     * {@code IF NOT EXISTS} then makes this statement a no-op.
+     * <strong>Upgrade note — read before deploying onto a large ledger.</strong> On
+     * the first start after this change the index is built on the existing table
+     * from {@link #ensureSchema()}, which runs lazily on the first
+     * {@code appendBatch}/{@code appendEntry}/{@code getEntries} — that is, on the
+     * audit-ledger-writer thread, holding this class's monitor. A plain
+     * (non-{@code CONCURRENTLY}) {@code CREATE INDEX} takes a {@code SHARE} lock,
+     * so for the duration of the build audit inserts block, the ledger's queue
+     * fills toward its bound, and REST audit reads wait on the same monitor. On a
+     * multi-million-row table that is minutes.
+     * <p>
+     * {@code CREATE INDEX CONCURRENTLY} is <em>not</em> illegal here —
+     * {@code ensureSchema} issues its statements on a plain autocommit
+     * {@link Statement}, not inside a transaction block, which is the only thing
+     * PostgreSQL forbids it in. It is avoided for the other reason: on failure it
+     * leaves an INVALID index behind, and nothing in this class would notice or
+     * repair one. Operators of large existing ledgers who cannot take the pause
+     * should build {@code idx_audit_user} with {@code CREATE INDEX CONCURRENTLY}
+     * out of band <em>before</em> deploying and check {@code pg_index.indisvalid};
+     * {@code IF NOT EXISTS} then makes this statement a no-op. Written up for
+     * operators in {@code docs/audit-ledger.md}.
      */
     private static final String CREATE_INDEX_USER = "CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_ledger (user_id)";
 
@@ -138,6 +147,14 @@ public class PostgresAuditStore implements IAuditStore {
      * that already landed. Re-inserting an entry with a different body under the
      * same id is not a scenario the ledger has — entry ids are per-submission
      * UUIDs.
+     * <p>
+     * The idempotency holds only for an entry that <em>has</em> an id, which is why
+     * {@code AuditLedgerService.scrubSecrets} stamps one before signing rather than
+     * leaving it to {@link #setEntryParams}: a fresh UUID minted per attempt here
+     * would give the batch write and the per-entry retry different primary keys and
+     * store the same entry twice, which the chain verifier grades as a DUPLICATE
+     * ({@code BROKEN}). The fallback below remains for direct callers that bypass
+     * the ledger.
      */
     private static final String INSERT_SQL = """
             INSERT INTO audit_ledger

@@ -62,7 +62,18 @@ The export includes all user data in a structured, machine-readable JSON format:
   the binaries themselves are not inlined and must be fetched via the attachment
   download API
 
-**Via MCP:** Use the `export_user_data` tool.
+> **Check `conversationsTruncated` before handing the bundle to the data subject.**
+> Conversation snapshots are capped per request (1,000), because each one is a full
+> document load assembled in memory on the request thread. When the cap bites, the
+> endpoint answers **206 Partial Content** and the payload carries
+> `conversationsTruncated: true` alongside `totalConversations` — the number the
+> user actually has. A bundle in that state is **not** a complete Art. 15 / Art. 20
+> response; the omitted conversations are still retrievable individually through the
+> conversation API. A 200 with `conversationsTruncated: false` is the complete
+> bundle. (The audit-record cap of 10,000 is still reported in the server log only.)
+
+**Via MCP:** Use the `export_user_data` tool. It reports the same two fields; an
+agent acting on its answer must not report a truncated bundle as fulfilled.
 
 ### 3. Right to Restriction of Processing (GDPR Art. 18 / LGPD Art. 18)
 
@@ -90,6 +101,30 @@ curl -X DELETE https://your-eddi-instance/admin/gdpr/{userId}/restrict \
 - Existing data is preserved (not deleted)
 - Restriction status is stored as a user memory entry
 - All restriction/unrestriction events are logged in the audit ledger
+
+**Caching the restriction flag — `eddi.gdpr.restriction-cache-ttl-seconds` (default `0`, i.e. no caching)**
+
+The flag is read at conversation start and again on every `say`/`sayStreaming`, so it sits on
+the hottest path in the system. **By default it is nonetheless read from the store every
+time**: no verdict is cached, a restriction applied on any replica takes effect on every
+replica at once, and a store outage always answers **503**
+(`ProcessingRestrictionUnavailableException`) rather than being absorbed by a cached verdict.
+The cost of that default is one indexed lookup per turn.
+
+Setting the property above `0` switches on a **node-local** cache with that TTL.
+`restrict`/`unrestrict` publish through it, so the node serving the admin call applies the
+change on the very next turn — but there is no cross-node invalidation, so **any other node
+keeps answering "not restricted" from its own cache until the TTL expires**, and for the same
+reason keeps answering from cache during a store outage instead of failing closed. A cached
+negative verdict is a suspended Art. 18 legal control, which is why it is not the default.
+
+- **Multi-replica without conversation affinity** — keep the default (`0`). This is the only
+  safe setting there until cluster-wide invalidation exists.
+- **Single node, or a cluster with conversation affinity** — every turn of a conversation and
+  every admin call reach the same node, which is what makes the explicit invalidation
+  sufficient. Setting e.g. `eddi.gdpr.restriction-cache-ttl-seconds=30` there buys back the
+  per-turn lookup. Treat it as an explicit topology assertion, not a tuning knob: it is wrong
+  the moment a second replica is added.
 
 **Use cases:**
 - User disputes accuracy of stored data (Art. 18(1)(a))

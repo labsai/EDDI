@@ -93,6 +93,20 @@ class RestTenantQuotaTest {
         assertThrows(BadRequestException.class, () -> restTenantQuota.updateQuota(" ", valid));
     }
 
+    /**
+     * The other half of the same guard. A null path segment cannot arrive over
+     * HTTP, but this bean is also called in-process, and a null tenant id reaching
+     * the store would write a row no gate can ever read back — the quota would look
+     * saved in the UI and enforce nothing.
+     */
+    @Test
+    void shouldRejectANullTenantId() {
+        var valid = new TenantQuota(TENANT_ID, 100, 10, 50, 500.0, true);
+        assertThrows(BadRequestException.class, () -> restTenantQuota.updateQuota(null, valid));
+        assertEquals(-1, quotaStore.getQuota(TENANT_ID).maxConversationsPerDay(),
+                "a rejected request must not have written anything");
+    }
+
     @Test
     void shouldRejectLimitsBelowTheUnlimitedSentinel() {
         assertThrows(BadRequestException.class,
@@ -254,6 +268,20 @@ class RestTenantQuotaTest {
             }
             assertTrue(records.stream().noneMatch(r -> r.contains("NOT enforced")),
                     "an unlimited budget must not produce the warning, was: " + records);
+
+            records.clear();
+            // A budget on a tenant whose enforcement is switched off entirely. Nothing
+            // about it is enforced, budget included, so the specific "cost is not
+            // recorded" warning would be noise — and noise is how the case above stops
+            // being read.
+            try (Response response = restTenantQuota.updateQuota(TENANT_ID,
+                    new TenantQuota(TENANT_ID, -1, -1, -1, 250.0, false))) {
+                assertEquals(200, response.getStatus());
+            }
+            assertTrue(records.stream().noneMatch(r -> r.contains("NOT enforced")),
+                    "a disabled tenant must not produce the warning, was: " + records);
+            assertEquals(250.0, quotaStore.getQuota(TENANT_ID).maxMonthlyCostUsd(),
+                    "and the value is still stored, exactly as in the enabled case");
         } finally {
             restLogger.removeHandler(handler);
             restLogger.setLevel(previousLevel);

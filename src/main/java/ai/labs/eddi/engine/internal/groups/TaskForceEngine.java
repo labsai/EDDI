@@ -29,7 +29,7 @@ import ai.labs.eddi.engine.internal.TaskListParser;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
 import ai.labs.eddi.engine.lifecycle.model.DiscussionControlToken;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
-import ai.labs.eddi.engine.tenancy.QuotaExceededException;
+import ai.labs.eddi.engine.tenancy.QuotaRefusal;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import ai.labs.eddi.utils.LogSanitizer;
 import org.jboss.logging.Logger;
@@ -450,7 +450,7 @@ public class TaskForceEngine {
                             // Quota errors are non-retryable — abort all tasks immediately.
                             // Checked before the cancellation guard so a quota breach is still
                             // reported even when the wave is already unwinding.
-                            if (e.getCause() instanceof QuotaExceededException) {
+                            if (e.getCause() instanceof QuotaRefusal) {
                                 errors.add(e);
                                 return; // exit the entire agent's CompletableFuture
                             }
@@ -563,7 +563,7 @@ public class TaskForceEngine {
 
             // Quota errors always abort, regardless of onAgentFailure policy
             for (GroupDiscussionException error : errors) {
-                if (error.getCause() instanceof QuotaExceededException) {
+                if (error.getCause() instanceof QuotaRefusal) {
                     throw error;
                 }
             }

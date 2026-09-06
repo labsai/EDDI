@@ -273,6 +273,7 @@ eddi_schedule_fire_duration_seconds         # Fire latency (timer)
 ```text
 eddi_tenant_quota_allowed_total             # Slot acquisitions granted (untagged)
 eddi_tenant_quota_denied_total{tenant,type} # Quota denials, always tagged
+eddi_tenant_quota_unavailable_total{tenant,type} # Refusals caused by the quota store failing, not by a limit
 eddi_tenant_usage_conversations_total       # Conversation usage (per tenant)
 eddi_tenant_usage_api_calls_total           # API call usage (per tenant)
 eddi_tenant_usage_cost_total                # Cost usage (per tenant)
@@ -300,6 +301,27 @@ sum(rate(eddi_tenant_quota_denied_total[5m]))
 `eddi_tenant_quota_allowed_total` counts **slot acquisitions only**. The read-only
 gates (`checkAgentQuota`, `checkCostBudget`) deliberately do not touch it, so
 `allowed / (allowed + denied)` is not a true accept rate.
+
+`eddi_tenant_quota_unavailable_total` is the *other* reason a request is refused:
+the quota store could not answer at all — a driver failure in whichever store is
+configured (a `MongoException` in `MongoTenantQuotaStore`, which is the default
+backend, or a `SQLException` in `PostgresTenantQuotaStore`) — so the turn is
+denied for safety without any limit having been reached. It covers **both** store
+calls a gate makes: reading the tenant's configuration and incrementing the
+counter. The read runs first, so on a full outage it is the one that fails —
+which is why a failing read used to exit as an opaque `500` on MongoDB and to
+bypass enforcement silently on PostgreSQL, while only a partial outage (reads up,
+writes down) ever reached the counter. It used to be counted on `eddi_tenant_quota_denied_total`
+and answered `429` with `Retry-After: 60`, so a database outage looked exactly
+like a tenant burning through its allowance on the very graph you would use to
+decide whether to raise a limit. It now answers `503`
+(`quota_accounting_unavailable`) and carries the same `tenant` / `type` tags, so
+the two can sit side by side:
+
+```promql
+# Infrastructure, not allowance
+sum(rate(eddi_tenant_quota_unavailable_total[5m])) by (tenant)
+```
 
 ### Coordinator Metrics
 
@@ -478,7 +500,13 @@ eddi_conversations_listing_owner_scan_exhausted_total  # Conversation listing ga
 
 ```text
 eddi_audit_entries_dropped_total            # Audit entries dropped (compliance-critical)
+eddi_audit_sequence_collisions_total        # Chain positions allocated by another replica
 ```
+
+`eddi_audit_sequence_collisions_total` is non-zero only on a multi-replica deployment
+without conversation affinity, where two nodes allocate the same per-conversation chain
+positions and `/auditstore/verify` then grades those conversations `BROKEN`. See
+[Chain sequences and multi-replica deployments](audit-ledger.md#chain-sequences-and-multi-replica-deployments).
 
 ### Deployed Agents
 
@@ -565,6 +593,13 @@ groups:
           severity: critical
         annotations:
           summary: "Audit entries are being dropped — compliance risk"
+
+      - alert: AuditSequenceCollisions
+        expr: eddi_audit_sequence_collisions_total > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "Audit chain positions are being allocated by more than one replica — enable conversation affinity"
 
       # Warning
       - alert: HighToolFailureRate

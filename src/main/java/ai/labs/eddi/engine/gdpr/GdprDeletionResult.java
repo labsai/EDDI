@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.gdpr;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 import java.time.Instant;
 import java.util.List;
 
@@ -88,7 +90,16 @@ public record GdprDeletionResult(
     /**
      * Whether every step of the cascade succeeded. False means some of the user's
      * data may still exist — the caller must not report the erasure as fulfilled.
+     * <p>
+     * Annotated because this is a derived method, not a record component and not a
+     * bean getter, so Jackson left it out of the REST entity while
+     * {@code McpGdprTools} puts it into the MCP payload explicitly — the same
+     * result reported in two different shapes, and a client written against the MCP
+     * JSON silently reading null from the REST one. {@code READ_ONLY} keeps it out
+     * of deserialization, where the canonical record constructor has no matching
+     * component.
      */
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     public boolean complete() {
         return failedSteps.isEmpty();
     }

@@ -12,6 +12,7 @@ import com.mongodb.ServerAddress;
 import com.mongodb.WriteError;
 import com.mongodb.bulk.BulkWriteError;
 import com.mongodb.bulk.BulkWriteResult;
+import com.mongodb.bulk.WriteConcernError;
 import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
@@ -179,11 +180,62 @@ class AuditStoreTest {
         return new MongoWriteException(new WriteError(code, "write error", new BsonDocument()), new ServerAddress(), Set.of());
     }
 
+    /**
+     * The failover shape: {@code w=majority} could not be acknowledged, so the
+     * driver raises {@code MongoBulkWriteException} with an EMPTY write-error list
+     * and a write-concern error. Filtering only the per-document errors treated
+     * that as success — the ledger cleared its in-flight batch, reset its failure
+     * counter and left the chain counters past positions a rollback could still
+     * erase: no retry, no dead-letter record, no dropped-counter increment, and
+     * {@code /auditstore/verify} reporting the conversation BROKEN later on. The
+     * production connection string sets {@code w=majority}, so this is the ordinary
+     * election shape rather than an exotic one.
+     */
+    @Test
+    @DisplayName("appendBatch — a write-concern failure with no document errors is not success")
+    void appendBatchPropagatesAWriteConcernError() {
+        List<AuditEntry> entries = List.of(createEntry("conv-1", "agent-1"));
+
+        doThrow(writeConcernFailure()).when(collection).insertMany(anyList(), any(InsertManyOptions.class));
+
+        assertThrows(MongoBulkWriteException.class, () -> store.appendBatch(entries),
+                "an unacknowledged batch must not be counted as persisted");
+    }
+
+    /**
+     * And the same shape alongside a tolerated duplicate: the duplicate is not what
+     * makes it safe to swallow.
+     */
+    @Test
+    @DisplayName("appendBatch — a write-concern failure propagates even when the only document error is a duplicate")
+    void appendBatchPropagatesAWriteConcernErrorEvenWithDuplicates() {
+        List<AuditEntry> entries = List.of(createEntry("conv-1", "agent-1"));
+
+        doThrow(new MongoBulkWriteException(
+                BulkWriteResult.acknowledged(0, 0, 0, 0, List.of(), List.of()),
+                List.of(new BulkWriteError(11000, "duplicate key", new BsonDocument(), 0)),
+                writeConcernError(), new ServerAddress(), Set.of()))
+                .when(collection).insertMany(anyList(), any(InsertManyOptions.class));
+
+        assertThrows(MongoBulkWriteException.class, () -> store.appendBatch(entries));
+    }
+
     private static MongoBulkWriteException bulkWriteException(int code) {
         return new MongoBulkWriteException(
                 BulkWriteResult.acknowledged(0, 0, 0, 0, List.of(), List.of()),
                 List.of(new BulkWriteError(code, "write error", new BsonDocument(), 0)),
                 null, new ServerAddress(), Set.of());
+    }
+
+    private static MongoBulkWriteException writeConcernFailure() {
+        return new MongoBulkWriteException(
+                BulkWriteResult.acknowledged(1, 0, 0, 0, List.of(), List.of()),
+                List.of(), writeConcernError(), new ServerAddress(), Set.of());
+    }
+
+    /** 64 is {@code WriteConcernFailed} — what a majority write times out with. */
+    private static WriteConcernError writeConcernError() {
+        return new WriteConcernError(64, "WriteConcernFailed", "waiting for replication timed out", new BsonDocument());
     }
 
     // ==================== getEntries ====================

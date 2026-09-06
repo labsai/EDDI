@@ -63,7 +63,12 @@ public interface IRestGdprAdmin {
      * to hundreds of megabytes is delivered.
      * <p>
      * Conversation snapshots are capped per bundle; audit entries were already
-     * capped. Both caps are reported in the server log when they bite.
+     * capped. When the conversation cap bites, the response says so in the payload
+     * ({@code totalConversations}, {@code conversationsTruncated}) and the status
+     * is 206 Partial Content — a bundle that silently omits conversations while
+     * answering 200 lets a DPO hand a data subject an incomplete Art. 15 bundle
+     * believing it complete, which is the same misreporting {@link #deleteUserData}
+     * answers 207 for. The audit cap is still reported in the server log only.
      */
     @GET
     @Path("/{userId}/export")
@@ -74,10 +79,17 @@ public interface IRestGdprAdmin {
                        + "managed conversation mappings, audit processing records and attachment "
                        + "metadata. Group discussion transcripts, shared artifacts, schedules and "
                        + "HITL journal entries are NOT yet included, although the erasure endpoint "
-                       + "does delete them — see the interface javadoc.")
-    UserDataExport exportUserData(
-                                  @PathParam("userId")
-                                  @Parameter(description = "User ID to export", required = true) String userId);
+                       + "does delete them — see the interface javadoc. "
+                       + "Responds 200 when the bundle is complete and 206 Partial Content when the "
+                       + "per-request conversation cap bit — 'conversationsTruncated' is then true and "
+                       + "'totalConversations' says how many the user has.")
+    @APIResponse(responseCode = "200", description = "Complete export bundle",
+                 content = @Content(schema = @Schema(implementation = UserDataExport.class)))
+    @APIResponse(responseCode = "206", description = "Bundle truncated at the conversation cap — see 'conversationsTruncated'",
+                 content = @Content(schema = @Schema(implementation = UserDataExport.class)))
+    Response exportUserData(
+                            @PathParam("userId")
+                            @Parameter(description = "User ID to export", required = true) String userId);
 
     @POST
     @Path("/{userId}/restrict")

@@ -108,12 +108,23 @@ class PostgresTenantQuotaStoreTest {
             verify(statement, times(2)).execute(anyString());
         }
 
+        /**
+         * Schema init runs before every method and takes a connection, so on a database
+         * unreachable since startup this — not the method the caller invoked — is where
+         * the outage surfaces. A plain {@code RuntimeException} here slipped past
+         * {@code TenantQuotaService}'s gates, which match the refusal type, and left
+         * that window answering an opaque 500 while the same outage a moment later
+         * answered 503.
+         */
         @Test
-        @DisplayName("should throw RuntimeException when schema creation fails")
+        @DisplayName("should refuse as an accounting outage when schema creation fails")
         void ensureSchema_failsWithSQLException() throws Exception {
             when(connection.createStatement()).thenThrow(new SQLException("DB down"));
 
-            assertThrows(RuntimeException.class, () -> sut.getQuota(TENANT_ID));
+            var thrown = assertThrows(QuotaAccountingUnavailableException.class, () -> sut.getQuota(TENANT_ID));
+
+            assertInstanceOf(SQLException.class, thrown.getCause(),
+                    "a schema failure is unreadable without the driver's own stack");
         }
     }
 
@@ -155,17 +166,28 @@ class PostgresTenantQuotaStoreTest {
             assertNull(quota);
         }
 
+        /**
+         * Finding f2-01. This used to assert {@code null}, i.e. fail-open — and
+         * {@code null} from {@code getQuota} means "no quota configured", which
+         * {@code TenantQuotaService} treats as unlimited. So one outage produced two
+         * opposite policies depending on which call happened to fail first: the read
+         * silently switched enforcement off for every tenant, the write refused with an
+         * honest 503. The read runs first at every gate, so fail-open won in practice
+         * and the write-side refusal was mostly unreachable.
+         */
         @Test
-        @DisplayName("should return null and log on SQLException")
+        @DisplayName("should refuse honestly, not fail open, on SQLException")
         void getQuota_sqlException() throws Exception {
             // After schema init, the second getConnection call throws
             when(dataSource.getConnection())
                     .thenReturn(connection) // for ensureSchema
                     .thenThrow(new SQLException("connection error"));
 
-            TenantQuota result = sut.getQuota(TENANT_ID);
+            var thrown = assertThrows(QuotaAccountingUnavailableException.class, () -> sut.getQuota(TENANT_ID));
 
-            assertNull(result);
+            assertEquals(ITenantQuotaStore.ACCOUNTING_UNAVAILABLE, thrown.getMessage(),
+                    "the same reason MongoTenantQuotaStore gives, so the 503 body is identical on both backends");
+            assertInstanceOf(SQLException.class, thrown.getCause(), "the driver exception stays attached");
         }
     }
 
@@ -471,6 +493,11 @@ class PostgresTenantQuotaStoreTest {
             assertEquals(PostgresTenantQuotaStore.ACCOUNTING_UNAVAILABLE, result.reason());
             assertFalse(result.reason().contains("Daily conversation limit"),
                     "an outage must be distinguishable from a tenant that is genuinely over quota");
+            // Wording alone is not a signal anything reads: without the flag this
+            // still incremented eddi.tenant.quota.denied and answered 429 with
+            // Retry-After: 60, exactly like an exhausted allowance.
+            assertTrue(result.accountingUnavailable(),
+                    "the refusal must be machine-distinguishable, not just differently worded");
         }
     }
 
@@ -560,6 +587,8 @@ class PostgresTenantQuotaStoreTest {
             assertEquals(PostgresTenantQuotaStore.ACCOUNTING_UNAVAILABLE, result.reason());
             assertFalse(result.reason().contains("API rate limit"),
                     "an outage must be distinguishable from a tenant that is genuinely over quota");
+            assertTrue(result.accountingUnavailable(),
+                    "the refusal must be machine-distinguishable, not just differently worded");
         }
     }
 

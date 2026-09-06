@@ -13,6 +13,7 @@ import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.IAuditStore;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.caching.CacheFactory;
+import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.memory.IConversationCheckpointStore;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
@@ -38,6 +39,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -104,13 +106,23 @@ class GdprComplianceServiceTest {
         service = newService(attachmentStorageInstance);
     }
 
+    /**
+     * A service with restriction caching switched <em>on</em>
+     * ({@code eddi.gdpr.restriction-cache-ttl-seconds=30}) — the single-node /
+     * conversation-affinity optimisation, which is opt-in and not the shipped
+     * default. The cache semantics below (publish on restrict, publish on
+     * unrestrict, monotone-toward-restriction on a concurrent miss) only exist when
+     * it is switched on, so they are pinned against a service that has it. The
+     * default is pinned separately, by
+     * {@code isProcessingRestricted_defaultConfiguration_*}.
+     */
     private GdprComplianceService newService(Instance<IAttachmentStore> attachments) {
         return new GdprComplianceService(
                 userMemoryStore, conversationMemoryStore,
                 userConversationStore, databaseLogs, auditStore,
                 auditLedgerService, attachments, hitlToolJournalStore,
                 conversationDescriptorStore, checkpointStore,
-                groupConversationStoreInstance, sharedArtifactStoreInstance, scheduleStore, cacheFactory);
+                groupConversationStoreInstance, sharedArtifactStoreInstance, scheduleStore, cacheFactory, 30L);
     }
 
     @Test
@@ -752,6 +764,154 @@ class GdprComplianceServiceTest {
                 "the lift must apply to the very next turn, not after the cache TTL");
     }
 
+    /**
+     * A service with {@code eddi.gdpr.restriction-cache-ttl-seconds=0}, the setting
+     * a multi-replica deployment without conversation affinity is expected to use.
+     */
+    private GdprComplianceService newServiceWithoutRestrictionCache() {
+        return new GdprComplianceService(
+                userMemoryStore, conversationMemoryStore,
+                userConversationStore, databaseLogs, auditStore,
+                auditLedgerService, attachmentStorageInstance, hitlToolJournalStore,
+                conversationDescriptorStore, checkpointStore,
+                groupConversationStoreInstance, sharedArtifactStoreInstance, scheduleStore,
+                cacheFactory, 0L);
+    }
+
+    /**
+     * The cache is node-local with no cross-node invalidation, so a cached negative
+     * verdict is what lets node B keep processing a user node A has just restricted
+     * — for the whole TTL. Setting the TTL to 0 has to remove the cache outright,
+     * not merely shorten it: every call reads the store.
+     */
+    @Test
+    void isProcessingRestricted_cachingDisabled_readsTheStoreOnEveryTurn() throws Exception {
+        var uncached = newServiceWithoutRestrictionCache();
+        when(userMemoryStore.getByKey(USER_ID, "_gdpr_processing_restricted"))
+                .thenReturn(Optional.empty());
+
+        assertFalse(uncached.isProcessingRestricted(USER_ID));
+        assertFalse(uncached.isProcessingRestricted(USER_ID));
+        assertFalse(uncached.isProcessingRestricted(USER_ID));
+
+        verify(userMemoryStore, times(3)).getByKey(USER_ID, "_gdpr_processing_restricted");
+    }
+
+    /**
+     * The behaviour the previous test protects, stated as the reviewer's scenario:
+     * another node applies the Art. 18 restriction — this node never saw the admin
+     * call, so nothing invalidates anything here — and the very next turn must be
+     * blocked rather than served from a cached {@code false}.
+     */
+    @Test
+    void isProcessingRestricted_cachingDisabled_seesAnotherNodesRestrictionOnTheNextTurn() throws Exception {
+        var uncached = newServiceWithoutRestrictionCache();
+        var flag = new UserMemoryEntry(
+                "entry-id", USER_ID, "_gdpr_processing_restricted", "true",
+                "gdpr", Property.Visibility.global,
+                null, List.of(), null, false, 0,
+                Instant.now(), Instant.now());
+        // First turn: not restricted anywhere. Then another node writes the flag.
+        when(userMemoryStore.getByKey(USER_ID, "_gdpr_processing_restricted"))
+                .thenReturn(Optional.empty())
+                .thenReturn(Optional.of(flag));
+
+        assertFalse(uncached.isProcessingRestricted(USER_ID), "precondition: not restricted yet");
+
+        assertTrue(uncached.isProcessingRestricted(USER_ID),
+                "a restriction applied on another node must bite on the next turn, not after a TTL");
+    }
+
+    /**
+     * A service built the way CDI builds it when nothing sets
+     * {@code eddi.gdpr.restriction-cache-ttl-seconds} — i.e. carrying the shipped
+     * default of that property, whatever it is.
+     */
+    private GdprComplianceService newServiceWithDefaultConfiguration() {
+        return new GdprComplianceService(
+                userMemoryStore, conversationMemoryStore,
+                userConversationStore, databaseLogs, auditStore,
+                auditLedgerService, attachmentStorageInstance, hitlToolJournalStore,
+                conversationDescriptorStore, checkpointStore,
+                groupConversationStoreInstance, sharedArtifactStoreInstance, scheduleStore, cacheFactory);
+    }
+
+    /**
+     * The two tests above only hold for a deployment that has explicitly set the
+     * TTL to 0. This one pins the <strong>shipped default</strong>, which is the
+     * setting almost every deployment actually runs: out of the box, no restriction
+     * verdict may be cached, because the cache is node-local with no cross-node
+     * invalidation and a cached {@code false} therefore suspends an Art. 18 legal
+     * control on every other replica for the length of the TTL.
+     * <p>
+     * The scenario is the reviewer's: this node answers one turn while the user is
+     * unrestricted, another node applies the restriction (nothing invalidates
+     * anything here — this node never saw the admin call), and the very next turn
+     * on this node must be blocked. A default TTL above 0 fails this: the second
+     * call is served from the cache and returns {@code false}.
+     */
+    @Test
+    void isProcessingRestricted_defaultConfiguration_doesNotServeAStaleUnrestrictedVerdict() throws Exception {
+        var shipped = newServiceWithDefaultConfiguration();
+        var flag = new UserMemoryEntry(
+                "entry-id", USER_ID, "_gdpr_processing_restricted", "true",
+                "gdpr", Property.Visibility.global,
+                null, List.of(), null, false, 0,
+                Instant.now(), Instant.now());
+        when(userMemoryStore.getByKey(USER_ID, "_gdpr_processing_restricted"))
+                .thenReturn(Optional.empty())
+                .thenReturn(Optional.of(flag));
+
+        assertFalse(shipped.isProcessingRestricted(USER_ID), "precondition: not restricted yet");
+
+        assertTrue(shipped.isProcessingRestricted(USER_ID),
+                "with the shipped default, a restriction applied on another replica must bite on the "
+                        + "very next turn — the default must not cache a negative verdict");
+        verify(userMemoryStore, times(2)).getByKey(USER_ID, "_gdpr_processing_restricted");
+    }
+
+    /**
+     * The other half of the same finding: while a negative verdict is cached the
+     * node keeps processing straight through a store outage, because it never asks
+     * the store. With the cache off, an outage always surfaces as the availability
+     * failure it is — which is what fail-closed means here.
+     */
+    @Test
+    void isProcessingRestricted_cachingDisabled_failsClosedOnAnOutageAfterASuccessfulRead() throws Exception {
+        var uncached = newServiceWithoutRestrictionCache();
+        when(userMemoryStore.getByKey(USER_ID, "_gdpr_processing_restricted"))
+                .thenReturn(Optional.empty())
+                .thenThrow(new RuntimeException("Connection refused"));
+
+        assertFalse(uncached.isProcessingRestricted(USER_ID), "precondition: one good read");
+
+        assertThrows(ProcessingRestrictionUnavailableException.class,
+                () -> uncached.isProcessingRestricted(USER_ID),
+                "a cached false must not absorb the outage");
+    }
+
+    /**
+     * Switching the cache off must not break the admin writes, which publish
+     * through it on the default setting.
+     */
+    @Test
+    void restrictAndUnrestrict_cachingDisabled_stillWriteTheStore() throws Exception {
+        var uncached = newServiceWithoutRestrictionCache();
+        var flag = new UserMemoryEntry(
+                "entry-id", USER_ID, "_gdpr_processing_restricted", "true",
+                "gdpr", Property.Visibility.global,
+                null, List.of(), null, false, 0,
+                Instant.now(), Instant.now());
+        when(userMemoryStore.getByKey(USER_ID, "_gdpr_processing_restricted"))
+                .thenReturn(Optional.of(flag));
+
+        assertDoesNotThrow(() -> uncached.restrictProcessing(USER_ID));
+        assertDoesNotThrow(() -> uncached.unrestrictProcessing(USER_ID));
+
+        verify(userMemoryStore).upsert(any(UserMemoryEntry.class));
+        verify(userMemoryStore).deleteEntry("entry-id");
+    }
+
     @Test
     void isProcessingRestricted_returnsFalseWhenValueIsNotTrue() throws Exception {
         // Given — value is "false" not "true"
@@ -1153,5 +1313,320 @@ class GdprComplianceServiceTest {
         assertDoesNotThrow(() -> service.deleteUserData(USER_ID));
 
         verify(sharedArtifactStore, never()).deleteAllForUser(any());
+    }
+
+    /**
+     * Finding r4. The cap was reported in the server log only, so a data
+     * portability request for a user with 1,200 conversations returned 200 OK and a
+     * bundle silently missing 200 of them — an arbitrary 200 on MongoDB, whose
+     * natural order is not insertion order. A DPO hands that to the data subject
+     * believing it complete, which is the same misreporting the erasure half of
+     * this class answers 207 for.
+     */
+    @Test
+    void exportUserData_marksTheBundleTruncatedWhenTheCapBites() throws Exception {
+        var manyIds = new ArrayList<String>();
+        int total = GdprComplianceService.CONVERSATION_EXPORT_LIMIT + 25;
+        for (int i = 0; i < total; i++) {
+            manyIds.add("conv-" + i);
+        }
+        var snapshot = new ConversationMemorySnapshot();
+        snapshot.setAgentId("agent-1");
+        snapshot.setAgentVersion(1);
+        snapshot.setConversationState(ConversationState.READY);
+
+        when(userMemoryStore.getAllEntries(USER_ID)).thenReturn(List.of());
+        when(conversationMemoryStore.getConversationIdsByUserId(USER_ID)).thenReturn(manyIds);
+        when(conversationMemoryStore.loadConversationMemorySnapshot(anyString())).thenReturn(snapshot);
+        when(userConversationStore.getAllForUser(USER_ID)).thenReturn(List.of());
+        when(auditStore.getEntriesByUserId(eq(USER_ID), anyInt(), anyInt())).thenReturn(List.of());
+
+        UserDataExport export = service.exportUserData(USER_ID);
+
+        assertTrue(export.conversationsTruncated(),
+                "an incomplete Art. 15 bundle must say so in the payload, not only in the server log");
+        assertEquals(total, export.totalConversations(),
+                "the caller has to be able to see how much is missing");
+    }
+
+    /** A bundle inside the cap is complete, and says so. */
+    @Test
+    void exportUserData_isNotMarkedTruncatedWithinTheCap() throws Exception {
+        var snapshot = new ConversationMemorySnapshot();
+        snapshot.setAgentId("agent-1");
+        snapshot.setAgentVersion(1);
+        snapshot.setConversationState(ConversationState.READY);
+
+        when(userMemoryStore.getAllEntries(USER_ID)).thenReturn(List.of());
+        when(conversationMemoryStore.getConversationIdsByUserId(USER_ID)).thenReturn(List.of("conv-1", "conv-2"));
+        when(conversationMemoryStore.loadConversationMemorySnapshot(anyString())).thenReturn(snapshot);
+        when(userConversationStore.getAllForUser(USER_ID)).thenReturn(List.of());
+        when(auditStore.getEntriesByUserId(eq(USER_ID), anyInt(), anyInt())).thenReturn(List.of());
+
+        UserDataExport export = service.exportUserData(USER_ID);
+
+        assertFalse(export.conversationsTruncated());
+        assertEquals(2, export.totalConversations());
+    }
+
+    /**
+     * Finding r7. The read path is not atomic with {@code restrictProcessing}: T1
+     * reads "not restricted" from the store, T2 (an admin applying an Art. 18
+     * restriction) writes the row and publishes {@code true}, and T1 then
+     * overwrites it with the stale {@code false}. The node keeps processing a
+     * restricted user for up to RESTRICTION_CACHE_TTL — 30 seconds of processing
+     * someone whose processing must be halted, which is a legal control, not a
+     * cache-freshness preference.
+     * <p>
+     * The interleaving is driven deterministically: the store lookup itself applies
+     * the restriction, exactly as a concurrent admin call would between the read
+     * and the write that follows it.
+     */
+    @Test
+    void isProcessingRestricted_doesNotOverwriteARestrictionAppliedDuringTheRead() throws Exception {
+        when(userMemoryStore.getByKey(eq(USER_ID), anyString())).thenAnswer(invocation -> {
+            // Stands in for the admin call landing between this read and its cache
+            // write. restrictProcessing publishes "true" through the same cache.
+            service.restrictProcessing(USER_ID);
+            return Optional.empty();
+        });
+
+        boolean firstAnswer = service.isProcessingRestricted(USER_ID);
+
+        assertTrue(firstAnswer, "the administrative write is newer than a read that started before it");
+        // And the published verdict must survive: the second call is a cache hit, so
+        // a stale false written here would keep answering for the whole TTL.
+        reset(userMemoryStore);
+        assertTrue(service.isProcessingRestricted(USER_ID),
+                "a restriction masked in the cache is a restriction not enforced");
+        verify(userMemoryStore, never()).getByKey(anyString(), anyString());
+    }
+
+    /**
+     * Finding G1/f1-01. {@code isProcessingRestricted} is itself a cache writer, so
+     * two turns for the same user can both miss and both publish. T2 misses, reads
+     * "not restricted" and publishes {@code false}; T1 misses, reads {@code true}
+     * from the store — a DPO applied the Art. 18 restriction on another node, and
+     * nothing invalidates this node's cache — and must return its own fresh
+     * {@code true}, not the sibling's stale {@code false}.
+     * <p>
+     * A plain {@code putIfAbsent} is refused here and hands T1 back the
+     * {@code false}, so T1 processes a turn its own store read said must be blocked
+     * and the node keeps answering {@code false} for the rest of the TTL. That is a
+     * fail-open on a legal control.
+     * <p>
+     * The interleaving is driven deterministically: T1's store lookup runs the
+     * whole sibling read inline, exactly where a concurrent one would land.
+     */
+    @Test
+    void isProcessingRestricted_prefersItsOwnFreshRestrictionOverAConcurrentReadersStaleFalse()
+            throws Exception {
+        var restrictedEntry = new UserMemoryEntry(
+                "entry-id", USER_ID, "_gdpr_processing_restricted", "true",
+                "gdpr", Property.Visibility.global,
+                null, List.of(), null, false, 0,
+                Instant.now(), Instant.now());
+        var siblingRan = new AtomicBoolean(false);
+
+        when(userMemoryStore.getByKey(eq(USER_ID), anyString())).thenAnswer(invocation -> {
+            if (siblingRan.compareAndSet(false, true)) {
+                // T2: a second in-flight turn for the same user. It misses the same
+                // empty cache, reads "not restricted", and its publish lands first.
+                assertFalse(service.isProcessingRestricted(USER_ID),
+                        "precondition: the sibling really did observe and publish 'not restricted'");
+                return Optional.of(restrictedEntry);
+            }
+            // The sibling's own store read.
+            return Optional.empty();
+        });
+
+        assertTrue(service.isProcessingRestricted(USER_ID),
+                "a reader must never return a sibling's stale false over the restriction it read itself");
+
+        // And that verdict has to be what the node serves for the rest of the TTL —
+        // otherwise every following turn is a cache hit on the stale false.
+        reset(userMemoryStore);
+        assertTrue(service.isProcessingRestricted(USER_ID),
+                "a restriction masked in the cache is a restriction not enforced");
+        verify(userMemoryStore, never()).getByKey(anyString(), anyString());
+    }
+
+    /**
+     * Finding r14. {@code recordFailure} is called from inside the per-conversation
+     * loops, so with a stack trace on every call a user with 5,000 conversations
+     * produced 20,000 ERROR traces for one erasure request and buried the one line
+     * that matters. Repeats are still reported, at WARN, without the identical
+     * trace.
+     */
+    @Test
+    void recordFailure_logsTheStackTraceOncePerStepAndStillRecordsRepeats() {
+        var failedSteps = new ArrayList<String>();
+        var boom = new RuntimeException("store down");
+
+        assertTrue(GdprComplianceService.recordFailure(failedSteps, "attachments", boom, "pseudo"),
+                "the first failure of a step carries the trace");
+        assertFalse(GdprComplianceService.recordFailure(failedSteps, "attachments", boom, "pseudo"),
+                "the 4,999 identical traces after it do not");
+        assertTrue(GdprComplianceService.recordFailure(failedSteps, "checkpoints", boom, "pseudo"),
+                "a different step is a different failure and carries its own trace");
+
+        assertEquals(List.of("attachments", "checkpoints"), failedSteps,
+                "each failing step is still named exactly once for the caller");
+    }
+
+    /**
+     * Finding m1, attachment half. The attachment sweep isolates EACH conversation,
+     * so the store refusing one must not cost the others their erasure — and the
+     * step still has to be named in {@code failedSteps}, or a DPO files the Art. 17
+     * request as fulfilled while one conversation's uploads are still on disk.
+     */
+    @Test
+    void deleteUserData_oneFailingAttachmentDeleteDoesNotStopTheSweep() throws Exception {
+        when(userMemoryStore.countEntries(USER_ID)).thenReturn(0L);
+        when(conversationMemoryStore.getConversationIdsByUserId(USER_ID))
+                .thenReturn(List.of("conv-1", "conv-2"));
+        when(attachmentStorageInstance.isResolvable()).thenReturn(true);
+        when(attachmentStorageInstance.get()).thenReturn(attachmentStore);
+        when(attachmentStore.deleteByConversation("conv-1"))
+                .thenThrow(new RuntimeException("GridFS bucket unavailable"));
+        when(attachmentStore.deleteByConversation("conv-2")).thenReturn(3L);
+
+        GdprDeletionResult result = newService(attachmentStorageInstance).deleteUserData(USER_ID);
+
+        verify(attachmentStore).deleteByConversation("conv-2");
+        assertEquals(3, result.attachmentsDeleted(),
+                "only the conversation that actually failed may be missing from the count");
+        assertFalse(result.complete());
+        assertEquals(List.of("attachments"), result.failedSteps(),
+                "one step name, however many conversations failed inside it");
+    }
+
+    /**
+     * The outer guard of the same step: a CDI {@code Instance} that cannot even be
+     * resolved throws before the loop is entered, and that has to be reported as an
+     * attachment failure rather than aborting the whole cascade — every later step
+     * still has to run.
+     */
+    @Test
+    void deleteUserData_unresolvableAttachmentStoreIsReportedNotFatal() throws Exception {
+        when(userMemoryStore.countEntries(USER_ID)).thenReturn(0L);
+        when(conversationMemoryStore.getConversationIdsByUserId(USER_ID)).thenReturn(List.of("conv-1"));
+        when(attachmentStorageInstance.isResolvable())
+                .thenThrow(new IllegalStateException("no attachment storage bean"));
+        when(conversationMemoryStore.deleteConversationsByUserId(USER_ID)).thenReturn(1L);
+
+        GdprDeletionResult result = newService(attachmentStorageInstance).deleteUserData(USER_ID);
+
+        assertTrue(result.failedSteps().contains("attachments"), result.failedSteps().toString());
+        assertEquals(1, result.conversationsDeleted(),
+                "the cascade must carry on past a step that could not start");
+        verify(auditStore).pseudonymizeByUserId(eq(USER_ID), anyString());
+    }
+
+    /**
+     * Descriptors are what the conversation list in the UI reads, so one that
+     * survives erasure keeps the user's conversation titles visible. Isolated per
+     * conversation for the same reason as the attachment sweep.
+     */
+    @Test
+    void deleteUserData_oneFailingDescriptorDeleteIsRecordedAndTheRestStillGo() throws Exception {
+        when(userMemoryStore.countEntries(USER_ID)).thenReturn(0L);
+        when(conversationMemoryStore.getConversationIdsByUserId(USER_ID))
+                .thenReturn(List.of("conv-1", "conv-2"));
+        doThrow(new RuntimeException("descriptor store unavailable"))
+                .when(conversationDescriptorStore).deleteAllDescriptor("conv-1");
+
+        GdprDeletionResult result = service.deleteUserData(USER_ID);
+
+        verify(conversationDescriptorStore).deleteAllDescriptor("conv-2");
+        assertFalse(result.complete());
+        assertTrue(result.failedSteps().contains("conversationDescriptors"),
+                "an undeleted descriptor still shows the user's conversation titles: " + result.failedSteps());
+    }
+
+    /**
+     * The intents are read before the rows are deleted precisely because the cache
+     * is keyed by intent — once the rows are gone there is no way to work out which
+     * keys to evict. A failure to read them therefore gets its own step name: the
+     * mappings are still deleted, but the cache goes on serving them.
+     */
+    @Test
+    void deleteUserData_reportsAFailureToReadTheMappedIntents() throws Exception {
+        when(userMemoryStore.countEntries(USER_ID)).thenReturn(0L);
+        when(userConversationStore.getAllForUser(USER_ID))
+                .thenThrow(new RuntimeException("mapping store unavailable"));
+        when(userConversationStore.deleteAllForUser(USER_ID)).thenReturn(2L);
+
+        GdprDeletionResult result = service.deleteUserData(USER_ID);
+
+        assertEquals(2, result.conversationMappingsDeleted(), "the rows themselves were still erased");
+        assertFalse(result.complete());
+        assertTrue(result.failedSteps().contains("conversationMappingIntents"),
+                "an unevictable cache keeps serving erased mappings, and the response has to say so: "
+                        + result.failedSteps());
+    }
+
+    /**
+     * And the eviction itself. The cache has no TTL, so a failure here means
+     * {@code readUserConversation} serves erased data for as long as the process
+     * lives — the one outcome an Art. 17 confirmation must never hide.
+     */
+    @Test
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    void deleteUserData_reportsAFailedCacheEviction() throws Exception {
+        ICache<String, UserConversation> cache = mock(ICache.class);
+        doThrow(new IllegalStateException("cache closed")).when(cache).remove(anyString());
+        var failingCacheFactory = mock(CacheFactory.class);
+        when(failingCacheFactory.getCache(anyString())).thenReturn((ICache) cache);
+        when(failingCacheFactory.getCache(anyString(), any())).thenReturn(mock(ICache.class));
+
+        var mapping = new UserConversation();
+        mapping.setIntent("support");
+        when(userMemoryStore.countEntries(USER_ID)).thenReturn(0L);
+        when(userConversationStore.getAllForUser(USER_ID)).thenReturn(List.of(mapping));
+        when(userConversationStore.deleteAllForUser(USER_ID)).thenReturn(1L);
+
+        var serviceWithFailingCache = new GdprComplianceService(
+                userMemoryStore, conversationMemoryStore,
+                userConversationStore, databaseLogs, auditStore,
+                auditLedgerService, attachmentStorageInstance, hitlToolJournalStore,
+                conversationDescriptorStore, checkpointStore,
+                groupConversationStoreInstance, sharedArtifactStoreInstance, scheduleStore, failingCacheFactory);
+
+        GdprDeletionResult result = serviceWithFailingCache.deleteUserData(USER_ID);
+
+        assertFalse(result.complete());
+        assertTrue(result.failedSteps().contains("conversationMappingCache"), result.failedSteps().toString());
+    }
+
+    /**
+     * Caffeine rejects a null key outright, so the restriction cache must not be
+     * asked about one. A null user is "not restricted" — there is nothing to look
+     * up and nothing to cache — rather than an exception on the hottest path in the
+     * system.
+     */
+    @Test
+    void isProcessingRestricted_nullUserIsNotRestrictedAndIsNeverLookedUp() throws Exception {
+        assertFalse(service.isProcessingRestricted(null));
+
+        verify(userMemoryStore, never()).getByKey(any(), anyString());
+    }
+
+    /**
+     * The Art. 18 write refuses a null subject before it touches any store, and
+     * says why.
+     * <p>
+     * Worth pinning because it is what makes {@code forgetRestriction}'s own null
+     * guard unreachable: every mutating entry point derives a pseudonym first, and
+     * that derivation rejects null. Were this to become lenient, the catch blocks
+     * that call {@code forgetRestriction} would start handing Caffeine a null key,
+     * and the resulting NPE would replace the failure they exist to report.
+     */
+    @Test
+    void restrictProcessing_rejectsANullSubjectBeforeTouchingAnyStore() throws Exception {
+        var thrown = assertThrows(RuntimeException.class, () -> service.restrictProcessing(null));
+
+        assertEquals("userId must not be null when deriving a GDPR pseudonym", thrown.getMessage());
+        verify(userMemoryStore, never()).upsert(any());
     }
 }
