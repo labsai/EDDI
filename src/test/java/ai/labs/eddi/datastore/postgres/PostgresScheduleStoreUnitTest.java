@@ -1300,6 +1300,13 @@ class PostgresScheduleStoreUnitTest {
         ordered.verify(connection).prepareStatement("DELETE FROM eddi_schedule_fire_logs WHERE schedule_id = ?");
         ordered.verify(preparedStatement).setString(1, "sched-erased");
         ordered.verify(preparedStatement).executeBatch();
+        // The sweep runs on its own connection outside the transaction, so it owns
+        // both handles and must close them. Asserted rather than assumed: a static
+        // analyser reading this file sees prepareStatement() and cannot tell that
+        // `connection` is a mock, and the honest answer to that is a test that fails
+        // if the try-with-resources in sweepFireLogsOf were ever unwrapped.
+        verify(preparedStatement, atLeastOnce()).close();
+        verify(connection, atLeastOnce()).close();
     }
 
     /**
@@ -1316,6 +1323,8 @@ class PostgresScheduleStoreUnitTest {
         ordered.verify(connection).prepareStatement("DELETE FROM eddi_schedule_fire_logs WHERE schedule_id = ?");
         ordered.verify(preparedStatement).setString(1, "sched-1");
         ordered.verify(preparedStatement).executeBatch();
+        verify(preparedStatement, atLeastOnce()).close();
+        verify(connection, atLeastOnce()).close();
     }
 
     /**
