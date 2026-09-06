@@ -140,6 +140,10 @@ public final class CronParser {
      * cycle, which is what makes the answer a property of the EXPRESSION and not of
      * the year in which someone asks.
      */
+    private static final int SECONDS_PER_HOUR = 3600;
+
+    private static final int SECONDS_PER_MINUTE = 60;
+
     private static final int SCAN_FIRST_YEAR = 2001;
 
     /** @see #SCAN_FIRST_YEAR */
@@ -205,7 +209,13 @@ public final class CronParser {
         List<Integer> secondsOfDay = new ArrayList<>(hours.size() * minutes.size());
         for (int hour : hours) {
             for (int minute : minutes) {
-                secondsOfDay.add(hour * 3600 + minute * 60);
+                // parseField already rejected anything outside 0-23 and 0-59, so this
+                // cannot exceed 86,340. Computed in long and narrowed with toIntExact
+                // anyway: the bound lives in a method three calls away, which is far
+                // enough that neither a reader nor a static analyser should be asked to
+                // take it on trust, and an exact narrowing throws rather than wrapping
+                // if the bound were ever loosened.
+                secondsOfDay.add(Math.toIntExact((long) hour * SECONDS_PER_HOUR + (long) minute * SECONDS_PER_MINUTE));
             }
         }
         long min = Long.MAX_VALUE;
