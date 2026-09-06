@@ -156,7 +156,7 @@ public class GdprComplianceService {
         this(userMemoryStore, conversationMemoryStore, userConversationStore, databaseLogs, auditStore,
                 auditLedgerService, attachmentStorageInstance, hitlToolJournalStore, conversationDescriptorStore,
                 checkpointStore, groupConversationStoreInstance, sharedArtifactStoreInstance, scheduleStore,
-                cacheFactory, Long.parseLong(RESTRICTION_CACHE_TTL_DEFAULT));
+                cacheFactory, RESTRICTION_CACHE_TTL_DEFAULT_SECONDS);
     }
 
     /**
@@ -199,8 +199,19 @@ public class GdprComplianceService {
     /**
      * Default for {@link #RESTRICTION_CACHE_TTL_PROPERTY}, as MicroProfile needs a
      * String. Zero: no verdict is cached unless a deployment asks for it.
+     * <p>
+     * Kept as a pair with {@link #RESTRICTION_CACHE_TTL_DEFAULT_SECONDS} rather
+     * than parsed at runtime. A {@code @ConfigProperty} default has to be a
+     * compile-time String constant, but the CDI-free constructor below needs the
+     * number, and {@code Long.parseLong} on a literal is a parse that can only ever
+     * succeed - noise that a reader and a static analyser both have to reason
+     * about. {@code GdprComplianceServiceTest#theTwoDefaultConstantsAgree} fails if
+     * the two ever drift.
      */
     static final String RESTRICTION_CACHE_TTL_DEFAULT = "0";
+
+    /** The numeric half of {@link #RESTRICTION_CACHE_TTL_DEFAULT}. */
+    static final long RESTRICTION_CACHE_TTL_DEFAULT_SECONDS = 0L;
 
     /**
      * Name of the Caffeine cache {@code RestUserConversationStore} reads managed

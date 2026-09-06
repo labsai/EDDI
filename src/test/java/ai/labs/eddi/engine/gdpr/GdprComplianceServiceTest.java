@@ -1629,4 +1629,22 @@ class GdprComplianceServiceTest {
         assertEquals("userId must not be null when deriving a GDPR pseudonym", thrown.getMessage());
         verify(userMemoryStore, never()).upsert(any());
     }
+
+    /**
+     * The two halves of the restriction-cache default must stay equal.
+     * <p>
+     * A {@code @ConfigProperty} default has to be a compile-time String, and the
+     * CDI-free constructor needs the number, so the value exists twice. Changing
+     * one and not the other would silently give the annotated constructor a
+     * different default from the plain one - the shipped default from Quarkus, and
+     * something else everywhere the class is built directly, including these tests.
+     */
+    @Test
+    void theTwoDefaultConstantsAgree() {
+        assertEquals(GdprComplianceService.RESTRICTION_CACHE_TTL_DEFAULT,
+                Long.toString(GdprComplianceService.RESTRICTION_CACHE_TTL_DEFAULT_SECONDS),
+                "the @ConfigProperty default and the constructor default are the same number or the class "
+                        + "has two different shipped defaults depending on how it was built");
+    }
+
 }
