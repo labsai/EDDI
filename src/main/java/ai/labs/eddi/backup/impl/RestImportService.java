@@ -327,6 +327,31 @@ public class RestImportService extends AbstractBackupService implements IRestImp
      *            the agent a merge would write into, or null when nothing on this
      *            instance matches the archived agent — then every schedule is new
      */
+    /**
+     * The archive's schedule files, in a stable order.
+     * <p>
+     * {@link Files#newDirectoryStream} yields entries in whatever order the
+     * filesystem hands back, which is unspecified and differs between platforms. It
+     * matters here because a name match is <em>consumed</em>: when an archive
+     * carries two schedules of the same name and the target agent runs one, the
+     * first file read takes the UPDATE and the second becomes a CREATE. Left to the
+     * filesystem, which of the two overwrites the live schedule depends on the
+     * machine the import happens to run on, and {@code previewImport} can promise
+     * an outcome that {@code importAgent} then does not perform - the preview
+     * exists precisely so an operator can refuse an overwrite before it happens.
+     * Sorting by file name makes both passes agree and makes the same archive
+     * import the same way everywhere.
+     */
+    private static List<Path> archivedScheduleFiles(Path schedulesDir) throws IOException {
+        List<Path> files = new ArrayList<>();
+        try (var scheduleStream = Files.newDirectoryStream(schedulesDir,
+                p -> p.toString().endsWith("." + SCHEDULE_EXT + ".json"))) {
+            scheduleStream.forEach(files::add);
+        }
+        files.sort(Comparator.comparing(p -> p.getFileName().toString()));
+        return files;
+    }
+
     private void addScheduleDiffs(List<ResourceDiff> diffs, Path targetDirPath, String targetAgentId) {
         Path schedulesDir = findArchiveDir(targetDirPath, SCHEDULES_DIR);
         if (schedulesDir == null) {
@@ -335,9 +360,8 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         Map<String, String> existingByName = targetAgentId != null
                 ? existingScheduleIdsByName(targetAgentId)
                 : new LinkedHashMap<>();
-        try (var scheduleStream = Files.newDirectoryStream(schedulesDir,
-                p -> p.toString().endsWith("." + SCHEDULE_EXT + ".json"))) {
-            for (Path scheduleFilePath : scheduleStream) {
+        try {
+            for (Path scheduleFilePath : archivedScheduleFiles(schedulesDir)) {
                 try {
                     ScheduleConfiguration schedule = jsonSerialization.deserialize(
                             readFile(scheduleFilePath), ScheduleConfiguration.class);
@@ -1340,10 +1364,9 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                     "The archive contains schedules but the imported agent URI " + newAgentUri + " carries no id.");
         }
 
-        List<Path> scheduleFiles = new ArrayList<>();
-        try (var scheduleStream = Files.newDirectoryStream(schedulesDir,
-                p -> p.toString().endsWith("." + SCHEDULE_EXT + ".json"))) {
-            scheduleStream.forEach(scheduleFiles::add);
+        List<Path> scheduleFiles;
+        try {
+            scheduleFiles = archivedScheduleFiles(schedulesDir);
         } catch (IOException e) {
             throw new InternalServerErrorException("Could not read schedules from the archive: " + e.getMessage(), e);
         }

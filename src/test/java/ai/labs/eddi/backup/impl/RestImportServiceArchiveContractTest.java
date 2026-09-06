@@ -791,6 +791,57 @@ class RestImportServiceArchiveContractTest {
             assertEquals(DiffAction.CREATE, rows.get("sched3").action(),
                     "a name the target does not have is added: " + rows);
         }
+
+        /**
+         * Which of two identically named archived schedules overwrites the live one
+         * must not depend on the filesystem.
+         * <p>
+         * The match is <em>consumed</em>: the first file read takes the UPDATE and the
+         * second becomes a CREATE. The archive was walked with
+         * {@code Files.newDirectoryStream}, whose order is unspecified and differs
+         * between platforms, so the same ZIP could overwrite a different schedule on a
+         * different machine — and {@code previewImport} could promise an outcome that
+         * {@code importAgent} then did not perform, which defeats the point of a
+         * preview an operator is meant to refuse.
+         * <p>
+         * The files here are written in the order {@code b-} then {@code a-}, so a
+         * creation-ordered filesystem hands back the wrong one first; only sorting by
+         * file name makes {@code a-} win.
+         */
+        @Test
+        @DisplayName("the archived schedule that wins a name match is chosen by file name, not by the filesystem")
+        void scheduleMatchingDoesNotDependOnDirectoryOrder() throws Exception {
+            stubUnzip(dir -> {
+                Files.writeString(new File(dir, AGENT_ORIGIN_ID + ".agent.json").toPath(), "{\"workflows\":[]}");
+                File schedules = new File(dir, "schedules");
+                assertTrue(schedules.mkdirs());
+                Files.writeString(new File(schedules, "b-second.schedule.json").toPath(),
+                        "{\"id\":\"writtenFirst\",\"name\":\"nightly\",\"agentId\":\"someOtherAgent\"}");
+                Files.writeString(new File(schedules, "a-first.schedule.json").toPath(),
+                        "{\"id\":\"writtenSecond\",\"name\":\"nightly\",\"agentId\":\"someOtherAgent\"}");
+            });
+
+            var existingDescriptor = new DocumentDescriptor();
+            existingDescriptor.setResource(URI.create(
+                    "eddi://ai.labs.agent/agentstore/agents/" + NEW_AGENT_ID + "?version=4"));
+            when(documentDescriptorStore.findByOriginId(AGENT_ORIGIN_ID)).thenReturn(List.of(existingDescriptor));
+
+            var existingSchedule = new ScheduleConfiguration();
+            existingSchedule.setId("alreadyHere");
+            existingSchedule.setName("nightly");
+            when(scheduleStore.readSchedulesByAgentId(NEW_AGENT_ID)).thenReturn(List.of(existingSchedule));
+
+            var preview = importService.previewImport(new ByteArrayInputStream(new byte[0]), null);
+
+            var rows = preview.resources().stream()
+                    .filter(d -> "schedule".equals(d.resourceType()))
+                    .collect(Collectors.toMap(ResourceDiff::sourceId, d -> d));
+            assertEquals(DiffAction.UPDATE, rows.get("writtenSecond").action(),
+                    "a-first.schedule.json sorts first, so its schedule takes the match whatever order the "
+                            + "filesystem enumerated the directory in: " + rows);
+            assertEquals(DiffAction.CREATE, rows.get("writtenFirst").action(),
+                    "b-second.schedule.json sorts second, so its schedule is added: " + rows);
+        }
     }
 
     @Nested
