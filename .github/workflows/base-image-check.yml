@@ -195,11 +195,21 @@ jobs:
             fi
           done
 
-          if [ -n "$GUARD_DEGRADED" ] && [ -z "$DEPENDABOT_PR" ]; then
+          # Record a degraded lookup whether or not a later candidate matched.
+          # Gating this on an empty $DEPENDABOT_PR would hide the failure in the
+          # case where one candidate was unreadable and a subsequent one matched:
+          # the decision is then sound, but a candidate still went unchecked and
+          # the summary should say so.
+          if [ -n "$GUARD_DEGRADED" ]; then
             {
               echo "### ⚠️ Dependabot guard degraded"
-              echo "${GUARD_DEGRADED}, so this run could not rule out a Dependabot PR"
-              echo "covering \`${DOCKERFILE}\`. Proceeding anyway — check for a duplicate."
+              if [ -n "$DEPENDABOT_PR" ]; then
+                echo "${GUARD_DEGRADED}. PR #${DEPENDABOT_PR} matched \`${DOCKERFILE}\` anyway,"
+                echo "so skipping is still correct — but one candidate went unchecked."
+              else
+                echo "${GUARD_DEGRADED}, so this run could not rule out a Dependabot PR"
+                echo "covering \`${DOCKERFILE}\`. Proceeding anyway — check for a duplicate."
+              fi
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 

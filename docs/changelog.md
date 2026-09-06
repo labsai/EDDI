@@ -103,10 +103,26 @@ weeks, with nobody acting on it. When the guard cannot complete it now also writ
 "Dependabot guard degraded" block into the step summary, so a duplicate is explained rather
 than merely appearing.
 
-Exercised the rewritten guard against a stubbed `gh` on all four paths: Dependabot PRs touching
+A second review round caught that the degraded summary was itself conditional: it was gated on
+`[ -z "$DEPENDABOT_PR" ]`, so if one candidate's file list was unreadable and a *later* candidate
+matched, the block was suppressed. The skip decision is sound in that case, but a candidate went
+unchecked and the summary said nothing. The gate is now on the degraded flag alone, with wording
+that distinguishes the two outcomes. (The `::warning::` annotation always fired either way; only
+the summary was being hidden.)
+
+Exercised the rewritten guard against a stubbed `gh` on all five paths: Dependabot PRs touching
 only `Dockerfile.demo` (no match, PR created — the original bug's correct behaviour), one
-touching the production Dockerfile (match, skipped), `gh pr list` failing, and `gh pr view`
-failing per-PR. The block is clean under `shellcheck --severity=style`.
+touching the production Dockerfile (match, skipped), `gh pr list` failing, `gh pr view` failing
+per-PR, and the mixed case above where the first lookup fails and the second matches. The block
+is clean under `shellcheck --severity=style`.
+
+Worth recording that the first run of that fifth case printed nothing at all, which looked like
+the new conditional was broken. It was the *harness*: it locates the end of the guard fragment by
+matching `if [ -n "$DEPENDABOT_PR" ]; then`, and the fix introduces a nested `if` on the same
+condition, so the extractor cut the fragment in half and produced an unterminated block. It now
+matches only at the run-block's own indentation. The same shape of mistake as the `PATH` one in
+the UBI 10 entry: twice now the test rig has been the thing that broke, and both times it first
+presented as a bug in the code under test.
 
 The failure mode is worth naming because it is the quiet kind: the weekly job reported
 **success**, its own summary said the digest had changed, and the outcome line read
