@@ -49,6 +49,34 @@ bottom of this file and are never archived.
 
 ---
 
+## 🧼 fix(configs): sanitize every cascade-delete log argument, not most of them (2026-09-06)
+
+**Repo:** EDDI (`fix/review-config-delete`)
+
+CodeQL raised eight log-injection alerts on this branch: a REST path parameter reached a log call
+unsanitized, so a caller could put CR/LF in an Agent or workflow id and forge log records
+(CWE-117). Every flagged argument now goes through `LogSanitizer.sanitize`.
+
+The more useful part was what the alerts did *not* cover. `RestAgentStore` was left with the same
+tainted `id` sanitized on one line and raw sixteen lines above it, on the schedule-cascade pair
+that CodeQL could not reach because it needs the schedule store to throw. Uneven coverage in one
+file is worse than none, because the next reader assumes the file is done. Every log argument in
+that class is now sanitized: caller ids, store-sourced ids, and exception messages.
+
+`URI`-typed arguments are deliberately left alone — `URI.create` rejects control characters, so a
+URI object cannot carry a record boundary in the first place.
+
+Ten regression tests drive a CR/LF payload through the real code paths and assert no newline
+reaches the log. They guard against vacuity twice: the capture must be non-empty, and it must
+contain a marker from the specific line under test — otherwise a closed logger or an unreached
+branch would pass. `captureLogsOf` moved to a shared `LogCaptureSupport` rather than being copied.
+
+One argument is honestly not pinned: `pinned.getId()` on the plan-cascade failure path. It comes
+from `RestUtilities.extractResourceId`, whose validity gate returns null for anything containing
+CR/LF, so the value cannot be driven. It is defensive, not reachable.
+
+---
+
 ## 🧹 fix(configs): stop cascading deletes removing resources someone else still uses (2026-09-06)
 
 **Repo:** EDDI (`fix/review-config-delete`)

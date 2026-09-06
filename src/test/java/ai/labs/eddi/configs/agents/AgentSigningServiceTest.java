@@ -24,6 +24,9 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
+import static ai.labs.eddi.utils.LogCaptureSupport.FORGED_RECORD;
+import static ai.labs.eddi.utils.LogCaptureSupport.assertNoForgedRecordBoundary;
+import static ai.labs.eddi.utils.LogCaptureSupport.captureLogsOf;
 import static org.junit.jupiter.api.Assertions.*;
 
 class AgentSigningServiceTest {
@@ -649,6 +652,74 @@ class AgentSigningServiceTest {
         var ex = assertThrows(AgentSigningService.AgentSigningException.class,
                 () -> signingService.sign("t1", "missing-agent", "payload"));
         assertTrue(ex.getMessage().contains("No signing key found") || ex.getMessage().contains("Failed to load"));
+    }
+
+    // ==================== log injection (CWE-117) ====================
+
+    /**
+     * CWE-117. {@code agentId} and {@code tenantId} arrive from the REST path and
+     * from deployment configuration, and {@code firstFailure} quotes the vault key
+     * built out of {@code agentId}, so all three carry caller text into the WARN
+     * that reports a cleanup the operator is meant to act on. A newline in any of
+     * them forges a record that reads as the server's own.
+     */
+    @Test
+    void deleteKeyPair_vaultFailure_cannotForgeALogRecordThroughTheAgentId() throws Exception {
+        String poisonedAgent = "agent-1" + FORGED_RECORD;
+        String poisonedTenant = "tenant-1" + FORGED_RECORD;
+        signingService.generateKeyPair(poisonedTenant, poisonedAgent);
+        secretProvider.failDeleteFor(poisonedTenant + ":agent-signing-key:" + poisonedAgent);
+
+        List<String> captured = captureLogsOf(AgentSigningService.class,
+                () -> signingService.deleteKeyPair(poisonedTenant, poisonedAgent, List.of(1)));
+
+        assertFalse(captured.isEmpty(),
+                "nothing was captured, so this test proves nothing — the logger was not open, or the WARN branch did not run");
+        assertTrue(captured.stream().anyMatch(value -> value.contains("could NOT be deleted")),
+                "the vault-failure WARN is the line under test and it did not fire; captured: " + captured);
+        assertNoForgedRecordBoundary(captured, "AgentSigningService.deleteKeyPair's vault-failure WARN");
+    }
+
+    /**
+     * CWE-117, the success branch of the same tally. It reports a different line
+     * with the same caller-controlled identifiers, so it needs its own sanitising
+     * and its own pin.
+     */
+    @Test
+    void deleteKeyPair_success_cannotForgeALogRecordThroughTheAgentId() throws Exception {
+        String poisonedAgent = "agent-1" + FORGED_RECORD;
+        String poisonedTenant = "tenant-1" + FORGED_RECORD;
+        signingService.generateKeyPair(poisonedTenant, poisonedAgent);
+
+        List<String> captured = captureLogsOf(AgentSigningService.class,
+                () -> signingService.deleteKeyPair(poisonedTenant, poisonedAgent, List.of(1)));
+
+        assertFalse(captured.isEmpty(),
+                "nothing was captured, so this test proves nothing — the logger was not open, or the INFO branch did not run");
+        assertTrue(captured.stream().anyMatch(value -> value.contains("signing key(s) for agent")),
+                "the successful-cleanup INFO is the line under test and it did not fire; captured: " + captured);
+        assertNoForgedRecordBoundary(captured, "AgentSigningService.deleteKeyPair's successful-cleanup INFO");
+    }
+
+    /**
+     * CWE-117, the third branch: an agent that never had key material at all. It is
+     * DEBUG rather than WARN, which changes nothing — a forged record is forged at
+     * any level, and this is the branch an attacker reaches without needing the
+     * vault to fail or the agent to exist.
+     */
+    @Test
+    void deleteKeyPair_noKeys_cannotForgeALogRecordThroughTheAgentId() {
+        String poisonedAgent = "agent-1" + FORGED_RECORD;
+        String poisonedTenant = "tenant-1" + FORGED_RECORD;
+
+        List<String> captured = captureLogsOf(AgentSigningService.class,
+                () -> signingService.deleteKeyPair(poisonedTenant, poisonedAgent, List.of(1)));
+
+        assertFalse(captured.isEmpty(),
+                "nothing was captured, so this test proves nothing — the logger was not open, or the DEBUG branch did not run");
+        assertTrue(captured.stream().anyMatch(value -> value.contains("No signing keys found in the vault")),
+                "the nothing-to-clean DEBUG is the line under test and it did not fire; captured: " + captured);
+        assertNoForgedRecordBoundary(captured, "AgentSigningService.deleteKeyPair's nothing-to-clean DEBUG");
     }
 
     /**

@@ -26,6 +26,9 @@ import java.net.URI;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import static ai.labs.eddi.utils.LogCaptureSupport.FORGED_RECORD;
+import static ai.labs.eddi.utils.LogCaptureSupport.assertNoForgedRecordBoundary;
+import static ai.labs.eddi.utils.LogCaptureSupport.captureLogsOf;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -949,6 +952,62 @@ class RestWorkflowStoreTest {
             verify(resourceClientLibrary, times(1)).deleteResource(URI.create(pinned), false);
             assertNull(response.getHeaderString("X-Cascade-Skipped"),
                     "a cascade that deleted everything it walked must not report a skip");
+        }
+    }
+    /**
+     * CWE-117 (log injection). {@code id} is the DELETE path parameter and the
+     * store's message quotes caller input back, so a CR/LF in either closes the
+     * real record and lets the remainder read as a second line the server wrote.
+     *
+     * <p>
+     * These assert the CONTRACT, not the call: drive a forged record through the
+     * real cascade path and require that nothing carrying a record boundary reached
+     * the log. Removing either {@code sanitize(...)} fails them.
+     * </p>
+     */
+    @Nested
+    @DisplayName("deleteWorkflow — log injection (CWE-117)")
+    class LogInjection {
+
+        /** The workflow id as an attacker supplies it on the DELETE path. */
+        private static final String POISONED_WORKFLOW_ID = "pkg1" + FORGED_RECORD;
+
+        /**
+         * Live at v1 under the poisoned id, so the cascade runs far enough to reach the
+         * lines under test.
+         */
+        @BeforeEach
+        void workflowIsLiveUnderThePoisonedId() throws Exception {
+            when(WorkflowStore.getCurrentResourceId(POISONED_WORKFLOW_ID)).thenReturn(resourceId(POISONED_WORKFLOW_ID, 1));
+        }
+
+        @Test
+        @DisplayName("a CR/LF workflow id cannot forge a record through the not-found-for-cascade WARN")
+        void workflowNotFoundForCascade() throws Exception {
+            when(WorkflowStore.read(POISONED_WORKFLOW_ID, 1)).thenThrow(new IResourceStore.ResourceNotFoundException("not found"));
+
+            List<String> captured = captureLogsOf(RestWorkflowStore.class,
+                    () -> assertDoesNotThrow(() -> restWorkflowStore.deleteWorkflow(POISONED_WORKFLOW_ID, 1, false, true)));
+
+            assertFalse(captured.isEmpty(), "nothing was captured, so this proves nothing — the logger was not open");
+            assertTrue(captured.stream().anyMatch(value -> value.contains("not found for cascade")),
+                    "the line under test did not fire; captured: " + captured);
+            assertNoForgedRecordBoundary(captured, "RestWorkflowStore.planCascade's workflow-not-found WARN");
+        }
+
+        @Test
+        @DisplayName("a CR/LF store error message cannot forge a record through the read-failed WARN")
+        void workflowReadFailsForCascade() throws Exception {
+            when(WorkflowStore.read(POISONED_WORKFLOW_ID, 1))
+                    .thenThrow(new IResourceStore.ResourceStoreException("index unavailable" + FORGED_RECORD));
+
+            List<String> captured = captureLogsOf(RestWorkflowStore.class,
+                    () -> assertDoesNotThrow(() -> restWorkflowStore.deleteWorkflow(POISONED_WORKFLOW_ID, 1, false, true)));
+
+            assertFalse(captured.isEmpty(), "nothing was captured, so this proves nothing — the logger was not open");
+            assertTrue(captured.stream().anyMatch(value -> value.contains("Error reading workflow")),
+                    "the line under test did not fire; captured: " + captured);
+            assertNoForgedRecordBoundary(captured, "RestWorkflowStore.planCascade's read-failed WARN");
         }
     }
 }

@@ -23,17 +23,13 @@ import org.junit.jupiter.api.Test;
 import java.lang.annotation.Annotation;
 import java.lang.reflect.Method;
 import java.net.URI;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
-import java.util.logging.Handler;
-import java.util.logging.Level;
-import java.util.logging.LogRecord;
-import java.util.logging.Logger;
 import java.util.stream.Stream;
 
+import static ai.labs.eddi.utils.LogCaptureSupport.captureLogsOf;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -623,50 +619,5 @@ class CapabilityRegistryServiceTest {
                 "the miss must have been captured with the skill sanitized in place; captured: " + captured);
         assertTrue(captured.stream().noneMatch(value -> value.contains("\n")),
                 "a newline reached the log, so a caller can forge log records; captured: " + captured);
-    }
-
-    /**
-     * Runs {@code body} with a JUL handler attached to {@code loggerClass}'s logger
-     * and returns every message and message parameter it emitted.
-     *
-     * <p>
-     * {@code logging.properties} turns the whole {@code ai.labs.eddi} namespace OFF
-     * for plain unit tests, so the logger has to be opened explicitly to see
-     * anything; the previous level is always put back.
-     * </p>
-     */
-    static List<String> captureLogsOf(Class<?> loggerClass, Runnable body) {
-        List<String> captured = new ArrayList<>();
-        Handler handler = new Handler() {
-            @Override
-            public void publish(LogRecord record) {
-                captured.add(String.valueOf(record.getMessage()));
-                if (record.getParameters() != null) {
-                    for (Object parameter : record.getParameters()) {
-                        captured.add(String.valueOf(parameter));
-                    }
-                }
-            }
-
-            @Override
-            public void flush() {
-            }
-
-            @Override
-            public void close() {
-            }
-        };
-
-        Logger julLogger = Logger.getLogger(loggerClass.getName());
-        Level previousLevel = julLogger.getLevel();
-        julLogger.setLevel(Level.ALL);
-        julLogger.addHandler(handler);
-        try {
-            body.run();
-        } finally {
-            julLogger.removeHandler(handler);
-            julLogger.setLevel(previousLevel);
-        }
-        return captured;
     }
 }

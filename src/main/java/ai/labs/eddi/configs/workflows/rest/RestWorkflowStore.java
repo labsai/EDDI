@@ -36,6 +36,7 @@ import static ai.labs.eddi.configs.descriptors.ResourceUtilities.*;
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 import static jakarta.ws.rs.core.Response.Status.BAD_REQUEST;
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 @ApplicationScoped
 public class RestWorkflowStore implements IRestWorkflowStore {
@@ -341,9 +342,9 @@ public class RestWorkflowStore implements IRestWorkflowStore {
                 }
             }
         } catch (IResourceStore.ResourceNotFoundException e) {
-            log.warnf("Workflow %s (v%d) not found for cascade — deleting workflow only", id, version);
+            log.warnf("Workflow %s (v%d) not found for cascade — deleting workflow only", sanitize(id), version);
         } catch (IResourceStore.ResourceStoreException e) {
-            log.warnf("Error reading workflow %s for cascade: %s", id, e.getMessage());
+            log.warnf("Error reading workflow %s for cascade: %s", sanitize(id), sanitize(e.getMessage()));
         }
         return new CascadePlan(toDelete, skipped[0]);
     }

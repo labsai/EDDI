@@ -32,6 +32,9 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import jakarta.ws.rs.BadRequestException;
+import static ai.labs.eddi.utils.LogCaptureSupport.FORGED_RECORD;
+import static ai.labs.eddi.utils.LogCaptureSupport.assertNoForgedRecordBoundary;
+import static ai.labs.eddi.utils.LogCaptureSupport.captureLogsOf;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -821,6 +824,158 @@ class RestAgentStoreTest {
             });
 
             assertDoesNotThrow(() -> restAgentStore.createAgent(config));
+        }
+    }
+    /**
+     * CWE-117 (log injection). Every identifier below reaches a {@code log.warnf}
+     * or {@code log.infof} from outside the process — {@code id} is the DELETE path
+     * parameter, the workflow id and the exception messages come back out of the
+     * store — and a CR/LF in any of them closes the real record and lets the
+     * remainder read as a second line the server wrote itself.
+     *
+     * <p>
+     * These assert the CONTRACT, not the call: drive a forged record through the
+     * real path and require that nothing carrying a record boundary reached the
+     * log. Removing any {@code sanitize(...)} on the pinned line fails them.
+     * </p>
+     */
+    @Nested
+    @DisplayName("deleteAgent — log injection (CWE-117)")
+    class LogInjection {
+
+        /** The Agent id as an attacker supplies it on the DELETE path. */
+        private static final String POISONED_AGENT_ID = AGENT_ID + FORGED_RECORD;
+
+        private static final String PKG1_URI = "eddi://ai.labs.workflow/workflowstore/workflows/" + PKG1_ID + "?version=2";
+
+        /**
+         * The Agent is live at v1 under its poisoned id, so the cascade is allowed to
+         * run and reach the lines under test.
+         */
+        @BeforeEach
+        void agentIsLiveUnderThePoisonedId() throws Exception {
+            when(AgentStore.getCurrentResourceId(POISONED_AGENT_ID)).thenReturn(resourceId(POISONED_AGENT_ID, 1));
+        }
+
+        private AgentConfiguration configReferencing(String workflowUri) {
+            AgentConfiguration config = new AgentConfiguration();
+            config.setWorkflows(new ArrayList<>(List.of(URI.create(workflowUri))));
+            return config;
+        }
+
+        @Test
+        @DisplayName("a CR/LF Agent id cannot forge a record through the schedule-cascade INFO")
+        void schedulesCascadeDeleted() throws Exception {
+            when(AgentStore.read(POISONED_AGENT_ID, 1)).thenReturn(configReferencing(PKG1_URI));
+            when(scheduleStore.deleteSchedulesByAgentId(POISONED_AGENT_ID)).thenReturn(3);
+
+            List<String> captured = captureLogsOf(RestAgentStore.class,
+                    () -> assertDoesNotThrow(() -> restAgentStore.deleteAgent(POISONED_AGENT_ID, 1, false, true)));
+
+            assertFalse(captured.isEmpty(), "nothing was captured, so this proves nothing — the logger was not open");
+            assertTrue(captured.stream().anyMatch(value -> value.contains("Cascade-deleted %d schedule(s)")
+                    || value.contains("schedule(s) for Agent")),
+                    "the line under test did not fire; captured: " + captured);
+            assertNoForgedRecordBoundary(captured, "RestAgentStore.deleteAgent's schedule-cascade INFO");
+        }
+
+        @Test
+        @DisplayName("a CR/LF Agent id and store message cannot forge a record through the schedule-cascade WARN")
+        void schedulesCascadeFails() throws Exception {
+            when(AgentStore.read(POISONED_AGENT_ID, 1)).thenReturn(configReferencing(PKG1_URI));
+            when(scheduleStore.deleteSchedulesByAgentId(POISONED_AGENT_ID))
+                    .thenThrow(new IllegalStateException("scheduler unreachable" + FORGED_RECORD));
+
+            List<String> captured = captureLogsOf(RestAgentStore.class,
+                    () -> assertDoesNotThrow(() -> restAgentStore.deleteAgent(POISONED_AGENT_ID, 1, false, true)));
+
+            assertFalse(captured.isEmpty(), "nothing was captured, so this proves nothing — the logger was not open");
+            assertTrue(captured.stream().anyMatch(value -> value.contains("Failed to cascade-delete schedules")),
+                    "the line under test did not fire; captured: " + captured);
+            assertNoForgedRecordBoundary(captured, "RestAgentStore.deleteAgent's schedule-cascade WARN");
+        }
+
+        @Test
+        @DisplayName("a CR/LF Agent id cannot forge a record through the not-found-for-cascade WARN")
+        void agentNotFoundForCascade() throws Exception {
+            when(AgentStore.read(POISONED_AGENT_ID, 1)).thenThrow(new IResourceStore.ResourceNotFoundException("not found"));
+
+            List<String> captured = captureLogsOf(RestAgentStore.class,
+                    () -> assertDoesNotThrow(() -> restAgentStore.deleteAgent(POISONED_AGENT_ID, 1, false, true)));
+
+            assertFalse(captured.isEmpty(), "nothing was captured, so this proves nothing — the logger was not open");
+            assertTrue(captured.stream().anyMatch(value -> value.contains("not found for cascade")),
+                    "the line under test did not fire; captured: " + captured);
+            assertNoForgedRecordBoundary(captured, "RestAgentStore.planCascade's Agent-not-found WARN");
+        }
+
+        @Test
+        @DisplayName("a CR/LF store error message cannot forge a record through the read-failed WARN")
+        void agentReadFailsForCascade() throws Exception {
+            when(AgentStore.read(POISONED_AGENT_ID, 1))
+                    .thenThrow(new IResourceStore.ResourceStoreException("index unavailable" + FORGED_RECORD));
+
+            List<String> captured = captureLogsOf(RestAgentStore.class,
+                    () -> assertDoesNotThrow(() -> restAgentStore.deleteAgent(POISONED_AGENT_ID, 1, false, true)));
+
+            assertFalse(captured.isEmpty(), "nothing was captured, so this proves nothing — the logger was not open");
+            assertTrue(captured.stream().anyMatch(value -> value.contains("Error reading Agent")),
+                    "the line under test did not fire; captured: " + captured);
+            assertNoForgedRecordBoundary(captured, "RestAgentStore.planCascade's read-failed WARN");
+        }
+
+        @Test
+        @DisplayName("a CR/LF store error message cannot forge a record through the plan-failed WARN")
+        void planningOneWorkflowFails() throws Exception {
+            when(AgentStore.read(POISONED_AGENT_ID, 1)).thenReturn(configReferencing(PKG1_URI));
+            // The reference check cannot answer — the cascade fails closed for this
+            // workflow and reports why, quoting the store's message back.
+            when(restWorkflowStore.getCurrentResourceId(PKG1_ID)).thenThrow(new RuntimeException("lookup failed" + FORGED_RECORD));
+
+            List<String> captured = captureLogsOf(RestAgentStore.class,
+                    () -> assertDoesNotThrow(() -> restAgentStore.deleteAgent(POISONED_AGENT_ID, 1, false, true)));
+
+            assertFalse(captured.isEmpty(), "nothing was captured, so this proves nothing — the logger was not open");
+            assertTrue(captured.stream().anyMatch(value -> value.contains("Failed to plan cascade-delete of package")),
+                    "the line under test did not fire; captured: " + captured);
+            assertNoForgedRecordBoundary(captured, "RestAgentStore.planCascade's plan-failed WARN");
+        }
+
+        @Test
+        @DisplayName("a CR/LF Agent id or workflow id cannot forge a record through the cascade-deleted INFO")
+        void cascadeDeletedPackage() throws Exception {
+            String poisonedWorkflowId = PKG1_ID + FORGED_RECORD;
+            when(AgentStore.read(POISONED_AGENT_ID, 1)).thenReturn(configReferencing(PKG1_URI));
+            when(restWorkflowStore.getCurrentResourceId(PKG1_ID)).thenReturn(resourceId(poisonedWorkflowId, 2));
+            when(AgentStore.getAgentDescriptorsContainingWorkflow(poisonedWorkflowId, 2, true)).thenAnswer(invocation -> referrers(1));
+            when(restWorkflowStore.deleteWorkflow(anyString(), anyInt(), anyBoolean(), anyBoolean())).thenReturn(Response.ok().build());
+
+            List<String> captured = captureLogsOf(RestAgentStore.class,
+                    () -> assertDoesNotThrow(() -> restAgentStore.deleteAgent(POISONED_AGENT_ID, 1, false, true)));
+
+            assertFalse(captured.isEmpty(), "nothing was captured, so this proves nothing — the logger was not open");
+            assertTrue(captured.stream().anyMatch(value -> value.contains("Cascade-deleted package")),
+                    "the line under test did not fire; captured: " + captured);
+            assertNoForgedRecordBoundary(captured, "RestAgentStore.deleteAgent's cascade-deleted INFO");
+        }
+
+        @Test
+        @DisplayName("a CR/LF workflow id or failure message cannot forge a record through the cascade-failed WARN")
+        void cascadeDeleteOfOnePackageFails() throws Exception {
+            String poisonedWorkflowId = PKG1_ID + FORGED_RECORD;
+            when(AgentStore.read(POISONED_AGENT_ID, 1)).thenReturn(configReferencing(PKG1_URI));
+            when(restWorkflowStore.getCurrentResourceId(PKG1_ID)).thenReturn(resourceId(poisonedWorkflowId, 2));
+            when(AgentStore.getAgentDescriptorsContainingWorkflow(poisonedWorkflowId, 2, true)).thenAnswer(invocation -> referrers(1));
+            when(restWorkflowStore.deleteWorkflow(anyString(), anyInt(), anyBoolean(), anyBoolean()))
+                    .thenThrow(new RuntimeException("workflow in use" + FORGED_RECORD));
+
+            List<String> captured = captureLogsOf(RestAgentStore.class,
+                    () -> assertDoesNotThrow(() -> restAgentStore.deleteAgent(POISONED_AGENT_ID, 1, false, true)));
+
+            assertFalse(captured.isEmpty(), "nothing was captured, so this proves nothing — the logger was not open");
+            assertTrue(captured.stream().anyMatch(value -> value.contains("Failed to cascade-delete package")),
+                    "the line under test did not fire; captured: " + captured);
+            assertNoForgedRecordBoundary(captured, "RestAgentStore.deleteAgent's cascade-failed WARN");
         }
     }
 }

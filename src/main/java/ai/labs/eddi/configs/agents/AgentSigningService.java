@@ -25,6 +25,7 @@ import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.IntStream;
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
  * Ed25519-based signing and verification service for agent identity.
@@ -267,12 +268,14 @@ public class AgentSigningService {
         // Javadoc warns about — and equally after deleting nothing at all.
         if (tally.failed > 0) {
             LOGGER.warnf("Signing key cleanup for agent '%s' in tenant '%s': %d key(s) deleted, %d could NOT be deleted and may "
-                    + "still hold private key material (first failure: %s)", agentId, tenantId, tally.deleted, tally.failed,
-                    tally.firstFailure);
+                    + "still hold private key material (first failure: %s)", sanitize(agentId), sanitize(tenantId),
+                    tally.deleted, tally.failed, sanitize(tally.firstFailure));
         } else if (tally.deleted > 0) {
-            LOGGER.infof("Deleted %d signing key(s) for agent '%s' in tenant '%s' (cache evicted)", tally.deleted, agentId, tenantId);
+            LOGGER.infof("Deleted %d signing key(s) for agent '%s' in tenant '%s' (cache evicted)", tally.deleted,
+                    sanitize(agentId), sanitize(tenantId));
         } else {
-            LOGGER.debugf("No signing keys found in the vault for agent '%s' in tenant '%s' (cache evicted)", agentId, tenantId);
+            LOGGER.debugf("No signing keys found in the vault for agent '%s' in tenant '%s' (cache evicted)",
+                    sanitize(agentId), sanitize(tenantId));
         }
     }
 

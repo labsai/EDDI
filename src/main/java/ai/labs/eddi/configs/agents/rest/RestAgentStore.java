@@ -204,7 +204,7 @@ public class RestAgentStore implements IRestAgentStore {
         try {
             capabilityRegistryService.register(resourceId.getId(), agentConfiguration);
         } catch (Exception e) {
-            log.debugf("Could not register capabilities for new agent: %s", e.getMessage());
+            log.debugf("Could not register capabilities for new agent: %s", sanitize(e.getMessage()));
         }
 
         return Response.created(createdUri).location(createdUri)
@@ -332,10 +332,10 @@ public class RestAgentStore implements IRestAgentStore {
             try {
                 int deletedSchedules = scheduleStore.deleteSchedulesByAgentId(id);
                 if (deletedSchedules > 0) {
-                    log.infof("Cascade-deleted %d schedule(s) for Agent %s", deletedSchedules, id);
+                    log.infof("Cascade-deleted %d schedule(s) for Agent %s", deletedSchedules, sanitize(id));
                 }
             } catch (Exception e) {
-                log.warnf("Failed to cascade-delete schedules for Agent %s: %s", id, e.getMessage());
+                log.warnf("Failed to cascade-delete schedules for Agent %s: %s", sanitize(id), sanitize(e.getMessage()));
             }
 
             for (IResourceId target : cascadeTargets) {
@@ -351,9 +351,10 @@ public class RestAgentStore implements IRestAgentStore {
                     // scopes in agreement; permanently removing a shared resource stays
                     // an explicit, non-cascading request against that resource.
                     restWorkflowStore.deleteWorkflow(target.getId(), target.getVersion(), false, true);
-                    log.infof("Cascade-deleted package %s (v%d) for Agent %s", target.getId(), target.getVersion(), id);
+                    log.infof("Cascade-deleted package %s (v%d) for Agent %s", sanitize(target.getId()), target.getVersion(),
+                            sanitize(id));
                 } catch (Exception e) {
-                    log.warnf("Failed to cascade-delete package %s: %s", target.getId(), e.getMessage());
+                    log.warnf("Failed to cascade-delete package %s: %s", sanitize(target.getId()), sanitize(e.getMessage()));
                 }
             }
         }
@@ -394,7 +395,7 @@ public class RestAgentStore implements IRestAgentStore {
                 log.infof("Cascade-deleted %d deployment record(s) for Agent %s", deletedDeployments, sanitize(id));
             }
         } catch (Exception e) {
-            log.warnf("Failed to delete deployment record(s) for Agent %s: %s", sanitize(id), e.getMessage());
+            log.warnf("Failed to delete deployment record(s) for Agent %s: %s", sanitize(id), sanitize(e.getMessage()));
         }
 
         return response;
@@ -429,16 +430,18 @@ public class RestAgentStore implements IRestAgentStore {
         try {
             referencingAgents = agentStore.getAgentDescriptorsContainingWorkflow(target.getId(), target.getVersion(), true);
         } catch (Exception e) {
-            log.warnf("Re-check of package %s after the Agent delete failed — NOT cascade-deleting it: %s", target.getId(), e.getMessage());
+            log.warnf("Re-check of package %s after the Agent delete failed — NOT cascade-deleting it: %s",
+                    sanitize(target.getId()), sanitize(e.getMessage()));
             return true;
         }
         if (referencingAgents == null) {
-            log.warnf("Re-check of package %s after the Agent delete returned no answer — NOT cascade-deleting it", target.getId());
+            log.warnf("Re-check of package %s after the Agent delete returned no answer — NOT cascade-deleting it",
+                    sanitize(target.getId()));
             return true;
         }
         if (!referencingAgents.isEmpty()) {
             log.infof("Skipping cascade-delete of package %s (v%d) — it became referenced by %d Agent(s) after the cascade was planned",
-                    target.getId(), target.getVersion(), referencingAgents.size());
+                    sanitize(target.getId()), target.getVersion(), referencingAgents.size());
             return true;
         }
         return false;
@@ -482,25 +485,25 @@ public class RestAgentStore implements IRestAgentStore {
                     // newer version above for the walk to miss.
                     var referencingAgents = agentStore.getAgentDescriptorsContainingWorkflow(target.getId(), target.getVersion(), true);
                     if (referencingAgents.size() > 1) {
-                        log.infof("Skipping cascade-delete of package %s (v%d) — still referenced by %d other agent(s)", target.getId(),
-                                target.getVersion(), referencingAgents.size() - 1);
+                        log.infof("Skipping cascade-delete of package %s (v%d) — still referenced by %d other agent(s)",
+                                sanitize(target.getId()), target.getVersion(), referencingAgents.size() - 1);
                         continue;
                     }
                     targets.add(target);
                 } catch (IResourceStore.ResourceNotFoundException e) {
-                    log.infof("Skipping cascade-delete of package %s — it has no live version left", pinned.getId());
+                    log.infof("Skipping cascade-delete of package %s — it has no live version left", sanitize(pinned.getId()));
                 } catch (Exception e) {
                     // FAIL CLOSED per workflow, exactly as the workflow store's own
                     // cascade does: a reference check that cannot answer is not a licence
                     // to delete, and letting the throwable out here would abort the whole
                     // request before the Agent itself had been deleted.
-                    log.warnf("Failed to plan cascade-delete of package %s: %s", pinned.getId(), e.getMessage());
+                    log.warnf("Failed to plan cascade-delete of package %s: %s", sanitize(pinned.getId()), sanitize(e.getMessage()));
                 }
             }
         } catch (IResourceStore.ResourceNotFoundException e) {
-            log.warnf("Agent %s (v%d) not found for cascade — deleting Agent only", id, version);
+            log.warnf("Agent %s (v%d) not found for cascade — deleting Agent only", sanitize(id), version);
         } catch (IResourceStore.ResourceStoreException e) {
-            log.warnf("Error reading Agent %s for cascade: %s", id, e.getMessage());
+            log.warnf("Error reading Agent %s for cascade: %s", sanitize(id), sanitize(e.getMessage()));
         }
         return targets;
     }
@@ -552,7 +555,8 @@ public class RestAgentStore implements IRestAgentStore {
             // not found, store unreachable, a document that will not deserialize. The
             // alternative is failing the delete on a probe, and a leaked vault entry
             // is recoverable where a config that cannot be deleted is not.
-            log.debugf("Could not read Agent %s (v%s) to check for signing key material: %s", sanitize(id), version, e.getMessage());
+            log.debugf("Could not read Agent %s (v%s) to check for signing key material: %s", sanitize(id), version,
+                    sanitize(e.getMessage()));
             return null;
         }
     }
