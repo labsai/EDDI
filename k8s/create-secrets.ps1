@@ -180,9 +180,23 @@ if (-not $nsExists) {
     }
 }
 
-# Delete existing secret if it exists
-if ($PSCmdlet.ShouldProcess("Kubernetes", "Delete existing 'eddi-secrets' in '$Namespace' if exists")) {
-    kubectl delete secret eddi-secrets --namespace=$Namespace --ignore-not-found 2>$null | Out-Null
+# The delete belongs to -Force ALONE.
+#
+# It used to run unconditionally, justified by the probe above having found
+# nothing there to lose. But "absent when probed" is not "absent when deleted".
+# Between the two sit the key generation, the menu and — on the custom-passphrase
+# path — a Read-Host waiting on a human. Another operator, a second terminal or a
+# CI installer creating eddi-secrets inside that window had it erased by a run
+# that never passed -Force, printed no warning and exited 0. Conditioning an
+# irreversible step on a stale read is a race, not a guard.
+#
+# Normal creation relies instead on `kubectl create` refusing with AlreadyExists
+# — evaluated by the API server against the live object, atomically, at the
+# moment of the write. That refusal is handled below.
+if ($Force) {
+    if ($PSCmdlet.ShouldProcess("Kubernetes", "Delete existing 'eddi-secrets' in '$Namespace' if exists")) {
+        kubectl delete secret eddi-secrets --namespace=$Namespace --ignore-not-found 2>$null | Out-Null
+    }
 }
 
 # Create the secret.
@@ -211,6 +225,14 @@ if ($PSCmdlet.ShouldProcess("Kubernetes", "Create secret 'eddi-secrets' in '$Nam
     }
     if ($createExit -ne 0) {
         Write-Information -MessageData ($createOutput | Out-String).Trim() -InformationAction Continue
+        # AlreadyExists is the atomic half of the guard, not a generic failure:
+        # the Secret was created after this run's probe said it was not there.
+        # Nothing was destroyed — the delete above is force-only — so the message
+        # says so rather than leaving the operator to wonder.
+        if (($createOutput | Out-String) -match '\(AlreadyExists\)') {
+            Write-Error -Message "  ❌ eddi-secrets already exists in namespace $Namespace — it appeared between this run's check and its create, and NOTHING was changed. The key generated here was not installed and the live one is untouched. To rotate deliberately, re-run with -Force."
+            exit 1
+        }
         Write-Error -Message "  ❌ kubectl create secret failed — eddi-secrets was NOT created and the key was not installed."
         exit 1
     }

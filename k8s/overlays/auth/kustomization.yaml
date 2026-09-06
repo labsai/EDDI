@@ -40,6 +40,17 @@
 # not Keycloak. Putting the Keycloak host into redirectUris is what makes
 # Keycloak answer "Invalid parameter: redirect_uri": the Manager redirects to
 # where it is itself served, and the realm has to list THAT.
+#
+# ⚠️  On an EXISTING install, restart EDDI after applying this component:
+#
+#   kubectl rollout restart deployment/eddi -n eddi
+#
+# The patches below touch eddi-config and nothing else, and the EDDI Deployment
+# reads it through `envFrom`. Environment variables are fixed at container
+# start, so the apply updates the ConfigMap while the running pod keeps the
+# QUARKUS_OIDC_TENANT_ENABLED: "false" and the three ALLOW_UNAUTHENTICATED
+# escape hatches it booted with. Every object reports as applied and the install
+# stays UNAUTHENTICATED until the pod is replaced.
 apiVersion: kustomize.config.k8s.io/v1alpha1
 kind: Component
 

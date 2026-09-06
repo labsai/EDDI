@@ -162,10 +162,24 @@ if ! kubectl get namespace "$NAMESPACE" &>/dev/null 2>&1; then
   echo -e "${GREEN}✅${RESET}"
 fi
 
-# Delete existing secret if it exists (to avoid "already exists" error).
-# Only reachable with --force, or with nothing there to lose: the guard above
-# has already aborted otherwise.
-kubectl delete secret eddi-secrets --namespace="$NAMESPACE" --ignore-not-found >/dev/null 2>&1
+# The delete belongs to --force ALONE.
+#
+# It used to run unconditionally, justified by the guard above having found
+# nothing there to lose. But "absent when probed" is not "absent when deleted".
+# Between the two sit the key generation, the interactive menu and — on the
+# custom-passphrase path — an unbounded `read` waiting on a human. Another
+# operator, a second terminal or a CI installer creating eddi-secrets inside
+# that window had it erased by a run that never passed --force, printed no
+# warning and exited 0. Conditioning an irreversible step on a stale read is a
+# race, not a guard, and this is the one irreversible step in the file.
+#
+# Normal creation relies instead on `kubectl create` refusing with AlreadyExists
+# — evaluated by the API server against the live object, atomically, at the
+# moment of the write rather than against what this script saw a minute ago.
+# That refusal is handled below.
+if [[ "$FORCE" == "true" ]]; then
+  kubectl delete secret eddi-secrets --namespace="$NAMESPACE" --ignore-not-found >/dev/null 2>&1
+fi
 
 # Create the secret.
 #
@@ -194,6 +208,13 @@ if ! create_error=$(kubectl create secret generic eddi-secrets \
   trap - EXIT
   echo ""
   echo -e "  ${DIM}${create_error}${RESET}" >&2
+  # AlreadyExists is the atomic half of the guard, not a generic failure: the
+  # Secret was created after this run's probe said it was not there. Nothing was
+  # destroyed — the delete above is force-only — so the message says so, rather
+  # than leaving the operator to wonder whether the live key survived.
+  if grep -qF '(AlreadyExists)' <<<"$create_error"; then
+    fail "eddi-secrets already exists in namespace ${NAMESPACE} — it appeared between this run's check and its create, and NOTHING was changed. The key generated here was not installed and the live one is untouched. To rotate deliberately, re-run with --force."
+  fi
   # "the key" — never "the key above". Nothing above this point has printed a
   # key: the only earlier output is the one-line "Using provided vault key" /
   # "auto-generated" notice, and the value itself is printed in the box further

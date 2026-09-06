@@ -49,6 +49,38 @@ bottom of this file and are never archived.
 
 ---
 
+## ☸️ fix(deploy): stop the secret generator deleting on the normal path, pin config to its pods (2026-09-06)
+
+**Repo:** EDDI (`fix/review-deploy`)
+
+Fifth review round on this branch. Five comments, all behavioural, all fixed and each proven by
+reverting the change and watching a named test fail.
+
+**The secret generator deleted before it created, on every run.** `kubectl delete secret
+eddi-secrets --ignore-not-found` ran unconditionally, so the window between delete and create
+existed even when the operator had asked for nothing destructive. A pod starting in that window
+came up without its vault key. The delete now lives inside the `--force` branch in both
+`create-secrets.sh` and `create-secrets.ps1`; the normal path relies on `kubectl create` refusing
+with `AlreadyExists` and reports that nothing was changed.
+
+**The test suite had pinned the race as a requirement.** Two normal-path tests asserted the
+scripts "must keep the delete-then-create it does once past the guard" — so fixing the scripts
+alone would have turned them red, and leaving them would have blocked the fix forever. This is the
+failure mode this review keeps finding: a test that guards the bug rather than the contract. Both
+now assert the delete is reachable only under `--force`.
+
+**A config change did not restart the pods that read it.** The Deployment pod template gained
+`checksum/config` and `checksum/secret` annotations hashing the rendered `configmap.yaml` and
+`secret.yaml`, so `helm upgrade` rolls pods when their configuration actually changed. Without it
+`envFrom` kept serving the old values until something unrelated caused a restart — the same
+trap the Keycloak upgrade note now documents, with `kubectl rollout restart deployment/eddi`.
+
+**Files:** `k8s/create-secrets.sh`, `k8s/create-secrets.ps1`,
+`helm/eddi/templates/deployment.yaml`, `k8s/overlays/auth/kustomization.yaml`,
+`docs/kubernetes.md`, `src/test/java/ai/labs/eddi/deploy/DeploymentManifestsTest.java`
+
+---
+
 ## 🔎 test(deploy): assert manifest relationships, not the presence of strings (2026-09-04)
 
 **Repo:** EDDI (`fix/review-deploy`)

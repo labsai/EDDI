@@ -324,6 +324,24 @@ altogether. The shipped defaults cover
 > the new pod imports the realm into an empty database, and anything configured
 > by hand in the old admin console is gone. Export it first if you need it.
 
+> ⚠️ **Kustomize: restart EDDI after applying the auth component.**
+>
+> ```bash
+> kubectl rollout restart deployment/eddi -n eddi
+> ```
+>
+> The component patches `eddi-config` and nothing else, and the EDDI Deployment
+> reads that ConfigMap through `envFrom`. Environment variables are fixed at
+> container start, so `kubectl apply -k` updates the ConfigMap while the running
+> pod keeps `QUARKUS_OIDC_TENANT_ENABLED: "false"` and the three
+> `ALLOW_UNAUTHENTICATED` escape hatches it booted with. Every object reports as
+> applied and the install stays **unauthenticated** — the exact state the
+> previously ineffective overlay left behind — until the pod is replaced.
+>
+> Helm does this on its own: the pod template carries `checksum/config` and
+> `checksum/secret` annotations, so a ConfigMap or Secret change alters the
+> Deployment spec and `helm upgrade` rolls the pod.
+
 ### Pod Security
 
 EDDI runs as non-root user (UID 185) and is compatible with `restricted` Pod Security Standards:

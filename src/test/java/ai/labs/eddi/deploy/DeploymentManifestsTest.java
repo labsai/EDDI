@@ -323,23 +323,35 @@ class DeploymentManifestsTest {
         }
 
         /**
-         * Presence is not the property that protects the key — ORDER is. Both scripts
-         * still carry the pre-existing {@code kubectl delete secret
-         * eddi-secrets --ignore-not-found}, and they have to: that delete is what makes
-         * {@code --force} able to rotate at all. The guard only saves anything while it
-         * runs BEFORE it. A refactor that lifts the delete above the check, or drops
-         * the check into a function nobody calls, leaves every string the test above
-         * looks for exactly where it was and restores the key-destroying behaviour in
-         * full.
+         * Presence is not the property that protects the key — ORDER is, and so is the
+         * CONDITION. Both scripts still carry the pre-existing
+         * {@code kubectl delete secret eddi-secrets --ignore-not-found}, and they have
+         * to: that delete is what makes {@code --force} able to rotate at all. But it
+         * belongs to {@code --force} and to nothing else. Unconditional, it was a
+         * destructive step justified by a read that had already gone stale — the probe,
+         * the key generation and an interactive passphrase prompt all sit in between,
+         * and a Secret created inside that window was erased by a run that never asked
+         * to rotate anything.
+         * <p>
+         * Both halves are asserted because either alone is satisfiable while the key is
+         * at risk: a delete that runs before the guard destroys the key it was meant to
+         * find, and a delete outside the force branch destroys one the guard never saw.
          * <p>
          * This is the one data-destroying path in these manifests: the key it removes
-         * is the one the file's own banner calls UNRECOVERABLE, so the assertion is on
-         * the offsets, not on the words.
+         * is the one the file's own banner calls UNRECOVERABLE, so the assertions are
+         * on the offsets and the enclosing condition, not on the words.
          */
         @Test
-        @DisplayName("the generator checks for a live key BEFORE it deletes one")
+        @DisplayName("the generator deletes a live key only after checking, and only when forced")
         void secretGeneratorChecksBeforeItDeletes() throws IOException {
-            for (Path script : List.of(K8S.resolve("create-secrets.sh"), K8S.resolve("create-secrets.ps1"))) {
+            // The force switch as each shell spells it. Case tells the two apart, which
+            // is why the lookup is per-script rather than one string for both.
+            Map<Path, String> forceGate = new LinkedHashMap<>();
+            forceGate.put(K8S.resolve("create-secrets.sh"), "$FORCE");
+            forceGate.put(K8S.resolve("create-secrets.ps1"), "$Force)");
+
+            for (Map.Entry<Path, String> entry : forceGate.entrySet()) {
+                Path script = entry.getKey();
                 String code = stripComments(read(script));
                 int guard = code.indexOf("kubectl get secret eddi-secrets");
                 int destroy = code.indexOf("kubectl delete secret eddi-secrets");
@@ -356,6 +368,21 @@ class DeploymentManifestsTest {
                 assertTrue(code.substring(guard, destroy).contains("exit 1"),
                         script + " finds an existing eddi-secrets and then carries on to the delete anyway; "
                                 + "the guard has to abort, not warn");
+
+                // The condition immediately in front of the delete, not merely somewhere
+                // in the file: `--force` is parsed at the top of both scripts, so a
+                // whole-file search for the switch matches the argument parser and says
+                // nothing about what gates the delete.
+                String justBefore = code.substring(Math.max(0, destroy - 200), destroy);
+                assertTrue(justBefore.contains(entry.getValue()),
+                        script + " reaches `kubectl delete secret eddi-secrets` without " + entry.getValue()
+                                + " gating it — the 200 characters in front of the delete are: "
+                                + justBefore.strip() + ". An unconditional delete is justified only by the "
+                                + "probe above having found nothing, and that read is already stale by the "
+                                + "time it runs: the key generation and an interactive passphrase prompt sit "
+                                + "in between, which is room enough for another installer to create the "
+                                + "Secret this run then erases. The delete belongs to the force path; normal "
+                                + "creation relies on `kubectl create` refusing with AlreadyExists");
             }
         }
 
@@ -724,9 +751,20 @@ class DeploymentManifestsTest {
          * satisfy every assertion above while making a first install impossible. Only
          * kubectl's structured {@code (NotFound)} may be read as absent — and it must
          * be.
+         * <p>
+         * And on that path it must NOT delete. "Absent at probe time" is not "nothing
+         * to lose at delete time": the probe, the key generation and — on the
+         * custom-passphrase path — an unbounded {@code read} waiting on a human all sit
+         * between the two, and a second installer creating eddi-secrets inside that
+         * window had it erased by a run that never passed {@code --force}. The
+         * assertion used to be the opposite one, requiring the delete on exactly this
+         * path, which is what made the race a codified requirement rather than a bug.
+         * Idempotency on the normal path comes from {@code kubectl create} refusing
+         * with AlreadyExists, which the API server evaluates against the live object at
+         * the moment of the write.
          */
         @Test
-        @DisplayName("create-secrets.sh installs the key on a genuine NotFound")
+        @DisplayName("create-secrets.sh installs the key on a genuine NotFound, and deletes nothing")
         void shellGeneratorProceedsOnAStructuredNotFound() throws Exception {
             GeneratorRun absent = runShellGenerator("notfound");
             assertEquals(0, absent.exitCode(),
@@ -735,13 +773,38 @@ class DeploymentManifestsTest {
                             + "a guard that also blocks it has stopped being a guard. " + absent);
             assertTrue(absent.issued("create secret generic eddi-secrets"),
                     CREATE_SECRETS_SH + " exited cleanly without creating eddi-secrets. " + absent);
-            assertTrue(absent.issued("delete secret eddi-secrets"),
-                    CREATE_SECRETS_SH + " must keep the delete-then-create it does once past the guard — it "
-                            + "is what makes the documented --force rotation work, and there is nothing to "
-                            + "lose here by definition. " + absent);
+            assertFalse(absent.issued("delete secret eddi-secrets"),
+                    CREATE_SECRETS_SH + " ran `kubectl delete secret eddi-secrets` on the NORMAL path, on the "
+                            + "strength of a probe that had already returned. Between the two sit the key "
+                            + "generation and, on the passphrase path, a `read` waiting on a human — long "
+                            + "enough for a second installer to create the Secret and have this run destroy "
+                            + "it without --force and without a word. The delete belongs to --force alone; "
+                            + "AlreadyExists is what makes the normal path safe. " + absent);
             assertTrue(absent.output().contains("Save this key"),
                     CREATE_SECRETS_SH + " created the Secret but never printed the key. It is generated in "
                             + "the script and stored nowhere else; unprinted, it is unrecoverable. " + absent);
+        }
+
+        /**
+         * Rotation is the one path that may destroy a key, and it has to keep working:
+         * gating the delete behind {@code --force} is only correct if {@code --force}
+         * still deletes. Run against a cluster that HAS a Secret, which is the only
+         * situation rotation is for.
+         */
+        @Test
+        @DisplayName("create-secrets.sh deletes only on the explicit --force rotation")
+        void shellGeneratorDeletesOnlyWhenForced() throws Exception {
+            GeneratorRun rotated = runShellGenerator("exists", true);
+            assertEquals(0, rotated.exitCode(),
+                    CREATE_SECRETS_SH + " --force failed against a cluster that already has eddi-secrets, "
+                            + "which is the only case rotation exists for. " + rotated);
+            assertTrue(rotated.issued("delete secret eddi-secrets"),
+                    CREATE_SECRETS_SH + " --force did not delete the existing eddi-secrets, so the create "
+                            + "that follows can only fail with AlreadyExists and the documented rotation is "
+                            + "impossible. " + rotated);
+            assertTrue(rotated.issued("create secret generic eddi-secrets"),
+                    CREATE_SECRETS_SH + " --force deleted the live key and then did not install a new one. "
+                            + rotated);
         }
 
         @Test
@@ -779,7 +842,7 @@ class DeploymentManifestsTest {
         }
 
         @Test
-        @DisplayName("create-secrets.ps1 installs the key on a genuine NotFound")
+        @DisplayName("create-secrets.ps1 installs the key on a genuine NotFound, and deletes nothing")
         void powerShellGeneratorProceedsOnAStructuredNotFound() throws Exception {
             GeneratorRun absent = runPowerShellGenerator("notfound");
             assertEquals(0, absent.exitCode(),
@@ -788,11 +851,28 @@ class DeploymentManifestsTest {
                             + "install produces. " + absent);
             assertTrue(absent.issued("create secret generic eddi-secrets"),
                     CREATE_SECRETS_PS1 + " exited cleanly without creating eddi-secrets. " + absent);
-            assertTrue(absent.issued("delete secret eddi-secrets"),
-                    CREATE_SECRETS_PS1 + " must keep the delete-then-create it does once past the guard. "
-                            + absent);
+            assertFalse(absent.issued("delete secret eddi-secrets"),
+                    CREATE_SECRETS_PS1 + " ran `kubectl delete secret eddi-secrets` on the NORMAL path, on "
+                            + "the strength of a probe that had already returned — the same destructive race "
+                            + "as the shell script, and the two are documented as equivalent. The delete "
+                            + "belongs to -Force alone. " + absent);
             assertTrue(absent.output().contains("Save this key"),
                     CREATE_SECRETS_PS1 + " created the Secret but never printed the key. " + absent);
+        }
+
+        @Test
+        @DisplayName("create-secrets.ps1 deletes only on the explicit -Force rotation")
+        void powerShellGeneratorDeletesOnlyWhenForced() throws Exception {
+            GeneratorRun rotated = runPowerShellGenerator("exists", true);
+            assertEquals(0, rotated.exitCode(),
+                    CREATE_SECRETS_PS1 + " -Force failed against a cluster that already has eddi-secrets, "
+                            + "which is the only case rotation exists for. " + rotated);
+            assertTrue(rotated.issued("delete secret eddi-secrets"),
+                    CREATE_SECRETS_PS1 + " -Force did not delete the existing eddi-secrets, so the documented "
+                            + "rotation is impossible. " + rotated);
+            assertTrue(rotated.issued("create secret generic eddi-secrets"),
+                    CREATE_SECRETS_PS1 + " -Force deleted the live key and then did not install a new one. "
+                            + rotated);
         }
     }
 
@@ -1268,6 +1348,38 @@ class DeploymentManifestsTest {
             assertTrue(doc.contains("kubectl delete deployment keycloak"),
                     K8S_DOC + " documents the auth component but not the one manual step an upgrading operator "
                             + "must take before applying it");
+        }
+
+        /**
+         * The auth component patches {@code eddi-config} and nothing else, and the EDDI
+         * Deployment consumes that ConfigMap through {@code envFrom}. Environment
+         * variables are fixed at container start — unlike a ConfigMap mounted as a
+         * volume, which the kubelet refreshes in place — so {@code kubectl apply -k}
+         * updates the ConfigMap while the running pod keeps
+         * {@code QUARKUS_OIDC_TENANT_ENABLED: "false"} and the three
+         * {@code ALLOW_UNAUTHENTICATED} escape hatches it booted with. Every object
+         * reports as applied and the install stays UNAUTHENTICATED, which is precisely
+         * the state the previously ineffective (kind: Kustomization) overlay left
+         * behind: an operator upgrading to the fixed component to CLOSE that hole gets
+         * the same hole and a clean apply.
+         * <p>
+         * Helm needs no such note, because the pod template carries the
+         * configmap/secret checksums that make the upgrade roll the pod — which is why
+         * the assertion is on the Kustomize instructions only.
+         */
+        @Test
+        @DisplayName("enabling auth carries a restart-EDDI step for kustomize")
+        void enablingAuthIsDocumentedAsNeedingAnEddiRestart() throws IOException {
+            String restart = "kubectl rollout restart deployment/eddi";
+            for (Path file : List.of(AUTH_COMPONENT, K8S_DOC)) {
+                assertTrue(read(file).contains(restart),
+                        file + " must tell the operator to run `" + restart + " -n eddi` after applying the "
+                                + "auth component. It patches eddi-config only, and the Deployment reads it "
+                                + "via envFrom — environment variables are fixed at container start, so the "
+                                + "running pod keeps QUARKUS_OIDC_TENANT_ENABLED=\"false\" and the "
+                                + "ALLOW_UNAUTHENTICATED hatches it booted with. The apply succeeds and the "
+                                + "install is still unauthenticated");
+            }
         }
 
         /**
@@ -1842,6 +1954,59 @@ class DeploymentManifestsTest {
                         "values.yaml must document eddi.datastore." + value + "; a `required` on a value the "
                                 + "file does not mention is a failure with nowhere to go");
             }
+        }
+
+        /**
+         * Every setting EDDI reads reaches it from two objects that are not part of the
+         * Deployment: eddi-config via {@code envFrom}, and eddi-secrets via the
+         * projected volume. A {@code helm upgrade} that changes only those leaves the
+         * Deployment spec byte-identical, so Kubernetes creates no new ReplicaSet and
+         * the running pod keeps the environment it started with. Enabling OIDC, moving
+         * to an external datastore or rotating the vault master key therefore reported
+         * a successful upgrade and changed nothing at all until somebody restarted the
+         * pod by hand — with no error anywhere to suggest they should.
+         * <p>
+         * {@code envFrom} is the sharper half: a ConfigMap mounted as a VOLUME is at
+         * least refreshed in place by the kubelet, but environment variables are fixed
+         * at container start.
+         * <p>
+         * The hash has to be of the RENDERED template, not of {@code .Values}:
+         * configmap.yaml derives most of what it emits — the validated datastore type,
+         * the derived unauthenticated flags, the trimmed public URL — so hashing the
+         * inputs would miss a change only the output shows. Both spellings are
+         * therefore asserted, and both files, because either annotation alone leaves
+         * one of the two objects able to change without a rollout.
+         */
+        @Test
+        @DisplayName("a config or secret change rolls the EDDI pod")
+        void configurationChangesRollThePod() throws IOException {
+            String deployment = stripGoComments(read(HELM_TEMPLATES.resolve("deployment.yaml")));
+            for (String source : List.of("configmap.yaml", "secret.yaml")) {
+                String annotation = "checksum/" + (source.startsWith("config") ? "config" : "secret");
+                String expected = annotation + ": {{ include (print $.Template.BasePath \"/" + source
+                        + "\") . | sha256sum }}";
+                assertTrue(deployment.contains(expected),
+                        HELM_TEMPLATES.resolve("deployment.yaml") + " must carry `" + expected + "` on the pod "
+                                + "template. " + source + " is consumed by the pod (envFrom for the ConfigMap, "
+                                + "the projected volume for the Secret) but is not part of this Deployment's "
+                                + "spec, so `helm upgrade` updates it, changes nothing in the pod template, and "
+                                + "Kubernetes rolls no new pod. Environment variables are fixed at container "
+                                + "start, so the running EDDI keeps the old configuration — an upgrade that "
+                                + "enables OIDC reports success and stays unauthenticated");
+            }
+
+            // The annotations block must be unconditional. It used to be wrapped in
+            // `{{- with .Values.eddi.podAnnotations }}`, and folding the checksums into
+            // that block is the natural-looking tidy-up: it renders identically for
+            // anyone who sets podAnnotations and silently drops both checksums for
+            // everyone who does not — which is the default.
+            int annotations = deployment.indexOf("annotations:");
+            int guard = deployment.indexOf("{{- with .Values.eddi.podAnnotations }}");
+            assertTrue(annotations >= 0 && (guard < 0 || annotations < guard),
+                    HELM_TEMPLATES.resolve("deployment.yaml") + " renders `annotations:` only inside "
+                            + "`{{- with .Values.eddi.podAnnotations }}`, so the checksums above disappear on "
+                            + "every install that does not set podAnnotations — the default — and the upgrade "
+                            + "stops rolling the pod for exactly the installs least likely to notice");
         }
 
         /**
@@ -2738,31 +2903,44 @@ class DeploymentManifestsTest {
     }
 
     private static GeneratorRun runShellGenerator(String stubMode) throws IOException, InterruptedException {
+        return runShellGenerator(stubMode, false);
+    }
+
+    private static GeneratorRun runShellGenerator(String stubMode, boolean force)
+            throws IOException, InterruptedException {
         Path bash = locateBash();
         assumeTrue(bash != null, "no non-WSL bash available to run " + CREATE_SECRETS_SH
                 + "; CI's ubuntu-latest runner has one");
 
         Path stubDirectory = kubectlStub("sh", false);
-        Path log = freshLog("sh-" + stubMode);
+        Path log = freshLog("sh-" + stubMode + (force ? "-force" : ""));
         // PATH is assembled inside the shell rather than in the environment: a
         // Windows directory carries a drive-letter colon, which is PATH's separator
         // here. $PWD after a cd is already in the shell's own form.
         String command = "cd \"" + slashed(stubDirectory) + "\" && chmod +x kubectl && "
                 + "PATH=\"$PWD:$PATH\" bash \"" + slashed(CREATE_SECRETS_SH.toAbsolutePath())
-                + "\" --auto --namespace=eddi-stub";
+                + "\" --auto --namespace=eddi-stub" + (force ? " --force" : "");
         return execute(List.of(bash.toString(), "-c", command), log,
                 Map.of("KUBECTL_STUB_MODE", stubMode, "KUBECTL_LOG", slashed(log)));
     }
 
     private static GeneratorRun runPowerShellGenerator(String stubMode) throws IOException, InterruptedException {
+        return runPowerShellGenerator(stubMode, false);
+    }
+
+    private static GeneratorRun runPowerShellGenerator(String stubMode, boolean force)
+            throws IOException, InterruptedException {
         Path pwsh = locateOnPath(WINDOWS ? "pwsh.exe" : "pwsh");
         assumeTrue(pwsh != null, "no PowerShell 7 available to run " + CREATE_SECRETS_PS1
                 + "; CI's ubuntu-latest runner has one");
 
         Path stubDirectory = kubectlStub("pwsh", WINDOWS);
-        Path log = freshLog("pwsh-" + stubMode);
-        List<String> command = List.of(pwsh.toString(), "-NoProfile", "-NonInteractive", "-File",
-                CREATE_SECRETS_PS1.toAbsolutePath().toString(), "-Auto", "-Namespace", "eddi-stub");
+        Path log = freshLog("pwsh-" + stubMode + (force ? "-force" : ""));
+        List<String> command = new ArrayList<>(List.of(pwsh.toString(), "-NoProfile", "-NonInteractive", "-File",
+                CREATE_SECRETS_PS1.toAbsolutePath().toString(), "-Auto", "-Namespace", "eddi-stub"));
+        if (force) {
+            command.add("-Force");
+        }
         return execute(command, log, Map.of(
                 "KUBECTL_STUB_MODE", stubMode,
                 "KUBECTL_LOG", log.toAbsolutePath().toString(),
