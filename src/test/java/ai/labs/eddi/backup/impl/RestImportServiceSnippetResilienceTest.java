@@ -43,6 +43,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -426,8 +427,36 @@ class RestImportServiceSnippetResilienceTest {
      * surface — the failure mode of a deployment where the prompt-snippet extension
      * is not installed at all.
      */
+    /**
+     * The pairwise helpers below read {@code classThenStore[i + 1]}, so an odd
+     * argument count used to walk off the end of the varargs array and fail with a
+     * bare {@code ArrayIndexOutOfBoundsException} naming neither the helper nor the
+     * missing store. The guard also has to run BEFORE
+     * {@code mockStatic(CDI.class)}, or a rejected call leaks a static mock into
+     * the next test in the class.
+     */
+    @Test
+    @DisplayName("stubCdi rejects an odd argument count instead of reading past the array")
+    void stubCdiRejectsAnUnpairedArgument() {
+        var thrown = assertThrows(IllegalArgumentException.class, () -> stubCdi(IAgentStore.class));
+        assertTrue(thrown.getMessage().contains("PAIRS"),
+                "the message must say what is wrong, not just that something is: " + thrown.getMessage());
+        assertDoesNotThrow(() -> {
+            try (var ignored = stubCdi()) {
+                // An empty (even) argument list is legitimate and must still work; if the
+                // guard had leaked a static CDI mock on the rejected call above, opening
+                // this second one would fail.
+            }
+        }, "the rejected call must not have left a static CDI mock registered");
+    }
+
     @SuppressWarnings({"unchecked", "rawtypes"})
     private AutoCloseable stubCdiWithUnresolvableSnippetStore(Object... classThenStore) {
+        if (classThenStore.length % 2 != 0) {
+            throw new IllegalArgumentException("stubCdi takes (interface, store) PAIRS; got "
+                    + classThenStore.length + " argument(s). An odd count means a store was left off, and the "
+                    + "loop below would read past the end of the array instead of saying so.");
+        }
         var cdiMock = mockStatic(CDI.class);
         var cdi = mock(CDI.class);
         cdiMock.when(CDI::current).thenReturn(cdi);
@@ -441,6 +470,11 @@ class RestImportServiceSnippetResilienceTest {
 
     @SuppressWarnings("unchecked")
     private AutoCloseable stubCdi(Object... classThenStore) {
+        if (classThenStore.length % 2 != 0) {
+            throw new IllegalArgumentException("stubCdi takes (interface, store) PAIRS; got "
+                    + classThenStore.length + " argument(s). An odd count means a store was left off, and the "
+                    + "loop below would read past the end of the array instead of saying so.");
+        }
         var cdiMock = mockStatic(CDI.class);
         var cdi = mock(CDI.class);
         cdiMock.when(CDI::current).thenReturn(cdi);
