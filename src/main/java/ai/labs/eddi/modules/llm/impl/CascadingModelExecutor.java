@@ -34,6 +34,9 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
+import java.net.UnknownHostException;
+import java.net.SocketTimeoutException;
+import java.net.ConnectException;
 
 /**
  * Executes a multi-model cascade: tries a cheap/fast model first, evaluates

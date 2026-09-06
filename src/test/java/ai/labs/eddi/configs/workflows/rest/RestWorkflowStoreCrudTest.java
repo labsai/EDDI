@@ -24,6 +24,7 @@ import org.junit.jupiter.api.Test;
 import java.net.URI;
 import java.util.*;
 
+import jakarta.ws.rs.BadRequestException;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -134,7 +135,7 @@ class RestWorkflowStoreCrudTest {
         void malformedUri() {
             // Malformed URI — malformedResourceUri is thrown
             // BadRequestException
-            assertThrows(jakarta.ws.rs.BadRequestException.class, () -> sut.readWorkflowDescriptors("", 0, 20, "not-a-valid-uri", false));
+            assertThrows(BadRequestException.class, () -> sut.readWorkflowDescriptors("", 0, 20, "not-a-valid-uri", false));
         }
 
         /**

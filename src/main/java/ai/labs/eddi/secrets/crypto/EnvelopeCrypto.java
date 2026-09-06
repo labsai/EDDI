@@ -13,6 +13,9 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.util.Base64;
+import java.security.spec.InvalidKeySpecException;
+import javax.crypto.spec.PBEKeySpec;
+import javax.crypto.SecretKeyFactory;
 
 /**
  * Stateless utility for AES-256-GCM envelope encryption.
@@ -179,10 +182,10 @@ public final class EnvelopeCrypto {
             throw new CryptoException("PBKDF2 salt must be at least 8 bytes, got " + (salt == null ? "null" : salt.length));
         }
         try {
-            javax.crypto.SecretKeyFactory factory = javax.crypto.SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");
-            javax.crypto.spec.PBEKeySpec spec = new javax.crypto.spec.PBEKeySpec(keyString.toCharArray(), salt, 600_000, 256);
+            SecretKeyFactory factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");
+            PBEKeySpec spec = new PBEKeySpec(keyString.toCharArray(), salt, 600_000, 256);
             return factory.generateSecret(spec).getEncoded();
-        } catch (java.security.NoSuchAlgorithmException | java.security.spec.InvalidKeySpecException e) {
+        } catch (NoSuchAlgorithmException | InvalidKeySpecException e) {
             throw new CryptoException("PBKDF2 key derivation failed", e);
         }
     }

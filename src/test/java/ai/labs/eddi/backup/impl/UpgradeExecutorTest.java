@@ -49,6 +49,8 @@ import org.mockito.Mockito;
 import java.net.URI;
 import java.util.*;
 
+import jakarta.enterprise.inject.spi.CDI;
+import jakarta.enterprise.inject.Instance;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -315,12 +317,12 @@ class UpgradeExecutorTest {
             when(agentStore.updateAgent(eq("target-1"), eq(1), any())).thenReturn(Response.ok().build());
 
             @SuppressWarnings("rawtypes")
-            MockedStatic<jakarta.enterprise.inject.spi.CDI> cdiMock = Mockito.mockStatic(jakarta.enterprise.inject.spi.CDI.class);
+            MockedStatic<CDI> cdiMock = Mockito.mockStatic(CDI.class);
             try (cdiMock) {
-                var cdiInstance = Mockito.mock(jakarta.enterprise.inject.spi.CDI.class);
-                cdiMock.when(jakarta.enterprise.inject.spi.CDI::current).thenReturn(cdiInstance);
-                var instanceLlm = (jakarta.enterprise.inject.Instance<IRestLlmStore>) Mockito
-                        .mock(jakarta.enterprise.inject.Instance.class);
+                var cdiInstance = Mockito.mock(CDI.class);
+                cdiMock.when(CDI::current).thenReturn(cdiInstance);
+                var instanceLlm = (Instance<IRestLlmStore>) Mockito
+                        .mock(Instance.class);
                 when(cdiInstance.select(IRestLlmStore.class)).thenReturn(instanceLlm);
                 when(instanceLlm.get()).thenReturn(llmStore);
 
@@ -384,20 +386,20 @@ class UpgradeExecutorTest {
             when(agentStore.updateAgent(eq("target-1"), eq(1), any())).thenReturn(Response.ok().build());
 
             @SuppressWarnings("rawtypes")
-            MockedStatic<jakarta.enterprise.inject.spi.CDI> cdiMock = Mockito.mockStatic(jakarta.enterprise.inject.spi.CDI.class);
+            MockedStatic<CDI> cdiMock = Mockito.mockStatic(CDI.class);
             try (cdiMock) {
-                var cdiInstance = Mockito.mock(jakarta.enterprise.inject.spi.CDI.class);
-                cdiMock.when(jakarta.enterprise.inject.spi.CDI::current).thenReturn(cdiInstance);
+                var cdiInstance = Mockito.mock(CDI.class);
+                cdiMock.when(CDI::current).thenReturn(cdiInstance);
 
                 // CDI lookup for IRestRagStore (getStore in resolveExtensionOps)
-                var instanceRestRag = (jakarta.enterprise.inject.Instance<IRestRagStore>) Mockito
-                        .mock(jakarta.enterprise.inject.Instance.class);
+                var instanceRestRag = (Instance<IRestRagStore>) Mockito
+                        .mock(Instance.class);
                 when(cdiInstance.select(IRestRagStore.class)).thenReturn(instanceRestRag);
                 when(instanceRestRag.get()).thenReturn(ragRestStore);
 
                 // CDI lookup for IRagStore (dispatchCreateDirect)
-                var instanceRag = (jakarta.enterprise.inject.Instance<IRagStore>) Mockito
-                        .mock(jakarta.enterprise.inject.Instance.class);
+                var instanceRag = (Instance<IRagStore>) Mockito
+                        .mock(Instance.class);
                 when(cdiInstance.select(IRagStore.class)).thenReturn(instanceRag);
                 when(instanceRag.get()).thenReturn(ragDirectStore);
 
@@ -445,12 +447,12 @@ class UpgradeExecutorTest {
             when(wfDirectStore.create(any())).thenReturn(wfResourceId);
 
             @SuppressWarnings("rawtypes")
-            MockedStatic<jakarta.enterprise.inject.spi.CDI> cdiMock = Mockito.mockStatic(jakarta.enterprise.inject.spi.CDI.class);
+            MockedStatic<CDI> cdiMock = Mockito.mockStatic(CDI.class);
             try (cdiMock) {
-                var cdiInstance = Mockito.mock(jakarta.enterprise.inject.spi.CDI.class);
-                cdiMock.when(jakarta.enterprise.inject.spi.CDI::current).thenReturn(cdiInstance);
-                var instanceWf = (jakarta.enterprise.inject.Instance<IWorkflowStore>) Mockito
-                        .mock(jakarta.enterprise.inject.Instance.class);
+                var cdiInstance = Mockito.mock(CDI.class);
+                cdiMock.when(CDI::current).thenReturn(cdiInstance);
+                var instanceWf = (Instance<IWorkflowStore>) Mockito
+                        .mock(Instance.class);
                 when(cdiInstance.select(IWorkflowStore.class)).thenReturn(instanceWf);
                 when(instanceWf.get()).thenReturn(wfDirectStore);
 
@@ -586,10 +588,10 @@ class UpgradeExecutorTest {
             when(workflowStore.readWorkflow(wfId, 1)).thenReturn(new WorkflowConfiguration());
 
             @SuppressWarnings("rawtypes")
-            MockedStatic<jakarta.enterprise.inject.spi.CDI> cdiMock = Mockito.mockStatic(jakarta.enterprise.inject.spi.CDI.class);
+            MockedStatic<CDI> cdiMock = Mockito.mockStatic(CDI.class);
             try (cdiMock) {
-                var cdiInstance = Mockito.mock(jakarta.enterprise.inject.spi.CDI.class);
-                cdiMock.when(jakarta.enterprise.inject.spi.CDI::current).thenReturn(cdiInstance);
+                var cdiInstance = Mockito.mock(CDI.class);
+                cdiMock.when(CDI::current).thenReturn(cdiInstance);
 
                 URI result = executor.executeUpgrade(source, "target-1", null, null);
 
@@ -636,12 +638,12 @@ class UpgradeExecutorTest {
             when(workflowStore.readWorkflow(wfId, 1)).thenReturn(new WorkflowConfiguration());
 
             @SuppressWarnings("rawtypes")
-            MockedStatic<jakarta.enterprise.inject.spi.CDI> cdiMock = Mockito.mockStatic(jakarta.enterprise.inject.spi.CDI.class);
+            MockedStatic<CDI> cdiMock = Mockito.mockStatic(CDI.class);
             try (cdiMock) {
-                var cdiInstance = Mockito.mock(jakarta.enterprise.inject.spi.CDI.class);
-                cdiMock.when(jakarta.enterprise.inject.spi.CDI::current).thenReturn(cdiInstance);
-                var instanceLlm = (jakarta.enterprise.inject.Instance<IRestLlmStore>) Mockito
-                        .mock(jakarta.enterprise.inject.Instance.class);
+                var cdiInstance = Mockito.mock(CDI.class);
+                cdiMock.when(CDI::current).thenReturn(cdiInstance);
+                var instanceLlm = (Instance<IRestLlmStore>) Mockito
+                        .mock(Instance.class);
                 when(cdiInstance.select(IRestLlmStore.class)).thenReturn(instanceLlm);
                 when(instanceLlm.get()).thenReturn(llmStore);
 
@@ -679,12 +681,12 @@ class UpgradeExecutorTest {
             setupPreviewAndAgent("target-1", 1, diffs);
 
             @SuppressWarnings("rawtypes")
-            MockedStatic<jakarta.enterprise.inject.spi.CDI> cdiMock = Mockito.mockStatic(jakarta.enterprise.inject.spi.CDI.class);
+            MockedStatic<CDI> cdiMock = Mockito.mockStatic(CDI.class);
             try (cdiMock) {
-                var cdiInstance = Mockito.mock(jakarta.enterprise.inject.spi.CDI.class);
-                cdiMock.when(jakarta.enterprise.inject.spi.CDI::current).thenReturn(cdiInstance);
-                var instanceWf = (jakarta.enterprise.inject.Instance<IWorkflowStore>) Mockito
-                        .mock(jakarta.enterprise.inject.Instance.class);
+                var cdiInstance = Mockito.mock(CDI.class);
+                cdiMock.when(CDI::current).thenReturn(cdiInstance);
+                var instanceWf = (Instance<IWorkflowStore>) Mockito
+                        .mock(Instance.class);
                 when(cdiInstance.select(IWorkflowStore.class)).thenReturn(instanceWf);
                 when(instanceWf.get()).thenThrow(new RuntimeException("CDI lookup failed"));
 
@@ -739,12 +741,12 @@ class UpgradeExecutorTest {
             when(workflowStore.readWorkflow(wfId, 1)).thenReturn(targetWfConfig);
 
             @SuppressWarnings("rawtypes")
-            MockedStatic<jakarta.enterprise.inject.spi.CDI> cdiMock = Mockito.mockStatic(jakarta.enterprise.inject.spi.CDI.class);
+            MockedStatic<CDI> cdiMock = Mockito.mockStatic(CDI.class);
             try (cdiMock) {
-                var cdiInstance = Mockito.mock(jakarta.enterprise.inject.spi.CDI.class);
-                cdiMock.when(jakarta.enterprise.inject.spi.CDI::current).thenReturn(cdiInstance);
-                var instanceLlm = (jakarta.enterprise.inject.Instance<IRestLlmStore>) Mockito
-                        .mock(jakarta.enterprise.inject.Instance.class);
+                var cdiInstance = Mockito.mock(CDI.class);
+                cdiMock.when(CDI::current).thenReturn(cdiInstance);
+                var instanceLlm = (Instance<IRestLlmStore>) Mockito
+                        .mock(Instance.class);
                 when(cdiInstance.select(IRestLlmStore.class)).thenReturn(instanceLlm);
                 when(instanceLlm.get()).thenReturn(llmStore);
 
@@ -905,12 +907,12 @@ class UpgradeExecutorTest {
             when(workflowStore.readWorkflow(wfId, 1)).thenReturn(new WorkflowConfiguration());
 
             @SuppressWarnings("rawtypes")
-            MockedStatic<jakarta.enterprise.inject.spi.CDI> cdiMock = Mockito.mockStatic(jakarta.enterprise.inject.spi.CDI.class);
+            MockedStatic<CDI> cdiMock = Mockito.mockStatic(CDI.class);
             try (cdiMock) {
-                var cdiInstance = Mockito.mock(jakarta.enterprise.inject.spi.CDI.class);
-                cdiMock.when(jakarta.enterprise.inject.spi.CDI::current).thenReturn(cdiInstance);
-                var instanceLlm = (jakarta.enterprise.inject.Instance<IRestLlmStore>) Mockito
-                        .mock(jakarta.enterprise.inject.Instance.class);
+                var cdiInstance = Mockito.mock(CDI.class);
+                cdiMock.when(CDI::current).thenReturn(cdiInstance);
+                var instanceLlm = (Instance<IRestLlmStore>) Mockito
+                        .mock(Instance.class);
                 when(cdiInstance.select(IRestLlmStore.class)).thenReturn(instanceLlm);
                 when(instanceLlm.get()).thenReturn(Mockito.mock(IRestLlmStore.class));
 
@@ -1012,12 +1014,12 @@ class UpgradeExecutorTest {
             // Workflow config (empty)
             when(workflowStore.readWorkflow(wfId, 1)).thenReturn(new WorkflowConfiguration());
 
-            MockedStatic<jakarta.enterprise.inject.spi.CDI> cdiMock = Mockito.mockStatic(jakarta.enterprise.inject.spi.CDI.class);
+            MockedStatic<CDI> cdiMock = Mockito.mockStatic(CDI.class);
             try (cdiMock) {
-                var cdiInstance = Mockito.mock(jakarta.enterprise.inject.spi.CDI.class);
-                cdiMock.when(jakarta.enterprise.inject.spi.CDI::current).thenReturn(cdiInstance);
+                var cdiInstance = Mockito.mock(CDI.class);
+                cdiMock.when(CDI::current).thenReturn(cdiInstance);
 
-                var instance = (jakarta.enterprise.inject.Instance) Mockito.mock(jakarta.enterprise.inject.Instance.class);
+                var instance = (Instance) Mockito.mock(Instance.class);
                 when(cdiInstance.select(restStoreClass)).thenReturn(instance);
                 when(instance.get()).thenReturn(mockStore);
 

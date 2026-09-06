@@ -58,6 +58,8 @@ import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
 
+import java.security.NoSuchAlgorithmException;
+import java.security.MessageDigest;
 import static ai.labs.eddi.engine.memory.ConversationMemoryUtilities.convertConversationMemorySnapshot;
 import static ai.labs.eddi.engine.memory.ConversationMemoryUtilities.convertSimpleConversationMemorySnapshot;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -975,7 +977,7 @@ class ConversationHitlService {
     /** SHA-256 hex of the given string (lower-case, 64 chars). */
     static String sha256Hex(String s) {
         try {
-            var md = java.security.MessageDigest.getInstance("SHA-256");
+            var md = MessageDigest.getInstance("SHA-256");
             byte[] hash = md.digest(s.getBytes(java.nio.charset.StandardCharsets.UTF_8));
             var sb = new StringBuilder(hash.length * 2);
             for (byte b : hash) {
@@ -983,7 +985,7 @@ class ConversationHitlService {
                 sb.append(Character.forDigit(b & 0xF, 16));
             }
             return sb.toString();
-        } catch (java.security.NoSuchAlgorithmException e) {
+        } catch (NoSuchAlgorithmException e) {
             // SHA-256 is guaranteed present on every JVM; unreachable.
             throw new IllegalStateException("SHA-256 unavailable", e);
         }

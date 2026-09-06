@@ -27,6 +27,7 @@ import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeoutException;
 
+import io.nats.client.impl.NatsJetStreamMetaData;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -105,7 +106,7 @@ class NatsConversationCoordinatorBranchTest {
             when(msg.getData()).thenReturn(payload.getBytes(StandardCharsets.UTF_8));
             when(msg.getSubject()).thenReturn("eddi.deadletter.conv-1");
 
-            io.nats.client.impl.NatsJetStreamMetaData metaData = mock(io.nats.client.impl.NatsJetStreamMetaData.class);
+            NatsJetStreamMetaData metaData = mock(NatsJetStreamMetaData.class);
             when(metaData.streamSequence()).thenReturn(42L);
             when(msg.metaData()).thenReturn(metaData);
 

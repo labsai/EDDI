@@ -28,6 +28,7 @@ import java.io.IOException;
 import java.util.List;
 import java.util.function.Consumer;
 
+import com.mongodb.client.result.UpdateResult;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -418,7 +419,7 @@ class MongoResourceStorageTest {
         when(currentCollection.withWriteConcern(any())).thenReturn(durableCurrent);
         when(historyCollection.withWriteConcern(any())).thenReturn(durableHistory);
 
-        var updateResult = mock(com.mongodb.client.result.UpdateResult.class);
+        var updateResult = mock(UpdateResult.class);
         when(updateResult.getMatchedCount()).thenReturn(1L);
         when(durableCurrent.replaceOne(any(Bson.class), any(Document.class))).thenReturn(updateResult);
 
@@ -443,7 +444,7 @@ class MongoResourceStorageTest {
         when(currentCollection.withWriteConcern(any())).thenReturn(durableCurrent);
         when(historyCollection.withWriteConcern(any())).thenReturn(durableHistory);
 
-        var updateResult = mock(com.mongodb.client.result.UpdateResult.class);
+        var updateResult = mock(UpdateResult.class);
         when(updateResult.getMatchedCount()).thenReturn(0L);
         when(durableCurrent.replaceOne(any(Bson.class), any(Document.class))).thenReturn(updateResult);
 
@@ -510,7 +511,7 @@ class MongoResourceStorageTest {
         when(documentBuilder.toString(any())).thenReturn("{\"state\":\"AWAITING_APPROVAL\"}");
         IResourceStorage.IResource<String> resource = storage.newResource(VALID_ID, 2, "test");
 
-        var updateResult = mock(com.mongodb.client.result.UpdateResult.class);
+        var updateResult = mock(UpdateResult.class);
         when(updateResult.getMatchedCount()).thenReturn(1L);
         when(currentCollection.replaceOne(any(Bson.class), any(Document.class))).thenReturn(updateResult);
 
@@ -525,7 +526,7 @@ class MongoResourceStorageTest {
         when(documentBuilder.toString(any())).thenReturn("{\"state\":\"AWAITING_APPROVAL\"}");
         IResourceStorage.IResource<String> resource = storage.newResource(VALID_ID, 2, "test");
 
-        var updateResult = mock(com.mongodb.client.result.UpdateResult.class);
+        var updateResult = mock(UpdateResult.class);
         when(updateResult.getMatchedCount()).thenReturn(0L);
         when(currentCollection.replaceOne(any(Bson.class), any(Document.class))).thenReturn(updateResult);
         // No document with that id exists any more → deleted.
@@ -541,7 +542,7 @@ class MongoResourceStorageTest {
         when(documentBuilder.toString(any())).thenReturn("{\"state\":\"AWAITING_APPROVAL\"}");
         IResourceStorage.IResource<String> resource = storage.newResource(VALID_ID, 2, "test");
 
-        var updateResult = mock(com.mongodb.client.result.UpdateResult.class);
+        var updateResult = mock(UpdateResult.class);
         when(updateResult.getMatchedCount()).thenReturn(0L);
         when(currentCollection.replaceOne(any(Bson.class), any(Document.class))).thenReturn(updateResult);
         // The document exists, but its field value changed under us → mismatch.

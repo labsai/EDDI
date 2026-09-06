@@ -159,6 +159,125 @@ That inversion is deliberate and correct: permanently removing a shared resource
 explicit, non-cascading request. A functional regression in `RetryConfiguration`'s new
 backoff budget was found by the auditor while the class's own suite stayed green, and is
 fixed with a test that fails without it.
+## 🔀 fix(build): repair `main` while merging it into the v5 compatibility branch (2026-09-06)
+
+**Repo:** EDDI (`fix/review-legacy-compat`)
+
+Merging `origin/main` to clear a conflict on this branch surfaced that **`main` itself is red**,
+and has been since the merge of #728. Two independent breakages, neither this branch's doing,
+both fixed here because the merge inherits them and the PR cannot go green while they stand —
+the same call the workspace-properties entry recorded on 2026-08-30.
+
+**1. `McpToolsProviderTest` and `McpToolsProviderDiscoveryTest` do not compile.**
+`2377cd045` ("read configs from stores, not the authoring facade") changed `McpToolsProvider`
+to take `IAgentStore`/`IWorkflowStore` and updated those tests' imports. `f314d47cd` (#725)
+then added test code still using `IRestAgentStore`/`IRestWorkflowStore` — types the file no
+longer imports. Two commits that each pass alone and fail together, which is exactly what a
+merge queue is meant to catch. Migrated to the store interfaces: `readAgent`/`readWorkflow`
+become `IResourceStore.read`, and the one test that now calls a throwing method declares it.
+
+**2. `ImportStyleTest` fails on `main`.** `RestScheduleStoreTest` carries two inline
+`io.quarkus.security.ForbiddenException` references, which is the exact convention that test
+enforces. No other `ForbiddenException` is in the file, so a plain import is unambiguous — no
+`ALLOWED` entry needed.
+
+### The conflict itself
+
+`main` had independently added `@JsonAlias("workflowExtensions")` to `WorkflowConfiguration` —
+a partial version of this branch's fix. This branch's alias is a superset that also covers
+`packageExtensions`, the key 5.6.0 actually persisted and the one a v5 ZIP carries, so the
+branch's version wins and `workflowExtensions` remains covered. The second conflict was an
+import collision in `DynamicAgentGuardrailResolutionTest`; both imports are needed and both are
+kept.
+
+### Copilot review
+
+One non-blocking comment: `LegacyDocumentMigrations`'s Javadoc called the transforms *pure*
+while every one of them mutates the supplied `Document` in place. Corrected to state the
+in-place contract, that the return value is the same instance or `null` for "nothing changed",
+and that callers must pass a freshly deserialized mutable document. The matching `@DisplayName`
+is updated too.
+
+---
+
+## 🔬 test(configs): pin the v5 compatibility guards against mutation (2026-09-04)
+
+**Repo:** EDDI (`fix/review-legacy-compat`)
+
+Follow-up to the v5 compatibility fix on the same branch, from an independent review round.
+
+`OutputItem` registered `AgentFaceOutputItem` twice — once per type id — which forced
+`OutputItemTemplatingTest` to loosen its subtype-count assertion. Collapsed onto Jackson's
+`names` attribute so one class has one registration, and the original
+`assertEquals(8, subTypes.value().length)` guard is restored.
+
+`PostgresMigrationManagerParityTest` was named for a parity it never checked: it pinned the
+PostgreSQL bean in isolation and never instantiated `MigrationManager`, so a divergent
+transform re-inlined into either backend would have kept it green. It now runs one legacy
+fixture through both managers and compares.
+
+The Javadoc on `LegacyDocumentMigrations.output()` claimed the stored-document rewrite
+normalizes `botFace` away. It does not: the Mongo sweep is gated on a migration-log row every
+already-started deployment holds, and the PostgreSQL manager never swept at all. The alias is
+therefore **permanent**, and both it and `AgentFaceOutputItem.LEGACY_TYPE_ID` now say so —
+without that note the next maintainer could retire the alias as redundant and silently
+re-break every un-resaved v5 output set.
+
+**Diff coverage.** Changed lines went from 98.9% to 100% line and 86.8% to 100% branch,
+measured by intersecting the branch diff with JaCoCo per-line data. The project's own gate is
+bundle-level across 175k lines and cannot see uncovered new code. Sixteen tests were added and
+each was proven by mutating the line it claims to pin and confirming it fails — one caught a
+`-2147483649` round-tripping back as `2147483647`.
+
+---
+
+## 🧬 fix(configs): keep v5 stored configurations loadable (2026-09-04)
+
+**Repo:** EDDI (`fix/review-legacy-compat`)
+
+From the whole-repository code review: the one compatibility contract this project
+promises to keep — stored JSON configs and exported ZIPs keep loading — was broken in
+the direction that loses everything silently.
+
+`WorkflowConfiguration.workflowSteps` carried no alias for the key EDDI 5.x actually
+persisted. `PackageConfiguration` wrote `packageExtensions` up to and including 5.6.0,
+and `SerializationCustomizer` deliberately pins `FAIL_ON_UNKNOWN_PROPERTIES=false`, so
+the old key was dropped without a word: the workflow deserialized to **zero steps**,
+`WorkflowStoreClientLibrary` happily built an executable workflow from the empty list,
+and the agent *deployed successfully* while running no parser, no behaviour rules and no
+output for the rest of its life. No exception, no warning, no failed deployment.
+
+Fixed by `@JsonAlias({"packageExtensions", "workflowExtensions", "pipelineSteps"})` on
+the setter. The two intermediate names never reached a released database, but keeping
+them is cheaper than being wrong about which of them did.
+
+The same shape existed in the output model: the polymorphic type id was renamed
+`botFace` → `agentFace` with no alias and no `defaultImpl`, so a v5 output set carrying a
+`botFace` item was unloadable. `OutputItem` now registers the retired id as a subtype
+alias of `AgentFaceOutputItem`.
+
+Two further compatibility gaps, both found by the review's cross-cutting pass:
+
+- **Migrations were MongoDB-only.** `MigrationManager` held the legacy document rewrites
+  as private helpers, so a ZIP imported against PostgreSQL skipped them entirely and the
+  same archive produced different agents per backend. The rewrites moved into a new
+  backend-neutral `LegacyDocumentMigrations`, which `PostgresMigrationManager` now applies
+  too; `PostgresMigrationManagerParityTest` pins that both managers perform the same set.
+- **The strict-boundary sweep skipped the evidence.** `StrictBoundaryShippedConfigsTest`
+  counted `.bot.json` and `.package.json` fixtures as *skipped* rather than checked —
+  precisely the two file kinds that would have caught the missing aliases. It now parses
+  them.
+
+**Regression coverage.** Every behavioural change is pinned by a test proven to fail with
+its fix reverted. `WorkflowConfigurationLegacyAliasTest` reads the repository's own v5
+fixture and asserts the step count, and it first asserts the fixture still contains the v5
+key — so the test cannot quietly pass while guarding nothing. With the alias removed it
+fails with `expected: <6> but was: <0>`.
+
+Note for anyone repeating this exercise: proving a test fails without its fix requires
+touching the restored file's timestamp. Maven compiles incrementally by mtime, and both
+`git checkout` and `Move-Item` restore an *older* one, so the test silently runs the
+previously compiled class and the proof is worthless.
 
 ---
 
@@ -1483,6 +1602,191 @@ both sides and asserts the split: reads verify against the stores, duplicate/del
 against the facades.
 
 ---
+
+## 🔍 fix(review): close an SSRF gap, and two tests that passed for the wrong reason (2026-08-28)
+
+**Repo:** EDDI (`claude/code-review-test-coverage-59bf99`)
+
+A review pass for dead code, defects and thin coverage. Dead code came up empty —
+every candidate turned out to be framework-wired (`OpenApiTagSortFilter` via Quarkus
+`@OpenApiFilter`, `LifecycleModule` as a CDI producer, `URIMessageBodyProvider` as a
+JAX-RS `@Provider`), there are zero `TODO/FIXME` markers in `src/main`, and no
+`ILifecycleTask` holds mutable instance state. Three real problems did surface, each
+verified by reverting the fix and watching the new test fail.
+
+**Measured baseline** (local `./mvnw test`): 20,295 tests, 8 failures / 193 errors —
+all environmental (loopback sockets, Docker, network), matching the known local
+profile. Fresh JaCoCo from that run: 89.91% instruction / 79.24% branch.
+
+### 1. `SourceUrlValidator` accepted internal hosts the rest of the codebase refuses
+
+The remote agent-sync endpoints (`backup/import/sync*`, open to **`eddi-editor`**,
+not just admin) validated their `sourceUrl` with a second, local copy of the SSRF
+predicate built from the four JDK checks. Those do not cover:
+
+- **RFC 4193 IPv6 ULA `fc00::/7`** — `isSiteLocalAddress()` only matches the
+  deprecated `fec0::/10`
+- **RFC 6598 CGNAT `100.64.0.0/10`** — used by Tailscale and some k8s pod CIDRs
+- IPv4 multicast
+
+`UrlValidationUtils.isPrivateAddress` — which AGENTS.md already names as the thing to
+call before fetching a user-controlled URL — covers all of them. `isPrivateIp` now
+delegates there instead of keeping the weaker duplicate, which is also what §4.7
+"Unification over duplication" asks for. `isPrivateAddress` is promoted to `public`
+and documented as the single definition of an unsafe outbound address.
+
+The wrapper keeps its own messages and its HTTPS-in-production rule (which has no
+equivalent in `UrlValidationUtils`), so no existing message assertion changes.
+Deliberately *not* adopted: `UrlValidationUtils`' `.local`/`.internal` hostname
+block — those hostnames resolve and are then caught by the address check anyway, and
+blocking them by name would newly reject a legitimate corporate sync target.
+
+Confirmed by mutation: with the old predicate restored, `100.64.0.1`, `fd00::1`,
+`fc00::1` and `224.0.0.1` were all **accepted**.
+
+### 2. Two audit dead-letter tests never tested what they claimed on Linux
+
+`AuditLedgerServiceBranchTest` passed `"Z:\\nonexistent\\path\\deadletter.jsonl"` as
+the dead-letter path to force the file-fallback **failure** branch. That is only
+unwritable on Windows: a backslash is a legal character in a Unix filename, so on the
+Linux CI runner the whole string is one relative filename that
+`Files.write(..., CREATE)` happily creates. So the two assertion-free tests
+(`writeToDeadLetterNatsFails`, `writeToDeadLetterFileOnly`) exercised the *success*
+path on CI while their comments claimed the failure path — and left a junk file named
+`Z:\nonexistent\path\deadletter.jsonl` in the build directory, which is not
+gitignored.
+
+Replaced with `@TempDir` + a deliberately-uncreated parent directory: `Files.write`
+with `CREATE` does not create parent directories, so it throws `NoSuchFileException`
+on both platforms. Both tests gained real assertions — that NATS was actually
+attempted (or actually skipped), and that the dead-letter file does **not** exist
+afterwards, which is what makes them fail if the write ever starts succeeding again.
+
+Confirmed by mutation: pointing the helper at a writable path fails exactly those two
+tests.
+
+### 3. `McpToolsProvider` sat at 31% coverage, including its tool-confusion defence
+
+`McpToolsProviderTest` asserted in its javadoc that discovery was "already covered
+indirectly by `AgentOrchestratorExtendedTest`". Measurement disagreed: 264 of 383
+instructions and 41 of 50 branches missed. The indirect suites drive discovery with a
+mocked memory whose `getAgentVersion()` is null, so `WorkflowTraversal` returns before
+the per-server loop is ever entered, and the `McpToolProviderManager*Test` suites
+cover the *manager*, not this class.
+
+Untested as a result: whitelist/blacklist filtering (the blacklist is an operator
+security control), the first-write-wins collision handling the class documents at
+length as an anti-tool-confusion measure, the spec-without-executor skip, the
+resource-bridge opt-in and its `IllegalArgumentException` → `INVALID_CONFIGURATION`
+path, and the `asProviderFailures` kind mapping.
+
+New `McpToolsProviderDiscoveryTest` covers all of it (13 tests). Note for future
+authors, called out in the class comment: `WorkflowTraversal` memoizes a completed
+traversal for two seconds in a **static** map keyed on
+`agentId|version|stepType|configClass`, so every test allocates its own agent id.
+
+The stale javadoc is corrected, and `contribute_nullFlag_defaultsToEnabled` — which
+asserted only `assertNotNull`, and so passed whether or not the flag short-circuited —
+now verifies that discovery was actually attempted.
+
+Confirmed by mutation: removing the collision guard fails
+`collisionKeepsFirstSpecAndItsExecutor`.
+
+### Noted, not changed
+
+- `RemoteApiResourceSource` builds a raw `HttpClient` rather than using
+  `SafeHttpClient`, contrary to §4.4. Not urgent — the JDK default redirect policy is
+  `NEVER`, so there is no redirect-based bypass — but it is a real follow-up with its
+  own blast radius (timeout/redirect semantics differ).
+- `ImportStyleTest` enforces the §4.7 no-inline-FQN rule only for
+  `ai.labs.eddi|java.util|java.time|java.nio.file`, so ~59 inline third-party FQNs
+  across 41 files slip through. Handled separately so it does not drown this review.
+
+---
+
+
+
+## 🧹 refactor(style): make ImportStyleTest enforce the rule it documents (2026-08-28)
+
+**Repo:** EDDI (`refactor/import-style-guard`)
+
+`ImportStyleTest` guards AGENTS.md §4.7 ("never inline a fully-qualified name"), but
+its `INLINE_FQN` pattern only matched four package roots —
+`ai.labs.eddi|java.util|java.time|java.nio.file`. Every third-party FQN was invisible
+to it, so the rule was enforced on about a tenth of the surface it claims to cover.
+
+Measured blind spot: **381 inline FQNs across 118 files**, for roots the project
+actually depends on — `jakarta`, `javax`, `org.eclipse`, `org.jboss`, `com.fasterxml`,
+`io.quarkus`, `io.smallrye`, `io.micrometer`, `io.nats`, `org.bson`, `com.mongodb`,
+`org.postgresql`, `dev.langchain4j`, plus the JDK's `java.io`, `java.net`, `java.lang`
+and `java.security`. Examples: `jakarta.ws.rs.NotFoundException` in `McpHitlTools`,
+`io.micrometer.core.instrument.Counter` as a field type in `AuditLedgerService`,
+`org.eclipse.microprofile.openapi.models.tags.Tag::getName` in `OpenApiTagSortFilter`.
+
+Essentially none were the disambiguation case §4.7 permits — they were simply missing
+imports. Rather than park 118 files in an allowlist (the test's own doc argues an
+`ALLOWED` entry should be "a deliberate, reviewable act rather than silent drift", and
+an allowlist that never shrinks is exactly the drift it warns about), the pattern is
+widened to an explicit root list and the violations are fixed.
+
+The root list stays explicit rather than a general lowercase-dotted-path shape,
+because a generic pattern also matches method chains and builder idioms on a
+lowercase receiver, which are not FQNs at all.
+
+### One genuine collision found, and allowlisted
+
+`NatsConversationCoordinator` imports `io.nats.client.api.*`, which brings in
+`io.nats.client.api.Error`. Its `catch (RuntimeException | java.lang.Error e)` clauses
+mean the JDK type, and the inline FQN is load-bearing: rewriting it to `Error` makes
+the reference ambiguous and the file stops compiling. An explicit
+`import java.lang.Error` resolves it but is a redundant import (`java.lang` is
+implicit) that Checkstyle flags — so the inline FQN really is the only clean spelling.
+Added to `ALLOWED` with that reasoning recorded.
+
+Worth noting how this surfaced: the automated rewrite's conflict check only consulted
+*single-type* imports, so a name introduced by a wildcard import was invisible to it.
+The compiler caught it. Anyone repeating this exercise should expect wildcard imports
+to hide exactly this class of collision.
+
+### Verification
+
+Clean `test-compile` (not incremental — a type-level refactor reuses stale `.class`
+files otherwise), `ImportStyleTest` green against the widened pattern, and the full
+unit suite re-run against the pre-change baseline of 20,295 tests / 8 failures /
+193 errors (all environmental: loopback sockets, Docker, network). Checkstyle is
+unchanged at its pre-existing violation count — the one violation this work did
+introduce, a redundant `import java.lang.Error`, is gone with the revert above.
+
+No behaviour changes: every edit replaces an inline FQN with the identical type named
+by a top-level import, or moves an import line.
+
+One review follow-up, in two rounds. Shortening the two FQNs in
+`HttpCallToolsProvider.parseFailureDetail` pulled its `case JsonParseException ignored ->` /
+`case MismatchedInputException ignored ->` switch labels into the diff, and CodeQL's
+"unread local variable" query flagged both bindings. It was right, and it predated this
+branch: the switch only needs the *type* to choose a sentence, so `ignored` never had a
+reader.
+
+The first attempt renamed them to the unnamed variable `_`, which is what the codebase
+already uses for a binding it does not intend to read (`catch (NumberFormatException _)` in
+`BoundedLogStore` and `PathNavigator`). **CodeQL re-fired on that** - it reports
+`Variable 'JsonParseException _' is never read` just the same, so it does not treat `_` as
+an intentional discard.
+
+Since a pattern label must bind *something*, the fix is to stop using one: the switch is now
+a plain `instanceof` chain, which is also the style the position lookup in the same method
+already uses. Same order, same three sentences, same default. The single call site is inside
+`catch (IOException e)`, so the one semantic difference between the two forms - a pattern
+switch throws on a null selector where `instanceof` yields false - is unreachable. Note that
+no test pins these strings; equivalence here is by inspection, not by assertion.
+
+The failing-class *set* was diffed rather than just the counts - that catches a swap
+where one class newly breaks while another newly passes, which equal totals would hide.
+It came back identical, so nothing regressed.
+
+---
+
+
 
 ## 📝 docs(monitoring): reconcile the dashboard inventory with what is provisioned (2026-08-27)
 

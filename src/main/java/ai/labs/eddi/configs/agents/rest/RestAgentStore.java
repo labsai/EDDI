@@ -35,6 +35,7 @@ import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
 
+import jakarta.ws.rs.BadRequestException;
 import static ai.labs.eddi.configs.descriptors.ResourceUtilities.*;
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;

@@ -30,6 +30,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeoutException;
 
+import java.security.Principal;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -332,7 +333,7 @@ class RestGroupConversationTest {
             when(ownershipValidator.isAuthEnabled()).thenReturn(true);
             when(identity.isAnonymous()).thenReturn(false);
             when(identity.hasRole("eddi-admin")).thenReturn(false);
-            var principal = mock(java.security.Principal.class);
+            var principal = mock(Principal.class);
             when(principal.getName()).thenReturn("user-1");
             when(identity.getPrincipal()).thenReturn(principal);
 

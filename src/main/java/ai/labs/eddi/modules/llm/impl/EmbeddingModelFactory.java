@@ -29,6 +29,7 @@ import java.time.Duration;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.TreeMap;
+import dev.langchain4j.model.azure.AzureOpenAiEmbeddingModel;
 
 /**
  * Creates and caches {@link EmbeddingModel} instances based on
@@ -147,7 +148,7 @@ public class EmbeddingModelFactory {
      * </ul>
      */
     private EmbeddingModel buildAzureOpenAi(Map<String, String> params) {
-        var builder = dev.langchain4j.model.azure.AzureOpenAiEmbeddingModel.builder()
+        var builder = AzureOpenAiEmbeddingModel.builder()
                 .deploymentName(params.getOrDefault("deploymentName", "text-embedding-3-small")).apiKey(params.get("apiKey"));
 
         if (params.containsKey("endpoint")) {
