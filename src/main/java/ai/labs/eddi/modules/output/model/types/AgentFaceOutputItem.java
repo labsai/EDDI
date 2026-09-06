@@ -19,6 +19,18 @@ public class AgentFaceOutputItem extends OutputItem {
      * read-only {@code @JsonSubTypes} alias so stored 5.x output sets stay
      * loadable, and canonicalized away in {@link #setType(String)} so it is never
      * written back out or sent to a client.
+     * <p>
+     * <strong>The alias is permanent — do not retire it as "already
+     * migrated".</strong> {@code LegacyDocumentMigrations.output()} does rewrite
+     * the id, but its only stored-document caller is the MongoDB startup sweep, and
+     * {@code MigrationManager.startMigrationIfFirstTimeRun} runs that sweep only
+     * while the {@code MIGRATION_CONFIRMATION} log row is absent. Every deployment
+     * that has already started once has that row, so it never sweeps again;
+     * {@code PostgresMigrationManager} has no sweep at all. The rewrite therefore
+     * reaches only never-migrated MongoDB databases and freshly imported ZIPs — not
+     * the installed base that holds the {@code botFace} documents. A stored
+     * document is normalized when something happens to re-save it, and until then
+     * this alias is the only thing that keeps it readable.
      */
     public static final String LEGACY_TYPE_ID = "botFace";
 

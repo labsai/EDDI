@@ -5,22 +5,35 @@
 package ai.labs.eddi.datastore.postgres;
 
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
+import ai.labs.eddi.configs.migration.MigrationLogStore;
+import ai.labs.eddi.configs.migration.MigrationManager;
 import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
 import ai.labs.eddi.datastore.serialization.SerializationCustomizer;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.mongodb.client.MongoDatabase;
 import org.bson.Document;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
 
 /**
  * The same agent ZIP must import the same way on both backends.
@@ -41,22 +54,181 @@ import static org.junit.jupiter.api.Assertions.assertNull;
  * HTTP call missing its base URL.</li>
  * </ul>
  * These tests pin the transforms to the Postgres bean directly, so the
- * behaviour cannot regress to a no-op without a red test.
+ * behaviour cannot regress to a no-op without a red test, and
+ * {@link #bothManagersRunTheSameTransforms()} compares the two beans against
+ * each other so a divergent transform re-inlined into {@link MigrationManager}
+ * is caught too — a per-backend test in isolation would stay green while the
+ * backends drift.
+ * <p>
+ * {@link #noOpSweepStillCompletes()} covers the other half of the bean — the
+ * startup sweep that legitimately stays a no-op — including the boot line that
+ * used to assert the very belief this branch disproved.
  */
 @DisplayName("PostgresMigrationManager — import-path transform parity")
 class PostgresMigrationManagerParityTest {
 
     private final PostgresMigrationManager postgres = new PostgresMigrationManager();
 
+    /** Everything the class under test logged during one test. */
+    private final List<String> bootLog = new ArrayList<>();
+
+    private Logger sweepLogger;
+    private Handler logHandler;
+    private Level previousLevel;
+    private boolean previousUseParentHandlers;
+
+    @BeforeEach
+    void captureTheBootLog() {
+        logHandler = new Handler() {
+            @Override
+            public void publish(LogRecord record) {
+                bootLog.add(record.getMessage());
+            }
+
+            @Override
+            public void flush() {
+                // nothing is buffered
+            }
+
+            @Override
+            public void close() {
+                // nothing to release
+            }
+        };
+        // src/test/resources/logging.properties sets ai.labs.eddi.level=OFF, so without
+        // raising this one logger the record never reaches a handler and the assertion
+        // below would pass against an empty list for the wrong reason. Detaching the
+        // parent handlers keeps the boot line out of the surefire output.
+        sweepLogger = Logger.getLogger(PostgresMigrationManager.class.getName());
+        previousLevel = sweepLogger.getLevel();
+        previousUseParentHandlers = sweepLogger.getUseParentHandlers();
+        sweepLogger.setLevel(Level.ALL);
+        sweepLogger.setUseParentHandlers(false);
+        sweepLogger.addHandler(logHandler);
+    }
+
+    @AfterEach
+    void releaseTheBootLog() {
+        sweepLogger.removeHandler(logHandler);
+        sweepLogger.setLevel(previousLevel);
+        sweepLogger.setUseParentHandlers(previousUseParentHandlers);
+    }
+
     /** Exactly how imported bodies are read: the shared, lenient recipe. */
     private static ObjectMapper productionMapper() {
         return SerializationCustomizer.configureObjectMapper(new ObjectMapper(), false);
     }
 
+    /**
+     * The MongoDB bean, built with mocked collaborators. Only the three transform
+     * getters are exercised; they are pure functions that touch neither the
+     * database nor the migration log.
+     */
+    private static MigrationManager mongoManager() {
+        return new MigrationManager(mock(MongoDatabase.class), mock(MigrationLogStore.class), true);
+    }
+
+    private static Document legacyApiCalls() {
+        return new Document("targetServer", "https://api.example.invalid");
+    }
+
+    private static Document legacyOutput() {
+        // Mutable lists throughout: the transforms rewrite alternatives in place, and
+        // an immutable list would make them fail into their catch and return null.
+        return new Document("outputSet",
+                new ArrayList<>(List.of(new Document("action", "greet").append("timesOccurred", 0).append("quickReplies", List.of())
+                        .append("outputs", new ArrayList<>(List.of(
+                                new Document("valueAlternatives", new ArrayList<Object>(List.of("Hello!")))))))));
+    }
+
+    private static Document legacyPropertySetter() {
+        return new Document("setOnActions",
+                new ArrayList<>(List.of(new Document("actions", List.of("*")).append("setProperties",
+                        new ArrayList<>(List.of(new Document("name", "city").append("value", "Vienna")))))));
+    }
+
+    /**
+     * The actual parity assertion this class is named for: the two
+     * {@code IMigrationManager} beans, asked for the same transform, must answer
+     * with one that does the same thing.
+     * <p>
+     * The per-backend tests below pin the Postgres bean against a
+     * {@code document -> null} regression, but only in isolation — nothing in them
+     * would notice a divergent transform being re-inlined into
+     * {@link MigrationManager}, which is exactly the state this branch undid. Each
+     * transform gets its own fresh fixture because they rewrite in place.
+     */
+    @Test
+    @DisplayName("both backends answer with the same transform, so they cannot drift apart again")
+    void bothManagersRunTheSameTransforms() {
+        var mongo = mongoManager();
+
+        Document mongoApiCalls = mongo.migrateApiCalls().migrate(legacyApiCalls());
+        assertNotNull(mongoApiCalls, "fixture must exercise the transform on both sides");
+        assertEquals(mongoApiCalls, postgres.migrateApiCalls().migrate(legacyApiCalls()),
+                "the same uploaded httpcalls body must import identically on both backends");
+
+        Document mongoOutput = mongo.migrateOutput().migrate(legacyOutput());
+        assertNotNull(mongoOutput, "fixture must exercise the transform on both sides");
+        assertEquals(mongoOutput, postgres.migrateOutput().migrate(legacyOutput()),
+                "the same uploaded output body must import identically on both backends");
+
+        Document mongoPropertySetter = mongo.migratePropertySetter().migrate(legacyPropertySetter());
+        assertNotNull(mongoPropertySetter, "fixture must exercise the transform on both sides");
+        assertEquals(mongoPropertySetter, postgres.migratePropertySetter().migrate(legacyPropertySetter()),
+                "the same uploaded propertysetter body must import identically on both backends");
+    }
+
+    /**
+     * The half that legitimately stays a no-op has two obligations, and
+     * {@code startMigrationIfFirstTimeRun} is two statements long, so this pins
+     * both of them.
+     * <ol>
+     * <li>The MongoDB implementation calls back only after its collection sweep
+     * finishes; the Postgres bean has no sweep to run, but {@code onComplete} is
+     * what releases startup, so skipping the work must not mean skipping the
+     * signal. Returning without calling it would hang every PostgreSQL deployment
+     * at boot with nothing in the log to explain it.</li>
+     * <li>The one line it prints is the only thing an operator ever sees about
+     * legacy handling on this backend, and it must not overstate what was skipped.
+     * It used to read "no MongoDB <em>migrations</em> needed", which was true of
+     * the sweep and false of the bean: the three document transforms run on every
+     * uploaded ZIP whichever backend is configured — the third assertion
+     * demonstrates that on the same object in the same test rather than asserting
+     * it by hand. That wording is exactly the belief that produced this bug, and it
+     * was in the log telling the operator the transforms did not exist while they
+     * silently returned null. The claim has to be scoped to the sweep.</li>
+     * </ol>
+     */
+    @Test
+    @DisplayName("the no-op sweep signals completion exactly once and scopes its no-op claim to the sweep")
+    void noOpSweepStillCompletes() {
+        var completions = new AtomicInteger();
+
+        postgres.startMigrationIfFirstTimeRun(completions::incrementAndGet);
+
+        assertEquals(1, completions.get(), "startup waits on this callback — never calling it hangs the boot, and "
+                + "calling it twice would run the post-migration startup work twice");
+
+        assertEquals(1, bootLog.size(), "the skipped sweep announces itself once, so a PostgreSQL boot log says why "
+                + "no collection was rewritten at startup; saw: " + bootLog);
+        var announcement = bootLog.getFirst();
+        assertTrue(announcement.contains("sweep"),
+                "the no-op is the startup collection sweep and the line has to name it, otherwise the reader cannot "
+                        + "tell which half was skipped; saw: " + announcement);
+        assertFalse(announcement.contains("migrations needed"),
+                "this line must not tell the operator that no MongoDB-era migration is needed on PostgreSQL — that "
+                        + "sentence is the bug this branch fixed, and the next assertion shows it is false; saw: "
+                        + announcement);
+        assertNotNull(postgres.migrateApiCalls().migrate(legacyApiCalls()),
+                "the premise of the assertion above: migrations demonstrably ARE needed on this backend, so a boot "
+                        + "line claiming otherwise would be wrong, not merely differently worded");
+    }
+
     @Test
     @DisplayName("a legacy 'targetServer' is renamed, not silently dropped")
     void apiCallsTargetServerIsMigrated() throws Exception {
-        var document = new Document("targetServer", "https://api.example.invalid");
+        var document = legacyApiCalls();
 
         Document migrated = postgres.migrateApiCalls().migrate(document);
 
@@ -83,12 +255,7 @@ class PostgresMigrationManagerParityTest {
     @DisplayName("a bare-string output alternative is upgraded so the document still deserializes")
     @SuppressWarnings("unchecked")
     void outputStringAlternativeIsMigrated() throws Exception {
-        // Mutable lists throughout: the transforms rewrite alternatives in place, and
-        // an immutable list would make them fail into their catch and return null.
-        var document = new Document("outputSet",
-                new ArrayList<>(List.of(new Document("action", "greet").append("timesOccurred", 0).append("quickReplies", List.of())
-                        .append("outputs", new ArrayList<>(List.of(
-                                new Document("valueAlternatives", new ArrayList<Object>(List.of("Hello!")))))))));
+        var document = legacyOutput();
 
         Document migrated = postgres.migrateOutput().migrate(document);
 
@@ -107,9 +274,7 @@ class PostgresMigrationManagerParityTest {
     @DisplayName("a legacy untyped property value is moved onto its typed field")
     @SuppressWarnings("unchecked")
     void propertySetterValueIsMigrated() {
-        var document = new Document("setOnActions",
-                new ArrayList<>(List.of(new Document("actions", List.of("*")).append("setProperties",
-                        new ArrayList<>(List.of(new Document("name", "city").append("value", "Vienna")))))));
+        var document = legacyPropertySetter();
 
         Document migrated = postgres.migratePropertySetter().migrate(document);
 

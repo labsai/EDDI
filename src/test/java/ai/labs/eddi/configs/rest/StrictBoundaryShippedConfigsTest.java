@@ -279,9 +279,18 @@ class StrictBoundaryShippedConfigsTest {
      * Strict-parses one shipped group template, as
      * {@code GroupTemplateService.instantiate} unwraps it: the {@code manifest}
      * half against the service's own record, the {@code config} half against
-     * {@link AgentGroupConfiguration}. Instantiating a template writes that config
-     * to the store through the same strict boundary, so an undeclared key here is a
-     * template nobody can instantiate.
+     * {@link AgentGroupConfiguration}.
+     * <p>
+     * Note what the hazard actually is. {@code instantiate} reads the config
+     * <em>leniently</em> — {@code objectMapper.treeToValue(...)} on the CDI mapper,
+     * which {@code SerializationCustomizer} configures with
+     * {@code FAIL_ON_UNKNOWN_PROPERTIES=false} — and hands the resulting POJO
+     * straight to the store from service code, never back through
+     * {@link StrictConfigurationBodyInterceptor}. So an undeclared key here is not
+     * a template nobody can instantiate; it is a template that instantiates fine
+     * with that key silently dropped, leaving its author believing a setting is
+     * active when it never reaches the group. This sweep is the only place that
+     * says so.
      */
     private static void checkGroupTemplate(ObjectMapper mapper, String label, Path p, List<String> checked,
                                            Map<String, String> failures)

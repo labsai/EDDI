@@ -49,6 +49,37 @@ bottom of this file and are never archived.
 
 ---
 
+## 🔬 test(configs): pin the v5 compatibility guards against mutation (2026-09-04)
+
+**Repo:** EDDI (`fix/review-legacy-compat`)
+
+Follow-up to the v5 compatibility fix on the same branch, from an independent review round.
+
+`OutputItem` registered `AgentFaceOutputItem` twice — once per type id — which forced
+`OutputItemTemplatingTest` to loosen its subtype-count assertion. Collapsed onto Jackson's
+`names` attribute so one class has one registration, and the original
+`assertEquals(8, subTypes.value().length)` guard is restored.
+
+`PostgresMigrationManagerParityTest` was named for a parity it never checked: it pinned the
+PostgreSQL bean in isolation and never instantiated `MigrationManager`, so a divergent
+transform re-inlined into either backend would have kept it green. It now runs one legacy
+fixture through both managers and compares.
+
+The Javadoc on `LegacyDocumentMigrations.output()` claimed the stored-document rewrite
+normalizes `botFace` away. It does not: the Mongo sweep is gated on a migration-log row every
+already-started deployment holds, and the PostgreSQL manager never swept at all. The alias is
+therefore **permanent**, and both it and `AgentFaceOutputItem.LEGACY_TYPE_ID` now say so —
+without that note the next maintainer could retire the alias as redundant and silently
+re-break every un-resaved v5 output set.
+
+**Diff coverage.** Changed lines went from 98.9% to 100% line and 86.8% to 100% branch,
+measured by intersecting the branch diff with JaCoCo per-line data. The project's own gate is
+bundle-level across 175k lines and cannot see uncovered new code. Sixteen tests were added and
+each was proven by mutating the line it claims to pin and confirming it fails — one caught a
+`-2147483649` round-tripping back as `2147483647`.
+
+---
+
 ## 🧬 fix(configs): keep v5 stored configurations loadable (2026-09-04)
 
 **Repo:** EDDI (`fix/review-legacy-compat`)

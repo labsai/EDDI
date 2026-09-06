@@ -236,9 +236,15 @@ public final class LegacyDocumentMigrations {
                                             // The avatar item's type id was renamed in v6.
                                             // OutputItem still ACCEPTS the retired id — an
                                             // unresolvable type id is fatal to the whole
-                                            // document, not just the one item — but normalize
-                                            // the stored document once so the old id stops
-                                            // travelling.
+                                            // document, not just the one item — and that alias
+                                            // is what carries every read. This rewrite is the
+                                            // narrower half: it reaches a never-migrated
+                                            // MongoDB database and every imported ZIP, but NOT
+                                            // an already-migrated deployment, whose startup
+                                            // sweep is gated on a log row it already has (see
+                                            // AgentFaceOutputItem.LEGACY_TYPE_ID). So this
+                                            // normalizes what it can see; it does not make the
+                                            // alias redundant.
                                             if (AgentFaceOutputItem.LEGACY_TYPE_ID.equals(outputValue.get(FIELD_NAME_TYPE))) {
                                                 outputValue.put(FIELD_NAME_TYPE, AgentFaceOutputItem.TYPE_ID);
                                                 convertedOutput = true;
