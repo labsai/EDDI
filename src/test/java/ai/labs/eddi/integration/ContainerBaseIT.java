@@ -20,7 +20,11 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.jboss.logmanager.LogManager;
 
 /**
@@ -81,6 +85,14 @@ public abstract class ContainerBaseIT extends BaseIntegrationIT {
      * ships. Parsing the real {@code FROM} line means the pin comes along for free
      * and cannot be forgotten. Takes the <em>last</em> {@code FROM}, matching how
      * {@code base-image-check.yml} identifies the runtime stage.
+     * <p>
+     * Tolerates the two forms a future edit to that file could plausibly take: a
+     * trailing {@code AS <stage>} once the build goes multi-stage, and leading
+     * flags such as {@code --platform=$BUILDPLATFORM} once it goes multi-arch.
+     * Without the flag handling the first token after {@code FROM} would be the
+     * flag itself, and the ITs would build against a Dockerfile reading
+     * {@code FROM --platform=$BUILDPLATFORM} — a confusing build failure rather
+     * than a clear one.
      *
      * @return the image reference, e.g.
      *         {@code registry.access.redhat.com/ubi10/openjdk-25-runtime:1.24@sha256:...}
@@ -98,12 +110,31 @@ public abstract class ContainerBaseIT extends BaseIntegrationIT {
         }
 
         return lines.stream()
-                .map(String::strip)
-                .filter(line -> line.startsWith("FROM "))
-                // Drop a trailing "AS <stage>" so a future multi-stage build still parses.
-                .map(line -> line.substring("FROM ".length()).strip().split("\\s+")[0])
+                .map(FROM_INSTRUCTION::matcher)
+                .filter(Matcher::matches)
+                .map(matcher -> matcher.group(1))
+                .map(ContainerBaseIT::imageReferenceOf)
+                .flatMap(Optional::stream)
                 .reduce((first, second) -> second)
                 .orElseThrow(() -> new IllegalStateException("No FROM instruction found in " + dockerfile));
+    }
+
+    /**
+     * A {@code FROM} instruction and its arguments. Dockerfile keywords are
+     * case-insensitive and may be followed by any whitespace, so this is looser
+     * than a {@code startsWith("FROM ")} check.
+     */
+    private static final Pattern FROM_INSTRUCTION = Pattern.compile("^\\s*FROM\\s+(.*)$", Pattern.CASE_INSENSITIVE);
+
+    /**
+     * The image reference within a {@code FROM} instruction's arguments: the first
+     * token that is not a {@code --flag}. Everything after it is a stage alias.
+     */
+    private static Optional<String> imageReferenceOf(String arguments) {
+        return Arrays.stream(arguments.strip().split("\\s+"))
+                .filter(token -> !token.startsWith("--"))
+                .filter(token -> !token.isEmpty())
+                .findFirst();
     }
 
     /**

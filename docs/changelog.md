@@ -120,11 +120,27 @@ Red Hat's policy. It is not; the matrix was checked and the claim corrected befo
 UBI 9, and unpinned, so it was already a major version and a digest behind what shipped.
 Hard-coding UBI 10 there would only have reset the clock: the copy goes stale on the next digest
 bump without anything failing, and the container ITs quietly certify an OS layer nothing ships.
-It now parses the `FROM` line out of `src/main/docker/Dockerfile` at test time — last `FROM`
-wins, a trailing `AS <stage>` is stripped, so a future multi-stage production build still
-resolves — which carries the digest pin along for free and makes drift impossible rather than
-merely discouraged. Verified against both Dockerfiles in the repo, including the multi-stage
-demo one.
+It now parses the `FROM` line out of `src/main/docker/Dockerfile` at test time, which carries the
+digest pin along for free and makes drift impossible rather than merely discouraged.
+
+A later review round hardened that parser. The first version took the first whitespace-separated
+token after `FROM`, which is the image reference today but would be the **flag** the moment the
+file gains `FROM --platform=$BUILDPLATFORM …` for a multi-arch build. The ITs would then have
+built against a Dockerfile reading `FROM --platform=$BUILDPLATFORM` and failed confusingly rather
+than clearly. It now skips `--flag` tokens, and matches the instruction with a case-insensitive
+`^\s*FROM\s+` rather than `startsWith("FROM ")`, since Dockerfile keywords are case-insensitive
+and may be followed by a tab. Checked against thirteen shapes: both real Dockerfiles in the repo,
+`--platform` with and without a trailing `AS`, a lowercase keyword, a tab separator, a leading
+indent, a `# FROM` decoy comment, multi-stage last-wins, and the two malformed inputs that must
+throw.
+
+Worth recording how nearly that verification went wrong. The first harness reported the
+tab-separator case failing, which looked like a bug in the new regex. It was not: the harness had
+been written through a shell heredoc, which ate one backslash from `"\\s"`, and **Java 15 accepts
+`\s` in a string literal as an escape for a plain space** — so the corrupted harness compiled
+cleanly and silently tested `^ *FROM +` instead of `^\s*FROM\s+`. A compile error would have been
+kinder. The harness was rewritten to a file directly and its regex diffed against the real one
+before being trusted.
 
 ### The check that could not have told us
 
