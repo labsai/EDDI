@@ -59,6 +59,10 @@ import jakarta.enterprise.inject.spi.CDI;
 import jakarta.enterprise.inject.Instance;
 import jakarta.ws.rs.NotFoundException;
 import java.io.IOException;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -115,6 +119,69 @@ class UpgradeExecutorTest {
             executor.executeUpgrade(source, "target-1", null, null);
 
             verify(snippetStore).updateSnippet(eq("tgt-snp-1"), eq(2), any(PromptSnippet.class));
+        }
+
+        /**
+         * A snippet name comes from the archive, which a caller supplies, and it is
+         * free-form text - unlike the URI-derived ids around it, which cannot carry a
+         * control character and still parse. A CR/LF in it reached the "Created
+         * snippet" INFO unsanitized, so a sync could write forged lines into the
+         * operator's log (CWE-117).
+         */
+        @Test
+        @DisplayName("a CR/LF snippet name cannot forge a log record on the create path")
+        void snippetNameCannotForgeALogRecord() throws Exception {
+            String poisoned = "new_snippet\r\n2026-01-01 00:00:00,000 INFO  [io.quarkus] Forged admin login succeeded";
+            var sourceSnippet = new SnippetSourceData("src-snp-2", poisoned, createSnippet(poisoned, "Brand new"));
+            var source = createSource(List.of(), List.of(sourceSnippet));
+
+            List<ResourceDiff> diffs = new ArrayList<>();
+            diffs.add(agentDiff("src-1", "target-1", DiffAction.SKIP));
+            diffs.add(new ResourceDiff("src-snp-2", "snippet", poisoned,
+                    DiffAction.CREATE, null, null, null, null, null, -1));
+
+            setupPreviewAndAgent("target-1", 1, diffs);
+
+            List<String> captured = new ArrayList<>();
+            Handler handler = new Handler() {
+                @Override
+                public void publish(LogRecord record) {
+                    captured.add(String.valueOf(record.getMessage()));
+                    if (record.getParameters() != null) {
+                        for (Object parameter : record.getParameters()) {
+                            captured.add(String.valueOf(parameter));
+                        }
+                    }
+                }
+
+                @Override
+                public void flush() {
+                }
+
+                @Override
+                public void close() {
+                }
+            };
+            // logging.properties turns ai.labs.eddi OFF for plain unit tests, so the
+            // logger has to be opened or nothing is captured and this passes vacuously.
+            Logger julLogger = Logger.getLogger(UpgradeExecutor.class.getName());
+            Level previous = julLogger.getLevel();
+            julLogger.setLevel(Level.ALL);
+            julLogger.addHandler(handler);
+            try {
+                executor.executeUpgrade(source, "target-1", null, null);
+            } finally {
+                julLogger.removeHandler(handler);
+                julLogger.setLevel(previous);
+            }
+
+            assertFalse(captured.isEmpty(), "nothing was captured, so this proves nothing - the logger was not open");
+            assertTrue(captured.stream().anyMatch(value -> value.contains("Created snippet")),
+                    "the line under test did not fire; captured: " + captured);
+            for (String value : captured) {
+                assertFalse(value.contains("\n") || value.contains("\r"),
+                        "a CR/LF reached the log, so a caller can forge records (CWE-117); offending value: " + value);
+            }
         }
 
         @Test
@@ -758,6 +825,160 @@ class UpgradeExecutorTest {
         }
     }
 
+    // ==================== Workflow document changes ====================
+
+    /**
+     * What happens when the thing that changed is the workflow document itself —
+     * the steps, their order, their own config — and not the extension configs
+     * hanging off it.
+     */
+    @Nested
+    @DisplayName("Workflow document changes")
+    class WorkflowDocumentChanges {
+
+        private static final String WF_ID = "aabbccddeeff112233445566";
+        private static final String BEHAVIOR_URI = "eddi://ai.labs.rules/rulestore/rulesets/aaaaaaaaaaaaaaaaaaaaaaaa?version=1";
+        private static final String LLM_URI = "eddi://ai.labs.llm/llmstore/llms/bbbbbbbbbbbbbbbbbbbbbbbb?version=1";
+
+        /**
+         * The preview says UPDATE for the workflow because its steps really did change.
+         * Counting that as {@code skipped} and writing nothing dropped the operator's
+         * edit and answered 200 OK with "nothing to do" — the executor disagreeing with
+         * the preview it had just shown them.
+         */
+        @Test
+        @DisplayName("a reordered pipeline is written, not counted as skipped")
+        void reorderedStepsAreApplied() throws Exception {
+            var sourceWfConfig = twoStepWorkflow(true);
+            var extensionKeys = WorkflowExtensions.scan(sourceWfConfig).stream()
+                    .map(WorkflowExtensions.ExtensionRef::key).toList();
+
+            var behaviorExt = new ExtensionSourceData("src-ext-b", "Rules", "behavior",
+                    "eddi://ai.labs.behavior", "{}");
+            var llmExt = new ExtensionSourceData("src-ext-l", "GPT Config", "langchain",
+                    "eddi://ai.labs.llm", "{}");
+            var sourceWf = new WorkflowSourceData("src-wf-1", "Workflow 1", 0, sourceWfConfig,
+                    Map.of(extensionKeys.get(0), behaviorExt, extensionKeys.get(1), llmExt));
+            var source = createSource(List.of(sourceWf), List.of());
+
+            List<ResourceDiff> diffs = new ArrayList<>();
+            diffs.add(agentDiff("src-1", "target-1", DiffAction.SKIP));
+            diffs.add(new ResourceDiff("src-wf-1", "workflow", "Workflow 1",
+                    DiffAction.UPDATE, WF_ID, 1, "position", null, null, 0));
+            // Neither extension's content changed — only the pipeline around them.
+            diffs.add(new ResourceDiff("src-ext-b", "behavior", "Rules",
+                    DiffAction.SKIP, "aaaaaaaaaaaaaaaaaaaaaaaa", 1, "type", null, null, -1));
+            diffs.add(new ResourceDiff("src-ext-l", "langchain", "GPT Config",
+                    DiffAction.SKIP, "bbbbbbbbbbbbbbbbbbbbbbbb", 1, "type", null, null, -1));
+
+            var preview = new ImportPreview("src-1", "Source Agent", "target-1", "Target Agent", diffs);
+            when(structuralMatcher.buildPreview(any(), eq("target-1"), eq(true))).thenReturn(preview);
+
+            var descriptor = new DocumentDescriptor();
+            descriptor.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/target-1?version=1"));
+            when(descriptorStore.readDescriptor(eq("target-1"), isNull())).thenReturn(descriptor);
+
+            // The target still runs the two steps the other way round.
+            when(workflowStore.readWorkflow(WF_ID, 1)).thenReturn(twoStepWorkflow(false));
+            when(workflowStore.updateWorkflow(eq(WF_ID), eq(1), any())).thenReturn(Response.ok().build());
+
+            var agentConfig = new AgentConfiguration();
+            agentConfig.setWorkflows(new ArrayList<>(List.of(
+                    URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + WF_ID + "?version=1"))));
+            when(agentStore.readAgent("target-1", 1)).thenReturn(agentConfig);
+            when(agentStore.updateAgent(eq("target-1"), eq(1), any())).thenReturn(Response.ok().build());
+
+            UpgradeResult result = executor.executeUpgrade(source, "target-1", null, null);
+
+            var captor = ArgumentCaptor.forClass(WorkflowConfiguration.class);
+            verify(workflowStore).updateWorkflow(eq(WF_ID), eq(1), captor.capture());
+            List<WorkflowConfiguration.WorkflowStep> written = captor.getValue().getWorkflowSteps();
+            assertEquals("eddi://ai.labs.behavior", written.get(0).getType().toString(),
+                    "the source's step order is what the operator previewed");
+            assertEquals("eddi://ai.labs.llm", written.get(1).getType().toString());
+            // ...still pointing at the target's own resources, never the source's ids.
+            assertEquals(BEHAVIOR_URI, written.get(0).getConfig().get("uri"));
+            assertEquals(LLM_URI, written.get(1).getConfig().get("uri"));
+
+            assertFalse(result.hasFailures(), result.failures().toString());
+            assertEquals(1, result.updated(), "the workflow itself was written");
+            assertTrue(result.agentUpdated(), "the agent must point at the new workflow version");
+
+            var agentCaptor = ArgumentCaptor.forClass(AgentConfiguration.class);
+            verify(agentStore).updateAgent(eq("target-1"), eq(1), agentCaptor.capture());
+            assertEquals("eddi://ai.labs.workflow/workflowstore/workflows/" + WF_ID + "?version=2",
+                    agentCaptor.getValue().getWorkflows().getFirst().toString());
+        }
+
+        /**
+         * The other side of the same decision. A source step referencing something the
+         * target workflow does not have would be written pointing at a resource id from
+         * the other instance, so the pipeline is left alone and the operator is told
+         * why instead of being handed a silent success.
+         */
+        @Test
+        @DisplayName("a source step the target cannot resolve leaves the pipeline alone and is reported")
+        void unresolvableSourceStepIsRefused() throws Exception {
+            var sourceWfConfig = twoStepWorkflow(true);
+            var extensionKeys = WorkflowExtensions.scan(sourceWfConfig).stream()
+                    .map(WorkflowExtensions.ExtensionRef::key).toList();
+
+            var behaviorExt = new ExtensionSourceData("src-ext-b", "Rules", "behavior",
+                    "eddi://ai.labs.behavior", "{}");
+            var sourceWf = new WorkflowSourceData("src-wf-1", "Workflow 1", 0, sourceWfConfig,
+                    Map.of(extensionKeys.get(0), behaviorExt));
+            var source = createSource(List.of(sourceWf), List.of());
+
+            List<ResourceDiff> diffs = new ArrayList<>();
+            diffs.add(agentDiff("src-1", "target-1", DiffAction.SKIP));
+            diffs.add(new ResourceDiff("src-wf-1", "workflow", "Workflow 1",
+                    DiffAction.UPDATE, WF_ID, 1, "position", null, null, 0));
+            diffs.add(new ResourceDiff("src-ext-b", "behavior", "Rules",
+                    DiffAction.SKIP, "aaaaaaaaaaaaaaaaaaaaaaaa", 1, "type", null, null, -1));
+
+            var preview = new ImportPreview("src-1", "Source Agent", "target-1", "Target Agent", diffs);
+            when(structuralMatcher.buildPreview(any(), eq("target-1"), eq(true))).thenReturn(preview);
+
+            var descriptor = new DocumentDescriptor();
+            descriptor.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/target-1?version=1"));
+            when(descriptorStore.readDescriptor(eq("target-1"), isNull())).thenReturn(descriptor);
+
+            // The target has the behavior step but no LLM step at all.
+            var targetWfConfig = new WorkflowConfiguration();
+            targetWfConfig.setWorkflowSteps(new ArrayList<>(
+                    List.of(step("eddi://ai.labs.behavior", BEHAVIOR_URI))));
+            when(workflowStore.readWorkflow(WF_ID, 1)).thenReturn(targetWfConfig);
+
+            UpgradeResult result = executor.executeUpgrade(source, "target-1", null, null);
+
+            verify(workflowStore, never()).updateWorkflow(anyString(), anyInt(), any());
+            assertTrue(result.hasFailures(), "a dropped pipeline change must not be reported as a clean run");
+            String reason = result.failures().getFirst().reason();
+            assertTrue(reason.contains("eddi://ai.labs.llm#0/config"),
+                    "the operator must be told which step could not be applied, got: " + reason);
+            assertFalse(result.agentUpdated(), "nothing was written, so no agent version may be burned");
+        }
+
+        /** A workflow with a behavior step and an LLM step, in either order. */
+        private WorkflowConfiguration twoStepWorkflow(boolean behaviorFirst) {
+            var behaviorStep = step("eddi://ai.labs.behavior", BEHAVIOR_URI);
+            var llmStep = step("eddi://ai.labs.llm", LLM_URI);
+            var config = new WorkflowConfiguration();
+            config.setWorkflowSteps(new ArrayList<>(behaviorFirst
+                    ? List.of(behaviorStep, llmStep)
+                    : List.of(llmStep, behaviorStep)));
+            return config;
+        }
+
+        private WorkflowConfiguration.WorkflowStep step(String stepType, String extensionUri) {
+            var step = new WorkflowConfiguration.WorkflowStep();
+            step.setType(URI.create(stepType));
+            step.setConfig(new HashMap<>(Map.of("uri", extensionUri)));
+            step.setExtensions(new HashMap<>());
+            return step;
+        }
+    }
+
     // ==================== Error Handling ====================
 
     @Nested
@@ -1285,9 +1506,15 @@ class UpgradeExecutorTest {
             doThrow(new RuntimeException("DB error"))
                     .when(snippetStore).updateSnippet(anyString(), anyInt(), any());
 
-            // Should NOT throw — processSnippet catches and logs
-            URI result = executor.executeUpgrade(source, "target-1", null, null).agentUri();
-            assertNotNull(result);
+            // Should NOT throw — processSnippet catches and reports
+            UpgradeResult result = executor.executeUpgrade(source, "target-1", null, null);
+
+            // A non-null agent URI comes back whether or not anything was written, so
+            // it says nothing on its own: the snippet that did not land has to be named.
+            assertNotNull(result.agentUri());
+            assertEquals(1, result.failures().size(), result.failures().toString());
+            assertEquals("snippet", result.failures().getFirst().resourceType());
+            assertEquals(0, result.updated());
         }
     }
 
@@ -1333,9 +1560,15 @@ class UpgradeExecutorTest {
                 when(cdiInstance.select(IRestLlmStore.class)).thenReturn(instanceLlm);
                 when(instanceLlm.get()).thenReturn(Mockito.mock(IRestLlmStore.class));
 
-                // Should NOT throw — extension processing catches and logs
-                URI result = executor.executeUpgrade(source, "target-1", null, null).agentUri();
-                assertNotNull(result);
+                // Should NOT throw — extension processing catches and reports
+                UpgradeResult result = executor.executeUpgrade(source, "target-1", null, null);
+
+                // The agent URI is reported even by a run that wrote nothing, so the
+                // extension that could not be deserialized has to be named as a failure.
+                assertNotNull(result.agentUri());
+                assertEquals(1, result.failures().size(), result.failures().toString());
+                assertEquals("langchain", result.failures().getFirst().resourceType());
+                assertEquals(0, result.updated());
             }
         }
     }
@@ -1350,7 +1583,7 @@ class UpgradeExecutorTest {
         @DisplayName("should dispatch update for DictionaryConfiguration")
         @SuppressWarnings("unchecked")
         void dispatchDictionary() throws Exception {
-            verifyDispatchUpdate("regulardictionary", "ai.labs.parser",
+            verifyDispatchUpdate("regulardictionary", "ai.labs.parser", "ai.labs.dictionary",
                     DictionaryConfiguration.class,
                     IRestDictionaryStore.class);
         }
@@ -1359,7 +1592,7 @@ class UpgradeExecutorTest {
         @DisplayName("should dispatch update for RuleSetConfiguration")
         @SuppressWarnings("unchecked")
         void dispatchRuleSet() throws Exception {
-            verifyDispatchUpdate("behavior", "ai.labs.behavior",
+            verifyDispatchUpdate("behavior", "ai.labs.behavior", "ai.labs.rules",
                     RuleSetConfiguration.class,
                     IRestRuleSetStore.class);
         }
@@ -1368,7 +1601,7 @@ class UpgradeExecutorTest {
         @DisplayName("should dispatch update for ApiCallsConfiguration")
         @SuppressWarnings("unchecked")
         void dispatchApiCalls() throws Exception {
-            verifyDispatchUpdate("httpcalls", "ai.labs.httpcalls",
+            verifyDispatchUpdate("httpcalls", "ai.labs.httpcalls", "ai.labs.apicalls",
                     ApiCallsConfiguration.class,
                     IRestApiCallsStore.class);
         }
@@ -1377,7 +1610,7 @@ class UpgradeExecutorTest {
         @DisplayName("should dispatch update for PropertySetterConfiguration")
         @SuppressWarnings("unchecked")
         void dispatchPropertySetter() throws Exception {
-            verifyDispatchUpdate("property", "ai.labs.property",
+            verifyDispatchUpdate("property", "ai.labs.property", "ai.labs.property",
                     PropertySetterConfiguration.class,
                     IRestPropertySetterStore.class);
         }
@@ -1386,7 +1619,7 @@ class UpgradeExecutorTest {
         @DisplayName("should dispatch update for OutputConfigurationSet")
         @SuppressWarnings("unchecked")
         void dispatchOutput() throws Exception {
-            verifyDispatchUpdate("output", "ai.labs.output",
+            verifyDispatchUpdate("output", "ai.labs.output", "ai.labs.output",
                     OutputConfigurationSet.class,
                     IRestOutputStore.class);
         }
@@ -1395,7 +1628,7 @@ class UpgradeExecutorTest {
         @DisplayName("should dispatch update for McpCallsConfiguration")
         @SuppressWarnings("unchecked")
         void dispatchMcpCalls() throws Exception {
-            verifyDispatchUpdate("mcpcalls", "ai.labs.mcpcalls",
+            verifyDispatchUpdate("mcpcalls", "ai.labs.mcpcalls", "ai.labs.mcpcalls",
                     McpCallsConfiguration.class,
                     IRestMcpCallsStore.class);
         }
@@ -1410,21 +1643,36 @@ class UpgradeExecutorTest {
         @DisplayName("should dispatch update for RagConfiguration")
         @SuppressWarnings("unchecked")
         void dispatchRag() throws Exception {
-            verifyDispatchUpdate("rag", "ai.labs.rag",
+            verifyDispatchUpdate("rag", "ai.labs.rag", "ai.labs.rag",
                     RagConfiguration.class,
                     IRestRagStore.class);
         }
 
+        /**
+         * Runs one extension of the given type all the way through: store dispatch, the
+         * workflow repoint that follows it, and the agent version that follows that.
+         * <p>
+         * The old form asserted only that {@code agentUri()} came back non-null, which
+         * an upgrade returns even when every resource in it failed — the agent URI is
+         * reported whether or not anything was written. A row of the store table
+         * pointing at the wrong CDI type therefore left the dispatch throwing, the
+         * extension recorded as a failure, and this test green. The assertion has to be
+         * that the run is clean.
+         */
         @SuppressWarnings({"unchecked", "rawtypes"})
-        private void verifyDispatchUpdate(String extensionType, String stepType,
+        private void verifyDispatchUpdate(String extensionType, String stepType, String resourceAuthority,
                                           Class<?> configClass, Class<?> restStoreClass)
                 throws Exception {
             String wfId = "aabbccddeeff112233445566";
             String extId = "bbbbbbbbbbbbbbbbbbbbbbbb";
+            String extUri = "eddi://" + resourceAuthority + "/store/resources/" + extId + "?version=2";
+
+            var sourceWfConfig = workflowWithStep(stepType, extUri);
+            String extensionKey = WorkflowExtensions.scan(sourceWfConfig).getFirst().key();
 
             var ext = new ExtensionSourceData("src-ext-1", "Config", extensionType, stepType, "{}");
             var sourceWf = new WorkflowSourceData("src-wf-1", "Workflow 1", 0,
-                    new WorkflowConfiguration(), Map.of(stepType, ext));
+                    sourceWfConfig, Map.of(extensionKey, ext));
             var source = createSource(List.of(sourceWf), List.of());
 
             List<ResourceDiff> diffs = new ArrayList<>();
@@ -1436,15 +1684,16 @@ class UpgradeExecutorTest {
 
             setupPreviewAndAgent("target-1", 1, diffs);
 
-            Object mockStore = Mockito.mock(restStoreClass);
+            // Every store's update method answers 200, whatever it is called, so the
+            // only thing that can go wrong here is the dispatch itself.
+            Object mockStore = Mockito.mock(restStoreClass, invocation -> invocation.getMethod().getReturnType() == Response.class
+                    ? Response.ok().build()
+                    : Mockito.RETURNS_DEFAULTS.answer(invocation));
             Object mockConfig = Mockito.mock(configClass);
             when(jsonSerialization.deserialize(eq("{}"), any())).thenReturn(mockConfig);
 
-            // The mock will return null (default) for the unstubbed update method.
-            // This exercises the resolveExtensionOps dispatch path for each config type.
-
-            // Workflow config (empty)
-            when(workflowStore.readWorkflow(wfId, 1)).thenReturn(new WorkflowConfiguration());
+            when(workflowStore.readWorkflow(wfId, 1)).thenReturn(workflowWithStep(stepType, extUri));
+            when(workflowStore.updateWorkflow(eq(wfId), eq(1), any())).thenReturn(Response.ok().build());
 
             MockedStatic<CDI> cdiMock = Mockito.mockStatic(CDI.class);
             try (cdiMock) {
@@ -1455,15 +1704,25 @@ class UpgradeExecutorTest {
                 when(cdiInstance.select(restStoreClass)).thenReturn(instance);
                 when(instance.get()).thenReturn(mockStore);
 
-                // The actual dispatch will call the specific update method.
-                // Since we haven't stubbed the specific method, it will return null (default
-                // for mock).
-                // This exercises the resolveExtensionOps + dispatchUpdate path, which will
-                // result in null response → null URI → no workflow update.
-                URI result = executor.executeUpgrade(source, "target-1", null, null).agentUri();
+                UpgradeResult result = executor.executeUpgrade(source, "target-1", null, null);
 
-                assertNotNull(result);
+                assertNotNull(result.agentUri());
+                assertFalse(result.hasFailures(), result.failures().toString());
+                assertEquals(2, result.updated(),
+                        "the extension and the workflow that references it are both written");
+                assertFalse(Mockito.mockingDetails(mockStore).getInvocations().isEmpty(),
+                        "the update never reached " + restStoreClass.getSimpleName());
             }
+        }
+
+        private WorkflowConfiguration workflowWithStep(String stepType, String extensionUri) {
+            var step = new WorkflowConfiguration.WorkflowStep();
+            step.setType(URI.create("eddi://" + stepType));
+            step.setConfig(new HashMap<>(Map.of("uri", extensionUri)));
+            step.setExtensions(new HashMap<>());
+            var config = new WorkflowConfiguration();
+            config.setWorkflowSteps(new ArrayList<>(List.of(step)));
+            return config;
         }
     }
 

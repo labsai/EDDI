@@ -176,16 +176,23 @@ public class UpgradeExecutor {
                     Map<String, URI> extensionUpdates = processWorkflowExtensions(
                             sourceWf, diffMap, selectedSourceIds, outcome);
 
-                    // Update the workflow config with new extension version URIs
-                    if (extensionUpdates.isEmpty()) {
+                    // The workflow document itself changed — reordered steps, a
+                    // changed step config, a condition — and the preview said so.
+                    // Counting that as "skipped" and writing nothing told the
+                    // operator the sync was a no-op while their edit was dropped.
+                    boolean adoptSourceConfig = wfDiff.action() == DiffAction.UPDATE
+                            && isSelected(selectedSourceIds, sourceWf.sourceId());
+
+                    int failuresBefore = outcome.failures.size();
+                    URI updatedUri = extensionUpdates.isEmpty() && !adoptSourceConfig
+                            ? null
+                            : updateMatchedWorkflow(sourceWf, wfDiff, extensionUpdates,
+                                    adoptSourceConfig, outcome);
+                    if (updatedUri != null) {
+                        updatedWorkflowUris.put(wfDiff.targetId(), updatedUri);
+                        outcome.updated++;
+                    } else if (extensionUpdates.isEmpty() && outcome.failures.size() == failuresBefore) {
                         outcome.skipped++;
-                    } else {
-                        URI updatedUri = updateWorkflowExtensionUris(
-                                wfDiff.targetId(), wfDiff.targetVersion(), extensionUpdates, outcome);
-                        if (updatedUri != null) {
-                            updatedWorkflowUris.put(wfDiff.targetId(), updatedUri);
-                            outcome.updated++;
-                        }
                     }
                 }
             }
@@ -264,17 +271,18 @@ public class UpgradeExecutor {
                 snippetStore.updateSnippet(diff.targetId(), diff.targetVersion(), sourceSnippet.snippet());
                 outcome.updated++;
                 LOGGER.infof("Updated snippet '%s' (target=%s, v%d→v%d)",
-                        sourceSnippet.name(), diff.targetId(), diff.targetVersion(), diff.targetVersion() + 1);
+                        LogSanitizer.sanitize(sourceSnippet.name()), LogSanitizer.sanitize(diff.targetId()), diff.targetVersion(),
+                        diff.targetVersion() + 1);
             } else if (diff.action() == DiffAction.CREATE) {
                 // Create new snippet
                 snippetStore.createSnippet(sourceSnippet.snippet());
                 outcome.created++;
-                LOGGER.infof("Created snippet '%s'", sourceSnippet.name());
+                LOGGER.infof("Created snippet '%s'", LogSanitizer.sanitize(sourceSnippet.name()));
             } else {
                 outcome.skipped++;
             }
         } catch (Exception e) {
-            LOGGER.warnf(e, "Failed to process snippet '%s'", sourceSnippet.name());
+            LOGGER.warnf(e, "Failed to process snippet '%s'", LogSanitizer.sanitize(sourceSnippet.name()));
             outcome.failed(sourceSnippet.sourceId(), "snippet", sourceSnippet.name(), e);
         }
     }
@@ -318,8 +326,8 @@ public class UpgradeExecutor {
                         updates.put(extensionKey, updatedUri);
                         outcome.updated++;
                         LOGGER.infof("Updated %s '%s' (target=%s, v%d→v%d)",
-                                sourceExt.type(), sourceExt.name(),
-                                extDiff.targetId(), extDiff.targetVersion(), extDiff.targetVersion() + 1);
+                                LogSanitizer.sanitize(sourceExt.type()), LogSanitizer.sanitize(sourceExt.name()),
+                                LogSanitizer.sanitize(extDiff.targetId()), extDiff.targetVersion(), extDiff.targetVersion() + 1);
                     } else {
                         outcome.failed(sourceExt.sourceId(), sourceExt.type(), sourceExt.name(),
                                 "the store did not accept the update");
@@ -347,7 +355,8 @@ public class UpgradeExecutor {
                             LogSanitizer.sanitize(sourceExt.type()), LogSanitizer.sanitize(sourceExt.name()));
                 }
             } catch (Exception e) {
-                LOGGER.warnf(e, "Failed to process extension %s '%s'", sourceExt.type(), sourceExt.name());
+                LOGGER.warnf(e, "Failed to process extension %s '%s'", LogSanitizer.sanitize(sourceExt.type()),
+                        LogSanitizer.sanitize(sourceExt.name()));
                 outcome.failed(sourceExt.sourceId(), sourceExt.type(), sourceExt.name(), e);
             }
         }
@@ -462,7 +471,8 @@ public class UpgradeExecutor {
                     ? URI.create(ops.resourceUri() + targetId + ops.versionQueryParam() + (targetVersion + 1))
                     : null;
         } catch (Exception e) {
-            LOGGER.warnf(e, "Failed to update %s '%s' (target=%s)", source.type(), source.name(), targetId);
+            LOGGER.warnf(e, "Failed to update %s '%s' (target=%s)", LogSanitizer.sanitize(source.type()), LogSanitizer.sanitize(source.name()),
+                    LogSanitizer.sanitize(targetId));
             return null;
         }
     }
@@ -541,16 +551,16 @@ public class UpgradeExecutor {
 
             return createdUri;
         } catch (Exception e) {
-            LOGGER.warnf(e, "Failed to create workflow '%s'", sourceWf.name());
+            LOGGER.warnf(e, "Failed to create workflow '%s'", LogSanitizer.sanitize(sourceWf.name()));
             outcome.failed(sourceWf.sourceId(), "workflow", sourceWf.name(), e);
             return null;
         }
     }
 
     /**
-     * Updates the extension URIs within a target workflow's config. When an
-     * extension was updated (version incremented), the workflow config needs to
-     * point to the new version.
+     * Writes the target workflow: its own document when the source workflow changed
+     * and can be adopted, plus the extension URIs of everything this run
+     * re-versioned.
      * <p>
      * The new URI is written into the step's {@code config} map — the one the
      * engine reads. Writing it into {@code extensions} left the deployed pipeline
@@ -561,19 +571,53 @@ public class UpgradeExecutor {
      * Any key this method cannot place is reported as a failure rather than
      * dropped. A written resource whose URI nothing consumes is an orphan the
      * operator is never told about, and the run would still answer success.
+     *
+     * @param adoptSourceConfig
+     *            whether the preview said the workflow document itself changed, so
+     *            the source's steps replace the target's. Honoured only when the
+     *            two workflows wire up the same extensions — see
+     *            {@link #adoptableSourceConfig}
+     * @return the workflow's new version URI, or null when nothing was written
      */
-    private URI updateWorkflowExtensionUris(String workflowId, Integer workflowVersion,
-                                            Map<String, URI> extensionUpdates, Outcome outcome) {
+    private URI updateMatchedWorkflow(WorkflowSourceData sourceWf, ResourceDiff wfDiff,
+                                      Map<String, URI> extensionUpdates,
+                                      boolean adoptSourceConfig, Outcome outcome) {
+        String workflowId = wfDiff.targetId();
+        Integer workflowVersion = wfDiff.targetVersion();
         try {
-            WorkflowConfiguration wfConfig = workflowStore.readWorkflow(workflowId, workflowVersion);
+            WorkflowConfiguration targetConfig = workflowStore.readWorkflow(workflowId, workflowVersion);
 
-            boolean changed = false;
+            // Where the target currently points, so an adopted source config can be
+            // rewritten onto the target's own resources instead of the source
+            // instance's ids, which do not exist here.
+            Map<String, URI> targetRefs = new LinkedHashMap<>();
+            for (WorkflowExtensions.ExtensionRef ref : WorkflowExtensions.scan(targetConfig)) {
+                targetRefs.put(ref.key(), ref.extensionUri());
+            }
+
+            String refusedAdoption = null;
+            WorkflowConfiguration configToWrite = targetConfig;
+            if (adoptSourceConfig && targetConfig == null) {
+                LOGGER.warnf("Workflow %s changed in the source but its current version could not be read —"
+                        + " its steps are left as they are", LogSanitizer.sanitize(workflowId));
+            } else if (adoptSourceConfig && hasSteps(sourceWf.config())) {
+                refusedAdoption = adoptableSourceConfig(sourceWf.config(), targetRefs);
+                if (refusedAdoption == null) {
+                    configToWrite = sourceWf.config();
+                }
+            }
+
+            boolean changed = configToWrite != null && configToWrite != targetConfig;
             Set<String> unconsumed = new LinkedHashSet<>(extensionUpdates.keySet());
-            for (WorkflowExtensions.ExtensionRef ref : WorkflowExtensions.scan(wfConfig)) {
+            for (WorkflowExtensions.ExtensionRef ref : WorkflowExtensions.scan(configToWrite)) {
                 URI newExtUri = extensionUpdates.get(ref.key());
                 if (newExtUri != null) {
-                    ref.repointTo(newExtUri);
                     unconsumed.remove(ref.key());
+                } else if (configToWrite != targetConfig) {
+                    newExtUri = targetRefs.get(ref.key());
+                }
+                if (newExtUri != null && !newExtUri.equals(ref.extensionUri())) {
+                    ref.repointTo(newExtUri);
                     changed = true;
                 }
             }
@@ -583,23 +627,109 @@ public class UpgradeExecutor {
                         "the target workflow has no reference at '" + key + "' for "
                                 + extensionUpdates.get(key) + ", so the updated resource is not deployed");
             }
+            if (refusedAdoption != null) {
+                outcome.failed(workflowId, "workflow", sourceWf.name(), refusedAdoption);
+            }
+
+            // Adopting a config that repoints to exactly what the target already has
+            // is the cross-instance no-op: same steps, different resource ids. Writing
+            // it would burn a workflow and an agent version to change nothing.
+            if (changed && configToWrite != targetConfig && sameSteps(configToWrite, targetConfig)) {
+                changed = false;
+            }
 
             if (changed) {
-                Response resp = workflowStore.updateWorkflow(workflowId, workflowVersion, wfConfig);
+                Response resp = workflowStore.updateWorkflow(workflowId, workflowVersion, configToWrite);
                 if (resp != null && resp.getStatus() == 200) {
                     return URI.create(IRestWorkflowStore.resourceURI + workflowId
                             + IRestWorkflowStore.versionQueryParam + (workflowVersion + 1));
                 }
                 outcome.failed(workflowId, "workflow", null,
-                        "the workflow store did not accept the updated extension URIs");
+                        "the workflow store did not accept the updated workflow");
             }
 
             return null;
         } catch (Exception e) {
-            LOGGER.warnf(e, "Failed to update workflow URIs %s", workflowId);
+            LOGGER.warnf(e, "Failed to update workflow %s", LogSanitizer.sanitize(workflowId));
             outcome.failed(workflowId, "workflow", null, e);
             return null;
         }
+    }
+
+    /**
+     * Whether the source workflow's steps may replace the target's, or the reason
+     * they may not.
+     * <p>
+     * Only when both sides wire up the same extensions. A source step referencing
+     * something the target workflow does not have would be written pointing at a
+     * resource id from the other instance — a pipeline step loading a config that
+     * is not in this database. That is the same refusal
+     * {@link #processWorkflowExtensions} makes for a CREATE extension, applied to
+     * the step that would reference it.
+     *
+     * @return null when the source config can be adopted, otherwise the reason for
+     *         the operator
+     */
+    private String adoptableSourceConfig(WorkflowConfiguration sourceConfig, Map<String, URI> targetRefs) {
+        for (WorkflowExtensions.ExtensionRef ref : WorkflowExtensions.scan(sourceConfig)) {
+            if (!targetRefs.containsKey(ref.key())) {
+                return "the source workflow's steps were not applied: it references a " + ref.fileExtension()
+                        + " at '" + ref.key() + "' that the target workflow does not have"
+                        + " — add the step to the target workflow, or import the source workflow as a new one";
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Whether a source workflow carries a pipeline to apply at all.
+     * <p>
+     * A source with no steps is left alone rather than adopted. A workflow with
+     * zero steps deploys an agent that runs no lifecycle task and answers nothing
+     * (see {@link WorkflowConfiguration#setWorkflowSteps}), so emptying a live
+     * pipeline is never what a sync is for — and it is what an unparsed or
+     * partially read source workflow looks like.
+     */
+    private static boolean hasSteps(WorkflowConfiguration config) {
+        return config != null && config.getWorkflowSteps() != null && !config.getWorkflowSteps().isEmpty();
+    }
+
+    /**
+     * Whether two workflow documents describe the same pipeline.
+     * {@link WorkflowConfiguration} has no {@code equals}, and the comparison has
+     * to hold without a serializer so that it cannot itself fail.
+     */
+    private static boolean sameSteps(WorkflowConfiguration left, WorkflowConfiguration right) {
+        if (left == right) {
+            return true;
+        }
+        if (left == null || right == null) {
+            return false;
+        }
+        List<WorkflowConfiguration.WorkflowStep> leftSteps = left.getWorkflowSteps();
+        List<WorkflowConfiguration.WorkflowStep> rightSteps = right.getWorkflowSteps();
+        if (leftSteps == null || rightSteps == null) {
+            return leftSteps == rightSteps;
+        }
+        if (leftSteps.size() != rightSteps.size()) {
+            return false;
+        }
+        for (int i = 0; i < leftSteps.size(); i++) {
+            WorkflowConfiguration.WorkflowStep leftStep = leftSteps.get(i);
+            WorkflowConfiguration.WorkflowStep rightStep = rightSteps.get(i);
+            if (leftStep == null || rightStep == null) {
+                if (leftStep != rightStep) {
+                    return false;
+                }
+                continue;
+            }
+            if (!Objects.equals(leftStep.getType(), rightStep.getType())
+                    || !Objects.equals(leftStep.getConfig(), rightStep.getConfig())
+                    || !Objects.equals(leftStep.getExtensions(), rightStep.getExtensions())) {
+                return false;
+            }
+        }
+        return true;
     }
 
     // ==================== Agent Config Update ====================
@@ -643,7 +773,8 @@ public class UpgradeExecutor {
             Response resp = agentStore.updateAgent(agentId, currentVersion, agentConfig);
             if (resp.getStatus() == 200) {
                 URI updatedUri = URI.create(IRestAgentStore.resourceURI + agentId + "?version=" + (currentVersion + 1));
-                LOGGER.infof("Agent '%s' upgraded successfully (v%d→v%d)", agentId, currentVersion, currentVersion + 1);
+                LOGGER.infof("Agent '%s' upgraded successfully (v%d→v%d)", LogSanitizer.sanitize(agentId), currentVersion,
+                        currentVersion + 1);
                 return updatedUri;
             }
 

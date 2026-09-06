@@ -49,6 +49,51 @@ bottom of this file and are never archived.
 
 ---
 
+## 🔑 fix(backup): a reordered config list could hand one endpoint another's credential (2026-09-07)
+
+**Repo:** EDDI (`fix/review-backup-sync`)
+
+Three review comments and a round of CodeQL alerts. The first is the serious one.
+
+**Secrets were restored into the wrong entry.** `ScrubbedSecrets.merge` paired source and target
+list elements by index. An httpCalls config whose entries had been reordered between export and
+sync therefore kept each source entry's own `uri` while taking the target's value at that position:
+the billing call kept `https://billing.example.com` and received the *analytics* token. An
+inserted entry was worse — a newly added call to an attacker-chosen host inherited the credential
+that had been at its index. That is a credential disclosure to whatever endpoint sits at the other
+position, not merely a lost secret.
+
+Elements are now bound by stable identity (`name`, `id`, `key`) wherever they carry one, requiring
+a unique target match. Elements with none — a bare string in an array — fall back to position only
+when the lists are the same length and the two elements are identical in everything the scrubber
+did not replace. Anything else refuses and keeps its placeholder, which the caller already logs for
+the operator. Refusing beats guessing here: a lost secret costs an operator one re-entered key, a
+misplaced one goes to somebody else's server.
+
+**A workflow-only change was dropped and reported as skipped.** When a workflow diff was `UPDATE`
+with no extension changes, nothing wrote the source config, so reordered steps or an added
+condition silently did not arrive — and the run said "skipped", so the operator was told nothing
+had gone wrong. The executor now adopts the source workflow, but only when every extension
+reference it carries also exists in the target at the same canonical key; otherwise it refuses and
+names the step, the same refusal the branch already makes for a new extension. Adopted references
+are repointed onto the target's own resource URIs, because a cross-instance source names the
+*other* instance's ids. A source workflow with no steps is refused outright rather than emptying a
+live pipeline, and an adoption that comes out identical to the target is suppressed so a
+cross-instance no-op does not burn a version.
+
+**A dispatch test asserted something that could not fail.** It checked `agentUri()` was non-null,
+which is returned whether or not anything was written, so a miswired store row passed. It now
+asserts the result carries no failures and that the store was actually invoked; two sibling tests
+that provoked a failure and asserted nothing about it were strengthened the same way.
+
+**Log injection.** Snippet names, extension types and names, workflow and agent ids all come from
+the archive and reached the log unsanitized. Every log argument in `UpgradeExecutor` and
+`SourceUrlValidator` now goes through `LogSanitizer.sanitize`. Most of those values happen to be
+URI-derived and so cannot carry a control character, but a snippet name is free-form text and
+genuinely could — that is the one the new test drives.
+
+---
+
 ## 🧪 test(backup): replace the tests that could not fail, close the CodeQL round (2026-09-06)
 
 **Repo:** EDDI (`fix/review-backup-sync`)
