@@ -665,7 +665,15 @@ class PostgresTenantQuotaStoreTest {
             QuotaCheckResult result = sut.tryAddCost(TENANT_ID, 10.0, 100.0);
 
             assertFalse(result.allowed());
-            assertTrue(result.reason().contains("Cost accounting failed"));
+            // Both fields, and the shared constant rather than a substring of a
+            // wording private to this gate. reason() reaches the client verbatim
+            // (ConversationService builds the 503 body from it), so a cost outage that
+            // reads differently from a conversation outage is the same outage
+            // described two ways. The substring assertion could not see that.
+            assertTrue(result.accountingUnavailable(),
+                    "503 quota_accounting_unavailable, not 429 quota_exceeded: nothing is over a limit");
+            assertEquals(PostgresTenantQuotaStore.ACCOUNTING_UNAVAILABLE, result.reason(),
+                    "the same reason MongoTenantQuotaStore gives, so parity holds on the wire too");
         }
     }
 

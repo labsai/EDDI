@@ -57,18 +57,28 @@ public class RestGdprAdmin implements IRestGdprAdmin {
                 .build();
     }
 
-    /** HTTP 206 Partial Content, for a bundle the conversation cap truncated. */
-    static final int PARTIAL_CONTENT = Response.Status.PARTIAL_CONTENT.getStatusCode();
-
     /**
-     * Answers 206 when the conversation cap truncated the bundle.
+     * Answers 207 whenever the bundle is not everything EDDI holds on the user.
      * <p>
-     * Same reasoning as the 207 above. The cap used to be visible only in the
-     * server log, so a data-portability request for a user with 1,200 conversations
-     * returned 200 with 200 of them silently missing — an arbitrary 200 on MongoDB,
-     * whose natural order is not insertion order. The body now carries
-     * {@code totalConversations} and {@code conversationsTruncated}; the status
-     * carries the same distinction for a caller that does not read the body.
+     * Same reasoning as the 207 above, and now the same status. Two things used to
+     * be wrong here. The cap was visible only in the server log, so a
+     * data-portability request for a user with 1,200 conversations returned 200
+     * with 200 of them silently missing — an arbitrary 200 on MongoDB, whose
+     * natural order is not insertion order. And the cap was then the <em>only</em>
+     * completeness check, while the exporter has never covered group transcripts,
+     * shared artifacts, schedules or HITL journal entries: a user whose data lives
+     * only in those four categories received an empty bundle, 200 OK, documented as
+     * complete — an Art. 20 answer that overstates itself to the one reader who
+     * cannot check it. {@link UserDataExport#complete()} answers both questions and
+     * the status follows it; {@code omittedCategories} in the body names what is
+     * missing.
+     * <p>
+     * 207, not the 206 this used to send. 206 Partial Content is defined for range
+     * requests and RFC 9110 requires a {@code Content-Range} with it, which this
+     * endpoint neither reads nor produces — a conforming client is entitled to
+     * treat the body as a malformed range response. 207 already means "composite
+     * operation, read the body for what actually happened" on the erasure half of
+     * this API, which is the same thing being said.
      */
     @Override
     public Response exportUserData(String userId) {
@@ -79,7 +89,11 @@ public class RestGdprAdmin implements IRestGdprAdmin {
             LOGGER.warnf("GDPR export truncated — %d of %d conversations returned",
                     export.conversations().size(), export.totalConversations());
         }
-        return Response.status(export.conversationsTruncated() ? PARTIAL_CONTENT : Response.Status.OK.getStatusCode())
+        if (!export.complete()) {
+            LOGGER.warnf("GDPR export incomplete — conversationsTruncated: %s, omitted categories: %s",
+                    export.conversationsTruncated(), export.omittedCategories());
+        }
+        return Response.status(export.complete() ? Response.Status.OK.getStatusCode() : MULTI_STATUS)
                 .entity(export)
                 .build();
     }

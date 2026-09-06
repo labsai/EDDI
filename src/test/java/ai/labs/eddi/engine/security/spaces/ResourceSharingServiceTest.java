@@ -68,8 +68,15 @@ class ResourceSharingServiceTest {
         descriptors.put(BORROWED_CHILD, descriptor("bob"));
 
         store = mock(IDocumentDescriptorStore.class);
-        // describe() resolves through readCurrentDescriptor; the mutating paths resolve
-        // the version explicitly so they can write back to the version they read.
+        // Every ResourceSharingService path — describe() included — loads through
+        // loadOrNull: getCurrentResourceId, then readDescriptor(id, version). The
+        // version is resolved explicitly so a write can go back to the version it
+        // read. readCurrentDescriptor is the *guard's* read (ResourceAccessGuard is
+        // its only caller in this package) and the guard is mocked here, so nothing
+        // in this fixture reaches that stub. This comment used to claim the opposite
+        // and sent a reviewer after the store-failure stub below, which is correctly
+        // on readDescriptor: injecting the failure on readCurrentDescriptor would
+        // make that test pass without ever reaching the code it names.
         when(store.readCurrentDescriptor(anyString())).thenAnswer(i -> {
             var d = descriptors.get(i.<String>getArgument(0));
             if (d == null) {

@@ -49,6 +49,59 @@ bottom of this file and are never archived.
 
 ---
 
+## 📤 fix(gdpr): stop calling an export complete while four data categories are missing (2026-09-07)
+
+**Repo:** EDDI (`fix/review-audit-gdpr`)
+
+Six review comments, plus the log-injection round.
+
+**The portability export overstated itself.** `conversationsTruncated` was the only completeness
+signal, but the endpoint's own interface documents that every export omits group transcripts,
+shared artifacts, schedules and HITL journal entries. A user whose data lived only in those
+categories received a 200 the API described as complete — a GDPR Art. 20 answer that is not true.
+`UserDataExport` now derives `complete` and `omittedCategories`, both mirrored into the MCP payload
+so the two surfaces agree, and the response carries the distinction in the status line as well as
+the body.
+
+**206 was the wrong status and is now 207.** 206 Partial Content is a *range* status and means
+something specific about byte ranges. 207 Multi-Status says "composite operation, read the body",
+which is what this is, and it is already what the sibling erasure endpoint uses. Because the four
+categories are always omitted today, the export always answers 207; the 200 branch returns when
+those exporters land. The four missing exporters are deliberately not implemented here.
+
+**A warning claimed a write that had not happened.** `warnIfCostBudgetIsUnenforceable` ran before
+`setQuota`, so a failing store still logged that the limit was stored and would apply. Moved after
+the write returns.
+
+**The SSE and synchronous quota surfaces disagreed.** A `QuotaAccountingUnavailableException` with
+no message produced `"message":""` on the streaming path while the synchronous mapper produced
+`Quota accounting unavailable`. Both now use one shared fallback.
+
+**Two stores gave a different refusal reason than the gates around them.** The Mongo and PostgreSQL
+tenant-quota stores said "Cost accounting failed" where every sibling gate says "Quota accounting
+unavailable — denying request for safety". Aligned.
+
+**A documentation contradiction, half real.** `AuditLedgerService` has two overflow paths, and only
+one dead-letters. `submit()` reserves its slot before a sequence is assigned, so a rejected
+submission is simply counted and dropped; `offerBounded()` on the retry paths dead-letters, because
+those entries already hold a chain position. The Failure Handling prose described the second and
+generalised it to both. It is now a table naming each path and its recoverability, with the
+consequence stated: a dropped submission is unrecoverable *and* leaves the chain `INTACT`, so
+`eddi_audit_entries_dropped_total` is the only signal and a clean `/auditstore/verify` is not proof
+of completeness.
+
+**One comment was wrong and is recorded as such.** A reviewer said a fixture stubbed the wrong
+descriptor read. The call graph is the other way round — `describe()` reaches `readDescriptor`, not
+`readCurrentDescriptor`, and the latter appears nowhere in the service. What misled the reviewer was
+the fixture's own comment, which claimed the opposite; the comment was corrected and the stub left
+alone. Following the suggestion would have stopped the test reaching the production guard at all.
+
+**Log injection.** The GDPR delete-all logs on both user-memory stores wrote the caller-supplied
+`userId` raw. Both now sanitize it — on the erasure path, which is exactly where a log has to be
+trustworthy.
+
+---
+
 ## 🔐 fix(gdpr): stop caching "not restricted" by default; make foreign audit sequences visible (2026-09-06)
 
 **Repo:** EDDI (`fix/review-audit-gdpr`)

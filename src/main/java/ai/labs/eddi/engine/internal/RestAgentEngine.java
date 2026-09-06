@@ -36,6 +36,7 @@ import ai.labs.eddi.engine.security.OwnershipValidator;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.tenancy.QuotaAccountingUnavailableException;
 import ai.labs.eddi.engine.tenancy.QuotaExceededException;
+import ai.labs.eddi.engine.tenancy.rest.QuotaAccountingUnavailableExceptionMapper;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -301,11 +302,13 @@ public class RestAgentEngine implements IRestAgentEngine {
             // Before the RejectedExecutionException branch below, which it extends:
             // that branch would already answer 503 rather than 500, but with
             // "capacity_exceeded", and this is not capacity. The quota store could
-            // not answer at all, so the honest error code names that.
+            // not answer at all, so the honest error code names that. The message
+            // comes from the mapper's accessor so all three surfaces that report this
+            // condition read one fallback rather than three copies of a literal.
             LOGGER.warnf("Quota accounting unavailable for conversation %s: %s", sanitize(conversationId), e.getMessage());
             response.resume(Response.status(Response.Status.SERVICE_UNAVAILABLE)
                     .entity(Map.of("error", "quota_accounting_unavailable",
-                            "message", e.getMessage() != null ? e.getMessage() : "Quota accounting unavailable"))
+                            "message", QuotaAccountingUnavailableExceptionMapper.messageOf(e)))
                     .type(MediaType.APPLICATION_JSON).header("Retry-After", "5").build());
         } catch (RejectedExecutionException e) {
             // Same reason as the quota branch above: say() is resumed through an

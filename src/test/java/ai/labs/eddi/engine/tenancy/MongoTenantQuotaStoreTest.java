@@ -352,6 +352,14 @@ class MongoTenantQuotaStoreTest {
 
             assertFalse(result.allowed(), "a budget that cannot be read is not a budget with room left");
             assertTrue(result.accountingUnavailable());
+            // Asserted like its two siblings above, and it was not: this gate phrased
+            // a reason of its own ("Cost accounting failed — denying request for
+            // safety") while every other outage path used the shared constant.
+            // ConversationService puts reason() verbatim into the
+            // QuotaAccountingUnavailableException the 503 body is built from, so one
+            // outage read differently depending on which gate happened to fail first.
+            assertEquals(ITenantQuotaStore.ACCOUNTING_UNAVAILABLE, result.reason(),
+                    "the same reason the other gates give, so the 503 body is identical whichever call failed");
         }
 
         @Test

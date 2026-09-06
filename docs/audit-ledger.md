@@ -185,7 +185,18 @@ Redaction is applied recursively to nested maps and lists.
 
 ## Failure Handling
 
-If a database write fails, entries are **re-queued** for the next flush cycle. After 3 consecutive failures, the batch is dropped from the queue and written to a **dead-letter sink** — NATS JetStream (subject `eddi.deadletter.audit`) when a connection is available, otherwise the JSONL file at `eddi.audit.dead-letter-path`. The re-queue path respects the bound set by `eddi.audit.max-queue-size`: entries that no longer fit go to the same sink instead of growing the heap. This prevents unbounded memory growth while keeping the missing entries recoverable rather than lost.
+If a database write fails, entries are **re-queued** for the next flush cycle. After 3 consecutive failures, the batch is dropped from the queue and written to a **dead-letter sink** — NATS JetStream (subject `eddi.deadletter.audit`) when a connection is available, otherwise the JSONL file at `eddi.audit.dead-letter-path`.
+
+**Queue overflow has two outcomes, and only one of them is recoverable.** Both increment `eddi_audit_entries_dropped_total`, so the counter on its own does not say which happened:
+
+| Overflow path | What happens at `eddi.audit.max-queue-size` | Recoverable? |
+| ------------- | ------------------------------------------- | ------------ |
+| **Re-queue** — a failed batch coming back from the flush retry, or entries the retry budget never reached | Written to the dead-letter sink instead of growing the heap | **Yes** — replay from the sink |
+| **Submit** — a fresh entry arriving from the pipeline while the queue is already full | Refused outright: counted and logged at WARN, **not** dead-lettered | **No** — the entry is gone |
+
+The asymmetry is deliberate. A re-queued entry has already consumed its chain position, so discarding it without a record would leave a gap `/auditstore/verify` grades `BROKEN` with nothing to attribute it to — the sink is what makes that gap explicable. A refused submission has not been sequenced yet (`submit()` reserves the queue slot *before* taking a chain position, exactly so a refusal burns no number), so it leaves the chain intact and verify reports nothing at all.
+
+> **A dropped submission is unrecoverable and invisible to chain verification.** `eddi_audit_entries_dropped_total` rising while `/auditstore/verify` still says `INTACT` is the only signal that audit evidence was lost. Alert on the counter; do not treat a clean verify as proof of completeness.
 
 > **The dead-letter record is the whole entry, and that makes the sink a personal-data location.** It carries the `userId`, the verbatim input and output, the LLM detail and tool calls, plus the entry's own timestamp, sequence, HMAC and agent signature — anything less is not replayable, and without the `sequence` an operator cannot prove which chain positions the ledger itself abandoned, so every self-inflicted gap reads as `BROKEN` rather than `INCOMPLETE`. Secret redaction has already been applied, but user content has not.
 >

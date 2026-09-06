@@ -371,7 +371,8 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
     public void deleteAllForUser(String userId) throws IResourceStore.ResourceStoreException {
         RuntimeUtilities.checkNotNull(userId, FIELD_USER_ID);
         DeleteResult result = memoriesCollection.deleteMany(eq(FIELD_USER_ID, userId));
-        LOGGER.infof("[MEMORY] GDPR delete-all for user '%s': %d entries removed", userId, result.getDeletedCount());
+        LOGGER.infof("[MEMORY] GDPR delete-all for user '%s': %d entries removed", LogSanitizer.sanitize(userId),
+                result.getDeletedCount());
     }
 
     @Override

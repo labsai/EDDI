@@ -808,6 +808,25 @@ class RestAgentEngineStreamingTest {
             assertFalse(payload.contains("Internal server error"), payload);
         }
 
+        /**
+         * The quota twin of
+         * {@code restrictionStatusUnavailableWithoutAMessageUsesTheSharedFallback}.
+         * Echoing {@code getMessage()} raw is null-safe here — it goes through
+         * {@code escapeJson} — but it emitted {@code "message":""} for a thrower with
+         * no message, while {@code QuotaAccountingUnavailableExceptionMapper} and the
+         * synchronous twin both answer "Quota accounting unavailable". One outage, two
+         * error contracts, decided by nothing but whether the client asked for SSE.
+         */
+        @Test
+        @DisplayName("a quota outage carrying no message streams the shared fallback text, not an empty one")
+        void quotaAccountingUnavailableWithoutAMessageUsesTheSharedFallback() throws Exception {
+            String payload = errorPayloadFor(new QuotaAccountingUnavailableException(null));
+
+            assertTrue(payload.contains("\"code\":\"quota_accounting_unavailable\""), payload);
+            assertTrue(payload.contains("Quota accounting unavailable"), payload);
+            assertFalse(payload.contains("\"message\":\"\""), payload);
+        }
+
         @Test
         @DisplayName("anything else stays opaque: fixed message + correlationId, no code")
         void unknownExceptionsStayOpaque() throws Exception {

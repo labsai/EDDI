@@ -20,6 +20,12 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
+import java.util.ArrayList;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -634,6 +640,59 @@ class PostgresUserMemoryStoreUnitTest {
         // when/then
         assertThrows(IResourceStore.ResourceStoreException.class,
                 () -> sut.deleteAllForUser("user1"));
+    }
+
+    /**
+     * A userId is whatever the erasure caller supplied, and it reaches this INFO
+     * line directly. Without sanitising, a CR/LF in it writes forged lines into the
+     * operator's log (CWE-117) - on the GDPR erasure path, which is exactly where a
+     * log has to be trustworthy.
+     */
+    @Test
+    void deleteAllForUser_cannotForgeALogRecordThroughTheUserId() throws Exception {
+        String poisoned = "user1\r\n2026-01-01 00:00:00,000 INFO  [io.quarkus] Forged admin login succeeded";
+        when(preparedStatement.executeUpdate()).thenReturn(3);
+
+        List<String> captured = new ArrayList<>();
+        Handler handler = new Handler() {
+            @Override
+            public void publish(LogRecord record) {
+                captured.add(String.valueOf(record.getMessage()));
+                if (record.getParameters() != null) {
+                    for (Object parameter : record.getParameters()) {
+                        captured.add(String.valueOf(parameter));
+                    }
+                }
+            }
+
+            @Override
+            public void flush() {
+            }
+
+            @Override
+            public void close() {
+            }
+        };
+        // logging.properties turns ai.labs.eddi OFF for plain unit tests, so the
+        // logger has to be opened or nothing is captured and this passes vacuously.
+        Logger julLogger = Logger.getLogger(PostgresUserMemoryStore.class.getName());
+        Level previous = julLogger.getLevel();
+        julLogger.setLevel(Level.ALL);
+        julLogger.addHandler(handler);
+        try {
+            sut.deleteAllForUser(poisoned);
+        } finally {
+            julLogger.removeHandler(handler);
+            julLogger.setLevel(previous);
+        }
+
+        assertFalse(captured.isEmpty(), "nothing was captured, so this proves nothing - the logger was not open");
+        assertTrue(captured.stream().anyMatch(value -> value.contains("GDPR delete-all")),
+                "the line under test did not fire; captured: " + captured);
+        for (String value : captured) {
+            assertFalse(value.contains("\n") || value.contains("\r"),
+                    "a CR/LF reached the log, so a caller can forge records (CWE-117); offending value: " + value);
+        }
     }
 
     // ─── countEntries SQL exception ─────────────────────────────

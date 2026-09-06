@@ -23,6 +23,9 @@ import java.util.logging.LogRecord;
 import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
 
 /**
  * Unit tests for the tenant quota REST API.
@@ -282,6 +285,58 @@ class RestTenantQuotaTest {
                     "a disabled tenant must not produce the warning, was: " + records);
             assertEquals(250.0, quotaStore.getQuota(TENANT_ID).maxMonthlyCostUsd(),
                     "and the value is still stored, exactly as in the enabled case");
+        } finally {
+            restLogger.removeHandler(handler);
+            restLogger.setLevel(previousLevel);
+            restLogger.setUseParentHandlers(previousUseParentHandlers);
+        }
+    }
+
+    /**
+     * The warning above asserts that the limit <em>is</em> stored and will apply
+     * once cost recording is wired. It used to be emitted before {@code setQuota}
+     * was called at all, so a store that then threw left that claim standing in the
+     * log with nothing written behind it — and that one line is the only signal
+     * this feature has, so an operator reading it goes looking for a row that does
+     * not exist.
+     */
+    @Test
+    void shouldNotClaimAStoredBudgetWhenTheQuotaWriteFailed() {
+        var failingService = mock(TenantQuotaService.class);
+        doThrow(new IllegalStateException("quota store unreachable")).when(failingService).setQuota(any());
+        var restWithFailingStore = new RestTenantQuota(quotaStore, failingService);
+
+        var records = new ArrayList<String>();
+        Logger restLogger = Logger.getLogger(RestTenantQuota.class.getName());
+        Handler handler = new Handler() {
+            @Override
+            public void publish(LogRecord record) {
+                records.add(record.getMessage() + " " + Arrays.toString(record.getParameters()));
+            }
+
+            @Override
+            public void flush() {
+                // nothing is buffered
+            }
+
+            @Override
+            public void close() {
+                // nothing to release
+            }
+        };
+        Level previousLevel = restLogger.getLevel();
+        boolean previousUseParentHandlers = restLogger.getUseParentHandlers();
+        restLogger.setLevel(Level.ALL);
+        restLogger.setUseParentHandlers(false);
+        restLogger.addHandler(handler);
+        try {
+            // Enabled, with a real budget: the exact combination that warns, so the
+            // only thing keeping the line out of the log is the failed write.
+            assertThrows(IllegalStateException.class, () -> restWithFailingStore.updateQuota(TENANT_ID,
+                    new TenantQuota(TENANT_ID, -1, -1, -1, 250.0, true)));
+
+            assertTrue(records.stream().noneMatch(r -> r.contains("NOT enforced")),
+                    "the warning asserts a stored limit, so it must not outlive a write that never landed, was: " + records);
         } finally {
             restLogger.removeHandler(handler);
             restLogger.setLevel(previousLevel);

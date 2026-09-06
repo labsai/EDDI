@@ -543,8 +543,13 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
             LOGGER.errorf("Failed to add cost for tenant '%s': %s", sanitize(tenantId), sanitize(e.getMessage()));
             // Fail closed — if cost accounting fails, deny the request rather than
             // silently bypassing budget enforcement. Flagged as an outage rather
-            // than a budget breach, for the reason accountingUnavailable() gives.
-            return QuotaCheckResult.unavailable("Cost accounting failed — denying request for safety");
+            // than a budget breach, for the reason accountingUnavailable() gives —
+            // and with its wording, not a second one of this method's own. The
+            // reason reaches the client verbatim (ConversationService puts it into
+            // the QuotaAccountingUnavailableException the 503 body is built from),
+            // so a private phrasing here meant one outage produced two different
+            // messages depending on which gate failed first.
+            return ITenantQuotaStore.accountingUnavailable();
         }
         return QuotaCheckResult.OK;
     }

@@ -62,13 +62,27 @@ public interface IRestGdprAdmin {
      * regex and an exact re-check), plus a decision on how a bundle that could run
      * to hundreds of megabytes is delivered.
      * <p>
+     * <strong>Which is why this endpoint does not answer 200 today.</strong> The
+     * gap is part of the response rather than a footnote here: every bundle carries
+     * {@code complete: false} and an {@code omittedCategories} list naming those
+     * four stores, and the status is 207 Multi-Status. Without it, a user whose
+     * data lives only in the four omitted categories received an empty bundle with
+     * a 200 documented as "complete export bundle" — an Art. 20 answer that
+     * overstates itself to the one reader who cannot check it. It becomes 200 once
+     * the four exporters land and the list goes empty.
+     * <p>
      * Conversation snapshots are capped per bundle; audit entries were already
      * capped. When the conversation cap bites, the response says so in the payload
-     * ({@code totalConversations}, {@code conversationsTruncated}) and the status
-     * is 206 Partial Content — a bundle that silently omits conversations while
-     * answering 200 lets a DPO hand a data subject an incomplete Art. 15 bundle
-     * believing it complete, which is the same misreporting {@link #deleteUserData}
-     * answers 207 for. The audit cap is still reported in the server log only.
+     * ({@code totalConversations}, {@code conversationsTruncated}) and counts
+     * against {@code complete} the same way — a bundle that silently omits
+     * conversations while answering 200 lets a DPO hand a data subject an
+     * incomplete Art. 15 bundle believing it complete, which is the same
+     * misreporting {@link #deleteUserData} answers 207 for. The audit cap is still
+     * reported in the server log only.
+     * <p>
+     * 207 rather than the 206 Partial Content this used to send: 206 is a range
+     * status, RFC 9110 requires a {@code Content-Range} with it, and this endpoint
+     * neither reads a {@code Range} nor produces one.
      */
     @GET
     @Path("/{userId}/export")
@@ -80,12 +94,17 @@ public interface IRestGdprAdmin {
                        + "metadata. Group discussion transcripts, shared artifacts, schedules and "
                        + "HITL journal entries are NOT yet included, although the erasure endpoint "
                        + "does delete them — see the interface javadoc. "
-                       + "Responds 200 when the bundle is complete and 206 Partial Content when the "
-                       + "per-request conversation cap bit — 'conversationsTruncated' is then true and "
-                       + "'totalConversations' says how many the user has.")
-    @APIResponse(responseCode = "200", description = "Complete export bundle",
+                       + "Responds 200 only when the bundle covers everything, and 207 Multi-Status "
+                       + "otherwise: 'complete' says which, 'omittedCategories' names the categories "
+                       + "this exporter does not reach, and 'conversationsTruncated' with "
+                       + "'totalConversations' report the per-request conversation cap. Because those "
+                       + "four categories are always omitted today, the answer is currently always 207 "
+                       + "— the export must NOT be handed to the data subject as a complete Art. 15/20 "
+                       + "bundle while 'complete' is false.")
+    @APIResponse(responseCode = "200", description = "Complete export bundle — every category covered, nothing truncated",
                  content = @Content(schema = @Schema(implementation = UserDataExport.class)))
-    @APIResponse(responseCode = "206", description = "Bundle truncated at the conversation cap — see 'conversationsTruncated'",
+    @APIResponse(responseCode = "207",
+                 description = "Incomplete bundle — see 'complete', 'omittedCategories' and 'conversationsTruncated'",
                  content = @Content(schema = @Schema(implementation = UserDataExport.class)))
     Response exportUserData(
                             @PathParam("userId")

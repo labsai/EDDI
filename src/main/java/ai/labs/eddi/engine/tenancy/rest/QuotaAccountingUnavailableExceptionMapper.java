@@ -45,9 +45,32 @@ public class QuotaAccountingUnavailableExceptionMapper implements ExceptionMappe
         return Response.status(Response.Status.SERVICE_UNAVAILABLE)
                 .entity(Map.of(
                         "error", "quota_accounting_unavailable",
-                        "message", exception.getMessage() != null ? exception.getMessage() : "Quota accounting unavailable"))
+                        "message", messageOf(exception)))
                 .type(MediaType.APPLICATION_JSON)
                 .header("Retry-After", "5")
                 .build();
+    }
+
+    /**
+     * The body's {@code message}, never null.
+     * <p>
+     * Shared with the {@code AsyncResponse} branches in
+     * {@code RestAgentEngine.sayInternal} and
+     * {@code RestAgentEngineStreaming.buildKnownConditionOrOpaqueErrorEvent}, which
+     * cannot reach this mapper and so reproduce its body themselves. The streaming
+     * branch echoed {@code getMessage()} raw, so a thrower that supplies no message
+     * emitted {@code "message":""} there while the other two surfaces said "Quota
+     * accounting unavailable" — one outage described two ways to clients keying on
+     * the error contract. Mirrors
+     * {@code ProcessingRestrictionUnavailableExceptionMapper.messageOf}, which
+     * exists for the same reason.
+     *
+     * @param exception
+     *            the failure being reported
+     * @return the exception's own message, or a fixed fallback when it has none
+     */
+    public static String messageOf(QuotaAccountingUnavailableException exception) {
+        String message = exception.getMessage();
+        return message != null ? message : "Quota accounting unavailable";
     }
 }

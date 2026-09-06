@@ -107,7 +107,6 @@ class RestGdprAdminTest {
 
         Response response = restAdmin.exportUserData("user-1");
 
-        assertEquals(200, response.getStatus());
         assertSame(expected, response.getEntity());
         verify(gdprService).exportUserData("user-1");
     }
@@ -116,18 +115,65 @@ class RestGdprAdminTest {
      * Finding r4. A bundle the conversation cap truncated is an INCOMPLETE Art.
      * 15/20 response, and it used to be indistinguishable from a complete one: 200
      * OK, no marker in the payload, the warning in the server log only. The same
-     * distinction the 207 above draws for erasure.
+     * distinction the 207 above draws for erasure — and now literally the same
+     * status, because 206 Partial Content is a range status and RFC 9110 wants a
+     * {@code Content-Range} with it that this endpoint neither reads nor produces.
      */
     @Test
-    void exportUserData_reports206WhenTheConversationCapTruncatedTheBundle() {
+    void exportUserData_reports207WhenTheConversationCapTruncatedTheBundle() {
         var truncated = new UserDataExport("user-1", Instant.now(),
                 List.of(), List.of(), List.of(), List.of(), List.of(), 1_200, true);
         when(gdprService.exportUserData("user-1")).thenReturn(truncated);
 
         Response response = restAdmin.exportUserData("user-1");
 
-        assertEquals(RestGdprAdmin.PARTIAL_CONTENT, response.getStatus());
+        assertEquals(RestGdprAdmin.MULTI_STATUS, response.getStatus());
         assertSame(truncated, response.getEntity());
+        assertFalse(truncated.complete());
+    }
+
+    /**
+     * The conversation cap used to be the ONLY completeness check, while this
+     * exporter has never covered group transcripts, shared artifacts, schedules or
+     * HITL journal entries — categories the erasure half deletes as this user's
+     * personal data. So a user with fewer conversations than the cap, and in the
+     * limit a user whose data lives <em>only</em> in those four, received a 200
+     * documented as "Complete export bundle": an Art. 20 portability answer
+     * overstating itself to the one reader who cannot check it.
+     */
+    @Test
+    void exportUserData_reports207WhileWholeCategoriesAreOmitted() {
+        var untruncated = new UserDataExport("user-1", Instant.now(),
+                List.of(), List.of(), List.of(), List.of(), List.of(), 0, false);
+        when(gdprService.exportUserData("user-1")).thenReturn(untruncated);
+
+        Response response = restAdmin.exportUserData("user-1");
+
+        assertEquals(RestGdprAdmin.MULTI_STATUS, response.getStatus(),
+                "nothing was truncated, but four whole categories are missing — that is not a complete bundle");
+        assertFalse(untruncated.complete());
+        assertEquals(List.of("groupConversations", "sharedArtifacts", "schedules", "journalEntries"),
+                untruncated.omittedCategories(),
+                "and the caller is told which categories, not merely that something is missing");
+    }
+
+    /**
+     * Finding r15 again, for the export half. {@code complete()} and
+     * {@code omittedCategories()} are derived methods — neither record components
+     * nor bean getters — so without the annotation Jackson drops them from the REST
+     * entity, {@code McpGdprTools} still puts them in the MCP payload, and the
+     * status code becomes the only place the REST client is told about the gap.
+     */
+    @Test
+    void exportUserData_restBodyCarriesCompletenessAndOmittedCategories() throws Exception {
+        var export = new UserDataExport("user-1", Instant.now(),
+                List.of(), List.of(), List.of(), List.of(), List.of(), 0, false);
+
+        String json = new ObjectMapper().registerModule(new JavaTimeModule()).writeValueAsString(export);
+
+        assertTrue(json.contains("\"complete\":false"),
+                "a bundle whose incompleteness lives only in the status line gets filed as complete: " + json);
+        assertTrue(json.contains("\"omittedCategories\":[\"groupConversations\""), json);
     }
 
     /**

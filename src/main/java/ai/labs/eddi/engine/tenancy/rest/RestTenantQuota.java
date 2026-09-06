@@ -72,12 +72,16 @@ public class RestTenantQuota implements IRestTenantQuota {
         var storedQuota = new TenantQuota(tenantId, quota.maxConversationsPerDay(), quota.maxAgentsPerTenant(), quota.maxApiCallsPerMinute(),
                 quota.maxMonthlyCostUsd(), quota.enabled());
 
-        warnIfCostBudgetIsUnenforceable(storedQuota);
-
         // Through the service, not straight to the store: the enforcement gates read
         // configuration through a short-TTL cache, and the service write-through is
         // what drops the stale entry so the new limits apply to the very next turn.
         quotaService.setQuota(storedQuota);
+
+        // After the write returns, not before it. The warning asserts that the limit
+        // *is* stored and will apply once cost recording is wired; emitted first, a
+        // store failure left that claim in the log with nothing written behind it —
+        // the operator reading it would go looking for a row that does not exist.
+        warnIfCostBudgetIsUnenforceable(storedQuota);
         return Response.ok(storedQuota).build();
     }
 

@@ -18,6 +18,7 @@ import ai.labs.eddi.engine.gdpr.ProcessingRestrictionUnavailableExceptionMapper;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.tenancy.QuotaAccountingUnavailableException;
 import ai.labs.eddi.engine.tenancy.QuotaExceededException;
+import ai.labs.eddi.engine.tenancy.rest.QuotaAccountingUnavailableExceptionMapper;
 
 import ai.labs.eddi.engine.lifecycle.TaskId;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
@@ -284,13 +285,16 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
         } else if (e instanceof AgentMismatchException) {
             code = "agent_mismatch";
             message = "Agent version mismatch";
-        } else if (e instanceof QuotaAccountingUnavailableException) {
+        } else if (e instanceof QuotaAccountingUnavailableException quotaUnavailable) {
             // Before QuotaExceededException is irrelevant (they are unrelated types),
             // but the distinction is the same one RestAgentEngine draws: the store
             // could not answer, so this is not the tenant being over a limit. The
-            // message is this class's own fixed text and names nothing internal.
+            // message is this class's own fixed text and names nothing internal, so
+            // it is echoed rather than replaced — through the mapper's accessor, so a
+            // thrower that supplies no message produces the same sentence here as on
+            // the other two surfaces instead of "message":"".
             code = "quota_accounting_unavailable";
-            message = e.getMessage();
+            message = QuotaAccountingUnavailableExceptionMapper.messageOf(quotaUnavailable);
         } else if (e instanceof QuotaExceededException) {
             code = "quota_exceeded";
             message = e.getMessage();

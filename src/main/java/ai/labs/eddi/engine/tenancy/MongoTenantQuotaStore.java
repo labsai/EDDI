@@ -348,6 +348,14 @@ public class MongoTenantQuotaStore implements ITenantQuotaStore {
      * See {@link #tryIncrementConversations} for why the body is wrapped. Cost
      * accounting fails closed for the same reason the PostgreSQL store does: a
      * budget that cannot be read must not be treated as a budget with room left.
+     * <p>
+     * The refusal carries {@link ITenantQuotaStore#ACCOUNTING_UNAVAILABLE} like
+     * every other outage path. It used to carry a wording of its own, which reached
+     * the client verbatim — {@code ConversationService} puts {@code reason()} into
+     * the {@code QuotaAccountingUnavailableException} the 503 body is built from —
+     * so one outage produced two different {@code message} strings depending on
+     * which gate happened to fail first. That is precisely the parity
+     * {@code ACCOUNTING_UNAVAILABLE} was extracted to hold.
      */
     @Override
     public QuotaCheckResult tryAddCost(String tenantId, double cost, double limit) {
@@ -356,7 +364,7 @@ public class MongoTenantQuotaStore implements ITenantQuotaStore {
         } catch (MongoException e) {
             LOGGER.errorf("Failed to add cost for tenant '%s': %s",
                     LogSanitizer.sanitize(tenantId), LogSanitizer.sanitize(e.getMessage()));
-            return QuotaCheckResult.unavailable("Cost accounting failed — denying request for safety");
+            return ITenantQuotaStore.accountingUnavailable();
         }
     }
 
