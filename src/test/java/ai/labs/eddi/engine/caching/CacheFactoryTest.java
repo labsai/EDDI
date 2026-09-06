@@ -27,10 +27,13 @@ import static org.junit.jupiter.api.Assertions.*;
  * constructed {@code CacheImpl} and would therefore not notice the factory
  * dropping the policy on the floor.
  * <p>
- * Nearly all of these assertions only ever wait for "at least this much time
- * has passed", never for "at most", which makes them slow-machine safe. The one
- * exception has to read an entry back before it expires — see
- * {@link #CACHE_WIDE_TTL_MILLIS}, which is sized so that read cannot lose.
+ * Most of these assertions only ever wait for "at least this much time has
+ * passed", which makes them slow-machine safe. Two do depend on an upper bound
+ * and are sized accordingly: the cache-wide TTL test reads an entry back before
+ * it expires (500 ms of margin, see {@link #CACHE_WIDE_TTL_MILLIS}), and the
+ * sub-second cache-key test needs a 999 ms entry to survive a 30 ms sleep (969
+ * ms of margin). Both margins are orders of magnitude larger than the work
+ * between the statements they span.
  */
 @DisplayName("CacheFactory Tests")
 class CacheFactoryTest {
@@ -59,6 +62,17 @@ class CacheFactoryTest {
      * the thread to be descheduled for a millisecond between two adjacent
      * statements. Half a second is past any plausible stall there, and the test
      * still finishes well inside two seconds.
+     * <p>
+     * <b>Keep this value under one second.</b> A sub-second TTL is what makes the
+     * pre-expiry read able to catch a truncating duration conversion — the exact
+     * bug class this codebase already hit once, when the cache <em>key</em> was
+     * rendered with {@code Duration.toSeconds()} and every sub-second TTL collapsed
+     * onto {@code ttl=0} (see the comment in
+     * {@link CacheFactory#getCache(String, java.time.Duration)}). If
+     * {@code WriteExpiry.of} ever acquired the same truncation, a sub-second TTL
+     * would become an instant expiry, and only a read taken before the sleep would
+     * notice. Raising this to a whole number of seconds would silence the flake and
+     * lose that coverage at the same time.
      */
     private static final long CACHE_WIDE_TTL_MILLIS = 500L;
 
@@ -200,11 +214,18 @@ class CacheFactoryTest {
         void cacheWideTtlStillExpires() throws InterruptedException {
             ICache<String, String> cache = factory.getCache("cacheWideTtl", Duration.ofMillis(CACHE_WIDE_TTL_MILLIS));
             cache.put("key1", "value1");
-            // Keep this read: it is the only thing standing between the assertion
-            // below and passing vacuously. A put() that stored nothing, or an entry
-            // the cache declined to admit, would satisfy assertNull just as well as a
-            // working TTL does. See CACHE_WIDE_TTL_MILLIS for why the TTL is not 1 ms
-            // like its neighbours — this read is the one that has to win a race.
+            // Keep this read, and keep it on THIS cache. It is the only thing standing
+            // between the assertion below and passing vacuously: a put() that stored
+            // nothing, an entry the cache declined to admit, or a TTL that truncated to
+            // zero would all satisfy assertNull just as well as a working TTL does.
+            //
+            // The tempting refactor is to split this in two — prove storage against a
+            // long-TTL cache with no race, then prove expiry against a 1 ms one. That
+            // reads better and runs faster, and it is weaker: a sub-second TTL
+            // truncating to zero would leave the long-TTL half green and make the
+            // short-TTL half pass for the wrong reason. Both halves have to be the same
+            // sub-second cache, which is why this read has to win a race at all.
+            // See CACHE_WIDE_TTL_MILLIS for how the margin is sized.
             assertEquals("value1", cache.get("key1"), "the entry must be readable before its TTL elapses");
 
             Thread.sleep(PAST_CACHE_WIDE_TTL_MILLIS);
