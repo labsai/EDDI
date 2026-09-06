@@ -18,11 +18,19 @@ import static org.junit.jupiter.api.Assertions.*;
  * Tests for {@link CacheFactory} — covers named cache creation, TTL caches,
  * null name handling, and same-cache reuse semantics.
  * <p>
- * The factory builds its caches against {@code System.nanoTime()}, so the
- * expiry assertions here use a sub-millisecond TTL and a short sleep rather
- * than a fake ticker. They only ever wait for "at least this much time has
- * passed", never for "at most", so they are slow-machine safe. Precise expiry
- * semantics are pinned deterministically in {@code CacheImplTest}.
+ * The factory builds its caches against {@code System.nanoTime()} and exposes
+ * no seam for a {@link com.github.benmanes.caffeine.cache.Ticker}, so the
+ * expiry assertions here sleep rather than winding a fake clock. What they are
+ * for is narrow: that the factory <em>wires</em> the expiry policy it claims
+ * to. The semantics of that policy are pinned deterministically in
+ * {@code CacheImplTest}, which drives a {@code FakeTicker} over a directly
+ * constructed {@code CacheImpl} and would therefore not notice the factory
+ * dropping the policy on the floor.
+ * <p>
+ * Nearly all of these assertions only ever wait for "at least this much time
+ * has passed", never for "at most", which makes them slow-machine safe. The one
+ * exception has to read an entry back before it expires — see
+ * {@link #CACHE_WIDE_TTL_MILLIS}, which is sized so that read cannot lose.
  */
 @DisplayName("CacheFactory Tests")
 class CacheFactoryTest {
@@ -37,6 +45,28 @@ class CacheFactoryTest {
      * so the sub-second cache-key assertions cannot flake in either direction.
      */
     private static final long SUB_SECOND_GAP_MILLIS = 30L;
+
+    /**
+     * Cache-wide TTL for the one test that has to read an entry back
+     * <em>before</em> it expires.
+     * <p>
+     * Every other expiry test here can use a 1 ms lifespan because it only reads
+     * <em>after</em> sleeping: its guard against passing vacuously is a second,
+     * untimed key that must survive. A cache-wide TTL leaves no such key — it
+     * expires everything — so the guard has to be a read taken before expiry, and
+     * that read races the TTL. At 1 ms it lost the race on CI (run 34047771699,
+     * {@code expected: <value1> but was: <null>}), because the assertion only needs
+     * the thread to be descheduled for a millisecond between two adjacent
+     * statements. Half a second is past any plausible stall there, and the test
+     * still finishes well inside two seconds.
+     */
+    private static final long CACHE_WIDE_TTL_MILLIS = 500L;
+
+    /**
+     * Comfortably past {@link #CACHE_WIDE_TTL_MILLIS}. Caffeine evaluates expiry on
+     * read, so overshooting once is enough — no polling is needed.
+     */
+    private static final long PAST_CACHE_WIDE_TTL_MILLIS = 3 * CACHE_WIDE_TTL_MILLIS;
 
     private CacheFactory factory;
 
@@ -168,11 +198,16 @@ class CacheFactoryTest {
         @Test
         @DisplayName("the cache-wide TTL still expires entries written without their own lifespan")
         void cacheWideTtlStillExpires() throws InterruptedException {
-            ICache<String, String> cache = factory.getCache("cacheWideTtl", Duration.ofMillis(1));
+            ICache<String, String> cache = factory.getCache("cacheWideTtl", Duration.ofMillis(CACHE_WIDE_TTL_MILLIS));
             cache.put("key1", "value1");
-            assertEquals("value1", cache.get("key1"));
+            // Keep this read: it is the only thing standing between the assertion
+            // below and passing vacuously. A put() that stored nothing, or an entry
+            // the cache declined to admit, would satisfy assertNull just as well as a
+            // working TTL does. See CACHE_WIDE_TTL_MILLIS for why the TTL is not 1 ms
+            // like its neighbours — this read is the one that has to win a race.
+            assertEquals("value1", cache.get("key1"), "the entry must be readable before its TTL elapses");
 
-            Thread.sleep(PAST_TTL_MILLIS);
+            Thread.sleep(PAST_CACHE_WIDE_TTL_MILLIS);
 
             assertNull(cache.get("key1"), "the cache-wide TTL must still remove the entry");
         }

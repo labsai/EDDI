@@ -49,6 +49,70 @@ bottom of this file and are never archived.
 
 ---
 
+## 🎲 test(caching): de-flake the cache-wide TTL expiry test (2026-09-06)
+
+**Repo:** EDDI (`fix/flaky-cache-ttl-test`)
+
+`CacheFactoryTest.cacheWideTtlStillExpires` reddened CI on an unrelated branch
+(run `34047771699`, `expected: <value1> but was: <null>`, 1 failure in 20,556 tests). A rerun of
+the same commit passed, so this was a race, not a regression.
+
+The test built a cache with a **1 ms** cache-wide TTL, wrote an entry, and read it straight back:
+
+```java
+ICache<String, String> cache = factory.getCache("cacheWideTtl", Duration.ofMillis(1));
+cache.put("key1", "value1");
+assertEquals("value1", cache.get("key1"));   // loses if the thread stalls for 1 ms
+```
+
+One millisecond of scheduling stall between two adjacent statements is unremarkable on a shared
+runner, and that is all it takes. The behaviour under test — that the entry eventually expires —
+was never in question.
+
+### Why the fix is a wider margin and not a fake clock
+
+`CacheFactory` builds Caffeine inline and exposes no `Ticker` seam, so a deterministic clock
+would mean adding a test-only seam to production code. That is not worth it here, because the
+deterministic coverage **already exists**: `CacheImplTest.DefaultTtlTests` drives a `FakeTicker`
+over a directly constructed `CacheImpl` carrying `WriteExpiry.of(Duration.ofSeconds(60))` and
+pins the semantics exactly — expiry on an untimed put, reads not extending it, re-writes
+restarting it.
+
+What that deterministic test cannot see is the factory itself: it constructs `CacheImpl` by hand,
+so `CacheFactory.getCache(name, ttl)` could stop installing the policy entirely and every
+assertion there would stay green. That wiring check is this test's actual job, and it is worth
+keeping. So the TTL moves to **500 ms** with a 1.5 s sleep past it. The test costs ~1.5 s, which
+against a 20,556-test suite is nothing.
+
+### The read that looks redundant is the one holding the test up
+
+The obvious "fix" is deleting the pre-expiry read, since the test is named for expiry. That would
+make it pass vacuously: with nothing asserting the entry was ever stored, a `put` that silently
+dropped the write would satisfy `assertNull` just as well as a working TTL. Its neighbours avoid
+the race by writing a *second, untimed* key as their non-vacuity guard and only reading after the
+sleep — but a cache-wide TTL expires everything, so no such key exists here and the guard has to
+be a read before expiry. That is why this one test needs a TTL its siblings do not, and the
+constant's Javadoc says so, with the failing run id.
+
+### Both assertions mutation-checked
+
+Per the house rule that a behavioural test is not trusted until it has been seen to fail:
+
+| Mutation | Expected | Result |
+|---|---|---|
+| `getCache(name, ttl)` installs `WriteExpiry.never()` instead of `of(ttl)` | the entry survives | fails at `assertNull` — *the cache-wide TTL must still remove the entry, expected `<null>` but was `<value1>`* |
+| `CacheImpl.put(K,V)` stores nothing | the entry is never there | fails at the pre-read in 0.002 s — *the entry must be readable before its TTL elapses* |
+
+Both production files were restored afterwards; this change touches **test code only**.
+
+`perEntryLifespanOverridesCacheTtl` was checked as well, as suspected: it writes a 1 ms entry and
+an untimed one into a **1 hour** cache and reads neither before sleeping, so it has no race. Same
+for `perEntryTtlIsHonoured` and `negativeLifespanIsUnlimited`.
+
+**Files:** [`CacheFactoryTest.java`](../src/test/java/ai/labs/eddi/engine/caching/CacheFactoryTest.java)
+
+---
+
 ## 🔀 fix(build): repair `main` while merging it into the v5 compatibility branch (2026-09-06)
 
 **Repo:** EDDI (`fix/review-legacy-compat`)
