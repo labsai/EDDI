@@ -39,6 +39,8 @@ import java.util.Map;
 import java.util.Locale;
 import java.util.Set;
 
+import java.net.URLDecoder;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
@@ -427,7 +429,7 @@ class ToolLoopResumer {
     static String toJson(Object value) {
         try {
             return ENVELOPE_MAPPER.writeValueAsString(value);
-        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+        } catch (JsonProcessingException e) {
             // Fall back to a minimal, safe envelope rather than propagating — the
             // resume must still complete. Effectively unreachable for the small maps
             // serialized here.
@@ -549,7 +551,7 @@ class ToolLoopResumer {
      * same asymmetry the whole guard already accepts: a refusal costs a retry, a
      * miss costs the boundary.
      */
-    static String targetsOwnConversationLive(dev.langchain4j.agent.tool.ToolExecutionRequest toolRequest,
+    static String targetsOwnConversationLive(ToolExecutionRequest toolRequest,
                                              Map<String, ToolRequestResolver> resolvers, String conversationId) {
         return targetsOwnConversation(toolRequest.name(), toolRequest.arguments(),
                 args -> {
@@ -599,7 +601,7 @@ class ToolLoopResumer {
         }
         String decoded = candidate;
         try {
-            decoded = java.net.URLDecoder.decode(candidate, java.nio.charset.StandardCharsets.UTF_8);
+            decoded = URLDecoder.decode(candidate, java.nio.charset.StandardCharsets.UTF_8);
         } catch (IllegalArgumentException e) {
             // A malformed escape is not a reason to stop checking — fall back to the
             // raw string rather than returning false and allowing the write.

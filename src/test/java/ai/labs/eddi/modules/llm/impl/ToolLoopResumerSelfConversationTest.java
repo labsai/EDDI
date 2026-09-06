@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.Map;
 
+import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -167,7 +168,7 @@ class ToolLoopResumerSelfConversationTest {
     @Test
     @DisplayName("live path: refuses an ungated call whose resolved URI is the agent's own conversation")
     void livePathRefusesSelfTargetedCall() {
-        var request = dev.langchain4j.agent.tool.ToolExecutionRequest.builder()
+        var request = ToolExecutionRequest.builder()
                 .name("say").arguments("{}").build();
 
         String reason = ToolLoopResumer.targetsOwnConversationLive(request,
@@ -179,7 +180,7 @@ class ToolLoopResumerSelfConversationTest {
     @Test
     @DisplayName("live path: allows an ungated call to a different conversation")
     void livePathAllowsOtherConversation() {
-        var request = dev.langchain4j.agent.tool.ToolExecutionRequest.builder()
+        var request = ToolExecutionRequest.builder()
                 .name("say").arguments("{}").build();
 
         assertNull(ToolLoopResumer.targetsOwnConversationLive(request,
@@ -189,7 +190,7 @@ class ToolLoopResumerSelfConversationTest {
     @Test
     @DisplayName("live path: falls back to the raw arguments when no resolver exists")
     void livePathFallsBackToArguments() {
-        var request = dev.langchain4j.agent.tool.ToolExecutionRequest.builder()
+        var request = ToolExecutionRequest.builder()
                 .name("say").arguments("{\"conversationId\":\"" + CONVERSATION_ID + "\"}").build();
 
         assertNotNull(ToolLoopResumer.targetsOwnConversationLive(request, Map.of(), CONVERSATION_ID));
@@ -198,7 +199,7 @@ class ToolLoopResumerSelfConversationTest {
     @Test
     @DisplayName("live path: tolerates a null resolver map and a blank conversation id")
     void livePathToleratesMissingInputs() {
-        var request = dev.langchain4j.agent.tool.ToolExecutionRequest.builder()
+        var request = ToolExecutionRequest.builder()
                 .name("say").arguments("{}").build();
 
         assertNull(ToolLoopResumer.targetsOwnConversationLive(request, null, null));

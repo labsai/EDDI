@@ -12,7 +12,19 @@ import java.util.function.UnaryOperator;
 
 @JsonTypeInfo(visible = true, property = "type", use = JsonTypeInfo.Id.NAME, include = JsonTypeInfo.As.EXISTING_PROPERTY)
 @JsonSubTypes({@JsonSubTypes.Type(value = TextOutputItem.class, name = "text"), @JsonSubTypes.Type(value = ImageOutputItem.class, name = "image"),
-        @JsonSubTypes.Type(value = AgentFaceOutputItem.class, name = "agentFace"),
+        // "botFace" is a read-only second name for the same class: EDDI 5.x registered
+        // this very class under that id. An unrecognized type id is fatal no matter
+        // what FAIL_ON_UNKNOWN_PROPERTIES says, so without it a single legacy avatar
+        // item makes the whole output document unreadable and the agent fails to
+        // deploy. Writes stay on "agentFace" — AgentFaceOutputItem.initType() sets it
+        // and its setType() canonicalizes the legacy id fed in by visible = true.
+        // The alias is PERMANENT, not a bridge to a migration: see
+        // AgentFaceOutputItem.LEGACY_TYPE_ID for why nothing ever normalizes the
+        // stored documents that carry it. It is a second `names` entry rather than a
+        // second @JsonSubTypes.Type for the same class, so entries stay one-to-one
+        // with output classes — which is what OutputItemTemplatingTest counts.
+        @JsonSubTypes.Type(value = AgentFaceOutputItem.class, name = AgentFaceOutputItem.TYPE_ID,
+                           names = {AgentFaceOutputItem.LEGACY_TYPE_ID}),
         @JsonSubTypes.Type(value = QuickReplyOutputItem.class, name = "quickReply"),
         @JsonSubTypes.Type(value = InputFieldOutputItem.class, name = "inputField"),
         @JsonSubTypes.Type(value = ApplicationLinkOutputItem.class, name = "applicationLink"),

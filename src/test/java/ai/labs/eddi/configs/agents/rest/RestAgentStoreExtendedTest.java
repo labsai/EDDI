@@ -27,6 +27,7 @@ import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
 
+import jakarta.ws.rs.BadRequestException;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -104,7 +105,7 @@ class RestAgentStoreExtendedTest {
         @DisplayName("invalid workflow URI returns error list")
         void invalidWorkflowUri() {
             // A completely invalid URI should cause a BadRequestException
-            assertThrows(jakarta.ws.rs.BadRequestException.class, () -> restAgentStore.readAgentDescriptors(
+            assertThrows(BadRequestException.class, () -> restAgentStore.readAgentDescriptors(
                     null, 0, 10, "invalid-uri", false));
         }
 
@@ -428,7 +429,7 @@ class RestAgentStoreExtendedTest {
             identity.setKeys(List.of()); // empty
             config.setIdentity(identity);
 
-            assertThrows(jakarta.ws.rs.BadRequestException.class,
+            assertThrows(BadRequestException.class,
                     () -> restAgentStore.createAgent(config));
         }
 
@@ -441,7 +442,7 @@ class RestAgentStoreExtendedTest {
             config.setSecurity(security);
             config.setIdentity(null);
 
-            assertThrows(jakarta.ws.rs.BadRequestException.class,
+            assertThrows(BadRequestException.class,
                     () -> restAgentStore.createAgent(config));
         }
     }

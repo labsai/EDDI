@@ -16,6 +16,8 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.stream.Collectors;
+import javax.crypto.spec.PBEKeySpec;
+import javax.crypto.SecretKeyFactory;
 
 /**
  * HMAC-SHA256 integrity signing for audit entries.
@@ -171,8 +173,8 @@ public final class AuditHmac {
      */
     public static byte[] deriveHmacKey(String masterKey) {
         try {
-            javax.crypto.SecretKeyFactory factory = javax.crypto.SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");
-            javax.crypto.spec.PBEKeySpec spec = new javax.crypto.spec.PBEKeySpec(masterKey.toCharArray(),
+            SecretKeyFactory factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");
+            PBEKeySpec spec = new PBEKeySpec(masterKey.toCharArray(),
                     PBKDF2_SALT.getBytes(StandardCharsets.UTF_8), PBKDF2_ITERATIONS, 256);
             return factory.generateSecret(spec).getEncoded();
         } catch (Exception e) {

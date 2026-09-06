@@ -26,6 +26,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
+import io.quarkus.security.identity.SecurityIdentity;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -58,7 +59,7 @@ class RestScheduleStoreExpandedTest {
         setField(sut, "scheduleStore", scheduleStore);
         setField(sut, "fireExecutor", fireExecutor);
         setField(sut, "pollerService", pollerService);
-        setField(sut, "identity", mock(io.quarkus.security.identity.SecurityIdentity.class));
+        setField(sut, "identity", mock(SecurityIdentity.class));
         setField(sut, "ownershipValidator", ownershipValidator);
         // A bare mock admits everything: its void requireAgentUseAccess does nothing.
         setField(sut, "resourceAccessGuard", mock(ResourceAccessGuard.class));

@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 package ai.labs.eddi.modules.nlp.expressions;
+import org.jboss.logging.Logger;
 
 /**
  * @author ginccc
@@ -45,5 +46,5 @@ public class Negation extends Expression {
             getSubExpressions()[0].setDomain(category);
     }
 
-    private static final org.jboss.logging.Logger log = org.jboss.logging.Logger.getLogger(Negation.class);
+    private static final Logger log = Logger.getLogger(Negation.class);
 }

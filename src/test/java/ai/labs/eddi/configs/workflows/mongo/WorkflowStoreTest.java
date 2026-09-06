@@ -20,6 +20,7 @@ import org.mockito.ArgumentCaptor;
 import java.util.ArrayList;
 import java.util.List;
 
+import java.net.URI;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -145,7 +146,7 @@ class WorkflowStoreTest {
         when(resourceStorage.getCurrentVersion("111111111111111111111111")).thenReturn(1);
 
         DocumentDescriptor descriptor = new DocumentDescriptor();
-        descriptor.setResource(java.net.URI.create("eddi://ai.labs.workflow/workflowstore/workflows/111111111111111111111111?version=1"));
+        descriptor.setResource(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/111111111111111111111111?version=1"));
         when(documentDescriptorStore.readDescriptor("111111111111111111111111", 1)).thenReturn(descriptor);
 
         List<DocumentDescriptor> result = store.getWorkflowDescriptorsContainingResource(resourceURI, false);
