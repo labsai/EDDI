@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.runtime.internal;
 
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
@@ -78,6 +79,7 @@ public class SchedulePollerService {
     private Counter pollCounter;
     private Counter fireCounter;
     private Counter fireFailedCounter;
+    private Counter fireSkippedCounter;
     private Counter claimConflictCounter;
     private Counter deadLetterCounter;
     private Counter fireLogsPrunedCounter;
@@ -123,6 +125,7 @@ public class SchedulePollerService {
         pollCounter = meterRegistry.counter("eddi.schedule.poll.count");
         fireCounter = meterRegistry.counter("eddi.schedule.fire.count");
         fireFailedCounter = meterRegistry.counter("eddi.schedule.fire.failed");
+        fireSkippedCounter = meterRegistry.counter("eddi.schedule.fire.skipped");
         claimConflictCounter = meterRegistry.counter("eddi.schedule.claim.conflict");
         deadLetterCounter = meterRegistry.counter("eddi.schedule.fire.deadlettered");
         fireLogsPrunedCounter = meterRegistry.counter("eddi.schedule.firelog.pruned");
@@ -210,31 +213,52 @@ public class SchedulePollerService {
     }
 
     /**
-     * Atomically claim a schedule for this instance. Returns true only if the CAS
-     * claim succeeded.
+     * The poller's claim: returns true only if the CAS claim succeeded, and never
+     * throws — one unclaimable schedule must not abort the rest of the batch.
+     * <p>
+     * The conflict metric and the "another instance got it" reading belong HERE and
+     * not in {@link #tryClaimFor}, because they are only true of the poll path. A
+     * manual fire is refused for states the poller never even fetches
+     * (dead-lettered, or FAILED still inside its backoff), and counting those as
+     * cluster contention made {@code eddi.schedule.claim.conflict} — documented as
+     * "instances racing for the same schedule" — react to an operator pressing a
+     * button.
      */
     private boolean claimSchedule(ScheduleConfiguration schedule, Instant now, Instant leaseExpiry) {
         try {
-            boolean claimed = scheduleStore.tryClaim(schedule.getId(), instanceId, now, leaseExpiry);
+            boolean claimed = tryClaimFor(schedule, now, leaseExpiry);
             if (!claimed) {
                 claimConflictCounter.increment();
                 LOGGER.debugf("[SCHEDULE] Claim conflict for schedule %s — another instance got it", schedule.getId());
-                return false;
             }
-            // tryClaim() returns only a boolean; it does not hand back the fireId it
-            // just persisted. Without this, the in-memory ScheduleConfiguration keeps
-            // its stale pre-claim fireId (often null), which ScheduleFireExecutor uses
-            // for fire-log correlation and injects into the agent context — the fired
-            // turn couldn't be correlated to the claimed DB row. Both MongoScheduleStore
-            // and PostgresScheduleStore derive the persisted fireId identically as
-            // `scheduleId + "_" + now` — mirror that here to keep the in-memory copy in
-            // sync with what was actually written.
-            schedule.setFireId(IScheduleStore.fireIdOf(schedule.getId(), now));
-            return true;
+            return claimed;
         } catch (Exception e) {
             LOGGER.errorf(e, "[SCHEDULE] Error claiming schedule %s", schedule.getId());
             return false;
         }
+    }
+
+    /**
+     * The CAS claim itself, with the store's failure left to the caller to
+     * interpret. A store error is NOT a claim conflict: reporting it as one told a
+     * manual caller "already being fired" during a database blip, which is a
+     * statement about the cluster that nobody had checked.
+     */
+    private boolean tryClaimFor(ScheduleConfiguration schedule, Instant now, Instant leaseExpiry)
+            throws IResourceStore.ResourceStoreException {
+        if (!scheduleStore.tryClaim(schedule.getId(), instanceId, now, leaseExpiry)) {
+            return false;
+        }
+        // tryClaim() returns only a boolean; it does not hand back the fireId it
+        // just persisted. Without this, the in-memory ScheduleConfiguration keeps
+        // its stale pre-claim fireId (often null), which ScheduleFireExecutor uses
+        // for fire-log correlation and injects into the agent context — the fired
+        // turn couldn't be correlated to the claimed DB row. Both MongoScheduleStore
+        // and PostgresScheduleStore derive the persisted fireId identically as
+        // `scheduleId + "_" + now` — mirror that here to keep the in-memory copy in
+        // sync with what was actually written.
+        schedule.setFireId(IScheduleStore.fireIdOf(schedule.getId(), now));
+        return true;
     }
 
     /**
@@ -315,11 +339,7 @@ public class SchedulePollerService {
             wasInterrupted = Thread.interrupted();
 
             // Handle result
-            if (FireStatus.COMPLETED.name().equals(fireLog.status())) {
-                onFireCompleted(schedule);
-            } else {
-                onFireFailed(schedule);
-            }
+            recordFireOutcome(schedule, fireLog);
         } catch (Exception e) {
             LOGGER.errorf(e, "[SCHEDULE] Error processing schedule %s", schedule.getId());
             // Same reasoning as above: the bookkeeping write must not run under a set flag.
@@ -333,6 +353,67 @@ public class SchedulePollerService {
             if (wasInterrupted) {
                 Thread.currentThread().interrupt();
             }
+        }
+    }
+
+    /**
+     * Route one fire log into the schedule's state machine. Shared by the poller
+     * and by {@link #recordManualFireOutcome} so a manual fire cannot drift from a
+     * polled one.
+     * <p>
+     * Three outcomes, not two. SKIPPED is the one that is neither: the coordinator
+     * dropped the turn without consuming the input (busy or human-paused
+     * conversation), so nothing ran — but nothing broke either, and feeding it to
+     * {@link #onFireFailed} dead-lettered a healthy heartbeat after
+     * {@code max-retries} consecutive skips.
+     */
+    private void recordFireOutcome(ScheduleConfiguration schedule, ScheduleFireLog fireLog) {
+        String status = fireLog != null ? fireLog.status() : null;
+        if (FireStatus.COMPLETED.name().equals(status)) {
+            onFireCompleted(schedule);
+        } else if (FireStatus.SKIPPED.name().equals(status)) {
+            onFireSkipped(schedule);
+        } else {
+            onFireFailed(schedule);
+        }
+    }
+
+    /**
+     * Release the claim of a skipped fire and re-arm the schedule at its next
+     * cadence, WITHOUT touching failCount.
+     * <p>
+     * A due time that has NOT yet arrived is kept as it is rather than rolled
+     * forward. Only a polled fire is guaranteed to be overdue; a manual "fire now"
+     * claims at any time — {@code tryClaim} deliberately has no
+     * {@code nextFire <= now} guard — so an operator firing a daily heartbeat in
+     * the morning, into a conversation a human happens to be chatting in, would
+     * otherwise push tonight's delivery out by a whole interval. Nothing ran, so
+     * nothing was consumed: the still-pending fire IS the next cadence, and
+     * advancing past it cancels a scheduled delivery silently. This is where a skip
+     * parts company with a success, which does consume the pending fire (see
+     * {@link #recordManualFireOutcome}).
+     * <p>
+     * A schedule with no next cadence — a one-shot whose moment has passed — has
+     * nothing to re-arm to, and leaving it PENDING with nextFire in the past is a
+     * tight re-fire loop. Those fall through to {@link #onFireFailed}, which
+     * retries them with backoff and eventually dead-letters: for a one-shot that is
+     * the honest outcome, because the single delivery it existed for really never
+     * happened.
+     */
+    private void onFireSkipped(ScheduleConfiguration schedule) {
+        try {
+            Instant due = schedule.getNextFire();
+            Instant nextFire = due != null && due.isAfter(Instant.now()) ? due : computeNextFire(schedule);
+            if (nextFire == null) {
+                onFireFailed(schedule);
+                return;
+            }
+            scheduleStore.markSkipped(schedule.getId(), nextFire);
+            fireSkippedCounter.increment();
+            LOGGER.infof("[SCHEDULE] Fire of schedule '%s' (id=%s) was skipped (conversation busy or awaiting a human); "
+                    + "re-armed for %s without counting a failure", schedule.getName(), schedule.getId(), nextFire);
+        } catch (Exception e) {
+            LOGGER.errorf(e, "[SCHEDULE] Failed to re-arm skipped schedule %s", schedule.getId());
         }
     }
 
@@ -442,13 +523,21 @@ public class SchedulePollerService {
      * would seize the claim of a fire that is still running — the opposite of what
      * claiming is for. {@code now - leaseTimeout} steals only a genuinely stale
      * claim.
+     * <p>
+     * A store failure PROPAGATES rather than becoming {@code false}. The caller
+     * turns {@code false} into "409 — already being fired", which during a database
+     * blip is a claim about the cluster that nothing verified; the exception maps
+     * to a 500, which is what actually happened.
      *
      * @return {@code true} when this call now owns the schedule; {@code false} when
-     *         the poller or another operator is already firing it
+     *         the schedule is not in a claimable state — the poller or another
+     *         operator is firing it, or it is dead-lettered or still in backoff
+     * @throws IResourceStore.ResourceStoreException
+     *             if the claim could not be attempted at all
      */
-    public boolean claimForManualFire(ScheduleConfiguration schedule) {
+    public boolean claimForManualFire(ScheduleConfiguration schedule) throws IResourceStore.ResourceStoreException {
         Instant now = Instant.now();
-        return claimSchedule(schedule, now, now.minus(leaseTimeout));
+        return tryClaimFor(schedule, now, now.minus(leaseTimeout));
     }
 
     /**
@@ -478,15 +567,16 @@ public class SchedulePollerService {
      * on a pending one-shot is therefore not a rehearsal: it is the run. An
      * operator who wants it back must re-arm it through {@code POST
      * /schedules/{id}/enable}, which does handle {@code oneTimeAt}.</li>
+     * <li>A SKIPPED manual fire — the operator pressed "fire now" while the
+     * conversation was busy or awaiting a human — releases the claim without
+     * counting a failure, exactly as a polled skip does, and is the one outcome
+     * that does NOT consume a pending fire: nothing ran, so a due time still in the
+     * future is left untouched (see {@link #onFireSkipped}).</li>
      * </ul>
      */
     public void recordManualFireOutcome(ScheduleConfiguration schedule, ScheduleFireLog fireLog) {
         try {
-            if (fireLog != null && FireStatus.COMPLETED.name().equals(fireLog.status())) {
-                onFireCompleted(schedule);
-            } else {
-                onFireFailed(schedule);
-            }
+            recordFireOutcome(schedule, fireLog);
         } catch (Exception e) {
             LOGGER.errorf(e, "[SCHEDULE] Could not record the outcome of a manual fire of schedule %s", schedule.getId());
         }

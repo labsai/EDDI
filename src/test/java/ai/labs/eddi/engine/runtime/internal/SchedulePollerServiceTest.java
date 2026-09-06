@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.runtime.internal;
 
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
@@ -12,9 +13,11 @@ import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
@@ -33,14 +36,26 @@ class SchedulePollerServiceTest {
 
     private IScheduleStore scheduleStore;
     private ScheduleFireExecutor fireExecutor;
+    private SimpleMeterRegistry meterRegistry;
     private SchedulePollerService poller;
+
+    /**
+     * {@code eddi.schedule.claim.conflict} is documented to operators as "instances
+     * racing for the same schedule", so WHICH paths bump it is part of the
+     * contract, not an implementation detail. The counter is therefore asserted
+     * wherever a claim is refused or fails.
+     */
+    private double claimConflicts() {
+        return meterRegistry.counter("eddi.schedule.claim.conflict").count();
+    }
 
     @BeforeEach
     void setUp() {
         scheduleStore = mock(IScheduleStore.class);
         fireExecutor = mock(ScheduleFireExecutor.class);
+        meterRegistry = new SimpleMeterRegistry();
 
-        poller = new SchedulePollerService(scheduleStore, fireExecutor, new SimpleMeterRegistry(), true, // enabled
+        poller = new SchedulePollerService(scheduleStore, fireExecutor, meterRegistry, true, // enabled
                 Duration.ofMinutes(5), // leaseTimeout
                 5, // maxRetries
                 15, // backoffBaseSeconds
@@ -133,7 +148,7 @@ class SchedulePollerServiceTest {
 
         poller.pollDueSchedules();
 
-        var scheduleCaptor = org.mockito.ArgumentCaptor.forClass(ScheduleConfiguration.class);
+        var scheduleCaptor = ArgumentCaptor.forClass(ScheduleConfiguration.class);
         verify(fireExecutor).fire(scheduleCaptor.capture(), eq("test-instance"), eq(1));
         String firedFireId = scheduleCaptor.getValue().getFireId();
         assertNotNull(firedFireId, "fireId must be populated after a successful claim");
@@ -447,7 +462,7 @@ class SchedulePollerServiceTest {
 
         poller.pollDueSchedules();
 
-        var nextFire = org.mockito.ArgumentCaptor.forClass(Instant.class);
+        var nextFire = ArgumentCaptor.forClass(Instant.class);
         verify(scheduleStore).markCompleted(eq("hb-drift"), nextFire.capture());
         assertEquals(due.plusSeconds(60), nextFire.getValue(),
                 "the cadence must be due + interval, not finish-time + interval");
@@ -483,7 +498,7 @@ class SchedulePollerServiceTest {
         poller.pollDueSchedules();
         Instant afterPoll = Instant.now();
 
-        var clamped = org.mockito.ArgumentCaptor.forClass(Instant.class);
+        var clamped = ArgumentCaptor.forClass(Instant.class);
         verify(scheduleStore).markCompleted(eq("hb-overrun"), clamped.capture());
         assertFalse(clamped.getValue().isBefore(beforePoll.plusSeconds(60)),
                 "an overrun fire must be clamped to now + interval, not left in the past: " + clamped.getValue());
@@ -503,7 +518,7 @@ class SchedulePollerServiceTest {
 
         poller.pollDueSchedules();
 
-        var kept = org.mockito.ArgumentCaptor.forClass(Instant.class);
+        var kept = ArgumentCaptor.forClass(Instant.class);
         verify(scheduleStore).markCompleted(eq("hb-late"), kept.capture());
         assertEquals(due.plusSeconds(60), kept.getValue(),
                 "a fire that ran late but inside the interval keeps the cadence — the clamp is for "
@@ -523,7 +538,7 @@ class SchedulePollerServiceTest {
 
         poller.pruneFireLogs();
 
-        var cutoff = org.mockito.ArgumentCaptor.forClass(Instant.class);
+        var cutoff = ArgumentCaptor.forClass(Instant.class);
         verify(scheduleStore).deleteFireLogsOlderThan(cutoff.capture());
         assertTrue(cutoff.getValue().isBefore(Instant.now().minus(Duration.ofDays(89))), "cutoff: " + cutoff.getValue());
     }
@@ -546,6 +561,137 @@ class SchedulePollerServiceTest {
         assertDoesNotThrow(() -> poller.pruneFireLogs());
     }
 
+    /**
+     * {@code eddi.schedule.enabled=false} switches the whole poller off, and the
+     * retention sweep is part of the poller. An operator who disabled scheduling on
+     * an instance — the usual reason being that another instance owns it — must not
+     * find this one still deleting rows from the shared fire-log table.
+     */
+    @Test
+    void pruneFireLogs_disabledPollerDoesNotPrune() throws Exception {
+        var disabled = pollerWithRetention(false, Duration.ofDays(90));
+
+        disabled.pruneFireLogs();
+
+        verify(scheduleStore, never()).deleteFireLogsOlderThan(any());
+    }
+
+    /**
+     * A negative retention is the same "keep everything" instruction zero is, and
+     * has to be treated as one: subtracting it would put the cutoff in the FUTURE
+     * and delete the entire fire log, including the rows written moments ago.
+     */
+    @Test
+    void pruneFireLogs_negativeRetentionKeepsEverything() throws Exception {
+        var keepAll = pollerWithRetention(true, Duration.ofDays(-1));
+
+        keepAll.pruneFireLogs();
+
+        verify(scheduleStore, never()).deleteFireLogsOlderThan(any());
+    }
+
+    @Test
+    void pruneFireLogs_unsetRetentionKeepsEverything() throws Exception {
+        var keepAll = pollerWithRetention(true, null);
+
+        keepAll.pruneFireLogs();
+
+        verify(scheduleStore, never()).deleteFireLogsOlderThan(any());
+    }
+
+    /**
+     * The metric counts ROWS, and it is what tells an operator whether retention is
+     * working at all. A sweep that deleted nothing must leave it alone, or a flat
+     * table and a rising counter would say the opposite of the truth.
+     */
+    @Test
+    void pruneFireLogs_countsDeletedRowsAndOnlyWhenSomethingWasDeleted() throws Exception {
+        var registry = new SimpleMeterRegistry();
+        var counting = new SchedulePollerService(scheduleStore, fireExecutor, registry, true, Duration.ofMinutes(5), 5, 15, 4,
+                Optional.of("test-instance"), "UTC", Duration.ofDays(90));
+        counting.init();
+
+        when(scheduleStore.deleteFireLogsOlderThan(any())).thenReturn(0);
+        counting.pruneFireLogs();
+        assertEquals(0.0, registry.counter("eddi.schedule.firelog.pruned").count(),
+                "an empty sweep must not report pruned rows");
+
+        when(scheduleStore.deleteFireLogsOlderThan(any())).thenReturn(12);
+        counting.pruneFireLogs();
+        assertEquals(12.0, registry.counter("eddi.schedule.firelog.pruned").count(),
+                "the counter measures rows removed, not sweeps run");
+    }
+
+    private SchedulePollerService pollerWithRetention(boolean enabled, Duration retention) {
+        var service = new SchedulePollerService(scheduleStore, fireExecutor, new SimpleMeterRegistry(), enabled, Duration.ofMinutes(5), 5,
+                15, 4, Optional.of("test-instance"), "UTC", retention);
+        service.init();
+        return service;
+    }
+
+    /**
+     * A skip re-arms from the schedule's own cadence when there is no due time to
+     * keep. {@code nextFire} is null on a row that has never been armed, and
+     * treating null as "already due" would hand {@code markSkipped} a null instant
+     * — which both stores write as a null {@code nextFire}, i.e. a schedule
+     * {@code findDueSchedules} can never match again.
+     */
+    @Test
+    void poll_skippedCronWithNoDueTime_reArmsFromTheCronCadence() throws Exception {
+        var schedule = makeCronSchedule("sched-skip-6", "0 9 * * *", "hi");
+        schedule.setNextFire(null);
+        when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
+        when(scheduleStore.tryClaim(any(), any(), any(), any())).thenReturn(true);
+        when(fireExecutor.fire(any(), any(), anyInt())).thenReturn(makeFireLog("sched-skip-6", FireStatus.SKIPPED.name()));
+
+        poller.pollDueSchedules();
+
+        var nextFire = ArgumentCaptor.forClass(Instant.class);
+        verify(scheduleStore).markSkipped(eq("sched-skip-6"), nextFire.capture());
+        assertNotNull(nextFire.getValue(), "a null nextFire would strand the schedule permanently");
+        assertTrue(nextFire.getValue().isAfter(Instant.now()), "re-armed into the past: " + nextFire.getValue());
+    }
+
+    @Test
+    void poll_skippedHeartbeatWithNoDueTime_anchorsOnNowPlusTheInterval() throws Exception {
+        var schedule = makeHeartbeatSchedule("sched-skip-7", 3600, "heartbeat");
+        schedule.setNextFire(null);
+        when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
+        when(scheduleStore.tryClaim(any(), any(), any(), any())).thenReturn(true);
+        when(fireExecutor.fire(any(), any(), anyInt())).thenReturn(makeFireLog("sched-skip-7", FireStatus.SKIPPED.name()));
+
+        Instant before = Instant.now();
+        poller.pollDueSchedules();
+
+        var nextFire = ArgumentCaptor.forClass(Instant.class);
+        verify(scheduleStore).markSkipped(eq("sched-skip-7"), nextFire.capture());
+        assertFalse(nextFire.getValue().isBefore(before.plusSeconds(3600)),
+                "with no due time to anchor on, the interval runs from now: " + nextFire.getValue());
+        assertTrue(nextFire.getValue().isBefore(Instant.now().plusSeconds(3660)), "nextFire: " + nextFire.getValue());
+    }
+
+    /**
+     * A store failure while re-arming a skip must not escalate. The schedule stays
+     * CLAIMED and becomes reclaimable when its lease expires; turning the failure
+     * into a FAILED/dead-letter path instead would punish a healthy schedule for a
+     * database blip, which is exactly what routing skips away from
+     * {@code onFireFailed} exists to prevent.
+     */
+    @Test
+    void poll_skipReArmFailure_isSwallowedAndNeverCountsAsAFailure() throws Exception {
+        var schedule = makeHeartbeatSchedule("sched-skip-8", 3600, "heartbeat");
+        when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
+        when(scheduleStore.tryClaim(any(), any(), any(), any())).thenReturn(true);
+        when(fireExecutor.fire(any(), any(), anyInt())).thenReturn(makeFireLog("sched-skip-8", FireStatus.SKIPPED.name()));
+        doThrow(new IResourceStore.ResourceStoreException("db down")).when(scheduleStore).markSkipped(any(), any());
+
+        assertDoesNotThrow(() -> poller.pollDueSchedules());
+
+        verify(scheduleStore, never()).markFailed(any(), any());
+        verify(scheduleStore, never()).markDeadLettered(any());
+        verify(scheduleStore, never()).markCompleted(any(), any());
+    }
+
     // --- Manual fires (REST) ---
 
     /**
@@ -561,20 +707,98 @@ class SchedulePollerServiceTest {
 
         assertTrue(poller.claimForManualFire(schedule));
 
-        var now = org.mockito.ArgumentCaptor.forClass(Instant.class);
-        var leaseExpiry = org.mockito.ArgumentCaptor.forClass(Instant.class);
+        var now = ArgumentCaptor.forClass(Instant.class);
+        var leaseExpiry = ArgumentCaptor.forClass(Instant.class);
         verify(scheduleStore).tryClaim(eq("manual-1"), eq("test-instance"), now.capture(), leaseExpiry.capture());
         assertEquals(now.getValue().minus(Duration.ofMinutes(5)), leaseExpiry.getValue(),
                 "a manual fire must not be able to steal a live claim");
         assertEquals("manual-1_" + now.getValue(), schedule.getFireId(), "the in-memory copy must mirror the persisted fireId");
     }
 
+    /**
+     * A refused manual claim is not cluster contention, and the counter is the
+     * reason the two callers of the CAS claim are deliberately different methods:
+     * {@code eddi.schedule.claim.conflict} is documented as "instances racing for
+     * the same schedule", and a manual fire is refused for states the poller never
+     * even fetches (dead-lettered, or FAILED still inside its backoff). Moving the
+     * increment down into the shared {@code tryClaimFor} would make the metric
+     * react to an operator pressing "Fire now".
+     */
     @Test
-    void claimForManualFire_refusesWhenTheScheduleIsAlreadyClaimed() throws Exception {
+    void claimForManualFire_refusesWithoutClaimingClusterContention() throws Exception {
         var schedule = makeCronSchedule("manual-2", "0 9 * * *", "hi");
         when(scheduleStore.tryClaim(eq("manual-2"), any(), any(), any())).thenReturn(false);
 
         assertFalse(poller.claimForManualFire(schedule));
+
+        assertEquals(0.0, claimConflicts(),
+                "an operator pressing Fire now on an unclaimable schedule is not two instances racing");
+    }
+
+    /**
+     * A store failure is not a claim conflict.
+     * <p>
+     * The shared claim helper caught every exception and returned false, so a
+     * database blip reached the operator as a 409 "already being fired (claimed by
+     * another instance or the poller)" — a statement about the cluster that nothing
+     * had checked — and bumped {@code eddi.schedule.claim.conflict}, the metric
+     * operators are told means instances racing for the same schedule. Propagating
+     * lets {@code fireNow}'s existing handler answer 500, which is what happened.
+     */
+    @Test
+    void claimForManualFire_propagatesAStoreFailureInsteadOfReportingAConflict() throws Exception {
+        var schedule = makeCronSchedule("manual-8", "0 9 * * *", "hi");
+        when(scheduleStore.tryClaim(eq("manual-8"), any(), any(), any()))
+                .thenThrow(new IResourceStore.ResourceStoreException("db down"));
+
+        assertThrows(IResourceStore.ResourceStoreException.class, () -> poller.claimForManualFire(schedule));
+
+        assertEquals(0.0, claimConflicts(),
+                "a database blip must not be recorded as instances racing for the schedule");
+    }
+
+    /**
+     * The POLLER keeps swallowing a store failure — one unclaimable schedule must
+     * never abort the rest of the batch — which is why the two callers of the CAS
+     * claim are deliberately different methods.
+     * <p>
+     * Swallowing it is not the same as calling it a conflict, though. A database
+     * blip leaves {@code eddi.schedule.claim.conflict} alone on this path too: the
+     * counter answers "how often did two instances race", and nobody checked the
+     * cluster here.
+     */
+    @Test
+    void poll_stillTreatsAStoreFailureAsAnUnclaimedScheduleWithoutAbortingTheBatch() throws Exception {
+        var failing = makeCronSchedule("batch-1", "0 9 * * *", "hi");
+        var claimable = makeCronSchedule("batch-2", "0 9 * * *", "hi");
+        when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(failing, claimable));
+        when(scheduleStore.tryClaim(eq("batch-1"), any(), any(), any()))
+                .thenThrow(new IResourceStore.ResourceStoreException("db down"));
+        when(scheduleStore.tryClaim(eq("batch-2"), any(), any(), any())).thenReturn(true);
+        when(fireExecutor.fire(any(), any(), anyInt())).thenReturn(makeFireLog("batch-2", FireStatus.COMPLETED.name()));
+
+        assertDoesNotThrow(() -> poller.pollDueSchedules());
+
+        verify(fireExecutor, never()).fire(argThat(s -> "batch-1".equals(s.getId())), any(), anyInt());
+        verify(fireExecutor).fire(argThat(s -> "batch-2".equals(s.getId())), any(), anyInt());
+        assertEquals(0.0, claimConflicts(), "a store error is not a claim conflict, on either path");
+    }
+
+    /**
+     * The other half of the same contract: a CAS claim that a peer genuinely won IS
+     * what the metric counts, and it is counted on the poll path — where "another
+     * instance got it" is actually true.
+     */
+    @Test
+    void poll_aLostCasClaimIsTheOneThingCountedAsAClaimConflict() throws Exception {
+        var contested = makeCronSchedule("contested-1", "0 9 * * *", "hi");
+        when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(contested));
+        when(scheduleStore.tryClaim(eq("contested-1"), any(), any(), any())).thenReturn(false);
+
+        poller.pollDueSchedules();
+
+        verifyNoInteractions(fireExecutor);
+        assertEquals(1.0, claimConflicts(), "a lost CAS claim on the poll path is exactly what the metric means");
     }
 
     @Test
@@ -659,6 +883,168 @@ class SchedulePollerServiceTest {
         // null nextFire is what markCompleted reads as "one-shot finished — disable
         // it".
         verify(scheduleStore).markCompleted("manual-7", null);
+    }
+
+    // --- Skipped fires (a dropped turn is not a failed one) ---
+
+    /**
+     * The regression that made recording a skip as FAILED worse than the bug it
+     * fixed.
+     * <p>
+     * A HEARTBEAT defaults to {@code conversationStrategy=persistent}, so while its
+     * conversation is paused on a HITL approval — or while a human is simply
+     * chatting in it — EVERY fire is skipped. Fed to {@code onFireFailed} those
+     * skips accumulate failCount, and with the defaults (max-retries 5, backoff
+     * 15s×4^(n-1)) the fifth one DEAD_LETTERS the schedule about 21 minutes into a
+     * pause that HITL approval timeouts routinely allow to run for hours. The
+     * cadence was then dead until an operator posted /retry, and
+     * {@code eddi.schedule.fire.deadlettered} — documented "alert on any increase"
+     * — fired for a perfectly healthy schedule.
+     */
+    @Test
+    void poll_consecutiveSkips_neverDeadLetterTheSchedule() throws Exception {
+        var schedule = makeHeartbeatSchedule("sched-skip", 60, "heartbeat");
+        when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
+        when(scheduleStore.tryClaim(any(), any(), any(), any())).thenReturn(true);
+        when(fireExecutor.fire(any(), any(), anyInt())).thenReturn(makeFireLog("sched-skip", FireStatus.SKIPPED.name()));
+
+        // Ten consecutive skips — twice max-retries. The schedule object keeps its
+        // failCount across them because nothing may increment it.
+        for (int i = 0; i < 10; i++) {
+            poller.pollDueSchedules();
+        }
+
+        verify(scheduleStore, never()).markDeadLettered(any());
+        verify(scheduleStore, never()).markFailed(any(), any());
+        verify(scheduleStore, times(10)).markSkipped(eq("sched-skip"), any());
+        assertEquals(0, schedule.getFailCount(), "a skip must not count as a failed attempt");
+    }
+
+    /**
+     * A skip must not CLEAR the failure state either. Routing it through
+     * {@code markCompleted} would have been the cheap fix, but a schedule that
+     * alternates between failing and being skipped — a wedged conversation makes
+     * exactly that shape — would then reset its failCount on every other fire and
+     * could never reach max-retries.
+     */
+    @Test
+    void poll_skippedFire_doesNotClearAnExistingFailureCount() throws Exception {
+        var schedule = makeHeartbeatSchedule("sched-skip-2", 60, "heartbeat");
+        schedule.setFailCount(3);
+        when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
+        when(scheduleStore.tryClaim(any(), any(), any(), any())).thenReturn(true);
+        when(fireExecutor.fire(any(), any(), anyInt())).thenReturn(makeFireLog("sched-skip-2", FireStatus.SKIPPED.name()));
+
+        poller.pollDueSchedules();
+
+        verify(scheduleStore, never()).markCompleted(any(), any());
+        verify(scheduleStore).markSkipped(eq("sched-skip-2"), any());
+    }
+
+    /**
+     * A skipped heartbeat whose due time has ARRIVED — every polled skip, by
+     * definition, since {@code findDueSchedules} filters on {@code nextFire <= now}
+     * — is re-armed on the drift-proof anchor, like any other: due + interval, not
+     * now + interval.
+     */
+    @Test
+    void poll_skippedHeartbeat_isReArmedOnTheDueTimeAnchor() throws Exception {
+        var schedule = makeHeartbeatSchedule("sched-skip-3", 3600, "heartbeat");
+        Instant due = Instant.now().minusSeconds(120).truncatedTo(ChronoUnit.SECONDS);
+        schedule.setNextFire(due);
+        when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
+        when(scheduleStore.tryClaim(any(), any(), any(), any())).thenReturn(true);
+        when(fireExecutor.fire(any(), any(), anyInt())).thenReturn(makeFireLog("sched-skip-3", FireStatus.SKIPPED.name()));
+
+        poller.pollDueSchedules();
+
+        verify(scheduleStore).markSkipped("sched-skip-3", due.plusSeconds(3600));
+    }
+
+    /**
+     * The counterpart, and the reason the anchor alone is not enough: a due time
+     * that has NOT arrived must survive the skip untouched.
+     * <p>
+     * Only the poller is guaranteed to fire an overdue schedule — {@code tryClaim}
+     * has no {@code nextFire <= now} guard, so {@code POST /{id}/fire} claims at
+     * any time. Rolling the anchor forward there would take an operator's "fire
+     * now" on a daily heartbeat at 09:00, have the coordinator skip it because a
+     * human is chatting in that persistent conversation, and silently cancel
+     * tonight's 23:00 delivery: nothing was delivered by the manual attempt,
+     * nothing counted as a failure, and the next fire is a day later than the
+     * operator's own config says. A skip consumed no fire, so it must consume no
+     * cadence either.
+     */
+    @Test
+    void poll_skippedHeartbeat_doesNotConsumeADueTimeThatIsStillInTheFuture() throws Exception {
+        var schedule = makeHeartbeatSchedule("sched-skip-5", 3600, "heartbeat");
+        schedule.setNextFire(Instant.parse("2099-01-01T00:00:00Z"));
+        when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
+        when(scheduleStore.tryClaim(any(), any(), any(), any())).thenReturn(true);
+        when(fireExecutor.fire(any(), any(), anyInt())).thenReturn(makeFireLog("sched-skip-5", FireStatus.SKIPPED.name()));
+
+        poller.pollDueSchedules();
+
+        verify(scheduleStore).markSkipped("sched-skip-5", Instant.parse("2099-01-01T00:00:00Z"));
+    }
+
+    /**
+     * A one-shot has no next cadence to re-arm to. Leaving it PENDING with
+     * {@code nextFire} in the past would be a tight re-fire loop for as long as the
+     * conversation stays busy, so a skipped one-shot goes through the retry machine
+     * after all — its single delivery genuinely never happened, and backoff plus
+     * dead-lettering is the bounded, visible answer.
+     */
+    @Test
+    void poll_skippedOneShot_fallsBackToRetryBecauseThereIsNoCadence() throws Exception {
+        var oneShot = makeCronSchedule("sched-skip-4", null, "once");
+        oneShot.setCronExpression(null);
+        oneShot.setOneTimeAt("2099-01-01T00:00:00Z");
+        when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(oneShot));
+        when(scheduleStore.tryClaim(any(), any(), any(), any())).thenReturn(true);
+        when(fireExecutor.fire(any(), any(), anyInt())).thenReturn(makeFireLog("sched-skip-4", FireStatus.SKIPPED.name()));
+
+        poller.pollDueSchedules();
+
+        verify(scheduleStore, never()).markSkipped(any(), any());
+        verify(scheduleStore).markFailed(eq("sched-skip-4"), any());
+    }
+
+    /**
+     * The manual path shares the state machine, so "fire now" pressed while the
+     * conversation is busy must not count a failure either — and, since the manual
+     * path is the one that can claim a schedule whose due time is still ahead, must
+     * leave that due time exactly where it was. This is the shape the operator
+     * actually hits: fire a daily heartbeat by hand in the morning, get skipped,
+     * and still get tonight's scheduled run.
+     */
+    @Test
+    void recordManualFireOutcome_skippedFireReArmsWithoutCountingAFailure() throws Exception {
+        var schedule = makeHeartbeatSchedule("manual-skip", 3600, "hi");
+        schedule.setNextFire(Instant.parse("2099-01-01T00:00:00Z"));
+
+        poller.recordManualFireOutcome(schedule, makeFireLog("manual-skip", FireStatus.SKIPPED.name()));
+
+        verify(scheduleStore).markSkipped("manual-skip", Instant.parse("2099-01-01T00:00:00Z"));
+        verify(scheduleStore, never()).markFailed(any(), any());
+        verify(scheduleStore, never()).markCompleted(any(), any());
+        verify(scheduleStore, never()).markDeadLettered(any());
+    }
+
+    /**
+     * A manual fire of a schedule that IS overdue still rolls the cadence forward:
+     * the guard is "has this fire's moment arrived", not "was it manual".
+     */
+    @Test
+    void recordManualFireOutcome_skippedFireOfAnOverdueHeartbeatStillAdvancesTheCadence() throws Exception {
+        var schedule = makeHeartbeatSchedule("manual-skip-overdue", 3600, "hi");
+        Instant due = Instant.now().minusSeconds(60).truncatedTo(ChronoUnit.SECONDS);
+        schedule.setNextFire(due);
+
+        poller.recordManualFireOutcome(schedule, makeFireLog("manual-skip-overdue", FireStatus.SKIPPED.name()));
+
+        verify(scheduleStore).markSkipped("manual-skip-overdue", due.plusSeconds(3600));
+        verify(scheduleStore, never()).markFailed(any(), any());
     }
 
     // --- Helpers ---

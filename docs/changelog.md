@@ -49,6 +49,36 @@ bottom of this file and are never archived.
 
 ---
 
+## ⏱️ fix(schedule): close the review round and pin the guards by mutation (2026-09-04)
+
+**Repo:** EDDI (`fix/review-schedules`)
+
+Follow-up on the same branch, from three independent review rounds plus a diff-coverage pass.
+
+**Two CI failures this branch caused are fixed.** `ImportStyleTest` was red because the branch
+introduced two inline fully-qualified names — the exact convention that test enforces — in
+`RestScheduleStoreTest` and `MongoScheduleStoreTest`. And the vendored fuzz sources drifted
+because a Javadoc reformat of `PathNavigator` diverged from the copy `.clusterfuzzlite`
+vendors; the cosmetic edit is reverted rather than re-syncing the vendored file, keeping the
+diff to what the findings required.
+
+**Tests that could not fail were replaced.** Five were proven vacuous by mutation, not by
+inspection. Two `WordSplitter` cases never reached the bounds guard they claimed to pin — one
+used an input whose index made the new `i > 0 &&` term unreachable. A `MongoScheduleStore` test
+asserted `!rendered.contains("triggerType=CRON")` on a `Bson.toString()` where that string can
+never appear, so it was unconditionally true; it now encodes through the real codec registry
+and asserts BSON null for an absent trigger type and the value for a present one, catching both
+an invented default and a hardcoded null.
+
+Two further claims were **disputed with evidence and left alone**: their "changed" line was a
+rename from an inline FQN to an import, mandated by AGENTS.md 4.7. No test can fail on the
+revert of a rename, so the correct remedy is to drop the line from the coverage claim, not the
+test from the suite — and both were shown to kill real mutants first.
+
+**Diff coverage** of changed lines: 94.4% to 99.2% line, 89.3% to 98.2% branch.
+
+---
+
 ## ⏰ fix(schedule): correct fire bookkeeping, persistence and manual-fire claiming (2026-09-04)
 
 **Repo:** EDDI (`fix/review-schedules`)

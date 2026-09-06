@@ -34,7 +34,9 @@ public interface IRestScheduleStore {
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(description = "List schedules, newest first. Optional filter by agentId. "
             + "Paged: 'limit' is capped at 1000 (default 500) and 'offset' skips that many rows. "
-            + "A response holding exactly 'limit' entries may be truncated — request the next page to find out.")
+            + "A response holding exactly 'limit' entries may be truncated — request the next page to find out. "
+            + "Human-in-the-loop approval-timeout schedules are excluded for non-admins by the query itself, "
+            + "so they never occupy a slot in the page.")
     List<ScheduleConfiguration> readAllSchedules(@QueryParam("agentId") String agentId, @QueryParam("limit")
     @DefaultValue("500") int limit, @QueryParam("offset")
     @DefaultValue("0") int offset);

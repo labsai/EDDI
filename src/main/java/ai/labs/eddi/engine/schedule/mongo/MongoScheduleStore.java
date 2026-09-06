@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.schedule.mongo;
 
+import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
@@ -122,6 +123,11 @@ public class MongoScheduleStore implements IScheduleStore {
         // Fix #14: index on status for readFailedFireLogs()
         fireLogCollection.createIndex(Indexes.compoundIndex(Indexes.ascending(STATUS), Indexes.descending(STARTED_AT)),
                 new IndexOptions().name("idx_fire_logs_status"));
+        // Standalone startedAt index for the retention sweep (deleteFireLogsOlderThan).
+        // Neither compound index above can serve a range on startedAt alone — MongoDB
+        // cannot skip a compound index's leading field — so without this the hourly
+        // prune is a full scan of exactly the collection it exists to keep bounded.
+        fireLogCollection.createIndex(Indexes.ascending(STARTED_AT), new IndexOptions().name("idx_fire_logs_startedAt"));
     }
 
     // ========================= CRUD =========================
@@ -190,6 +196,16 @@ public class MongoScheduleStore implements IScheduleStore {
      * {@code persistentConversationId} are therefore NOT written here — they are
      * owned by {@link #createSchedule}, the claim/completion methods and
      * {@link #setPersistentConversationId}.
+     * <p>
+     * That includes {@code fireStatus} and {@code failCount}. They used to be
+     * written from the caller's object, which made an ordinary PUT a
+     * read-modify-write over live lifecycle state: read PENDING, poller claims,
+     * UPDATE lands and writes PENDING back over the fresh CLAIMED — the running
+     * fire is un-claimed and the next poll fires it again into the same persistent
+     * conversation. Carrying the values over in the REST layer only narrowed that
+     * to a millisecond window and left any non-REST caller un-claiming
+     * unconditionally, so the columns are simply not part of a configuration
+     * update. {@code nextFire} stays, because an edited cron legitimately re-arms.
      */
     @Override
     public void updateSchedule(String scheduleId, ScheduleConfiguration schedule)
@@ -216,8 +232,6 @@ public class MongoScheduleStore implements IScheduleStore {
             updates.add(set("allowSelfScheduling", schedule.isAllowSelfScheduling()));
             updates.add(set(ENABLED, schedule.isEnabled()));
             updates.add(set(NEXT_FIRE, schedule.getNextFire() == null ? null : epochMillis(schedule.getNextFire())));
-            updates.add(set(FIRE_STATUS, schedule.getFireStatus() != null ? schedule.getFireStatus().name() : FireStatus.PENDING.name()));
-            updates.add(set(FAIL_COUNT, schedule.getFailCount()));
             updates.add(set(METADATA, schedule.getMetadata()));
             updates.add(set(UPDATED_AT, epochMillis(now)));
 
@@ -291,6 +305,13 @@ public class MongoScheduleStore implements IScheduleStore {
             // that no erasure path can find again.
             deleteFireLogsByScheduleId(scheduleId);
             scheduleCollection.deleteOne(eq(ID, scheduleId));
+            // Second pass, for the same reason the bulk cascades run one — and this is
+            // the more likely path to need it, being the one an operator uses to remove
+            // a schedule that is firing right now. MongoDB cannot span the two
+            // collections in one transaction, so a fire log written between the two
+            // statements above would outlive its schedule carrying a conversationId
+            // nothing can find again. See {@link #sweepFireLogsOf}.
+            sweepFireLogsOf(List.of(scheduleId));
             LOGGER.infof("Deleted schedule id=%s", sanitize(scheduleId));
         } catch (IResourceStore.ResourceStoreException e) {
             throw e;
@@ -302,8 +323,9 @@ public class MongoScheduleStore implements IScheduleStore {
     @Override
     public int deleteSchedulesByAgentId(String agentId) throws IResourceStore.ResourceStoreException {
         try {
-            deleteFireLogsOfSchedulesMatching(eq(AGENT_ID, agentId));
+            List<String> ids = deleteFireLogsOfSchedulesMatching(eq(AGENT_ID, agentId));
             var result = scheduleCollection.deleteMany(eq(AGENT_ID, agentId));
+            sweepFireLogsOf(ids);
             int count = (int) result.getDeletedCount();
             if (count > 0) {
                 LOGGER.infof("Cascade-deleted %d schedule(s) for Agent %s", count, sanitize(agentId));
@@ -327,8 +349,9 @@ public class MongoScheduleStore implements IScheduleStore {
         try {
             // The fire logs go with them: each carries a conversationId of the user
             // being erased, and once the schedule row is gone nothing can find them.
-            deleteFireLogsOfSchedulesMatching(eq(USER_ID, userId));
+            List<String> ids = deleteFireLogsOfSchedulesMatching(eq(USER_ID, userId));
             var result = scheduleCollection.deleteMany(eq(USER_ID, userId));
+            sweepFireLogsOf(ids);
             int count = (int) result.getDeletedCount();
             if (count > 0) {
                 LOGGER.infof("Erased %d schedule(s) owned by user %s", count, sanitize(userId));
@@ -342,8 +365,9 @@ public class MongoScheduleStore implements IScheduleStore {
     @Override
     public int deleteSchedulesByName(String name) throws IResourceStore.ResourceStoreException {
         try {
-            deleteFireLogsOfSchedulesMatching(eq(NAME, name));
+            List<String> ids = deleteFireLogsOfSchedulesMatching(eq(NAME, name));
             var result = scheduleCollection.deleteMany(eq(NAME, name));
+            sweepFireLogsOf(ids);
             int count = (int) result.getDeletedCount();
             if (count > 0) {
                 LOGGER.infof("Deleted %d HITL timeout schedule(s) with name '%s'", count, sanitize(name));
@@ -361,8 +385,9 @@ public class MongoScheduleStore implements IScheduleStore {
     }
 
     @Override
-    public List<ScheduleConfiguration> readAllSchedules(int limit, int offset) throws IResourceStore.ResourceStoreException {
-        return readSchedulePage(new Document(), limit, offset);
+    public List<ScheduleConfiguration> readAllSchedules(int limit, int offset, boolean excludeHitlTimeouts)
+            throws IResourceStore.ResourceStoreException {
+        return readSchedulePage(redacted(new Document(), excludeHitlTimeouts), limit, offset);
     }
 
     @Override
@@ -371,8 +396,25 @@ public class MongoScheduleStore implements IScheduleStore {
     }
 
     @Override
-    public List<ScheduleConfiguration> readSchedulesByAgentId(String agentId, int limit, int offset) throws IResourceStore.ResourceStoreException {
-        return readSchedulePage(new Document(AGENT_ID, agentId), limit, offset);
+    public List<ScheduleConfiguration> readSchedulesByAgentId(String agentId, int limit, int offset, boolean excludeHitlTimeouts)
+            throws IResourceStore.ResourceStoreException {
+        return readSchedulePage(redacted(new Document(AGENT_ID, agentId), excludeHitlTimeouts), limit, offset);
+    }
+
+    /**
+     * Add the HITL approval-timeout exclusion to a listing filter when the caller
+     * may not see those schedules — see
+     * {@link IScheduleStore#readAllSchedules(int, int, boolean)} for why this
+     * belongs in the query and not in a post-filter.
+     * <p>
+     * {@code $ne} also matches documents with no {@code metadata} at all, which is
+     * what is wanted: only an explicit {@code hitlType=hitl_timeout} is redacted.
+     */
+    private static Bson redacted(Bson filter, boolean excludeHitlTimeouts) {
+        if (!excludeHitlTimeouts) {
+            return filter;
+        }
+        return and(filter, ne(METADATA + "." + HitlSchedules.METADATA_TYPE_KEY, HitlSchedules.METADATA_TYPE_TIMEOUT));
     }
 
     // ========================= Polling & Claiming =========================
@@ -469,6 +511,24 @@ public class MongoScheduleStore implements IScheduleStore {
             scheduleCollection.updateOne(eq(ID, scheduleId), update);
         } catch (Exception e) {
             throw new IResourceStore.ResourceStoreException("Failed to mark failed: " + scheduleId, e);
+        }
+    }
+
+    /**
+     * Note what is NOT written here: no {@code failCount} (neither reset nor
+     * incremented), no {@code lastFired}, no {@code nextRetryAt}. A skipped turn
+     * never ran, so it is neither a success nor a failure — see
+     * {@link IScheduleStore#markSkipped}.
+     */
+    @Override
+    public void markSkipped(String scheduleId, Instant nextFire) throws IResourceStore.ResourceStoreException {
+        try {
+            long nowMs = epochMillis(Instant.now());
+            Bson update = combine(set(FIRE_STATUS, FireStatus.PENDING.name()), set(NEXT_FIRE, epochMillis(nextFire)), set(CLAIMED_BY, null),
+                    set(CLAIMED_AT, null), set(FIRE_ID, null), set(UPDATED_AT, nowMs));
+            scheduleCollection.updateOne(eq(ID, scheduleId), update);
+        } catch (Exception e) {
+            throw new IResourceStore.ResourceStoreException("Failed to mark skipped: " + scheduleId, e);
         }
     }
 
@@ -602,8 +662,20 @@ public class MongoScheduleStore implements IScheduleStore {
      * Cascade the fire logs of every schedule matching {@code filter}. Two steps
      * because the fire log only carries the scheduleId — resolve the ids first,
      * then delete their logs in one call.
+     * <p>
+     * MongoDB has no cross-collection transaction to offer here (PostgreSQL runs
+     * the same cascade as one), so this pass is not atomic with the schedule delete
+     * that follows it: a fire log written between the two — by an executor that is
+     * mid-fire on one of these schedules — would survive its schedule and carry the
+     * erased user's conversationId with nothing left to find it by. Hence the
+     * second pass in {@link #sweepFireLogsOf}, over the ids resolved here, once the
+     * schedules are gone. A fire that commits after even THAT still orphans its
+     * log; closing that window needs a tombstone or an FK the fire path checks, a
+     * schema change beyond this fix, and both backends share the residual window.
+     *
+     * @return the ids of the matched schedules, for the post-delete sweep
      */
-    private void deleteFireLogsOfSchedulesMatching(Bson filter) throws IResourceStore.ResourceStoreException {
+    private List<String> deleteFireLogsOfSchedulesMatching(Bson filter) throws IResourceStore.ResourceStoreException {
         try {
             List<String> ids = new ArrayList<>();
             for (var doc : scheduleCollection.find(filter).projection(new Document(ID, 1))) {
@@ -615,8 +687,28 @@ public class MongoScheduleStore implements IScheduleStore {
             if (!ids.isEmpty()) {
                 fireLogCollection.deleteMany(in(SCHEDULE_ID, ids));
             }
+            return ids;
         } catch (Exception e) {
             throw new IResourceStore.ResourceStoreException("Failed to cascade-delete fire logs", e);
+        }
+    }
+
+    /**
+     * Second cascade pass, run AFTER the schedules themselves are deleted, over the
+     * ids the first pass covered — the ones resolved by
+     * {@link #deleteFireLogsOfSchedulesMatching} for a bulk cascade, or the single
+     * id of {@link #deleteSchedule}. It costs one indexed {@code deleteMany} and
+     * catches every log written during the window described on that method — the
+     * usual case being an in-flight fire of a schedule that is being erased.
+     */
+    private void sweepFireLogsOf(List<String> ids) throws IResourceStore.ResourceStoreException {
+        if (ids.isEmpty()) {
+            return;
+        }
+        try {
+            fireLogCollection.deleteMany(in(SCHEDULE_ID, ids));
+        } catch (Exception e) {
+            throw new IResourceStore.ResourceStoreException("Failed to sweep cascade-deleted fire logs", e);
         }
     }
 

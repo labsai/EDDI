@@ -100,6 +100,17 @@ class FileUtilitiesTest {
         assertEquals("dir1" + File.separator + "file.txt", FileUtilities.buildPath("dir1", null, "file.txt"));
     }
 
+    /**
+     * A null varargs ARRAY is a different shape from a null element and reaches the
+     * for-each directly. It arrives whenever a caller forwards a {@code String[]}
+     * it never populated, and the empty path is the same answer {@code buildPath()}
+     * already gives — never an NPE from inside a path helper.
+     */
+    @Test
+    void buildPath_nullArray_returnsEmptyRatherThanThrowing() {
+        assertEquals("", assertDoesNotThrow(() -> FileUtilities.buildPath((String[]) null)));
+    }
+
     @Test
     void readTextFromFile_readsUtf8Exactly(@TempDir Path tempDir) throws IOException {
         // ready() is "can I read without blocking", not "is there more" — the old loop

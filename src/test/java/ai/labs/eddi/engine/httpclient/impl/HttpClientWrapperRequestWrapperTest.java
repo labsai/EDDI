@@ -288,6 +288,31 @@ class HttpClientWrapperRequestWrapperTest {
     }
 
     @Nested
+    @DisplayName("RequestWrapper — send")
+    class SendTests {
+
+        /**
+         * An unknown body encoding is a configuration error in the agent's httpCall,
+         * and it has to arrive as an {@link IRequest.HttpRequestException} naming the
+         * encoding. Letting the raw {@code IllegalArgumentException} out of the buffer
+         * construction would escape the request's own failure channel, so the caller
+         * never sees it as a request failure and the offending encoding is named
+         * nowhere. Nothing may be sent either.
+         */
+        @Test
+        @DisplayName("unknown body encoding fails the request, naming the encoding")
+        void invalidBodyEncodingIsReportedAsARequestFailure() {
+            IRequest request = wrapper.newRequest(URI.create("http://example.com"));
+            request.setBodyEntity("payload", "no-such-charset", "text/plain");
+
+            var thrown = assertThrows(IRequest.HttpRequestException.class, request::send);
+
+            assertTrue(thrown.getMessage().contains("no-such-charset"), thrown.getMessage());
+            verify(mockVertxRequest, never()).sendBuffer(any(), any());
+        }
+    }
+
+    @Nested
     @DisplayName("RequestWrapper — toMap")
     class ToMapTests {
 

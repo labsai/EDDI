@@ -106,7 +106,7 @@ For heartbeat triggers, use `heartbeatIntervalSeconds` instead of `cronExpressio
 }
 ```
 
-Heartbeats are **drift-proof** — after a fire completes, the next fire is calculated as `lastFired + interval`, not `now + interval`.
+Heartbeats are **drift-proof** — the next fire is the time this fire was *due* plus the interval, not the moment the turn happened to finish. A 40 s turn on a 60 s heartbeat still fires every 60 s. (`lastFired + interval` would *be* the drifting formula: `lastFired` is the completion instant. The one exception is a fire that overran a whole interval — anchoring on the due time would put the next fire in the past, which is a re-fire loop rather than catching up, so it is clamped to `now + interval`.)
 
 ### Schedule Fields
 
@@ -155,6 +155,23 @@ Heartbeats are **drift-proof** — after a fire completes, the next fire is calc
 > a polled fire does, so a successful manual fire of a `oneTimeAt` schedule
 > disables it — it is the run, not a rehearsal. Re-arm it with
 > `POST /{id}/enable`.
+>
+> **Firing a heartbeat manually consumes its next scheduled fire.** Same reason:
+> a successful fire re-arms the schedule from the fire it was *due* to make, so
+> firing a daily heartbeat by hand in the morning moves the next one to a day
+> after that due time — tonight's run is skipped, not brought forward.
+>
+> **A *skipped* manual fire does not.** If the coordinator drops the turn because
+> the conversation is busy or `AWAITING_HUMAN`, nothing was delivered, so nothing
+> is consumed: a due time still in the future is left exactly where it was and
+> tonight's run happens as configured. Only a due time that has already passed is
+> rolled forward to the next cadence.
+>
+> A manual fire is **synchronous**: the request holds open until the turn
+> finishes or `eddi.schedule.fire-timeout` (default 5 minutes) elapses, so a
+> proxy or client with a shorter read timeout may give up before the fire log
+> comes back. The fire itself continues, and the schedule stays claimed until it
+> ends — a retry in the meantime answers `409`.
 
 ### Admin Endpoints
 
@@ -242,15 +259,44 @@ curl http://localhost:7070/schedulestore/schedules/{scheduleId}/fires?limit=20
 curl http://localhost:7070/schedulestore/schedules/admin/failed?limit=50
 ```
 
+> **What `cost` means depends on the fire path, and the two are not the same
+> quantity.** A conversation fire reports the **tool** spend of that turn — the
+> `ToolCostTracker` delta — so a schedule whose agent only talks to the model,
+> with no tool calls, reports `0.00` however many tokens it used. A dream
+> consolidation fire reports its own **estimated LLM** cost. Compare a fire log
+> against others on the same path, and use `maxCostPerFire` / `maxCostPerRun`
+> rather than the logged number to bound spend.
+
 ### State Machine
 
 Each schedule follows a state machine:
 
 ```text
 PENDING → CLAIMED → EXECUTING → COMPLETED
+                              → SKIPPED → (re-arm, no failure counted) → PENDING
                               → FAILED → (retry) → PENDING
                               → DEAD_LETTERED → (manual retry/dismiss)
 ```
+
+`SKIPPED` is a **fire-log status only** — it is never stored on the schedule
+itself. It means the coordinator dropped the scheduled turn without consuming
+the input because the conversation was already busy or `AWAITING_HUMAN`. That is
+the normal state of a `persistent` heartbeat while a human is chatting in its
+conversation, or while a previous fire waits on a HITL approval, so a skip is
+logged and counted but **never** enters the retry/backoff/dead-letter machine:
+`failCount` is left exactly as it was and the claim is released.
+
+Re-arming is deliberately conservative, because a skip delivered nothing:
+
+- **Due time already passed** (every polled skip, and a manual fire of an overdue
+  schedule) → advanced to the next cadence, on the same drift-proof anchor a
+  successful fire uses.
+- **Due time still in the future** (only reachable through `POST /{id}/fire`,
+  which claims regardless of `nextFire`) → left untouched. The pending fire *is*
+  the next cadence, so advancing past it would silently cancel a scheduled
+  delivery that nothing replaced.
+- **A one-shot whose moment has passed** has no cadence to re-arm to, so it does
+  go through retry/backoff — its single delivery genuinely never happened.
 
 ## Cluster Awareness
 
@@ -298,6 +344,7 @@ variables — Quarkus maps `eddi.schedule.poll-interval` to
 | `eddi.schedule.poll.count` | Counter | Poller liveness. Flat means the poller is not running — check `eddi.schedule.enabled` |
 | `eddi.schedule.fire.count` | Counter | Fires executed |
 | `eddi.schedule.fire.failed` | Counter | Fires that raised. Compare against `fire.count` for a failure rate |
+| `eddi.schedule.fire.skipped` | Counter | Fires dropped because the target conversation was busy or awaiting a human. Not failures and never dead-lettered, but a heartbeat that only ever skips is delivering nothing — compare against `fire.count` |
 | `eddi.schedule.fire.deadlettered` | Counter | Fires that exhausted `max-retries`. **Alert on any increase** — these need manual retry or dismissal |
 | `eddi.schedule.fire.duration` | Timer | If p99 approaches `lease-timeout`, double execution is imminent |
 | `eddi.schedule.claim.conflict` | Counter | Instances racing for the same schedule. Normal and expected in a cluster; a sharp rise alongside falling `fire.count` suggests contention rather than work |

@@ -6569,7 +6569,8 @@
         {
           "id": 77,
           "type": "timeseries",
-          "title": "Poll / fire / fail",
+          "title": "Poll / fire / fail / skip",
+          "description": "`skipped` is neither a success nor a failure: the coordinator dropped the turn without consuming the input (the conversation was IN_PROGRESS or AWAITING_HUMAN), so the schedule was re-armed at its next cadence with failCount untouched and will never dead-letter on skips alone. A skip line that tracks the fire line is a schedule whose message is being dropped every cycle while `failed` and `deadlettered` stay flat.",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
@@ -6613,6 +6614,17 @@
               "editorMode": "code",
               "range": true,
               "legendFormat": "failed"
+            },
+            {
+              "refId": "D",
+              "expr": "sum(rate(eddi_schedule_fire_skipped_total{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "skipped"
             }
           ],
           "fieldConfig": {

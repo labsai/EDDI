@@ -209,6 +209,47 @@ class PathNavigatorTest {
         assertDoesNotThrow(() -> PathNavigator.setValue("a", null, "value"));
     }
 
+    /**
+     * A last segment the segment grammar does not recognise is a malformed path,
+     * and setValue's contract is to write nothing rather than invent a key. Storing
+     * {@code "items[abc]"} as a literal map key would leave a plausible-looking
+     * entry that nothing can ever read back through the same path.
+     */
+    @Test
+    void shouldWriteNothingWhenTheLastSegmentIsMalformed() {
+        Map<String, Object> map = new HashMap<>();
+        map.put("items", new ArrayList<>(List.of("a", "b")));
+
+        PathNavigator.setValue("items[abc]", map, "X");
+
+        assertEquals(1, map.size(), "no key may be invented: " + map);
+        assertEquals(List.of("a", "b"), map.get("items"));
+    }
+
+    /** An indexed write against something that is not a list must do nothing. */
+    @Test
+    void shouldWriteNothingWhenTheIndexedTargetIsNotAList() {
+        Map<String, Object> map = new HashMap<>();
+        map.put("items", "not a list");
+
+        PathNavigator.setValue("items[0]", map, "X");
+
+        assertEquals("not a list", map.get("items"));
+    }
+
+    /**
+     * An indexed write needs a MAP to look the key up in. A bare list as the root
+     * offers no key to resolve, so the write is skipped rather than guessed at.
+     */
+    @Test
+    void shouldWriteNothingWhenAnIndexedPathHasNoMapToResolveTheKeyIn() {
+        List<Object> root = new ArrayList<>(List.of("a", "b"));
+
+        assertDoesNotThrow(() -> PathNavigator.setValue("items[0]", root, "X"));
+
+        assertEquals(List.of("a", "b"), root);
+    }
+
     // --- Multi-operand concatenation (the class's own documented example) ---
 
     /**
@@ -287,5 +328,88 @@ class PathNavigatorTest {
         Map<String, Object> root = Map.of("properties", Map.of("first", "John"));
 
         assertNull(PathNavigator.getValue("properties.missing-'oops", root));
+    }
+
+    // --- Associativity and operators inside literals ---
+
+    /**
+     * The class Javadoc promises left-to-right evaluation, but the split pattern
+     * was re-applied to the RIGHT-hand remainder, making it right-associative:
+     * {@code count-1-1} became {@code count-(1-1)} and answered 10 instead of 8.
+     * Silently — no error, no log line — through PropertySetterTask,
+     * MatchingUtilities and SizeMatcher.
+     */
+    @Test
+    void shouldFoldRepeatedSubtractionFromLeftToRight() {
+        Map<String, Object> root = Map.of("properties", Map.of("count", 10));
+
+        assertEquals(8, PathNavigator.getValue("properties.count-1-1", root));
+        assertEquals(4, PathNavigator.getValue("properties.count-5-1", root));
+        assertEquals(12, PathNavigator.getValue("properties.count+1+1", root));
+    }
+
+    /**
+     * An operator inside a quoted literal is part of the literal, not a separator.
+     * Splitting before recognising quotes truncated
+     * {@code properties.first+' - '+properties.last} — the most ordinary way to
+     * join two names — to just {@code John}: the remainder was split again at the
+     * hyphen inside the literal, every parse below it failed, and an empty string
+     * was concatenated.
+     */
+    @Test
+    void shouldTreatOperatorsInsideStringLiteralsAsText() {
+        Map<String, Object> root = Map.of("properties", Map.of("first", "John", "last", "Doe"));
+
+        assertEquals("John-Doe", PathNavigator.getValue("properties.first+'-'+properties.last", root));
+        assertEquals("John - Doe", PathNavigator.getValue("properties.first+' - '+properties.last", root));
+        assertEquals("John+Doe", PathNavigator.getValue("properties.first+'+'+properties.last", root));
+    }
+
+    /**
+     * Tokenising must not cost the hyphenated-key support: a key that really
+     * contains a hyphen has to keep resolving as one path segment even when it is
+     * not the first operand of the expression.
+     */
+    @Test
+    void shouldStillResolveAHyphenatedKeyAsTheRightOperand() {
+        Map<String, Object> root = Map.of("properties", Map.of("first", "John", "my-key", "present", "my", "shorter"));
+
+        assertEquals("Johnpresent", PathNavigator.getValue("properties.first+properties.my-key", root));
+    }
+
+    /**
+     * A sign belongs to the operand it precedes.
+     * <p>
+     * Splitting on every top-level {@code +}/{@code -} turned {@code count+-1} into
+     * {@code count}, {@code +}, EMPTY, {@code -}, {@code 1}: the empty operand
+     * parsed as null, the concatenation branch folded it into the String
+     * {@code "10"}, and {@code "10" - 1} is not an expression at all — so a
+     * template that adds a negative literal answered "not found", and the rule
+     * stopped matching or the property stopped being set.
+     */
+    @Test
+    void shouldEvaluateASignedNumericLiteralAsOneOperand() {
+        Map<String, Object> root = Map.of("properties", Map.of("count", 10));
+
+        assertEquals(9, PathNavigator.getValue("properties.count+-1", root));
+        assertEquals(11, PathNavigator.getValue("properties.count--1", root));
+        assertEquals(9, PathNavigator.getValue("properties.count + -1", root));
+        assertEquals(11.5, PathNavigator.getValue("properties.count--1.5", root));
+    }
+
+    /**
+     * A dangling operator is a malformed expression, and the only honest answer is
+     * "not found". Folding the left operand with an empty right one produced the
+     * String {@code "10"} — a plausible-looking value out of a broken expression,
+     * which is precisely the failure class this class refuses everywhere else.
+     */
+    @Test
+    void shouldRefuseAnExpressionWithADanglingOperator() {
+        Map<String, Object> root = Map.of("properties", Map.of("count", 10));
+
+        assertNull(PathNavigator.getValue("properties.count+", root));
+        assertNull(PathNavigator.getValue("properties.count-", root));
+        assertNull(PathNavigator.getValue("properties.count+1+", root));
+        assertNull(PathNavigator.getValue("properties.count+ ", root));
     }
 }

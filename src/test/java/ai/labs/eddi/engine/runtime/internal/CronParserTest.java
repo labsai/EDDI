@@ -178,6 +178,39 @@ class CronParserTest {
         assertEquals(3600, CronParser.computeMinIntervalSeconds("0 9,10 * * MON", UTC));
     }
 
+    /**
+     * The one that separates the two measurements at (almost) every instant, and
+     * therefore the test that fails if the horizon scan is reverted to
+     * {@code second - first}.
+     * <p>
+     * "0 9,10 * * MON" above states the contract but cannot enforce it on its own:
+     * its two fires are an hour apart and the weekly gap only shows up when the
+     * request arrives inside that hour, so the old single-gap measurement also
+     * answers 3600 for ~99 % of the week. These expressions have THREE fires with
+     * UNEQUAL gaps, and the tight pair is the second one: "0,10,11 0 1 1 *" fires
+     * on 1 January at 00:00, 00:10 and 00:11, so the gap that follows now is 600 s
+     * at every instant except the ten minutes a year between the first two fires,
+     * while the tightest gap the expression can produce is 60 s always. Same shape
+     * an hour wide for "0 0,6,7 1 1 *": 21600 s measured from now, 3600 s measured
+     * over the scan.
+     * <p>
+     * Both assertions are deterministic on correct code without an injected clock,
+     * because the scan is now-independent by construction: it starts at the next
+     * fire, and whichever of the three fires that happens to be, the wrap-around
+     * brings the tight pair into the scan before the horizon or the 64-fire ceiling
+     * stops it. That independence is the whole point of the change, so the test is
+     * exactly as stable as the property it pins.
+     */
+    @Test
+    void computeMinIntervalSeconds_isTheTightestGapEvenWhenItIsNotTheGapAfterNow() {
+        assertEquals(60, CronParser.computeMinIntervalSeconds("0,10,11 0 1 1 *", UTC),
+                "00:00 -> 00:10 -> 00:11: the policy is about the 60 s pair, not the 600 s one that "
+                        + "happens to come first");
+        assertEquals(3600, CronParser.computeMinIntervalSeconds("0 0,6,7 1 1 *", UTC),
+                "00:00 -> 06:00 -> 07:00: the tightest gap is the last pair, 3600 s, not the 21600 s "
+                        + "one the old single-gap measurement would report");
+    }
+
     @Test
     void computeMinIntervalSeconds_burstWithinAnHour() {
         // 09:00, 09:01, 09:02 then a day's gap — the policy cares about the 60s pair

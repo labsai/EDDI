@@ -25,6 +25,7 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -61,6 +62,10 @@ class McpAdminToolsBranchCoverageTest {
                 strictConfigurationParser(),
                 scheduleStore, scheduleFireExecutor, schedulePollerService,
                 identity, false);
+        // fire_schedule_now claims the schedule first, exactly as the poller and the
+        // REST endpoint do. Default the claim to "won" so tests about anything else
+        // still reach the fire.
+        when(schedulePollerService.claimForManualFire(any())).thenReturn(true);
     }
 
     // ─── deployAgent ────────────────────────────────────────────────────
@@ -750,6 +755,74 @@ class McpAdminToolsBranchCoverageTest {
             verify(scheduleFireExecutor).fire(schedule, "inst1", 1);
         }
 
+        /**
+         * {@code fire_schedule_now} used to call the executor directly: no cluster
+         * claim, so it raced the poller — and with
+         * {@code conversationStrategy=persistent} both pushed a turn into the SAME
+         * conversation — and no {@code recordManualFireOutcome}, so the fire never
+         * reached the retry/backoff/one-shot state machine. A failure here did not
+         * increment failCount and a success did not re-arm the schedule. Routing it
+         * through the same claim/fire/finally flow as the REST endpoint is the point.
+         */
+        @Test
+        @DisplayName("claims the schedule and records the outcome, like the REST endpoint")
+        void claimsAndRecordsTheOutcome() throws Exception {
+            var schedule = new ScheduleConfiguration();
+            schedule.setName("test");
+            schedule.setFailCount(2);
+            when(scheduleStore.readSchedule("sched1")).thenReturn(schedule);
+            when(schedulePollerService.getInstanceId()).thenReturn("inst1");
+            var fireLog = new ScheduleFireLog("log1", "sched1", "fire1", Instant.now(), Instant.now(),
+                    Instant.now(), "COMPLETED", "inst1", "conv1", null, 3, 0.0);
+            when(scheduleFireExecutor.fire(any(), anyString(), anyInt())).thenReturn(fireLog);
+            when(jsonSerialization.serialize(any())).thenReturn("{}");
+
+            tools.fireScheduleNow("sched1");
+
+            var inOrder = inOrder(schedulePollerService, scheduleFireExecutor);
+            inOrder.verify(schedulePollerService).claimForManualFire(schedule);
+            // The attempt this actually is, not a constant 1: a manual retry of a
+            // schedule on its third failure logged as "attempt 1" and hid the history.
+            inOrder.verify(scheduleFireExecutor).fire(schedule, "inst1", 3);
+            inOrder.verify(schedulePollerService).recordManualFireOutcome(schedule, fireLog);
+        }
+
+        @Test
+        @DisplayName("a refused claim does not fire")
+        void refusedClaimDoesNotFire() throws Exception {
+            var schedule = new ScheduleConfiguration();
+            schedule.setName("test");
+            when(scheduleStore.readSchedule("sched1")).thenReturn(schedule);
+            when(schedulePollerService.claimForManualFire(any())).thenReturn(false);
+            when(jsonSerialization.serialize(any())).thenReturn("{}");
+
+            tools.fireScheduleNow("sched1");
+
+            verify(scheduleFireExecutor, never()).fire(any(), anyString(), anyInt());
+            verify(schedulePollerService, never()).recordManualFireOutcome(any(), any());
+        }
+
+        /**
+         * REST refuses a manual fire of a HITL approval timeout for EVERYONE, because
+         * firing it applies the configured AUTO_APPROVE/AUTO_REJECT/ABORT decision with
+         * a system actor and no owner/admin/approver check. This tool must refuse too,
+         * or it is the same bypass behind a different door.
+         */
+        @Test
+        @DisplayName("refuses a HITL approval timeout")
+        void refusesHitlTimeoutSchedule() throws Exception {
+            var schedule = new ScheduleConfiguration();
+            schedule.setName("hitl-timeout-conv-1");
+            schedule.setMetadata(Map.of("hitlType", "hitl_timeout", "conversationId", "conv-1"));
+            when(scheduleStore.readSchedule("sched1")).thenReturn(schedule);
+            when(jsonSerialization.serialize(any())).thenReturn("{}");
+
+            tools.fireScheduleNow("sched1");
+
+            verify(schedulePollerService, never()).claimForManualFire(any());
+            verify(scheduleFireExecutor, never()).fire(any(), anyString(), anyInt());
+        }
+
         @Test
         @DisplayName("fire log with null completedAt/startedAt → duration null")
         void nullDuration() throws Exception {
@@ -764,6 +837,54 @@ class McpAdminToolsBranchCoverageTest {
             when(jsonSerialization.serialize(any())).thenReturn("{}");
 
             tools.fireScheduleNow("sched1");
+        }
+
+        /**
+         * The same interrupt discipline the REST endpoint got, on the tool that shares
+         * its flow.
+         * <p>
+         * {@code ScheduleFireExecutor.fire} deliberately re-asserts an interrupt that a
+         * blocking call inside it consumed, so on the interrupted path — shutdown, a
+         * cancelled tool invocation — this finally block runs with the flag set. The
+         * synchronous Mongo driver then throws {@code MongoInterruptedException} on
+         * connection checkout, {@code recordManualFireOutcome} swallows it, and the
+         * schedule stays CLAIMED with failCount never incremented until its lease
+         * expires. The flag must be parked across the write and re-asserted after it,
+         * or the cancellation signal is lost instead.
+         */
+        @Test
+        @DisplayName("an interrupted fire releases the claim with the flag parked, then restores it")
+        void interruptedFireReleasesTheClaimWithTheFlagParked() throws Exception {
+            var schedule = new ScheduleConfiguration();
+            schedule.setName("test");
+            when(scheduleStore.readSchedule("sched1")).thenReturn(schedule);
+            when(schedulePollerService.getInstanceId()).thenReturn("inst1");
+            var fireLog = new ScheduleFireLog("log1", "sched1", "fire1", Instant.now(), Instant.now(),
+                    Instant.now(), "FAILED", "inst1", "conv1", "interrupted", 1, 0.0);
+            // Mirror ScheduleFireExecutor.restoreInterrupt: the flag is set when fire()
+            // returns on the interrupted path.
+            when(scheduleFireExecutor.fire(any(), anyString(), anyInt())).thenAnswer(inv -> {
+                Thread.currentThread().interrupt();
+                return fireLog;
+            });
+            when(jsonSerialization.serialize(any())).thenReturn("{}");
+            var flagDuringRelease = new AtomicBoolean(true);
+            doAnswer(inv -> {
+                flagDuringRelease.set(Thread.currentThread().isInterrupted());
+                return null;
+            }).when(schedulePollerService).recordManualFireOutcome(any(), any());
+
+            try {
+                tools.fireScheduleNow("sched1");
+
+                assertFalse(flagDuringRelease.get(),
+                        "the bookkeeping write must not run under a set interrupt flag — the sync Mongo "
+                                + "driver throws MongoInterruptedException on connection checkout and the claim leaks");
+                assertTrue(Thread.currentThread().isInterrupted(),
+                        "the interrupt must be re-asserted afterwards, or the cancellation signal is swallowed");
+            } finally {
+                Thread.interrupted(); // never leak a set flag into the next test
+            }
         }
 
         @Test

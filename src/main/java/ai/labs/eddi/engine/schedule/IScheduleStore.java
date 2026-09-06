@@ -157,20 +157,36 @@ public interface IScheduleStore {
      * cadences are all created programmatically, so the cap is reachable without
      * anyone creating a schedule by hand.
      *
+     * {@code excludeHitlTimeouts} is part of the QUERY rather than something the
+     * caller filters out afterwards, and that is the whole point of the parameter.
+     * The REST layer redacts HITL approval-timeout schedules from non-admins; when
+     * it did so after the page came back, {@code limit} and {@code offset} were
+     * counted over rows the caller could not see. HITL timeouts are created
+     * programmatically — one per paused conversation, in bursts, sorting
+     * newest-first — so an editor's first page could legitimately come back short
+     * or entirely empty while later pages held their own schedules, and a client
+     * following the documented "a full page may be truncated, ask for the next one"
+     * rule stopped paging and never saw them.
+     *
      * @param limit
      *            maximum rows to return
      * @param offset
      *            rows to skip; 0 for the first page
+     * @param excludeHitlTimeouts
+     *            when true, rows whose metadata marks them as HITL approval
+     *            timeouts are excluded by the query, so limit/offset apply to the
+     *            visible set
      */
-    List<ScheduleConfiguration> readAllSchedules(int limit, int offset) throws IResourceStore.ResourceStoreException;
+    List<ScheduleConfiguration> readAllSchedules(int limit, int offset, boolean excludeHitlTimeouts) throws IResourceStore.ResourceStoreException;
 
     List<ScheduleConfiguration> readSchedulesByAgentId(String agentId) throws IResourceStore.ResourceStoreException;
 
     /**
      * Paged, deterministically ordered variant — see
-     * {@link #readAllSchedules(int, int)}.
+     * {@link #readAllSchedules(int, int, boolean)}.
      */
-    List<ScheduleConfiguration> readSchedulesByAgentId(String agentId, int limit, int offset) throws IResourceStore.ResourceStoreException;
+    List<ScheduleConfiguration> readSchedulesByAgentId(String agentId, int limit, int offset, boolean excludeHitlTimeouts)
+            throws IResourceStore.ResourceStoreException;
 
     // --- Polling & Claiming ---
 
@@ -235,6 +251,34 @@ public interface IScheduleStore {
      * Mark a schedule fire as failed. Increments failCount and sets nextRetryAt.
      */
     void markFailed(String scheduleId, Instant nextRetryAt) throws IResourceStore.ResourceStoreException;
+
+    /**
+     * Release the claim of a fire that was SKIPPED and re-arm the schedule at
+     * {@code nextFire}.
+     * <p>
+     * Deliberately neither {@link #markCompleted} nor {@link #markFailed}. A
+     * skipped turn is one the coordinator dropped without consuming the input,
+     * because the conversation was busy or paused on a human approval — so:
+     * <ul>
+     * <li>it is not a completion: {@code lastFired} must not move and
+     * {@code failCount} must not be CLEARED, or a schedule that alternates between
+     * failing and being skipped could never reach {@code max-retries};</li>
+     * <li>it is not a failure either: {@code failCount} must not be INCREMENTED, or
+     * a persistent heartbeat is dead-lettered by any human pause longer than the
+     * backoff budget (~21 minutes with the defaults) even though nothing about it
+     * is broken.</li>
+     * </ul>
+     * So this writes exactly two things: the claim is released (fireStatus back to
+     * PENDING, claim columns and fireId cleared) and {@code nextFire} is moved to
+     * the next cadence. Everything about the retry state is left exactly as the
+     * fire found it.
+     *
+     * @param nextFire
+     *            the next cadence, never null — a schedule with nothing to re-arm
+     *            to (a one-shot) is not routed here; see
+     *            {@code SchedulePollerService.onFireSkipped}
+     */
+    void markSkipped(String scheduleId, Instant nextFire) throws IResourceStore.ResourceStoreException;
 
     /**
      * Mark a schedule as dead-lettered (retries exhausted).

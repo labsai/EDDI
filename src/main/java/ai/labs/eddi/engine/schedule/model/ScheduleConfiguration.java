@@ -37,7 +37,21 @@ public class ScheduleConfiguration {
          * {@code findDueSchedules} and {@code tryClaim} about it — both currently treat
          * an EXECUTING row as unclaimable and unreclaimable, i.e. permanently stuck.
          */
-        EXECUTING, COMPLETED, FAILED, DEAD_LETTERED
+        EXECUTING, COMPLETED, FAILED, DEAD_LETTERED,
+        /**
+         * FIRE-LOG ONLY: the coordinator dropped the scheduled turn without consuming
+         * the input, because the conversation was already IN_PROGRESS or
+         * AWAITING_HUMAN. Nothing ran, so it is not a COMPLETED fire — but nothing
+         * BROKE either, so it must not enter the retry/dead-letter machine: a
+         * persistent heartbeat whose conversation a human is chatting in (or which is
+         * paused on a HITL approval) is skipped on every fire for as long as the pause
+         * lasts, and counting those as failures dead-lettered a perfectly healthy
+         * schedule after max-retries. The poller answers it by re-arming at the next
+         * cadence, leaving {@code failCount} untouched. Never written to a schedule
+         * row's {@code fireStatus}. Appended LAST on purpose: nothing may depend on the
+         * ordinals, and both stores persist {@code name()}.
+         */
+        SKIPPED
     }
 
     public enum TriggerType {

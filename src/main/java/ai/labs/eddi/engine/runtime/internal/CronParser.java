@@ -125,10 +125,18 @@ public final class CronParser {
     }
 
     /**
-     * How many fires to look ahead when measuring an expression's tightest gap. A
-     * week of one-minute fires is 10,080, so this horizon covers every sub-daily
-     * pattern in full and samples a long enough stretch of the rarer ones to find
-     * their tightest pair.
+     * How many fires to look ahead when measuring an expression's tightest gap.
+     * <p>
+     * Deliberately small. The tightest pair a cron expression can produce always
+     * appears within the first cycle of its innermost list or step — {@code 0,30 *
+     * * * *} shows its 30-minute gap inside one hour, {@code 0 9,10 * * MON} shows
+     * its one-hour gap on the first matching Monday — so a scan does not have to
+     * cover a whole period of the OUTER field to find the minimum. 64 successive
+     * fires comfortably span the innermost cycle of every field combination this
+     * parser accepts (at most 60 minute values, 24 hours, 7 weekdays), while
+     * keeping validation to a bounded handful of milliseconds: each step is a full
+     * {@link #computeNextFire} walk, so the count is a cost ceiling as much as a
+     * horizon. {@link #SCAN_HORIZON} stops the sparse expressions earlier still.
      */
     private static final int MIN_INTERVAL_SCAN_FIRES = 64;
 

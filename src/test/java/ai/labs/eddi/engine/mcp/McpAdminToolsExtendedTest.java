@@ -118,6 +118,10 @@ class McpAdminToolsExtendedTest {
 
         lenient().when(jsonSerialization.serialize(any())).thenReturn("{}");
         lenient().when(schedulePollerService.getInstanceId()).thenReturn("test-instance");
+        // fire_schedule_now claims the schedule first, exactly as the poller and the
+        // REST endpoint do. Default the claim to "won" so tests about anything else
+        // still reach the fire.
+        lenient().when(schedulePollerService.claimForManualFire(any())).thenReturn(true);
 
         var mockIdentity = mock(io.quarkus.security.identity.SecurityIdentity.class);
         lenient().when(mockIdentity.isAnonymous()).thenReturn(true);

@@ -5,11 +5,13 @@
 package ai.labs.eddi.ui;
 
 import jakarta.ws.rs.core.Response;
+import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.io.InputStream;
+import java.lang.reflect.Method;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -95,6 +97,21 @@ class RestHtmlChatResourceTest {
             assertNull(response.getEntity());
         } finally {
             Thread.currentThread().setContextClassLoader(previous);
+        }
+    }
+
+    /**
+     * {@code /chat} is an SPA shell, not an API operation — the same as the
+     * manager, workforce and welcome shells, all three of which are hidden. It
+     * alone showed up as a documented endpoint in the generated OpenAPI document.
+     */
+    @Test
+    @DisplayName("both /chat methods are hidden from the generated OpenAPI document")
+    void chatShellIsHiddenFromOpenApi() throws Exception {
+        for (Method method : IRestHtmlChatResource.class.getDeclaredMethods()) {
+            Operation operation = method.getAnnotation(Operation.class);
+            assertNotNull(operation, method.getName() + " has no @Operation(hidden = true)");
+            assertTrue(operation.hidden(), method.getName() + " must be hidden like every other SPA shell");
         }
     }
 }

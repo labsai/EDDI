@@ -98,6 +98,108 @@ class ScheduleFireExecutorTest {
         assertEquals(FireStatus.FAILED.name(), logged.getValue().status());
     }
 
+    /**
+     * A SKIPPED turn is not a successful fire.
+     * <p>
+     * {@code ConversationResponseHandler.onSkipped} defaults to {@code onComplete},
+     * so a single-method handler cannot tell them apart — and {@code onSkipped}
+     * means the coordinator DROPPED the input without consuming it, because the
+     * conversation was already IN_PROGRESS or AWAITING_HUMAN when the queued turn
+     * ran. That is the ordinary case for {@code conversationStrategy=persistent}
+     * (the default for every HEARTBEAT) while a previous fire is still executing,
+     * or while a human is chatting in the same conversation. Recorded COMPLETED,
+     * the poller re-armed the schedule and cleared failCount: the message the
+     * schedule existed to send was lost, with a green fire log and a null
+     * errorMessage.
+     * <p>
+     * It is not a FAILED fire either — that was the over-correction. A skip is its
+     * own outcome: visible in the fire log with a reason, but never fed to the
+     * retry/dead-letter machine, because a persistent heartbeat is skipped on every
+     * fire for as long as its conversation is paused and a HITL approval left open
+     * for ~21 minutes would otherwise dead-letter it. See
+     * {@code SchedulePollerService.onFireSkipped}.
+     */
+    @Test
+    void fire_turnSkippedBecauseTheConversationWasBusy_isRecordedSkipped() throws Exception {
+        var schedule = makeCronSchedule("sched-skip", "new");
+        when(conversationService.startConversation(any(), eq("agent-1"), eq("system:scheduler"), any()))
+                .thenReturn(new IConversationService.ConversationResult("conv-skip", null));
+
+        var busy = new SimpleConversationMemorySnapshot();
+        busy.setConversationState(ConversationState.IN_PROGRESS);
+        doAnswer(inv -> {
+            ((IConversationService.ConversationResponseHandler) inv.getArgument(8)).onSkipped(busy);
+            return null;
+        }).when(conversationService).say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+
+        ScheduleFireLog result = executor.fire(schedule, "instance-1", 1);
+
+        assertEquals(FireStatus.SKIPPED.name(), result.status(), "a dropped turn is neither a success nor a failure");
+        assertNotEquals(FireStatus.COMPLETED.name(), result.status(), "a dropped turn must not re-arm the schedule as a success");
+        assertNotEquals(FireStatus.FAILED.name(), result.status(), "a dropped turn must not enter the retry/dead-letter machine");
+        assertNotNull(result.errorMessage(), "a skipped fire must say why, or nothing distinguishes it from a green one");
+        assertTrue(result.errorMessage().contains("skipped"), "the reason must name the skip: " + result.errorMessage());
+    }
+
+    /** The same, for a conversation already paused on a human approval. */
+    @Test
+    void fire_turnSkippedBecauseTheConversationAwaitsAHuman_isRecordedSkipped() throws Exception {
+        var schedule = makeCronSchedule("sched-paused", "new");
+        when(conversationService.startConversation(any(), eq("agent-1"), eq("system:scheduler"), any()))
+                .thenReturn(new IConversationService.ConversationResult("conv-paused", null));
+
+        var paused = new SimpleConversationMemorySnapshot();
+        paused.setConversationState(ConversationState.AWAITING_HUMAN);
+        doAnswer(inv -> {
+            ((IConversationService.ConversationResponseHandler) inv.getArgument(8)).onSkipped(paused);
+            return null;
+        }).when(conversationService).say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+
+        assertEquals(FireStatus.SKIPPED.name(), executor.fire(schedule, "instance-1", 1).status());
+    }
+
+    /**
+     * A turn cut short mid-pipeline did not do the schedule's work either, so it
+     * belongs with ERROR rather than with success. Only ERROR used to be rejected.
+     */
+    @Test
+    void fire_conversationExecutionInterrupted_isRecordedFailed() throws Exception {
+        var schedule = makeCronSchedule("sched-interrupted", "new");
+        when(conversationService.startConversation(any(), eq("agent-1"), eq("system:scheduler"), any()))
+                .thenReturn(new IConversationService.ConversationResult("conv-interrupted", null));
+
+        var interrupted = new SimpleConversationMemorySnapshot();
+        interrupted.setConversationState(ConversationState.EXECUTION_INTERRUPTED);
+        doAnswer(inv -> {
+            ((IConversationService.ConversationResponseHandler) inv.getArgument(8)).onComplete(interrupted);
+            return null;
+        }).when(conversationService).say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+
+        assertEquals(FireStatus.FAILED.name(), executor.fire(schedule, "instance-1", 1).status());
+    }
+
+    /**
+     * A turn that paused for a human approval of its OWN accord still ran: the
+     * input was consumed and the pipeline executed, so it stays COMPLETED. That
+     * distinction is exactly what {@code onSkipped} carries, and it is why the
+     * handler has to implement both methods rather than inspect the state alone.
+     */
+    @Test
+    void fire_turnThatPausedItselfForApproval_isStillCompleted() throws Exception {
+        var schedule = makeCronSchedule("sched-hitl", "new");
+        when(conversationService.startConversation(any(), eq("agent-1"), eq("system:scheduler"), any()))
+                .thenReturn(new IConversationService.ConversationResult("conv-hitl", null));
+
+        var awaiting = new SimpleConversationMemorySnapshot();
+        awaiting.setConversationState(ConversationState.AWAITING_HUMAN);
+        doAnswer(inv -> {
+            ((IConversationService.ConversationResponseHandler) inv.getArgument(8)).onComplete(awaiting);
+            return null;
+        }).when(conversationService).say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+
+        assertEquals(FireStatus.COMPLETED.name(), executor.fire(schedule, "instance-1", 1).status());
+    }
+
     @Test
     void fire_conversationEndedReady_isStillCompleted() throws Exception {
         var schedule = makeCronSchedule("sched-ok", "new");
@@ -749,6 +851,28 @@ class ScheduleFireExecutorTest {
         ScheduleFireLog failed = executor.fire(failing, "instance-1", 2);
         assertEquals(FireStatus.FAILED.name(), failed.status(), "a real failure must retry and dead-letter");
         assertTrue(failed.errorMessage().contains("No workspace"), failed.errorMessage());
+    }
+
+    /**
+     * The fire log is a record of what happened, not a precondition for it. A store
+     * that cannot write it must not turn a cadence pull that already ran into a
+     * FAILED fire — the poller would then re-fire it, pulling the same backlog
+     * tasks into a second discussion. The outcome the caller sees is still the
+     * cadence's own.
+     */
+    @Test
+    @Timeout(10)
+    void fire_teamCadence_fireLogFailure_doesNotChangeTheOutcome() throws Exception {
+        var schedule = makeTeamCadenceSchedule("sched-cadence-4");
+        when(teamCadenceService.processScheduledFire(any()))
+                .thenReturn(new TeamCadenceService.CadenceResult("group-1", "cadence-1", "gc-9", 2, null, null));
+        doThrow(new RuntimeException("db down")).when(scheduleStore).logFire(any());
+
+        ScheduleFireLog result = assertDoesNotThrow(() -> executor.fire(schedule, "instance-1", 1));
+
+        assertEquals(FireStatus.COMPLETED.name(), result.status());
+        assertEquals("gc-9", result.conversationId());
+        verify(scheduleStore).logFire(any());
     }
 
     private static ScheduleConfiguration makeDreamSchedule(String id, String userId) {

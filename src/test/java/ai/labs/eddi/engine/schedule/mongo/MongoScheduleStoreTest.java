@@ -15,9 +15,11 @@ import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
 import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.result.DeleteResult;
 import com.mongodb.client.result.UpdateResult;
 import org.bson.BsonDocument;
+import org.bson.BsonValue;
 import org.bson.Document;
 import org.bson.conversions.Bson;
 import org.junit.jupiter.api.BeforeEach;
@@ -27,6 +29,7 @@ import org.mockito.ArgumentCaptor;
 
 import java.io.IOException;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
@@ -190,6 +193,65 @@ class MongoScheduleStoreTest {
     }
 
     /**
+     * The field list is a {@code $set} of explicit values, so an absent triggerType
+     * has to be written as BSON null. Calling {@code name()} unguarded would throw
+     * an NPE from inside the update builder and fail the whole PUT; PostgreSQL
+     * binds SQL NULL for the same case, and the two backends must agree.
+     * <p>
+     * Asserted on the ENCODED document rather than on {@code Bson.toString()}. The
+     * builder renders as {@code Update{fieldName='triggerType', operator='$set',
+     * value=CRON}}, so a substring check for "triggerType=CRON" is unconditionally
+     * true and a production line that invented CRON for an absent trigger type —
+     * exactly what this test exists to prevent — sailed through it. Both directions
+     * are pinned here: null stays null, and a real value is still written.
+     */
+    @Test
+    @DisplayName("updateSchedule — a null triggerType is written as BSON null, never as an invented default")
+    void updateScheduleWithNullTriggerTypeWritesNull() throws Exception {
+        UpdateResult updateResult = mock(UpdateResult.class);
+        when(updateResult.getMatchedCount()).thenReturn(1L);
+        when(scheduleCollection.updateOne(any(Bson.class), any(Bson.class))).thenReturn(updateResult);
+
+        ScheduleConfiguration config = new ScheduleConfiguration();
+        config.setTriggerType(null);
+        store.updateSchedule("sched-1", config);
+
+        ArgumentCaptor<Bson> update = ArgumentCaptor.forClass(Bson.class);
+        verify(scheduleCollection).updateOne(any(Bson.class), update.capture());
+        BsonDocument set = encodedSet(update.getValue());
+        assertTrue(set.containsKey("triggerType"), "the field must still be $set, so the column is cleared: " + set.toJson());
+        assertTrue(set.get("triggerType").isNull(),
+                "an absent trigger type must be written as BSON null, not as an invented default: " + set.toJson());
+
+        clearInvocations(scheduleCollection);
+        when(scheduleCollection.updateOne(any(Bson.class), any(Bson.class))).thenReturn(updateResult);
+        ScheduleConfiguration withType = new ScheduleConfiguration();
+        withType.setTriggerType(ScheduleConfiguration.TriggerType.HEARTBEAT);
+        store.updateSchedule("sched-1", withType);
+
+        ArgumentCaptor<Bson> typed = ArgumentCaptor.forClass(Bson.class);
+        verify(scheduleCollection).updateOne(any(Bson.class), typed.capture());
+        BsonDocument typedSet = encodedSet(typed.getValue());
+        // Checked before reading the value: getString() on a null (or absent) field
+        // throws BsonInvalidOperationException, and a regression that wrote null for
+        // every trigger type would surface as that crash rather than as a stated
+        // expectation — a test bug to whoever reads the CI mail, not a product bug.
+        assertTrue(typedSet.isString("triggerType"),
+                "a real trigger type must be written as a BSON string, not as null or another type: "
+                        + typedSet.toJson());
+        assertEquals("HEARTBEAT", typedSet.getString("triggerType").getValue(),
+                "a real trigger type must still be written by name");
+    }
+
+    /**
+     * The {@code $set} sub-document of an update, encoded exactly as the driver
+     * encodes it before putting the command on the wire.
+     */
+    private static BsonDocument encodedSet(Bson update) {
+        return update.toBsonDocument(Document.class, MongoClientSettings.getDefaultCodecRegistry()).getDocument("$set");
+    }
+
+    /**
      * updateSchedule was {@code replaceOne(eq(_id), toDocument(schedule))} — a
      * whole-document replace built from the request body. A normal PUT (the shape
      * the Manager, curl and MCP all send) omits the read-only fields, so every edit
@@ -219,6 +281,43 @@ class MongoScheduleStoreTest {
                 "persistentConversationId")) {
             assertFalse(rendered.contains(forbidden), forbidden + " must not be written by an ordinary update");
         }
+    }
+
+    /**
+     * A configuration update must not touch the fire lifecycle at all.
+     * <p>
+     * {@code fireStatus} and {@code failCount} used to be written from the caller's
+     * object (defaulting to PENDING when absent), which made every PUT a
+     * read-modify-write over live state: the REST layer read PENDING, the poller
+     * claimed the row, and this update then wrote PENDING back over the fresh
+     * CLAIMED. Because {@code tryClaim} accepts any PENDING row, the next poll
+     * started a duplicate fire into the very same persistent conversation. Carrying
+     * the values over in the REST layer narrowed the window to milliseconds and did
+     * nothing for a non-REST caller; the two fields belong to the claim/completion
+     * methods.
+     */
+    @Test
+    @DisplayName("updateSchedule — never writes fireStatus or failCount")
+    void updateScheduleDoesNotTouchTheFireLifecycle() throws Exception {
+        UpdateResult updateResult = mock(UpdateResult.class);
+        when(updateResult.getMatchedCount()).thenReturn(1L);
+        when(scheduleCollection.updateOne(any(Bson.class), any(Bson.class))).thenReturn(updateResult);
+
+        ScheduleConfiguration config = new ScheduleConfiguration();
+        config.setName("edited");
+        config.setFireStatus(FireStatus.PENDING);
+        config.setFailCount(0);
+        store.updateSchedule("sched-1", config);
+
+        ArgumentCaptor<Bson> update = ArgumentCaptor.forClass(Bson.class);
+        verify(scheduleCollection).updateOne(any(Bson.class), update.capture());
+        String rendered = update.getValue().toString();
+        assertFalse(rendered.contains("fireStatus"),
+                "writing fireStatus from a PUT un-claims a running fire: " + rendered);
+        assertFalse(rendered.contains("failCount"),
+                "failCount is owned by markFailed/markCompleted, not by an edit: " + rendered);
+        assertTrue(rendered.contains("nextFire"),
+                "nextFire stays: an edited cron or interval legitimately re-arms the schedule");
     }
 
     /**
@@ -311,9 +410,17 @@ class MongoScheduleStoreTest {
      * Fire logs are unreachable once their schedule is gone, and each carries a
      * conversationId — leaving them behind orphans personal data that no erasure
      * path can find again.
+     * <p>
+     * Like the bulk cascades, the single delete runs the cascade TWICE and the
+     * order is the point. This is the everyday path — {@code DELETE
+     * /schedulestore/schedules/{id}}, the one an operator reaches for to remove a
+     * schedule that is firing right now — so the window it has to close is the more
+     * likely one, not the rarer: a fire log written by an executor mid-fire on
+     * another instance, landing between the first cascade and the schedule delete,
+     * would outlive its schedule with nothing left to find it by.
      */
     @Test
-    @DisplayName("deleteSchedule — cascades the fire logs")
+    @DisplayName("deleteSchedule — cascades the fire logs, before AND after")
     void deleteScheduleCascadesFireLogs() throws Exception {
         DeleteResult logResult = mock(DeleteResult.class);
         when(logResult.getDeletedCount()).thenReturn(4L);
@@ -322,8 +429,17 @@ class MongoScheduleStoreTest {
 
         store.deleteSchedule("sched-1");
 
-        verify(fireLogCollection).deleteMany(any(Bson.class));
-        verify(scheduleCollection).deleteOne(any(Bson.class));
+        ArgumentCaptor<Bson> logFilter = ArgumentCaptor.forClass(Bson.class);
+        verify(fireLogCollection, times(2)).deleteMany(logFilter.capture());
+        for (Bson filter : logFilter.getAllValues()) {
+            String rendered = filter.toString();
+            assertTrue(rendered.contains("scheduleId"), "the cascade must scope by scheduleId: " + rendered);
+            assertTrue(rendered.contains("sched-1"), "the cascade must scope to the deleted schedule: " + rendered);
+        }
+        var inOrder = inOrder(fireLogCollection, scheduleCollection);
+        inOrder.verify(fireLogCollection).deleteMany(any(Bson.class));
+        inOrder.verify(scheduleCollection).deleteOne(any(Bson.class));
+        inOrder.verify(fireLogCollection).deleteMany(any(Bson.class));
     }
 
     @Test
@@ -346,9 +462,16 @@ class MongoScheduleStoreTest {
      * The three pre-existing bulk-delete tests assert only the returned count and
      * were given permissive cascade stubs in {@code setUp}, so they are silent
      * about whether the cascade runs at all. These are what pin it.
+     * <p>
+     * The cascade runs TWICE, and the order is the point. MongoDB cannot span the
+     * two collections in one transaction, so a fire log written between the first
+     * pass and the schedule delete — by an executor mid-fire on one of these
+     * schedules — would outlive its schedule carrying the erased user's
+     * conversationId. The second pass, over the same resolved ids and after the
+     * schedules are gone, closes that window.
      */
     @Test
-    @DisplayName("deleteSchedulesByUserId — cascades the fire logs of every matched schedule")
+    @DisplayName("deleteSchedulesByUserId — cascades the fire logs of every matched schedule, before AND after")
     void deleteSchedulesByUserIdCascadesFireLogs() throws Exception {
         stubScheduleIdProjection("sched-1", "sched-2");
         DeleteResult deleteResult = mock(DeleteResult.class);
@@ -358,15 +481,21 @@ class MongoScheduleStoreTest {
         assertEquals(2, store.deleteSchedulesByUserId("user-1"));
 
         ArgumentCaptor<Bson> logFilter = ArgumentCaptor.forClass(Bson.class);
-        verify(fireLogCollection).deleteMany(logFilter.capture());
-        String rendered = logFilter.getValue().toString();
-        assertTrue(rendered.contains("scheduleId"), "the cascade must scope by scheduleId: " + rendered);
-        assertTrue(rendered.contains("sched-1") && rendered.contains("sched-2"),
-                "every matched schedule's logs must go, not just the first: " + rendered);
+        verify(fireLogCollection, times(2)).deleteMany(logFilter.capture());
+        for (Bson filter : logFilter.getAllValues()) {
+            String rendered = filter.toString();
+            assertTrue(rendered.contains("scheduleId"), "the cascade must scope by scheduleId: " + rendered);
+            assertTrue(rendered.contains("sched-1") && rendered.contains("sched-2"),
+                    "every matched schedule's logs must go, not just the first: " + rendered);
+        }
+        var inOrder = inOrder(fireLogCollection, scheduleCollection);
+        inOrder.verify(fireLogCollection).deleteMany(any(Bson.class));
+        inOrder.verify(scheduleCollection).deleteMany(any(Bson.class));
+        inOrder.verify(fireLogCollection).deleteMany(any(Bson.class));
     }
 
     @Test
-    @DisplayName("deleteSchedulesByAgentId — cascades the fire logs of every matched schedule")
+    @DisplayName("deleteSchedulesByAgentId — cascades the fire logs of every matched schedule, before AND after")
     void deleteSchedulesByAgentIdCascadesFireLogs() throws Exception {
         stubScheduleIdProjection("sched-7");
         DeleteResult deleteResult = mock(DeleteResult.class);
@@ -376,12 +505,16 @@ class MongoScheduleStoreTest {
         assertEquals(1, store.deleteSchedulesByAgentId("agent-1"));
 
         ArgumentCaptor<Bson> logFilter = ArgumentCaptor.forClass(Bson.class);
-        verify(fireLogCollection).deleteMany(logFilter.capture());
-        assertTrue(logFilter.getValue().toString().contains("sched-7"), logFilter.getValue().toString());
+        verify(fireLogCollection, times(2)).deleteMany(logFilter.capture());
+        assertTrue(logFilter.getAllValues().stream().allMatch(f -> f.toString().contains("sched-7")), logFilter.getAllValues().toString());
+        var inOrder = inOrder(fireLogCollection, scheduleCollection);
+        inOrder.verify(fireLogCollection).deleteMany(any(Bson.class));
+        inOrder.verify(scheduleCollection).deleteMany(any(Bson.class));
+        inOrder.verify(fireLogCollection).deleteMany(any(Bson.class));
     }
 
     @Test
-    @DisplayName("deleteSchedulesByName — cascades the fire logs of every matched schedule")
+    @DisplayName("deleteSchedulesByName — cascades the fire logs of every matched schedule, before AND after")
     void deleteSchedulesByNameCascadesFireLogs() throws Exception {
         stubScheduleIdProjection("sched-9");
         DeleteResult deleteResult = mock(DeleteResult.class);
@@ -391,15 +524,58 @@ class MongoScheduleStoreTest {
         assertEquals(1, store.deleteSchedulesByName("hitl-timeout-conv-1"));
 
         ArgumentCaptor<Bson> logFilter = ArgumentCaptor.forClass(Bson.class);
-        verify(fireLogCollection).deleteMany(logFilter.capture());
-        assertTrue(logFilter.getValue().toString().contains("sched-9"), logFilter.getValue().toString());
+        verify(fireLogCollection, times(2)).deleteMany(logFilter.capture());
+        assertTrue(logFilter.getAllValues().stream().allMatch(f -> f.toString().contains("sched-9")), logFilter.getAllValues().toString());
+        var inOrder = inOrder(fireLogCollection, scheduleCollection);
+        inOrder.verify(fireLogCollection).deleteMany(any(Bson.class));
+        inOrder.verify(scheduleCollection).deleteMany(any(Bson.class));
+        inOrder.verify(fireLogCollection).deleteMany(any(Bson.class));
+    }
+
+    /**
+     * The bulk cascade's own failure must surface as a store exception rather than
+     * a raw driver error, and it must never be mistaken for "nothing matched": a
+     * caller that reads 0 back from a failed erasure records a compliance sweep
+     * that did not happen.
+     */
+    @Test
+    @DisplayName("deleteSchedulesByName — a driver failure becomes a ResourceStoreException")
+    void deleteSchedulesByNameStoreFailureIsWrapped() {
+        stubScheduleIdProjection("sched-9");
+        when(scheduleCollection.deleteMany(any(Bson.class))).thenThrow(new IllegalStateException("cluster down"));
+
+        var thrown = assertThrows(IResourceStore.ResourceStoreException.class,
+                () -> store.deleteSchedulesByName("hitl-timeout-conv-1"));
+        assertTrue(thrown.getMessage().contains("hitl-timeout-conv-1"), thrown.getMessage());
+    }
+
+    /**
+     * The SECOND cascade pass — the one that runs after the schedule row is gone —
+     * must not fail quietly. Its whole purpose is to catch a fire log written
+     * mid-delete, so a caller told the delete "succeeded" while the sweep threw
+     * would believe the erasure complete when a log carrying a conversationId
+     * outlived it.
+     */
+    @Test
+    @DisplayName("deleteSchedule — a failing post-delete sweep is reported, not swallowed")
+    void deleteScheduleReportsAFailingPostDeleteSweep() {
+        DeleteResult firstPass = mock(DeleteResult.class);
+        when(firstPass.getDeletedCount()).thenReturn(2L);
+        when(fireLogCollection.deleteMany(any(Bson.class))).thenReturn(firstPass)
+                .thenThrow(new IllegalStateException("cluster down"));
+        when(scheduleCollection.deleteOne(any(Bson.class))).thenReturn(mock(DeleteResult.class));
+
+        var thrown = assertThrows(IResourceStore.ResourceStoreException.class, () -> store.deleteSchedule("sched-1"));
+        assertTrue(thrown.getMessage().contains("sweep"),
+                "the second pass must be distinguishable from the first in the error: " + thrown.getMessage());
     }
 
     /**
      * A cascade over a filter that matches no schedule must not issue an unscoped
      * {@code deleteMany} — an {@code $in} over an empty id list would be harmless,
      * but the guard against it is what keeps a future refactor from turning "no
-     * matches" into "delete everything".
+     * matches" into "delete everything". That covers BOTH passes: the post-delete
+     * sweep carries the same empty-id guard.
      */
     @Test
     @DisplayName("bulk delete with no matching schedules touches no fire logs")
@@ -430,7 +606,7 @@ class MongoScheduleStoreTest {
             hasNext[i] = true;
         }
         hasNext[scheduleIds.length] = false;
-        when(cursor.hasNext()).thenReturn(hasNext[0], java.util.Arrays.copyOfRange(hasNext, 1, hasNext.length));
+        when(cursor.hasNext()).thenReturn(hasNext[0], Arrays.copyOfRange(hasNext, 1, hasNext.length));
         if (scheduleIds.length > 0) {
             Document[] rest = new Document[scheduleIds.length - 1];
             for (int i = 1; i < scheduleIds.length; i++) {
@@ -495,6 +671,23 @@ class MongoScheduleStoreTest {
         assertEquals(3, count);
     }
 
+    /**
+     * The retention sweep deletes on {@code startedAt} alone, and MongoDB cannot
+     * use a compound index without its leading field — so neither
+     * {@code (scheduleId, startedAt)} nor {@code (status, startedAt)} serves it.
+     * Without a standalone index the hourly prune scans the whole fire-log
+     * collection, which is exactly what it exists to keep bounded.
+     */
+    @Test
+    @DisplayName("indexes — a standalone startedAt index backs the retention sweep")
+    void fireLogIndexesIncludeAStandaloneStartedAt() {
+        var options = ArgumentCaptor.forClass(IndexOptions.class);
+        verify(fireLogCollection, atLeastOnce()).createIndex(any(Bson.class), options.capture());
+        assertTrue(options.getAllValues().stream().anyMatch(o -> "idx_fire_logs_startedAt".equals(o.getName())),
+                "the prune has no index it can use: "
+                        + options.getAllValues().stream().map(IndexOptions::getName).toList());
+    }
+
     // ==================== readAllSchedules ====================
 
     @Test
@@ -506,6 +699,41 @@ class MongoScheduleStoreTest {
         assertEquals(1, result.size());
     }
 
+    /**
+     * The HITL redaction belongs in the QUERY, not in a filter over the returned
+     * page. Filtering afterwards counted limit/offset over rows a non-admin cannot
+     * see, so an editor's first page could come back short — or empty — while later
+     * pages held their own schedules, and a client obeying the documented "a full
+     * page may be truncated" rule stopped paging and never saw them.
+     * <p>
+     * {@code $ne} also matches documents with no {@code metadata} at all, so only
+     * an explicit {@code hitlType=hitl_timeout} is excluded.
+     */
+    @Test
+    @DisplayName("readAllSchedules — excludes HITL timeouts in the filter, not after the page")
+    void readAllSchedulesExcludingHitlTimeoutsFiltersInTheQuery() throws Exception {
+        setupSchedulePageIteration();
+
+        store.readAllSchedules(50, 0, true);
+
+        var filter = ArgumentCaptor.forClass(Bson.class);
+        verify(scheduleCollection).find(filter.capture());
+        assertRedactsHitlTimeouts(filter.getValue());
+    }
+
+    @Test
+    @DisplayName("readAllSchedules — an admin listing carries no redaction filter")
+    void readAllSchedulesForAnAdminIsUnfiltered() throws Exception {
+        setupSchedulePageIteration();
+
+        store.readAllSchedules(50, 0, false);
+
+        var filter = ArgumentCaptor.forClass(Bson.class);
+        verify(scheduleCollection).find(filter.capture());
+        assertFalse(filter.getValue().toString().contains("hitlType"),
+                "an admin listing must not be filtered: " + filter.getValue());
+    }
+
     // ==================== readSchedulesByAgentId ====================
 
     @Test
@@ -515,6 +743,81 @@ class MongoScheduleStoreTest {
 
         List<ScheduleConfiguration> result = store.readSchedulesByAgentId("agent1");
         assertEquals(1, result.size());
+    }
+
+    @Test
+    @DisplayName("readSchedulesByAgentId — ANDs the redaction onto the agent filter")
+    void readSchedulesByAgentIdExcludingHitlTimeouts() throws Exception {
+        setupSchedulePageIteration();
+
+        store.readSchedulesByAgentId("agent1", 50, 0, true);
+
+        var filter = ArgumentCaptor.forClass(Bson.class);
+        verify(scheduleCollection).find(filter.capture());
+        BsonDocument rendered = encodedFilter(filter.getValue());
+        assertEquals("agent1", clauseFor(rendered, "agentId").asString().getValue(),
+                "the agent filter must survive the redaction: " + rendered.toJson());
+        assertRedactsHitlTimeouts(filter.getValue());
+    }
+
+    /**
+     * The redaction has to be the {@code $ne} clause, and the operator is the whole
+     * behaviour: {@code $eq} on the same field and value renders with the same two
+     * substrings a string-contains check looks for, but returns ONLY the HITL
+     * timeouts to a non-admin — the exact inverse of the redaction. {@code $ne} is
+     * also what makes documents carrying no {@code metadata} at all match, so only
+     * an explicit {@code hitlType=hitl_timeout} is excluded.
+     */
+    private static void assertRedactsHitlTimeouts(Bson filter) {
+        BsonDocument rendered = encodedFilter(filter);
+        BsonValue marker = clauseFor(rendered, "metadata.hitlType");
+        assertNotNull(marker, "the redaction must be part of the query filter: " + rendered.toJson());
+        assertTrue(marker.isDocument() && marker.asDocument().containsKey("$ne"),
+                "the redaction must EXCLUDE the marker with $ne — an equality match returns only the HITL timeouts: "
+                        + rendered.toJson());
+        assertEquals("hitl_timeout", marker.asDocument().getString("$ne").getValue(),
+                "the redaction must name the marker value: " + rendered.toJson());
+    }
+
+    /** The filter as the driver encodes it before putting the query on the wire. */
+    private static BsonDocument encodedFilter(Bson filter) {
+        return filter.toBsonDocument(Document.class, MongoClientSettings.getDefaultCodecRegistry());
+    }
+
+    /**
+     * The clause a rendered filter binds to {@code field}, whether the driver
+     * flattened the AND into one document or fell back to an explicit {@code $and}
+     * array. {@code null} when the field is not constrained at all.
+     */
+    private static BsonValue clauseFor(BsonDocument rendered, String field) {
+        if (rendered.containsKey(field)) {
+            return rendered.get(field);
+        }
+        if (rendered.containsKey("$and")) {
+            for (BsonValue clause : rendered.getArray("$and")) {
+                BsonValue found = clauseFor(clause.asDocument(), field);
+                if (found != null) {
+                    return found;
+                }
+            }
+        }
+        return null;
+    }
+
+    /** {@link #setupScheduleIteration} plus the sort/skip a paged read applies. */
+    private void setupSchedulePageIteration() throws Exception {
+        Document doc = new Document("_id", "sched-1");
+        MongoCursor<Document> cursor = mock(MongoCursor.class);
+        FindIterable<Document> iterable = mock(FindIterable.class);
+        when(scheduleCollection.find(any(Bson.class))).thenReturn(iterable);
+        when(iterable.sort(any(Document.class))).thenReturn(iterable);
+        when(iterable.skip(anyInt())).thenReturn(iterable);
+        when(iterable.limit(anyInt())).thenReturn(iterable);
+        doReturn(cursor).when(iterable).iterator();
+        when(cursor.hasNext()).thenReturn(true, false);
+        when(cursor.next()).thenReturn(doc);
+
+        when(documentBuilder.build(any(Document.class), eq(ScheduleConfiguration.class))).thenReturn(new ScheduleConfiguration());
     }
 
     // ==================== findDueSchedules ====================
@@ -571,6 +874,51 @@ class MongoScheduleStoreTest {
     void markFailed() throws Exception {
         when(scheduleCollection.updateOne(any(Bson.class), any(Bson.class))).thenReturn(mock(UpdateResult.class));
         assertDoesNotThrow(() -> store.markFailed("sched-1", Instant.now().plusSeconds(30)));
+    }
+
+    // ==================== markSkipped ====================
+
+    /**
+     * A skipped fire releases the claim and re-arms the cadence — and touches
+     * NOTHING else. The whole point of the method is what it does not write: not
+     * {@code failCount} (incrementing it dead-letters a healthy heartbeat during a
+     * human pause; clearing it lets a fail/skip/fail schedule dodge max-retries),
+     * not {@code lastFired} (nothing fired), not {@code nextRetryAt} (the schedule
+     * is not in retry).
+     */
+    @Test
+    @DisplayName("markSkipped — re-arms and releases the claim without touching the retry state")
+    void markSkippedLeavesTheRetryStateAlone() throws Exception {
+        when(scheduleCollection.updateOne(any(Bson.class), any(Bson.class))).thenReturn(mock(UpdateResult.class));
+
+        store.markSkipped("sched-1", Instant.parse("2099-01-01T00:00:00Z"));
+
+        ArgumentCaptor<Bson> update = ArgumentCaptor.forClass(Bson.class);
+        verify(scheduleCollection).updateOne(any(Bson.class), update.capture());
+        String rendered = update.getValue().toString();
+        assertTrue(rendered.contains("nextFire"), "the cadence must be re-armed: " + rendered);
+        assertTrue(rendered.contains("PENDING"), "the claim must be released: " + rendered);
+        assertTrue(rendered.contains("claimedBy"), "the claim owner must be cleared: " + rendered);
+        assertFalse(rendered.contains("failCount"), "a skip is neither a failure nor a success: " + rendered);
+        assertFalse(rendered.contains("lastFired"), "nothing fired, so lastFired must not move: " + rendered);
+        assertFalse(rendered.contains("nextRetryAt"), "a skip does not put the schedule into (or out of) retry: " + rendered);
+    }
+
+    /**
+     * A failed re-arm must be reported. The poller logs it and moves on, but if
+     * this threw a raw driver exception instead of a store exception the poller's
+     * own {@code catch} would still swallow it while the schedule stayed CLAIMED
+     * with a past nextFire — reclaimed on every lease expiry and never able to
+     * dead-letter.
+     */
+    @Test
+    @DisplayName("markSkipped — a driver failure becomes a ResourceStoreException naming the schedule")
+    void markSkippedStoreFailureIsWrapped() {
+        when(scheduleCollection.updateOne(any(Bson.class), any(Bson.class))).thenThrow(new IllegalStateException("cluster down"));
+
+        var thrown = assertThrows(IResourceStore.ResourceStoreException.class,
+                () -> store.markSkipped("sched-1", Instant.parse("2099-01-01T00:00:00Z")));
+        assertTrue(thrown.getMessage().contains("sched-1"), thrown.getMessage());
     }
 
     // ==================== markDeadLettered ====================
@@ -698,7 +1046,7 @@ class MongoScheduleStoreTest {
         int count = store.deleteSchedulesByUserId("user-1");
 
         assertEquals(2, count);
-        var captor = org.mockito.ArgumentCaptor.forClass(Bson.class);
+        var captor = ArgumentCaptor.forClass(Bson.class);
         verify(scheduleCollection).deleteMany(captor.capture());
         assertTrue(captor.getValue().toString().contains("userId"),
                 "the filter must scope the delete to the user: " + captor.getValue());

@@ -14,6 +14,7 @@ import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 
 import javax.sql.DataSource;
 import java.sql.*;
@@ -208,18 +209,36 @@ class PostgresScheduleStoreUnitTest {
         verify(preparedStatement).executeUpdate();
     }
 
+    /**
+     * A configuration update must not touch the fire lifecycle at all.
+     * <p>
+     * {@code fire_status} and {@code fail_count} used to be written from the
+     * caller's object (defaulting to PENDING when absent), which made every PUT a
+     * read-modify-write over live state: the REST layer read PENDING, the poller
+     * claimed the row, and this UPDATE then wrote PENDING back over the fresh
+     * CLAIMED — un-claiming a fire that was still running, so the next poll fired
+     * it a second time into the same persistent conversation. Carrying the values
+     * over in the REST layer only narrowed the window to milliseconds and did
+     * nothing at all for a non-REST caller. The two columns belong to
+     * tryClaim/markCompleted/markFailed/setScheduleEnabled/requeueDeadLetter.
+     */
     @Test
-    void updateSchedule_nullFireStatus_defaultsToPending() throws Exception {
-        // given
+    void updateSchedule_doesNotWriteTheFireLifecycleColumns() throws Exception {
         when(preparedStatement.executeUpdate()).thenReturn(1);
         var config = newScheduleConfig();
-        config.setFireStatus(null);
+        config.setFireStatus(FireStatus.PENDING);
+        config.setFailCount(0);
 
-        // when
         sut.updateSchedule("sched-1", config);
 
-        // then — fire_status is param 12 (user_id was inserted at 4)
-        verify(preparedStatement).setString(12, FireStatus.PENDING.name());
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+        assertFalse(sql.getValue().contains("fire_status="),
+                "fire_status must not be in the UPDATE SET list — a PUT would un-claim a running fire: " + sql.getValue());
+        assertFalse(sql.getValue().contains("fail_count="),
+                "fail_count is owned by markFailed/markCompleted, not by an edit: " + sql.getValue());
+        assertTrue(sql.getValue().contains("next_fire="),
+                "next_fire stays: an edited cron or interval legitimately re-arms the schedule");
     }
 
     // ─── schedule payload columns ───────────────────────────────
@@ -269,11 +288,13 @@ class PostgresScheduleStoreUnitTest {
 
         sut.updateSchedule("sched-1", config);
 
-        verify(preparedStatement).setString(16, "changed");
-        verify(preparedStatement).setString(18, "Europe/Vienna");
-        verify(preparedStatement).setString(19, "test");
-        verify(preparedStatement).setInt(20, 3);
-        verify(preparedStatement).setBoolean(21, true);
+        // fire_status and fail_count left the SET list, so every parameter after
+        // next_fire shifted down by two.
+        verify(preparedStatement).setString(14, "changed");
+        verify(preparedStatement).setString(16, "Europe/Vienna");
+        verify(preparedStatement).setString(17, "test");
+        verify(preparedStatement).setInt(18, 3);
+        verify(preparedStatement).setBoolean(19, true);
     }
 
     /**
@@ -367,6 +388,34 @@ class PostgresScheduleStoreUnitTest {
     }
 
     /**
+     * The cascade and the schedule delete were two autocommit statements on two
+     * connections. The cascade prevents the orphan that matters (a fire log
+     * carrying a conversationId whose schedule is gone), but unbunched it created
+     * the opposite one: if the second statement failed the fire history was already
+     * gone while the schedule survived and kept firing. One transaction makes the
+     * pair all-or-nothing.
+     */
+    @Test
+    void deleteSchedule_runsTheCascadeAndTheDeleteInOneTransaction() throws Exception {
+        sut.deleteSchedule("sched-1");
+
+        var inOrder = inOrder(connection);
+        inOrder.verify(connection).setAutoCommit(false);
+        inOrder.verify(connection).commit();
+        verify(connection, never()).rollback();
+    }
+
+    @Test
+    void deleteSchedule_rollsBackWhenTheScheduleDeleteFails() throws Exception {
+        when(preparedStatement.executeUpdate()).thenThrow(new SQLException("lock timeout"));
+
+        assertThrows(IResourceStore.ResourceStoreException.class, () -> sut.deleteSchedule("sched-1"));
+
+        verify(connection).rollback();
+        verify(connection, never()).commit();
+    }
+
+    /**
      * The three bulk delete paths cascade too, and GDPR erasure is the reason the
      * cascade exists: every fire log carries a conversationId of the user being
      * erased, and once the schedule row is gone nothing can find those logs again.
@@ -409,6 +458,158 @@ class PostgresScheduleStoreUnitTest {
         assertTrue(sql.getAllValues().stream().anyMatch(s -> s.contains("DELETE FROM eddi_schedule_fire_logs")
                 && s.contains("SELECT id FROM eddi_schedules WHERE name = ?")),
                 "a resolved HITL pause must not leave its fire log behind: " + sql.getAllValues());
+    }
+
+    /**
+     * The count these two report is the number of SCHEDULE rows removed, not the
+     * fire logs the cascade deleted first. The cascade runs on the same connection
+     * immediately before, so returning its row count instead would tell the GDPR
+     * sweep — which logs the number as evidence of the erasure — a number that has
+     * nothing to do with how many schedules were erased.
+     */
+    @Test
+    void deleteSchedulesByUserId_returnsTheScheduleRowCountNotTheCascadeCount() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(7, 3);
+
+        assertEquals(3, sut.deleteSchedulesByUserId("user-1"),
+                "7 fire logs and 3 schedules were removed; the erasure count is 3");
+    }
+
+    @Test
+    void deleteSchedulesByName_returnsTheScheduleRowCount() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(4, 2);
+
+        assertEquals(2, sut.deleteSchedulesByName("hitl-timeout-conv-1"));
+    }
+
+    /**
+     * The cascade and the schedule delete are one transaction, so a failure in
+     * either must roll BOTH back — otherwise a failed erasure has already destroyed
+     * the fire history of schedules that survive and keep firing.
+     */
+    @Test
+    void deleteWithCascade_rollsBackWhenTheScheduleDeleteFails() throws Exception {
+        when(connection.getAutoCommit()).thenReturn(true); // a pooled connection's usual state
+        when(preparedStatement.executeUpdate()).thenReturn(5).thenThrow(new SQLException("lock timeout"));
+
+        var thrown = assertThrows(IResourceStore.ResourceStoreException.class,
+                () -> sut.deleteSchedulesByUserId("user-1"));
+
+        assertInstanceOf(SQLException.class, thrown.getCause());
+        assertEquals("lock timeout", thrown.getCause().getMessage());
+        InOrder ordered = inOrder(connection);
+        ordered.verify(connection).setAutoCommit(false);
+        ordered.verify(connection).rollback();
+        ordered.verify(connection).setAutoCommit(true); // the caller's autocommit is restored
+        verify(connection, never()).commit();
+    }
+
+    /**
+     * A rollback that fails too must not replace the real cause. Rethrowing the
+     * rollback failure would report "connection closed" where the actual reason the
+     * erasure did not happen was the lock timeout below it.
+     */
+    @Test
+    void deleteWithCascade_rollbackFailureIsSuppressedNotSubstituted() throws Exception {
+        when(preparedStatement.executeUpdate()).thenThrow(new SQLException("lock timeout"));
+        doThrow(new SQLException("connection closed")).when(connection).rollback();
+
+        var thrown = assertThrows(IResourceStore.ResourceStoreException.class,
+                () -> sut.deleteSchedulesByUserId("user-1"));
+
+        Throwable cause = thrown.getCause();
+        assertEquals("lock timeout", cause.getMessage(), "the original failure must stay the cause");
+        assertEquals(1, cause.getSuppressed().length);
+        assertEquals("connection closed", cause.getSuppressed()[0].getMessage());
+    }
+
+    /**
+     * A connection handed over with autocommit already off must be given back the
+     * same way. Restoring it to {@code true} unconditionally would silently change
+     * the transaction semantics of whatever the caller does with it next.
+     */
+    @Test
+    void deleteWithCascade_restoresAutoCommitEvenWhenItWasAlreadyFalse() throws Exception {
+        when(connection.getAutoCommit()).thenReturn(false);
+        when(preparedStatement.executeUpdate()).thenReturn(1, 1);
+
+        sut.deleteSchedulesByAgentId("agent-1");
+
+        verify(connection).commit();
+        verify(connection, never()).setAutoCommit(true);
+    }
+
+    // ─── fire-log deletion ──────────────────────────────────────
+
+    @Test
+    void deleteFireLogsByScheduleId_deletesByScheduleIdAndReturnsTheCount() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(12);
+
+        assertEquals(12, sut.deleteFireLogsByScheduleId("sched-1"));
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+        assertEquals("DELETE FROM eddi_schedule_fire_logs WHERE schedule_id = ?", sql.getValue());
+        verify(preparedStatement).setString(1, "sched-1");
+    }
+
+    @Test
+    void deleteFireLogsByScheduleId_sqlException_throwsResourceStoreException() throws Exception {
+        when(preparedStatement.executeUpdate()).thenThrow(new SQLException("boom"));
+
+        var thrown = assertThrows(IResourceStore.ResourceStoreException.class,
+                () -> sut.deleteFireLogsByScheduleId("sched-1"));
+        assertTrue(thrown.getMessage().contains("sched-1"), thrown.getMessage());
+    }
+
+    @Test
+    void deleteFireLogsOlderThan_sqlException_throwsResourceStoreException() throws Exception {
+        when(preparedStatement.executeUpdate()).thenThrow(new SQLException("boom"));
+
+        assertThrows(IResourceStore.ResourceStoreException.class,
+                () -> sut.deleteFireLogsOlderThan(Instant.parse("2020-01-01T00:00:00Z")));
+    }
+
+    /**
+     * A schedule whose triggerType is somehow absent must write SQL NULL, not the
+     * string "null" and not an NPE. The column is nullable and
+     * {@code fromResultSet} already tolerates a null trigger_type.
+     */
+    @Test
+    void updateSchedule_nullTriggerType_bindsSqlNull() throws Exception {
+        var config = newScheduleConfig();
+        config.setTriggerType(null);
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+
+        sut.updateSchedule("sched-1", config);
+
+        verify(preparedStatement).setString(5, null);
+    }
+
+    @Test
+    void setPersistentConversationId_sqlException_throwsResourceStoreException() throws Exception {
+        when(preparedStatement.executeUpdate()).thenThrow(new SQLException("boom"));
+
+        var thrown = assertThrows(IResourceStore.ResourceStoreException.class,
+                () -> sut.setPersistentConversationId("sched-1", "conv-1"));
+        assertTrue(thrown.getMessage().contains("sched-1"), thrown.getMessage());
+    }
+
+    /**
+     * The single-field write the fire path uses. It must touch
+     * persistent_conversation_id (and updated_at) and NOTHING else — writing the
+     * whole schedule back from the fire path un-claimed a row that was still
+     * firing.
+     */
+    @Test
+    void setPersistentConversationId_writesOnlyThatColumn() throws Exception {
+        sut.setPersistentConversationId("sched-1", "conv-9");
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+        assertEquals("UPDATE eddi_schedules SET persistent_conversation_id=?, updated_at=? WHERE id=?", sql.getValue());
+        verify(preparedStatement).setString(1, "conv-9");
+        verify(preparedStatement).setString(3, "sched-1");
     }
 
     /**
@@ -459,11 +660,76 @@ class PostgresScheduleStoreUnitTest {
         verify(preparedStatement).setLong(1, cutoff.toEpochMilli());
     }
 
+    /**
+     * The retention sweep filters on {@code started_at} alone, and PostgreSQL
+     * cannot use a compound index without its leading column — so neither
+     * {@code (schedule_id, started_at)} nor {@code (status, started_at)} can serve
+     * it. Without a standalone index the hourly prune is a full scan of exactly the
+     * table it exists to keep bounded.
+     */
+    @Test
+    void ensureSchema_createsAStandaloneStartedAtIndexForTheRetentionSweep() throws Exception {
+        when(resultSet.next()).thenReturn(false);
+        sut.readAllSchedules(10);
+
+        ArgumentCaptor<String> ddl = ArgumentCaptor.forClass(String.class);
+        verify(statement, atLeastOnce()).execute(ddl.capture());
+        assertTrue(ddl.getAllValues().stream()
+                .anyMatch(s -> s.contains("idx_fire_logs_started_at") && s.contains("eddi_schedule_fire_logs (started_at)")),
+                "the prune has no index it can use: " + ddl.getAllValues());
+    }
+
+    /**
+     * The HITL redaction has to be part of the QUERY. Filtering the returned page
+     * counted limit/offset over rows a non-admin cannot see, so their first page
+     * could come back short or empty while later pages held their own schedules.
+     * <p>
+     * {@code IS DISTINCT FROM} rather than {@code <>}: a schedule with no metadata
+     * yields SQL NULL there, and {@code <>} would drop every one of those rows —
+     * which is every ordinary schedule.
+     */
+    @Test
+    void readAllSchedules_excludingHitlTimeouts_filtersInTheQuery() throws Exception {
+        when(resultSet.next()).thenReturn(false);
+
+        sut.readAllSchedules(50, 0, true);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+        assertTrue(sql.getValue().contains("metadata->>'hitlType' IS DISTINCT FROM 'hitl_timeout'"),
+                "the redaction must be in the WHERE clause: " + sql.getValue());
+        assertTrue(sql.getValue().indexOf("WHERE") < sql.getValue().indexOf("LIMIT"),
+                "the filter must precede LIMIT, or paging still counts hidden rows: " + sql.getValue());
+    }
+
+    @Test
+    void readSchedulesByAgentId_excludingHitlTimeouts_addsTheFilterToTheAgentClause() throws Exception {
+        when(resultSet.next()).thenReturn(false);
+
+        sut.readSchedulesByAgentId("agent-1", 50, 0, true);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+        assertTrue(sql.getValue().contains("agent_id = ? AND metadata->>'hitlType' IS DISTINCT FROM 'hitl_timeout'"),
+                "the redaction must AND onto the agent filter: " + sql.getValue());
+    }
+
+    @Test
+    void readAllSchedules_asAdmin_addsNoRedactionClause() throws Exception {
+        when(resultSet.next()).thenReturn(false);
+
+        sut.readAllSchedules(50, 0, false);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+        assertFalse(sql.getValue().contains("hitlType"), "an admin listing must not be filtered: " + sql.getValue());
+    }
+
     @Test
     void readAllSchedules_paged_ordersDeterministicallyAndBindsOffset() throws Exception {
         when(resultSet.next()).thenReturn(false);
 
-        sut.readAllSchedules(50, 100);
+        sut.readAllSchedules(50, 100, false);
 
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         verify(connection).prepareStatement(sql.capture());
@@ -626,6 +892,44 @@ class PostgresScheduleStoreUnitTest {
         // when/then
         assertThrows(IResourceStore.ResourceStoreException.class,
                 () -> sut.markCompleted("sched-1", Instant.now()));
+    }
+
+    // ─── markSkipped ────────────────────────────────────────────
+
+    /**
+     * A skipped fire releases the claim and re-arms the cadence — and the statement
+     * must touch nothing else. Incrementing {@code fail_count} here dead-letters a
+     * healthy heartbeat during a human pause; clearing it lets a schedule that
+     * alternates failing and skipping dodge {@code max-retries} forever. Neither
+     * belongs in a skip, and nor does {@code last_fired}: nothing fired.
+     */
+    @Test
+    void markSkipped_reArmsWithoutTouchingTheRetryState() throws Exception {
+        // when
+        sut.markSkipped("sched-1", Instant.parse("2099-01-01T00:00:00Z"));
+
+        // then
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+        String sqlText = sql.getValue();
+        assertTrue(sqlText.contains("next_fire=?"), "the cadence must be re-armed: " + sqlText);
+        assertTrue(sqlText.contains("fire_status='PENDING'"), "the claim must be released: " + sqlText);
+        assertTrue(sqlText.contains("claimed_by=NULL"), "the claim owner must be cleared: " + sqlText);
+        assertFalse(sqlText.contains("fail_count"), "a skip is neither a failure nor a success: " + sqlText);
+        assertFalse(sqlText.contains("last_fired"), "nothing fired, so last_fired must not move: " + sqlText);
+        assertFalse(sqlText.contains("next_retry_at"), "a skip does not put the schedule into (or out of) retry: " + sqlText);
+        verify(preparedStatement).setLong(1, Instant.parse("2099-01-01T00:00:00Z").toEpochMilli());
+        verify(preparedStatement).setString(3, "sched-1");
+    }
+
+    @Test
+    void markSkipped_sqlException_throwsResourceStoreException() throws Exception {
+        // given
+        when(preparedStatement.executeUpdate()).thenThrow(new SQLException("DB error"));
+
+        // when/then
+        assertThrows(IResourceStore.ResourceStoreException.class,
+                () -> sut.markSkipped("sched-1", Instant.now()));
     }
 
     // ─── markFailed ─────────────────────────────────────────────

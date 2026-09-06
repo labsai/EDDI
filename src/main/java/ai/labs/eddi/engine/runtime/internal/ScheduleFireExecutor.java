@@ -27,6 +27,7 @@ import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -185,13 +186,33 @@ public class ScheduleFireExecutor {
             // failCount never incremented, backoff never applied, nothing ever
             // dead-lettered.
             var outcome = new AtomicReference<SimpleConversationMemorySnapshot>();
+            // Deliberately NOT a lambda. ConversationResponseHandler.onSkipped defaults
+            // to onComplete, so a single-method handler cannot tell the two apart — and
+            // a skipped turn is one the coordinator DROPPED without consuming the input
+            // (the conversation was already IN_PROGRESS or AWAITING_HUMAN when the
+            // queued turn ran). That is exactly the case a conversationStrategy=
+            // persistent heartbeat hits when the previous fire is still executing, or
+            // while a human is chatting in the same conversation. Recorded as COMPLETED
+            // it re-armed the schedule and cleared failCount, so the message the
+            // schedule existed to send was lost with a green fire log.
+            var skipped = new AtomicBoolean(false);
             conversationService.say(env, schedule.getAgentId(), conversationId, false, // returnDetailed
                     true, // returnCurrentStepOnly
                     List.of(), // returningFields (empty = all)
                     inputData, false, // rerunOnly
-                    snapshot -> { // responseHandler
-                        outcome.set(snapshot);
-                        latch.countDown();
+                    new IConversationService.ConversationResponseHandler() { // responseHandler
+                        @Override
+                        public void onComplete(SimpleConversationMemorySnapshot snapshot) {
+                            outcome.set(snapshot);
+                            latch.countDown();
+                        }
+
+                        @Override
+                        public void onSkipped(SimpleConversationMemorySnapshot snapshot) {
+                            skipped.set(true);
+                            outcome.set(snapshot);
+                            latch.countDown();
+                        }
                     });
 
             Duration timeout = fireTimeout != null ? fireTimeout : DEFAULT_FIRE_TIMEOUT;
@@ -201,7 +222,21 @@ public class ScheduleFireExecutor {
 
             SimpleConversationMemorySnapshot snapshot = outcome.get();
             ConversationState state = snapshot != null ? snapshot.getConversationState() : null;
-            if (state == ConversationState.ERROR) {
+            if (skipped.get()) {
+                // SKIPPED, not FAILED: nothing ran, but nothing broke either. Recorded as
+                // a failure it fed the retry/backoff machine — and since a persistent
+                // heartbeat is skipped on EVERY fire for as long as its conversation is
+                // busy or paused, a HITL approval left open for ~21 minutes dead-lettered
+                // the schedule outright, where the original bug merely lost one message.
+                // SchedulePollerService.onFireSkipped re-arms the cadence instead.
+                status = ScheduleConfiguration.FireStatus.SKIPPED.name();
+                errorMessage = "Turn skipped without consuming the input — conversation was in state " + state;
+                LOGGER.warnf("[SCHEDULE] Fire of schedule '%s' (id=%s) was skipped: conversation %s was in state %s, "
+                        + "so the scheduled input was never processed", schedule.getName(), schedule.getId(), conversationId, state);
+            } else if (state == ConversationState.ERROR || state == ConversationState.EXECUTION_INTERRUPTED) {
+                // EXECUTION_INTERRUPTED belongs here with ERROR: the turn was cut short
+                // mid-pipeline, so the schedule's work did not happen. Treating only
+                // ERROR as a failure re-armed the schedule and cleared failCount for it.
                 status = ScheduleConfiguration.FireStatus.FAILED.name();
                 errorMessage = "Conversation ended in state " + state;
                 LOGGER.warnf("[SCHEDULE] Fire of schedule '%s' (id=%s) left conversation %s in state %s", schedule.getName(),
@@ -228,6 +263,12 @@ public class ScheduleFireExecutor {
         // Charged whether the fire succeeded or failed: a turn that errored after
         // calling three tools still cost money, and a cost of 0.0 on every failure
         // would hide exactly the schedules worth investigating.
+        //
+        // This is TOOL spend, not total spend — ToolCostTracker is the only cost
+        // tracker in the engine and it accumulates @Tool executions alone, so an
+        // agent that only talks to the LLM still logs 0.0 here. The Dream fast-path
+        // below writes an LLM estimate instead, so the column carries two different
+        // quantities; see ScheduleFireLog#cost and docs/scheduling.md.
         cost = Math.max(0.0, conversationCost(conversationId) - costBefore);
 
         // 4. Log the fire attempt (Fix #4: use caller-provided attemptNumber)
