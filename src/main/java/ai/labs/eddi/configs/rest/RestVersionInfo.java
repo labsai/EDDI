@@ -256,7 +256,14 @@ public class RestVersionInfo<T> implements IRestVersionInfo {
                 markDescriptorDeleted(id, currentDescriptorVersion(id, version));
             } else {
                 resourceStore.delete(id, version);
-                markDescriptorDeleted(id, version);
+                // Resolved the same way as the permanent branch, and for the same
+                // reason: descriptor versions advance independently of the resource's
+                // (DocumentDescriptorFilter bumps them on metadata edits), so a
+                // resource at v2 whose descriptor has moved to v4 had its v2 descriptor
+                // row flagged while the CURRENT v4 row stayed deleted=false — the
+                // phantom listing this flagging exists to remove, surviving on the soft
+                // path because only the permanent one resolved the descriptor.
+                markDescriptorDeleted(id, currentDescriptorVersion(id, version));
             }
             return Response.ok().build();
         } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceModifiedException | IResourceStore.ResourceNotFoundException e) {

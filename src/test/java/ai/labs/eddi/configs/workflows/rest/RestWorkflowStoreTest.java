@@ -24,6 +24,7 @@ import org.mockito.Mock;
 
 import java.net.URI;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -59,10 +60,63 @@ class RestWorkflowStoreTest {
         // disagree is CascadeVersionGuard.staleReferenceResolvesToTheCurrentVersion.
         when(resourceClientLibrary.getCurrentResourceId(any(URI.class))).thenAnswer(invocation -> {
             URI uri = invocation.getArgument(0);
-            String query = uri.getQuery();
-            int version = query != null && query.startsWith("version=") ? Integer.parseInt(query.substring("version=".length())) : 1;
-            return resourceId(uri.getPath(), version);
+            return resourceId(uri.getPath(), pinnedVersion(uri));
         });
+        // The workflow the cascade is deleting stops being a referrer the moment it
+        // is deleted — AbstractResourceStore.isStaleReference drops a referrer with
+        // no current row. Modelling that is what lets the post-delete re-check in
+        // deleteWorkflow mean anything: with a stub frozen at its pre-delete answer,
+        // "nobody else references this" and "one other workflow does" look alike.
+        doAnswer(invocation -> {
+            parentDeleted.set(true);
+            return null;
+        }).when(WorkflowStore).delete(anyString(), anyInt());
+        doAnswer(invocation -> {
+            parentDeleted.set(true);
+            return null;
+        }).when(WorkflowStore).deleteAllPermanently(anyString());
+    }
+
+    /**
+     * The version a stored reference pins, defaulting to 1.
+     *
+     * <p>
+     * A stored {@code config.uri} is arbitrary text — hand-written, imported, or
+     * carrying a second query parameter — so a bare
+     * {@code Integer.parseInt(query.substring(...))} threw
+     * {@code NumberFormatException} out of the mock for input the production code
+     * handles. The default is the same one the missing-query case already used.
+     * </p>
+     */
+    private static int pinnedVersion(URI uri) {
+        String query = uri.getQuery();
+        if (query == null || !query.startsWith("version=")) {
+            return 1;
+        }
+        try {
+            return Integer.parseInt(query.substring("version=".length()));
+        } catch (NumberFormatException e) {
+            return 1;
+        }
+    }
+
+    /**
+     * Whether the workflow under test has been deleted yet; see {@link #referrers}.
+     */
+    private final AtomicBoolean parentDeleted = new AtomicBoolean();
+
+    /**
+     * The reverse lookup's answer, as the real store gives it: {@code total} counts
+     * the workflow being deleted among the referrers, and that one disappears once
+     * it has been deleted.
+     */
+    private List<DocumentDescriptor> referrers(int total) {
+        int remaining = parentDeleted.get() ? total - 1 : total;
+        List<DocumentDescriptor> descriptors = new ArrayList<>();
+        for (int i = 0; i < remaining; i++) {
+            descriptors.add(new DocumentDescriptor());
+        }
+        return descriptors;
     }
 
     private static IResourceStore.IResourceId resourceId(String id, int version) {
@@ -84,7 +138,7 @@ class RestWorkflowStoreTest {
      * delete)
      */
     private void mockSingleReference() throws Exception {
-        when(WorkflowStore.getWorkflowDescriptorsContainingResource(anyString(), eq(true))).thenReturn(List.of(new DocumentDescriptor()));
+        when(WorkflowStore.getWorkflowDescriptorsContainingResource(anyString(), eq(true))).thenAnswer(invocation -> referrers(1));
     }
 
     @Nested
@@ -185,12 +239,11 @@ class RestWorkflowStoreTest {
 
             // Shared resource referenced by 2 packages
             String sharedUri = "eddi://ai.labs.rules/rulestore/rulesets/shared1?version=1";
-            when(WorkflowStore.getWorkflowDescriptorsContainingResource(eq(sharedUri), eq(true)))
-                    .thenReturn(List.of(new DocumentDescriptor(), new DocumentDescriptor()));
+            when(WorkflowStore.getWorkflowDescriptorsContainingResource(eq(sharedUri), eq(true))).thenAnswer(invocation -> referrers(2));
 
             // Unique resource referenced by only 1 package
             String uniqueUri = "eddi://ai.labs.output/outputstore/outputsets/unique1?version=1";
-            when(WorkflowStore.getWorkflowDescriptorsContainingResource(eq(uniqueUri), eq(true))).thenReturn(List.of(new DocumentDescriptor()));
+            when(WorkflowStore.getWorkflowDescriptorsContainingResource(eq(uniqueUri), eq(true))).thenAnswer(invocation -> referrers(1));
 
             when(resourceClientLibrary.deleteResource(any(), anyBoolean())).thenReturn(Response.ok().build());
 
@@ -214,8 +267,7 @@ class RestWorkflowStoreTest {
 
             when(WorkflowStore.read("wf1", 1)).thenReturn(workflowBeingDeleted);
             // Both wf1 (the one being deleted) and wf2 reference the same output set.
-            when(WorkflowStore.getWorkflowDescriptorsContainingResource(eq(sharedOutputUri), eq(true)))
-                    .thenReturn(List.of(new DocumentDescriptor(), new DocumentDescriptor()));
+            when(WorkflowStore.getWorkflowDescriptorsContainingResource(eq(sharedOutputUri), eq(true))).thenAnswer(invocation -> referrers(2));
 
             restWorkflowStore.deleteWorkflow("wf1", 1, true, true);
 
@@ -585,8 +637,7 @@ class RestWorkflowStoreTest {
             mockSingleReference();
             // One resource that IS still referenced elsewhere: the only legitimate skip
             // in this workflow.
-            when(WorkflowStore.getWorkflowDescriptorsContainingResource(eq(shared), eq(true)))
-                    .thenReturn(List.of(new DocumentDescriptor(), new DocumentDescriptor()));
+            when(WorkflowStore.getWorkflowDescriptorsContainingResource(eq(shared), eq(true))).thenAnswer(invocation -> referrers(2));
 
             WorkflowConfiguration config = new WorkflowConfiguration();
 
@@ -671,6 +722,65 @@ class RestWorkflowStoreTest {
             assertEquals("1", response.getHeaderString("X-Cascade-Skipped"),
                     "a reference check that could not answer must be reported, not silently treated as 'nobody uses it'");
         }
+
+        /**
+         * The shared-resource decision is made BEFORE the workflow is deleted — it has
+         * to be, so the workflow still counts among the referrers. A workflow created,
+         * or re-pointed at one of these configs, in the window between the plan and the
+         * child delete would otherwise have its newly shared configuration soft-deleted
+         * underneath it. The re-check runs after the parent is gone, so the only safe
+         * answer is zero referrers.
+         */
+        @Test
+        @DisplayName("a resource that becomes referenced between the plan and the child delete is not deleted")
+        void resourceThatBecomesSharedDuringTheCascadeIsSkipped() throws Exception {
+            String outputUri = "eddi://ai.labs.output/outputstore/outputsets/out1?version=1";
+            // One referrer at both moments, but not the SAME one: when the cascade is
+            // planned it is this workflow (so the resource is a candidate), and by the
+            // time the child delete runs this workflow is gone and the one referrer is
+            // a workflow that has just been pointed at the config.
+            when(WorkflowStore.getWorkflowDescriptorsContainingResource(eq(outputUri), eq(true)))
+                    .thenReturn(List.of(new DocumentDescriptor()));
+
+            WorkflowConfiguration config = new WorkflowConfiguration();
+            WorkflowStep step = new WorkflowStep();
+            step.setType(URI.create("eddi://ai.labs.output"));
+            step.setConfig(new HashMap<>(Map.of("uri", outputUri)));
+            config.getWorkflowSteps().add(step);
+            when(WorkflowStore.read("pkg1", 1)).thenReturn(config);
+            when(resourceClientLibrary.deleteResource(any(), anyBoolean())).thenReturn(Response.ok().build());
+
+            Response response = restWorkflowStore.deleteWorkflow("pkg1", 1, false, true);
+
+            verify(WorkflowStore).delete("pkg1", 1);
+            verify(resourceClientLibrary, never()).deleteResource(any(), anyBoolean());
+            assertEquals("1", response.getHeaderString("X-Cascade-Skipped"),
+                    "the resource became shared during the cascade, so it was left alone — and the response has to say so");
+        }
+
+        /**
+         * The counterpart: nothing appeared in the window, so the re-check finds no
+         * referrer left and the delete goes through. Without this the test above would
+         * also pass against a cascade that had simply stopped deleting.
+         */
+        @Test
+        @DisplayName("a resource nobody picked up during the cascade is still deleted")
+        void resourceThatStaysUnreferencedIsStillDeleted() throws Exception {
+            mockSingleReference();
+
+            WorkflowConfiguration config = new WorkflowConfiguration();
+            WorkflowStep step = new WorkflowStep();
+            step.setType(URI.create("eddi://ai.labs.output"));
+            step.setConfig(new HashMap<>(Map.of("uri", "eddi://ai.labs.output/outputstore/outputsets/out1?version=1")));
+            config.getWorkflowSteps().add(step);
+            when(WorkflowStore.read("pkg1", 1)).thenReturn(config);
+            when(resourceClientLibrary.deleteResource(any(), anyBoolean())).thenReturn(Response.ok().build());
+
+            Response response = restWorkflowStore.deleteWorkflow("pkg1", 1, false, true);
+
+            verify(resourceClientLibrary).deleteResource(URI.create("eddi://ai.labs.output/outputstore/outputsets/out1?version=1"), false);
+            assertNull(response.getHeaderString("X-Cascade-Skipped"));
+        }
     }
 
     /**
@@ -707,8 +817,7 @@ class RestWorkflowStoreTest {
             when(resourceClientLibrary.getCurrentResourceId(URI.create(pinned)))
                     .thenReturn(resourceId("/outputstore/outputsets/out1", 3));
             // Only this workflow references it, asked at the version that exists.
-            when(WorkflowStore.getWorkflowDescriptorsContainingResource(eq(current), eq(true)))
-                    .thenReturn(List.of(new DocumentDescriptor()));
+            when(WorkflowStore.getWorkflowDescriptorsContainingResource(eq(current), eq(true))).thenAnswer(invocation -> referrers(1));
             when(resourceClientLibrary.deleteResource(any(), anyBoolean())).thenReturn(Response.ok().build());
 
             restWorkflowStore.deleteWorkflow("pkg1", 1, false, true);
@@ -760,8 +869,7 @@ class RestWorkflowStoreTest {
             config.getWorkflowSteps().add(outputStep);
 
             when(WorkflowStore.read("pkg1", 1)).thenReturn(config);
-            when(WorkflowStore.getWorkflowDescriptorsContainingResource(anyString(), eq(true)))
-                    .thenReturn(List.of(new DocumentDescriptor()));
+            when(WorkflowStore.getWorkflowDescriptorsContainingResource(anyString(), eq(true))).thenAnswer(invocation -> referrers(1));
             // The guard saw v1; by the time the delete runs the workflow is at v2.
             doThrow(new IResourceStore.ResourceModifiedException("not the latest version")).when(WorkflowStore).delete("pkg1", 1);
 

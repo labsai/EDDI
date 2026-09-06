@@ -140,7 +140,7 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
                 // the two questions at different versions is how a guard that passes
                 // can still be followed by a delete of something in use.
                 Integer version = resolveVersion(orphan);
-                if (isReferencedNow(orphan, version)) {
+                if (isReferencedNow(orphan, version) || isReferencedByADeployedVersionNow(orphan)) {
                     log.warnf("Skipping orphan %s — it became referenced after the scan and before the purge", orphan.getResourceUri());
                     continue;
                 }
@@ -201,6 +201,56 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
             log.warnf("Re-check of orphan %s failed — NOT purging it: %s", orphan.getResourceUri(), e.getMessage());
             return true;
         }
+    }
+
+    /**
+     * The second half of the fresh re-check: the references held by DEPLOYED Agent
+     * versions, which {@link #isReferencedNow} cannot see.
+     *
+     * <p>
+     * Both reverse lookups {@link #isReferencedNow} uses skip a referrer that is
+     * not a resource's current version
+     * ({@code AbstractResourceStore.isStaleReference}), so they answer only for
+     * current Agents and current workflows. The mark scan deliberately counts more
+     * than that — {@link #scanDeployedAgents} folds in every version a deployment
+     * record pins, because {@code checkDeployments} redeploys exactly those on
+     * every startup and every 10-second sweep. Re-checking with the narrower
+     * question would therefore have DISCARDED a referrer the scan itself treats as
+     * live: a deployment record that starts pinning an older Agent version in the
+     * mark/sweep window, whose workflow (or extension) this loop would then erase
+     * with every version and every history row.
+     * </p>
+     *
+     * <p>
+     * Costs one deployment enumeration per candidate — deliberately not hoisted out
+     * of the loop, since a set computed once before the loop would be exactly the
+     * stale answer this re-check exists to replace. Fails CLOSED: an incomplete
+     * deployment scan reports "referenced".
+     * </p>
+     */
+    private boolean isReferencedByADeployedVersionNow(OrphanInfo orphan) {
+        String key = resourceKey(orphan.getResourceUri());
+        if (key == null) {
+            log.warnf("Cannot re-check orphan %s against deployed versions (no usable key) — NOT purging it", orphan.getResourceUri());
+            return true;
+        }
+        Set<String> deployedReferences = new HashSet<>();
+        String failureReason;
+        try {
+            failureReason = scanDeployedAgents(deployedReferences, null);
+        } catch (Exception e) {
+            log.warnf("Deployed-version re-check of orphan %s failed — NOT purging it: %s", orphan.getResourceUri(), e.getMessage());
+            return true;
+        }
+        if (failureReason != null) {
+            log.warnf("Deployed-version re-check of orphan %s was incomplete (%s) — NOT purging it", orphan.getResourceUri(), failureReason);
+            return true;
+        }
+        if (deployedReferences.contains(key)) {
+            log.warnf("Skipping orphan %s — a deployed Agent version started referencing it after the scan", orphan.getResourceUri());
+            return true;
+        }
+        return false;
     }
 
     /**

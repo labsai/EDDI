@@ -424,8 +424,36 @@ class AgentSigningServiceTest {
 
         signingService.deleteKeyPair("tenant-1", "agent-1", List.of());
 
-        assertEquals(1, secretProvider.deleteAttempts.size(), "attempted: " + secretProvider.deleteAttempts);
         assertFalse(secretProvider.contains("tenant-1", "agent-signing-key:agent-1"));
+    }
+
+    /**
+     * An empty declared-version list is not evidence that no versioned key exists,
+     * so it bounds nothing and has to fall back to the blind sweep.
+     *
+     * <p>
+     * {@code rotateKey} writes the vault entry and returns; adding the version to
+     * {@code identity.keys} is a SEPARATE config write by the caller. A first
+     * rotation whose config write failed therefore leaves v1 in the vault with
+     * {@code keys[]} still empty — and an operator can prune {@code keys[]} by hand
+     * to the same shape. Treating that as "no rotated versions, nothing to sweep"
+     * left an Ed25519 private key in the vault after a PERMANENT delete, while the
+     * tally reported a clean "Deleted 1 signing key(s)".
+     * </p>
+     */
+    @Test
+    void deleteKeyPair_withNoDeclaredVersions_stillRemovesAnUndeclaredRotatedKey() throws Exception {
+        signingService.generateKeyPair("tenant-1", "agent-1");
+        // The rotation reached the vault; the config write that would have added it to
+        // identity.keys did not.
+        signingService.generateKeyPairVersioned("tenant-1", "agent-1", 1);
+
+        signingService.deleteKeyPair("tenant-1", "agent-1", List.of());
+
+        assertFalse(secretProvider.contains("tenant-1", "agent-signing-key:agent-1:v1"),
+                "a rotated key that no keys[] entry names is exactly the private key material a permanent delete must not leave behind");
+        assertEquals(AgentSigningService.MAX_KEY_VERSION_SCAN + 1, secretProvider.deleteAttempts.size(),
+                "an empty list bounds nothing, so the whole documented range is swept; attempted: " + secretProvider.deleteAttempts.size());
     }
 
     @Test

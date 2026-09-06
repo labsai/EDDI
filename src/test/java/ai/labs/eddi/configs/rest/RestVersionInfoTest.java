@@ -158,6 +158,33 @@ class RestVersionInfoTest {
     }
 
     /**
+     * The soft path had the same descriptor-version bug the permanent path was
+     * fixed for, and only the permanent one was pinned. Descriptor versions advance
+     * independently of the resource's — {@code DocumentDescriptorFilter} bumps them
+     * on metadata edits — so a resource at v2 whose descriptor has moved to v4 had
+     * its v2 descriptor row flagged while the CURRENT v4 row kept saying
+     * {@code deleted=false}: the listing still showed a resource that had just been
+     * deleted, which is the phantom this flagging exists to remove.
+     */
+    @Test
+    void delete_soft_flagsTheDescriptorAtItsCurrentVersion() throws Exception {
+        IResourceId currentDescriptor = mock(IResourceId.class);
+        when(currentDescriptor.getId()).thenReturn(TEST_ID);
+        when(currentDescriptor.getVersion()).thenReturn(4);
+        when(documentDescriptorStore.getCurrentResourceId(TEST_ID)).thenReturn(currentDescriptor);
+
+        var descriptor = new DocumentDescriptor();
+        when(documentDescriptorStore.readDescriptor(TEST_ID, 4)).thenReturn(descriptor);
+
+        restVersionInfo.delete(TEST_ID, 2, false);
+
+        verify(resourceStore).delete(TEST_ID, 2);
+        assertTrue(descriptor.isDeleted());
+        verify(documentDescriptorStore).setDescriptor(TEST_ID, 4, descriptor);
+        verify(documentDescriptorStore, never()).setDescriptor(eq(TEST_ID), eq(2), any());
+    }
+
+    /**
      * Four classes used to assert in comments that {@code Response.getLocation()}
      * returns null for {@code eddi://} scheme URIs, and a parallel creation API
      * plus a three-strategy URI extractor were built around that belief. It is

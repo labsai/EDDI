@@ -49,6 +49,40 @@ bottom of this file and are never archived.
 
 ---
 
+## 🧹 fix(configs): stop cascading deletes removing resources someone else still uses (2026-09-06)
+
+**Repo:** EDDI (`fix/review-config-delete`)
+
+Review round on this branch: 20 comments, 6 fixed, 13 confirmed already correct, 1 disputed with
+code evidence. The six fixes share one shape — a delete that asked the right question at the wrong
+moment.
+
+**Cascade deletes checked references before the parent was gone.** `planCascade` has to ask
+"is this referenced by more than one thing" while the Agent still counts itself, but by the time
+each child delete actually runs the Agent is deleted and the count has moved. A workflow that a
+second Agent adopted in between was deleted anyway. Both `RestAgentStore` and `RestWorkflowStore`
+now re-ask immediately before each child delete, and a candidate that is still referenced
+increments the `X-Cascade-Skipped` counter instead of being removed.
+
+**The orphan purge trusted a reverse lookup that ignores old versions.** Both lookups in
+`isReferencedNow` skip referrers that are not a resource's current version, while the mark scan
+deliberately counts every version a deployment record pins. The purge loop now also re-runs the
+deployed-agent scan per candidate and fails closed when the scan is incomplete or throws.
+
+**Vault key rotation could sweep the key it had just written.** `versionsToSweep` treated an empty
+list of valid versions as "nothing to keep" rather than as an unknown bound, so a rotation whose
+identity update had not yet landed swept the new key. Empty is now handled exactly like null: the
+full scan range is preserved and nothing is deleted on an unknown bound.
+
+**Soft-deleting a descriptor marked the wrong version.** Descriptor versions advance independently
+of the resource's, so the soft path now resolves the descriptor's own current version the way the
+permanent path already did.
+
+**Files:** `RestAgentStore`, `RestWorkflowStore`, `RestOrphanAdmin`, `AgentSigningService`,
+`RestVersionInfo`, and their tests.
+
+---
+
 ## 🛡️ fix(configs): close the CodeQL alerts and the review round (2026-09-04)
 
 **Repo:** EDDI (`fix/review-config-delete`)

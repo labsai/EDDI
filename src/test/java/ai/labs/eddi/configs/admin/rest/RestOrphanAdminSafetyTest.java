@@ -1189,5 +1189,114 @@ class RestOrphanAdminSafetyTest {
             assertTrue(report.getOrphans().stream().noneMatch(o -> hostless.equals(o.getResourceUri())),
                     "the verbatim key must still match the step that references it, got: " + report.getOrphans());
         }
+
+        /**
+         * The mark scan counts every version a deployment record pins; the
+         * per-candidate re-check has to count them too.
+         *
+         * <p>
+         * Both reverse lookups the re-check uses skip a referrer that is not a
+         * resource's current version ({@code AbstractResourceStore.isStaleReference}),
+         * so they speak only for current Agents and current workflows. A deployment
+         * record that starts pinning an older Agent version in the mark/sweep window is
+         * therefore invisible to them — and the purge would erase the extension (or
+         * workflow) that the still-deployed version resolves, with every version and
+         * every history row gone and no recovery path.
+         * </p>
+         *
+         * <p>
+         * The deployment store answers empty on the mark scan and non-empty afterwards,
+         * which IS the window: the rule set really is unreferenced when it is
+         * classified, and really is referenced when it is about to be deleted.
+         * </p>
+         */
+        @Test
+        @DisplayName("a deployed version that starts referencing an orphan between scan and purge stops the delete")
+        void deployedVersionThatAppearsDuringThePurgeStopsTheDelete() throws Exception {
+            String ruleSetId = "aabbccddeeff112233445590";
+            URI ruleSetUri = URI.create("eddi://ai.labs.rules/rulestore/rulesets/" + ruleSetId + "?version=1");
+
+            WorkflowConfiguration deployedWorkflow = new WorkflowConfiguration();
+            WorkflowConfiguration.WorkflowStep step = new WorkflowConfiguration.WorkflowStep();
+            step.setType(URI.create("eddi://ai.labs.rules"));
+            step.setConfig(new HashMap<>(Map.of("uri", ruleSetUri.toString())));
+            deployedWorkflow.setWorkflowSteps(List.of(step));
+
+            AgentConfiguration deployedAgent = new AgentConfiguration();
+            deployedAgent.setWorkflows(List.of(DEPLOYED_WORKFLOW_URI));
+
+            noDescriptors();
+            when(documentDescriptorStore.readDescriptors(eq("ai.labs.rules"), anyString(), eq(0), anyInt(), anyBoolean()))
+                    .thenReturn(List.of(descriptor(ruleSetUri, "orphan-at-scan-time")));
+            when(resourceClientLibrary.getCurrentResourceId(ruleSetUri)).thenReturn(resourceId(ruleSetId, 1));
+            // No CURRENT workflow references it — the only question the version-scoped
+            // re-check can ask.
+            when(workflowStore.getWorkflowDescriptorsContainingResource(anyString(), anyBoolean())).thenReturn(List.of());
+            // Empty during the mark scan, so the rule set is genuinely classified as an
+            // orphan; the deployment record appears before the delete.
+            when(deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed))
+                    .thenReturn(List.of(), List.of(deployment(DEPLOYED_AGENT_ID, 2)));
+            when(agentStore.read(DEPLOYED_AGENT_ID, 2)).thenReturn(deployedAgent);
+            when(workflowStore.read(DEPLOYED_WORKFLOW_ID, 3)).thenReturn(deployedWorkflow);
+
+            OrphanReport report = restOrphanAdmin.purgeOrphans(false);
+
+            assertEquals(1, report.getTotalOrphans(), "it was an orphan when the scan classified it");
+            assertEquals(0, report.getDeletedCount(), "a deployed Agent version references it now, so it must not be erased");
+            verify(resourceClientLibrary, never()).deleteResource(any(), anyBoolean());
+            verify(documentDescriptorStore, never()).deleteAllDescriptor(anyString());
+        }
+
+        /**
+         * The counterpart: with no deployment record in the window the same candidate
+         * still converges. Without it the test above would pass equally against a purge
+         * that had simply stopped deleting.
+         */
+        @Test
+        @DisplayName("no deployed version appears, so the orphan is still purged")
+        void unreferencedOrphanIsStillPurgedWhenNoDeploymentAppears() throws Exception {
+            String ruleSetId = "aabbccddeeff112233445591";
+            URI ruleSetUri = URI.create("eddi://ai.labs.rules/rulestore/rulesets/" + ruleSetId + "?version=1");
+
+            noDescriptors();
+            when(documentDescriptorStore.readDescriptors(eq("ai.labs.rules"), anyString(), eq(0), anyInt(), anyBoolean()))
+                    .thenReturn(List.of(descriptor(ruleSetUri, "orphan-ruleset")));
+            when(resourceClientLibrary.getCurrentResourceId(ruleSetUri)).thenReturn(resourceId(ruleSetId, 1));
+            when(workflowStore.getWorkflowDescriptorsContainingResource(anyString(), anyBoolean())).thenReturn(List.of());
+            when(deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed)).thenReturn(List.of());
+
+            OrphanReport report = restOrphanAdmin.purgeOrphans(false);
+
+            assertEquals(1, report.getDeletedCount());
+            verify(resourceClientLibrary).deleteResource(ruleSetUri, true);
+        }
+
+        /**
+         * The deployed-version re-check fails CLOSED like every other guard on this
+         * path: a deployment store that cannot answer has told us nothing, and nothing
+         * is not a licence for a permanent delete. The mark scan runs before the
+         * failure starts, so this cannot be mistaken for the incomplete-scan refusal —
+         * the purge is entered, and stops at the candidate.
+         */
+        @Test
+        @DisplayName("a deployment store that fails during the purge stops the delete rather than guessing")
+        void deploymentReadFailureDuringThePurgeStopsTheDelete() throws Exception {
+            String ruleSetId = "aabbccddeeff112233445592";
+            URI ruleSetUri = URI.create("eddi://ai.labs.rules/rulestore/rulesets/" + ruleSetId + "?version=1");
+
+            noDescriptors();
+            when(documentDescriptorStore.readDescriptors(eq("ai.labs.rules"), anyString(), eq(0), anyInt(), anyBoolean()))
+                    .thenReturn(List.of(descriptor(ruleSetUri, "orphan-ruleset")));
+            when(resourceClientLibrary.getCurrentResourceId(ruleSetUri)).thenReturn(resourceId(ruleSetId, 1));
+            when(workflowStore.getWorkflowDescriptorsContainingResource(anyString(), anyBoolean())).thenReturn(List.of());
+            when(deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed))
+                    .thenReturn(List.of())
+                    .thenThrow(new IResourceStore.ResourceStoreException("mongo down"));
+
+            OrphanReport report = restOrphanAdmin.purgeOrphans(false);
+
+            assertEquals(0, report.getDeletedCount(), "the re-check could not answer, so nothing may be erased");
+            verify(resourceClientLibrary, never()).deleteResource(any(), anyBoolean());
+        }
     }
 }

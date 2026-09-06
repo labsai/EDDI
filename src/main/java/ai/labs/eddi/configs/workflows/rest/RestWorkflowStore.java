@@ -238,6 +238,10 @@ public class RestWorkflowStore implements IRestWorkflowStore {
 
         int skipped = plan.skipped();
         for (URI candidate : plan.toDelete()) {
+            if (stillReferencedAfterParentDelete(candidate)) {
+                skipped++;
+                continue;
+            }
             if (!deleteCascadedResource(candidate)) {
                 skipped++;
             }
@@ -471,6 +475,54 @@ public class RestWorkflowStore implements IRestWorkflowStore {
         String raw = resourceUri.toString();
         int queryStart = raw.indexOf('?');
         return URI.create((queryStart >= 0 ? raw.substring(0, queryStart) : raw) + versionQueryParam + version);
+    }
+
+    /**
+     * Re-asks "is anyone still using this?" immediately before the irreversible
+     * child delete.
+     *
+     * <p>
+     * {@link #planCascade} answers that question BEFORE the parent workflow is
+     * deleted — it has to, so the parent still counts among the referrers — and a
+     * workflow created, or re-pointed at this resource, in the window between the
+     * two would then have its newly shared configuration soft-deleted underneath
+     * it. The parent is gone by the time this runs, so the honest expectation here
+     * is ZERO referrers, not the {@code > 1} the plan phase used: the reverse
+     * lookup drops a soft-deleted or erased referrer (see
+     * {@code AbstractResourceStore.isStaleReference}).
+     * </p>
+     *
+     * <p>
+     * This narrows the window to the instants between this query and the delete; it
+     * does not close it. Closing it needs a deployment-wide lock over reference
+     * writes, which would serialise configuration editing against every cascade.
+     * </p>
+     *
+     * <p>
+     * FAILS CLOSED, like the plan-phase check it repeats: a lookup that throws or
+     * answers null has told us nothing, and "nothing" is not a licence to delete.
+     * </p>
+     *
+     * @return true when the resource must NOT be deleted
+     */
+    private boolean stillReferencedAfterParentDelete(URI currentUri) {
+        List<DocumentDescriptor> referencingWorkflows;
+        try {
+            referencingWorkflows = workflowStore.getWorkflowDescriptorsContainingResource(currentUri.toString(), true);
+        } catch (Exception e) {
+            log.errorf(e, "Re-check of %s after the workflow delete failed — NOT cascade-deleting it", currentUri);
+            return true;
+        }
+        if (referencingWorkflows == null) {
+            log.warnf("Re-check of %s after the workflow delete returned no answer — NOT cascade-deleting it", currentUri);
+            return true;
+        }
+        if (!referencingWorkflows.isEmpty()) {
+            log.infof("Skipping cascade-delete of %s — it became referenced by %d workflow(s) after the cascade was planned",
+                    currentUri, referencingWorkflows.size());
+            return true;
+        }
+        return false;
     }
 
     /** @return true when the resource was actually deleted */

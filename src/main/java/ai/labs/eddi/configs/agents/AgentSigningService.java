@@ -249,14 +249,16 @@ public class AgentSigningService {
      *            the rotated key versions the configuration declares, used as the
      *            upper bound of the sweep, or {@code null} when they are unknown
      *            and the whole 1..{@value #MAX_KEY_VERSION_SCAN} range has to be
-     *            swept
+     *            swept. A list holding no positive version is treated as
+     *            {@code null}: it bounds nothing — see
+     *            {@link #versionsToSweep(Collection)}
      */
     public void deleteKeyPair(String tenantId, String agentId, Collection<Integer> knownVersions) {
         DeleteTally tally = new DeleteTally();
 
-        deleteVaultKey(tenantId, agentId, vaultKeyName(agentId), cacheKey(tenantId, agentId), tally);
+        deleteVaultKey(tenantId, vaultKeyName(agentId), cacheKey(tenantId, agentId), tally);
         for (int v : versionsToSweep(knownVersions)) {
-            deleteVaultKey(tenantId, agentId, vaultKeyNameVersioned(agentId, v), cacheKey(tenantId, agentId) + ";v=" + v, tally);
+            deleteVaultKey(tenantId, vaultKeyNameVersioned(agentId, v), cacheKey(tenantId, agentId) + ";v=" + v, tally);
         }
 
         // Reports what actually happened. The old unconditional "Deleted signing
@@ -300,6 +302,19 @@ public class AgentSigningService {
      * ABOVE the cap are still attempted individually — they are known to exist,
      * where the range is only a guess.
      * </p>
+     *
+     * <p>
+     * An empty list of valid versions is an UNKNOWN bound, not a known-empty one,
+     * and falls back to the full sweep exactly as {@code null} does. It is the same
+     * argument as the gaps above, at its extreme: {@code rotateKey} writes the
+     * vault entry and the caller then updates {@code identity.keys} separately, so
+     * a first rotation whose config write failed leaves v1 in the vault with
+     * {@code keys[]} still empty — and treating that as "no rotated versions,
+     * nothing to sweep" left an Ed25519 private key behind after a permanent delete
+     * while the tally reported success. An operator who pruned {@code keys[]} by
+     * hand produces the same shape. The 101 round trips are the price of not
+     * leaking a private key on a rare, irreversible operation.
+     * </p>
      */
     private static List<Integer> versionsToSweep(Collection<Integer> knownVersions) {
         if (knownVersions == null) {
@@ -307,9 +322,8 @@ public class AgentSigningService {
         }
         List<Integer> declared = knownVersions.stream().filter(v -> v != null && v > 0).distinct().sorted().toList();
         if (declared.isEmpty()) {
-            // "Key material, but no rotated versions" — the legacy unversioned key,
-            // which deleteKeyPair removes on its own. Nothing to sweep for.
-            return List.of();
+            // Nothing usable to bound the sweep with — see above.
+            return IntStream.rangeClosed(1, MAX_KEY_VERSION_SCAN).boxed().toList();
         }
         int highest = Math.min(declared.get(declared.size() - 1), MAX_KEY_VERSION_SCAN);
         Set<Integer> versions = new TreeSet<>(declared);
@@ -336,7 +350,7 @@ public class AgentSigningService {
      * than the vault entry the WARN is about.
      * </p>
      */
-    private void deleteVaultKey(String tenantId, String agentId, String vaultKey, String cacheKeyStr, DeleteTally tally) {
+    private void deleteVaultKey(String tenantId, String vaultKey, String cacheKeyStr, DeleteTally tally) {
         try {
             secretProvider.delete(new SecretReference(tenantId, vaultKey));
             tally.deleted++;

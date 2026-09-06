@@ -29,6 +29,7 @@ import org.mockito.Mock;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -75,6 +76,16 @@ class RestAgentStoreTest {
         // EXISTS before it asks who else uses it or deletes anything.
         when(restWorkflowStore.getCurrentResourceId(PKG1_ID)).thenReturn(resourceId(PKG1_ID, 2));
         when(restWorkflowStore.getCurrentResourceId(PKG2_ID)).thenReturn(resourceId(PKG2_ID, 1));
+        // The Agent stops being a referrer of its own workflows the moment it is
+        // deleted; see referrers().
+        doAnswer(invocation -> {
+            agentDeleted.set(true);
+            return null;
+        }).when(AgentStore).delete(anyString(), anyInt());
+        doAnswer(invocation -> {
+            agentDeleted.set(true);
+            return null;
+        }).when(AgentStore).deleteAllPermanently(anyString());
     }
 
     static IResourceStore.IResourceId resourceId(String id, int version) {
@@ -94,6 +105,32 @@ class RestAgentStoreTest {
     /** Helper to create a dummy DocumentDescriptor for reference-count mocking */
     private DocumentDescriptor dummyDescriptor() {
         return new DocumentDescriptor();
+    }
+
+    /**
+     * Whether the Agent under test has been deleted yet; see {@link #referrers}.
+     */
+    private final AtomicBoolean agentDeleted = new AtomicBoolean();
+
+    /**
+     * The reverse lookup's answer, as the real store gives it: {@code total} counts
+     * the Agent being deleted among a workflow's referrers, and that one disappears
+     * once the Agent has been deleted — {@code AbstractResourceStore
+     * .isStaleReference} drops a referrer that has no current row.
+     *
+     * <p>
+     * Modelling that is what lets the post-delete re-check in {@code deleteAgent}
+     * mean anything: against a stub frozen at its pre-delete answer, "only this
+     * Agent used it" and "another Agent has picked it up since" look identical.
+     * </p>
+     */
+    private List<DocumentDescriptor> referrers(int total) {
+        int remaining = agentDeleted.get() ? total - 1 : total;
+        List<DocumentDescriptor> descriptors = new ArrayList<>();
+        for (int i = 0; i < remaining; i++) {
+            descriptors.add(dummyDescriptor());
+        }
+        return descriptors;
     }
 
     @Nested
@@ -150,8 +187,8 @@ class RestAgentStoreTest {
                     URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG2_ID + "?version=1"))));
             when(AgentStore.read(AGENT_ID, 1)).thenReturn(config);
             // Each package is only referenced by this one agent
-            when(AgentStore.getAgentDescriptorsContainingWorkflow(PKG1_ID, 2, true)).thenReturn(List.of(dummyDescriptor()));
-            when(AgentStore.getAgentDescriptorsContainingWorkflow(PKG2_ID, 1, true)).thenReturn(List.of(dummyDescriptor()));
+            when(AgentStore.getAgentDescriptorsContainingWorkflow(PKG1_ID, 2, true)).thenAnswer(invocation -> referrers(1));
+            when(AgentStore.getAgentDescriptorsContainingWorkflow(PKG2_ID, 1, true)).thenAnswer(invocation -> referrers(1));
             when(restWorkflowStore.deleteWorkflow(anyString(), anyInt(), anyBoolean(), anyBoolean())).thenReturn(Response.ok().build());
 
             restAgentStore.deleteAgent(AGENT_ID, 1, true, true);
@@ -173,7 +210,7 @@ class RestAgentStoreTest {
             AgentConfiguration config = new AgentConfiguration();
             config.setWorkflows(new ArrayList<>(List.of(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG1_ID + "?version=1"))));
             when(AgentStore.read(AGENT_ID, 1)).thenReturn(config);
-            when(AgentStore.getAgentDescriptorsContainingWorkflow(PKG1_ID, 2, true)).thenReturn(List.of(dummyDescriptor()));
+            when(AgentStore.getAgentDescriptorsContainingWorkflow(PKG1_ID, 2, true)).thenAnswer(invocation -> referrers(1));
             when(restWorkflowStore.deleteWorkflow(anyString(), anyInt(), anyBoolean(), anyBoolean())).thenReturn(Response.ok().build());
 
             restAgentStore.deleteAgent(AGENT_ID, 1, true, true);
@@ -189,9 +226,9 @@ class RestAgentStoreTest {
                     URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG2_ID + "?version=1"))));
             when(AgentStore.read(AGENT_ID, 1)).thenReturn(config);
             // PKG1 is shared with 2 agents — should be SKIPPED
-            when(AgentStore.getAgentDescriptorsContainingWorkflow(PKG1_ID, 2, true)).thenReturn(List.of(dummyDescriptor(), dummyDescriptor()));
+            when(AgentStore.getAgentDescriptorsContainingWorkflow(PKG1_ID, 2, true)).thenAnswer(invocation -> referrers(2));
             // PKG2 is only in this Agent — should be deleted
-            when(AgentStore.getAgentDescriptorsContainingWorkflow(PKG2_ID, 1, true)).thenReturn(List.of(dummyDescriptor()));
+            when(AgentStore.getAgentDescriptorsContainingWorkflow(PKG2_ID, 1, true)).thenAnswer(invocation -> referrers(1));
             when(restWorkflowStore.deleteWorkflow(anyString(), anyInt(), anyBoolean(), anyBoolean())).thenReturn(Response.ok().build());
 
             restAgentStore.deleteAgent(AGENT_ID, 1, true, true);
@@ -210,7 +247,7 @@ class RestAgentStoreTest {
                     URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG2_ID + "?version=1"))));
             when(AgentStore.read(AGENT_ID, 1)).thenReturn(config);
             // both packages only referenced by this agent
-            when(AgentStore.getAgentDescriptorsContainingWorkflow(anyString(), anyInt(), eq(true))).thenReturn(List.of(dummyDescriptor()));
+            when(AgentStore.getAgentDescriptorsContainingWorkflow(anyString(), anyInt(), eq(true))).thenAnswer(invocation -> referrers(1));
             when(restWorkflowStore.deleteWorkflow(PKG1_ID, 2, false, true)).thenThrow(new RuntimeException("Workflow in use"));
             when(restWorkflowStore.deleteWorkflow(PKG2_ID, 1, false, true)).thenReturn(Response.ok().build());
 
@@ -284,7 +321,7 @@ class RestAgentStoreTest {
             AgentConfiguration config = new AgentConfiguration();
             config.setWorkflows(new ArrayList<>(List.of(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG1_ID + "?version=1"))));
             when(AgentStore.read(AGENT_ID, 1)).thenReturn(config);
-            when(AgentStore.getAgentDescriptorsContainingWorkflow(PKG1_ID, 2, true)).thenReturn(List.of(dummyDescriptor()));
+            when(AgentStore.getAgentDescriptorsContainingWorkflow(PKG1_ID, 2, true)).thenAnswer(invocation -> referrers(1));
             when(restWorkflowStore.deleteWorkflow(anyString(), anyInt(), anyBoolean(), anyBoolean())).thenReturn(Response.ok().build());
 
             restAgentStore.deleteAgent(AGENT_ID, 0, false, true);
@@ -445,7 +482,7 @@ class RestAgentStoreTest {
             config.setWorkflows(
                     new ArrayList<>(List.of(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG1_ID + "?version=1"))));
             when(AgentStore.read(AGENT_ID, 1)).thenReturn(config);
-            when(AgentStore.getAgentDescriptorsContainingWorkflow(PKG1_ID, 2, true)).thenReturn(List.of(dummyDescriptor()));
+            when(AgentStore.getAgentDescriptorsContainingWorkflow(PKG1_ID, 2, true)).thenAnswer(invocation -> referrers(1));
             // The guard saw v1; by the time the delete runs the Agent is at v2.
             doThrow(new IResourceStore.ResourceModifiedException("not the latest version")).when(AgentStore).delete(AGENT_ID, 1);
 
@@ -472,12 +509,62 @@ class RestAgentStoreTest {
             when(AgentStore.read(AGENT_ID, 1)).thenReturn(config);
             // This Agent plus one other — the guard must read that as "still referenced".
             when(AgentStore.getAgentDescriptorsContainingWorkflow(PKG1_ID, 2, true))
-                    .thenReturn(List.of(dummyDescriptor(), dummyDescriptor()));
+                    .thenAnswer(invocation -> referrers(2));
 
             restAgentStore.deleteAgent(AGENT_ID, 1, false, true);
 
             verify(AgentStore).delete(AGENT_ID, 1);
             verify(restWorkflowStore, never()).deleteWorkflow(anyString(), anyInt(), anyBoolean(), anyBoolean());
+        }
+
+        /**
+         * The window the ordering leaves open: the workflow was judged exclusive BEFORE
+         * this Agent was deleted, and another Agent can be created — or re-pointed at
+         * it — between that decision and the cascade delete. Nothing downstream
+         * re-asks: {@code deleteWorkflow} only checks WORKFLOW referrers, not Agent
+         * ones. So the newly shared workflow (and, through that delete's own cascade,
+         * its rule sets, output sets and dictionaries) was torn down under a live
+         * Agent. The re-check runs after this Agent is gone, so anything the reverse
+         * lookup still returns is a referrer that must stop the delete.
+         */
+        @Test
+        @DisplayName("a workflow another Agent picks up during the cascade is not deleted")
+        void workflowThatBecomesSharedDuringTheCascadeIsSkipped() throws Exception {
+            AgentConfiguration config = new AgentConfiguration();
+            config.setWorkflows(
+                    new ArrayList<>(List.of(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG1_ID + "?version=1"))));
+            when(AgentStore.read(AGENT_ID, 1)).thenReturn(config);
+            // One referrer at both moments, but not the SAME one: when the cascade is
+            // planned it is this Agent (so the workflow is a candidate), and by the time
+            // the cascade delete runs this Agent is gone and the one referrer is an
+            // Agent that has just been pointed at the workflow.
+            when(AgentStore.getAgentDescriptorsContainingWorkflow(PKG1_ID, 2, true)).thenReturn(List.of(dummyDescriptor()));
+
+            restAgentStore.deleteAgent(AGENT_ID, 1, false, true);
+
+            verify(AgentStore).delete(AGENT_ID, 1);
+            verify(restWorkflowStore, never()).deleteWorkflow(anyString(), anyInt(), anyBoolean(), anyBoolean());
+        }
+
+        /**
+         * The counterpart to
+         * {@link #workflowThatBecomesSharedDuringTheCascadeIsSkipped} — without it,
+         * that test would pass equally against a cascade that had simply stopped
+         * deleting anything.
+         */
+        @Test
+        @DisplayName("a workflow nobody picks up during the cascade is still deleted")
+        void workflowThatStaysExclusiveIsStillCascadeDeleted() throws Exception {
+            AgentConfiguration config = new AgentConfiguration();
+            config.setWorkflows(
+                    new ArrayList<>(List.of(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG1_ID + "?version=1"))));
+            when(AgentStore.read(AGENT_ID, 1)).thenReturn(config);
+            when(AgentStore.getAgentDescriptorsContainingWorkflow(PKG1_ID, 2, true)).thenAnswer(invocation -> referrers(1));
+            when(restWorkflowStore.deleteWorkflow(anyString(), anyInt(), anyBoolean(), anyBoolean())).thenReturn(Response.ok().build());
+
+            restAgentStore.deleteAgent(AGENT_ID, 1, false, true);
+
+            verify(restWorkflowStore).deleteWorkflow(PKG1_ID, 2, false, true);
         }
 
         /**
@@ -497,7 +584,7 @@ class RestAgentStoreTest {
             when(AgentStore.read(AGENT_ID, 1)).thenReturn(config);
             when(restWorkflowStore.getCurrentResourceId(PKG1_ID))
                     .thenThrow(new IResourceStore.ResourceNotFoundException("already soft-deleted"));
-            when(AgentStore.getAgentDescriptorsContainingWorkflow(PKG2_ID, 1, true)).thenReturn(List.of(dummyDescriptor()));
+            when(AgentStore.getAgentDescriptorsContainingWorkflow(PKG2_ID, 1, true)).thenAnswer(invocation -> referrers(1));
 
             restAgentStore.deleteAgent(AGENT_ID, 1, false, true);
 
@@ -522,7 +609,7 @@ class RestAgentStoreTest {
             when(AgentStore.read(AGENT_ID, 1)).thenReturn(config);
             when(AgentStore.getAgentDescriptorsContainingWorkflow(PKG1_ID, 2, true))
                     .thenThrow(new IResourceStore.ResourceStoreException("reverse lookup broken"));
-            when(AgentStore.getAgentDescriptorsContainingWorkflow(PKG2_ID, 1, true)).thenReturn(List.of(dummyDescriptor()));
+            when(AgentStore.getAgentDescriptorsContainingWorkflow(PKG2_ID, 1, true)).thenAnswer(invocation -> referrers(1));
 
             restAgentStore.deleteAgent(AGENT_ID, 1, false, true);
 

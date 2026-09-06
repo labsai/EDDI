@@ -338,6 +338,9 @@ public class RestAgentStore implements IRestAgentStore {
             }
 
             for (IResourceId target : cascadeTargets) {
+                if (stillReferencedAfterAgentDelete(target)) {
+                    continue;
+                }
                 try {
                     // NEVER permanent down a cascade, whatever the request asked for.
                     // The guard in planCascade answers a VERSION-scoped question ("who
@@ -394,6 +397,50 @@ public class RestAgentStore implements IRestAgentStore {
         }
 
         return response;
+    }
+
+    /**
+     * Re-asks "does any Agent still reference this workflow?" immediately before
+     * the irreversible cascade delete.
+     *
+     * <p>
+     * {@link #planCascade} answers that question BEFORE this Agent is deleted — it
+     * has to, so this Agent still counts among the referrers — and an Agent
+     * created, or re-pointed at this workflow, in the window between the two would
+     * then have its newly shared workflow (and, through {@code deleteWorkflow}'s
+     * own cascade, that workflow's extensions) torn down underneath it. This Agent
+     * is gone by the time this runs, so the honest expectation is ZERO referrers
+     * rather than the {@code > 1} the plan phase used: the reverse lookup drops a
+     * soft-deleted or erased referrer (see
+     * {@code AbstractResourceStore.isStaleReference}).
+     * </p>
+     *
+     * <p>
+     * It narrows the window to the instants between this query and the delete
+     * rather than closing it, and FAILS CLOSED — a lookup that cannot answer is not
+     * a licence to delete.
+     * </p>
+     *
+     * @return true when the workflow must NOT be cascade-deleted
+     */
+    private boolean stillReferencedAfterAgentDelete(IResourceId target) {
+        List<DocumentDescriptor> referencingAgents;
+        try {
+            referencingAgents = agentStore.getAgentDescriptorsContainingWorkflow(target.getId(), target.getVersion(), true);
+        } catch (Exception e) {
+            log.warnf("Re-check of package %s after the Agent delete failed — NOT cascade-deleting it: %s", target.getId(), e.getMessage());
+            return true;
+        }
+        if (referencingAgents == null) {
+            log.warnf("Re-check of package %s after the Agent delete returned no answer — NOT cascade-deleting it", target.getId());
+            return true;
+        }
+        if (!referencingAgents.isEmpty()) {
+            log.infof("Skipping cascade-delete of package %s (v%d) — it became referenced by %d Agent(s) after the cascade was planned",
+                    target.getId(), target.getVersion(), referencingAgents.size());
+            return true;
+        }
+        return false;
     }
 
     /**
