@@ -28,6 +28,7 @@ import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.secrets.sanitize.SecretScrubber;
 import ai.labs.eddi.utils.FileUtilities;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -40,7 +41,9 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -89,6 +92,9 @@ class RestExportServiceSelectionContractTest {
     /** Archive contents, as '/'-separated paths relative to the ZIP root. */
     private final List<String> archivedFiles = new ArrayList<>();
 
+    /** The same files' text, keyed the same way. */
+    private final Map<String, String> archivedContent = new LinkedHashMap<>();
+
     @BeforeEach
     void setUp() throws Exception {
         var agentStore = mock(IAgentStore.class);
@@ -116,23 +122,35 @@ class RestExportServiceSelectionContractTest {
         agentConfig.setWorkflows(List.of(URI.create(
                 "eddi://ai.labs.workflow/workflowstore/workflows/" + WORKFLOW_ID + "?version=1")));
         when(agentStore.read(AGENT_ID, 1)).thenReturn(agentConfig);
-        when(workflowStore.read(WORKFLOW_ID, 1)).thenReturn(new WorkflowConfiguration());
+        var storedWorkflow = new WorkflowConfiguration();
+        when(workflowStore.read(WORKFLOW_ID, 1)).thenReturn(storedWorkflow);
         when(llmStore.read(LLM_ID, 1)).thenReturn(new LlmConfiguration(List.of()));
 
         // The workflow points at one LLM config; that config references one snippet.
         String workflowJson = "{\"workflowSteps\":[{\"type\":\"eddi://ai.labs.llm\",\"config\":"
                 + "{\"uri\":\"eddi://ai.labs.llm/llmstore/llms/" + LLM_ID + "?version=1\"}}]}";
         String llmJson = "{\"tasks\":[{\"systemMessage\":\"{snippets.greeting}\"}]}";
+        var mapper = new ObjectMapper();
         when(jsonSerialization.serialize(any())).thenAnswer(inv -> {
             Object value = inv.getArgument(0);
-            if (value instanceof WorkflowConfiguration) {
+            if (value == storedWorkflow) {
+                // The object the store hands out is an empty stand-in for the JSON
+                // above; it is never serialized for real.
                 return workflowJson;
+            }
+            if (value instanceof WorkflowConfiguration workflow) {
+                // No other workflow object should reach the exporter: the archive
+                // carries the stored JSON as it is. Serialized for real so a test can
+                // see whatever did land in the archive.
+                return mapper.writeValueAsString(workflow);
             }
             if (value instanceof LlmConfiguration) {
                 return llmJson;
             }
             return "{}";
         });
+        when(jsonSerialization.deserialize(anyString(), eq(WorkflowConfiguration.class)))
+                .thenAnswer(inv -> mapper.readValue((String) inv.getArgument(0), WorkflowConfiguration.class));
         when(secretScrubber.scrubJson(anyString())).thenAnswer(inv -> inv.getArgument(0));
 
         var agentDescriptor = new DocumentDescriptor();
@@ -214,6 +232,43 @@ class RestExportServiceSelectionContractTest {
     }
 
     @Test
+    @DisplayName("a selective export omits the config file but keeps the workflow step that names it")
+    void deselectedExtensionKeepsItsWorkflowStepReference() {
+        String workflowFile = WORKFLOW_ID + "/1/" + WORKFLOW_ID + ".workflow.json";
+
+        // The user unticks the LLM config in the export dialog. The file is omitted,
+        // and the workflow keeps its config.uri — because strategy=merge PUTs this
+        // very workflow over the target's, and answers the reference from the
+        // target's own copy. Dropping the step here deleted it from the live target
+        // instead: promote just the behaviour rules to prod, and prod's LLM step was
+        // gone. The import side drops what it cannot resolve, and only where there
+        // is no local copy to resolve it from
+        // (RestImportServiceArchiveContractTest#missingExtensionFileOnCreateDropsTheStep).
+        exportService.exportAgent(AGENT_ID, 1, "9999111122223333444455aa", null, null);
+
+        assertFalse(archivedFiles.contains(WORKFLOW_ID + "/1/" + LLM_ID + ".langchain.json"),
+                "the deselected config must not be in the archive, got " + archivedFiles);
+        assertTrue(archivedFiles.contains(workflowFile), archivedFiles.toString());
+        assertTrue(archivedContent.get(workflowFile).contains(LLM_ID),
+                "the archived workflow must keep the reference a merge answers from the target's own copy, was "
+                        + archivedContent.get(workflowFile));
+    }
+
+    @Test
+    @DisplayName("a selected extension is written, and the workflow still names it")
+    void selectedExtensionKeepsItsWorkflowStep() {
+        String workflowFile = WORKFLOW_ID + "/1/" + WORKFLOW_ID + ".workflow.json";
+
+        exportService.exportAgent(AGENT_ID, 1, LLM_ID, null, null);
+
+        assertTrue(archivedFiles.contains(WORKFLOW_ID + "/1/" + LLM_ID + ".langchain.json"),
+                archivedFiles.toString());
+        assertTrue(archivedContent.get(workflowFile).contains(LLM_ID),
+                "a selected config must be both written and referenced, was "
+                        + archivedContent.get(workflowFile));
+    }
+
+    @Test
     @DisplayName("a full export still carries every referenced snippet and every schedule")
     void fullExportIsUnfiltered() {
         exportService.exportAgent(AGENT_ID, 1, null, null, null);
@@ -228,9 +283,11 @@ class RestExportServiceSelectionContractTest {
      */
     private void recordArchiveContents(Path zipRoot) throws IOException {
         try (var paths = Files.walk(zipRoot)) {
-            paths.filter(Files::isRegularFile)
-                    .map(path -> zipRoot.relativize(path).toString().replace('\\', '/'))
-                    .forEach(archivedFiles::add);
+            for (Path path : paths.filter(Files::isRegularFile).toList()) {
+                String relative = zipRoot.relativize(path).toString().replace('\\', '/');
+                archivedFiles.add(relative);
+                archivedContent.put(relative, Files.readString(path));
+            }
         }
     }
 

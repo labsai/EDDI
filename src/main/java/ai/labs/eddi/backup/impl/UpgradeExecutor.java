@@ -14,40 +14,31 @@ import ai.labs.eddi.backup.model.UpgradeResult;
 import ai.labs.eddi.backup.model.UpgradeResult.ResourceFailure;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
-import ai.labs.eddi.configs.apicalls.IApiCallsStore;
 import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
-import ai.labs.eddi.configs.dictionary.IDictionaryStore;
 import ai.labs.eddi.configs.dictionary.IRestDictionaryStore;
 import ai.labs.eddi.configs.dictionary.model.DictionaryConfiguration;
-import ai.labs.eddi.configs.llm.ILlmStore;
 import ai.labs.eddi.configs.llm.IRestLlmStore;
-import ai.labs.eddi.configs.mcpcalls.IMcpCallsStore;
 import ai.labs.eddi.configs.mcpcalls.IRestMcpCallsStore;
 import ai.labs.eddi.configs.mcpcalls.model.McpCallsConfiguration;
-import ai.labs.eddi.configs.output.IOutputStore;
 import ai.labs.eddi.configs.output.IRestOutputStore;
 import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
-import ai.labs.eddi.configs.propertysetter.IPropertySetterStore;
 import ai.labs.eddi.configs.propertysetter.IRestPropertySetterStore;
 import ai.labs.eddi.configs.propertysetter.model.PropertySetterConfiguration;
-import ai.labs.eddi.configs.rag.IRagStore;
 import ai.labs.eddi.configs.rag.IRestRagStore;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
-import ai.labs.eddi.configs.rules.IRuleSetStore;
 import ai.labs.eddi.configs.rules.IRestRuleSetStore;
 import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
 import ai.labs.eddi.configs.snippets.IRestPromptSnippetStore;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
-import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
-import ai.labs.eddi.secrets.sanitize.SecretScrubber;
+import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.utils.RestUtilities;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.spi.CDI;
@@ -171,13 +162,24 @@ public class UpgradeExecutor {
                             outcome.created++;
                         }
                     }
-                } else if (wfDiff.action() == DiffAction.UPDATE) {
-                    // Matched workflow — process extensions
+                } else {
+                    // Matched workflow — process its extensions whatever the
+                    // workflow-level action says.
+                    //
+                    // The action is decided from the workflow JSON alone, and on the
+                    // most natural sync path — export an agent, edit one extension in
+                    // the ZIP, upgrade the same agent — that JSON is byte-identical on
+                    // both sides, so the workflow came back SKIP. Reading the extension
+                    // diffs only inside the UPDATE branch therefore threw away every
+                    // extension change the preview had just shown the operator, and the
+                    // response still said 200 OK.
                     Map<String, URI> extensionUpdates = processWorkflowExtensions(
                             sourceWf, diffMap, selectedSourceIds, outcome);
 
                     // Update the workflow config with new extension version URIs
-                    if (!extensionUpdates.isEmpty()) {
+                    if (extensionUpdates.isEmpty()) {
+                        outcome.skipped++;
+                    } else {
                         URI updatedUri = updateWorkflowExtensionUris(
                                 wfDiff.targetId(), wfDiff.targetVersion(), extensionUpdates, outcome);
                         if (updatedUri != null) {
@@ -185,8 +187,6 @@ public class UpgradeExecutor {
                             outcome.updated++;
                         }
                     }
-                } else {
-                    outcome.skipped++;
                 }
             }
 
@@ -205,7 +205,7 @@ public class UpgradeExecutor {
 
             if (!agentNeedsUpdate) {
                 LOGGER.infof("Agent '%s' upgrade wrote no workflow changes — agent version left at %s",
-                        targetAgentId, agentUri);
+                        LogSanitizer.sanitize(targetAgentId), LogSanitizer.sanitize(String.valueOf(agentUri)));
             }
 
             UpgradeResult result = outcome.toResult(agentUri, agentNeedsUpdate);
@@ -217,11 +217,11 @@ public class UpgradeExecutor {
             // A target agent that cannot be read is a 404 the operator can act on.
             // Wrapping it turned the one actionable failure of a sync into a 500.
             metrics.upgradeFailed();
-            LOGGER.errorf(e, "Upgrade failed for target agent %s", targetAgentId);
+            LOGGER.errorf(e, "Upgrade failed for target agent %s", LogSanitizer.sanitize(targetAgentId));
             throw e;
         } catch (Exception e) {
             metrics.upgradeFailed();
-            LOGGER.errorf(e, "Upgrade failed for target agent %s", targetAgentId);
+            LOGGER.errorf(e, "Upgrade failed for target agent %s", LogSanitizer.sanitize(targetAgentId));
             throw new RuntimeException("Upgrade failed: " + e.getMessage(), e);
         }
     }
@@ -325,15 +325,26 @@ public class UpgradeExecutor {
                                 "the store did not accept the update");
                     }
                 } else if (extDiff.action() == DiffAction.CREATE) {
-                    URI newUri = createExtension(sourceExt);
-                    if (newUri != null) {
-                        updates.put(extensionKey, newUri);
-                        outcome.created++;
-                        LOGGER.infof("Created %s '%s'", sourceExt.type(), sourceExt.name());
-                    } else {
-                        outcome.failed(sourceExt.sourceId(), sourceExt.type(), sourceExt.name(),
-                                "the store did not accept the create");
-                    }
+                    // Deliberately NOT created. The only thing that would consume the
+                    // new URI is updateWorkflowExtensionUris, which can repoint a
+                    // reference the target workflow already has — and CREATE means, by
+                    // definition, that it has none. Creating the resource anyway left
+                    // it in the store with nothing pointing at it, counted it as
+                    // created, answered 201, changed the agent's behaviour not at all,
+                    // and previewed the same CREATE again on the next sync, so every
+                    // run added another unreferenced copy.
+                    //
+                    // Cloning the source's step into the target workflow instead was
+                    // considered and rejected: the preview has no row for "a step will
+                    // be added to your existing pipeline", so it would reshape a live
+                    // agent's pipeline off the back of a resource row the operator
+                    // approved as a config change.
+                    outcome.failed(sourceExt.sourceId(), sourceExt.type(), sourceExt.name(),
+                            "the target workflow has no step referencing this " + sourceExt.type()
+                                    + " — add the step to the target workflow, or import the source"
+                                    + " workflow as a new one, then sync again");
+                    LOGGER.warnf("Skipped %s '%s': the target workflow has no step to reference it",
+                            LogSanitizer.sanitize(sourceExt.type()), LogSanitizer.sanitize(sourceExt.name()));
                 }
             } catch (Exception e) {
                 LOGGER.warnf(e, "Failed to process extension %s '%s'", sourceExt.type(), sourceExt.name());
@@ -359,50 +370,42 @@ public class UpgradeExecutor {
                     DictionaryConfiguration.class,
                     (id, version, config) -> getStore(IRestDictionaryStore.class).updateRegularDictionary(id, version, config),
                     IRestDictionaryStore.resourceURI,
-                    IRestDictionaryStore.versionQueryParam,
-                    IDictionaryStore.class);
+                    IRestDictionaryStore.versionQueryParam);
             case "behavior" -> new ExtensionStoreOps<>(
                     RuleSetConfiguration.class,
                     (id, version, config) -> getStore(IRestRuleSetStore.class).updateRuleSet(id, version, config),
                     IRestRuleSetStore.resourceURI,
-                    IRestRuleSetStore.versionQueryParam,
-                    IRuleSetStore.class);
+                    IRestRuleSetStore.versionQueryParam);
             case "httpcalls" -> new ExtensionStoreOps<>(
                     ApiCallsConfiguration.class,
                     (id, version, config) -> getStore(IRestApiCallsStore.class).updateApiCalls(id, version, config),
                     IRestApiCallsStore.resourceURI,
-                    IRestApiCallsStore.versionQueryParam,
-                    IApiCallsStore.class);
+                    IRestApiCallsStore.versionQueryParam);
             case "langchain" -> new ExtensionStoreOps<>(
                     LlmConfiguration.class,
                     (id, version, config) -> getStore(IRestLlmStore.class).updateLlm(id, version, config),
                     IRestLlmStore.resourceURI,
-                    IRestLlmStore.versionQueryParam,
-                    ILlmStore.class);
+                    IRestLlmStore.versionQueryParam);
             case "property" -> new ExtensionStoreOps<>(
                     PropertySetterConfiguration.class,
                     (id, version, config) -> getStore(IRestPropertySetterStore.class).updatePropertySetter(id, version, config),
                     IRestPropertySetterStore.resourceURI,
-                    IRestPropertySetterStore.versionQueryParam,
-                    IPropertySetterStore.class);
+                    IRestPropertySetterStore.versionQueryParam);
             case "output" -> new ExtensionStoreOps<>(
                     OutputConfigurationSet.class,
                     (id, version, config) -> getStore(IRestOutputStore.class).updateOutputSet(id, version, config),
                     IRestOutputStore.resourceURI,
-                    IRestOutputStore.versionQueryParam,
-                    IOutputStore.class);
+                    IRestOutputStore.versionQueryParam);
             case "mcpcalls" -> new ExtensionStoreOps<>(
                     McpCallsConfiguration.class,
                     (id, version, config) -> getStore(IRestMcpCallsStore.class).updateMcpCalls(id, version, config),
                     IRestMcpCallsStore.resourceURI,
-                    IRestMcpCallsStore.versionQueryParam,
-                    IMcpCallsStore.class);
+                    IRestMcpCallsStore.versionQueryParam);
             case "rag" -> new ExtensionStoreOps<>(
                     RagConfiguration.class,
                     (id, version, config) -> getStore(IRestRagStore.class).updateRag(id, version, config),
                     IRestRagStore.resourceURI,
-                    IRestRagStore.versionQueryParam,
-                    IRagStore.class);
+                    IRestRagStore.versionQueryParam);
             // Loud, not silent: a type registered in WorkflowExtensions but missing
             // here used to return null, which every caller turned into "the store
             // did not accept it" — a wrong diagnosis for a wiring mistake.
@@ -418,10 +421,8 @@ public class UpgradeExecutor {
     }
 
     /**
-     * Holds the configuration class, its store's update call, the URI pattern, and
-     * the direct store class for a single extension type. The
-     * {@code directStoreClass} is used by {@link #dispatchCreateDirect} to bypass
-     * Response.getLocation() which fails for eddi:// scheme URIs.
+     * Holds the configuration class, its store's update call and the URI pattern
+     * for a single extension type.
      * <p>
      * The update call is a typed lambda so that dispatch happens here, in the one
      * table, instead of a second switch on the config class's <em>simple name</em>
@@ -432,8 +433,7 @@ public class UpgradeExecutor {
             Class<T> configClass,
             ExtensionUpdate<T> update,
             String resourceUri,
-            String versionQueryParam,
-            Class<?> directStoreClass) {
+            String versionQueryParam) {
     }
 
     // ==================== Extension Update/Create (Unified) ====================
@@ -468,102 +468,46 @@ public class UpgradeExecutor {
     }
 
     /**
-     * Creates a new extension resource from the source content. Uses direct store
-     * create to bypass Response.getLocation() which fails for eddi:// URIs.
-     *
-     * @throws IllegalArgumentException
-     *             if no store is registered for the source's extension type — see
-     *             {@link #updateExtension} for why that one is not caught here
-     */
-    private URI createExtension(ExtensionSourceData source) {
-        ExtensionStoreOps<?> ops = resolveExtensionOps(source.type());
-        try {
-            return dispatchCreateDirect(ops, source.contentJson());
-        } catch (Exception e) {
-            LOGGER.warnf(e, "Failed to create %s '%s'", source.type(), source.name());
-            return null;
-        }
-    }
-
-    /**
-     * The marker {@link SecretScrubber} writes in place of a secret value.
-     * <p>
-     * Referenced, not re-typed: as a bare literal the two copies could drift, and
-     * the drift would be silent — {@link #restoreRedactedSecrets} would simply stop
-     * matching and write placeholders over a production agent's live API keys.
-     */
-    private static final String SCRUBBED_SECRET = SecretScrubber.REDACTED;
-
-    /**
      * Puts the target's own value back wherever the source content carries a
      * scrubbed secret.
      * <p>
      * Everything in an export ZIP has been through the secret scrubber, which
-     * replaces live credentials with {@value #SCRUBBED_SECRET}. Writing that
-     * straight into the target replaced a production agent's working API keys with
-     * placeholders — an upgrade from an export silently broke the agent it was
-     * meant to update. A placeholder with no counterpart in the target is left
-     * alone and reported, because there is nothing to preserve and the operator has
-     * to supply the value.
+     * replaces live credentials with a placeholder. Writing that straight into the
+     * target replaced a production agent's working API keys with placeholders — an
+     * upgrade from an export silently broke the agent it was meant to update. A
+     * placeholder with no counterpart in the target is left alone and reported,
+     * because there is nothing to preserve and the operator has to supply the
+     * value.
+     * <p>
+     * The merge itself lives in {@link ScrubbedSecrets} so that
+     * {@link StructuralMatcher} decides its {@link DiffAction} on exactly the
+     * content this method is about to write.
      *
      * @return the source JSON, with scrubbed leaves replaced by the target's values
      */
     private String restoreRedactedSecrets(ExtensionSourceData source, String sourceJson, String targetJson) {
-        if (sourceJson == null || !sourceJson.contains(SCRUBBED_SECRET)) {
+        if (!ScrubbedSecrets.carriesPlaceholder(sourceJson)) {
             return sourceJson;
         }
         if (targetJson == null) {
             LOGGER.warnf("%s '%s' carries scrubbed secrets and the target's current config could not be read —"
                     + " the placeholders will be written as-is and must be replaced by hand",
-                    source.type(), source.name());
+                    LogSanitizer.sanitize(source.type()), LogSanitizer.sanitize(source.name()));
             return sourceJson;
         }
         try {
-            Object sourceTree = jsonSerialization.deserialize(sourceJson);
-            Object targetTree = jsonSerialization.deserialize(targetJson);
-            Object merged = mergeScrubbedValues(sourceTree, targetTree);
-            String mergedJson = jsonSerialization.serialize(merged);
-            if (mergedJson != null && mergedJson.contains(SCRUBBED_SECRET)) {
+            String mergedJson = ScrubbedSecrets.restore(sourceJson, targetJson, jsonSerialization);
+            if (ScrubbedSecrets.carriesPlaceholder(mergedJson)) {
                 LOGGER.warnf("%s '%s' still carries scrubbed secrets the target has no value for —"
-                        + " they must be replaced by hand", source.type(), source.name());
+                        + " they must be replaced by hand",
+                        LogSanitizer.sanitize(source.type()), LogSanitizer.sanitize(source.name()));
             }
             return mergedJson != null ? mergedJson : sourceJson;
         } catch (Exception e) {
             LOGGER.warnf(e, "Could not restore scrubbed secrets for %s '%s' — writing the source content as-is",
-                    source.type(), source.name());
+                    LogSanitizer.sanitize(source.type()), LogSanitizer.sanitize(source.name()));
             return sourceJson;
         }
-    }
-
-    /**
-     * Walks two parsed configs in parallel and returns the source with every
-     * scrubbed leaf replaced by the target's value at the same position.
-     */
-    private static Object mergeScrubbedValues(Object sourceNode, Object targetNode) {
-        if (sourceNode instanceof String text) {
-            if (text.contains(SCRUBBED_SECRET) && targetNode instanceof String targetText) {
-                return targetText;
-            }
-            return text;
-        }
-        if (sourceNode instanceof Map<?, ?> sourceMap) {
-            Map<?, ?> targetMap = targetNode instanceof Map<?, ?> map ? map : Map.of();
-            Map<String, Object> merged = new LinkedHashMap<>();
-            for (Map.Entry<?, ?> entry : sourceMap.entrySet()) {
-                String key = String.valueOf(entry.getKey());
-                merged.put(key, mergeScrubbedValues(entry.getValue(), targetMap.get(key)));
-            }
-            return merged;
-        }
-        if (sourceNode instanceof List<?> sourceList) {
-            List<?> targetList = targetNode instanceof List<?> list ? list : List.of();
-            List<Object> merged = new ArrayList<>(sourceList.size());
-            for (int i = 0; i < sourceList.size(); i++) {
-                merged.add(mergeScrubbedValues(sourceList.get(i), i < targetList.size() ? targetList.get(i) : null));
-            }
-            return merged;
-        }
-        return sourceNode;
     }
 
     /**
@@ -575,26 +519,6 @@ public class UpgradeExecutor {
             throws Exception {
         T config = jsonSerialization.deserialize(json, ops.configClass());
         return ops.update().apply(targetId, targetVersion, config);
-    }
-
-    /**
-     * Deserializes JSON and creates the resource directly via the underlying
-     * I*Store, bypassing the REST layer and Response.getLocation() entirely.
-     */
-    @SuppressWarnings("unchecked")
-    private <T> URI dispatchCreateDirect(ExtensionStoreOps<T> ops, String json) throws Exception {
-        T config = jsonSerialization.deserialize(json, ops.configClass());
-        IResourceStore<T> store = (IResourceStore<T>) CDI.current().select(ops.directStoreClass()).get();
-        IResourceId resourceId = store.create(config);
-        URI createdUri = RestUtilities.createURI(ops.resourceUri(), resourceId.getId(), ops.versionQueryParam(), resourceId.getVersion());
-
-        // Create the DocumentDescriptor that the DocumentDescriptorFilter would
-        // normally create on a 201 response — including the ownership stamp, or a
-        // resource created by an upgrade would be unowned and unlistable.
-        documentDescriptorStore.createDescriptor(resourceId.getId(), resourceId.getVersion(),
-                resourceAccessGuard.stampNewDescriptor(createDocumentDescriptor(createdUri)));
-
-        return createdUri;
     }
 
     // ==================== Workflow Updates ====================
@@ -633,6 +557,10 @@ public class UpgradeExecutor {
      * loading the OLD extension version while the agent version was bumped, and
      * left a stray {@code extensions.uri} that reference scans do not count, so the
      * resource it named looked orphaned.
+     * <p>
+     * Any key this method cannot place is reported as a failure rather than
+     * dropped. A written resource whose URI nothing consumes is an orphan the
+     * operator is never told about, and the run would still answer success.
      */
     private URI updateWorkflowExtensionUris(String workflowId, Integer workflowVersion,
                                             Map<String, URI> extensionUpdates, Outcome outcome) {
@@ -640,12 +568,20 @@ public class UpgradeExecutor {
             WorkflowConfiguration wfConfig = workflowStore.readWorkflow(workflowId, workflowVersion);
 
             boolean changed = false;
+            Set<String> unconsumed = new LinkedHashSet<>(extensionUpdates.keySet());
             for (WorkflowExtensions.ExtensionRef ref : WorkflowExtensions.scan(wfConfig)) {
                 URI newExtUri = extensionUpdates.get(ref.key());
                 if (newExtUri != null) {
                     ref.repointTo(newExtUri);
+                    unconsumed.remove(ref.key());
                     changed = true;
                 }
+            }
+
+            for (String key : unconsumed) {
+                outcome.failed(workflowId, "workflow", null,
+                        "the target workflow has no reference at '" + key + "' for "
+                                + extensionUpdates.get(key) + ", so the updated resource is not deployed");
             }
 
             if (changed) {
@@ -713,7 +649,7 @@ public class UpgradeExecutor {
 
             return null;
         } catch (Exception e) {
-            LOGGER.errorf(e, "Failed to update agent config %s", agentId);
+            LOGGER.errorf(e, "Failed to update agent config %s", LogSanitizer.sanitize(agentId));
             throw new RuntimeException("Agent config update failed: " + e.getMessage(), e);
         }
     }
@@ -733,7 +669,7 @@ public class UpgradeExecutor {
         Integer currentVersion = resolveLatestVersion(agentId);
         if (currentVersion == null) {
             LOGGER.warnf("Could not establish the current version of agent %s — reporting its URI without one"
-                    + " rather than guessing", agentId);
+                    + " rather than guessing", LogSanitizer.sanitize(agentId));
             return URI.create(IRestAgentStore.resourceURI + agentId);
         }
         return URI.create(IRestAgentStore.resourceURI + agentId + "?version=" + currentVersion);
@@ -761,7 +697,7 @@ public class UpgradeExecutor {
                     return resId.getVersion();
             }
         } catch (Exception e) {
-            LOGGER.debugf(e, "Could not find latest version for %s", resourceId);
+            LOGGER.debugf(e, "Could not find latest version for %s", LogSanitizer.sanitize(resourceId));
         }
         return null;
     }

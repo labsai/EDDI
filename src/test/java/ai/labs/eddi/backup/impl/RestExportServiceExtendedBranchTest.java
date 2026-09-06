@@ -24,10 +24,13 @@ import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.secrets.sanitize.SecretScrubber;
+import ai.labs.eddi.utils.FileUtilities;
 import ai.labs.eddi.backup.model.ExportPreview;
+import io.quarkus.scheduler.Scheduled;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.core.Response;
@@ -44,6 +47,9 @@ import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.attribute.FileTime;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.*;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -239,6 +245,34 @@ class RestExportServiceExtendedBranchTest {
             names.add("greeting");
             // Should not throw
             method.invoke(exportService, Files.createTempDirectory("test-snippets"), names, null);
+        }
+
+        /**
+         * The listing itself failing is the wider case: a snippet store that will not
+         * answer at all costs the snippets and nothing else. The export the operator
+         * asked for is an agent, and it still has to produce one — and no half-built
+         * {@code snippets/} directory to make the archive look like it carried some.
+         */
+        @Test
+        @DisplayName("a snippet listing that will not answer costs the snippets, not the export")
+        void snippetListingFailureIsNotFatal() throws Exception {
+            Method method = RestExportService.class.getDeclaredMethod(
+                    "exportSnippets", Path.class, Set.class, Set.class);
+            method.setAccessible(true);
+
+            doAnswer(invocation -> {
+                throw new IResourceStore.ResourceStoreException("snippet descriptors unavailable");
+            }).when(documentDescriptorStore).readDescriptors(eq("ai.labs.snippet"), anyString(), anyInt(), anyInt(),
+                    eq(false), any());
+
+            Set<String> names = new LinkedHashSet<>();
+            names.add("greeting");
+            Path agentPath = Files.createTempDirectory("test-snippets");
+
+            method.invoke(exportService, agentPath, names, null);
+
+            assertFalse(Files.exists(agentPath.resolve("snippets")),
+                    "a listing that never answered must not leave a snippets directory suggesting it did");
         }
 
         @Test
@@ -644,6 +678,150 @@ class RestExportServiceExtendedBranchTest {
             // Should call writeConfigs with filtered configs
             method.invoke(exportService, Files.createTempDirectory("test"),
                     Collections.emptyMap(), "ext", Set.of("r1"));
+        }
+    }
+
+    // =========================================================
+    // HITL approval timeouts are never archived
+    // =========================================================
+
+    /**
+     * A HITL approval timeout is a safety timer for one pending approval on this
+     * deployment, named after its conversation — not part of the agent's
+     * configuration. The import surface refuses to mint one for anybody, including
+     * administrators, so archiving it only produced a backup that could not be
+     * restored, and previewing it offered the operator a row that could never land.
+     */
+    @Nested
+    @DisplayName("HITL approval timeouts are never archived")
+    class HitlTimeoutSchedules {
+
+        @Test
+        @DisplayName("exportSchedules writes the agent's own schedules and skips its HITL timers")
+        void hitlTimerIsNotWritten() throws Exception {
+            Method method = RestExportService.class.getDeclaredMethod(
+                    "exportSchedules", String.class, Path.class, Set.class);
+            method.setAccessible(true);
+
+            var nightly = new ScheduleConfiguration();
+            nightly.setId("aabbccddeeff112233445566");
+            nightly.setName("nightly");
+            var hitlTimer = new ScheduleConfiguration();
+            hitlTimer.setId("bbccddeeff11223344556677");
+            hitlTimer.setName(HitlSchedules.regularTimeoutScheduleName("conv-1"));
+            hitlTimer.setMetadata(Map.of(HitlSchedules.METADATA_TYPE_KEY, HitlSchedules.METADATA_TYPE_TIMEOUT));
+
+            when(scheduleStore.readSchedulesByAgentId("agent1")).thenReturn(List.of(nightly, hitlTimer));
+            when(jsonSerialization.serialize(any())).thenReturn("{}");
+            when(secretScrubber.scrubJson(anyString())).thenReturn("{}");
+
+            Path agentPath = Files.createTempDirectory("test-hitl-sched");
+            method.invoke(exportService, "agent1", agentPath, null);
+
+            Path schedulesDir = agentPath.resolve("schedules");
+            assertTrue(Files.exists(schedulesDir.resolve(nightly.getId() + ".schedule.json")),
+                    "an ordinary schedule must still be archived");
+            assertFalse(Files.exists(schedulesDir.resolve(hitlTimer.getId() + ".schedule.json")),
+                    "an approval timer must never reach the archive — the import refuses to restore it");
+        }
+
+        @Test
+        @DisplayName("the preview offers no row for a HITL timer, nor for a schedule with no id")
+        void hitlTimerIsNotPreviewed() throws Exception {
+            var nightly = new ScheduleConfiguration();
+            nightly.setId("aabbccddeeff112233445566");
+            nightly.setName("nightly");
+            var hitlTimer = new ScheduleConfiguration();
+            hitlTimer.setId("bbccddeeff11223344556677");
+            hitlTimer.setName(HitlSchedules.regularTimeoutScheduleName("conv-1"));
+            hitlTimer.setMetadata(Map.of(HitlSchedules.METADATA_TYPE_KEY, HitlSchedules.METADATA_TYPE_TIMEOUT));
+            var idless = new ScheduleConfiguration();
+            idless.setName("half-written");
+
+            AgentConfiguration config = new AgentConfiguration();
+            config.setWorkflows(new ArrayList<>());
+            when(agentStore.read("previewAgent", 1)).thenReturn(config);
+            when(jsonSerialization.serialize(any())).thenReturn("{}");
+            when(scheduleStore.readSchedulesByAgentId("previewAgent"))
+                    .thenReturn(Arrays.asList(nightly, hitlTimer, idless, null));
+
+            ExportPreview preview = exportService.previewExport("previewAgent", 1);
+
+            List<String> scheduleRowIds = preview.resources().stream()
+                    .filter(resource -> "schedule".equals(resource.resourceType()))
+                    .map(ExportPreview.ExportableResource::resourceId)
+                    .toList();
+            assertEquals(List.of(nightly.getId()), scheduleRowIds,
+                    "only the agent's own, fully-formed schedules are deselectable rows");
+        }
+    }
+
+    // =========================================================
+    // Retention sweep on the timer
+    // =========================================================
+
+    /**
+     * Sweeping only from the export path left the last archives an instance
+     * produced on disk until its next export — which on a deployment that exports
+     * occasionally is indefinitely. The timer is what bounds an idle instance, so
+     * it has to sweep the same two directories the export path does.
+     */
+    @Nested
+    @DisplayName("Retention sweep on the timer")
+    class ScheduledRetentionSweep {
+
+        @Test
+        @DisplayName("the scheduled sweep deletes expired archives in tmp/archives and tmp/, and only those")
+        void scheduledSweepReclaimsWhatTheInstanceWrote() throws Exception {
+            Path tmpDir = Paths.get(FileUtilities.buildPath(System.getProperty("user.dir"), "tmp"));
+            Path archiveDir = Files.createDirectories(tmpDir.resolve("archives"));
+
+            Path expiredArchive = archiveDir.resolve("sweep-expired.zip");
+            Path freshArchive = archiveDir.resolve("sweep-fresh.zip");
+            Path legacyExpired = tmpDir.resolve("sweep-legacy-expired.zip");
+            Path notAnArchive = archiveDir.resolve("sweep-keep-me.txt");
+            for (Path path : List.of(expiredArchive, freshArchive, legacyExpired, notAnArchive)) {
+                Files.writeString(path, "zip-bytes");
+            }
+            var longExpired = FileTime.from(Instant.now().minus(Duration.ofDays(30)));
+            Files.setLastModifiedTime(expiredArchive, longExpired);
+            Files.setLastModifiedTime(legacyExpired, longExpired);
+            Files.setLastModifiedTime(notAnArchive, longExpired);
+
+            try {
+                exportService.sweepExpiredArchivesOnSchedule();
+
+                assertFalse(Files.exists(expiredArchive), "an expired archive must be reclaimed by the timer");
+                assertFalse(Files.exists(legacyExpired),
+                        "archives leaked into tmp/ by earlier releases must be reclaimed too");
+                assertTrue(Files.exists(freshArchive), "an archive still inside the retention window must survive");
+                assertTrue(Files.exists(notAnArchive), "the sweep must only ever delete .zip files");
+            } finally {
+                Files.deleteIfExists(expiredArchive);
+                Files.deleteIfExists(freshArchive);
+                Files.deleteIfExists(legacyExpired);
+                Files.deleteIfExists(notAnArchive);
+            }
+        }
+
+        /**
+         * The test above calls the sweep by hand, so it passes just as well on a method
+         * nothing ever fires — which is precisely the defect reported: an instance that
+         * stops exporting never reclaims what it already wrote. What makes the sweep
+         * independent of {@code exportAgent} is the annotation, so that is what this
+         * pins.
+         */
+        @Test
+        @DisplayName("the sweep is fired by the scheduler, not only from the export path")
+        void sweepIsScheduledIndependentlyOfExports() throws Exception {
+            Method scheduled = RestExportService.class.getDeclaredMethod("sweepExpiredArchivesOnSchedule");
+            Scheduled annotation = scheduled.getAnnotation(Scheduled.class);
+
+            assertNotNull(annotation, "the retention sweep must run on a timer, not only when an export happens");
+            assertEquals("${eddi.backup.export.sweep-interval:15m}", annotation.every(),
+                    "the sweep cadence must stay operator-configurable");
+            assertEquals("backup-export-archive-retention", annotation.identity(),
+                    "the job needs a stable identity so operators can see and pause it by name");
         }
     }
 }

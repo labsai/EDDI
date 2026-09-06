@@ -11,6 +11,7 @@ import ai.labs.eddi.configs.snippets.model.PromptSnippet;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.utils.RestUtilities;
 import org.jboss.logging.Logger;
 
@@ -92,10 +93,29 @@ public class RemoteApiResourceSource implements IResourceSource {
         this.agentVersion = agentVersion;
         this.authToken = authToken;
         this.jsonSerialization = jsonSerialization;
-        this.httpClient = HttpClient.newBuilder()
-                .connectTimeout(CONNECT_TIMEOUT)
-                .build();
+        this.httpClient = configure(HttpClient.newBuilder()).build();
         this.ownsHttpClient = true;
+    }
+
+    /**
+     * The configuration every {@link HttpClient} this class owns is built with.
+     * <p>
+     * Redirects are stated rather than inherited. A redirect is never followed, so
+     * a remote instance answering 3xx can never bounce the caller's
+     * X-Source-Authorization bearer at an address of its choosing: the hop surfaces
+     * as a non-200 status and the read fails. This is the JDK's default too, and
+     * saying so is what stops a later edit from changing it without anyone
+     * noticing.
+     * <p>
+     * Both build sites go through here, and it is package-private, so that the
+     * policy can be asserted directly. Building a real client to read it back is
+     * not an option in a sandboxed build: {@code HttpClient.build()} opens a
+     * selector, which needs a loopback socket.
+     */
+    static HttpClient.Builder configure(HttpClient.Builder builder) {
+        return builder
+                .connectTimeout(CONNECT_TIMEOUT)
+                .followRedirects(HttpClient.Redirect.NEVER);
     }
 
     // Visible for testing
@@ -179,7 +199,7 @@ public class RemoteApiResourceSource implements IResourceSource {
                     workflowDataList.add(wfData);
                 }
             } catch (Exception e) {
-                LOGGER.warnf(e, "Failed to read workflow %d from remote %s", i, baseUrl);
+                LOGGER.warnf(e, "Failed to read workflow %d from remote %s", i, LogSanitizer.sanitize(baseUrl));
             }
         }
 
@@ -213,11 +233,13 @@ public class RemoteApiResourceSource implements IResourceSource {
                                 resId.getId(), snippet.getName(), snippet));
                     }
                 } catch (Exception e) {
-                    LOGGER.debugf("Could not read remote snippet %s: %s", desc.getName(), e.getMessage());
+                    LOGGER.debugf("Could not read remote snippet %s: %s",
+                            LogSanitizer.sanitize(desc.getName()), LogSanitizer.sanitize(e.getMessage()));
                 }
             }
         } catch (Exception e) {
-            LOGGER.warnf("Failed to read snippets from remote %s: %s", baseUrl, e.getMessage());
+            LOGGER.warnf("Failed to read snippets from remote %s: %s",
+                    LogSanitizer.sanitize(baseUrl), LogSanitizer.sanitize(e.getMessage()));
         }
 
         return snippetDataList;
@@ -247,9 +269,7 @@ public class RemoteApiResourceSource implements IResourceSource {
         }
         URI baseUri = URI.create(normalized);
 
-        try (HttpClient client = HttpClient.newBuilder()
-                .connectTimeout(CONNECT_TIMEOUT)
-                .build()) {
+        try (HttpClient client = configure(HttpClient.newBuilder()).build()) {
 
             // codeql[java/ssrf] False Positive: It is an intended feature to connect to a
             // user-provided remote EDDI instance
@@ -290,7 +310,8 @@ public class RemoteApiResourceSource implements IResourceSource {
         // read went out as /workflowstore/workflows/null?version=0.
         if (wfResId == null || wfResId.getId() == null) {
             LOGGER.warnf("Agent %s on %s references a workflow URI with no resource id: %s",
-                    agentId, baseUrl, workflowUri);
+                    LogSanitizer.sanitize(agentId), LogSanitizer.sanitize(baseUrl),
+                    LogSanitizer.sanitize(String.valueOf(workflowUri)));
             return null;
         }
 
@@ -326,7 +347,8 @@ public class RemoteApiResourceSource implements IResourceSource {
                 extensions.put(ref.key(), new ExtensionSourceData(
                         extId, name, ref.fileExtension(), ref.stepType(), contentJson));
             } catch (Exception e) {
-                LOGGER.debugf("Could not read remote extension %s: %s", ref.extensionUri(), e.getMessage());
+                LOGGER.debugf("Could not read remote extension %s: %s",
+                        LogSanitizer.sanitize(String.valueOf(ref.extensionUri())), LogSanitizer.sanitize(e.getMessage()));
             }
         }
 
@@ -390,7 +412,8 @@ public class RemoteApiResourceSource implements IResourceSource {
                 }
             }
         } catch (Exception e) {
-            LOGGER.debugf("Could not read remote descriptors from %s: %s", descriptorsPath, e.getMessage());
+            LOGGER.debugf("Could not read remote descriptors from %s: %s",
+                    LogSanitizer.sanitize(descriptorsPath), LogSanitizer.sanitize(e.getMessage()));
         }
         return names;
     }

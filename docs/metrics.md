@@ -483,8 +483,10 @@ eddi_backup_upgrade_resource_skipped_count_total  # Matched resources whose cont
 eddi_backup_upgrade_resource_failure_count_total  # Resources a sync could not process (the 207 body lists them)
 ```
 
-> The four `resource` counters are what answer "the sync returned 201 but
-> nothing changed". All-skipped means source and target already agree; a
+> The four `resource` counters explain a successful no-op. An all-skipped run is
+> answered with `200 OK`: source and target already agree, nothing was written and
+> no agent version was burned. (`201 Created` means something *was* written,
+> `207 Multi-Status` that part of it failed — see `IRestImportService`.) A
 > `created` line where `updated` is expected means the matcher is not joining
 > source and target extensions and every sync is duplicating the configuration
 > tree.

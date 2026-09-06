@@ -13,6 +13,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.io.IOException;
 import java.net.URI;
@@ -274,6 +275,15 @@ class RemoteApiResourceSourceMissedBranchTest {
 
             var agentData = source.readAgent();
             assertNotNull(agentData);
+
+            // Non-null is also what the removed version-1 fallback answered, so it
+            // proves nothing on its own: pin the version that was actually requested.
+            var sent = ArgumentCaptor.forClass(HttpRequest.class);
+            verify(httpClient, atLeastOnce()).send(sent.capture(), any(HttpResponse.BodyHandler.class));
+            assertTrue(sent.getAllValues().stream()
+                    .anyMatch(request -> request.uri().toString().endsWith("/" + agentId + "?version=5")),
+                    "the agent must be read at the version its descriptor names, requests were: "
+                            + sent.getAllValues());
         }
 
         @Test

@@ -49,6 +49,43 @@ bottom of this file and are never archived.
 
 ---
 
+## 🧪 test(backup): replace the tests that could not fail, close the CodeQL round (2026-09-06)
+
+**Repo:** EDDI (`fix/review-backup-sync`)
+
+Two passes on the same branch: 22 review comments (mostly CodeQL log-injection alerts) and a
+mutation audit of the tests this branch had added.
+
+**Every alert was already closed in the source, but two had no test that could fail if the fix
+were removed.** Those guards were added. The rest were verified line by line against the working
+tree rather than against the previous pass's notes.
+
+**The mutation audit is the more useful half.** Fable re-ran each new test with the production
+change surgically reverted and found several that passed anyway — coverage without a contract.
+They are now rewritten to assert what the changed line actually implements:
+
+- The snippet-rollback test asserted a call count; it now proves that a snippet created during a
+  failed import is recorded on the `ImportTransaction` and deleted again by `rollbackCreatedResources`,
+  and that a snippet *merged* into an existing one is never deleted.
+- `BackupMetrics.upgradeCompleted` was checked by reading counters back, which cannot distinguish
+  `increment(0)` from no call at all — both leave a `SimpleMeterRegistry` counter at zero. It now
+  asserts the calls themselves against a recording registry.
+- The workflow pass-through tests asserted a rendered string that a re-serialised model also
+  produces. They now assert the archive's own text survives byte for byte, which catches the real
+  loss: re-rendering adds an `extensions` field the archive never carried.
+- The extension-failure test now asserts the exact key set the matcher builds from the target,
+  including the occurrence ordinal, rather than a substring a wrongly-keyed map would also satisfy.
+
+**Recorded gaps, stated rather than papered over.** Two defensive lines cannot be pinned by a unit
+test and their tests were deleted rather than left as decoration: `recordCreatedSnippet`'s
+null-URI guard and `resolveSnippetIdsByName`'s null-listing guard both sit inside a broader
+`catch (Exception)`, so removing either still leaves the class green. A test that cannot fail is
+worse than no test, because it hides the hole.
+
+Diff coverage of the branch's changed lines: 94.1% line, 84.2% branch.
+
+---
+
 ## 🔁 fix(backup): repair agent export, import and sync (2026-09-04)
 
 **Repo:** EDDI (`fix/review-agent-sync`)

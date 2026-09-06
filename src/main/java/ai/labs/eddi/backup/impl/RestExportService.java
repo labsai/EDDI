@@ -27,6 +27,7 @@ import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.configs.propertysetter.IPropertySetterStore;
 import ai.labs.eddi.configs.dictionary.IDictionaryStore;
+import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.datastore.IResourceStore;
@@ -36,6 +37,7 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.secrets.sanitize.SecretScrubber;
 import ai.labs.eddi.utils.FileUtilities;
 import ai.labs.eddi.utils.RestUtilities;
+import io.quarkus.scheduler.Scheduled;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -195,32 +197,56 @@ public class RestExportService extends AbstractBackupService implements IRestExp
     }
 
     /**
-     * Deletes finished archives older than the retention window. Runs before each
-     * export rather than on a scheduler: export is the only thing that creates
-     * these files, so sweeping here bounds the directory to what was produced
-     * within one retention window.
+     * The retention sweep on a timer, so an instance that stops exporting still
+     * reclaims what it already wrote. Sweeping only from {@link #exportAgent} meant
+     * the last archives an instance produced sat on disk until the next export —
+     * which on a deployment that exports occasionally is indefinitely.
+     */
+    @Scheduled(every = "${eddi.backup.export.sweep-interval:15m}", delayed = "1m",
+               identity = "backup-export-archive-retention")
+    void sweepExpiredArchivesOnSchedule() {
+        sweepExpiredArchives();
+    }
+
+    /**
+     * Deletes finished archives older than the retention window, and the loose
+     * {@code tmp/*.zip} files releases before this one left behind.
+     * <p>
+     * Runs both on a timer and before each export: the timer bounds an idle
+     * instance, and sweeping on the way in keeps a burst of exports from
+     * accumulating a retention window's worth of archives between ticks.
      * <p>
      * Failures are logged, never thrown — housekeeping must not fail an export.
      */
     private void sweepExpiredArchives() {
-        Path archiveDir = archiveDirectory();
-        if (!Files.isDirectory(archiveDir)) {
+        Instant cutoff = Instant.now().minus(Duration.ofMinutes(retentionMinutes()));
+        sweepExpiredZipsIn(archiveDirectory(), cutoff);
+        // Archives used to be written straight into tmp/. Nothing ever deleted them,
+        // and they are no longer downloadable either — getAgentZipArchive resolves
+        // only under tmp/archives — so an instance upgraded in place would otherwise
+        // keep every historical export forever.
+        sweepExpiredZipsIn(tmpPath.toAbsolutePath().normalize(), cutoff);
+    }
+
+    private void sweepExpiredZipsIn(Path directory, Instant cutoff) {
+        if (!Files.isDirectory(directory)) {
             return;
         }
-        Instant cutoff = Instant.now().minus(Duration.ofMinutes(retentionMinutes()));
-        try (var archives = Files.list(archiveDir)) {
-            archives.filter(Files::isRegularFile).forEach(archive -> {
-                try {
-                    if (Files.getLastModifiedTime(archive).toInstant().isBefore(cutoff)) {
-                        Files.deleteIfExists(archive);
-                        LOGGER.debugf("Deleted expired export archive %s", archive.getFileName());
-                    }
-                } catch (IOException e) {
-                    LOGGER.debugf("Could not evaluate export archive %s: %s", archive, e.getMessage());
-                }
-            });
+        try (var archives = Files.list(directory)) {
+            archives.filter(Files::isRegularFile)
+                    .filter(archive -> archive.getFileName().toString().endsWith(".zip"))
+                    .forEach(archive -> {
+                        try {
+                            if (Files.getLastModifiedTime(archive).toInstant().isBefore(cutoff)) {
+                                Files.deleteIfExists(archive);
+                                LOGGER.debugf("Deleted expired export archive %s", archive.getFileName());
+                            }
+                        } catch (IOException e) {
+                            LOGGER.debugf("Could not evaluate export archive %s: %s", archive, e.getMessage());
+                        }
+                    });
         } catch (IOException e) {
-            LOGGER.warnf("Could not sweep expired export archives in %s: %s", archiveDir, e.getMessage());
+            LOGGER.warnf("Could not sweep expired export archives in %s: %s", directory, e.getMessage());
         }
     }
 
@@ -262,8 +288,19 @@ public class RestExportService extends AbstractBackupService implements IRestExp
             for (IResourceId resourceId : workflowConfigurations.keySet()) {
                 WorkflowConfiguration workflowConfig = workflowConfigurations.get(resourceId);
                 String workflowConfigString = jsonSerialization.serialize(workflowConfig);
-                // Workflow skeletons are always included (required)
-                Path workflowPath = writeDirAndDocument(resourceId.getId(), resourceId.getVersion(), workflowConfigString, agentPath, WORKFLOW_EXT);
+                // The workflow is archived exactly as this deployment has it, including
+                // the reference to a config the selection is about to leave out. It is
+                // the importer, the only side that knows the strategy, that decides what
+                // to do with a reference it cannot resolve: a merge answers it from the
+                // target's own copy, a create drops the step
+                // (RestImportService#withoutUnresolvableReferences).
+                //
+                // Pruning the step here instead made every selective archive a
+                // step-deletion on the promotion flow it exists for: strategy=merge PUTs
+                // the archived workflow over the target's, so the target's own LLM and
+                // output steps vanished when someone promoted just the behaviour rules.
+                Path workflowPath = writeDirAndDocument(resourceId.getId(), resourceId.getVersion(), workflowConfigString, agentPath,
+                        WORKFLOW_EXT);
                 writeDocumentDescriptor(workflowPath, resourceId.getId(), resourceId.getVersion());
 
                 Map<IResourceId, String> dictionaryConfigs = convertConfigsToString(
@@ -900,6 +937,11 @@ public class RestExportService extends AbstractBackupService implements IRestExp
         }
     }
 
+    /** A HITL approval-timeout schedule, which never belongs in an archive. */
+    private static boolean isHitlTimeout(ScheduleConfiguration schedule) {
+        return schedule != null && HitlSchedules.isHitlTimeout(schedule.getMetadata());
+    }
+
     /**
      * Lists the agent's scheduled triggers as deselectable preview rows. Failure to
      * read them is not failure to preview: the rest of the preview is still useful.
@@ -907,7 +949,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
     private void addScheduleResources(List<ExportableResource> resources, String agentId) {
         try {
             for (ScheduleConfiguration schedule : scheduleStore.readSchedulesByAgentId(agentId)) {
-                if (schedule == null || schedule.getId() == null) {
+                if (schedule == null || schedule.getId() == null || isHitlTimeout(schedule)) {
                     continue;
                 }
                 resources.add(new ExportableResource(schedule.getId(), null, SCHEDULE_EXT,
@@ -935,6 +977,14 @@ public class RestExportService extends AbstractBackupService implements IRestExp
             Path schedulesDir = Files.createDirectories(Paths.get(agentPath.toString(), SCHEDULES_DIR));
             int exported = 0;
             for (ScheduleConfiguration schedule : schedules) {
+                // A HITL approval timeout is a safety timer for one pending approval
+                // on THIS deployment, not part of the agent's configuration. The
+                // import surface refuses to mint one for anybody — including admins —
+                // so writing it into the archive only produced a backup that could
+                // not be restored.
+                if (isHitlTimeout(schedule)) {
+                    continue;
+                }
                 // When the caller expressed a schedule selection, only the ones it
                 // kept.
                 if (selectedScheduleIds != null && !selectedScheduleIds.contains(schedule.getId())) {

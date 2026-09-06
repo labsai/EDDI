@@ -142,6 +142,122 @@ class WorkflowExtensionsTest {
         assertTrue(WorkflowExtensions.scan(config).isEmpty());
     }
 
+    /**
+     * {@code typeOf} is asked about URIs that came out of a foreign archive, so it
+     * has to answer "not a resource I move" rather than throw. A null URI, and one
+     * with no authority at all, are both such answers — a throw here would abort
+     * the scan of an otherwise importable workflow.
+     */
+    @Test
+    @DisplayName("typeOf answers null for a null URI and for one carrying no authority")
+    void typeOfIsNullSafe() {
+        assertNull(WorkflowExtensions.typeOf(null));
+        assertNull(WorkflowExtensions.typeOf(URI.create("/llmstore/llms/" + LLM_ID)));
+        assertNotNull(WorkflowExtensions.typeOf(URI.create("eddi://ai.labs.llm/llmstore/llms/" + LLM_ID)));
+    }
+
+    /**
+     * A workflow list may legitimately hold a null entry — Jackson produces one for
+     * a {@code null} element in the archived JSON. Scanning it must skip the hole
+     * rather than fail the whole import with a NullPointerException.
+     */
+    @Test
+    @DisplayName("a null entry in the step list is skipped, the steps around it are still scanned")
+    void nullStepInListIsSkipped() {
+        var config = new WorkflowConfiguration();
+        var steps = new ArrayList<WorkflowConfiguration.WorkflowStep>();
+        steps.add(null);
+        steps.add(step("eddi://ai.labs.llm",
+                Map.of("uri", "eddi://ai.labs.llm/llmstore/llms/" + LLM_ID + "?version=1"),
+                Map.of()));
+        config.setWorkflowSteps(steps);
+
+        List<WorkflowExtensions.ExtensionRef> refs = WorkflowExtensions.scan(config);
+
+        assertEquals(1, refs.size());
+        assertEquals(LLM_ID, refs.getFirst().resourceId().getId());
+    }
+
+    /**
+     * The depth guard exists so a pathological (or cyclic-looking) nested config
+     * cannot make the scan recurse forever. It is a real limit, not decoration: a
+     * reference buried deeper than it is simply not seen.
+     */
+    @Test
+    @DisplayName("a reference nested deeper than the depth guard is not returned")
+    void depthGuardStopsTheWalk() {
+        Object nested = new HashMap<>(Map.of("uri",
+                "eddi://ai.labs.llm/llmstore/llms/" + LLM_ID + "?version=1"));
+        for (int i = 0; i < 12; i++) {
+            nested = new HashMap<>(Map.of("level" + i, nested));
+        }
+        @SuppressWarnings("unchecked")
+        var deepConfig = (Map<String, Object>) nested;
+
+        assertTrue(WorkflowExtensions.scan(workflow(step("eddi://ai.labs.llm", deepConfig, Map.of()))).isEmpty());
+    }
+
+    /**
+     * Three shapes a {@code uri} entry can take that must all yield no reference
+     * instead of an exception. Each one is reachable from a real archive: a blank
+     * value from a half-written config, a non-string from a hand-edited ZIP, and a
+     * space-bearing value from a name pasted into the id position.
+     */
+    @Test
+    @DisplayName("a blank, non-string or unparseable uri value yields no reference")
+    void unusableUriValuesYieldNoReference() {
+        assertTrue(WorkflowExtensions.scan(workflow(
+                step("eddi://ai.labs.llm", Map.of("uri", "   "), Map.of()))).isEmpty());
+
+        assertTrue(WorkflowExtensions.scan(workflow(
+                step("eddi://ai.labs.llm", Map.of("uri", 42), Map.of()))).isEmpty());
+
+        // URI.create rejects the space, and the scan has to survive that.
+        assertTrue(WorkflowExtensions.scan(workflow(
+                step("eddi://ai.labs.llm",
+                        Map.of("uri", "eddi://ai.labs.llm/llmstore/llms/my llm?version=1"),
+                        Map.of())))
+                .isEmpty());
+    }
+
+    /**
+     * {@code RestUtilities.extractResourceId} rejects a non-integer
+     * {@code ?version=} with an IllegalArgumentException. A workflow carrying one
+     * must contribute no reference rather than abort the scan — the other steps of
+     * that workflow are still importable.
+     */
+    @Test
+    @DisplayName("a non-integer ?version leaves the rest of the workflow scannable")
+    void nonIntegerVersionYieldsNoReferenceButDoesNotAbortTheScan() {
+        var config = workflow(
+                step("eddi://ai.labs.llm",
+                        Map.of("uri", "eddi://ai.labs.llm/llmstore/llms/" + LLM_ID + "?version=latest"),
+                        Map.of()),
+                step("eddi://ai.labs.httpcalls",
+                        Map.of("uri", "eddi://ai.labs.apicalls/apicallstore/apicalls/" + HTTP_ID_A + "?version=1"),
+                        Map.of()));
+
+        List<WorkflowExtensions.ExtensionRef> refs = WorkflowExtensions.scan(config);
+
+        assertEquals(1, refs.size());
+        assertEquals(HTTP_ID_A, refs.getFirst().resourceId().getId());
+    }
+
+    /**
+     * A URI of a known authority whose last segment is not a valid resource id
+     * yields an id of null. Emitting a reference for it would send the sync to read
+     * {@code /llmstore/llms/null}.
+     */
+    @Test
+    @DisplayName("a known authority with no usable resource id yields no reference")
+    void knownAuthorityWithoutIdYieldsNoReference() {
+        var config = workflow(step("eddi://ai.labs.llm",
+                Map.of("uri", "eddi://ai.labs.llm/llmstore/llms/nope?version=1"),
+                Map.of()));
+
+        assertTrue(WorkflowExtensions.scan(config).isEmpty());
+    }
+
     // ==================== Helpers ====================
 
     private static WorkflowConfiguration.WorkflowStep step(String type,

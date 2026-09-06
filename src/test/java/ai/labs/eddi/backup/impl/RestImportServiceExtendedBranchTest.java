@@ -6,6 +6,7 @@ package ai.labs.eddi.backup.impl;
 
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.engine.security.spaces.SpaceContext;
 import ai.labs.eddi.backup.IZipArchive;
 import ai.labs.eddi.backup.model.ImportPreview;
 import ai.labs.eddi.backup.model.UpgradeResult;
@@ -15,6 +16,7 @@ import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.migration.IMigrationManager;
 import ai.labs.eddi.configs.migration.TemplateSyntaxMigrator;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import io.quarkus.runtime.LaunchMode;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.core.Response;
@@ -63,7 +65,7 @@ class RestImportServiceExtendedBranchTest {
                 zipArchive, jsonSerialization,
                 migrationManager, documentDescriptorStore,
                 templateSyntaxMigrator, structuralMatcher, upgradeExecutor, mock(IScheduleStore.class), mock(BackupMetrics.class),
-                mock(ResourceAccessGuard.class));
+                mock(ResourceAccessGuard.class), mock(SpaceContext.class));
     }
 
     // =========================================================
@@ -374,21 +376,19 @@ class RestImportServiceExtendedBranchTest {
         @Test
         @DisplayName("executeSync with HTTP in prod mode throws")
         void httpInProdMode() {
-            // Default quarkus.profile is "prod" (or unset)
-            // http:// should be rejected unless dev mode
-            String originalProfile = System.getProperty("quarkus.profile");
+            // The launch mode, not the quarkus.profile system property: isDevMode
+            // reads LaunchMode.current(), so setting the property here controlled
+            // nothing and this passed only because surefire's default mode happens to
+            // be NORMAL. Set what the code under test actually reads.
+            LaunchMode originalMode = LaunchMode.current();
             try {
-                System.setProperty("quarkus.profile", "prod");
+                LaunchMode.set(LaunchMode.NORMAL);
                 assertThrows(IllegalArgumentException.class,
                         () -> importService.executeSync(
                                 "http://example.com", "src", 1, "tgt",
                                 null, null, null));
             } finally {
-                if (originalProfile != null) {
-                    System.setProperty("quarkus.profile", originalProfile);
-                } else {
-                    System.clearProperty("quarkus.profile");
-                }
+                LaunchMode.set(originalMode);
             }
         }
 

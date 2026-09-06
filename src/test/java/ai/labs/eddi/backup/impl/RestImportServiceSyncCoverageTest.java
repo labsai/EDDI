@@ -6,16 +6,19 @@ package ai.labs.eddi.backup.impl;
 
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.engine.security.spaces.SpaceContext;
 import ai.labs.eddi.backup.IZipArchive;
 import ai.labs.eddi.backup.model.ImportPreview;
 import ai.labs.eddi.backup.model.SyncMapping;
 import ai.labs.eddi.backup.model.SyncRequest;
 import ai.labs.eddi.backup.model.UpgradeResult;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.migration.IMigrationManager;
 import ai.labs.eddi.configs.migration.TemplateSyntaxMigrator;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import jakarta.ws.rs.InternalServerErrorException;
+import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
@@ -32,6 +35,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.*;
 
 /**
@@ -68,7 +72,7 @@ class RestImportServiceSyncCoverageTest {
                 zipArchive, jsonSerialization,
                 migrationManager, documentDescriptorStore,
                 templateSyntaxMigrator, structuralMatcher, upgradeExecutor, mock(IScheduleStore.class), mock(BackupMetrics.class),
-                mock(ResourceAccessGuard.class));
+                mock(ResourceAccessGuard.class), mock(SpaceContext.class));
     }
 
     // =========================================================
@@ -113,6 +117,46 @@ class RestImportServiceSyncCoverageTest {
             assertThrows(IllegalArgumentException.class,
                     () -> importService.listRemoteAgents("http://127.0.0.1:1", null));
         }
+
+        /**
+         * A remote instance that cannot be listed becomes a 500 that says so and keeps
+         * the original as its cause. The connect failure, the expired token and the
+         * wrong port all arrive here, and the operator only gets to tell them apart if
+         * the reason survives the wrapping.
+         */
+        @Test
+        @DisplayName("a remote instance that will not answer becomes a 500 that keeps the reason")
+        void unreachableRemoteBecomesAServerError() {
+            var cause = new RuntimeException("Failed to list agents: connection refused");
+
+            InternalServerErrorException thrown;
+            try (var statics = mockStatic(RemoteApiResourceSource.class)) {
+                statics.when(() -> RemoteApiResourceSource.listRemoteAgentDescriptors(
+                        eq(PUBLIC_SOURCE_URL), eq("Bearer stale"), any())).thenThrow(cause);
+
+                thrown = assertThrows(InternalServerErrorException.class,
+                        () -> importService.listRemoteAgents(PUBLIC_SOURCE_URL, "Bearer stale"));
+            }
+
+            assertEquals(500, thrown.getResponse().getStatus());
+            assertTrue(thrown.getMessage().contains("connection refused"),
+                    "the reason must survive, was: " + thrown.getMessage());
+            assertSame(cause, thrown.getCause());
+        }
+
+        /** The list a reachable instance hands over reaches the caller unchanged. */
+        @Test
+        @DisplayName("the descriptors a reachable instance returns are passed through")
+        void reachableRemoteReturnsItsDescriptors() {
+            var descriptors = List.of(new DocumentDescriptor());
+
+            try (var statics = mockStatic(RemoteApiResourceSource.class)) {
+                statics.when(() -> RemoteApiResourceSource.listRemoteAgentDescriptors(
+                        eq(PUBLIC_SOURCE_URL), isNull(), any())).thenReturn(descriptors);
+
+                assertSame(descriptors, importService.listRemoteAgents(PUBLIC_SOURCE_URL, null));
+            }
+        }
     }
 
     // =========================================================
@@ -149,6 +193,56 @@ class RestImportServiceSyncCoverageTest {
                             "aabbccddeeff112233445566", 1,
                             "aabbccddeeff112233445567", null));
         }
+
+        /**
+         * A remote instance that cannot be read is this deployment's problem to report:
+         * the failure becomes a 500 that still names what went wrong and keeps the
+         * original as its cause, so the server log has the stack and the operator has
+         * the reason.
+         */
+        @Test
+        @DisplayName("a matcher failure becomes a 500 that keeps the reason and the cause")
+        void matcherFailureBecomesAServerError() {
+            var cause = new RuntimeException("remote instance closed the connection");
+            when(structuralMatcher.buildPreview(any(), eq(TARGET_A), eq(true))).thenThrow(cause);
+
+            var thrown = assertThrows(InternalServerErrorException.class, this::preview);
+
+            assertEquals(500, thrown.getResponse().getStatus());
+            assertTrue(thrown.getMessage().contains("remote instance closed the connection"),
+                    "the reason must survive the wrapping, was: " + thrown.getMessage());
+            assertSame(cause, thrown.getCause(), "the original must stay reachable for the server log");
+        }
+
+        /**
+         * The one failure that must <em>not</em> be wrapped. A target agent that is not
+         * there is a 404 the operator can act on — "you named an agent this instance
+         * does not have" — and repackaging it as a 500 turns a fixable mistake into an
+         * outage report.
+         */
+        @Test
+        @DisplayName("a 404 from the matcher is passed through, not repackaged as a 500")
+        void notFoundFromTheMatcherIsPassedThrough() {
+            var notFound = new NotFoundException("No agent found with id " + TARGET_A);
+            when(structuralMatcher.buildPreview(any(), eq(TARGET_A), eq(true))).thenThrow(notFound);
+
+            var thrown = assertThrows(NotFoundException.class, this::preview);
+
+            assertSame(notFound, thrown, "the matcher's own 404 has to reach the caller unchanged");
+        }
+
+        /**
+         * Runs the preview with {@link RemoteApiResourceSource} construction stubbed
+         * out — the real constructor builds an {@link java.net.http.HttpClient}, which
+         * opens a selector and so needs a loopback socket a sandboxed build does not
+         * have, and neither test is about the remote read itself.
+         */
+        private ImportPreview preview() {
+            try (var ignored = mockConstruction(RemoteApiResourceSource.class)) {
+                return importService.previewSync(PUBLIC_SOURCE_URL,
+                        "aabbccddeeff112233445566", 1, TARGET_A, null);
+            }
+        }
     }
 
     // =========================================================
@@ -184,6 +278,74 @@ class RestImportServiceSyncCoverageTest {
                     () -> importService.executeSync("https://[::1]:8443",
                             "aabbccddeeff112233445566", 1,
                             "aabbccddeeff112233445567", null, null, null));
+        }
+
+        /**
+         * Same split as the preview, and it matters more here because a sync writes: an
+         * upgrade that blew up mid-flight is a 500 naming the reason, with the original
+         * kept as the cause.
+         */
+        @Test
+        @DisplayName("an upgrade failure becomes a 500 that keeps the reason and the cause")
+        void upgradeFailureBecomesAServerError() {
+            var cause = new IllegalStateException("the target agent changed under the sync");
+            when(upgradeExecutor.executeUpgrade(any(), eq(TARGET_A), any(), any())).thenThrow(cause);
+
+            var thrown = assertThrows(InternalServerErrorException.class, this::sync);
+
+            assertEquals(500, thrown.getResponse().getStatus());
+            assertTrue(thrown.getMessage().contains("the target agent changed under the sync"),
+                    "the reason must survive the wrapping, was: " + thrown.getMessage());
+            assertSame(cause, thrown.getCause());
+        }
+
+        /**
+         * And a 404 for a target that does not exist survives the catch-all here too —
+         * a promotion job keying off the status code has to be able to tell "no such
+         * agent" from "this instance is broken".
+         */
+        @Test
+        @DisplayName("a 404 from the upgrade executor is passed through, not repackaged as a 500")
+        void notFoundFromTheExecutorIsPassedThrough() {
+            var notFound = new NotFoundException("No agent found with id " + TARGET_A);
+            when(upgradeExecutor.executeUpgrade(any(), eq(TARGET_A), any(), any())).thenThrow(notFound);
+
+            var thrown = assertThrows(NotFoundException.class, this::sync);
+
+            assertSame(notFound, thrown);
+        }
+
+        /**
+         * The happy path, which is what makes the two failure paths above meaningful: a
+         * sync that ran hands back the upgrade's own result and status, with the agent
+         * URI in the Location header, and passes the caller's selection and workflow
+         * order through to the executor rather than quietly syncing everything.
+         */
+        @Test
+        @DisplayName("a sync that ran answers with the upgrade's result, status and Location")
+        void successfulSyncAnswersWithTheUpgradeResult() {
+            var result = cleanResult(TARGET_A);
+            when(upgradeExecutor.executeUpgrade(any(), eq(TARGET_A), eq(Set.of("res-1", "res-2")),
+                    eq(List.of("wf-b", "wf-a")))).thenReturn(result);
+
+            Response response;
+            try (var ignored = mockConstruction(RemoteApiResourceSource.class)) {
+                response = importService.executeSync(PUBLIC_SOURCE_URL,
+                        "aabbccddeeff112233445566", 1, TARGET_A, "res-1,res-2", "wf-b, wf-a", null);
+            }
+
+            assertEquals(201, response.getStatus(), "something was written, so it is a 201");
+            assertSame(result, response.getEntity());
+            assertEquals(result.agentUri().toString(), response.getHeaderString("Location"));
+            assertEquals(MediaType.APPLICATION_JSON_TYPE, response.getMediaType());
+        }
+
+        /** See {@code PreviewSyncTests#preview()} for why construction is stubbed. */
+        private Response sync() {
+            try (var ignored = mockConstruction(RemoteApiResourceSource.class)) {
+                return importService.executeSync(PUBLIC_SOURCE_URL,
+                        "aabbccddeeff112233445566", 1, TARGET_A, null, null, null);
+            }
         }
     }
 

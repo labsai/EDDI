@@ -6,6 +6,7 @@ package ai.labs.eddi.backup.impl;
 
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.engine.security.spaces.SpaceContext;
 import ai.labs.eddi.backup.IZipArchive;
 import ai.labs.eddi.backup.model.ImportPreview;
 import ai.labs.eddi.backup.model.UpgradeResult;
@@ -66,7 +67,7 @@ class RestImportServiceBranchCoverageTest {
                 zipArchive, jsonSerialization,
                 migrationManager, documentDescriptorStore,
                 templateSyntaxMigrator, structuralMatcher, upgradeExecutor, mock(IScheduleStore.class), mock(BackupMetrics.class),
-                mock(ResourceAccessGuard.class));
+                mock(ResourceAccessGuard.class), mock(SpaceContext.class));
     }
 
     // =========================================================

@@ -34,10 +34,28 @@ public interface IRestImportService {
             + "An unknown strategy, or upgrade without targetAgentId, is a 400. "
             + "An archive containing no agent configuration file, or more than one, is a 400. "
             + "Agent files named <id>.agent.json (v6) and <id>.bot.json (v5) are both accepted, "
-            + "and any schedules/ directory in the archive is recreated for the imported agent. "
+            + "as is a v5 <id>.package.json workflow whose step list is keyed packageExtensions. "
+            + "Any schedules/ directory in the archive is recreated for the imported agent through the "
+            + "ordinary schedule API, so the same rules apply as when creating a schedule by hand: one "
+            + "marked as a HITL approval timeout is a 400 for everyone, the agent's USE gate is checked, "
+            + "and its cron expression is validated. nextFire is recomputed and agentVersion reset to "
+            + "latest. userId belongs to the source deployment and is kept only when it already names the "
+            + "importing caller, so an imported schedule otherwise runs as the system scheduler until an "
+            + "owner is assigned. With strategy=merge a schedule whose name matches one the target agent "
+            + "already has is updated in place rather than duplicated — except the target's HITL approval "
+            + "timers, which are never matched — keeping the owner the target had assigned, and the "
+            + "overwritten original is written back if the import fails afterwards. Schedule names are not "
+            + "unique, so a name carried by more than one schedule on either side is created rather than "
+            + "matched — a visible duplicate beats overwriting an arbitrary one of them. "
+            + "selectedResources deselects schedules by schedule id like any "
+            + "other preview row: it is one flat list over every row, so naming extension ids only "
+            + "leaves out every schedule in the archive. The answer then carries "
+            + "X-Schedules-Skipped with that count rather than a bare 201. Omit selectedResources to "
+            + "import everything. "
             + "An upgrade answers 201 when something was written, 200 when source and target were already "
             + "identical, and 207 Multi-Status when some resources failed — the body is an UpgradeResult "
-            + "listing per-resource outcomes.")
+            + "listing per-resource outcomes. All three are 2xx, so a client must branch on the status "
+            + "code rather than on response.ok.")
     Response importAgent(InputStream zippedAgentConfigFiles,
                          @QueryParam("strategy")
                          @DefaultValue("create") String strategy,
@@ -90,7 +108,8 @@ public interface IRestImportService {
     @Operation(description = "Execute a single-agent sync from a remote EDDI instance to a local target agent. "
             + "Answers 201 when something was written, 200 when source and target were already identical "
             + "(no agent version is burned), and 207 Multi-Status when some resources failed; the body is "
-            + "an UpgradeResult listing per-resource outcomes.")
+            + "an UpgradeResult listing per-resource outcomes. All three are 2xx, so a client must branch "
+            + "on the status code rather than on response.ok.")
     Response executeSync(@QueryParam("sourceUrl") String sourceUrl,
                          @QueryParam("sourceAgentId") String sourceAgentId,
                          @QueryParam("sourceAgentVersion") Integer sourceVersion,

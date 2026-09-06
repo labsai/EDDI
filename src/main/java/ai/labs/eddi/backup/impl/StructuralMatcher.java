@@ -25,12 +25,14 @@ import ai.labs.eddi.configs.snippets.IRestPromptSnippetStore;
 import ai.labs.eddi.configs.snippets.model.PromptSnippet;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.utils.RestUtilities;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.NotFoundException;
 import org.jboss.logging.Logger;
 
@@ -109,7 +111,9 @@ public class StructuralMatcher {
      *            always loaded when {@code targetAgentId} is given.
      * @return the preview with all resource diffs
      * @throws jakarta.ws.rs.NotFoundException
-     *             if {@code targetAgentId} was given but could not be read
+     *             if {@code targetAgentId} was given but no such agent exists
+     * @throws jakarta.ws.rs.InternalServerErrorException
+     *             if the target agent exists but could not be read
      */
     public ImportPreview buildPreview(IResourceSource source,
                                       String targetAgentId,
@@ -124,9 +128,10 @@ public class StructuralMatcher {
 
         if (targetAgentId != null) {
             // Deliberately not caught: the caller explicitly named a target, so a
-            // target that cannot be read is a 404 — not a silent switch to "create
-            // everything", which previewed an upgrade as a full duplicate of the
-            // agent and gave the operator nothing to distinguish the two.
+            // target that cannot be read is an error the operator can act on — not a
+            // silent switch to "create everything", which previewed an upgrade as a
+            // full duplicate of the agent and gave the operator nothing to
+            // distinguish the two. See readTargetAgent for 404 vs 5xx.
             targetConfig = readTargetAgent(targetAgentId);
             targetAgentName = readDescriptorName(targetAgentId);
         }
@@ -236,7 +241,7 @@ public class StructuralMatcher {
                 // Matched by step type + occurrence
                 String srcContent = sourceExt.contentJson();
                 String tgtContent = targetExt.contentJson;
-                DiffAction extAction = contentEquals(srcContent, tgtContent)
+                DiffAction extAction = contentEquals(secretNeutral(srcContent, tgtContent), tgtContent)
                         ? DiffAction.SKIP
                         : DiffAction.UPDATE;
 
@@ -308,6 +313,17 @@ public class StructuralMatcher {
 
     // ==================== Target Reading Helpers ====================
 
+    /**
+     * Reads the agent the caller named as the sync target.
+     * <p>
+     * A missing agent is a 404 — the operator mistyped an id, or the agent was
+     * deleted. Everything else is a 5xx: reporting a datastore outage as "target
+     * agent not found" sends the operator to look for a resource that is there, and
+     * a client that retries a 404 by creating the agent would duplicate it. The two
+     * are distinguished by the store's own contract, which separates
+     * {@link IResourceStore.ResourceNotFoundException} from
+     * {@link IResourceStore.ResourceStoreException}.
+     */
     private AgentConfiguration readTargetAgent(String agentId) {
         AgentConfiguration config;
         try {
@@ -316,7 +332,15 @@ public class StructuralMatcher {
         } catch (NotFoundException e) {
             throw e;
         } catch (Exception e) {
-            throw new NotFoundException("Could not read target agent " + agentId + ": " + e.getMessage(), e);
+            // instanceof rather than a second catch clause: the store's checked
+            // exceptions reach this frame through SneakyThrow (see
+            // RestVersionInfo.read), so the compiler does not believe they can be
+            // thrown here and refuses to let them be caught by type.
+            if (e instanceof IResourceStore.ResourceNotFoundException) {
+                throw new NotFoundException("Target agent " + agentId + " does not exist: " + e.getMessage(), e);
+            }
+            throw new InternalServerErrorException(
+                    "Could not read target agent " + agentId + ": " + e.getMessage(), e);
         }
         if (config == null) {
             throw new NotFoundException("Target agent " + agentId + " does not exist.");
@@ -495,6 +519,34 @@ public class StructuralMatcher {
         } catch (Exception e) {
             LOGGER.debugf("Serialization failed: %s", e.getMessage());
             return null;
+        }
+    }
+
+    /**
+     * The source content as {@link UpgradeExecutor} would actually write it: with
+     * the target's own values put back wherever the export's secret scrubber left a
+     * placeholder.
+     * <p>
+     * Comparing the raw source against the target instead made every configuration
+     * holding a credential — an LLM's apiKey, an httpCalls authorization header —
+     * differ by the placeholder alone. Such a resource could never SKIP, so a sync
+     * that changed nothing still wrote the resource, bumped its version, repointed
+     * the workflow and bumped the agent version, for exactly the agents that matter
+     * most.
+     *
+     * @return the source content, unchanged when it carries no placeholder or the
+     *         target could not be read
+     */
+    private String secretNeutral(String sourceJson, String targetJson) {
+        if (targetJson == null || !ScrubbedSecrets.carriesPlaceholder(sourceJson)) {
+            return sourceJson;
+        }
+        try {
+            String restored = ScrubbedSecrets.restore(sourceJson, targetJson, jsonSerialization);
+            return restored != null ? restored : sourceJson;
+        } catch (Exception e) {
+            LOGGER.debugf("Could not neutralize scrubbed secrets before comparing: %s", e.getMessage());
+            return sourceJson;
         }
     }
 

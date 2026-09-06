@@ -202,6 +202,45 @@ class RestExportServiceCleanupTest {
     }
 
     @Test
+    @DisplayName("archives leaked into tmp/ by earlier releases are swept too")
+    void legacyLooseArchivesAreReclaimed() throws Exception {
+        doAnswer(inv -> {
+            Path target = Paths.get(inv.getArgument(1, String.class)).toAbsolutePath().normalize();
+            Files.createDirectories(target.getParent());
+            Files.writeString(target, "zip-bytes");
+            return null;
+        }).when(zipArchive).createZip(anyString(), anyString(), any());
+
+        // Before this branch archives were written straight into tmp/. Nothing ever
+        // deleted them, and getAgentZipArchive now resolves only under tmp/archives,
+        // so an instance upgraded in place would keep every historical export forever
+        // while being unable to serve any of them.
+        Path legacyStale = tmpDir.resolve("d12-legacy-export-1.zip");
+        Files.createDirectories(tmpDir);
+        Files.writeString(legacyStale, "zip-bytes");
+        Files.setLastModifiedTime(legacyStale, FileTime.from(Instant.now().minus(Duration.ofDays(1))));
+
+        Path legacyFresh = tmpDir.resolve("d12-legacy-export-2.zip");
+        Files.writeString(legacyFresh, "zip-bytes");
+
+        Path notAnArchive = tmpDir.resolve("d12-legacy-notes.txt");
+        Files.writeString(notAnArchive, "keep me");
+        Files.setLastModifiedTime(notAnArchive, FileTime.from(Instant.now().minus(Duration.ofDays(1))));
+
+        try {
+            exportService.exportAgent(AGENT_ID, 1, null, null, null);
+
+            assertFalse(Files.exists(legacyStale), "an expired legacy archive must be reclaimed: " + legacyStale);
+            assertTrue(Files.exists(legacyFresh), "a legacy archive inside the retention window must be kept");
+            assertTrue(Files.exists(notAnArchive), "the sweep must only ever delete .zip files");
+        } finally {
+            Files.deleteIfExists(legacyStale);
+            Files.deleteIfExists(legacyFresh);
+            Files.deleteIfExists(notAnArchive);
+        }
+    }
+
+    @Test
     @DisplayName("a failing export still deletes its scratch tree")
     void failedExportLeavesNoResidue() throws Exception {
         List<Path> zippedSources = new ArrayList<>();

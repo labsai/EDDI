@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.configs.workflows.model;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
+
 import java.net.URI;
 import java.util.HashMap;
 import java.util.LinkedList;
@@ -54,11 +56,14 @@ public class WorkflowConfiguration {
         return workflowSteps;
     }
 
-    // Note: Alias required for backward compatibility with v5 exported agent
-    // schemas (ZIP files / MongoDB)
-    // where the property was natively named "workflowExtensions" instead of
-    // "workflowSteps".
-    @com.fasterxml.jackson.annotation.JsonAlias("workflowExtensions")
+    // Aliases required for backward compatibility with v5 exported agent schemas
+    // (ZIP files / MongoDB), where this property was named "workflowExtensions"
+    // or — in a genuine 5.x <id>.package.json — "packageExtensions". Without the
+    // latter, importing a real 5.x archive deserialized the workflow into an EMPTY
+    // step list (FAIL_ON_UNKNOWN_PROPERTIES is off), stored it, and answered 201:
+    // an agent that deploys and answers nothing, with every extension resource
+    // created alongside it as an orphan.
+    @JsonAlias({"workflowExtensions", "packageExtensions"})
     public void setWorkflowSteps(List<WorkflowStep> workflowSteps) {
         this.workflowSteps = workflowSteps;
     }

@@ -19,10 +19,13 @@ import ai.labs.eddi.configs.llm.IRestLlmStore;
 import ai.labs.eddi.configs.snippets.IRestPromptSnippetStore;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
+import ai.labs.eddi.secrets.sanitize.SecretScrubber;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.NotFoundException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -151,13 +154,52 @@ class StructuralMatcherRealWorkflowTest {
     }
 
     @Test
-    @DisplayName("an unreadable target agent is a 404, not a silent switch to create-everything")
-    void unreadableTargetIsNotFound() throws Exception {
-        doThrow(new RuntimeException("datastore down")).when(agentStore).readAgent(eq(TARGET_AGENT_ID), anyInt());
+    @DisplayName("a target agent that does not exist is a 404, not a silent switch to create-everything")
+    void missingTargetIsNotFound() throws Exception {
+        // doThrow refuses a checked exception the method does not declare; the store
+        // reaches this frame through SneakyThrow, so an answer is how it is simulated.
+        doAnswer(inv -> {
+            throw new IResourceStore.ResourceNotFoundException("no such agent");
+        }).when(agentStore).readAgent(eq(TARGET_AGENT_ID), anyInt());
 
         var ex = assertThrows(NotFoundException.class,
                 () -> matcher.buildPreview(sourceWith(llmJson("answer questions")), TARGET_AGENT_ID, true));
         assertTrue(ex.getMessage().contains(TARGET_AGENT_ID), ex.getMessage());
+    }
+
+    @Test
+    @DisplayName("a target agent that cannot be read is a 5xx — a store outage is not 'not found'")
+    void unreadableTargetIsServerError() throws Exception {
+        doThrow(new RuntimeException("datastore down")).when(agentStore).readAgent(eq(TARGET_AGENT_ID), anyInt());
+
+        // Reporting an outage as 404 sends the operator looking for an agent that is
+        // there, and a client that reacts to 404 by creating the agent duplicates it.
+        var ex = assertThrows(InternalServerErrorException.class,
+                () -> matcher.buildPreview(sourceWith(llmJson("answer questions")), TARGET_AGENT_ID, true));
+        assertTrue(ex.getMessage().contains(TARGET_AGENT_ID), ex.getMessage());
+    }
+
+    @Test
+    @DisplayName("content differing only by an exported secret placeholder still SKIPs")
+    void scrubbedSecretsDoNotCountAsAChange() throws Exception {
+        // Everything in an export ZIP (and everything a remote instance hands out) has
+        // been through the secret scrubber, so a config holding a credential arrives as
+        // ${vault:REDACTED} while the target still carries the live value. Comparing
+        // those raw made every agent WITH a credential compare unequal, so it could
+        // never SKIP: a nightly sync that changed nothing still wrote the resource,
+        // bumped its version, repointed the workflow and bumped the agent version.
+        LlmConfiguration target = llm("answer questions");
+        target.tasks().getFirst().setParameters(new LinkedHashMap<>(Map.of("apiKey", "sk-live-abc")));
+        doReturn(target).when(llmStore).readLlm(TARGET_LLM_ID, 1);
+
+        LlmConfiguration exported = llm("answer questions");
+        exported.tasks().getFirst().setParameters(new LinkedHashMap<>(Map.of("apiKey", SecretScrubber.REDACTED)));
+        String scrubbedSource = MAPPER.writeValueAsString(exported);
+        assertTrue(scrubbedSource.contains(SecretScrubber.REDACTED), scrubbedSource);
+
+        ImportPreview preview = matcher.buildPreview(sourceWith(scrubbedSource), TARGET_AGENT_ID, true);
+
+        assertEquals(DiffAction.SKIP, diffOfType(preview, "langchain").action());
     }
 
     // ==================== Fixtures ====================
