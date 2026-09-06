@@ -39,6 +39,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * This is a plain file sweep — no Quarkus boot, no Docker — so it runs in the
  * ordinary {@code mvn test} pass, which is the only gate a version bump is
  * guaranteed to cross.
+ * <p>
+ * <b>It reads every file it names.</b> An earlier draft narrated all six
+ * sources and then swept three, leaving the two workflows — including the very
+ * {@code workflow_dispatch} default that was deleted for this — free to drift
+ * back in unnoticed. {@link #SWEPT} now covers both workflows as well, and the
+ * certify job's {@code version} input gets its own assertion, because a stale
+ * default stops being a literal sweep's business the moment {@code pom.xml} is
+ * bumped past it.
  */
 @DisplayName("release version single source of truth (AGENTS.md 1)")
 class ReleaseVersionSourceTest {
@@ -47,9 +55,23 @@ class ReleaseVersionSourceTest {
     private static final Path APPLICATION_PROPERTIES = Path.of("src", "main", "resources", "application.properties");
     private static final Path DOCKERFILE = Path.of("src", "main", "docker", "Dockerfile");
     private static final Path OPEN_API_CONFIG = Path.of("src", "main", "java", "ai", "labs", "eddi", "configs", "OpenApiConfig.java");
+    private static final Path CI_WORKFLOW = Path.of(".github", "workflows", "ci.yml");
+    private static final Path CERTIFY_WORKFLOW = Path.of(".github", "workflows", "redhat-certify.yml");
 
-    /** Every file the literal sweep covers. */
-    private static final List<Path> SWEPT = List.of(APPLICATION_PROPERTIES, DOCKERFILE, OPEN_API_CONFIG);
+    /**
+     * Every file the literal sweep covers.
+     * <p>
+     * The workflows are in the list because the drift this class documents included
+     * a {@code workflow_dispatch} {@code default: "6.3.0"} in
+     * {@code redhat-certify.yml}, deleted on the same branch — and a sweep that did
+     * not read the file would have let it be re-added silently, which is the whole
+     * failure mode. {@code ci.yml} joins it because the release path derives the
+     * version from {@code pom.xml} in three places ({@code Compute Docker tags},
+     * the preflight build-arg, the preflight label check) and a literal pasted into
+     * any of them is the same bug.
+     */
+    private static final List<Path> SWEPT = List.of(
+            APPLICATION_PROPERTIES, DOCKERFILE, OPEN_API_CONFIG, CI_WORKFLOW, CERTIFY_WORKFLOW);
 
     /**
      * A {@code version = "6.3.0"} style attribute — the shape an annotation is
@@ -150,11 +172,10 @@ class ReleaseVersionSourceTest {
             List<String> lines = read(path).lines().toList();
             for (int i = 0; i < lines.size(); i++) {
                 String line = lines.get(i);
-                // Prose in comments may legitimately name a version ("the
-                // pre-6.3.0 behavior", "@since 6.3.0" — which pins the release a
-                // feature landed in and must NOT move); only live directives are
-                // in scope.
-                if (isComment(line)) {
+                // Prose may legitimately name a version ("the pre-6.3.0 behavior",
+                // "@since 6.3.0" — which pins the release a feature landed in and
+                // must NOT move); only live directives are in scope.
+                if (isProse(line)) {
                     continue;
                 }
                 if (line.contains(version)) {
@@ -169,10 +190,57 @@ class ReleaseVersionSourceTest {
     }
 
     /**
-     * Properties and Dockerfiles comment with a hash; Java with slashes or a star.
+     * Lines that describe rather than configure. Properties, Dockerfiles and YAML
+     * comment with a hash; Java with slashes or a star.
+     * <p>
+     * A workflow's {@code description:} counts too: it is the sentence GitHub shows
+     * above the input box, so "(e.g. 6.3.0)" there is an operator-facing example of
+     * a <em>published tag</em>, not a value the build consumes. The value on such
+     * an input is {@code default:}, which is not exempt — that is precisely the
+     * line this class exists to keep out of {@code redhat-certify.yml}.
      */
-    private static boolean isComment(String line) {
+    private static boolean isProse(String line) {
         String stripped = line.stripLeading();
-        return stripped.startsWith("#") || stripped.startsWith("//") || stripped.startsWith("*") || stripped.startsWith("/*");
+        return stripped.startsWith("#") || stripped.startsWith("//") || stripped.startsWith("*") || stripped.startsWith("/*")
+                || stripped.startsWith("description:");
+    }
+
+    /**
+     * The literal sweep above catches a version pasted into a workflow, but the
+     * specific regression it is guarding against — {@code default: "6.3.0"} on the
+     * certify job's {@code version} input — only shows up as a literal while
+     * {@code pom.xml} still says 6.3.0. Bump the pom and the stale default becomes
+     * invisible to a sweep for the CURRENT version, which is exactly the state in
+     * which it does damage: dispatching the workflow then certifies the previous
+     * release with nothing saying so.
+     */
+    @Test
+    @DisplayName("the certify workflow's version input carries no default at all")
+    void certifyWorkflowVersionInputHasNoDefault() throws IOException {
+        List<String> lines = read(CERTIFY_WORKFLOW).lines().toList();
+        List<String> offenders = new ArrayList<>();
+
+        boolean inVersionInput = false;
+        for (String line : lines) {
+            String stripped = line.strip();
+            if (stripped.equals("version:")) {
+                inVersionInput = true;
+                continue;
+            }
+            if (inVersionInput) {
+                // The next input key at the same nesting level ends the block.
+                if (stripped.endsWith(":") && !stripped.startsWith("#") && !line.startsWith("        ")) {
+                    inVersionInput = false;
+                } else if (stripped.startsWith("default:")) {
+                    offenders.add(stripped);
+                }
+            }
+        }
+
+        assertEquals(List.of(), offenders,
+                CERTIFY_WORKFLOW + " gives the `version` input a default. That input selects an ALREADY PUBLISHED"
+                        + " tag to certify, so any default is a hand-copied release number that goes stale on the"
+                        + " next pom bump — and dispatching with it certifies the wrong release silently. Require"
+                        + " the operator to type the tag.");
     }
 }

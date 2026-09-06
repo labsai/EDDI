@@ -645,7 +645,21 @@
                 <configuration>
                     <configLocation>checkstyle.xml</configLocation>
                     <consoleOutput>true</consoleOutput>
-                    <failsOnError>true</failsOnError>
+                    <!-- failOnViolation + violationSeverity IS the gate. `failsOnError`
+                         is deliberately absent (its default is false): the plugin's own
+                         descriptor for this goal reads "If this is true, and Checkstyle
+                         reported any violations or errors, the build fails immediately
+                         after running Checkstyle, before checking the log for
+                         logViolationsToConsole. If you want to use logViolationsToConsole,
+                         use failOnViolation instead of this." It is a second gate over the
+                         SAME error-severity set, not a processing-error guard — it just
+                         reaches the failure earlier and reports it worse ("Failed during
+                         checkstyle execution: There are N checkstyle errors" instead of
+                         "You have N Checkstyle violations"), and this build does want the
+                         console log. Real processing errors are already fatal: Checkstyle's
+                         Checker.haltOnException defaults to true, so an unparseable source
+                         aborts the run whatever this flag says.
+                         Pinned by BuildQualityGatesTest#checkstyleBlocksThroughFailOnViolation. -->
                     <failOnViolation>true</failOnViolation>
                     <violationSeverity>error</violationSeverity>
                     <!-- Scope, stated rather than defaulted: the blocking import rules

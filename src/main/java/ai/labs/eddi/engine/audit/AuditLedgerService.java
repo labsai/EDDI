@@ -208,23 +208,43 @@ public class AuditLedgerService {
     }
 
     /**
-     * Dead-letter sink for {@link #createForTesting}. An absolute path under the
-     * JVM's temp directory, deliberately: this used to be the bare relative
-     * {@code "eddi-audit-deadletter.jsonl"}, which resolves against the process CWD
-     * — the repository root during a test run — so unit tests wrote a file into the
-     * source tree that {@code mvn clean} could not remove and {@code .gitignore}
-     * had to hide. The CDI constructor above defaults to an absolute
-     * {@code /opt/eddi/data/...}; the test factory now matches that shape.
-     */
-    static final String TEST_DEAD_LETTER_PATH = Path.of(System.getProperty("java.io.tmpdir"), "eddi-audit-deadletter.jsonl").toString();
-
-    /**
      * Factory method for unit testing with an explicit queue bound.
      */
     static AuditLedgerService createForTesting(IAuditStore auditStore, boolean enabled, int flushIntervalSeconds, String masterKeyConfig,
                                                MeterRegistry meterRegistry, int maxQueueSize) {
-        return new AuditLedgerService(auditStore, enabled, flushIntervalSeconds, Optional.ofNullable(masterKeyConfig), TEST_DEAD_LETTER_PATH,
+        return createForTesting(auditStore, enabled, flushIntervalSeconds, masterKeyConfig, meterRegistry, maxQueueSize,
+                defaultTestDeadLetterPath());
+    }
+
+    /**
+     * As above, with the dead-letter sink chosen by the caller — for a test that
+     * wants to read the file back, and so has to own where it lives.
+     */
+    static AuditLedgerService createForTesting(IAuditStore auditStore, boolean enabled, int flushIntervalSeconds, String masterKeyConfig,
+                                               MeterRegistry meterRegistry, int maxQueueSize, String deadLetterPath) {
+        return new AuditLedgerService(auditStore, enabled, flushIntervalSeconds, Optional.ofNullable(masterKeyConfig), deadLetterPath,
                 false, "default", maxQueueSize, true, 500, meterRegistry, null, null, new ObjectMapper());
+    }
+
+    /**
+     * Where {@link #createForTesting} drops batches it could not persist. Absolute
+     * and under the JVM's temp directory: it used to be the bare relative
+     * {@code "eddi-audit-deadletter.jsonl"}, which resolves against the process CWD
+     * — the repository root during a test run — so unit tests wrote a file into the
+     * source tree that {@code mvn clean} could not remove and {@code .gitignore}
+     * had to hide. The CDI constructor above defaults to an absolute
+     * {@code /opt/eddi/data/...}; this matches that shape.
+     * <p>
+     * The process id is in the name, and computed rather than stored in a constant,
+     * because a single fixed filename under {@code java.io.tmpdir} is one file per
+     * <em>machine</em>: two test runs on the same host — two git worktrees, or two
+     * CI executors sharing {@code /tmp} — would append to each other's sink. No
+     * test reads it back today, so that is a latent fixture collision rather than a
+     * live flake, which is exactly when it is cheap to close.
+     */
+    static String defaultTestDeadLetterPath() {
+        return Path.of(System.getProperty("java.io.tmpdir"),
+                "eddi-audit-deadletter-" + ProcessHandle.current().pid() + ".jsonl").toString();
     }
 
     @PostConstruct

@@ -49,6 +49,38 @@ bottom of this file and are never archived.
 
 ---
 
+## 🧪 test(build): make the gate tests unable to pass a disarmed gate (2026-09-04)
+
+**Repo:** EDDI (`fix/review-quality-gates`)
+
+Follow-up on the same branch, from an independent review round and four GitHub Copilot
+comments. Every one was the same defect in a different place: a test that grades the build
+gates while itself being satisfiable by a disarmed gate.
+
+- **The coverage-gate test graded only what survived.** It walked the JaCoCo limits and
+  asserted a value per counter it found, so deleting the `BRANCH` limit — or emptying the
+  `<limits>` block entirely — still passed. It now compares the whole limit map against
+  `{INSTRUCTION=0.90, BRANCH=0.80}`, so a deleted, renamed or retuned limit fails.
+- **The langchain4j pinning test let an unpinned artifact through**, because the condition
+  began `version != null`. An artifact with no `<version>` falls back to a BOM or transitive
+  version, which is exactly what the test exists to forbid. Reproduced first by stripping the
+  version from a real dependency and watching the old test pass.
+- **The version-duplication sweep named `redhat-certify.yml` as an offender and did not scan
+  it.** Reintroducing the very `default:` this branch removed would have passed. The sweep now
+  covers five files and a dedicated assertion rejects any `default:` on that workflow's
+  `version` input — the check that still bites after `pom.xml` moves past the stale literal.
+- **The CI `code` path filter omitted `README.md` and `AGENTS.md`**, so a PR touching only
+  those skipped the tests that grade them. Rather than fix the pair by hand, a new test derives
+  the requirement: it sweeps the test tree for root documents any test opens, parses the filter
+  out of `ci.yml`, and fails if one is unlisted. It asserts the sweep found something, so it
+  cannot go vacuous itself.
+
+**Not changed, deliberately:** the same gap exists for `docs/**`, where three more tests grade
+documentation. `ci.yml` documents skipping the build for docs-only changes as intentional, so
+widening it is a policy decision rather than a review fix.
+
+---
+
 ## 🚦 fix(build): make the style, coverage and image gates able to fail (2026-09-04)
 
 **Repo:** EDDI (`fix/review-quality-gates`)

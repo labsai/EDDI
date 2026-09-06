@@ -73,43 +73,77 @@ class EddiImageDockerfileTest {
         }
     }
 
+    /**
+     * The base images, the runtime contract and the "nothing but the prefix moved"
+     * property, graded against a <em>fixture</em>.
+     * <p>
+     * These were three tests that ran the production Dockerfile through
+     * {@code forTestContext} and then compared the result with the same
+     * {@code String.replace} applied by hand — an assertion that a function equals
+     * itself, and so one that cannot fail whatever {@code forTestContext} is
+     * changed to. The FROM/ENV/ENTRYPOINT/HEALTHCHECK comparisons had the same
+     * shape: {@code target/quarkus-app/} appears in none of those lines, so the
+     * substitution could not have touched them either way.
+     * <p>
+     * Written against a known input instead, the expected output is spelled out
+     * rather than derived, so the test actually pins the behaviour: a
+     * {@code forTestContext} that starts rewriting a digest, an ENTRYPOINT or a
+     * second path fails here.
+     */
     @Test
-    @DisplayName("the ITs' Dockerfile keeps the production base images, digest and all")
-    void derivedDockerfileKeepsTheProductionBaseImages() throws IOException {
-        List<String> production = FROM_LINE.matcher(productionDockerfile()).results()
-                .map(m -> m.group(1)).toList();
-        List<String> derived = FROM_LINE.matcher(EddiImageDockerfile.forTestContext()).results()
-                .map(m -> m.group(1)).toList();
+    @DisplayName("forTestContext is exactly one prefix substitution")
+    void forTestContextIsExactlyOnePrefixSubstitution() {
+        String production = """
+                FROM registry.example.com/ubi9/openjdk-25-runtime:1.24@sha256:feedface AS docs
+                USER root
+                COPY docs/*.md /docs/
+                RUN rm -f /docs/changelog.md
 
-        assertEquals(production, derived,
-                "the ITs must start from exactly the base image the release is pinned to");
+                FROM registry.example.com/ubi9/openjdk-25-runtime:1.24@sha256:feedface
+                ARG EDDI_VERSION=dev
+                COPY --chown=185 target/quarkus-app/lib/ /deployments/lib/
+                COPY --chown=185 target/quarkus-app/*.jar /deployments/
+                COPY --chown=185 target/quarkus-app/app/ /deployments/app/
+                COPY --chown=185 target/quarkus-app/quarkus/ /deployments/quarkus/
+                COPY --chown=185 licenses/ /licenses/
+                COPY --from=docs --chown=185 /docs/ /deployments/docs/
+                ENV JAVA_OPTS_APPEND="-Dquarkus.http.host=0.0.0.0 -Deddi.docs.path=/deployments/docs"
+                ENV JAVA_APP_JAR="/deployments/quarkus-run.jar"
+                ENTRYPOINT [ "/opt/jboss/container/java/run/run-java.sh" ]
+                HEALTHCHECK --interval=30s CMD curl -f http://localhost:7070/q/health/live || exit 1
+                """;
+
+        String expected = """
+                FROM registry.example.com/ubi9/openjdk-25-runtime:1.24@sha256:feedface AS docs
+                USER root
+                COPY docs/*.md /docs/
+                RUN rm -f /docs/changelog.md
+
+                FROM registry.example.com/ubi9/openjdk-25-runtime:1.24@sha256:feedface
+                ARG EDDI_VERSION=dev
+                COPY --chown=185 quarkus-app/lib/ /deployments/lib/
+                COPY --chown=185 quarkus-app/*.jar /deployments/
+                COPY --chown=185 quarkus-app/app/ /deployments/app/
+                COPY --chown=185 quarkus-app/quarkus/ /deployments/quarkus/
+                COPY --chown=185 licenses/ /licenses/
+                COPY --from=docs --chown=185 /docs/ /deployments/docs/
+                ENV JAVA_OPTS_APPEND="-Dquarkus.http.host=0.0.0.0 -Deddi.docs.path=/deployments/docs"
+                ENV JAVA_APP_JAR="/deployments/quarkus-run.jar"
+                ENTRYPOINT [ "/opt/jboss/container/java/run/run-java.sh" ]
+                HEALTHCHECK --interval=30s CMD curl -f http://localhost:7070/q/health/live || exit 1
+                """;
+
+        assertEquals(expected, EddiImageDockerfile.forTestContext(production),
+                "forTestContext must rewrite the target/quarkus-app/ COPY prefix and change nothing else — the base"
+                        + " image digests, the docs stage, ENV, ENTRYPOINT and HEALTHCHECK are the ITs' whole reason"
+                        + " to build the production file rather than a copy of it");
     }
 
     @Test
-    @DisplayName("the ITs' Dockerfile keeps the production runtime contract")
-    void derivedDockerfileKeepsTheRuntimeContract() throws IOException {
-        String production = productionDockerfile();
-        String derived = EddiImageDockerfile.forTestContext();
-
-        // The lines that decide whether the container comes up at all. They were
-        // byte-identical across the two hand-maintained files by coincidence,
-        // which is what made the rest of the drift easy to miss.
-        for (String instruction : List.of("ENV JAVA_OPTS_APPEND=", "ENV JAVA_APP_JAR=", "ENTRYPOINT ", "HEALTHCHECK ")) {
-            assertEquals(lineStartingWith(production, instruction), lineStartingWith(derived, instruction),
-                    instruction + " differs between the production Dockerfile and the one the ITs build");
-        }
-    }
-
-    @Test
-    @DisplayName("only the build-context prefix is rewritten")
-    void rewriteTouchesOnlyTheBuildContextPrefix() throws IOException {
-        String production = productionDockerfile();
-        String derived = EddiImageDockerfile.forTestContext();
-
-        assertFalse(derived.contains(EddiImageDockerfile.PRODUCTION_APP_PREFIX),
+    @DisplayName("the derived Dockerfile the ITs actually build keeps no target/ path")
+    void derivedDockerfileKeepsNoProductionOnlyPath() {
+        assertFalse(EddiImageDockerfile.forTestContext().contains(EddiImageDockerfile.PRODUCTION_APP_PREFIX),
                 "the ITs' context maps target/quarkus-app in as quarkus-app, so no target/ path may survive");
-        assertEquals(production.replace(EddiImageDockerfile.PRODUCTION_APP_PREFIX, EddiImageDockerfile.TEST_APP_PREFIX),
-                derived, "the derivation must be that single substitution and nothing else");
     }
 
     @Test
@@ -117,6 +151,42 @@ class EddiImageDockerfileTest {
     void aProductionDockerfileThatStopsMatchingFailsLoudly() {
         IllegalStateException e = assertThrows(IllegalStateException.class,
                 () -> EddiImageDockerfile.forTestContext("FROM scratch\nCOPY build/app /deployments/\n"));
+        assertTrue(e.getMessage().contains(EddiImageDockerfile.PRODUCTION_APP_PREFIX), e.getMessage());
+    }
+
+    /**
+     * The post-rewrite guard, previously written off as dead on the grounds that
+     * {@code String.replace} removes every occurrence. It removes every
+     * <em>non-overlapping</em> occurrence, in one left-to-right pass: in
+     * {@code target/target/quarkus-app/} the match starts at the second
+     * {@code target/}, the scan resumes after the replacement, and the leading
+     * {@code target/} then abuts the freshly written {@code quarkus-app/} to
+     * re-form the prefix. So the input clears the first guard and the output still
+     * holds a path the ITs' build context cannot resolve — which is the case this
+     * second check exists for, and the reason it must not be deleted as
+     * unreachable.
+     * <p>
+     * The assertion is on <em>which</em> of the two {@code IllegalStateException}s
+     * came out. An input that merely fails to contain the prefix throws from the
+     * first guard and would satisfy a bare {@code assertThrows} while pinning
+     * nothing.
+     */
+    @Test
+    @DisplayName("a rewrite that leaves a target/ path behind fails loudly, not silently")
+    void aRewriteThatLeavesAProductionPathBehindFailsLoudly() {
+        String doubledPrefix = "COPY --chown=185 target/target/quarkus-app/lib/ /deployments/lib/\n";
+
+        assertEquals("COPY --chown=185 target/quarkus-app/lib/ /deployments/lib/\n",
+                doubledPrefix.replace(EddiImageDockerfile.PRODUCTION_APP_PREFIX, EddiImageDockerfile.TEST_APP_PREFIX),
+                "the premise of this test: a single replace pass over the doubled prefix leaves one occurrence"
+                        + " standing. If that ever stops holding, the input below no longer reaches the"
+                        + " post-rewrite guard and the assertion on it would start passing for the wrong reason");
+
+        IllegalStateException e = assertThrows(IllegalStateException.class,
+                () -> EddiImageDockerfile.forTestContext(doubledPrefix));
+
+        assertTrue(e.getMessage().startsWith("Rewrite left a "),
+                "the post-rewrite guard has to be the one that fired, not the entry guard. Got: " + e.getMessage());
         assertTrue(e.getMessage().contains(EddiImageDockerfile.PRODUCTION_APP_PREFIX), e.getMessage());
     }
 
@@ -253,12 +323,5 @@ class EddiImageDockerfileTest {
                         + " directories: the first is what Testcontainers receives, the second is what"
                         + " everyCopyResolvesInsideTheItsBuildContext checks the production Dockerfile against."
                         + " While they disagree, that sweep is grading a context nobody builds.");
-    }
-
-    private static String lineStartingWith(String dockerfile, String prefix) {
-        return dockerfile.lines()
-                .filter(line -> line.startsWith(prefix))
-                .findFirst()
-                .orElseThrow(() -> new AssertionError("no line starting with '" + prefix + "' in the Dockerfile"));
     }
 }

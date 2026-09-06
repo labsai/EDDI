@@ -27,13 +27,19 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -102,6 +108,15 @@ class BuildQualityGatesTest {
 
     /** The property failsafe reads to decide whether the ITs run at all. */
     private static final String SKIP_ITS = "${skipITs}";
+
+    /**
+     * A test opening a document that sits at the repository root, written as a
+     * single-segment {@code Path.of} literal ending in {@code .md}. Separators are
+     * excluded from the character class on purpose, so a multi-segment read (a file
+     * under {@code docs/}) does not match: a docs-only PR deliberately skips the
+     * build, and widening that is a policy decision rather than a filter oversight.
+     */
+    private static final Pattern ROOT_DOCUMENT_READ = Pattern.compile("Path\\.of\\(\"([^\"/\\\\]+\\.md)\"\\)");
 
     /**
      * The JaCoCo executions that consume or produce integration-test coverage. Each
@@ -215,6 +230,13 @@ class BuildQualityGatesTest {
      * The other half of build-ci-01: skipping the gate must not become a way to
      * quietly lower it. 90/80 is the OpenSSF Gold target the CI integration job
      * still enforces.
+     * <p>
+     * Collected into a map and compared whole, deliberately. Walking the
+     * {@code <limit>} elements and asserting inside an {@code if} on the counter
+     * name grades only the limits that are still there, so deleting both blocks —
+     * or renaming the counters to {@code LINE}/{@code METHOD} — leaves
+     * {@code jacoco:check} with no rule to enforce and this test green: the exact
+     * silently-disabled-gate shape the class exists to eliminate, one level up.
      */
     @Test
     @DisplayName("the coverage gate still demands 90% instructions and 80% branches")
@@ -225,15 +247,17 @@ class BuildQualityGatesTest {
         Element limits = child(rule, "limits").orElseThrow();
 
         assertEquals("verify", childText(check, "phase"), "the gate must run at verify");
+
+        Map<String, String> thresholds = new TreeMap<>();
         for (Element limit : children(limits, "limit")) {
-            String counter = childText(limit, "counter");
-            String minimum = childText(limit, "minimum");
-            if ("INSTRUCTION".equals(counter)) {
-                assertEquals("0.90", minimum, "the instruction threshold is the OpenSSF Gold target");
-            } else if ("BRANCH".equals(counter)) {
-                assertEquals("0.80", minimum, "the branch threshold is the OpenSSF Gold target");
-            }
+            thresholds.put(childText(limit, "counter"), childText(limit, "minimum"));
         }
+
+        assertEquals(Map.of("INSTRUCTION", "0.90", "BRANCH", "0.80"), thresholds,
+                "the merged-check rule must carry exactly the OpenSSF Gold limits. Absence fails here too: a rule"
+                        + " with no <limit> (or with the counters renamed) enforces nothing while every test stays"
+                        + " green, which is how a gate gets switched off without a diff that looks like switching a"
+                        + " gate off.");
     }
 
     /**
@@ -300,6 +324,13 @@ class BuildQualityGatesTest {
      * previously four properties — two pairs holding identical strings, so the
      * natural half-finished bump left modules on different {@code langchain4j-core}
      * versions.
+     * <p>
+     * A missing {@code <version>} is an offender too, and it used to be the one
+     * shape that slipped through: skipping the check when the element is absent
+     * lets an artifact fall back to whatever a BOM or another dependency's
+     * transitive tree supplies, which is precisely the "not pinned to one of these
+     * two coordinated properties" state this test claims to forbid — arrived at
+     * without a value for anyone to notice.
      */
     @Test
     @DisplayName("every langchain4j artifact pins one of the two version properties")
@@ -313,7 +344,9 @@ class BuildQualityGatesTest {
                 continue;
             }
             String version = childText(dependency, "version");
-            if (version != null && !LANGCHAIN4J_VERSION_PROPERTIES.contains(version)) {
+            if (version == null) {
+                offenders.add(childText(dependency, "artifactId") + " -> no <version>");
+            } else if (!LANGCHAIN4J_VERSION_PROPERTIES.contains(version)) {
                 offenders.add(childText(dependency, "artifactId") + " -> " + version);
             }
         }
@@ -321,7 +354,9 @@ class BuildQualityGatesTest {
         assertEquals(List.of(), offenders,
                 "langchain4j artifacts must pin " + LANGCHAIN4J_VERSION_PROPERTIES + " and nothing else — a third"
                         + " property is a value that can drift out of step, and the mismatch surfaces as a runtime"
-                        + " NoSuchMethodError rather than a build failure");
+                        + " NoSuchMethodError rather than a build failure. An artifact with no <version> at all is"
+                        + " the same failure with nothing to read: it resolves through a BOM or a transitive tree,"
+                        + " so the two release lines can part company without either property changing.");
     }
 
     /**
@@ -389,24 +424,38 @@ class BuildQualityGatesTest {
     }
 
     /**
-     * The other half of build-ci-05, and the one deliberate judgement call on this
-     * branch. {@code failsOnError} covers Checkstyle <em>processing</em> errors —
-     * an unparseable source, a rule that blows up on a new language construct —
-     * which are not violations and so are not covered by
-     * {@code failOnViolation}/{@code violationSeverity} at all. Left false, a
-     * Checkstyle that cannot read a file reports nothing and passes, which is the
-     * same "gate that cannot fail" shape as everything else in this class: the
-     * import rules would go ungraded on exactly the file that broke the parser.
+     * The other half of build-ci-05, corrected. This assertion used to demand
+     * {@code failsOnError=true} on the premise that it covers Checkstyle
+     * <em>processing</em> errors — an unparseable source, a rule that throws on a
+     * new language construct — which {@code failOnViolation} would not reach. The
+     * plugin's own descriptor (maven-checkstyle-plugin 3.6.0,
+     * {@code META-INF/maven/plugin.xml}, the authoritative source AGENTS.md rule 7
+     * points at) says the opposite: <em>"If this is true, and Checkstyle reported
+     * any violations or errors, the build fails immediately after running
+     * Checkstyle, before checking the log for logViolationsToConsole. If you want
+     * to use logViolationsToConsole, use failOnViolation instead of this."</em>
+     * <p>
+     * So it is a second gate over the same error-severity set — the executor counts
+     * ERROR-severity events and throws before the mojo's own violation summary runs
+     * — reached earlier and reported worse, on a build that sets
+     * {@code consoleOutput}. Genuine processing errors need no flag at all:
+     * Checkstyle's {@code Checker.haltOnException} defaults to true, so an
+     * unparseable source aborts the run regardless.
+     * <p>
+     * The flag is therefore not configured, and this test exists so it cannot come
+     * back carrying the justification that was just disproved.
      */
     @Test
-    @DisplayName("a Checkstyle processing error fails the build rather than being swallowed")
-    void checkstyleProcessingErrorsFailTheBuild() throws Exception {
+    @DisplayName("Checkstyle blocks through failOnViolation, not through failsOnError")
+    void checkstyleBlocksThroughFailOnViolation() throws Exception {
         Element configuration = child(buildPlugin(parse(POM), "maven-checkstyle-plugin"), "configuration").orElseThrow();
 
-        assertEquals("true", childText(configuration, "failsOnError"),
-                "failsOnError=false swallows Checkstyle PROCESSING errors (an unparseable source, a rule that throws"
-                        + " on a new language construct). They are not violations, so failOnViolation does not cover"
-                        + " them: the file goes ungraded and the build stays green.");
+        assertNull(childText(configuration, "failsOnError"),
+                "failsOnError buys nothing here: per the plugin's own descriptor it fails on the same violations"
+                        + " failOnViolation+violationSeverity already block, only earlier and with the worse"
+                        + " \"Failed during checkstyle execution\" message, and it is explicitly documented as the"
+                        + " wrong choice when violations are logged to the console. It is NOT a processing-error"
+                        + " guard — Checker.haltOnException already is one. Leave it unset.");
     }
 
     /**
@@ -468,6 +517,148 @@ class BuildQualityGatesTest {
                 "no `mvnw verify` in " + CI_WORKFLOW + " passes " + SKIP_ITS_DISABLED + ". The 90/80 jacoco gate"
                         + " carries <skip>${skipITs}</skip>, so that flag is the ONLY thing that runs it anywhere."
                         + " Found: " + verifyInvocations);
+    }
+
+    /**
+     * The release half of the version single-source-of-truth work. The PR preflight
+     * dry-run builds the image with {@code EDDI_VERSION=$POM_VERSION} and then
+     * asserts the Red Hat {@code version} label equals the pom version, while the
+     * release build labels the image with the git tag
+     * ({@code ${GITHUB_REF#refs/tags/}}). Nothing reconciled the two, so a hot-fix
+     * tagged {@code 6.3.1} on a tree whose pom still said {@code 6.3.0} would
+     * publish an image LABELLED 6.3.1 whose running application reports 6.3.0 in
+     * its banner, its User-Agent, {@code /openapi} and
+     * {@code quarkus.container-image.additional-tags} — and the preflight job
+     * cannot see it, because on a pull request both of its values come from the
+     * same pom.
+     * <p>
+     * The parity check lives in the one place that knows the tag, and it is release
+     * -only, which means it is also the path nobody dry-runs. So it is pinned here
+     * rather than trusted.
+     */
+    @Test
+    @DisplayName("the release build refuses a git tag that disagrees with pom.xml")
+    void releaseTagMustMatchThePomVersion() throws Exception {
+        String ci = read(CI_WORKFLOW);
+
+        assertTrue(ci.contains("\"$PRIMARY_TAG\" != \"$POM_VERSION\""),
+                CI_WORKFLOW + " does not compare the pushed tag against the pom version. Without that comparison the"
+                        + " published image's `version` label (built from the tag) and everything the application"
+                        + " reports about itself (derived from pom.xml) can disagree, and the PR preflight — which"
+                        + " reads the pom for both sides — passes either way.");
+        assertTrue(ci.contains("::error::Tag '${PRIMARY_TAG}' does not match pom.xml version"),
+                "the tag/pom mismatch must fail the docker job with a ::error:: annotation, not just log");
+    }
+
+    /**
+     * r8. The formatter and Checkstyle bind to {@code validate}, so every lifecycle
+     * build in the workflow paid for them — five jobs grading the identical commit.
+     * The downstream ones now pass {@code -Dformatter.skip=true
+     * -Dcheckstyle.skip=true}, which is fine exactly as long as the job that OWNS
+     * the style verdict still does not. Add those flags to
+     * {@code ./mvnw clean test} as well and the gates this whole class exists to
+     * arm are off everywhere, with a green pipeline and a diff that reads like a
+     * performance tweak.
+     */
+    @Test
+    @DisplayName("at least one CI job still runs the style gates it is allowed to skip elsewhere")
+    void theStyleGatesAreStillArmedInCi() throws Exception {
+        List<String> lifecycleBuilds = read(CI_WORKFLOW).lines()
+                .map(String::trim)
+                .filter(line -> line.contains("./mvnw"))
+                .filter(line -> line.contains(" test") || line.contains(" verify") || line.contains(" package")
+                        || line.contains(" compile") || line.contains(" install"))
+                .toList();
+
+        assertFalse(lifecycleBuilds.isEmpty(), CI_WORKFLOW + " runs no Maven lifecycle build at all");
+        assertTrue(lifecycleBuilds.stream()
+                .anyMatch(line -> !line.contains("-Dcheckstyle.skip") && !line.contains("-Dformatter.skip")),
+                "every Maven lifecycle invocation in " + CI_WORKFLOW + " skips Checkstyle and/or the formatter, so"
+                        + " neither gate can fail anything in CI. The downstream jobs may skip them (they are"
+                        + " `needs: build-and-test`); the build-and-test job may not. Found: " + lifecycleBuilds);
+    }
+
+    /**
+     * The {@code code} paths filter decides whether Build &amp; Test runs at all,
+     * and a skipped required check still satisfies branch protection — so a file
+     * the filter does not name can change with no job having graded it.
+     * <p>
+     * {@code README.md} and {@code AGENTS.md} are build inputs, not prose:
+     * {@code ComposeStackTest} parses the README's compose commands and
+     * {@link #checkstyleImportGateScopeMatchesTheDocs} reads AGENTS.md. Neither was
+     * in the filter, so a PR that touched only one of those contracts skipped the
+     * single test that grades it, and a stale compose command could merge green.
+     * <p>
+     * Derived from the test sources rather than listing the two by name: a
+     * hard-coded pair stays green the day a third root document acquires a test and
+     * misses the filter, which is the same ungraded-contract shape one document
+     * along.
+     */
+    @Test
+    @DisplayName("the CI paths filter covers every repo-root document a test grades")
+    void ciCodeFilterCoversTheRootDocumentsTestsGrade() throws Exception {
+        List<String> patterns = ciFilterPatterns("code");
+        List<String> documents = rootDocumentsReadByTests();
+
+        assertFalse(documents.isEmpty(),
+                "found no repo-root document opened by any test, so this assertion grades nothing. The sweep looks"
+                        + " for a single-segment Path.of literal ending in .md — if the tests now reach those files"
+                        + " some other way, teach the sweep that shape rather than leaving it vacuous.");
+
+        List<String> unfiltered = documents.stream().filter(document -> !patterns.contains(document)).toList();
+
+        assertEquals(List.of(), unfiltered,
+                "these repo-root documents are graded by a test but appear in no `code` path filter in " + CI_WORKFLOW
+                        + ", so a PR that changes only one of them resolves code=false and skips Build & Test — and a"
+                        + " skipped required check still satisfies branch protection, so it merges with the contract"
+                        + " ungraded. Current filter: " + patterns);
+    }
+
+    /**
+     * The globs listed under one named filter of the paths-filter step, unquoted.
+     * The list ends at the next key, which is the only line inside the block that
+     * is neither a comment nor a {@code - } item.
+     */
+    private static List<String> ciFilterPatterns(String filterName) throws IOException {
+        List<String> patterns = new ArrayList<>();
+        boolean inFilter = false;
+
+        for (String line : read(CI_WORKFLOW).lines().toList()) {
+            String stripped = line.strip();
+            if (!inFilter) {
+                inFilter = stripped.equals(filterName + ":");
+                continue;
+            }
+            if (stripped.isEmpty() || stripped.startsWith("#")) {
+                continue;
+            }
+            if (!stripped.startsWith("- ")) {
+                break;
+            }
+            patterns.add(stripped.substring(2).strip().replace("'", "").replace("\"", ""));
+        }
+
+        assertFalse(patterns.isEmpty(), CI_WORKFLOW + " declares no '" + filterName + ":' paths filter, so nothing"
+                + " here can be checked against it");
+        return patterns;
+    }
+
+    /** Repo-root documents the test sources open, sorted and de-duplicated. */
+    private static List<String> rootDocumentsReadByTests() throws IOException {
+        Path testSources = Path.of("src", "test", "java");
+        assertTrue(Files.isDirectory(testSources),
+                "expected the working directory to be the project root; " + testSources.toAbsolutePath() + " not found");
+
+        TreeSet<String> documents = new TreeSet<>();
+        try (Stream<Path> paths = Files.walk(testSources)) {
+            for (Path file : paths.filter(path -> path.getFileName().toString().endsWith(".java")).toList()) {
+                Matcher matcher = ROOT_DOCUMENT_READ.matcher(new String(Files.readAllBytes(file), StandardCharsets.UTF_8));
+                while (matcher.find()) {
+                    documents.add(matcher.group(1));
+                }
+            }
+        }
+        return new ArrayList<>(documents);
     }
 
     /**

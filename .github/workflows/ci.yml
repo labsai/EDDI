@@ -74,6 +74,16 @@ jobs:
               - '.trivyignore'
               - '.gitleaksignore'
               - 'licenses/**'
+              # Graded by unit tests, so they are build inputs rather than prose:
+              # ComposeStackTest parses README.md's compose commands, and
+              # BuildQualityGatesTest reads AGENTS.md 4.7 to check it still
+              # describes the Checkstyle import gate's real scope. Outside this
+              # filter, a PR that changes only one of them sets code=false and
+              # skips the very test that grades it, so a stale compose command or
+              # a gate description that no longer matches the pom merges with
+              # nothing having evaluated it.
+              - 'README.md'
+              - 'AGENTS.md'
             # The installers are the README's headline `curl | bash` path and were
             # in NO filter at all, so a PR touching only them skipped the whole
             # pipeline — and a skipped required check still satisfies branch
@@ -452,7 +462,13 @@ jobs:
           queries: security-extended
 
       - name: Build for CodeQL
-        run: ./mvnw compile -DskipTests -B --no-transfer-progress
+        # STYLE_GATES_SKIP: the formatter and Checkstyle now bind to `validate`, so
+        # every lifecycle build in this workflow pays them — five jobs, ~2 minutes
+        # of runner time each on 1947 files, all grading the same commit. Build &
+        # Test is the job that owns that verdict (it deliberately does NOT pass
+        # these flags); repeating it here only delays CodeQL and duplicates the
+        # failure. This job compiles for SAST, nothing more.
+        run: ./mvnw compile -DskipTests -Dformatter.skip=true -Dcheckstyle.skip=true -B --no-transfer-progress
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4.36.2
@@ -645,10 +661,27 @@ jobs:
       - name: Compute Docker tags
         id: meta
         run: |
+          POM_VERSION=$(grep -m1 '<version>' pom.xml | sed 's/.*<version>\(.*\)<\/version>.*/\1/')
+
           if [[ "$GITHUB_REF" == refs/tags/* ]]; then
             # Tag push: 6.0.0 or 6.0.0-RC2
             PRIMARY_TAG="${GITHUB_REF#refs/tags/}"
             IS_RELEASE="true"
+
+            # The tag is what EDDI_VERSION (and therefore the Red Hat `version`
+            # LABEL, the :latest alias and the certification submission) is built
+            # from, while application.properties derives systemRuntime.projectVersion,
+            # /openapi and quarkus.container-image.additional-tags from pom.xml. Tag
+            # 6.3.1 on a tree whose pom still says 6.3.0 — the easy hot-fix mistake —
+            # publishes an image LABELLED 6.3.1 whose running application reports
+            # 6.3.0 everywhere. Nothing else can see it: the PR preflight compares
+            # the label against the pom (both 6.3.0, so green) and this release path
+            # is the one nobody dry-runs. A pre-release suffix is allowed, so
+            # 6.3.0-RC2 on a 6.3.0 pom is fine.
+            if [[ "$PRIMARY_TAG" != "$POM_VERSION" && "$PRIMARY_TAG" != "${POM_VERSION}-"* ]]; then
+              echo "::error::Tag '${PRIMARY_TAG}' does not match pom.xml version '${POM_VERSION}'. Bump pom.xml (and re-tag) before releasing — otherwise the published image is labelled with the tag while the application inside reports the pom version."
+              exit 1
+            fi
 
             # Compute semver aliases for stable releases (no pre-release suffix)
             if [[ "$PRIMARY_TAG" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
@@ -663,7 +696,6 @@ jobs:
             echo "is-stable=${IS_STABLE}" >> $GITHUB_OUTPUT
           else
             # Branch push: version from pom.xml + build number
-            POM_VERSION=$(grep -m1 '<version>' pom.xml | sed 's/.*<version>\(.*\)<\/version>.*/\1/')
             PRIMARY_TAG="${POM_VERSION}-b${{ github.run_number }}"
             IS_RELEASE="false"
             echo "is-stable=false" >> $GITHUB_OUTPUT
@@ -683,7 +715,10 @@ jobs:
           fi
 
       - name: Build application
-        run: ./mvnw clean package -DskipTests -Plicense-gen -B
+        # STYLE_GATES_SKIP — see the note in the CodeQL job. This job is
+        # `needs: build-and-test`, so the style verdict for this exact commit is
+        # already in; re-running it here just adds ~2 minutes to every publish.
+        run: ./mvnw clean package -DskipTests -Dformatter.skip=true -Dcheckstyle.skip=true -Plicense-gen -B
 
       - name: Build Docker image
         run: |
@@ -748,13 +783,24 @@ jobs:
           MONGO_URI="mongodb://localhost:27017/eddi?retryWrites=true&w=majority&connectTimeoutMS=10000&socketTimeoutMS=30000"
 
           docker run -d --name eddi-boot-mongodb --network host mongo:7.0.14
+          MONGO_READY=0
           for _ in $(seq 1 30); do
             if docker exec eddi-boot-mongodb mongosh --eval "db.runCommand({ping:1})" > /dev/null 2>&1; then
               echo "MongoDB ready"
+              MONGO_READY=1
               break
             fi
             sleep 1
           done
+          # Fail here rather than falling through. Without this branch a runner that
+          # cannot pull or start mongo:7.0.14 (a Docker Hub hiccup, a full disk) ends
+          # up reported as "The built image did not become ready within 90s - refusing
+          # to publish", which blames the image for someone else's outage.
+          if [ "$MONGO_READY" != "1" ]; then
+            echo "::error::The runner could not start MongoDB for the boot check - this is an infrastructure failure, not a problem with the built image"
+            docker logs eddi-boot-mongodb
+            exit 1
+          fi
 
           docker run -d --name eddi-boot --network host -e "MONGODB_CONNECTIONSTRING=${MONGO_URI}" -e "EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true" -e "EDDI_MCP_ALLOW_UNAUTHENTICATED=true" -e "EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED=true" "${DOCKER_IMAGE}:${PRIMARY_TAG}"
 
@@ -1061,15 +1107,23 @@ jobs:
           cache: maven
 
       - name: Build application
-        run: ./mvnw clean package -DskipTests -Plicense-gen -B
+        # STYLE_GATES_SKIP — see the note in the CodeQL job. This job is
+        # `needs: build-and-test`, which already graded this commit's style.
+        run: ./mvnw clean package -DskipTests -Dformatter.skip=true -Dcheckstyle.skip=true -Plicense-gen -B
 
       - name: Build Docker image with Red Hat labels
         run: |
-          # EDDI_VERSION has to be passed here exactly as the docker job passes it.
-          # Without it this dry-run certifies an image labelled with the
-          # Dockerfile's ARG default instead of the real version - it reported
-          # `version` present and correct even when a release would have carried a
-          # stale one, which is the single failure this job exists to catch.
+          # EDDI_VERSION has to be passed here, or this dry-run certifies an image
+          # labelled with the Dockerfile's ARG default instead of the real version -
+          # it reported `version` present and correct even when a release would have
+          # carried a stale one, which is the single failure this job exists to catch.
+          #
+          # The pom version is the right value to pass BECAUSE the docker job now
+          # refuses to publish a tag that disagrees with pom.xml (see the parity
+          # check in `Compute Docker tags`). Without that check this dry-run and the
+          # release build could label the same commit differently and neither would
+          # know: a hot-fix tagged 6.3.1 on a 6.3.0 pom passes here and ships as
+          # 6.3.1 there.
           POM_VERSION=$(grep -m1 '<version>' pom.xml | cut -d'>' -f2 | cut -d'<' -f1)
           echo "Building with EDDI_VERSION=${POM_VERSION}"
           docker build \
