@@ -104,17 +104,27 @@ the next person to touch that line sees them without leaving the file, and summa
 
 ### Red Hat support boundary
 
-A container supplies its own userspace, so the UBI 10 image runs on a RHEL 9 host. Red Hat's
-support policy covers a container only on a host of the **same or newer** major, so that
-combination is outside it. `redhat-openshift.md` now says so and points deployments that need
-support on RHEL 9 hosts at 6.3.x and earlier.
+A container supplies its own userspace, so the host only has to be new enough. Red Hat's
+[container compatibility matrix](https://access.redhat.com/support/policy/rhel-container-compatibility)
+lists a UBI 10 image on a RHEL 9 host as **Supported**, subject to the conditions that apply to
+any mismatched major pair: the workload runs unprivileged and does not depend directly on host
+kernel interfaces. EDDI meets both — UID 185, nothing below the JVM. RHEL 8 is the one host
+Red Hat marks unsupported for a UBI 10 image. `redhat-openshift.md` states this.
 
-### `ContainerBaseIT` moves with the Dockerfile
+*(An earlier draft of this entry claimed the RHEL 9 host combination was categorically outside
+Red Hat's policy. It is not; the matrix was checked and the claim corrected before merge.)*
+
+### `ContainerBaseIT` no longer restates the base image
 
 `ContainerBaseIT` builds its own inline Dockerfile that mirrored the production `FROM` — on
-UBI 9, unpinned. Left behind, every container-based integration test would have gone on
-exercising the base production no longer uses. Moved to UBI 10 and called out in `AGENTS.md`,
-because a mirror that drifts is worse than no mirror.
+UBI 9, and unpinned, so it was already a major version and a digest behind what shipped.
+Hard-coding UBI 10 there would only have reset the clock: the copy goes stale on the next digest
+bump without anything failing, and the container ITs quietly certify an OS layer nothing ships.
+It now parses the `FROM` line out of `src/main/docker/Dockerfile` at test time — last `FROM`
+wins, a trailing `AS <stage>` is stripped, so a future multi-stage production build still
+resolves — which carries the digest pin along for free and makes drift impossible rather than
+merely discouraged. Verified against both Dockerfiles in the repo, including the multi-stage
+demo one.
 
 ### The check that could not have told us
 
@@ -127,6 +137,34 @@ body lists what to confirm before a major move: CPU baseline, crypto policy, JDK
 `ContainerBaseIT`. Verified against the live registry — `ubi11` and `ubi12` are 404 today, and
 running the same logic against the old `ubi9` pin resolves to `ubi10`, which is exactly the miss
 it closes.
+
+### Review round
+
+Four findings from CodeRabbit and Copilot, all taken.
+
+**The RHEL 9 host claim was wrong** — the strongest reason to run a review. CodeRabbit disputed
+the "categorically outside Red Hat's policy" wording and it was right; the matrix says
+**Supported**. Corrected in both the doc and this entry rather than quietly reworded.
+
+**`ContainerBaseIT` should carry the digest, not just the tag** — raised by both bots. Taken
+further than asked: rather than restating the digest in a second place, the test now parses the
+production `FROM` line, so the class of drift the bots were pointing at cannot recur.
+
+**A hard-coded version series in operator guidance** (Copilot) — "6.3.x and earlier" would have
+gone stale immediately. The corrected paragraph names no version at all.
+
+**`actionlint` SC2001/SC2086/SC2129 on the new step** (CodeRabbit). Fixed: bash regex and
+parameter expansion instead of `echo | sed`, quoted `"$GITHUB_OUTPUT"`/`"$GITHUB_STEP_SUMMARY"`,
+grouped consecutive appends. Both new steps are now clean under
+`shellcheck --severity=style`, which the seven pre-existing steps in the file are not — those
+are left alone here rather than folded into a base-image change.
+
+Extracting the new step and running it against a stubbed `skopeo` was worth doing: the first
+harness reported "no newer major" for all three cases, which looked like a real bug in the
+rewritten parameter expansion. It was the harness — a Windows-style directory on `PATH` that
+Git Bash cannot resolve, so the stub was never found and every probe failed identically. The
+step itself is correct on all three paths (pinned on ubi9 finds ubi10, pinned on ubi10 finds
+nothing, a non-`ubiN` image exits early).
 
 **Files:** [`src/main/docker/Dockerfile`](../src/main/docker/Dockerfile),
 [`ContainerBaseIT.java`](../src/test/java/ai/labs/eddi/integration/ContainerBaseIT.java),

@@ -643,7 +643,7 @@ The production image (`Dockerfile`) uses a Red Hat UBI 10 base pinned by **SHA25
 
 - The `FROM` line must always include `@sha256:...` — never use a bare tag like `:1.24`
 - Red Hat periodically republishes the same tag with security patches baked in
-- `ContainerBaseIT`'s inline Dockerfile mirrors this base — move both together, or the integration tests stop exercising what production runs
+- `ContainerBaseIT`'s inline Dockerfile parses the `FROM` line out of this file at test time, so the pin cannot drift — do not restate the image reference there
 
 RHEL 10 carries two constraints the `FROM` line documents in full and that any change here must preserve: a **x86-64-v3 host CPU floor** (glibc refuses to start below it) and a crypto policy that **disables the static-RSA TLS 1.2 suites** for the JVM as well as the OS.
 

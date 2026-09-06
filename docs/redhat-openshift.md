@@ -21,7 +21,7 @@ EDDI is delivered as an OCI-compliant Docker container image and runs on any pla
 
 > **Note**: Because EDDI ships as a standard OCI container image built on Red Hat UBI 10, it is inherently compatible with RHEL 10 and any RHEL-based platform. The image carries its own userspace, so the only host requirements are a container runtime and an x86-64-v3 CPU.
 
-> **Running on a RHEL 9 host**: the container works, because a container image supplies its own userspace and the RHEL 10 content has no kernel requirement a RHEL 9 host cannot meet. Red Hat's support policy, however, covers a container only on a host of the **same or newer** major version, so a UBI 10 image on a RHEL 9 host is outside that policy. Deployments that need Red Hat support on RHEL 9 hosts should pin an EDDI release built on UBI 9 (6.3.x and earlier).
+> **Running on a RHEL 9 host**: supported. Red Hat's [container compatibility matrix](https://access.redhat.com/support/policy/rhel-container-compatibility) lists a UBI 10 image on a RHEL 9 host as **Supported** — a container supplies its own userspace, so the host only has to be new enough. Because the majors do not match, the usual conditions for a mismatched pair apply: the workload must run unprivileged and must not depend directly on host kernel interfaces or kernel-specific data structures. EDDI satisfies both — it runs as UID `185` and touches nothing below the JVM. A RHEL 8 host is the one combination Red Hat marks unsupported for a UBI 10 image.
 
 All EDDI releases are continuously validated against Red Hat certification requirements via automated [preflight checks](https://github.com/redhat-openshift-ecosystem/openshift-preflight) in CI/CD.
 

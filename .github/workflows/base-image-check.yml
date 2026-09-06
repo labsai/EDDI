@@ -136,20 +136,22 @@ jobs:
           IMAGE="${{ steps.parse.outputs.image }}"
           TAG="${{ steps.parse.outputs.tag }}"
 
-          echo "### 🔍 UBI Major Check" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔍 UBI Major Check" >> "$GITHUB_STEP_SUMMARY"
 
-          # registry.access.redhat.com/ubi10/openjdk-25-runtime -> "ubi10" and the rest
-          UBI_MAJOR=$(echo "$IMAGE" | sed -n 's#.*/ubi\([0-9][0-9]*\)/.*#\1#p')
-          if [ -z "$UBI_MAJOR" ]; then
-            echo "exists=false" >> $GITHUB_OUTPUT
-            echo "Base image is not a \`ubiN/\` image — nothing to probe." >> $GITHUB_STEP_SUMMARY
+          # registry.access.redhat.com/ubi10/openjdk-25-runtime -> "10"
+          if [[ "$IMAGE" =~ /ubi([0-9]+)/ ]]; then
+            UBI_MAJOR="${BASH_REMATCH[1]}"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "Base image is not a \`ubiN/\` image — nothing to probe." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
 
           NEWEST_IMAGE=""
           NEWEST_TAG=""
           for OFFSET in 1 2; do
-            CANDIDATE_IMAGE=$(echo "$IMAGE" | sed "s#/ubi${UBI_MAJOR}/#/ubi$((UBI_MAJOR + OFFSET))/#")
+            NEXT_MAJOR=$((UBI_MAJOR + OFFSET))
+            CANDIDATE_IMAGE="${IMAGE/\/ubi${UBI_MAJOR}\//\/ubi${NEXT_MAJOR}\/}"
             # Prefer the tag we already pin; fall back to :latest so a renamed
             # tag scheme in the next major still registers as "it exists".
             for CANDIDATE_TAG in "$TAG" latest; do
@@ -162,13 +164,15 @@ jobs:
           done
 
           if [ -n "$NEWEST_IMAGE" ]; then
-            echo "image=${NEWEST_IMAGE}" >> $GITHUB_OUTPUT
-            echo "tag=${NEWEST_TAG}" >> $GITHUB_OUTPUT
-            echo "exists=true" >> $GITHUB_OUTPUT
-            echo "⬆️ **\`${NEWEST_IMAGE}:${NEWEST_TAG}\` exists** — a newer UBI major is published." >> $GITHUB_STEP_SUMMARY
+            {
+              echo "image=${NEWEST_IMAGE}"
+              echo "tag=${NEWEST_TAG}"
+              echo "exists=true"
+            } >> "$GITHUB_OUTPUT"
+            echo "⬆️ **\`${NEWEST_IMAGE}:${NEWEST_TAG}\` exists** — a newer UBI major is published." >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "exists=false" >> $GITHUB_OUTPUT
-            echo "\`ubi${UBI_MAJOR}\` is the newest published major (probed ubi$((UBI_MAJOR + 1)), ubi$((UBI_MAJOR + 2)))." >> $GITHUB_STEP_SUMMARY
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "\`ubi${UBI_MAJOR}\` is the newest published major (probed ubi$((UBI_MAJOR + 1)), ubi$((UBI_MAJOR + 2)))." >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Trivy scan on base image

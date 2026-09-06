@@ -16,9 +16,11 @@ import org.testcontainers.images.builder.ImageFromDockerfile;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.List;
 import org.jboss.logmanager.LogManager;
 
 /**
@@ -69,6 +71,42 @@ public abstract class ContainerBaseIT extends BaseIntegrationIT {
                     .withStartupTimeout(Duration.ofSeconds(180)));
 
     /**
+     * Reads the base image reference — tag <em>and</em> digest pin — out of the
+     * production Dockerfile instead of restating it here.
+     * <p>
+     * The inline Dockerfile in {@link #buildEddiImage(String)} exists to mirror
+     * production, and a mirror that can drift is worse than no mirror: a second
+     * copy of the reference goes stale on the next digest bump without anything
+     * failing, and the container ITs quietly start certifying an OS layer nothing
+     * ships. Parsing the real {@code FROM} line means the pin comes along for free
+     * and cannot be forgotten. Takes the <em>last</em> {@code FROM}, matching how
+     * {@code base-image-check.yml} identifies the runtime stage.
+     *
+     * @return the image reference, e.g.
+     *         {@code registry.access.redhat.com/ubi10/openjdk-25-runtime:1.24@sha256:...}
+     */
+    private static String productionBaseImage() {
+        Path dockerfile = Path.of("src/main/docker/Dockerfile");
+        List<String> lines;
+        try {
+            lines = Files.readAllLines(dockerfile);
+        } catch (IOException e) {
+            throw new IllegalStateException(
+                    "Could not read " + dockerfile + " to determine the production base image. "
+                            + "Container-based ITs must run from the project root.",
+                    e);
+        }
+
+        return lines.stream()
+                .map(String::strip)
+                .filter(line -> line.startsWith("FROM "))
+                // Drop a trailing "AS <stage>" so a future multi-stage build still parses.
+                .map(line -> line.substring("FROM ".length()).strip().split("\\s+")[0])
+                .reduce((first, second) -> second)
+                .orElseThrow(() -> new IllegalStateException("No FROM instruction found in " + dockerfile));
+    }
+
+    /**
      * Builds the EDDI Docker image using a test-specific inline Dockerfile with
      * flat build context paths.
      * <p>
@@ -106,7 +144,7 @@ public abstract class ContainerBaseIT extends BaseIntegrationIT {
         // flat COPY source paths (quarkus-app/ instead of target/quarkus-app/)
         // because target/quarkus-app is mapped to quarkus-app in the build context.
         String testDockerfile = """
-                FROM registry.access.redhat.com/ubi10/openjdk-25-runtime:1.24
+                FROM %s
                 ENV LANG='C.utf8' LANGUAGE='C.utf8'
                 USER root
                 RUN mkdir -p /deployments/tmp/import && \\
@@ -123,7 +161,8 @@ public abstract class ContainerBaseIT extends BaseIntegrationIT {
                 ENV JAVA_OPTS_APPEND="-Dquarkus.http.host=0.0.0.0 -Djava.util.logging.manager=LogManager -Dfile.encoding=UTF8 -Deddi.docs.path=/deployments/docs"
                 ENV JAVA_APP_JAR="/deployments/quarkus-run.jar"
                 ENTRYPOINT [ "/opt/jboss/container/java/run/run-java.sh" ]
-                """;
+                """
+                .formatted(productionBaseImage());
 
         var image = new ImageFromDockerfile(imageName, false)
                 .withFileFromString("Dockerfile", testDockerfile)
