@@ -43,12 +43,12 @@ import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
-import static ai.labs.eddi.utils.LogSanitizer.sanitize;
-
 import java.io.IOException;
 import java.net.URI;
 import java.util.*;
 import java.util.regex.Pattern;
+import dev.langchain4j.data.message.SystemMessage;
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 import static ai.labs.eddi.configs.workflows.model.ExtensionDescriptor.ConfigValue;
 import static ai.labs.eddi.configs.workflows.model.ExtensionDescriptor.FieldType;
@@ -494,7 +494,7 @@ public class LlmTask implements ILifecycleTask {
 
         // Build chat messages without system message for agent mode
         // (agent orchestrator adds system message internally)
-        List<ChatMessage> chatMessagesWithoutSystem = messages.stream().filter(m -> !(m instanceof dev.langchain4j.data.message.SystemMessage))
+        List<ChatMessage> chatMessagesWithoutSystem = messages.stream().filter(m -> !(m instanceof SystemMessage))
                 .toList();
 
         // === Multi-Model Cascade Branch ===

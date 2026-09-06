@@ -14,6 +14,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import org.jboss.logging.Logger;
 
 /**
  * Store-level validation for HITL configuration. Rejects unusable values at
@@ -212,7 +213,7 @@ public final class HitlConfigValidation {
         if (cfg != null
                 && cfg.getTimeoutPolicy() == null
                 && hitlConfig.getTimeoutPolicy() == HitlTimeoutPolicy.AUTO_APPROVE) {
-            org.jboss.logging.Logger.getLogger(HitlConfigValidation.class).warn(
+            Logger.getLogger(HitlConfigValidation.class).warn(
                     "hitlConfig: agent-level AUTO_APPROVE does not apply to tool approvals; tool pauses will "
                             + "WAIT_INDEFINITELY unless hitlConfig.toolApprovals.timeoutPolicy is set explicitly");
         }

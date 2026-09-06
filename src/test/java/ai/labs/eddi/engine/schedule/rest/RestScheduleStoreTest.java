@@ -14,6 +14,7 @@ import ai.labs.eddi.engine.runtime.internal.ScheduleFireExecutor;
 import ai.labs.eddi.engine.runtime.internal.SchedulePollerService;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.InternalServerErrorException;
@@ -30,6 +31,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import jakarta.ws.rs.NotFoundException;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -474,10 +476,10 @@ class RestScheduleStoreTest {
         // of the check on /agents/{id}/start.
         asEditor("editor-1");
         var privateAgentGuard = mock(ResourceAccessGuard.class);
-        doThrow(new io.quarkus.security.ForbiddenException("no")).when(privateAgentGuard).requireAgentUseAccess(anyString());
+        doThrow(new ForbiddenException("no")).when(privateAgentGuard).requireAgentUseAccess(anyString());
         setField(rest, "resourceAccessGuard", privateAgentGuard);
 
-        assertThrows(io.quarkus.security.ForbiddenException.class, () -> rest.createSchedule(dreamSchedule("d9", "editor-1")));
+        assertThrows(ForbiddenException.class, () -> rest.createSchedule(dreamSchedule("d9", "editor-1")));
         verify(scheduleStore, never()).createSchedule(any());
     }
 

@@ -23,6 +23,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.micrometer.core.instrument.Tag;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
@@ -310,7 +312,7 @@ class McpToolProviderManagerAdditionalTest {
         @Test
         @DisplayName("outcomes are counted without leaking a URL or a credential")
         void discoveryOutcomesAreCountedSafely() throws Exception {
-            var registry = new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
+            var registry = new SimpleMeterRegistry();
             // A spy with the network seam stubbed: pointing the real client at an
             // unreachable host would make this test depend on DNS and wait out the
             // 30-second default timeout.
@@ -324,7 +326,7 @@ class McpToolProviderManagerAdditionalTest {
             spied.discoverTools(List.of(config));
 
             var tagValues = registry.getMeters().stream().flatMap(m -> m.getId().getTags().stream())
-                    .map(io.micrometer.core.instrument.Tag::getValue).toList();
+                    .map(Tag::getValue).toList();
             assertFalse(tagValues.contains("super-secret-literal-key"), "a credential must never become a metric tag");
             assertFalse(tagValues.stream().anyMatch(v -> v.contains("unreachable-metrics-test")),
                     "a server URL is unbounded cardinality and must not be a tag: " + tagValues);

@@ -34,6 +34,9 @@ import java.util.concurrent.*;
 import java.util.concurrent.TimeoutException;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.net.UnknownHostException;
+import java.net.SocketTimeoutException;
+import java.net.ConnectException;
 
 /**
  * Executes a multi-model cascade: tries a cheap/fast model first, evaluates
@@ -904,8 +907,8 @@ class CascadingModelExecutor {
     private static boolean isRetryableError(Exception e) {
         Throwable current = e;
         while (current != null) {
-            if (current instanceof java.net.SocketTimeoutException || current instanceof TimeoutException
-                    || current instanceof java.net.ConnectException || current instanceof java.net.UnknownHostException) {
+            if (current instanceof SocketTimeoutException || current instanceof TimeoutException
+                    || current instanceof ConnectException || current instanceof UnknownHostException) {
                 return true;
             }
             String message = current.getMessage();

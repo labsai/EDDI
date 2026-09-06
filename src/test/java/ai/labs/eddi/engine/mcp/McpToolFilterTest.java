@@ -23,6 +23,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import dev.langchain4j.agent.tool.Tool;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -210,7 +211,7 @@ class McpToolFilterTest {
         Map<String, String> builtinTools = new LinkedHashMap<>();
         for (Class<?> clazz : discoverClassesUnder("ai.labs.eddi.modules.llm.tools", true)) {
             for (Method method : clazz.getDeclaredMethods()) {
-                var tool = method.getAnnotation(dev.langchain4j.agent.tool.Tool.class);
+                var tool = method.getAnnotation(Tool.class);
                 if (tool == null) {
                     continue;
                 }

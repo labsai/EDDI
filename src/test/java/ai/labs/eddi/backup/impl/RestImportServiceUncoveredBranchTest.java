@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
 
+import jakarta.ws.rs.core.Response;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
@@ -717,10 +718,10 @@ class RestImportServiceUncoveredBranchTest {
         @DisplayName("status 201 passes silently")
         void status201Passes() throws Exception {
             Method method = RestImportService.class.getDeclaredMethod(
-                    "checkIfCreatedResponse", jakarta.ws.rs.core.Response.class);
+                    "checkIfCreatedResponse", Response.class);
             method.setAccessible(true);
 
-            var response = jakarta.ws.rs.core.Response.status(201).build();
+            var response = Response.status(201).build();
             method.invoke(service, response); // Should not throw
         }
 
@@ -728,10 +729,10 @@ class RestImportServiceUncoveredBranchTest {
         @DisplayName("non-201 status logs error but does not throw")
         void nonCreatedStatus() throws Exception {
             Method method = RestImportService.class.getDeclaredMethod(
-                    "checkIfCreatedResponse", jakarta.ws.rs.core.Response.class);
+                    "checkIfCreatedResponse", Response.class);
             method.setAccessible(true);
 
-            var response = jakarta.ws.rs.core.Response.status(400).build();
+            var response = Response.status(400).build();
             method.invoke(service, response); // Should not throw, just logs
         }
 
@@ -739,10 +740,10 @@ class RestImportServiceUncoveredBranchTest {
         @DisplayName("status 500 logs error but does not throw")
         void serverError() throws Exception {
             Method method = RestImportService.class.getDeclaredMethod(
-                    "checkIfCreatedResponse", jakarta.ws.rs.core.Response.class);
+                    "checkIfCreatedResponse", Response.class);
             method.setAccessible(true);
 
-            var response = jakarta.ws.rs.core.Response.status(500).build();
+            var response = Response.status(500).build();
             method.invoke(service, response); // Should not throw
         }
     }

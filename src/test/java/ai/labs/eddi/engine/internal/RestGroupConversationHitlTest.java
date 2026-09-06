@@ -29,6 +29,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
+import jakarta.ws.rs.NotFoundException;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -335,7 +336,7 @@ class RestGroupConversationHitlTest {
         @Test
         @DisplayName("approver sees all of the group's pending summaries")
         void approverSeesAll() throws Exception {
-            var principal = mock(java.security.Principal.class);
+            var principal = mock(Principal.class);
             when(principal.getName()).thenReturn("reviewer");
             when(identity.getPrincipal()).thenReturn(principal);
             when(identity.hasRole("eddi-admin")).thenReturn(false);
@@ -602,7 +603,7 @@ class RestGroupConversationHitlTest {
             decision.setVerdict(HitlVerdict.APPROVED);
             request.setDecision(decision);
 
-            assertThrows(jakarta.ws.rs.NotFoundException.class,
+            assertThrows(NotFoundException.class,
                     () -> restGroupConversation.approveGroupPhase(OTHER_GROUP, GC_ID, request),
                     "approving under the wrong group path must 404, not act on the conversation");
         }
@@ -613,7 +614,7 @@ class RestGroupConversationHitlTest {
             asAdmin(ADMIN_ID);
             when(groupService.readGroupConversation(GC_ID)).thenReturn(makeGc(OWNER_ID));
 
-            assertThrows(jakarta.ws.rs.NotFoundException.class,
+            assertThrows(NotFoundException.class,
                     () -> restGroupConversation.cancelDiscussion(OTHER_GROUP, GC_ID),
                     "cancelling under the wrong group path must 404");
         }
@@ -624,7 +625,7 @@ class RestGroupConversationHitlTest {
             asAdmin(ADMIN_ID);
             when(groupService.readGroupConversation(GC_ID)).thenReturn(makeGc(OWNER_ID));
 
-            assertThrows(jakarta.ws.rs.NotFoundException.class,
+            assertThrows(NotFoundException.class,
                     () -> restGroupConversation.getGroupApprovalStatus(OTHER_GROUP, GC_ID, "summary"),
                     "reading approval-status under the wrong group path must 404");
         }
