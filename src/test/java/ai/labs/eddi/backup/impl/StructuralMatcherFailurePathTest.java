@@ -39,6 +39,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.io.IOException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -280,7 +281,7 @@ class StructuralMatcherFailurePathTest {
     void unparseableContentFallsBackToTheRawComparison() throws Exception {
         // doThrow, not when(...).thenThrow: the when-form would first invoke the
         // answer already installed in setUp with an empty argument.
-        doThrow(new java.io.IOException("not JSON")).when(jsonSerialization).deserialize(anyString());
+        doThrow(new IOException("not JSON")).when(jsonSerialization).deserialize(anyString());
 
         assertEquals(DiffAction.UPDATE,
                 extensionActionFor("{\"apiKey\":\"${vault:REDACTED}\",\"model\":\"gpt-4\"}",

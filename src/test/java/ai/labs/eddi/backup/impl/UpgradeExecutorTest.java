@@ -57,6 +57,8 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import jakarta.enterprise.inject.spi.CDI;
 import jakarta.enterprise.inject.Instance;
+import jakarta.ws.rs.NotFoundException;
+import java.io.IOException;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -1500,10 +1502,10 @@ class UpgradeExecutorTest {
         @Test
         @DisplayName("a WebApplicationException from the preview reaches the caller unwrapped")
         void webApplicationExceptionIsRethrownAsItIs() throws Exception {
-            var notFound = new jakarta.ws.rs.NotFoundException("Target agent target-1 does not exist.");
+            var notFound = new NotFoundException("Target agent target-1 does not exist.");
             when(structuralMatcher.buildPreview(any(), eq("target-1"), eq(true))).thenThrow(notFound);
 
-            var thrown = assertThrows(jakarta.ws.rs.NotFoundException.class,
+            var thrown = assertThrows(NotFoundException.class,
                     () -> executorWithMetrics.executeUpgrade(createSource(List.of(), List.of()),
                             "target-1", null, null));
 
@@ -1590,7 +1592,7 @@ class UpgradeExecutorTest {
             // doThrow, not when(...).thenThrow: the when-form would first invoke the
             // round-tripping answer the helper installs, with an empty argument.
             String written = writeExtension(SCRUBBED, "{\"apiKey\":\"sk-live-abc\"}",
-                    () -> doThrow(new java.io.IOException("not JSON"))
+                    () -> doThrow(new IOException("not JSON"))
                             .when(jsonSerialization).deserialize(anyString()));
 
             assertEquals(SCRUBBED, written);
