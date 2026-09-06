@@ -32,6 +32,7 @@ import jakarta.ws.rs.core.Response;
 import java.net.URI;
 import java.util.List;
 
+import jakarta.ws.rs.BadRequestException;
 import static ai.labs.eddi.configs.descriptors.ResourceUtilities.*;
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -382,7 +383,7 @@ public class RestAgentStore implements IRestAgentStore {
         boolean hasRotatedKeys = identity != null && identity.getKeys() != null
                 && !identity.getKeys().isEmpty();
         if (!hasLegacyKey && !hasRotatedKeys) {
-            throw new jakarta.ws.rs.BadRequestException(
+            throw new BadRequestException(
                     "Cryptographic identity features require a signing key. "
                             + "Generate one via POST /agentstore/{agentId}/signing/keys "
                             + "before enabling signInterAgentMessages "

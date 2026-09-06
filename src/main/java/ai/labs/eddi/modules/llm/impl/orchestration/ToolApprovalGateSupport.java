@@ -37,6 +37,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
+import java.security.NoSuchAlgorithmException;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
@@ -468,7 +469,7 @@ public class ToolApprovalGateSupport {
                 sb.append(Character.forDigit(b & 0xF, 16));
             }
             return sb.toString();
-        } catch (java.security.NoSuchAlgorithmException e) {
+        } catch (NoSuchAlgorithmException e) {
             // SHA-256 is guaranteed present on every JVM; treat as unreachable.
             throw new IllegalStateException("SHA-256 unavailable", e);
         }

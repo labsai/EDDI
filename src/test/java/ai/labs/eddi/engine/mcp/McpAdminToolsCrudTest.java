@@ -40,10 +40,12 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import ai.labs.eddi.configs.rest.StrictConfigurationParser;
+import io.quarkus.security.identity.SecurityIdentity;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
-import ai.labs.eddi.configs.rest.StrictConfigurationParser;
 
 /**
  * Unit tests for McpAdminTools Phase 8a.2 — update_resource, create_resource,
@@ -105,7 +107,7 @@ class McpAdminToolsCrudTest {
         scheduleStore = mock(IScheduleStore.class);
         scheduleFireExecutor = mock(ScheduleFireExecutor.class);
         schedulePollerService = mock(SchedulePollerService.class);
-        var mockIdentity = mock(io.quarkus.security.identity.SecurityIdentity.class);
+        var mockIdentity = mock(SecurityIdentity.class);
         lenient().when(mockIdentity.isAnonymous()).thenReturn(true);
         tools = new McpAdminTools(restInterfaceFactory, agentAdmin, jsonSerialization, strictConfigurationParser(), scheduleStore,
                 scheduleFireExecutor, schedulePollerService,
@@ -578,9 +580,9 @@ class McpAdminToolsCrudTest {
     @Test
     void createResource_unknownField_reportsTheKnownFieldsMessage() {
         var strictTools = new McpAdminTools(mock(IRestInterfaceFactory.class), agentAdmin, jsonSerialization,
-                new StrictConfigurationParser(new com.fasterxml.jackson.databind.ObjectMapper()), scheduleStore,
+                new StrictConfigurationParser(new ObjectMapper()), scheduleStore,
                 scheduleFireExecutor, schedulePollerService,
-                mock(io.quarkus.security.identity.SecurityIdentity.class), false);
+                mock(SecurityIdentity.class), false);
 
         String result = strictTools.createResource("propertysetter",
                 "{\"setProperties\":[{\"name\":\"x\",\"valueString\":\"y\"}]}");

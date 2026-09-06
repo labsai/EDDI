@@ -47,10 +47,11 @@ import java.net.URI;
 import java.time.Instant;
 import java.util.*;
 
+import ai.labs.eddi.configs.rest.StrictConfigurationParser;
+import io.quarkus.security.identity.SecurityIdentity;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
-import ai.labs.eddi.configs.rest.StrictConfigurationParser;
 
 /**
  * Extended tests for McpAdminTools — schedule management, channel integrations,
@@ -119,7 +120,7 @@ class McpAdminToolsExtendedTest {
         lenient().when(jsonSerialization.serialize(any())).thenReturn("{}");
         lenient().when(schedulePollerService.getInstanceId()).thenReturn("test-instance");
 
-        var mockIdentity = mock(io.quarkus.security.identity.SecurityIdentity.class);
+        var mockIdentity = mock(SecurityIdentity.class);
         lenient().when(mockIdentity.isAnonymous()).thenReturn(true);
 
         tools = new McpAdminTools(restInterfaceFactory, agentAdmin, jsonSerialization,

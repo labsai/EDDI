@@ -55,6 +55,8 @@ import java.net.URI;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
 
+import jakarta.enterprise.inject.spi.CDI;
+import jakarta.enterprise.inject.Instance;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -512,11 +514,13 @@ class UpgradeExecutorTest {
                 var cdiInstance = Mockito.mock(CDI.class);
                 cdiMock.when(CDI::current).thenReturn(cdiInstance);
 
+                // CDI lookup for IRestRagStore (getStore in resolveExtensionOps)
                 var instanceRestRag = (Instance<IRestRagStore>) Mockito
                         .mock(Instance.class);
                 when(cdiInstance.select(IRestRagStore.class)).thenReturn(instanceRestRag);
                 when(instanceRestRag.get()).thenReturn(ragRestStore);
 
+                // CDI lookup for IRagStore (dispatchCreateDirect)
                 var instanceRag = (Instance<IRagStore>) Mockito
                         .mock(Instance.class);
                 when(cdiInstance.select(IRagStore.class)).thenReturn(instanceRag);

@@ -23,6 +23,7 @@ import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
 
+import com.mongodb.client.ListCollectionNamesIterable;
 import static org.mockito.Mockito.*;
 
 class PropertiesMigrationServiceTest {
@@ -291,8 +292,8 @@ class PropertiesMigrationServiceTest {
      * of strings.
      */
     @SuppressWarnings("unchecked")
-    private static com.mongodb.client.ListCollectionNamesIterable mockIterableOf(String... names) {
-        var iterable = mock(com.mongodb.client.ListCollectionNamesIterable.class);
+    private static ListCollectionNamesIterable mockIterableOf(String... names) {
+        var iterable = mock(ListCollectionNamesIterable.class);
         doReturn(mockCursorOf(names)).when(iterable).iterator();
         return iterable;
     }
