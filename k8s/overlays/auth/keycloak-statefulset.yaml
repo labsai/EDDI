@@ -44,6 +44,20 @@ spec:
         app.kubernetes.io/component: auth
         app.kubernetes.io/part-of: eddi
     spec:
+      # The keycloak image runs as USER 1000, and a freshly provisioned PVC is
+      # root:root 0755 on EBS/PD/Azure Disk and most other CSI drivers until the
+      # kubelet applies fsGroup. Without this Keycloak cannot create
+      # /opt/keycloak/data/h2/keycloakdb.mv.db, exits on EACCES and never reaches
+      # the readiness probe — so the volume added below to stop restarts WIPING
+      # the realm would instead stop the pod starting at all. kind and minikube
+      # hostPath volumes are world-writable and hide it.
+      #
+      # Same shape, and the same reason, as the fsGroup on the mongodb and
+      # postgres StatefulSets.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
       containers:
         - name: keycloak
           image: quay.io/keycloak/keycloak:26.0
@@ -75,12 +89,18 @@ spec:
             # Service gets no endpoints and the liveness probe restart-loops.
             - name: KC_HEALTH_ENABLED
               value: "true"
-            # ⚠️  Must equal the URL the BROWSER uses to reach Keycloak, because
+            # ⚠️  Must equal the URL the BROWSER uses to reach KEYCLOAK, because
             # it is what Keycloak embeds as the token issuer. The default suits
             # `kubectl port-forward svc/keycloak 8080:8080`. Behind an ingress,
-            # change this, EDDI_KEYCLOAK_PUBLIC_URL and QUARKUS_OIDC_TOKEN_ISSUER
-            # in kustomization.yaml, and the redirectUris/webOrigins in
-            # eddi-realm.json — all four together.
+            # change this together with EDDI_KEYCLOAK_PUBLIC_URL and
+            # QUARKUS_OIDC_TOKEN_ISSUER in kustomization.yaml — those three name
+            # Keycloak.
+            #
+            # The redirectUris/webOrigins in eddi-realm.json are NOT this URL.
+            # They are where the Manager SPA is served — the EDDI origin — which
+            # behind an ingress is a different host (the Ingress fronts EDDI,
+            # not Keycloak). Putting the Keycloak host there is what produces
+            # "Invalid parameter: redirect_uri".
             - name: KC_HOSTNAME
               value: "http://localhost:8080"
             # Lets the backchannel (EDDI -> http://keycloak:8080) keep using the

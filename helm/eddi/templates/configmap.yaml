@@ -14,16 +14,134 @@
 {{- end }}
 {{- end }}
 {{- /*
+  ...and the datastore TYPE has to agree with it. The guard above only asks that
+  SOME datastore is configured; eddi.datastoreType is what EDDI actually
+  switches on, and it defaults to "mongodb". So supplying externalJdbcUrl and
+  forgetting the type — the one value the message above asks for — passed the
+  gate, rendered no MONGODB_CONNECTIONSTRING, and left EDDI booting the MongoDB
+  datastore against application.properties' baked-in mongodb://mongodb:27017/eddi:
+  exactly the DNS-failure death the gate was written to prevent, one value away.
+
+  Derived rather than asked for, and then compared, so the failure names the
+  disagreement instead of the symptom.
+
+  Emptiness is tested with `empty`, and every value is coalesced with `default`
+  before it is stringified. NEVER `toString` a chart value straight into a
+  truthiness or a `ne … ""` test: Sprig's toString is fmt.Sprintf("%v", …), so a
+  nil renders as the literal, non-empty, TRUTHY string "<nil>". A values file
+  carrying a bare `externalJdbcUrl:` — the shape an operator gets by copying
+  values.yaml and clearing the placeholder — then counted as "PostgreSQL is
+  configured" and this guard refused a stock MongoDB install, naming a database
+  that appears nowhere in the values. `empty`/`default` treat nil and "" alike,
+  which is what the gate on line 12 has always done.
+*/}}
+{{- $postgresConfigured := or .Values.postgres.enabled (not (empty $externalJdbc)) }}
+{{- $mongoConfigured := or .Values.mongodb.enabled (not (empty $externalMongo)) }}
+{{- /*
+  Two datastores of DIFFERENT kinds are refused here, BEFORE the type checks
+  below, and named for what they are.
+
+  mongodb.enabled defaults to TRUE, so a values file that only ever said
+  `postgres.enabled: true` + `datastoreType: postgres` — which rendered before
+  the type guards existed, wasting a MongoDB StatefulSet — reached them with
+  BOTH kinds configured. The two then contradicted each other: the PostgreSQL
+  guard demanded datastoreType=mongodb, the MongoDB guard demanded
+  datastoreType=postgres, and each told the operator the store they had named
+  was "a database that is not there" when postgres.enabled=true had
+  demonstrably deployed one. Every route out was refused by the other guard,
+  and neither message named the real cause.
+
+  With this in front, at most one KIND is configured by the time the type
+  checks run, so that sentence is true wherever they print it.
+*/}}
+{{- if and $postgresConfigured $mongoConfigured }}
+{{- fail (printf "Two datastores of different kinds are configured: MongoDB (mongodb.enabled=%v, eddi.datastore.externalConnectionString set=%v) AND PostgreSQL (postgres.enabled=%v, eddi.datastore.externalJdbcUrl set=%v). EDDI runs exactly one store, chosen by eddi.datastoreType, so the other is deployed, backed up and paid for while nothing ever reads or writes it. Note that mongodb.enabled defaults to TRUE: turning PostgreSQL on does not turn MongoDB off. Disable the one you are not using — mongodb.enabled=false or postgres.enabled=false, and clear the external URL of the kind you are dropping." .Values.mongodb.enabled (not (empty $externalMongo)) .Values.postgres.enabled (not (empty $externalJdbc))) }}
+{{- end }}
+{{- /*
+  Compared EXACTLY, and refused outright when it is neither spelling.
+
+  This comparison used to `lower` the declared type, which made the guard
+  case-INSENSITIVE while its only reader is case-SENSITIVE:
+  DataStoreProducers.isPostgres() is `"postgres".equals(datastoreType)` and
+  PropertiesMigrationService asks `"mongodb".equals(...)`. So
+  `--set eddi.datastoreType=Postgres` satisfied the guard, rendered
+  EDDI_DATASTORE_TYPE: "Postgres" below, and matched NEITHER Java branch — the
+  MongoDB store booted against application.properties' baked-in
+  mongodb://mongodb:27017/eddi. The env var is config ordinal 300 and outranks
+  the %postgres profile line at 250, so nothing downstream corrected it. That is
+  exactly the DNS-death this guard exists to refuse, reachable by capitalising
+  one word, on a chart whose values.yaml promises it cannot happen.
+
+  The validated string is what gets rendered below, so the value EDDI reads and
+  the value these guards checked cannot drift apart again.
+*/}}
+{{- $declaredType := toString (default "" .Values.eddi.datastoreType) }}
+{{- if not (has $declaredType (list "mongodb" "postgres")) }}
+{{- fail (printf "eddi.datastoreType is %q. The only values EDDI recognises are \"mongodb\" and \"postgres\", both lowercase, and it matches them EXACTLY: DataStoreProducers.isPostgres() is `\"postgres\".equals(datastoreType)`. The chart renders this value verbatim into EDDI_DATASTORE_TYPE, whose config ordinal (300) outranks application.properties, so any other spelling — \"Postgres\", \"MONGODB\", \"mongo\" — matches neither branch and silently boots the MongoDB store against the baked-in mongodb://mongodb:27017/eddi." $declaredType) }}
+{{- end }}
+{{- if and $postgresConfigured (ne $declaredType "postgres") }}
+{{- fail (printf "eddi.datastoreType is %q but the datastore actually configured is PostgreSQL (postgres.enabled=%v, eddi.datastore.externalJdbcUrl set=%v). EDDI selects its datastore from EDDI_DATASTORE_TYPE, so it would boot the %q store against a database that is not there — for the default that means application.properties' baked-in mongodb://mongodb:27017/eddi and a readiness probe that never passes. Set eddi.datastoreType=postgres." $declaredType .Values.postgres.enabled (not (empty $externalJdbc)) $declaredType) }}
+{{- end }}
+{{- if and $mongoConfigured (ne $declaredType "mongodb") }}
+{{- fail (printf "eddi.datastoreType is %q but the datastore actually configured is MongoDB (mongodb.enabled=%v, eddi.datastore.externalConnectionString set=%v). EDDI selects its datastore from EDDI_DATASTORE_TYPE, so it would boot the %q store against a database that is not there. Set eddi.datastoreType=mongodb." $declaredType .Values.mongodb.enabled (not (empty $externalMongo)) $declaredType) }}
+{{- end }}
+{{- /*
+  Two datastores of ONE kind is refused rather than resolved. The in-chart URL
+  is a ConfigMap env var (ordinal 300) and the external URI is a line in the
+  mounted properties file (QUARKUS_CONFIG_LOCATIONS, ordinal 400), so leaving
+  mongodb.enabled at its default `true` while ALSO setting
+  externalConnectionString does not "override" anything visibly: the chart
+  deploys an in-chart StatefulSet, NOTES.txt reports "MongoDB (in-chart)", and
+  the pod quietly talks to the external database because the higher ordinal
+  wins. An upgrade carrying a stale externalConnectionString would switch which
+  database EDDI uses with no render error and a NOTES line saying the opposite.
+  Picking one by config ordinal is not a decision this chart gets to make
+  silently.
+*/}}
+{{- if and .Values.mongodb.enabled $externalMongo }}
+{{- fail "Two MongoDB datastores are configured: mongodb.enabled=true deploys an in-chart MongoDB, and eddi.datastore.externalConnectionString points at another one. The external URI is mounted as a properties file (config ordinal 400) and would silently win over the in-chart connection string in the ConfigMap (ordinal 300), while NOTES.txt still reported \"MongoDB (in-chart)\". Set mongodb.enabled=false to use the external database, or clear eddi.datastore.externalConnectionString to use the in-chart one." }}
+{{- end }}
+{{- if and .Values.postgres.enabled $externalJdbc }}
+{{- fail "Two PostgreSQL datastores are configured: postgres.enabled=true deploys an in-chart PostgreSQL, and eddi.datastore.externalJdbcUrl points at another one. The in-chart URL wins and the external one is silently inert — including its credentials, which are then never rendered. Set postgres.enabled=false to use the external database, or clear eddi.datastore.externalJdbcUrl to use the in-chart one." }}
+{{- end }}
+{{- /*
   Messaging guard. eddi.messaging.type is read by NO Java code:
   NatsConversationCoordinator is gated on @IfBuildProfile("nats"), a BUILD-time
   switch, and the published labsai/eddi image is built without it. Setting this
   to "nats" used to provision a JetStream StatefulSet with a PVC that EDDI could
   never connect to, print "Messaging: nats" in the install notes, and quietly go
   on using in-memory queues.
+
+  Coalesced to the values.yaml default before comparing, for the same reason the
+  datastore guard above is: `toString nil` is "<nil>", which is not "in-memory",
+  so a values file with a bare `messagingType:` was refused with a message about
+  a NATS broker it had never asked for.
+
+  Coalesced ONCE, in the eddi.messagingType helper, because the guard and the
+  two places that print the value disagreed about what a null means: the guard
+  read it as "in-memory" while EDDI_MESSAGING_TYPE below and NOTES.txt rendered
+  the raw nil, which Sprig's `quote` skips — `--set eddi.messagingType=null`
+  produced a valueless `EDDI_MESSAGING_TYPE:` under an install note reading
+  "Messaging: ".
 */}}
-{{- if ne (lower (toString .Values.eddi.messagingType)) "in-memory" }}
+{{- if ne (include "eddi.messagingType" .) "in-memory" }}
 {{- if not .Values.nats.buildProfileImage }}
 {{- fail "eddi.messagingType is not \"in-memory\": the NATS coordinator is gated on @IfBuildProfile(\"nats\"), so it exists only in an image BUILT with -Dquarkus.profile=nats. The published labsai/eddi image is not, and no Java code reads eddi.messaging.type at runtime — the setting would be inert while still provisioning a NATS StatefulSet and PVC. Build your own image with -Dquarkus.profile=nats and set nats.buildProfileImage=true to confirm, or leave eddi.messagingType at \"in-memory\". NATS is a durability/ordering primitive either way: it does not permit a second replica (see eddi.replicas)." }}
+{{- end }}
+{{- /*
+  buildProfileImage says the IMAGE can speak NATS; nats.enabled is what actually
+  deploys the broker. They were checked independently, so
+  `messagingType=nats,nats.buildProfileImage=true` rendered a NATS-profile EDDI
+  with no StatefulSet, no Service and no EDDI_NATS_URL — the coordinator then
+  falls back to nats://localhost:4222 and nothing is listening on it.
+*/}}
+{{- if not .Values.nats.enabled }}
+{{- fail "eddi.messagingType is not \"in-memory\" but nats.enabled=false: nothing deploys the JetStream broker, no EDDI_NATS_URL is rendered, and the NATS coordinator falls back to nats://localhost:4222 inside the EDDI pod, where nothing listens. Set nats.enabled=true, or leave eddi.messagingType at \"in-memory\"." }}
+{{- end }}
+{{- else }}
+{{- /* And the inverse: a broker with nothing to publish to it. */}}
+{{- if .Values.nats.enabled }}
+{{- fail "nats.enabled=true while eddi.messagingType is \"in-memory\": this provisions a JetStream StatefulSet and a PVC that EDDI never connects to, because the coordinator is selected by eddi.messagingType. Set eddi.messagingType=nats (which also needs nats.buildProfileImage=true and an image built with -Dquarkus.profile=nats), or leave nats.enabled=false." }}
 {{- end }}
 {{- end }}
 apiVersion: v1
@@ -33,12 +151,29 @@ metadata:
   labels:
     {{- include "eddi.labels" . | nindent 4 }}
 data:
-  EDDI_DATASTORE_TYPE: {{ .Values.eddi.datastoreType | quote }}
+  {{- /*
+    The VALIDATED string, not the raw value: rendering the raw one is how a
+    mixed-case `Postgres` reached EDDI_DATASTORE_TYPE past a guard that had
+    lowercased it, matched neither of Java's exact comparisons, and booted the
+    MongoDB store. Guard and render now read the same binding.
+  */}}
+  EDDI_DATASTORE_TYPE: {{ $declaredType | quote }}
   {{- if .Values.mongodb.enabled }}
   MONGODB_CONNECTIONSTRING: "mongodb://{{ include "eddi.fullname" . }}-mongodb:27017/eddi?retryWrites=true&w=majority&connectTimeoutMS=10000&socketTimeoutMS=30000"
-  {{- else if $externalMongo }}
-  MONGODB_CONNECTIONSTRING: {{ $externalMongo | quote }}
   {{- end }}
+  {{- /*
+    eddi.datastore.externalConnectionString is NOT rendered here. It is
+    documented as "mongodb://user:pass@host:27017/eddi", i.e. credential-bearing,
+    and a ConfigMap is readable by every principal with `get configmaps` in the
+    namespace. It goes into the projected Secret as
+    mongodb.connectionString instead (secret.yaml), which is the same path the
+    vault key and the in-chart PostgreSQL credentials take: secrets arrive as
+    FILES, never as env vars (see deployment.yaml). The in-chart URL above
+    carries no credentials, so it stays.
+
+    Same for the external PostgreSQL username/password — only the JDBC URL,
+    which is an address rather than a credential, is rendered below.
+  */}}
   {{- if .Values.postgres.enabled }}
   QUARKUS_PROFILE: "postgres"
   QUARKUS_DATASOURCE_JDBC_URL: "jdbc:postgresql://{{ include "eddi.fullname" . }}-postgres:5432/{{ .Values.postgres.database }}"
@@ -46,7 +181,7 @@ data:
   QUARKUS_PROFILE: "postgres"
   QUARKUS_DATASOURCE_JDBC_URL: {{ $externalJdbc | quote }}
   {{- end }}
-  EDDI_MESSAGING_TYPE: {{ .Values.eddi.messagingType | quote }}
+  EDDI_MESSAGING_TYPE: {{ include "eddi.messagingType" . | quote }}
   {{- if .Values.nats.enabled }}
   EDDI_NATS_URL: "nats://{{ include "eddi.fullname" . }}-nats:4222"
   {{- end }}
@@ -99,7 +234,20 @@ data:
     It cannot be derived: the in-cluster Service name is not reachable from a
     browser, and the ingress only fronts EDDI, not Keycloak.
   */}}
-  {{- $publicUrl := .Values.eddi.oidc.publicUrl }}
+  {{- /*
+    Trimmed once, here, so the three literals that must agree — this,
+    KC_HOSTNAME in keycloak.yaml and the issuer below — cannot differ by a
+    trailing slash the operator did not think mattered.
+
+    `default ""` runs BEFORE toString, and the order is the whole point:
+    `toString nil` is fmt.Sprintf("%v", nil) — the literal, truthy string
+    "<nil>". Written the other way round this guard stopped firing for a values
+    file with a bare `publicUrl:`, and the install rendered
+    EDDI_KEYCLOAK_PUBLIC_URL "<nil>" and the issuer "<nil>/realms/eddi" with
+    exit 0: the Manager SPA handed "<nil>" as its Keycloak authority, every
+    authenticated request 401ing, and no way to see it before deploying.
+  */}}
+  {{- $publicUrl := trimSuffix "/" (toString (default "" .Values.eddi.oidc.publicUrl)) }}
   {{- if not $publicUrl }}
   {{- fail "eddi.oidc.publicUrl is required when eddi.oidc.enabled=true: it is the identity provider URL the BROWSER uses (never the in-cluster Service name), and the Manager SPA cannot start a login without it. For the port-forward flow that is http://localhost:8080; behind an ingress it is your Keycloak hostname." }}
   {{- end }}
@@ -111,6 +259,6 @@ data:
     fails unless the issuer is pinned. Same reasoning as
     docker-compose.auth.yml's QUARKUS_OIDC_TOKEN_ISSUER.
   */}}
-  QUARKUS_OIDC_TOKEN_ISSUER: "{{ trimSuffix "/" $publicUrl }}/realms/eddi"
+  QUARKUS_OIDC_TOKEN_ISSUER: "{{ $publicUrl }}/realms/eddi"
   {{- end }}
   {{- end }}

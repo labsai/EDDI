@@ -605,7 +605,7 @@ EDDI pod sits in `ContainerCreating` (`MountVolume.SetUp failed: secret
 
 ```bash
 # Kustomize overlays — create the vault Secret first, then apply
-bash k8s/create-secrets.sh                 # PowerShell: .\k8s\create-secrets.ps1
+bash k8s/create-secrets.sh                 # PowerShell 7: pwsh -File .\k8s\create-secrets.ps1
 kubectl apply -k k8s/overlays/mongodb/     # MongoDB backend
 kubectl apply -k k8s/overlays/postgres/    # PostgreSQL backend
 

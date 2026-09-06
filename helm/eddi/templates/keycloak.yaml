@@ -10,8 +10,18 @@
   the https://eddi.example.com placeholder. keycloak.publicOrigin replaces that
   placeholder, because a realm that does not list your actual host answers
   "Invalid parameter: redirect_uri" and login cannot complete.
+
+  publicOrigin is the origin the BROWSER uses for EDDI — where the Manager SPA
+  is served, normally ingress.hosts[0].host — and NOT the Keycloak URL in
+  eddi.oidc.publicUrl. The Manager redirects back to itself, so the realm has to
+  list its own origin; behind an ingress the two hosts differ.
+
+  trimSuffix, because the placeholder is substituted both into "…/*" and into a
+  bare webOrigin: passed with a trailing slash it would otherwise render the
+  redirect "https://host//*" and the origin "https://host/", and an origin must
+  carry no path at all. configmap.yaml trims the same way for the issuer.
 */}}
-{{- $realmOrigin := default "https://eddi.example.com" .Values.keycloak.publicOrigin }}
+{{- $realmOrigin := trimSuffix "/" (default "https://eddi.example.com" .Values.keycloak.publicOrigin) }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -63,6 +73,20 @@ spec:
         app.kubernetes.io/component: auth
         app.kubernetes.io/part-of: eddi
     spec:
+      # The keycloak image runs as USER 1000, and a freshly provisioned PVC is
+      # root:root 0755 on EBS/PD/Azure Disk and most other CSI drivers until the
+      # kubelet applies fsGroup. Without this Keycloak cannot create
+      # /opt/keycloak/data/h2/keycloakdb.mv.db, exits on EACCES and never reaches
+      # the readiness probe — so the claim added below to stop restarts WIPING
+      # the realm would instead stop the pod starting at all. kind and minikube
+      # hostPath volumes are world-writable and hide it.
+      #
+      # Same shape, and the same reason, as the fsGroup on mongodb.yaml and
+      # postgres.yaml.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
       containers:
         - name: keycloak
           image: "{{ .Values.keycloak.image.repository }}:{{ .Values.keycloak.image.tag }}"
@@ -94,10 +118,14 @@ spec:
             - name: KC_HEALTH_ENABLED
               value: "true"
             {{- if .Values.eddi.oidc.publicUrl }}
-            # Must equal the URL the BROWSER uses, because it is what Keycloak
-            # embeds as the token issuer.
+            # Must equal the URL the BROWSER uses for KEYCLOAK, because it is
+            # what Keycloak embeds as the token issuer. (Where the Manager SPA
+            # is served is a different value — keycloak.publicOrigin, which
+            # feeds the realm's redirectUris above.) Trimmed for the same reason
+            # configmap.yaml trims it: a trailing slash produces a hostname the
+            # issuer comparison then fails on.
             - name: KC_HOSTNAME
-              value: {{ .Values.eddi.oidc.publicUrl | quote }}
+              value: {{ trimSuffix "/" .Values.eddi.oidc.publicUrl | quote }}
             # Lets the backchannel (EDDI -> the in-cluster Service) keep using
             # the internal address while tokens carry the public issuer.
             - name: KC_HOSTNAME_BACKCHANNEL_DYNAMIC

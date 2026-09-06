@@ -22,13 +22,24 @@
 #   viewer / viewer  (eddi-viewer — read-only)
 #   user   / user    (eddi-user)
 #
-# ⚠️  Exposing this beyond `kubectl port-forward`? Four settings must agree on
-# the URL the BROWSER uses for Keycloak, and none of them can be derived:
+# ⚠️  Exposing this beyond `kubectl port-forward`? Four settings have to be
+# changed, and none of them can be derived — but they carry TWO different URLs.
+#
+# Three name the URL the BROWSER uses for KEYCLOAK (e.g. https://auth.example.com):
 #   1. KC_HOSTNAME in keycloak-statefulset.yaml
 #   2. EDDI_KEYCLOAK_PUBLIC_URL below
 #   3. QUARKUS_OIDC_TOKEN_ISSUER below
+#
+# The fourth names the URL the BROWSER uses for EDDI — where the Manager SPA is
+# served, i.e. the host in overlays/ingress/ingress.yaml (e.g.
+# https://eddi.example.com):
 #   4. redirectUris / webOrigins of the eddi-frontend client in eddi-realm.json
 #      (shipped with a https://eddi.example.com/* placeholder — replace it)
+#
+# Behind an ingress those two hosts differ, because the Ingress fronts EDDI and
+# not Keycloak. Putting the Keycloak host into redirectUris is what makes
+# Keycloak answer "Invalid parameter: redirect_uri": the Manager redirects to
+# where it is itself served, and the realm has to list THAT.
 apiVersion: kustomize.config.k8s.io/v1alpha1
 kind: Component
 

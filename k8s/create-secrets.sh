@@ -2,9 +2,12 @@
 # ─────────────────────────────────────────────────────────────
 #  EDDI Kubernetes — Secret Generator
 #
-#  Creates the Kubernetes Secret with:
+#  Creates the eddi-secrets Kubernetes Secret, which holds exactly one thing:
 #    - EDDI Vault Master Key (auto-generated or user-provided)
-#    - Optional PostgreSQL credentials
+#
+#  It does NOT create PostgreSQL credentials. Those are a separate manifest,
+#  k8s/overlays/postgres/postgres-secret.yaml, and have to be changed BEFORE the
+#  first apply — the postgres image reads the password only during initdb.
 #
 #  Usage:
 #    bash k8s/create-secrets.sh                 # interactive
@@ -76,19 +79,41 @@ echo ""
 # above it: run first it would remove the very Secret the check looks for, the
 # `kubectl get` would then find nothing, and the guard would wave every run
 # through after the key it protects had already been destroyed.
-if [[ "$FORCE" != "true" ]] && kubectl get secret eddi-secrets --namespace="$NAMESPACE" &>/dev/null; then
-  warn "eddi-secrets already exists in namespace ${NAMESPACE} — nothing was changed."
-  echo ""
-  echo -e "  Replacing it installs a ${BOLD}new${RESET} master key, and everything encrypted"
-  echo -e "  under the current one becomes ${BOLD}permanently undecryptable${RESET}."
-  echo ""
-  echo -e "  To read the key already in the cluster:"
-  echo -e "    ${CYAN}kubectl get secret eddi-secrets -n ${NAMESPACE} \\"
-  echo -e "      -o jsonpath='{.data.application-secrets\.properties}' | base64 -d${RESET}"
-  echo ""
-  echo -e "  To rotate deliberately, re-run with ${BOLD}--force${RESET}."
-  echo ""
-  exit 1
+#
+# The check also has to fail CLOSED. Any nonzero `kubectl get` used to read as
+# "no Secret there" — including a wrong kube-context, an expired token, an RBAC
+# denial or an unreachable API server — and the script then walked straight into
+# the delete on a cluster whose contents it had not actually been able to see.
+# Only a genuine NotFound counts as absent; anything else aborts.
+#
+# "Genuine NotFound" is kubectl's STRUCTURED reason — the parenthesised
+# "(NotFound)" carried by every "Error from server (NotFound): secrets ... not
+# found" — and nothing looser. Matching prose let an UNREACHABLE cluster back in
+# through the side door: kubectl answers a DNS failure with "Unable to connect
+# to the server: dial tcp: lookup <host>: no such host", which the earlier
+# 'not found|no such|notfound' alternation read as "there is no Secret here".
+# The script then prompted for a key and, if the name resolved again before the
+# unconditional delete below (a VPN reconnecting is enough), destroyed a live
+# master key on a cluster this probe had never actually seen. Nothing kubectl
+# prints for a missing object omits the reason in parentheses.
+if [[ "$FORCE" != "true" ]]; then
+  if secret_probe=$(kubectl get secret eddi-secrets --namespace="$NAMESPACE" -o name 2>&1); then
+    warn "eddi-secrets already exists in namespace ${NAMESPACE} — nothing was changed."
+    echo ""
+    echo -e "  Replacing it installs a ${BOLD}new${RESET} master key, and everything encrypted"
+    echo -e "  under the current one becomes ${BOLD}permanently undecryptable${RESET}."
+    echo ""
+    echo -e "  To read the key already in the cluster:"
+    echo -e "    ${CYAN}kubectl get secret eddi-secrets -n ${NAMESPACE} \\"
+    echo -e "      -o jsonpath='{.data.application-secrets\.properties}' | base64 -d${RESET}"
+    echo ""
+    echo -e "  To rotate deliberately, re-run with ${BOLD}--force${RESET}."
+    echo ""
+    exit 1
+  elif ! grep -qF '(NotFound)' <<<"$secret_probe"; then
+    echo -e "  ${DIM}${secret_probe}${RESET}" >&2
+    fail "Could not check whether eddi-secrets already exists (see the kubectl error above). Refusing to continue: a wrong context or a denied request must not be read as 'no key there'."
+  fi
 fi
 
 # Generate or accept vault key
@@ -156,10 +181,25 @@ cleanup_secret_file() { rm -f "$SECRET_FILE"; }
 trap cleanup_secret_file EXIT
 printf 'eddi.vault.master-key=%s\n' "$VAULT_KEY" > "$SECRET_FILE"
 
-kubectl create secret generic eddi-secrets \
+#
+# stderr is NOT discarded. It used to be, so a failed create (wrong context,
+# expired token, RBAC denial) printed nothing at all and `set -e` aborted the
+# script right after the "Creating eddi-secrets... " prefix — no message, no
+# explanation, and on a shell without errexit the "Save this key!" box below
+# would have been printed for a Secret that does not exist.
+if ! create_error=$(kubectl create secret generic eddi-secrets \
   --namespace="$NAMESPACE" \
-  --from-file=application-secrets.properties="$SECRET_FILE" \
-  >/dev/null 2>&1
+  --from-file=application-secrets.properties="$SECRET_FILE" 2>&1); then
+  cleanup_secret_file
+  trap - EXIT
+  echo ""
+  echo -e "  ${DIM}${create_error}${RESET}" >&2
+  # "the key" — never "the key above". Nothing above this point has printed a
+  # key: the only earlier output is the one-line "Using provided vault key" /
+  # "auto-generated" notice, and the value itself is printed in the box further
+  # down, which this branch never reaches.
+  fail "kubectl create secret failed — eddi-secrets was NOT created and the key was not installed."
+fi
 cleanup_secret_file
 trap - EXIT
 echo -e "${GREEN}✅${RESET}"

@@ -60,7 +60,7 @@
 
   📊 Components:
     Database:      {{ if .Values.mongodb.enabled }}MongoDB (in-chart){{ else if .Values.postgres.enabled }}PostgreSQL (in-chart){{ else if .Values.eddi.datastore.externalConnectionString }}MongoDB (external){{ else }}PostgreSQL (external){{ end }}
-    Messaging:     {{ .Values.eddi.messagingType }}
+    Messaging:     {{ include "eddi.messagingType" . }}
     Auth (OIDC):   {{ if .Values.eddi.oidc.enabled }}Enabled{{ else }}Disabled{{ end }}
     Replicas:      {{ .Values.eddi.replicas }} (fixed — EDDI is single-writer per
                    conversation; see eddi.replicas in values.yaml)

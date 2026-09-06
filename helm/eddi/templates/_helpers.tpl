@@ -51,6 +51,25 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
+The messaging coordinator.
+
+Coalesced to the values.yaml default and lowercased ONCE, so the guard in
+configmap.yaml, the EDDI_MESSAGING_TYPE it renders and the line NOTES.txt prints
+cannot disagree about what a value means. They did: the guard read
+`default "in-memory" .Values.eddi.messagingType` while both renders read the raw
+value, so a values file carrying a bare `messagingType:` — a YAML null — passed
+the guard as "in-memory" and then rendered `EDDI_MESSAGING_TYPE:` with nothing
+after it (Sprig's `quote` skips a nil) under an install note reading
+"Messaging: ".
+
+`default` runs BEFORE toString, as everywhere else in this chart: `toString nil`
+is fmt.Sprintf("%v", nil), the literal, non-empty, TRUTHY string "<nil>".
+*/}}
+{{- define "eddi.messagingType" -}}
+{{- lower (toString (default "in-memory" .Values.eddi.messagingType)) }}
+{{- end }}
+
+{{/*
 Service account name
 */}}
 {{- define "eddi.serviceAccountName" -}}

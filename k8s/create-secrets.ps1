@@ -1,13 +1,35 @@
-# ─────────────────────────────────────────────────────────────
-#  EDDI Kubernetes — Secret Generator (PowerShell)
+#Requires -Version 7
+# PowerShell 7 (`pwsh`), not the Windows PowerShell 5.1 that `powershell.exe`
+# starts. Two things in here are 7-only, and without this line each fails as raw
+# .NET noise partway through a run instead of as one legible sentence before it:
 #
-#  Creates the Kubernetes Secret with:
+#   * New-RandomKey calls [RandomNumberGenerator]::Fill, which exists in .NET
+#     Core but not in the .NET Framework 4.x that 5.1 runs on ("does not contain
+#     a method named 'Fill'") — the auto-generate path has never worked there.
+#   * The `2>&1` captures below rely on 7's native-command redirection. Under 5.1
+#     a stderr line captured that way arrives as an ErrorRecord, and with
+#     $ErrorActionPreference = 'Stop' the very first "Error from server
+#     (NotFound)" — the line EVERY first install produces — throws a terminating
+#     RemoteException before the NotFound check below can classify it.
+#
+# Declared rather than worked around: this script installs a key that cannot be
+# recovered if it goes wrong, so "this needs pwsh 7" is a better first line than
+# a half-finished install. docs/kubernetes.md says the same next to the command.
+# ─────────────────────────────────────────────────────────────
+#  EDDI Kubernetes — Secret Generator (PowerShell 7+)
+#
+#  Creates the eddi-secrets Kubernetes Secret, which holds exactly one thing:
 #    - EDDI Vault Master Key (auto-generated or user-provided)
 #
-#  Usage:
-#    .\k8s\create-secrets.ps1                 # interactive
-#    .\k8s\create-secrets.ps1 -Auto           # auto-generate
-#    .\k8s\create-secrets.ps1 -Key "my-key"   # use a specific key
+#  It does NOT create PostgreSQL credentials. Those are a separate manifest,
+#  k8s/overlays/postgres/postgres-secret.yaml, and have to be changed BEFORE the
+#  first apply — the postgres image reads the password only during initdb.
+#
+#  Usage — always through pwsh, never a bare .\…ps1: on a stock Windows box
+#  that starts Windows PowerShell 5.1, which the #Requires above refuses.
+#    pwsh -File .\k8s\create-secrets.ps1                 # interactive
+#    pwsh -File .\k8s\create-secrets.ps1 -Auto           # auto-generate
+#    pwsh -File .\k8s\create-secrets.ps1 -Key "my-key"   # use a specific key
 # ─────────────────────────────────────────────────────────────
 
 [CmdletBinding(SupportsShouldProcess)]
@@ -26,7 +48,7 @@ $ErrorActionPreference = "Stop"
 if ($Help) {
     Write-Information -MessageData "EDDI Kubernetes Secret Generator (PowerShell)" -InformationAction Continue
     Write-Information -MessageData "" -InformationAction Continue
-    Write-Information -MessageData "Usage: .\k8s\create-secrets.ps1 [OPTIONS]" -InformationAction Continue
+    Write-Information -MessageData "Usage: pwsh -File .\k8s\create-secrets.ps1 [OPTIONS]" -InformationAction Continue
     Write-Information -MessageData "" -InformationAction Continue
     Write-Information -MessageData "Options:" -InformationAction Continue
     Write-Information -MessageData "  -Auto                  Auto-generate key, no prompts" -InformationAction Continue
@@ -62,8 +84,30 @@ Write-Information -MessageData "" -InformationAction Continue
 # it must not reopen here, now that the docs route every install through this
 # script. Checked BEFORE the key is generated or prompted for, so nobody types a
 # passphrase that is then thrown away.
+#
+# It also has to fail CLOSED. A native command failure does not populate
+# $existing and $ErrorActionPreference does not apply to native commands
+# (PSNativeCommandUseErrorActionPreference is off by default), so a wrong
+# kube-context, an expired token or an RBAC denial read as "no Secret there" and
+# the script walked on into the delete below. $LASTEXITCODE is inspected, and
+# only a genuine NotFound counts as absent.
+#
+# "Absent" is recognised by kubectl's STRUCTURED reason — the parenthesised
+# "(NotFound)" in "Error from server (NotFound): secrets ... not found" — and not
+# by prose. Matching loose English is how the sibling shell script came to read
+# "Unable to connect to the server: dial tcp: lookup host: no such host" as
+# "there is no Secret here" and walk into the delete on a cluster it had never
+# reached.
 if (-not $Force) {
-    $existing = kubectl get secret eddi-secrets --namespace=$Namespace --ignore-not-found 2>$null
+    $probe = kubectl get secret eddi-secrets --namespace=$Namespace -o name 2>&1
+    $probeExit = $LASTEXITCODE
+    $probeText = ($probe | Out-String)
+    if ($probeExit -ne 0 -and $probeText -notmatch '\(NotFound\)') {
+        Write-Information -MessageData $probeText.Trim() -InformationAction Continue
+        Write-Error -Message "  ❌ Could not check whether eddi-secrets already exists (see the kubectl error above). Refusing to continue: a wrong context or a denied request must not be read as 'no key there'."
+        exit 1
+    }
+    $existing = if ($probeExit -eq 0) { $probeText.Trim() } else { "" }
     if ($existing) {
         Write-Information -MessageData "  ⚠️  eddi-secrets already exists in namespace $Namespace — nothing was changed." -InformationAction Continue
         Write-Information -MessageData "" -InformationAction Continue
@@ -152,12 +196,23 @@ if ($PSCmdlet.ShouldProcess("Kubernetes", "Create secret 'eddi-secrets' in '$Nam
     $secretFile = Join-Path ([System.IO.Path]::GetTempPath()) ("eddi-secrets-" + [guid]::NewGuid().ToString() + ".properties")
     try {
         Set-Content -Path $secretFile -Value "eddi.vault.master-key=$VaultKey" -Encoding utf8 -NoNewline
-        kubectl create secret generic eddi-secrets `
+        # stderr is captured rather than discarded, and the exit code is checked.
+        # $ErrorActionPreference = 'Stop' does not apply to native commands, so a
+        # failed create used to print the green tick and the "Save this key!" box
+        # below for a Secret that was never created — the operator then filed the
+        # key and watched the pod sit in ContainerCreating forever.
+        $createOutput = kubectl create secret generic eddi-secrets `
             --namespace=$Namespace `
-            --from-file=application-secrets.properties=$secretFile 2>$null | Out-Null
+            --from-file=application-secrets.properties=$secretFile 2>&1
+        $createExit = $LASTEXITCODE
     }
     finally {
         Remove-Item -Path $secretFile -Force -ErrorAction SilentlyContinue
+    }
+    if ($createExit -ne 0) {
+        Write-Information -MessageData ($createOutput | Out-String).Trim() -InformationAction Continue
+        Write-Error -Message "  ❌ kubectl create secret failed — eddi-secrets was NOT created and the key was not installed."
+        exit 1
     }
     Write-Information -MessageData "  Creating eddi-secrets... ✅" -InformationAction Continue
 }

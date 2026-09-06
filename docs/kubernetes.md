@@ -36,19 +36,28 @@ set -euo pipefail
 secrets_file=$(mktemp "${TMPDIR:-/tmp}/eddi-secrets.XXXXXX")
 trap 'shred -u "$secrets_file" 2>/dev/null || rm -f "$secrets_file"' EXIT
 
+# Fail closed. This block mints a NEW key every time it runs, so re-running it
+# over a live eddi-secrets — after a failed later step, or in a second session
+# — would leave everything already encrypted under the old key permanently
+# undecryptable. Checked before the key is generated, and `kubectl create`
+# below is deliberately NOT piped through `--dry-run=client | kubectl apply`,
+# which would replace the Secret silently and exit 0.
+if kubectl get secret eddi-secrets --namespace=eddi >/dev/null 2>&1; then
+  echo "eddi-secrets already exists — this would install a NEW master key and" >&2
+  echo "make everything encrypted under the current one unrecoverable." >&2
+  echo "To rotate deliberately: bash k8s/create-secrets.sh --force" >&2
+  exit 1
+fi
+
 key=$(openssl rand -base64 24)
 [ -n "$key" ] || { echo "vault key generation failed" >&2; exit 1; }
 printf 'eddi.vault.master-key=%s\n' "$key" > "$secrets_file"
 
 # The key name must be application-secrets.properties — that is the filename the
 # Deployment mounts. Passing the temp path bare would name the key after it.
-#
-# --dry-run=client | kubectl apply makes this idempotent: re-running it updates
-# the Secret instead of failing with AlreadyExists.
 kubectl create secret generic eddi-secrets \
   --namespace=eddi \
-  --from-file=application-secrets.properties="$secrets_file" \
-  --dry-run=client -o yaml | kubectl apply -f -
+  --from-file=application-secrets.properties="$secrets_file"
 
 # Only needed if EDDI was already running with a different key
 # kubectl rollout restart deployment/eddi -n eddi
@@ -75,9 +84,15 @@ bash k8s/create-secrets.sh
 kubectl apply -k k8s/overlays/mongodb/
 ```
 
-PowerShell:
+PowerShell — **PowerShell 7 (`pwsh`)**, not the Windows PowerShell 5.1 that
+`powershell.exe` starts. The script declares `#Requires -Version 7` and refuses
+to run under 5.1, whose .NET Framework has no `RandomNumberGenerator.Fill` to
+generate a key with. [Install
+it](https://learn.microsoft.com/powershell/scripting/install/installing-powershell-on-windows)
+or use `winget install Microsoft.PowerShell`.
+
 ```powershell
-.\k8s\create-secrets.ps1
+pwsh -File .\k8s\create-secrets.ps1
 kubectl apply -k k8s\overlays\mongodb\
 ```
 
@@ -213,6 +228,16 @@ Three ways to manage it:
    secrets_file=$(mktemp "${TMPDIR:-/tmp}/eddi-secrets.XXXXXX")
    trap 'shred -u "$secrets_file" 2>/dev/null || rm -f "$secrets_file"' EXIT
 
+   # Fail closed on a key that already exists. This mints a NEW one, so
+   # replacing a live eddi-secrets makes everything encrypted under the current
+   # key permanently undecryptable. `kubectl create` is deliberately not piped
+   # through `--dry-run=client | kubectl apply`: that would replace it silently
+   # and exit 0. Rotate with `bash k8s/create-secrets.sh --force` instead.
+   if kubectl get secret eddi-secrets --namespace=eddi >/dev/null 2>&1; then
+     echo "eddi-secrets already exists — refusing to install a new master key." >&2
+     exit 1
+   fi
+
    # Fail closed: an empty key would create a Secret that silently leaves the
    # vault inert and secrets in plaintext.
    key=$(openssl rand -base64 24)
@@ -221,13 +246,9 @@ Three ways to manage it:
 
    # The Secret key must be named application-secrets.properties — that is the
    # filename the Deployment mounts. A bare temp path would name it otherwise.
-   #
-   # --dry-run=client | kubectl apply makes this idempotent: re-running it
-   # updates the Secret instead of failing with AlreadyExists.
    kubectl create secret generic eddi-secrets \
      --namespace=eddi \
-     --from-file=application-secrets.properties="$secrets_file" \
-     --dry-run=client -o yaml | kubectl apply -f -
+     --from-file=application-secrets.properties="$secrets_file"
    ```
 
 3. **External secrets** (production): Use [External Secrets Operator](https://external-secrets.io/) to sync from AWS Secrets Manager, HashiCorp Vault, Azure Key Vault, etc.
@@ -252,20 +273,33 @@ realm exists, so later edits to the JSON do not reach a running Keycloak — cha
 those in the admin console. Keycloak keeps that database on a PVC, so a restart
 no longer wipes it.
 
-Four settings must all name the URL the **browser** uses for Keycloak — none of
-them can be derived, because the in-cluster Service name does not resolve in a
-browser and the Ingress fronts only EDDI:
+Four settings have to change together, and none of them can be derived — but
+they carry **two different URLs**. Behind an Ingress those are two different
+hosts, because the Ingress fronts EDDI and not Keycloak.
+
+**Three name the browser-facing URL of Keycloak** (the IdP, e.g.
+`https://auth.example.com`):
 
 | Setting | Kustomize | Helm |
 |---|---|---|
-| Keycloak's own hostname (token issuer) | `KC_HOSTNAME` in `keycloak-statefulset.yaml` | `eddi.oidc.publicUrl` |
+| Keycloak's own hostname (what it stamps as the token issuer) | `KC_HOSTNAME` in `keycloak-statefulset.yaml` | `eddi.oidc.publicUrl` |
 | URL handed to the Manager SPA | `EDDI_KEYCLOAK_PUBLIC_URL` patch | `eddi.oidc.publicUrl` |
 | Issuer EDDI validates tokens against | `QUARKUS_OIDC_TOKEN_ISSUER` patch | derived from `eddi.oidc.publicUrl` |
-| Realm `redirectUris` / `webOrigins` | edit `eddi-realm.json` | `keycloak.publicOrigin` |
 
-The shipped defaults cover `kubectl port-forward svc/keycloak 8080:8080`. Behind
-an Ingress, a realm that does not list your host answers
-`Invalid parameter: redirect_uri` and login cannot complete.
+**One names the browser-facing origin of EDDI** — where the Manager SPA is
+served, i.e. `ingress.hosts[0].host` (e.g. `https://eddi.example.com`), *not*
+the Keycloak host:
+
+| Setting | Kustomize | Helm |
+|---|---|---|
+| Realm `redirectUris` / `webOrigins` of the `eddi-frontend` client | edit `eddi-realm.json` (placeholder `https://eddi.example.com/*`) | `keycloak.publicOrigin` |
+
+The Manager redirects back to where it is itself served, so the realm has to
+list **that** origin. Putting the Keycloak host into `redirectUris` is the
+common way to get `Invalid parameter: redirect_uri`; so is omitting your host
+altogether. The shipped defaults cover
+`kubectl port-forward svc/keycloak 8080:8080`, where both URLs happen to be
+`localhost` and the distinction does not bite.
 
 #### Upgrading an existing Keycloak install
 
@@ -438,7 +472,7 @@ a live vault master key on the next `kubectl apply`. Create it out-of-band and
 the pod starts on its own, with no restart needed:
 
 ```bash
-bash k8s/create-secrets.sh            # PowerShell: .\k8s\create-secrets.ps1
+bash k8s/create-secrets.sh            # PowerShell: pwsh -File .\k8s\create-secrets.ps1
 kubectl get pods -n eddi -w
 ```
 
@@ -478,7 +512,7 @@ absent `eddi.vault.master-key` — for example a Secret created by hand from the
 old `k8s/base/eddi-secret.yaml` template. Replace it and restart:
 
 ```bash
-bash k8s/create-secrets.sh --force    # PowerShell: .\k8s\create-secrets.ps1 -Force
+bash k8s/create-secrets.sh --force    # PowerShell: pwsh -File .\k8s\create-secrets.ps1 -Force
 kubectl rollout restart deployment/eddi -n eddi
 ```
 

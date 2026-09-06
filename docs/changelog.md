@@ -49,6 +49,37 @@ bottom of this file and are never archived.
 
 ---
 
+## 🔎 test(deploy): assert manifest relationships, not the presence of strings (2026-09-04)
+
+**Repo:** EDDI (`fix/review-deploy`)
+
+Follow-up on the same branch, from three independent review rounds over the deployment fixes.
+
+The manifest suite was asserting that literals exist. A test for the Keycloak security context
+checked only that `runAsNonRoot: true` and `runAsUser: 1000` appear somewhere in the file after
+comment-stripping, which a commented-out or wrongly-nested block satisfies. Assertions now
+resolve the YAML and check the value on the container that actually runs.
+
+The CI path-filter test asserted that a forced-true exists for tagged releases, but that
+contract is **positional** — the `echo "<filter>=true"` has to sit inside the
+`if [[ "$GITHUB_REF" == refs/tags/* ]]` branch to mean anything. It now checks placement.
+
+The secret-generator ordering test was strengthened to assert the guard precedes the
+destructive delete *and* that an `exit 1` sits between them, so a guard that only warns fails.
+
+Two justifications were withdrawn after the reviewer disproved them: the secret scripts were
+filed as needing a live cluster, when their fail-closed classification is plain text parsing;
+and the Helm chart version claim was pinned to the break it documents by asserting `manager`,
+`monitoring` and `namespace` really are absent from `values.yaml`, so the major bump cannot
+become a different lie.
+
+**Coverage note.** Diff coverage of Java changed lines is 100%, but that figure is the
+intersection of the tool with an almost-empty `src/main` diff — this branch is 38 non-Java
+files. The manifests are covered by the structural suite instead, which is stated plainly
+rather than presented as a coverage result.
+
+---
+
 ## ☸️ fix(deploy): repair Keycloak realm substitution and the secret generator, add a manifest regression suite (2026-09-04)
 
 **Repo:** EDDI (`fix/review-deploy`)

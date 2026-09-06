@@ -41,7 +41,13 @@ eddi:
   # Generate: openssl rand -base64 24
   vaultMasterKey: ""
 
-  # Database backend: "mongodb" or "postgres"
+  # Database backend: exactly "mongodb" or exactly "postgres", both lowercase.
+  #
+  # EDDI matches this case-SENSITIVELY — DataStoreProducers.isPostgres() is
+  # `"postgres".equals(datastoreType)` — so "Postgres" is not a spelling of
+  # "postgres": it matches neither branch and boots the MongoDB store against
+  # the baked-in mongodb://mongodb:27017/eddi. The chart refuses every other
+  # spelling rather than rendering it.
   datastoreType: mongodb
 
   # Bring your own database (MongoDB Atlas, RDS, Cloud SQL, …).
@@ -50,10 +56,20 @@ eddi:
   # rendering fails with an explanation otherwise. Without these the chart used
   # to emit no connection string at all and the pod fell back to the built-in
   # default mongodb://mongodb:27017/eddi, which resolves to nothing.
-  # Set eddi.datastoreType to match whichever one you fill in.
+  #
+  # eddi.datastoreType must name whichever one you fill in; the chart now
+  # refuses to render when it disagrees, rather than booting the other store.
+  #
+  # externalConnectionString and the JDBC username/password are rendered into
+  # the mounted <release>-secrets FILE, never into the ConfigMap — a ConfigMap
+  # is readable by anything with `get configmaps` in the namespace.
   datastore:
     externalConnectionString: ""   # mongodb://user:pass@host:27017/eddi?...
     externalJdbcUrl: ""            # jdbc:postgresql://host:5432/eddi
+    # Both REQUIRED when externalJdbcUrl is set. Do NOT put credentials in the
+    # JDBC URL: that value is an address and is rendered into the ConfigMap.
+    externalJdbcUsername: ""
+    externalJdbcPassword: ""
 
   # Messaging. Only "in-memory" works with the published image.
   #
@@ -147,6 +163,10 @@ mongodb:
 # ── PostgreSQL ─────────────────────────────────────────────
 
 postgres:
+  # ⚠️  mongodb.enabled defaults to TRUE, so turning this on does NOT turn
+  # MongoDB off. The chart refuses to render with both enabled — EDDI runs one
+  # store and the other would be deployed, backed up and paid for while nothing
+  # writes to it — so set mongodb.enabled=false alongside this.
   enabled: false
   image:
     repository: postgres
