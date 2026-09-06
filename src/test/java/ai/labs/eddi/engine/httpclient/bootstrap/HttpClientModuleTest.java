@@ -55,7 +55,13 @@ class HttpClientModuleTest {
         assertTrue(producer.isAnnotationPresent(Produces.class),
                 "jakarta.enterprise.inject.Produces is what makes this a CDI producer; without it the bean "
                         + "exists only by grace of quarkus.arc.auto-producer-methods");
-        assertFalse(producer.isAnnotationPresent(jakarta.ws.rs.Produces.class),
+        // Named as a string rather than jakarta.ws.rs.Produces.class on purpose: the
+        // simple name is already taken by the CDI annotation imported above, and an
+        // inline FQN is what ImportStyleTest (AGENTS.md 4.7) exists to stop. Matching
+        // on the annotation type's name keeps the assertion exact without either an
+        // allowlist entry or a second import of the same simple name.
+        assertTrue(Arrays.stream(producer.getAnnotations())
+                .noneMatch(a -> "jakarta.ws.rs.Produces".equals(a.annotationType().getName())),
                 "jakarta.ws.rs.Produces is the media-type annotation and declares nothing here");
         assertTrue(producer.isAnnotationPresent(ApplicationScoped.class),
                 "one client instance per application, disposed by the @Disposes half below");
