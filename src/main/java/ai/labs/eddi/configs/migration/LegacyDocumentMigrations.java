@@ -18,8 +18,16 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 import static java.lang.Boolean.parseBoolean;
 
 /**
- * The v5 → v6 document transforms, as pure {@link Document} → {@link Document}
- * functions with no storage backend behind them.
+ * The v5 → v6 document transforms, as backend-neutral {@link Document} →
+ * {@link Document} functions with no storage backend behind them.
+ * <p>
+ * <strong>They mutate the {@link Document} they are given</strong>, in place,
+ * along with the nested lists and maps inside it — the return value is the same
+ * instance, or {@code null} to mean "nothing needed changing". Pass a freshly
+ * deserialized, mutable document: an immutable one throws, and a shared one is
+ * visibly rewritten under whoever else is holding it. Both callers satisfy this
+ * today, {@code MigrationManager} from a Mongo cursor and
+ * {@code RestImportService} from a just-parsed ZIP entry.
  * <p>
  * They live here rather than on {@link MigrationManager} because they have two
  * callers with different lifetimes. {@code MigrationManager} runs them once, as

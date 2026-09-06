@@ -66,6 +66,7 @@ import java.util.logging.Level;
 import java.util.logging.LogRecord;
 import java.util.logging.Logger;
 
+import io.micrometer.core.instrument.Counter;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
@@ -1364,10 +1365,10 @@ class AgentOrchestratorCoverageTest {
     /** Delta of the named decision-tagged counter across whatever `action` does. */
     private static double approvalCountDelta(String decision, Runnable action) {
         double before = Metrics.globalRegistry.find("eddi.operator.write.approval").tag("decision", decision).counters().stream()
-                .mapToDouble(io.micrometer.core.instrument.Counter::count).sum();
+                .mapToDouble(Counter::count).sum();
         action.run();
         double after = Metrics.globalRegistry.find("eddi.operator.write.approval").tag("decision", decision).counters().stream()
-                .mapToDouble(io.micrometer.core.instrument.Counter::count).sum();
+                .mapToDouble(Counter::count).sum();
         return after - before;
     }
 

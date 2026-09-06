@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DynamicAgentCon
 import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.model.Context;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -69,7 +70,7 @@ class DynamicAgentGuardrailResolutionTest {
 
     /** The same policy as it comes back from the store: a plain map. */
     private static Map<String, Object> asStoredMap(DynamicAgentConfig config) {
-        return MAPPER.convertValue(config, new com.fasterxml.jackson.core.type.TypeReference<>() {
+        return MAPPER.convertValue(config, new TypeReference<>() {
         });
     }
 

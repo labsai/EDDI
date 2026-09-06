@@ -11,6 +11,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.Method;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
@@ -178,7 +179,7 @@ class CronDescriberExtendedTest {
         @Test
         @DisplayName("should fall back to String.valueOf for negative value in single-element set")
         void negativeValueSingleElement() throws Exception {
-            java.lang.reflect.Method formatSet = CronDescriber.class.getDeclaredMethod("formatSet", Set.class, String[].class);
+            Method formatSet = CronDescriber.class.getDeclaredMethod("formatSet", Set.class, String[].class);
             formatSet.setAccessible(true);
 
             String[] labels = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
@@ -193,7 +194,7 @@ class CronDescriberExtendedTest {
         @Test
         @DisplayName("should fall back to String.valueOf for negative values in multi-element set")
         void negativeValueMultiElement() throws Exception {
-            java.lang.reflect.Method formatSet = CronDescriber.class.getDeclaredMethod("formatSet", Set.class, String[].class);
+            Method formatSet = CronDescriber.class.getDeclaredMethod("formatSet", Set.class, String[].class);
             formatSet.setAccessible(true);
 
             String[] labels = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
@@ -208,7 +209,7 @@ class CronDescriberExtendedTest {
         @Test
         @DisplayName("should handle value equal to labels.length (out of bounds)")
         void valueAtBoundary() throws Exception {
-            java.lang.reflect.Method formatSet = CronDescriber.class.getDeclaredMethod("formatSet", Set.class, String[].class);
+            Method formatSet = CronDescriber.class.getDeclaredMethod("formatSet", Set.class, String[].class);
             formatSet.setAccessible(true);
 
             String[] labels = {"A", "B", "C"};
@@ -220,7 +221,7 @@ class CronDescriberExtendedTest {
         @Test
         @DisplayName("should handle valid value at max index")
         void validMaxIndex() throws Exception {
-            java.lang.reflect.Method formatSet = CronDescriber.class.getDeclaredMethod("formatSet", Set.class, String[].class);
+            Method formatSet = CronDescriber.class.getDeclaredMethod("formatSet", Set.class, String[].class);
             formatSet.setAccessible(true);
 
             String[] labels = {"A", "B", "C"};

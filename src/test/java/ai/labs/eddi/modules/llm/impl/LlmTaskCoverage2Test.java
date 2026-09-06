@@ -45,6 +45,8 @@ import org.mockito.Mock;
 
 import java.util.*;
 
+import dev.langchain4j.data.message.UserMessage;
+import dev.langchain4j.data.message.SystemMessage;
 import static ai.labs.eddi.engine.memory.MemoryKeys.ACTIONS;
 import static dev.langchain4j.data.message.AiMessage.aiMessage;
 import static org.junit.jupiter.api.Assertions.*;
@@ -927,8 +929,8 @@ class LlmTaskCoverage2Test {
 
     private static List<ChatMessage> cascadeMessages() {
         var messages = new ArrayList<ChatMessage>();
-        messages.add(dev.langchain4j.data.message.SystemMessage.from("You are helpful"));
-        messages.add(dev.langchain4j.data.message.UserMessage.from("Hello"));
+        messages.add(SystemMessage.from("You are helpful"));
+        messages.add(UserMessage.from("Hello"));
         return messages;
     }
 
@@ -1032,7 +1034,7 @@ class LlmTaskCoverage2Test {
 
         verify(model).chat(msgCaptor.capture());
         var sent = (List<ChatMessage>) msgCaptor.getValue();
-        var sysText = ((dev.langchain4j.data.message.SystemMessage) sent.get(0)).text();
+        var sysText = ((SystemMessage) sent.get(0)).text();
         assertTrue(sysText.startsWith("You are helpful"), "existing system message preserved");
         assertTrue(sysText.contains("confidence"), "confidence instruction appended to existing system message");
     }

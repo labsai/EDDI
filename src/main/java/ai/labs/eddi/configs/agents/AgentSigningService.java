@@ -19,6 +19,8 @@ import java.security.*;
 import java.util.Base64;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
+import java.security.spec.X509EncodedKeySpec;
+import java.security.spec.PKCS8EncodedKeySpec;
 
 /**
  * Ed25519-based signing and verification service for agent identity.
@@ -134,7 +136,7 @@ public class AgentSigningService {
                     byte[] privateKeyBytes = Base64.getDecoder().decode(privateKeyB64);
                     KeyFactory keyFactory = KeyFactory.getInstance(ALGORITHM);
                     return keyFactory.generatePrivate(
-                            new java.security.spec.PKCS8EncodedKeySpec(privateKeyBytes));
+                            new PKCS8EncodedKeySpec(privateKeyBytes));
                 } catch (Exception e) {
                     throw new PrivateKeyLoadException(agentId, e);
                 }
@@ -178,7 +180,7 @@ public class AgentSigningService {
             byte[] publicKeyBytes = Base64.getDecoder().decode(publicKeyB64);
             KeyFactory keyFactory = KeyFactory.getInstance(ALGORITHM);
             PublicKey publicKey = keyFactory.generatePublic(
-                    new java.security.spec.X509EncodedKeySpec(publicKeyBytes));
+                    new X509EncodedKeySpec(publicKeyBytes));
 
             Signature sig = Signature.getInstance(ALGORITHM);
             sig.initVerify(publicKey);
@@ -324,7 +326,7 @@ public class AgentSigningService {
                     byte[] privateKeyBytes = Base64.getDecoder().decode(privateKeyB64);
                     KeyFactory keyFactory = KeyFactory.getInstance(ALGORITHM);
                     return keyFactory.generatePrivate(
-                            new java.security.spec.PKCS8EncodedKeySpec(privateKeyBytes));
+                            new PKCS8EncodedKeySpec(privateKeyBytes));
                 } catch (Exception e) {
                     throw new PrivateKeyLoadException(agentId, e);
                 }

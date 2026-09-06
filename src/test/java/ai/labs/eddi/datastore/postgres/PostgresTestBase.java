@@ -12,6 +12,9 @@ import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.Iterator;
 import java.util.List;
+import org.postgresql.ds.PGSimpleDataSource;
+import java.lang.annotation.Annotation;
+import jakarta.enterprise.util.TypeLiteral;
 
 /**
  * Shared Testcontainers base for PostgreSQL adapter integration tests.
@@ -45,7 +48,7 @@ public abstract class PostgresTestBase {
      * Returns a real JDBC DataSource pointing at the shared Testcontainer.
      */
     protected static DataSource createDataSource() {
-        var ds = new org.postgresql.ds.PGSimpleDataSource();
+        var ds = new PGSimpleDataSource();
         ds.setUrl(PG.getJdbcUrl());
         ds.setUser(PG.getUsername());
         ds.setPassword(PG.getPassword());
@@ -93,16 +96,16 @@ public abstract class PostgresTestBase {
         }
 
         @Override
-        public Instance<DataSource> select(java.lang.annotation.Annotation... qualifiers) {
+        public Instance<DataSource> select(Annotation... qualifiers) {
             throw new UnsupportedOperationException();
         }
         @Override
-        public <U extends DataSource> Instance<U> select(Class<U> subtype, java.lang.annotation.Annotation... qualifiers) {
+        public <U extends DataSource> Instance<U> select(Class<U> subtype, Annotation... qualifiers) {
             throw new UnsupportedOperationException();
         }
         @Override
-        public <U extends DataSource> Instance<U> select(jakarta.enterprise.util.TypeLiteral<U> subtype,
-                                                         java.lang.annotation.Annotation... qualifiers) {
+        public <U extends DataSource> Instance<U> select(TypeLiteral<U> subtype,
+                                                         Annotation... qualifiers) {
             throw new UnsupportedOperationException();
         }
         @Override

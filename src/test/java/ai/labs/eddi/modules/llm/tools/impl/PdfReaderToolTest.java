@@ -17,6 +17,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.net.http.HttpResponse;
+import java.net.http.HttpRequest;
+import java.io.IOException;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
@@ -166,10 +169,10 @@ class PdfReaderToolTest {
         @org.junit.jupiter.api.DisplayName("extractTextFromPdf — non-200 status returns error")
         @SuppressWarnings("unchecked")
         void extractText_non200_returnsError() throws Exception {
-            var mockResponse = (java.net.http.HttpResponse<Path>) org.mockito.Mockito.mock(java.net.http.HttpResponse.class);
+            var mockResponse = (HttpResponse<Path>) org.mockito.Mockito.mock(HttpResponse.class);
             org.mockito.Mockito.when(mockResponse.statusCode()).thenReturn(404);
             org.mockito.Mockito.doReturn(mockResponse).when(mockedHttpClient).send(
-                    org.mockito.ArgumentMatchers.any(java.net.http.HttpRequest.class),
+                    org.mockito.ArgumentMatchers.any(HttpRequest.class),
                     org.mockito.ArgumentMatchers.any());
 
             String result = mockedTool.extractTextFromPdf("https://example.com/notfound.pdf");
@@ -182,10 +185,10 @@ class PdfReaderToolTest {
         @org.junit.jupiter.api.DisplayName("extractTextFromPdfPages — non-200 status returns error")
         @SuppressWarnings("unchecked")
         void extractPages_non200_returnsError() throws Exception {
-            var mockResponse = (java.net.http.HttpResponse<Path>) org.mockito.Mockito.mock(java.net.http.HttpResponse.class);
+            var mockResponse = (HttpResponse<Path>) org.mockito.Mockito.mock(HttpResponse.class);
             org.mockito.Mockito.when(mockResponse.statusCode()).thenReturn(500);
             org.mockito.Mockito.doReturn(mockResponse).when(mockedHttpClient).send(
-                    org.mockito.ArgumentMatchers.any(java.net.http.HttpRequest.class),
+                    org.mockito.ArgumentMatchers.any(HttpRequest.class),
                     org.mockito.ArgumentMatchers.any());
 
             String result = mockedTool.extractTextFromPdfPages("https://example.com/doc.pdf", 1, 3);
@@ -198,10 +201,10 @@ class PdfReaderToolTest {
         @org.junit.jupiter.api.DisplayName("getPdfInfo — non-200 status returns error")
         @SuppressWarnings("unchecked")
         void pdfInfo_non200_returnsError() throws Exception {
-            var mockResponse = (java.net.http.HttpResponse<Path>) org.mockito.Mockito.mock(java.net.http.HttpResponse.class);
+            var mockResponse = (HttpResponse<Path>) org.mockito.Mockito.mock(HttpResponse.class);
             org.mockito.Mockito.when(mockResponse.statusCode()).thenReturn(403);
             org.mockito.Mockito.doReturn(mockResponse).when(mockedHttpClient).send(
-                    org.mockito.ArgumentMatchers.any(java.net.http.HttpRequest.class),
+                    org.mockito.ArgumentMatchers.any(HttpRequest.class),
                     org.mockito.ArgumentMatchers.any());
 
             String result = mockedTool.getPdfInfo("https://example.com/forbidden.pdf");
@@ -213,8 +216,8 @@ class PdfReaderToolTest {
         @Test
         @org.junit.jupiter.api.DisplayName("extractTextFromPdf — IOException returns error")
         void extractText_ioException_returnsError() throws Exception {
-            org.mockito.Mockito.doThrow(new java.io.IOException("Connection refused")).when(mockedHttpClient).send(
-                    org.mockito.ArgumentMatchers.any(java.net.http.HttpRequest.class),
+            org.mockito.Mockito.doThrow(new IOException("Connection refused")).when(mockedHttpClient).send(
+                    org.mockito.ArgumentMatchers.any(HttpRequest.class),
                     org.mockito.ArgumentMatchers.any());
 
             String result = mockedTool.extractTextFromPdf("https://example.com/doc.pdf");
@@ -226,8 +229,8 @@ class PdfReaderToolTest {
         @Test
         @org.junit.jupiter.api.DisplayName("extractTextFromPdfPages — IOException returns error")
         void extractPages_ioException_returnsError() throws Exception {
-            org.mockito.Mockito.doThrow(new java.io.IOException("Timeout")).when(mockedHttpClient).send(
-                    org.mockito.ArgumentMatchers.any(java.net.http.HttpRequest.class),
+            org.mockito.Mockito.doThrow(new IOException("Timeout")).when(mockedHttpClient).send(
+                    org.mockito.ArgumentMatchers.any(HttpRequest.class),
                     org.mockito.ArgumentMatchers.any());
 
             String result = mockedTool.extractTextFromPdfPages("https://example.com/doc.pdf", 1, 5);
@@ -239,8 +242,8 @@ class PdfReaderToolTest {
         @Test
         @org.junit.jupiter.api.DisplayName("getPdfInfo — IOException returns error")
         void pdfInfo_ioException_returnsError() throws Exception {
-            org.mockito.Mockito.doThrow(new java.io.IOException("DNS failed")).when(mockedHttpClient).send(
-                    org.mockito.ArgumentMatchers.any(java.net.http.HttpRequest.class),
+            org.mockito.Mockito.doThrow(new IOException("DNS failed")).when(mockedHttpClient).send(
+                    org.mockito.ArgumentMatchers.any(HttpRequest.class),
                     org.mockito.ArgumentMatchers.any());
 
             String result = mockedTool.getPdfInfo("https://example.com/doc.pdf");
@@ -253,7 +256,7 @@ class PdfReaderToolTest {
         @org.junit.jupiter.api.DisplayName("extractTextFromPdf — InterruptedException returns error")
         void extractText_interruptedException_returnsError() throws Exception {
             org.mockito.Mockito.doThrow(new InterruptedException("Interrupted")).when(mockedHttpClient).send(
-                    org.mockito.ArgumentMatchers.any(java.net.http.HttpRequest.class),
+                    org.mockito.ArgumentMatchers.any(HttpRequest.class),
                     org.mockito.ArgumentMatchers.any());
 
             String result = mockedTool.extractTextFromPdf("https://example.com/doc.pdf");
@@ -365,12 +368,12 @@ class PdfReaderToolTest {
                 Files.copy(sourcePdf, target,
                         StandardCopyOption.REPLACE_EXISTING);
 
-                var mockResponse = (java.net.http.HttpResponse<Path>) org.mockito.Mockito.mock(java.net.http.HttpResponse.class);
+                var mockResponse = (HttpResponse<Path>) org.mockito.Mockito.mock(HttpResponse.class);
                 org.mockito.Mockito.when(mockResponse.statusCode()).thenReturn(200);
                 org.mockito.Mockito.when(mockResponse.body()).thenReturn(target);
                 return mockResponse;
             }).when(mockedHttpClient).send(
-                    org.mockito.ArgumentMatchers.any(java.net.http.HttpRequest.class),
+                    org.mockito.ArgumentMatchers.any(HttpRequest.class),
                     org.mockito.ArgumentMatchers.any());
         }
 

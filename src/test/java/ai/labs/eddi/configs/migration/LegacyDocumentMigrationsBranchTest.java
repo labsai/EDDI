@@ -338,7 +338,7 @@ class LegacyDocumentMigrationsBranchTest {
     }
 
     @Nested
-    @DisplayName("the transforms are pure — no backend, no shared state")
+    @DisplayName("the transforms are backend-neutral — no storage behind them")
     class Purity {
 
         @Test

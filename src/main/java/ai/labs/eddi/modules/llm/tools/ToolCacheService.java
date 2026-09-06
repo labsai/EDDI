@@ -12,8 +12,6 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
-import static ai.labs.eddi.utils.LogSanitizer.sanitize;
-
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -22,6 +20,9 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import io.micrometer.core.instrument.Timer;
+import io.micrometer.core.instrument.Counter;
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
  * Caffeine-backed cache service for tool results with smart TTL management.
@@ -101,10 +102,10 @@ public class ToolCacheService {
     private ICache<String, CachedResult> cache;
 
     // Metrics
-    private io.micrometer.core.instrument.Counter cacheHitCounter;
-    private io.micrometer.core.instrument.Counter cacheMissCounter;
-    private io.micrometer.core.instrument.Timer cacheGetTimer;
-    private io.micrometer.core.instrument.Timer cachePutTimer;
+    private Counter cacheHitCounter;
+    private Counter cacheMissCounter;
+    private Timer cacheGetTimer;
+    private Timer cachePutTimer;
 
     private final AtomicInteger hits = new AtomicInteger(0);
     private final AtomicInteger misses = new AtomicInteger(0);
