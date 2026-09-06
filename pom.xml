@@ -350,6 +350,16 @@
             <groupId>com.fasterxml.jackson.dataformat</groupId>
             <artifactId>jackson-dataformat-xml</artifactId>
         </dependency>
+        <!-- YAML: ComposeStackTest and InfrastructureIT parse docker-compose*.yml
+             with YAMLMapper. quarkus-jackson does NOT ship the YAML module, so
+             without this the classpath entry arrives only through
+             json-schema-validator's transitive tree and an unrelated bump there
+             breaks the test compile. Version comes from the Quarkus BOM, like the
+             two modules above. -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.dataformat</groupId>
+            <artifactId>jackson-dataformat-yaml</artifactId>
+        </dependency>
 
         <dependency>
             <groupId>de.undercouch</groupId>

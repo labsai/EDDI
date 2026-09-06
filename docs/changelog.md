@@ -49,6 +49,40 @@ bottom of this file and are never archived.
 
 ---
 
+## 🔧 fix(build): make the base-image check ask which Dockerfile, declare the YAML dependency (2026-09-06)
+
+**Repo:** EDDI (`fix/review-quality-gates`)
+
+Eight review comments, four behavioural. All eight were proven in a single mutation run that
+reverted every behaviour at once and produced exactly eight named failures, one per comment, with
+no cross-talk.
+
+**The base-image check skipped itself on the wrong pull request.** It treated the first open
+`dependabot/docker/*` branch as covering the production Dockerfile, but `dependabot.yml` declares
+three docker ecosystems (`/src/main/docker`, `/mcp-sidecar`, `/.clusterfuzzlite`) and all three push
+branches under that prefix. A sidecar or fuzzing bump therefore silenced the check for the image
+that actually ships. It now asks `gh pr view --json files` whether the PR touches the production
+Dockerfile before skipping.
+
+**A dependency was reaching the classpath by accident.** `jackson-dataformat-yaml` was arriving
+only through `json-schema-validator`'s transitive tree, so an unrelated bump could have removed it
+and broken YAML parsing with no declaration to point at. It is now declared alongside the CSV and
+XML modules.
+
+**The dead-letter path trusted `java.io.tmpdir`.** A relative or empty value resolved against the
+working directory, which put the audit dead-letter file inside the source tree. It is now rejected
+with an `IllegalStateException` naming the property. The matching test also no longer requires the
+*global* absence of `eddi-audit-deadletter.jsonl` — a stale file from an older checkout made it
+fail for the wrong reason — and instead snapshots the repository-root sink and asserts it is
+unchanged.
+
+**Note for the merge order.** This branch arms the build gates: Checkstyle moves to
+`failOnViolation`, and the formatter from `format` to `validate`. It should merge **last**, after a
+pre-flight run of the armed gates against main with everything else already in, or it will turn
+green branches red on violations they currently get away with.
+
+---
+
 ## 🧪 test(build): make the gate tests unable to pass a disarmed gate (2026-09-04)
 
 **Repo:** EDDI (`fix/review-quality-gates`)

@@ -775,6 +775,36 @@ class AuditLedgerServiceTest {
     }
 
     /**
+     * {@code java.io.tmpdir} is an ordinary writable system property, not a
+     * guarantee. Set it to a relative value — or an empty one — and
+     * {@code Path.of(tmpdir, name)} silently produces a path that resolves against
+     * the process working directory, which under Maven is the repository root: the
+     * source-tree artifact this branch deleted, recreated by a JVM flag rather than
+     * by a code change. It has to fail loudly instead.
+     */
+    @Test
+    @DisplayName("a relative java.io.tmpdir is rejected rather than resolved against the working directory")
+    void relativeTempDirectoryIsRejected() {
+        String original = System.getProperty("java.io.tmpdir");
+        try {
+            for (String relative : List.of("tmp", "", "./tmp")) {
+                System.setProperty("java.io.tmpdir", relative);
+                var thrown = assertThrows(IllegalStateException.class, AuditLedgerService::defaultTestDeadLetterPath,
+                        "java.io.tmpdir='" + relative + "' is relative, so the sink would land under the process CWD"
+                                + " — the repository root under Maven — instead of the temp directory");
+                assertTrue(thrown.getMessage().contains("java.io.tmpdir"),
+                        "the failure must name the property an operator has to fix: " + thrown.getMessage());
+            }
+        } finally {
+            if (original == null) {
+                System.clearProperty("java.io.tmpdir");
+            } else {
+                System.setProperty("java.io.tmpdir", original);
+            }
+        }
+    }
+
+    /**
      * The sink {@link #testDeadLetterPathIsOutsideTheSourceTree} grades is the sink
      * the factory actually wires in — asserted end to end, by making the store fail
      * until the batch is abandoned and then looking for the file.
@@ -785,12 +815,21 @@ class AuditLedgerServiceTest {
      * and it stays green while every unit run drops a file into the repository root
      * again — the precise regression this branch removed the {@code .gitignore}
      * entry for.
+     * <p>
+     * The source-tree half is a before/after comparison rather than "the file does
+     * not exist". {@code eddi-audit-deadletter.jsonl} was generated and gitignored
+     * for years, so an existing checkout can easily still have one lying in the
+     * repository root — and a bare existence assertion would then fail on a tree
+     * that is entirely correct, while saying nothing about what THIS invocation
+     * wrote. What has to hold is that this call left it untouched.
      */
     @Test
     @DisplayName("the default test factory dead-letters outside the source tree, not into the repository root")
     void defaultTestFactoryWritesItsDeadLettersOutsideTheSourceTree() throws IOException {
         Path sink = Path.of(AuditLedgerService.defaultTestDeadLetterPath());
         Path repositoryRootSink = Path.of("").toAbsolutePath().resolve("eddi-audit-deadletter.jsonl");
+        boolean rootSinkExisted = Files.exists(repositoryRootSink);
+        long rootSinkSize = rootSinkExisted ? Files.size(repositoryRootSink) : -1L;
         Files.deleteIfExists(sink);
 
         var svc = AuditLedgerService.createForTesting(auditStore, true, 60, null, meterRegistry, 10);
@@ -803,11 +842,16 @@ class AuditLedgerServiceTest {
         svc.flush(); // failure 3 — abandoned to the dead-letter sink
 
         try {
-            assertFalse(Files.exists(repositoryRootSink),
-                    "createForTesting dead-lettered into the source tree at " + repositoryRootSink + ". A relative"
-                            + " dead-letter path resolves against the process CWD, which under Maven is the"
-                            + " repository root; mvn clean does not remove the file, which is why .gitignore used"
-                            + " to hide it. It must go through defaultTestDeadLetterPath().");
+            String sourceTreeMessage = "createForTesting dead-lettered into the source tree at " + repositoryRootSink
+                    + ". A relative dead-letter path resolves against the process CWD, which under Maven is the"
+                    + " repository root; mvn clean does not remove the file, which is why .gitignore used to hide"
+                    + " it. It must go through defaultTestDeadLetterPath().";
+            assertEquals(rootSinkExisted, Files.exists(repositoryRootSink), sourceTreeMessage);
+            if (rootSinkExisted) {
+                assertEquals(rootSinkSize, Files.size(repositoryRootSink), sourceTreeMessage
+                        + " (a pre-existing file from an earlier checkout grew during this test, so this run"
+                        + " appended to it)");
+            }
             assertTrue(Files.isRegularFile(sink),
                     "nothing was written to " + sink + ", so the factory is no longer wiring"
                             + " defaultTestDeadLetterPath() into the service");

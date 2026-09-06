@@ -80,6 +80,21 @@ class BuildQualityGatesTest {
     private static final Path CHECKSTYLE = Path.of("checkstyle.xml");
     private static final Path CI_WORKFLOW = Path.of(".github", "workflows", "ci.yml");
     private static final Path AGENTS_MD = Path.of("AGENTS.md");
+    private static final Path BASE_IMAGE_WORKFLOW = Path.of(".github", "workflows", "base-image-check.yml");
+    private static final Path DEPENDABOT = Path.of(".github", "dependabot.yml");
+
+    /**
+     * The one Dockerfile base-image-check.yml is responsible for keeping current.
+     */
+    private static final String PRODUCTION_DOCKERFILE_DIRECTORY = "/src/main/docker";
+
+    /**
+     * An {@code import com.fasterxml.jackson.dataformat.<module>.…} line. The
+     * captured segment is the Jackson data-format module name, which is also the
+     * artifactId suffix: {@code yaml} is shipped by
+     * {@code jackson-dataformat-yaml}.
+     */
+    private static final Pattern JACKSON_DATAFORMAT_IMPORT = Pattern.compile("import\\s+com\\.fasterxml\\.jackson\\.dataformat\\.([a-z0-9]+)\\.");
 
     /**
      * The flag that decides whether the coverage gate runs at all. Since the gate
@@ -770,5 +785,143 @@ class BuildQualityGatesTest {
             return null;
         }
         return modes.isEmpty() ? null : modes;
+    }
+
+    /**
+     * {@code base-image-check.yml} skips raising its digest PR when Dependabot
+     * already has one open for the production Dockerfile. It decided that by branch
+     * name alone — the first open {@code dependabot/docker/*} PR counted — which
+     * was sound only while {@code dependabot.yml} declared a single Docker
+     * ecosystem. It now declares three (/src/main/docker, /mcp-sidecar,
+     * /.clusterfuzzlite) and all of them push branches under that prefix, so an
+     * open sidecar bump reads as "the base image is covered" and suppresses the
+     * required production digest PR for as long as it lives — silently, because the
+     * skip path reports a green summary line.
+     * <p>
+     * Graded from both ends: the premise (more than one Docker ecosystem) and the
+     * consequence (the skip has to consult the candidate's changed files). Drop
+     * either half and the assertion is not vacuous — it fails.
+     */
+    @Test
+    @DisplayName("the base-image job's Dependabot skip identifies the PR by changed file, not branch prefix")
+    void baseImageDependabotSkipMatchesTheProductionDockerfile() throws Exception {
+        List<String> dockerDirectories = dependabotDockerDirectories();
+
+        assertTrue(dockerDirectories.contains(PRODUCTION_DOCKERFILE_DIRECTORY),
+                DEPENDABOT + " no longer watches " + PRODUCTION_DOCKERFILE_DIRECTORY + ", so the skip this test"
+                        + " grades has nothing to be about. Found: " + dockerDirectories);
+        assertTrue(dockerDirectories.size() > 1,
+                "only one docker ecosystem is declared, so this assertion would pass for the wrong reason. It exists"
+                        + " because sibling Docker ecosystems share the dependabot/docker/ branch prefix — if they"
+                        + " are gone, revisit the skip rather than deleting this. Found: " + dockerDirectories);
+
+        String skipBlock = dependabotSkipBlock();
+
+        assertTrue(skipBlock.contains("--json files"),
+                "the Dependabot skip in " + BASE_IMAGE_WORKFLOW + " must ask each candidate PR which files it"
+                        + " changes. Selecting on the dependabot/docker/ branch prefix alone matches the"
+                        + " mcp-sidecar and .clusterfuzzlite ecosystems too, so their PRs suppress the production"
+                        + " base-image digest PR. Block was:\n" + skipBlock);
+        assertTrue(skipBlock.contains("\"$DOCKERFILE\""),
+                "the skip must compare those changed files against $DOCKERFILE (" + PRODUCTION_DOCKERFILE_DIRECTORY
+                        + "/Dockerfile); fetching the file list and not matching on it decides nothing. Block was:\n"
+                        + skipBlock);
+    }
+
+    /**
+     * The directory of every {@code package-ecosystem: docker} entry in
+     * {@code dependabot.yml}, in file order.
+     */
+    private static List<String> dependabotDockerDirectories() throws IOException {
+        List<String> directories = new ArrayList<>();
+        boolean inDockerEcosystem = false;
+
+        for (String line : read(DEPENDABOT).lines().toList()) {
+            String stripped = line.strip();
+            if (stripped.startsWith("- package-ecosystem:")) {
+                inDockerEcosystem = stripped.endsWith("docker");
+            } else if (inDockerEcosystem && stripped.startsWith("directory:")) {
+                directories.add(stripped.substring("directory:".length()).strip().replace("\"", "").replace("'", ""));
+                inDockerEcosystem = false;
+            }
+        }
+        return directories;
+    }
+
+    /**
+     * The shell lines of the Dependabot de-duplication in
+     * {@code base-image-check.yml}: from the first {@code DEPENDABOT_PR=}
+     * assignment through the guard that acts on it. Everything that decides the
+     * skip is inside; a decision made outside it would leave the guard reading a
+     * variable nothing set.
+     */
+    private static String dependabotSkipBlock() throws IOException {
+        List<String> lines = read(BASE_IMAGE_WORKFLOW).lines().toList();
+        int start = -1;
+        for (int i = 0; i < lines.size(); i++) {
+            if (lines.get(i).strip().startsWith("DEPENDABOT_PR=")) {
+                start = i;
+                break;
+            }
+        }
+        assertTrue(start >= 0, BASE_IMAGE_WORKFLOW + " no longer sets DEPENDABOT_PR, so the skip this test grades"
+                + " is gone — remove the test deliberately or restore the guard, do not leave it passing vacuously");
+
+        StringBuilder block = new StringBuilder();
+        for (int i = start; i < lines.size(); i++) {
+            block.append(lines.get(i)).append('\n');
+            if (lines.get(i).strip().startsWith("if [ -n \"$DEPENDABOT_PR\" ]")) {
+                break;
+            }
+        }
+        return block.toString();
+    }
+
+    /**
+     * A Jackson data-format module used by the sources but only reachable through
+     * somebody else's dependency tree is a compile that breaks on an unrelated
+     * upgrade. {@code jackson-dataformat-yaml} was exactly that: {@code
+     * ComposeStackTest} and {@code InfrastructureIT} parse the compose files with
+     * {@code YAMLMapper} while the pom declared only the CSV and XML modules —
+     * {@code quarkus-jackson} does not supply YAML, so the classpath entry came
+     * from {@code json-schema-validator}'s transitive tree and would have vanished
+     * with it.
+     */
+    @Test
+    @DisplayName("every Jackson data-format module the sources import is declared in pom.xml")
+    void jacksonDataFormatModulesAreDeclaredDirectly() throws Exception {
+        TreeSet<String> imported = new TreeSet<>();
+        for (Path sourceRoot : List.of(Path.of("src", "main", "java"), Path.of("src", "test", "java"))) {
+            assertTrue(Files.isDirectory(sourceRoot),
+                    "expected the working directory to be the project root; " + sourceRoot.toAbsolutePath() + " not found");
+            try (Stream<Path> paths = Files.walk(sourceRoot)) {
+                for (Path file : paths.filter(path -> path.getFileName().toString().endsWith(".java")).toList()) {
+                    Matcher matcher = JACKSON_DATAFORMAT_IMPORT.matcher(Files.readString(file, StandardCharsets.UTF_8));
+                    while (matcher.find()) {
+                        imported.add("jackson-dataformat-" + matcher.group(1));
+                    }
+                }
+            }
+        }
+
+        assertFalse(imported.isEmpty(),
+                "found no com.fasterxml.jackson.dataformat import anywhere in the sources, so this assertion grades"
+                        + " nothing — teach the sweep the shape the imports now take rather than leaving it vacuous");
+
+        Element dependencies = child(parse(POM).getDocumentElement(), "dependencies").orElseThrow();
+        TreeSet<String> declared = new TreeSet<>();
+        for (Element dependency : children(dependencies, "dependency")) {
+            if ("com.fasterxml.jackson.dataformat".equals(childText(dependency, "groupId"))) {
+                declared.add(childText(dependency, "artifactId"));
+            }
+        }
+
+        List<String> undeclared = imported.stream().filter(module -> !declared.contains(module)).toList();
+
+        assertEquals(List.of(), undeclared,
+                "these Jackson data-format modules are imported by the sources but declared by no direct dependency"
+                        + " in pom.xml, so they are on the classpath only for as long as some other artifact keeps"
+                        + " dragging them in — an unrelated dependency bump then breaks the compile. Declared: "
+                        + declared);
     }
 }

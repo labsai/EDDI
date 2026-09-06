@@ -241,10 +241,22 @@ public class AuditLedgerService {
      * CI executors sharing {@code /tmp} — would append to each other's sink. No
      * test reads it back today, so that is a latent fixture collision rather than a
      * live flake, which is exactly when it is cheap to close.
+     * <p>
+     * {@code java.io.tmpdir} is validated rather than trusted: it is an ordinary
+     * writable system property, and a relative value (or an empty one, which
+     * {@code Path.of} turns into the empty path) resolves against the process CWD —
+     * the repository root under Maven. That is the precise state this method exists
+     * to prevent, so it fails loudly instead of quietly recreating the source-tree
+     * artifact.
      */
     static String defaultTestDeadLetterPath() {
-        return Path.of(System.getProperty("java.io.tmpdir"),
-                "eddi-audit-deadletter-" + ProcessHandle.current().pid() + ".jsonl").toString();
+        Path temporaryDirectory = Path.of(System.getProperty("java.io.tmpdir", ""));
+        if (!temporaryDirectory.isAbsolute()) {
+            throw new IllegalStateException("java.io.tmpdir must be an absolute path, but is '" + temporaryDirectory
+                    + "'. A relative temp directory resolves against the process working directory — the repository"
+                    + " root under Maven — so the test dead-letter sink would be written back into the source tree.");
+        }
+        return temporaryDirectory.resolve("eddi-audit-deadletter-" + ProcessHandle.current().pid() + ".jsonl").toString();
     }
 
     @PostConstruct
