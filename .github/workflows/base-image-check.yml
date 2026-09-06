@@ -174,19 +174,21 @@ jobs:
           # (2026-07-13 through 08-03) with nobody acting on it, so "the job goes
           # red" is not a reliable channel here.
           DEPENDABOT_PR=""
-          GUARD_DEGRADED=""
+          # Every failed lookup, not just the most recent one — a scalar here would
+          # report "PR #631 could not be read" on a run where #716 failed too.
+          DEGRADED_REASONS=()
 
           if ! CANDIDATES=$(gh pr list --author 'app/dependabot' --state open \
             --json number,headRefName -q '.[] | select(.headRefName | startswith("dependabot/docker/")) | .number'); then
             echo "::warning::Could not list Dependabot PRs — continuing as if none are open"
-            GUARD_DEGRADED="the Dependabot PR list could not be read"
+            DEGRADED_REASONS+=("the list of open Dependabot PRs could not be read")
             CANDIDATES=""
           fi
 
           for PR in $CANDIDATES; do
             if ! PR_FILES=$(gh pr view "$PR" --json files -q '.files[].path'); then
               echo "::warning::Could not read the file list of Dependabot PR #${PR} — not treating it as a match"
-              GUARD_DEGRADED="the file list of PR #${PR} could not be read"
+              DEGRADED_REASONS+=("the file list of PR #${PR} could not be read")
               continue
             fi
             if printf '%s\n' "$PR_FILES" | grep -qxF "$DOCKERFILE"; then
@@ -200,15 +202,19 @@ jobs:
           # case where one candidate was unreadable and a subsequent one matched:
           # the decision is then sound, but a candidate still went unchecked and
           # the summary should say so.
-          if [ -n "$GUARD_DEGRADED" ]; then
+          if [ ${#DEGRADED_REASONS[@]} -gt 0 ]; then
             {
               echo "### ⚠️ Dependabot guard degraded"
+              for REASON in "${DEGRADED_REASONS[@]}"; do
+                echo "- ${REASON}"
+              done
+              echo ""
               if [ -n "$DEPENDABOT_PR" ]; then
-                echo "${GUARD_DEGRADED}. PR #${DEPENDABOT_PR} matched \`${DOCKERFILE}\` anyway,"
-                echo "so skipping is still correct — but one candidate went unchecked."
+                echo "PR #${DEPENDABOT_PR} matched \`${DOCKERFILE}\` anyway, so skipping is still"
+                echo "correct — but at least one candidate went unchecked."
               else
-                echo "${GUARD_DEGRADED}, so this run could not rule out a Dependabot PR"
-                echo "covering \`${DOCKERFILE}\`. Proceeding anyway — check for a duplicate."
+                echo "This run could not rule out a Dependabot PR covering \`${DOCKERFILE}\`."
+                echo "Proceeding anyway — check for a duplicate."
               fi
             } >> "$GITHUB_STEP_SUMMARY"
           fi

@@ -110,6 +110,10 @@ unchecked and the summary said nothing. The gate is now on the degraded flag alo
 that distinguishes the two outcomes. (The `::warning::` annotation always fired either way; only
 the summary was being hidden.)
 
+A third round caught that the degraded reason was a scalar, so a run where two lookups failed
+reported only the last one. It is a list now, and the summary prints every failed lookup as its
+own bullet.
+
 Exercised the rewritten guard against a stubbed `gh` on all five paths: Dependabot PRs touching
 only `Dockerfile.demo` (no match, PR created — the original bug's correct behaviour), one
 touching the production Dockerfile (match, skipped), `gh pr list` failing, `gh pr view` failing
