@@ -21,6 +21,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
@@ -59,8 +60,19 @@ class AuditLedgerServiceBranchTest {
      * fallback's SUCCESS path while claiming to cover its failure path, and left a
      * junk file in the build directory.
      */
-    private String unwritableDeadLetterPath() {
-        return tempDir.resolve("no-such-dir").resolve("deadletter.jsonl").toString();
+    private String unwritableDeadLetterPath() throws IOException {
+        // A MISSING parent directory is no longer unwritable: writeToDeadLetter now
+        // calls Files.createDirectories on it, deliberately, so a missing directory
+        // cannot cost an audit record (see
+        // deadLetterWriteCreatesItsMissingParentDirectory).
+        // Blocking the path therefore needs something createDirectories cannot resolve:
+        // a regular FILE where the parent directory has to go, which fails with
+        // FileAlreadyExistsException on every OS.
+        Path blocker = tempDir.resolve("blocked-by-a-regular-file");
+        if (!Files.exists(blocker)) {
+            Files.writeString(blocker, "not a directory");
+        }
+        return blocker.resolve("deadletter.jsonl").toString();
     }
 
     @BeforeEach
