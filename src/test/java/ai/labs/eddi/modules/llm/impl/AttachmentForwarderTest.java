@@ -36,6 +36,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import java.io.IOException;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import static ai.labs.eddi.engine.memory.MemoryKeys.ATTACHMENTS;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -67,12 +69,12 @@ class AttachmentForwarderTest {
      * The registry backing the most recently built forwarder — for counter
      * assertions.
      */
-    private io.micrometer.core.instrument.simple.SimpleMeterRegistry meterRegistry;
+    private SimpleMeterRegistry meterRegistry;
 
     private AttachmentForwarder newForwarder(long perFile, long aggregate) {
         var capability = new ModelCapabilityService(k -> Optional.empty());
         var extractor = new AttachmentTextExtractor(10_000);
-        meterRegistry = new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
+        meterRegistry = new SimpleMeterRegistry();
         return new AttachmentForwarder(store, capability, extractor, httpClient,
                 meterRegistry, perFile, aggregate);
     }
@@ -627,7 +629,7 @@ class AttachmentForwarderTest {
     @Test
     void downloadException_addsNote() throws Exception {
         mockAttachments(urlImage());
-        doThrow(new java.io.IOException("boom")).when(httpClient).sendValidated(any(), any());
+        doThrow(new IOException("boom")).when(httpClient).sendValidated(any(), any());
         List<ChatMessage> messages = messages(UserMessage.from("look"));
 
         forwarder.forward(messages, memory, "gemini", "gemini-2.0-flash");
@@ -668,7 +670,7 @@ class AttachmentForwarderTest {
 
     @Test
     void metrics_recordForwardedAndErrors() {
-        var registry = new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
+        var registry = new SimpleMeterRegistry();
         var f = new AttachmentForwarder(store, new ModelCapabilityService(k -> Optional.empty()),
                 new AttachmentTextExtractor(10_000), httpClient, registry, 10L * 1024 * 1024, 20L * 1024 * 1024);
         Attachment ok = new Attachment();

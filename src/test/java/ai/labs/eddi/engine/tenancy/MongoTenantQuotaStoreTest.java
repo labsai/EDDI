@@ -34,6 +34,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
 
+import com.mongodb.client.MongoCursor;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -163,7 +164,7 @@ class MongoTenantQuotaStoreTest {
         void empty() {
             FindIterable<Document> emptyIterable = mock(FindIterable.class);
             when(quotasCollection.find()).thenReturn(emptyIterable);
-            com.mongodb.client.MongoCursor<Document> emptyCursor = mock(com.mongodb.client.MongoCursor.class);
+            MongoCursor<Document> emptyCursor = mock(MongoCursor.class);
             when(emptyCursor.hasNext()).thenReturn(false);
             doReturn(emptyCursor).when(emptyIterable).iterator();
 
@@ -187,7 +188,7 @@ class MongoTenantQuotaStoreTest {
 
             FindIterable<Document> iter = mock(FindIterable.class);
             when(quotasCollection.find()).thenReturn(iter);
-            com.mongodb.client.MongoCursor<Document> cursor = mock(com.mongodb.client.MongoCursor.class);
+            MongoCursor<Document> cursor = mock(MongoCursor.class);
             Iterator<Document> docIter = List.of(doc1, doc2).iterator();
             when(cursor.hasNext()).thenAnswer(inv -> docIter.hasNext());
             when(cursor.next()).thenAnswer(inv -> docIter.next());

@@ -19,6 +19,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import org.jboss.logmanager.LogManager;
 
 /**
  * Base class for container-based integration tests.
@@ -119,7 +120,7 @@ public abstract class ContainerBaseIT extends BaseIntegrationIT {
                 COPY --chown=185 docs/ /deployments/docs/
                 USER 185
                 EXPOSE 7070
-                ENV JAVA_OPTS_APPEND="-Dquarkus.http.host=0.0.0.0 -Djava.util.logging.manager=org.jboss.logmanager.LogManager -Dfile.encoding=UTF8 -Deddi.docs.path=/deployments/docs"
+                ENV JAVA_OPTS_APPEND="-Dquarkus.http.host=0.0.0.0 -Djava.util.logging.manager=LogManager -Dfile.encoding=UTF8 -Deddi.docs.path=/deployments/docs"
                 ENV JAVA_APP_JAR="/deployments/quarkus-run.jar"
                 ENTRYPOINT [ "/opt/jboss/container/java/run/run-java.sh" ]
                 """;

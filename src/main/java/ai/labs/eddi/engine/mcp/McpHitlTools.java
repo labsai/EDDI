@@ -36,6 +36,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import jakarta.ws.rs.NotFoundException;
 import static ai.labs.eddi.engine.mcp.McpToolUtils.errorJson;
 import static ai.labs.eddi.engine.mcp.McpToolUtils.escapeJsonString;
 import static ai.labs.eddi.engine.mcp.McpToolUtils.parseIntOrDefault;
@@ -377,7 +378,7 @@ public class McpHitlTools {
             return jsonSerialization.serialize(summary);
         } catch (ForbiddenException e) {
             return errorJson("Access denied", "FORBIDDEN", null);
-        } catch (jakarta.ws.rs.NotFoundException e) {
+        } catch (NotFoundException e) {
             return errorJson("Group conversation not found", "NOT_FOUND", null);
         } catch (ResourceNotFoundException e) {
             return errorJson("Group conversation not found", "NOT_FOUND", null);
@@ -451,7 +452,7 @@ public class McpHitlTools {
             return jsonSerialization.serialize(result);
         } catch (ForbiddenException e) {
             return errorJson("Access denied", "FORBIDDEN", null);
-        } catch (jakarta.ws.rs.NotFoundException e) {
+        } catch (NotFoundException e) {
             return errorJson("Group conversation not found", "NOT_FOUND", null);
         } catch (IResourceStore.ResourceModifiedException e) {
             return errorJson("The group conversation was modified concurrently — reload and retry", "CONFLICT", null);
@@ -496,7 +497,7 @@ public class McpHitlTools {
             return jsonSerialization.serialize(result);
         } catch (ForbiddenException e) {
             return errorJson("Access denied", "FORBIDDEN", null);
-        } catch (jakarta.ws.rs.NotFoundException e) {
+        } catch (NotFoundException e) {
             return errorJson("Group conversation not found", "NOT_FOUND", null);
         } catch (IResourceStore.ResourceModifiedException e) {
             return errorJson("The group conversation was modified concurrently — reload and retry", "CONFLICT", null);
@@ -537,7 +538,7 @@ public class McpHitlTools {
                             "WRONG_STATE", null);
         } catch (ForbiddenException e) {
             return errorJson("Access denied", "FORBIDDEN", null);
-        } catch (jakarta.ws.rs.NotFoundException e) {
+        } catch (NotFoundException e) {
             return errorJson("Group conversation not found", "NOT_FOUND", null);
         } catch (ResourceNotFoundException
                 | IGroupConversationStore.GroupConversationGoneException e) {

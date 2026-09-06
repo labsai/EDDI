@@ -12,6 +12,7 @@ import ai.labs.eddi.engine.internal.groups.LiveDiscussionRegistry;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DynamicAgentConfig;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.GroupMember;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
+import ai.labs.eddi.datastore.serialization.SerializationCustomizer;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
@@ -28,6 +29,7 @@ import ai.labs.eddi.modules.llm.tools.TeardownAgentTool;
 import ai.labs.eddi.modules.llm.tools.spi.ToolAssemblyContext;
 import ai.labs.eddi.modules.llm.tools.spi.ToolContribution;
 import ai.labs.eddi.modules.llm.tools.spi.ToolSourceProvider;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.jboss.logging.Logger;
 
@@ -77,12 +79,37 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
     private static final Logger LOGGER = Logger.getLogger(DynamicAgentToolsProvider.class);
 
     /**
-     * Converts a stored context map back into a typed {@link DynamicAgentConfig}. A
-     * bare {@link ObjectMapper}: this reads a config POJO the engine itself wrote,
-     * so it needs no module registration, and a static instance is thread-safe for
+     * Converts a stored context map back into a typed {@link DynamicAgentConfig}.
+     * Built from the shared {@link SerializationCustomizer} recipe rather than as a
+     * bare {@link ObjectMapper}, and a static instance is thread-safe for
      * {@code convertValue}.
+     * <p>
+     * The recipe matters for one setting: {@code FAIL_ON_UNKNOWN_PROPERTIES=false}.
+     * This map is a first-party config POJO that the engine wrote — but not
+     * necessarily <em>this</em> engine, and not necessarily this version of it. A
+     * group conversation's context map outlives the release that created it, so
+     * during a rolling upgrade, a rollback, or after any field is dropped from
+     * {@code DynamicAgentConfig} (which this project treats as a safe change — see
+     * {@code SerializationCustomizer}, where the same flag is pinned false for
+     * exactly this reason), a strict mapper would throw, the catch below would fire
+     * and every in-flight discussion would silently lose agent creation,
+     * recruitment and delegation for the turn. Failing closed is right for a policy
+     * we genuinely cannot read; a retired key is not that.
+     * <p>
+     * The recipe's other half is deliberately undone. It sets a default property
+     * inclusion of {@code NON_NULL}, and Jackson turns a bare {@code Include} into
+     * both a value <em>and</em> a content inclusion — content inclusion applies to
+     * map entries, and {@code convertValue} serializes the source map before it
+     * reads the POJO back. A stored {@code "allowDelegation": null} would therefore
+     * be dropped rather than applied, leaving the primitive at its POJO default of
+     * {@code true}, where feeding the null through yields {@code false}. On the one
+     * path whose whole invariant is "never let a conversion failure widen the
+     * policy", silently widening a stored {@code null} is that same mistake wearing
+     * a different hat — so inclusion goes back to {@code ALWAYS} and nothing is
+     * filtered on the way in.
      */
-    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final ObjectMapper MAPPER = SerializationCustomizer.configureObjectMapper(new ObjectMapper(), false)
+            .setDefaultPropertyInclusion(JsonInclude.Include.ALWAYS);
 
     /** Well-known data keys for dynamic agent lifecycle tracking. */
     static final String KEY_DYNAMIC_CREATED_AGENT_IDS = MemoryKeys.DYNAMIC_CREATED_AGENT_IDS;
@@ -463,9 +490,11 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
                         sanitize(memory.getAgentId()));
                 return converted;
             } catch (IllegalArgumentException e) {
-                // A map that is not this config (an unknown field, a type mismatch, a
-                // document written by a newer version). Fall through to fail closed —
-                // never let a conversion failure widen the policy.
+                // A map that is not this config — a type mismatch, a value the model
+                // cannot hold. (A merely unknown key is NOT this case: the mapper
+                // ignores it, so a config written by a different version still
+                // resolves.) Fall through to fail closed — never let a conversion
+                // failure widen the policy.
                 LOGGER.warnf("[DYNAMIC] A stored group DynamicAgentConfig for agent='%s' could not be converted (%s) — "
                         + "disabling dynamic agent capabilities for this turn", sanitize(memory.getAgentId()), e.getMessage());
                 return disabledDynamicConfig();

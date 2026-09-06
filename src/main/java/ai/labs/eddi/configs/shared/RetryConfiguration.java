@@ -10,6 +10,10 @@ import org.jboss.logging.Logger;
 
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeoutException;
+import java.net.UnknownHostException;
+import java.net.SocketTimeoutException;
+import java.net.ConnectException;
+import jakarta.ws.rs.WebApplicationException;
 
 /**
  * Shared retry configuration and execution utility.
@@ -184,15 +188,15 @@ public class RetryConfiguration {
 
         while (current != null) {
             // 1. Typed exception matching
-            if (current instanceof java.net.SocketTimeoutException
+            if (current instanceof SocketTimeoutException
                     || current instanceof TimeoutException
-                    || current instanceof java.net.ConnectException
-                    || current instanceof java.net.UnknownHostException) {
+                    || current instanceof ConnectException
+                    || current instanceof UnknownHostException) {
                 return true;
             }
 
             // 2. HTTP status code matching from typed exceptions
-            if (current instanceof jakarta.ws.rs.WebApplicationException wae) {
+            if (current instanceof WebApplicationException wae) {
                 int status = wae.getResponse().getStatus();
                 if (status == 429 || status == 502 || status == 503 || status == 504) {
                     return true;

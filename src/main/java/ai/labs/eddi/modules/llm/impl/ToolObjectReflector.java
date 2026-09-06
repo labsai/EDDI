@@ -15,6 +15,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import dev.langchain4j.agent.tool.Tool;
 
 /**
  * Turns tool <em>objects</em> (beans carrying {@code @Tool}-annotated methods)
@@ -92,8 +93,8 @@ final class ToolObjectReflector {
 
             // Find methods annotated with @Tool and map them to executors
             for (Method method : toolClass.getDeclaredMethods()) {
-                if (method.isAnnotationPresent(dev.langchain4j.agent.tool.Tool.class)) {
-                    dev.langchain4j.agent.tool.Tool toolAnnotation = method.getAnnotation(dev.langchain4j.agent.tool.Tool.class);
+                if (method.isAnnotationPresent(Tool.class)) {
+                    Tool toolAnnotation = method.getAnnotation(Tool.class);
                     String toolName = toolAnnotation.name().isEmpty() ? method.getName() : toolAnnotation.name();
                     toolExecutors.put(toolName, new DefaultToolExecutor(tool, method));
                     toolSources.put(toolName, sourceForBuiltInTool(tool));
