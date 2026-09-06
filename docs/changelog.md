@@ -86,6 +86,28 @@ guard now requires the candidate PR to actually touch `$DOCKERFILE`, checked wit
 both open Dependabot Docker PRs (#716, #631) touch only `Dockerfile.demo`, so the guard now
 falls through and the digest PR would be created.
 
+### Review round — which way the guard should fail
+
+Both CodeRabbit and Copilot flagged the same thing: the guard suppressed `gh` stderr with
+`2>/dev/null`, so an API error was indistinguishable from "no match". Right, and fixed —
+stderr is no longer discarded, both `gh` calls have their exit status checked, and each failure
+emits a `::warning::` annotation naming what could not be read.
+
+Where the two bots disagreed was the *direction* of the failure. CodeRabbit asked to exit the
+workflow on any API error ("fail closed"); Copilot asked to warn and continue with an empty
+list. Took Copilot's direction, deliberately: fail-closed here means no PR that week, which is
+the same outcome as the bug being fixed, whereas degrading toward *opening* the PR risks at
+worst a duplicate that is visible and closed in one click. Nor is a red job a reliable alarm in
+this repo — this very workflow failed on 2026-07-13, 07-20, 07-27 and 08-03, four consecutive
+weeks, with nobody acting on it. When the guard cannot complete it now also writes a
+"Dependabot guard degraded" block into the step summary, so a duplicate is explained rather
+than merely appearing.
+
+Exercised the rewritten guard against a stubbed `gh` on all four paths: Dependabot PRs touching
+only `Dockerfile.demo` (no match, PR created — the original bug's correct behaviour), one
+touching the production Dockerfile (match, skipped), `gh pr list` failing, and `gh pr view`
+failing per-PR. The block is clean under `shellcheck --severity=style`.
+
 The failure mode is worth naming because it is the quiet kind: the weekly job reported
 **success**, its own summary said the digest had changed, and the outcome line read
 `Dependabot PR #716 already covers this Dockerfile`. Nothing was red except the thing the

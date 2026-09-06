@@ -165,14 +165,44 @@ jobs:
           # That false match silently suppressed the production UBI digest bump
           # while the CI image scan was failing on the exact CVEs the bump
           # fixes, so require the PR to actually touch $DOCKERFILE.
+          #
+          # Every `gh` failure is annotated rather than swallowed, and the guard
+          # then degrades toward *opening* the PR. That direction is deliberate:
+          # a duplicate PR is visible and closed in one click, whereas a skipped
+          # one is the exact silent failure above. Failing the step instead would
+          # be no safer — this workflow was red for four consecutive weeks
+          # (2026-07-13 through 08-03) with nobody acting on it, so "the job goes
+          # red" is not a reliable channel here.
           DEPENDABOT_PR=""
-          for PR in $(gh pr list --author 'app/dependabot' --state open \
-            --json number,headRefName -q '.[] | select(.headRefName | startswith("dependabot/docker/")) | .number' 2>/dev/null); do
-            if gh pr view "$PR" --json files -q '.files[].path' 2>/dev/null | grep -qxF "$DOCKERFILE"; then
+          GUARD_DEGRADED=""
+
+          if ! CANDIDATES=$(gh pr list --author 'app/dependabot' --state open \
+            --json number,headRefName -q '.[] | select(.headRefName | startswith("dependabot/docker/")) | .number'); then
+            echo "::warning::Could not list Dependabot PRs — continuing as if none are open"
+            GUARD_DEGRADED="the Dependabot PR list could not be read"
+            CANDIDATES=""
+          fi
+
+          for PR in $CANDIDATES; do
+            if ! PR_FILES=$(gh pr view "$PR" --json files -q '.files[].path'); then
+              echo "::warning::Could not read the file list of Dependabot PR #${PR} — not treating it as a match"
+              GUARD_DEGRADED="the file list of PR #${PR} could not be read"
+              continue
+            fi
+            if printf '%s\n' "$PR_FILES" | grep -qxF "$DOCKERFILE"; then
               DEPENDABOT_PR="$PR"
               break
             fi
           done
+
+          if [ -n "$GUARD_DEGRADED" ] && [ -z "$DEPENDABOT_PR" ]; then
+            {
+              echo "### ⚠️ Dependabot guard degraded"
+              echo "${GUARD_DEGRADED}, so this run could not rule out a Dependabot PR"
+              echo "covering \`${DOCKERFILE}\`. Proceeding anyway — check for a duplicate."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
           if [ -n "$DEPENDABOT_PR" ]; then
             echo "Dependabot PR #${DEPENDABOT_PR} already covers this Dockerfile — skipping"
             echo "### ℹ️ Dependabot PR #${DEPENDABOT_PR} already open for Docker digest" >> $GITHUB_STEP_SUMMARY
