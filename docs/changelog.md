@@ -146,6 +146,15 @@ Four findings from CodeRabbit and Copilot, all taken.
 the "categorically outside Red Hat's policy" wording and it was right; the matrix says
 **Supported**. Corrected in both the doc and this entry rather than quietly reworded.
 
+*A second round then caught that the correction had left the page arguing with itself.* The
+opening bullet still said the image is "supported by Red Hat when run on RHEL or OpenShift" and
+the note below the platform table still said "any RHEL-based platform", while the new paragraph
+three lines further down said RHEL 8 is unsupported. An operator reading top-down would have
+been sent to RHEL 8 before ever reaching the caveat. Both broad claims are now bounded, the
+"runs anywhere with a container runtime" statement is explicitly separated from the *supported*
+configuration, and the platform table gained explicit RHEL 9 and RHEL 8 rows so the boundary is
+visible where support levels are actually looked up.
+
 **`ContainerBaseIT` should carry the digest, not just the tag** — raised by both bots. Taken
 further than asked: rather than restating the digest in a second place, the test now parses the
 production `FROM` line, so the class of drift the bots were pointing at cannot recur.
