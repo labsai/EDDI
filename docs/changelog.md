@@ -49,6 +49,83 @@ bottom of this file and are never archived.
 
 ---
 
+## 🐳 fix(docker): move the base image digest and stop the weekly check suppressing itself (2026-09-06)
+
+**Repo:** EDDI (`fix/base-image-digest-and-check`)
+
+`main` has not published an image since 2026-08-30. Every CI run fails at **Scan Docker image
+for vulnerabilities**, and every job after it — push, cosign signing, SLSA provenance, smoke
+test, GitHub release, Red Hat catalog publish — is skipped. Reproduced locally with the gate's
+own flags (`--severity CRITICAL,HIGH --ignore-unfixed`), which exits 1 on six findings, all
+from the base image:
+
+| Package | CVE | Installed | Fixed in |
+|---|---|---|---|
+| `curl-minimal`, `libcurl-minimal` | CVE-2026-8286 (TLS config mismatch) | 7.76.1-40.el9 | 7.76.1-40.el9_8.5 |
+| `curl-minimal`, `libcurl-minimal` | CVE-2026-9547 (SSH host key bypass) | 7.76.1-40.el9 | 7.76.1-40.el9_8.5 |
+| `sqlite-libs` | CVE-2026-11822, CVE-2026-11824 (FTS5 RCE, heap overflow) | 3.34.1-10.el9_8 | 3.34.1-11.el9_8 |
+
+**Digest update, not a stopgap.** The pin was build `1.24-3.1786536503` (2026-08-12). Red Hat
+republished the tag on 2026-08-24 as `1.24-3.1787587037`; the `1.24` tag now resolves to
+`sha256:d5f7e0c5…`, which carries all four fixes. Per the remediation procedure in
+[`AGENTS.md`](../AGENTS.md) this is the clean path — the pin moves, it is never dropped, and no
+`microdnf update` line is needed. Rebuilt from the amended Dockerfile and re-ran the gate: zero
+findings, exit 0. Also booted the image against MongoDB and drove a two-turn rule-based
+conversation end to end (create ruleset → output set → workflow → agent → deploy → start →
+say), plus the smoke-test assertions CI makes: health `UP` on all four checks, `/openapi` 200,
+all three security headers present.
+
+### Why nobody was told
+
+`base-image-check.yml` **saw** the new digest on 2026-08-31 and declined to open the PR. Its
+Dependabot guard matched any open PR whose branch starts `dependabot/docker/`, and #716 —
+which bumps the *demo* image's `eclipse-temurin` base in `Dockerfile.demo` — satisfies that.
+This repo has more than one Dockerfile, so the branch prefix was never a sufficient test. The
+guard now requires the candidate PR to actually touch `$DOCKERFILE`, checked with
+`gh pr view --json files` and an exact whole-line `grep -qxF`. Verified against the live repo:
+both open Dependabot Docker PRs (#716, #631) touch only `Dockerfile.demo`, so the guard now
+falls through and the digest PR would be created.
+
+The failure mode is worth naming because it is the quiet kind: the weekly job reported
+**success**, its own summary said the digest had changed, and the outcome line read
+`Dependabot PR #716 already covers this Dockerfile`. Nothing was red except the thing the
+automation existed to prevent.
+
+### UBI 10 — evaluated, not adopted
+
+Checked whether the app runs on `ubi10/openjdk-25-runtime`, since Red Hat's own Quarkus
+material still shows UBI 9. It does. Same UID 185, same `run-java.sh` entrypoint, same
+`JBOSS_CONTAINER_*` module layout, `curl` and `microdnf` both present, and the *identical* JDK
+build on both (`25.0.4.1+1-LTS`, Red_Hat-25.0.4.1.1-1) — so no JVM-level difference at all.
+The unmodified Dockerfile builds on it with only the `FROM` line changed; the image boots,
+passes the container `HEALTHCHECK`, serves `/openapi` and `/manage/`, emits an identical set of
+startup warnings, and runs the same two-turn conversation. Trivy reports **zero** findings at
+every severity, against 10 HIGH and 223 MEDIUM/LOW on UBI 9. It is also ~19 MB smaller.
+
+One real behavioural difference, and it is in the OS crypto policy rather than the JVM: RHEL 10
+additionally disables the static-RSA TLS 1.2 suites (`TLS_RSA_WITH_AES_*_CBC_*`,
+`TLS_RSA_WITH_AES_*_GCM_*`). Red Hat's OpenJDK honours `/etc/crypto-policies/back-ends/java.config`,
+and `java -XshowSettings:security:properties` confirms the suites land in the JVM's
+`jdk.tls.disabledAlgorithms` on UBI 10 and not on UBI 9. Every current LLM provider negotiates
+ECDHE and is unaffected — TLS to the OpenAI, Anthropic and Google endpoints succeeds from
+inside the UBI 10 image — but an on-prem endpoint offering only non-forward-secret suites would
+connect on UBI 9 and fail on UBI 10.
+
+Not switched in this change. The base OS is what `redhat-certify.yml` submits to the Red Hat
+container catalog, and a major-version move is a certification decision rather than a CVE fix.
+Kept separate so the digest bump can land immediately and unblock releases.
+
+### Follow-up not taken here
+
+`base-image-check.yml`'s "newer tag" probe only scans `1.25`…`1.29` **within the same
+repository**, so it cannot surface a UBI 10 image no matter how long one exists. Left as-is;
+widening it belongs with the decision above.
+
+**Files:** [`src/main/docker/Dockerfile`](../src/main/docker/Dockerfile),
+[`.github/workflows/base-image-check.yml`](../.github/workflows/base-image-check.yml)
+
+---
+
 ## 🔀 fix(build): repair `main` while merging it into the v5 compatibility branch (2026-09-06)
 
 **Repo:** EDDI (`fix/review-legacy-compat`)

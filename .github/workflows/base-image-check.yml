@@ -157,9 +157,22 @@ jobs:
             exit 0
           fi
 
-          # Check if Dependabot already has a PR for this Dockerfile
-          DEPENDABOT_PR=$(gh pr list --author 'app/dependabot' --state open \
-            --json number,headRefName -q '[.[] | select(.headRefName | startswith("dependabot/docker/"))] | first | .number // empty' 2>/dev/null || echo "")
+          # Check if Dependabot already has a PR for THIS Dockerfile.
+          #
+          # The branch prefix alone is not enough. This repo has more than one
+          # Dockerfile, and a Dependabot PR bumping the demo image's
+          # eclipse-temurin base carries the same `dependabot/docker/` prefix.
+          # That false match silently suppressed the production UBI digest bump
+          # while the CI image scan was failing on the exact CVEs the bump
+          # fixes, so require the PR to actually touch $DOCKERFILE.
+          DEPENDABOT_PR=""
+          for PR in $(gh pr list --author 'app/dependabot' --state open \
+            --json number,headRefName -q '.[] | select(.headRefName | startswith("dependabot/docker/")) | .number' 2>/dev/null); do
+            if gh pr view "$PR" --json files -q '.files[].path' 2>/dev/null | grep -qxF "$DOCKERFILE"; then
+              DEPENDABOT_PR="$PR"
+              break
+            fi
+          done
           if [ -n "$DEPENDABOT_PR" ]; then
             echo "Dependabot PR #${DEPENDABOT_PR} already covers this Dockerfile — skipping"
             echo "### ℹ️ Dependabot PR #${DEPENDABOT_PR} already open for Docker digest" >> $GITHUB_STEP_SUMMARY
