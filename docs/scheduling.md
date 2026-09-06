@@ -267,6 +267,33 @@ curl http://localhost:7070/schedulestore/schedules/admin/failed?limit=50
 > against others on the same path, and use `maxCostPerFire` / `maxCostPerRun`
 > rather than the logged number to bound spend.
 
+### Fire Logs and Erasure
+
+A fire log carries the `conversationId` of the turn it started, and it is only
+findable by its `scheduleId` — so a fire log whose schedule has been deleted is
+personal data that nothing can reach again. Deleting a schedule therefore always
+deletes its fire logs, on the single-schedule path and on all three bulk paths
+(by agent, by name, and the GDPR erasure by user).
+
+Two mechanisms keep that true even while the schedule is firing:
+
+- **The write is conditional.** A fire log is stored only if its schedule still
+  exists at the moment of the write — on PostgreSQL an
+  `INSERT … WHERE EXISTS (SELECT 1 FROM eddi_schedules WHERE id = ?)`, on
+  MongoDB (which has no conditional insert) an insert that is verified against
+  the schedule immediately afterwards and removed again if it has gone. A fire
+  in flight when an erasure runs simply writes no log. The fire itself is
+  unaffected; only its log is dropped.
+- **The delete sweeps twice.** The cascade removes the logs that exist when it
+  runs — on PostgreSQL in the same transaction as the schedule delete — and a
+  second indexed pass runs after the schedules are gone. That remains the
+  belt-and-braces for a log written by an instance that had not yet observed the
+  delete.
+
+The consequence for operators: a schedule deleted mid-fire may lose the fire log
+for that one attempt. That is deliberate — the alternative is an unreachable
+record of an erased user's conversation.
+
 ### State Machine
 
 Each schedule follows a state machine:

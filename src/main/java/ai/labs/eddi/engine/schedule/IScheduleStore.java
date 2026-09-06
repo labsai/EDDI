@@ -242,15 +242,57 @@ public interface IScheduleStore {
     }
 
     /**
+     * The fire whose outcome an unfenced transition belongs to cannot be named, so
+     * the write applies to whatever claim the row currently holds.
+     * <p>
+     * Only for callers that hold no claim at all and are not reporting the outcome
+     * of a fire — {@code RestScheduleStore.dismissDeadLetter} is the one: it clears
+     * a DEAD_LETTERED row, where by definition no fire is running. Every caller
+     * that DID fire must pass its {@code fireId}; see
+     * {@link #markCompleted(String, String, Instant)}.
+     */
+    String UNFENCED = null;
+
+    /**
      * Mark a schedule fire as completed. Resets fire state and sets nextFire. If
      * nextFire is null (one-shot schedule), the schedule is disabled.
+     *
+     * @param expectedFireId
+     *            the {@code fireId} of the claim this outcome belongs to (see
+     *            {@link #fireIdOf}); the write is a no-op unless the row still
+     *            holds exactly that claim. {@link #UNFENCED} skips the check.
+     *            <p>
+     *            Lease stealing is explicitly supported ({@link #tryClaim} reclaims
+     *            a CLAIMED row whose lease expired), so a slow fire A and its
+     *            replacement fire B can be in flight at once. Without the fence, A
+     *            finishing afterwards writes over B's live claim by schedule id
+     *            alone: the row goes back to PENDING with B still running, and the
+     *            next poll fires a third copy into the same conversation. Fencing
+     *            makes the stale write land nowhere, which is the correct outcome —
+     *            B owns the row and will report its own result.
      */
-    void markCompleted(String scheduleId, Instant nextFire) throws IResourceStore.ResourceStoreException;
+    void markCompleted(String scheduleId, String expectedFireId, Instant nextFire) throws IResourceStore.ResourceStoreException;
+
+    /** @see #markCompleted(String, String, Instant) */
+    default void markCompleted(String scheduleId, Instant nextFire) throws IResourceStore.ResourceStoreException {
+        markCompleted(scheduleId, UNFENCED, nextFire);
+    }
 
     /**
      * Mark a schedule fire as failed. Increments failCount and sets nextRetryAt.
+     *
+     * @param expectedFireId
+     *            fences the write to the claim that fired — see
+     *            {@link #markCompleted(String, String, Instant)}. A stale failure
+     *            that landed anyway would increment {@code failCount} against a
+     *            healthy running fire and could dead-letter it.
      */
-    void markFailed(String scheduleId, Instant nextRetryAt) throws IResourceStore.ResourceStoreException;
+    void markFailed(String scheduleId, String expectedFireId, Instant nextRetryAt) throws IResourceStore.ResourceStoreException;
+
+    /** @see #markFailed(String, String, Instant) */
+    default void markFailed(String scheduleId, Instant nextRetryAt) throws IResourceStore.ResourceStoreException {
+        markFailed(scheduleId, UNFENCED, nextRetryAt);
+    }
 
     /**
      * Release the claim of a fire that was SKIPPED and re-arm the schedule at
@@ -273,17 +315,38 @@ public interface IScheduleStore {
      * the next cadence. Everything about the retry state is left exactly as the
      * fire found it.
      *
+     * @param expectedFireId
+     *            fences the write to the claim that fired — see
+     *            {@link #markCompleted(String, String, Instant)}
      * @param nextFire
      *            the next cadence, never null — a schedule with nothing to re-arm
      *            to (a one-shot) is not routed here; see
      *            {@code SchedulePollerService.onFireSkipped}
      */
-    void markSkipped(String scheduleId, Instant nextFire) throws IResourceStore.ResourceStoreException;
+    void markSkipped(String scheduleId, String expectedFireId, Instant nextFire) throws IResourceStore.ResourceStoreException;
+
+    /** @see #markSkipped(String, String, Instant) */
+    default void markSkipped(String scheduleId, Instant nextFire) throws IResourceStore.ResourceStoreException {
+        markSkipped(scheduleId, UNFENCED, nextFire);
+    }
 
     /**
      * Mark a schedule as dead-lettered (retries exhausted).
+     *
+     * @param expectedFireId
+     *            fences the write to the claim that fired — see
+     *            {@link #markCompleted(String, String, Instant)}. It is the other
+     *            half of {@code markFailed}: a stale fire whose final failure lands
+     *            on the retry ceiling must not be able to dead-letter a row that a
+     *            replacement fire now owns, or fencing {@code markFailed} alone
+     *            just moves the damage to the last attempt.
      */
-    void markDeadLettered(String scheduleId) throws IResourceStore.ResourceStoreException;
+    void markDeadLettered(String scheduleId, String expectedFireId) throws IResourceStore.ResourceStoreException;
+
+    /** @see #markDeadLettered(String, String) */
+    default void markDeadLettered(String scheduleId) throws IResourceStore.ResourceStoreException {
+        markDeadLettered(scheduleId, UNFENCED);
+    }
 
     /**
      * Re-queue a dead-lettered schedule for another attempt.
@@ -292,6 +355,17 @@ public interface IScheduleStore {
 
     // --- Fire Log ---
 
+    /**
+     * Record one fire attempt — <em>if</em> its schedule still exists.
+     * <p>
+     * A fire log carries the conversationId of the turn it started, and it is only
+     * findable by its scheduleId, so a log whose schedule has been deleted is
+     * personal data no erasure path can reach again. Implementations must therefore
+     * make the write conditional on the schedule, so a fire that is in flight when
+     * a cascade delete or GDPR erasure runs cannot commit its log afterwards.
+     * Writing no row in that case is the correct outcome, not an error — the fire's
+     * own result is unaffected.
+     */
     void logFire(ScheduleFireLog fireLog) throws IResourceStore.ResourceStoreException;
 
     List<ScheduleFireLog> readFireLogs(String scheduleId, int limit) throws IResourceStore.ResourceStoreException;

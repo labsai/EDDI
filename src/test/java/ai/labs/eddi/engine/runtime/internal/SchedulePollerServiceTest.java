@@ -131,7 +131,7 @@ class SchedulePollerServiceTest {
 
         verify(scheduleStore).tryClaim(eq("sched-1"), eq("test-instance"), any(), any());
         verify(fireExecutor).fire(eq(schedule), eq("test-instance"), eq(1));
-        verify(scheduleStore).markCompleted(eq("sched-1"), any()); // nextFire recomputed
+        verify(scheduleStore).markCompleted(eq("sched-1"), any(), any()); // nextFire recomputed
     }
 
     @Test
@@ -280,8 +280,8 @@ class SchedulePollerServiceTest {
         poller.pollDueSchedules();
 
         // Should mark failed with exponential backoff: 15 * 4^0 = 15 seconds
-        verify(scheduleStore).markFailed(eq("sched-1"), any());
-        verify(scheduleStore, never()).markDeadLettered(any());
+        verify(scheduleStore).markFailed(eq("sched-1"), any(), any());
+        verify(scheduleStore, never()).markDeadLettered(any(), any());
     }
 
     @Test
@@ -294,8 +294,8 @@ class SchedulePollerServiceTest {
 
         poller.pollDueSchedules();
 
-        verify(scheduleStore).markDeadLettered("sched-1");
-        verify(scheduleStore, never()).markFailed(any(), any());
+        verify(scheduleStore).markDeadLettered(eq("sched-1"), any());
+        verify(scheduleStore, never()).markFailed(any(), any(), any());
     }
 
     /**
@@ -341,13 +341,13 @@ class SchedulePollerServiceTest {
             }
             markFailedCompleted.set(true);
             return null;
-        }).when(scheduleStore).markFailed(any(), any());
+        }).when(scheduleStore).markFailed(any(), any(), any());
 
         poller.pollDueSchedules();
 
         assertTrue(markFailedCompleted.get(),
                 "failCount was never incremented: the schedule stays CLAIMED with nextFire in the past and re-fires forever");
-        verify(scheduleStore).markFailed(eq("sched-int"), any());
+        verify(scheduleStore).markFailed(eq("sched-int"), any(), any());
     }
 
     // --- Heartbeat scheduling ---
@@ -369,7 +369,7 @@ class SchedulePollerServiceTest {
 
         poller.pollDueSchedules();
 
-        verify(scheduleStore).markCompleted(eq("hb-1"), eq(due.plusSeconds(300)));
+        verify(scheduleStore).markCompleted(eq("hb-1"), any(), eq(due.plusSeconds(300)));
     }
 
     @Test
@@ -383,7 +383,7 @@ class SchedulePollerServiceTest {
         poller.pollDueSchedules();
 
         // One-shot: null nextFire → MongoScheduleStore disables automatically
-        verify(scheduleStore).markCompleted(eq("one-1"), isNull());
+        verify(scheduleStore).markCompleted(eq("one-1"), any(), isNull());
     }
 
     // --- Finding #17: concurrent dispatch + error isolation ---
@@ -422,8 +422,8 @@ class SchedulePollerServiceTest {
         poller.pollDueSchedules();
 
         // good completes; bad is marked failed via the per-fire error isolation path.
-        verify(scheduleStore).markCompleted(eq("good"), any());
-        verify(scheduleStore).markFailed(eq("bad"), any());
+        verify(scheduleStore).markCompleted(eq("good"), any(), any());
+        verify(scheduleStore).markFailed(eq("bad"), any(), any());
     }
 
     @Test
@@ -463,7 +463,7 @@ class SchedulePollerServiceTest {
         poller.pollDueSchedules();
 
         var nextFire = ArgumentCaptor.forClass(Instant.class);
-        verify(scheduleStore).markCompleted(eq("hb-drift"), nextFire.capture());
+        verify(scheduleStore).markCompleted(eq("hb-drift"), any(), nextFire.capture());
         assertEquals(due.plusSeconds(60), nextFire.getValue(),
                 "the cadence must be due + interval, not finish-time + interval");
     }
@@ -499,7 +499,7 @@ class SchedulePollerServiceTest {
         Instant afterPoll = Instant.now();
 
         var clamped = ArgumentCaptor.forClass(Instant.class);
-        verify(scheduleStore).markCompleted(eq("hb-overrun"), clamped.capture());
+        verify(scheduleStore).markCompleted(eq("hb-overrun"), any(), clamped.capture());
         assertFalse(clamped.getValue().isBefore(beforePoll.plusSeconds(60)),
                 "an overrun fire must be clamped to now + interval, not left in the past: " + clamped.getValue());
         assertFalse(clamped.getValue().isAfter(afterPoll.plusSeconds(60)),
@@ -519,7 +519,7 @@ class SchedulePollerServiceTest {
         poller.pollDueSchedules();
 
         var kept = ArgumentCaptor.forClass(Instant.class);
-        verify(scheduleStore).markCompleted(eq("hb-late"), kept.capture());
+        verify(scheduleStore).markCompleted(eq("hb-late"), any(), kept.capture());
         assertEquals(due.plusSeconds(60), kept.getValue(),
                 "a fire that ran late but inside the interval keeps the cadence — the clamp is for "
                         + "overruns only, and must not quietly re-anchor every fire on now");
@@ -647,7 +647,7 @@ class SchedulePollerServiceTest {
         poller.pollDueSchedules();
 
         var nextFire = ArgumentCaptor.forClass(Instant.class);
-        verify(scheduleStore).markSkipped(eq("sched-skip-6"), nextFire.capture());
+        verify(scheduleStore).markSkipped(eq("sched-skip-6"), any(), nextFire.capture());
         assertNotNull(nextFire.getValue(), "a null nextFire would strand the schedule permanently");
         assertTrue(nextFire.getValue().isAfter(Instant.now()), "re-armed into the past: " + nextFire.getValue());
     }
@@ -664,7 +664,7 @@ class SchedulePollerServiceTest {
         poller.pollDueSchedules();
 
         var nextFire = ArgumentCaptor.forClass(Instant.class);
-        verify(scheduleStore).markSkipped(eq("sched-skip-7"), nextFire.capture());
+        verify(scheduleStore).markSkipped(eq("sched-skip-7"), any(), nextFire.capture());
         assertFalse(nextFire.getValue().isBefore(before.plusSeconds(3600)),
                 "with no due time to anchor on, the interval runs from now: " + nextFire.getValue());
         assertTrue(nextFire.getValue().isBefore(Instant.now().plusSeconds(3660)), "nextFire: " + nextFire.getValue());
@@ -683,13 +683,13 @@ class SchedulePollerServiceTest {
         when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
         when(scheduleStore.tryClaim(any(), any(), any(), any())).thenReturn(true);
         when(fireExecutor.fire(any(), any(), anyInt())).thenReturn(makeFireLog("sched-skip-8", FireStatus.SKIPPED.name()));
-        doThrow(new IResourceStore.ResourceStoreException("db down")).when(scheduleStore).markSkipped(any(), any());
+        doThrow(new IResourceStore.ResourceStoreException("db down")).when(scheduleStore).markSkipped(any(), any(), any());
 
         assertDoesNotThrow(() -> poller.pollDueSchedules());
 
-        verify(scheduleStore, never()).markFailed(any(), any());
-        verify(scheduleStore, never()).markDeadLettered(any());
-        verify(scheduleStore, never()).markCompleted(any(), any());
+        verify(scheduleStore, never()).markFailed(any(), any(), any());
+        verify(scheduleStore, never()).markDeadLettered(any(), any());
+        verify(scheduleStore, never()).markCompleted(any(), any(), any());
     }
 
     // --- Manual fires (REST) ---
@@ -807,8 +807,8 @@ class SchedulePollerServiceTest {
 
         poller.recordManualFireOutcome(schedule, makeFireLog("manual-3", FireStatus.COMPLETED.name()));
 
-        verify(scheduleStore).markCompleted(eq("manual-3"), any());
-        verify(scheduleStore, never()).markFailed(anyString(), any());
+        verify(scheduleStore).markCompleted(eq("manual-3"), any(), any());
+        verify(scheduleStore, never()).markFailed(anyString(), any(), any());
     }
 
     @Test
@@ -817,8 +817,8 @@ class SchedulePollerServiceTest {
 
         poller.recordManualFireOutcome(schedule, makeFireLog("manual-4", FireStatus.FAILED.name()));
 
-        verify(scheduleStore).markFailed(eq("manual-4"), any());
-        verify(scheduleStore, never()).markCompleted(anyString(), any());
+        verify(scheduleStore).markFailed(eq("manual-4"), any(), any());
+        verify(scheduleStore, never()).markCompleted(anyString(), any(), any());
     }
 
     /**
@@ -832,7 +832,7 @@ class SchedulePollerServiceTest {
 
         assertDoesNotThrow(() -> poller.recordManualFireOutcome(schedule, null));
 
-        verify(scheduleStore).markFailed(eq("manual-5"), any());
+        verify(scheduleStore).markFailed(eq("manual-5"), any(), any());
     }
 
     /**
@@ -852,7 +852,7 @@ class SchedulePollerServiceTest {
 
         poller.recordManualFireOutcome(schedule, makeFireLog("manual-6", FireStatus.COMPLETED.name()));
 
-        verify(scheduleStore).markCompleted("manual-6", Instant.parse("2099-01-01T01:00:00Z"));
+        verify(scheduleStore).markCompleted(eq("manual-6"), any(), eq(Instant.parse("2099-01-01T01:00:00Z")));
     }
 
     /**
@@ -882,7 +882,7 @@ class SchedulePollerServiceTest {
 
         // null nextFire is what markCompleted reads as "one-shot finished — disable
         // it".
-        verify(scheduleStore).markCompleted("manual-7", null);
+        verify(scheduleStore).markCompleted(eq("manual-7"), any(), isNull());
     }
 
     // --- Skipped fires (a dropped turn is not a failed one) ---
@@ -914,9 +914,9 @@ class SchedulePollerServiceTest {
             poller.pollDueSchedules();
         }
 
-        verify(scheduleStore, never()).markDeadLettered(any());
-        verify(scheduleStore, never()).markFailed(any(), any());
-        verify(scheduleStore, times(10)).markSkipped(eq("sched-skip"), any());
+        verify(scheduleStore, never()).markDeadLettered(any(), any());
+        verify(scheduleStore, never()).markFailed(any(), any(), any());
+        verify(scheduleStore, times(10)).markSkipped(eq("sched-skip"), any(), any());
         assertEquals(0, schedule.getFailCount(), "a skip must not count as a failed attempt");
     }
 
@@ -937,8 +937,8 @@ class SchedulePollerServiceTest {
 
         poller.pollDueSchedules();
 
-        verify(scheduleStore, never()).markCompleted(any(), any());
-        verify(scheduleStore).markSkipped(eq("sched-skip-2"), any());
+        verify(scheduleStore, never()).markCompleted(any(), any(), any());
+        verify(scheduleStore).markSkipped(eq("sched-skip-2"), any(), any());
     }
 
     /**
@@ -958,7 +958,7 @@ class SchedulePollerServiceTest {
 
         poller.pollDueSchedules();
 
-        verify(scheduleStore).markSkipped("sched-skip-3", due.plusSeconds(3600));
+        verify(scheduleStore).markSkipped(eq("sched-skip-3"), any(), eq(due.plusSeconds(3600)));
     }
 
     /**
@@ -985,7 +985,7 @@ class SchedulePollerServiceTest {
 
         poller.pollDueSchedules();
 
-        verify(scheduleStore).markSkipped("sched-skip-5", Instant.parse("2099-01-01T00:00:00Z"));
+        verify(scheduleStore).markSkipped(eq("sched-skip-5"), any(), eq(Instant.parse("2099-01-01T00:00:00Z")));
     }
 
     /**
@@ -1006,8 +1006,8 @@ class SchedulePollerServiceTest {
 
         poller.pollDueSchedules();
 
-        verify(scheduleStore, never()).markSkipped(any(), any());
-        verify(scheduleStore).markFailed(eq("sched-skip-4"), any());
+        verify(scheduleStore, never()).markSkipped(any(), any(), any());
+        verify(scheduleStore).markFailed(eq("sched-skip-4"), any(), any());
     }
 
     /**
@@ -1025,10 +1025,10 @@ class SchedulePollerServiceTest {
 
         poller.recordManualFireOutcome(schedule, makeFireLog("manual-skip", FireStatus.SKIPPED.name()));
 
-        verify(scheduleStore).markSkipped("manual-skip", Instant.parse("2099-01-01T00:00:00Z"));
-        verify(scheduleStore, never()).markFailed(any(), any());
-        verify(scheduleStore, never()).markCompleted(any(), any());
-        verify(scheduleStore, never()).markDeadLettered(any());
+        verify(scheduleStore).markSkipped(eq("manual-skip"), any(), eq(Instant.parse("2099-01-01T00:00:00Z")));
+        verify(scheduleStore, never()).markFailed(any(), any(), any());
+        verify(scheduleStore, never()).markCompleted(any(), any(), any());
+        verify(scheduleStore, never()).markDeadLettered(any(), any());
     }
 
     /**
@@ -1043,8 +1043,70 @@ class SchedulePollerServiceTest {
 
         poller.recordManualFireOutcome(schedule, makeFireLog("manual-skip-overdue", FireStatus.SKIPPED.name()));
 
-        verify(scheduleStore).markSkipped("manual-skip-overdue", due.plusSeconds(3600));
-        verify(scheduleStore, never()).markFailed(any(), any());
+        verify(scheduleStore).markSkipped(eq("manual-skip-overdue"), any(), eq(due.plusSeconds(3600)));
+        verify(scheduleStore, never()).markFailed(any(), any(), any());
+    }
+
+    /**
+     * Every outcome write must name the claim it belongs to.
+     * <p>
+     * Lease stealing is deliberate: {@code findDueSchedules}/{@code tryClaim} hand
+     * a CLAIMED row whose lease expired to a second instance while the first fire
+     * may still be running. When that first fire finally finishes, an outcome
+     * written by schedule id ALONE lands on the replacement's claim — releasing it
+     * back to PENDING with the replacement still executing, so the next poll starts
+     * a third copy of the same fire into the same persistent conversation. Passing
+     * the claim's {@code fireId} makes the stale write match nothing, which is the
+     * point: the row no longer belongs to that fire.
+     * <p>
+     * All four transitions are checked together because fencing three of them and
+     * forgetting the fourth just moves the damage: an unfenced
+     * {@code markDeadLettered} would kill a healthy replacement fire on the losing
+     * fire's last attempt.
+     */
+    @Test
+    void recordFireOutcome_everyTransitionIsFencedByTheClaimsFireId() throws Exception {
+        var completed = makeCronSchedule("fence-c", "0 9 * * *", "hi");
+        completed.setFireId("fence-c_claim");
+        poller.recordManualFireOutcome(completed, makeFireLog("fence-c", FireStatus.COMPLETED.name()));
+        verify(scheduleStore).markCompleted(eq("fence-c"), eq("fence-c_claim"), any());
+
+        var failed = makeCronSchedule("fence-f", "0 9 * * *", "hi");
+        failed.setFireId("fence-f_claim");
+        poller.recordManualFireOutcome(failed, makeFireLog("fence-f", FireStatus.FAILED.name()));
+        verify(scheduleStore).markFailed(eq("fence-f"), eq("fence-f_claim"), any());
+
+        var skipped = makeCronSchedule("fence-s", "0 9 * * *", "hi");
+        skipped.setFireId("fence-s_claim");
+        poller.recordManualFireOutcome(skipped, makeFireLog("fence-s", FireStatus.SKIPPED.name()));
+        verify(scheduleStore).markSkipped(eq("fence-s"), eq("fence-s_claim"), any());
+
+        var deadLettered = makeCronSchedule("fence-d", "0 9 * * *", "hi");
+        deadLettered.setFireId("fence-d_claim");
+        deadLettered.setFailCount(4); // one short of the maxRetries=5 this poller was built with
+        poller.recordManualFireOutcome(deadLettered, makeFireLog("fence-d", FireStatus.FAILED.name()));
+        verify(scheduleStore).markDeadLettered("fence-d", "fence-d_claim");
+    }
+
+    /**
+     * And the fireId the poller fences with is the one the CAS claim just wrote —
+     * not null, and not a stale value the schedule was carrying before the claim.
+     */
+    @Test
+    void poll_fencesTheOutcomeWithTheFireIdTheClaimPersisted() throws Exception {
+        var schedule = makeCronSchedule("sched-fenced", "0 9 * * *", "Hello");
+        schedule.setFireId("stale-from-a-previous-fire");
+        when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
+        when(scheduleStore.tryClaim(eq("sched-fenced"), eq("test-instance"), any(), any())).thenReturn(true);
+        when(fireExecutor.fire(any(), any(), anyInt())).thenReturn(makeFireLog("sched-fenced", FireStatus.COMPLETED.name()));
+
+        poller.pollDueSchedules();
+
+        var fenced = ArgumentCaptor.forClass(String.class);
+        verify(scheduleStore).markCompleted(eq("sched-fenced"), fenced.capture(), any());
+        assertNotNull(fenced.getValue(), "an unfenced outcome write can clobber another fire's live claim");
+        assertEquals(schedule.getFireId(), fenced.getValue(), "the fence must be the claim's own fireId");
+        assertTrue(fenced.getValue().startsWith("sched-fenced_"), "the claim rewrote the stale fireId: " + fenced.getValue());
     }
 
     // --- Helpers ---

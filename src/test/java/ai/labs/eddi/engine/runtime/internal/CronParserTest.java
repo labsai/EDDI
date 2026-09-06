@@ -228,41 +228,47 @@ class CronParserTest {
     }
 
     /**
-     * An expression with a first fire but no SECOND one inside the parser's own
-     * two-year horizon has no measurable gap at all, and the scan returns
-     * {@link Long#MAX_VALUE} to say so. That sentinel matters: it is what makes
-     * such an expression pass the minimum-interval policy, where letting the
-     * {@code IllegalStateException} out (the old behaviour) rejected it, and
-     * returning 0 would have rejected it even harder.
+     * The measurement must not depend on the year in which it is taken.
      * <p>
-     * 29 February is the case: it fires once every four years, so from the first
-     * fire the next one is provably beyond the horizon. Which branch applies
-     * depends on the calendar — for roughly half of any four-year cycle the FIRST
-     * fire is out of reach too, and then the expression is unsatisfiable and the
-     * exception is correct. The test therefore asks the parser which situation it
-     * is in and asserts the matching outcome exactly, rather than skipping half the
-     * time or hard-coding an assertion that expires on the next leap day.
+     * This is the case that survived the first fix. With Vixie DOM/DOW OR semantics
+     * {@code 0 0 29 2 MON} fires on every February Monday AND on 29 February, so
+     * its tightest pair only exists in a leap year whose 29 February follows a
+     * Monday — 2028 is one (29 February 2028 is a Tuesday), giving a gap of exactly
+     * one day. A scan bounded to the next 366 days or 64 fires simply never reaches
+     * such a year from most starting points and reports the weekly gap instead, so
+     * the same expression sat either side of the minimum-interval threshold
+     * depending on the current date. Deriving the minimum over a fixed 28-year
+     * calendar cycle makes the answer a property of the expression.
      */
     @Test
-    void computeMinIntervalSeconds_noSecondFireInTheHorizon_returnsTheSentinelNotZero() {
-        String leapDay = "0 0 29 2 *";
-        boolean firstFireIsReachable;
-        try {
-            CronParser.computeNextFire(leapDay, Instant.now(), UTC);
-            firstFireIsReachable = true;
-        } catch (IllegalStateException e) {
-            firstFireIsReachable = false;
-        }
+    void computeMinIntervalSeconds_seesAnAlignmentThatIsYearsAway() {
+        assertEquals(86400, CronParser.computeMinIntervalSeconds("0 0 29 2 MON", UTC),
+                "DOM/DOW OR semantics put 29 February next to a Monday in 2028 — one day apart, "
+                        + "whatever year the validation happens to run in");
+    }
 
-        if (firstFireIsReachable) {
-            assertEquals(Long.MAX_VALUE, CronParser.computeMinIntervalSeconds(leapDay, UTC),
-                    "no second fire within the horizon means no measurable gap — the scan must say so with the "
-                            + "sentinel, not throw and not report 0");
-        } else {
-            assertThrows(IllegalStateException.class, () -> CronParser.computeMinIntervalSeconds(leapDay, UTC),
-                    "the next 29 February is beyond the parser's horizon, so there is no fire to measure from "
-                            + "at all — that is the unsatisfiable-expression branch, not the sentinel");
-        }
+    /**
+     * The same property from the other side: an expression whose only pair is four
+     * years apart reports that, deterministically, instead of the
+     * {@link Long#MAX_VALUE} sentinel it used to give whenever the next leap day
+     * happened to fall outside the horizon (and an {@code IllegalStateException}
+     * for the roughly half of the cycle where even the FIRST fire did).
+     */
+    @Test
+    void computeMinIntervalSeconds_leapDayIsFourYearsNotASentinel() {
+        assertEquals(1461L * 86400, CronParser.computeMinIntervalSeconds("0 0 29 2 *", UTC),
+                "29 February to 29 February is 1461 days, in every year this is asked in");
+    }
+
+    /**
+     * A syntactically valid expression that can never match a calendar day is an
+     * unsatisfiable one, and must say so — {@code RestScheduleStore} turns this
+     * into a 400 rather than saving a schedule that would never fire.
+     */
+    @Test
+    void computeMinIntervalSeconds_unsatisfiableExpressionThrows() {
+        assertThrows(IllegalStateException.class, () -> CronParser.computeMinIntervalSeconds("0 0 30 2 *", UTC),
+                "30 February matches no day in any calendar cycle");
     }
 
     // --- Day-of-week 7 = Sunday (standard cron compatibility) ---

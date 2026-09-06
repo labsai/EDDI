@@ -408,7 +408,7 @@ public class SchedulePollerService {
                 onFireFailed(schedule);
                 return;
             }
-            scheduleStore.markSkipped(schedule.getId(), nextFire);
+            scheduleStore.markSkipped(schedule.getId(), schedule.getFireId(), nextFire);
             fireSkippedCounter.increment();
             LOGGER.infof("[SCHEDULE] Fire of schedule '%s' (id=%s) was skipped (conversation busy or awaiting a human); "
                     + "re-armed for %s without counting a failure", schedule.getName(), schedule.getId(), nextFire);
@@ -420,7 +420,7 @@ public class SchedulePollerService {
     private void onFireCompleted(ScheduleConfiguration schedule) {
         try {
             Instant nextFire = computeNextFire(schedule);
-            scheduleStore.markCompleted(schedule.getId(), nextFire);
+            scheduleStore.markCompleted(schedule.getId(), schedule.getFireId(), nextFire);
             // Note: markCompleted with null nextFire auto-disables (fix #5 in
             // MongoScheduleStore)
         } catch (Exception e) {
@@ -483,14 +483,14 @@ public class SchedulePollerService {
             int newFailCount = schedule.getFailCount() + 1;
             if (newFailCount >= maxRetries) {
                 // Dead-letter
-                scheduleStore.markDeadLettered(schedule.getId());
+                scheduleStore.markDeadLettered(schedule.getId(), schedule.getFireId());
                 deadLetterCounter.increment();
                 LOGGER.warnf("[SCHEDULE] Schedule '%s' (id=%s) dead-lettered after %d retries", schedule.getName(), schedule.getId(), newFailCount);
             } else {
                 // Exponential backoff
                 long delaySec = (long) (backoffBaseSeconds * Math.pow(backoffMultiplier, newFailCount - 1));
                 Instant nextRetry = Instant.now().plusSeconds(delaySec);
-                scheduleStore.markFailed(schedule.getId(), nextRetry);
+                scheduleStore.markFailed(schedule.getId(), schedule.getFireId(), nextRetry);
                 fireFailedCounter.increment();
                 LOGGER.warnf("[SCHEDULE] Schedule '%s' (id=%s) failed (attempt %d/%d), retry at %s", schedule.getName(), schedule.getId(),
                         newFailCount, maxRetries, nextRetry);

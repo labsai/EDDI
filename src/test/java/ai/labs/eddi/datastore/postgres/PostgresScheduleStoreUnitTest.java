@@ -1073,6 +1073,78 @@ class PostgresScheduleStoreUnitTest {
         verify(preparedStatement).setNull(12, Types.DOUBLE);
     }
 
+    /**
+     * The write-side half of the erasure guarantee, and the half that actually
+     * closes the window.
+     * <p>
+     * The cascade transaction and the post-commit sweep remove the fire logs that
+     * exist when they run, but neither can stop a fire that is mid-flight at that
+     * moment from inserting its log afterwards — and an erasure is exactly when a
+     * schedule is most likely to be mid-fire. That late row carries the erased
+     * user's conversationId and is findable only by a scheduleId that no longer
+     * resolves, so no erasure path can ever reach it: a GDPR erasure would report
+     * success over personal data it left behind.
+     * <p>
+     * {@code INSERT ... SELECT ... WHERE EXISTS} makes the row conditional on the
+     * schedule being visible to the statement that writes it, so the log is either
+     * written while the schedule is still there or not written at all. Without the
+     * guard this is an unconditional {@code VALUES} insert that always lands.
+     */
+    @Test
+    void logFire_guardsTheInsertOnTheScheduleStillExisting() throws Exception {
+        var log = new ScheduleFireLog("log-1", "sched-erased", "fire-1",
+                Instant.now(), Instant.now(), Instant.now(),
+                "COMPLETED", "n1", "conv-erased", null, 1, 0.05);
+
+        sut.logFire(log);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+        assertTrue(sql.getValue().contains("WHERE EXISTS (SELECT 1 FROM eddi_schedules WHERE id = ?)"),
+                "the fire-log insert must be conditional on the schedule still existing: " + sql.getValue());
+        assertFalse(sql.getValue().contains("VALUES"),
+                "an unconditional VALUES insert cannot be guarded: " + sql.getValue());
+        // The guard's own parameter, bound last so the twelve column parameters keep
+        // the indices logFire_withNullInstants_setsNulls pins.
+        verify(preparedStatement).setString(13, "sched-erased");
+    }
+
+    /**
+     * The guard must not cost the normal path its row: a fire of a schedule that
+     * still exists writes exactly as before, with the twelve column parameters at
+     * their original indices.
+     */
+    @Test
+    void logFire_normalPathStillWritesTheRow() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+        var log = new ScheduleFireLog("log-1", "sched-1", "fire-1",
+                Instant.now(), Instant.now(), Instant.now(),
+                "COMPLETED", "n1", "conv-1", null, 1, 0.05);
+
+        sut.logFire(log);
+
+        verify(preparedStatement).setString(1, "log-1");
+        verify(preparedStatement).setString(2, "sched-1");
+        verify(preparedStatement).setString(9, "conv-1");
+        verify(preparedStatement).executeUpdate();
+    }
+
+    /**
+     * Zero rows written is the guard doing its job, not a failure. Throwing here
+     * would turn a benign race — the schedule was erased while this fire ran — into
+     * an error on the fire path, and {@code ScheduleFireExecutor} would log it as
+     * though the store were broken.
+     */
+    @Test
+    void logFire_zeroRowsFromTheGuardIsNotAnError() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(0);
+        var log = new ScheduleFireLog("log-1", "sched-erased", "fire-1",
+                Instant.now(), Instant.now(), Instant.now(),
+                "COMPLETED", "n1", "conv-erased", null, 1, 0.05);
+
+        assertDoesNotThrow(() -> sut.logFire(log));
+    }
+
     // ─── readFireLogs ───────────────────────────────────────────
 
     @Test
@@ -1203,6 +1275,139 @@ class PostgresScheduleStoreUnitTest {
         config.setNextFire(Instant.now().plus(1, ChronoUnit.DAYS));
         config.setFireStatus(FireStatus.PENDING);
         return config;
+    }
+
+    /**
+     * The transaction removes the logs of the schedules that existed when it
+     * started. It cannot stop the fire that is running RIGHT NOW on one of those
+     * schedules from committing its log a moment later — and an erasure is exactly
+     * when a schedule is most likely to be mid-fire. That log then carries the
+     * erased user's conversationId with no schedule left to find it by, which is
+     * the orphan the whole cascade exists to prevent.
+     * <p>
+     * Hence the second pass over the ids resolved inside the transaction, after the
+     * commit. MongoScheduleStore reaches the same guarantee the same way.
+     */
+    @Test
+    void deleteSchedulesByUserId_sweepsTheFireLogsAgainAfterTheSchedulesAreGone() throws Exception {
+        when(resultSet.next()).thenReturn(true, false);
+        when(resultSet.getString(1)).thenReturn("sched-erased");
+
+        sut.deleteSchedulesByUserId("user-1");
+
+        InOrder ordered = inOrder(connection, preparedStatement);
+        ordered.verify(connection).commit();
+        ordered.verify(connection).prepareStatement("DELETE FROM eddi_schedule_fire_logs WHERE schedule_id = ?");
+        ordered.verify(preparedStatement).setString(1, "sched-erased");
+        ordered.verify(preparedStatement).executeBatch();
+    }
+
+    /**
+     * The single-schedule path needs the second pass MORE than the bulk ones — it
+     * is the one an operator uses to remove a schedule that is firing right now —
+     * and it knows its id without resolving anything.
+     */
+    @Test
+    void deleteSchedule_sweepsTheFireLogsAgainAfterTheScheduleIsGone() throws Exception {
+        sut.deleteSchedule("sched-1");
+
+        InOrder ordered = inOrder(connection, preparedStatement);
+        ordered.verify(connection).commit();
+        ordered.verify(connection).prepareStatement("DELETE FROM eddi_schedule_fire_logs WHERE schedule_id = ?");
+        ordered.verify(preparedStatement).setString(1, "sched-1");
+        ordered.verify(preparedStatement).executeBatch();
+    }
+
+    /**
+     * A failing sweep must be reported, not swallowed: the schedules are already
+     * gone at that point, so the caller (a GDPR erasure above all) has to be able
+     * to tell "the erasure did not happen" from "the schedules went but their fire
+     * logs may not have".
+     */
+    @Test
+    void deleteSchedule_aFailingPostDeleteSweepIsReportedNotSwallowed() throws Exception {
+        when(preparedStatement.executeBatch()).thenThrow(new SQLException("connection reset"));
+
+        var thrown = assertThrows(IResourceStore.ResourceStoreException.class, () -> sut.deleteSchedule("sched-1"));
+
+        assertTrue(thrown.getMessage().contains("sweep"),
+                "the second pass must be distinguishable from the first in the error: " + thrown.getMessage());
+        verify(connection).commit();
+    }
+
+    // ─── outcome writes are fenced by the claim's fireId ────────
+
+    /**
+     * Lease stealing is deliberate, so a fire that overran its lease and a
+     * replacement fire can be in flight at once. An outcome write keyed on
+     * {@code id} alone lets the loser release or fail the WINNER's claim on its way
+     * out — the row goes back to PENDING with a fire still running, and the next
+     * poll starts a third copy. The extra {@code fire_id} predicate makes the stale
+     * UPDATE match zero rows instead.
+     */
+    @Test
+    void markCompleted_fencesTheUpdateOnTheClaimsFireId() throws Exception {
+        sut.markCompleted("sched-1", "sched-1_fire-a", Instant.now().plusSeconds(60));
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+        assertTrue(sql.getValue().contains("AND fire_id=?"), "the outcome write must be fenced: " + sql.getValue());
+        verify(preparedStatement).setString(5, "sched-1_fire-a");
+    }
+
+    @Test
+    void markCompleted_oneShot_fencesTheUpdateOnTheClaimsFireId() throws Exception {
+        sut.markCompleted("sched-1", "sched-1_fire-a", null);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+        assertTrue(sql.getValue().contains("AND fire_id=?"), "the outcome write must be fenced: " + sql.getValue());
+        verify(preparedStatement).setString(4, "sched-1_fire-a");
+    }
+
+    @Test
+    void markFailed_fencesTheUpdateOnTheClaimsFireId() throws Exception {
+        sut.markFailed("sched-1", "sched-1_fire-a", Instant.now().plusSeconds(60));
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+        assertTrue(sql.getValue().contains("AND fire_id=?"), "the outcome write must be fenced: " + sql.getValue());
+        verify(preparedStatement).setString(4, "sched-1_fire-a");
+    }
+
+    @Test
+    void markSkipped_fencesTheUpdateOnTheClaimsFireId() throws Exception {
+        sut.markSkipped("sched-1", "sched-1_fire-a", Instant.parse("2099-01-01T00:00:00Z"));
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+        assertTrue(sql.getValue().contains("AND fire_id=?"), "the outcome write must be fenced: " + sql.getValue());
+        verify(preparedStatement).setString(4, "sched-1_fire-a");
+    }
+
+    @Test
+    void markDeadLettered_fencesTheUpdateOnTheClaimsFireId() throws Exception {
+        sut.markDeadLettered("sched-1", "sched-1_fire-a");
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+        assertTrue(sql.getValue().contains("AND fire_id=?"), "the last attempt must be fenced too: " + sql.getValue());
+        verify(preparedStatement).setString(3, "sched-1_fire-a");
+    }
+
+    /**
+     * The unfenced overload is for the one caller that holds no claim —
+     * {@code dismissDeadLetter}, where no fire is running by definition. It must
+     * still match by id alone, or dismissing a dead letter would silently do
+     * nothing.
+     */
+    @Test
+    void markCompleted_withoutAFireId_matchesByScheduleIdAlone() throws Exception {
+        sut.markCompleted("sched-1", Instant.now().plusSeconds(60));
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+        assertFalse(sql.getValue().contains("fire_id=?"), "an unfenced write must not add a predicate it cannot bind: " + sql.getValue());
     }
 
     private void setupResultSetForSchedule() throws Exception {

@@ -322,6 +322,41 @@ class SafeHttpClientTest {
                 "307 redirect should preserve POST method");
     }
 
+    /**
+     * The end-to-end half of {@link SafeHttpClientRedirectMethodTest}: a redirected
+     * PUT must arrive at the target as a PUT, with its body. Rewriting it to GET
+     * hands the caller a 200 for a write that never happened.
+     */
+    @Test
+    @DisplayName("302 redirect preserves PUT method and body")
+    void shouldPreservePutAcrossA302Redirect() throws Exception {
+        SafeHttpClient spy = Mockito.spy(client);
+        doNothing().when(spy).validateRedirectTarget(anyString());
+
+        server.createContext("/put-here", exchange -> {
+            exchange.getResponseHeaders().set("Location", "http://127.0.0.1:" + port + "/put-final");
+            exchange.sendResponseHeaders(302, -1);
+            exchange.close();
+        });
+        server.createContext("/put-final", exchange -> {
+            String received = exchange.getRequestMethod() + ":" + new String(exchange.getRequestBody().readAllBytes());
+            byte[] body = received.getBytes();
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.start();
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create("http://127.0.0.1:" + port + "/put-here"))
+                .PUT(HttpRequest.BodyPublishers.ofString("payload"))
+                .build();
+
+        HttpResponse<String> response = spy.send(request, HttpResponse.BodyHandlers.ofString());
+        assertEquals(200, response.statusCode());
+        assertEquals("PUT:payload", response.body(), "a redirected PUT must not silently become a GET");
+    }
+
     @Test
     @DisplayName("302 redirect downgrades POST to GET (RFC 7231)")
     void shouldDowngradeMethodOn302Redirect() throws Exception {

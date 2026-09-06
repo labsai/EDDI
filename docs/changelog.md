@@ -49,6 +49,60 @@ bottom of this file and are never archived.
 
 ---
 
+## ⏰ fix(schedule): a fire log can no longer outlive the schedule it belongs to (2026-09-06)
+
+**Repo:** EDDI (`fix/review-schedules`)
+
+Review round on this branch: 17 comments. Six were genuinely open and are fixed; the substantive
+one took two attempts, because the first was a mitigation described as a fix.
+
+**Erasure could report success over a log row it had not removed.** `deleteWithCascade` deleted
+logs and schedules in a transaction and then swept again after commit, which catches every log
+written before the sweep — but a fire already in flight can commit its log afterwards, so a GDPR
+erasure still reported success over a row carrying the erased user's `conversationId`. The window
+is now closed at the *write* side rather than by widening the sweep.
+
+On PostgreSQL `logFire` issues a guarded insert — `INSERT … SELECT … WHERE EXISTS (SELECT 1 FROM
+eddi_schedules WHERE id = ?)` — so the subquery is evaluated under the same snapshot that writes
+the row and a log for a deleted schedule cannot be committed at all. Zero rows is the correct
+outcome, logged at DEBUG, never thrown: a benign race must not surface on the fire path. A foreign
+key with `ON DELETE CASCADE` was the other candidate and was rejected — existing deployments
+already hold orphaned fire logs, which is the bug, so `ADD CONSTRAINT` would fail on exactly the
+installs that need it.
+
+MongoDB has no conditional insert, and a pre-check only moves the race. So it inserts, re-reads the
+schedule from the primary, and deletes the log it just wrote if the schedule has gone. Against the
+cascade's three steps there is no interleaving where the log survives its schedule: either the
+schedule delete precedes the re-read and the compensation fires, or it does not and the cascade's
+own delete or the post-commit sweep catches the document.
+
+Both sweeps are kept, re-framed as belt-and-braces for logs written by a replica that had not yet
+observed the delete. The one operator-visible consequence — a schedule deleted mid-fire may lose
+that attempt's log — is documented in `docs/scheduling.md` as deliberate.
+
+**Outcome writes are fenced by the claim's fire id.** `markCompleted`/`markFailed`/`markSkipped`
+and `markDeadLettered` now take the expected fire id, so a fire that exceeded its lease cannot
+overwrite the outcome of the fire that reclaimed the row.
+
+**Three CodeQL log-injection sites** in `PostgresScheduleStore` (`scheduleId`, `agentId` and a HITL
+timeout schedule name, all caller-supplied) now go through `LogSanitizer.sanitize`, matching what
+`MongoScheduleStore` already did.
+
+**Redirects no longer rewrite every method to GET.** `SafeHttpClient` splits the rule per status:
+307/308 preserve method and body, 303 rewrites to GET, and 301/302 rewrite only POST — so PUT,
+PATCH and DELETE keep their method, body and `Content-Type`.
+
+**The minimum-interval check no longer depends on when it runs.** `CronParser` derived the gap by
+walking fires from `Instant.now()`, so the same expression could pass validation on one day and
+fail on another. It is now computed from the parsed fields: the tightest pair within a firing day,
+and the tightest gap across days scanned over a full 28-year Gregorian cycle.
+
+**Correction.** An earlier entry on this branch described scheduling as "exactly-once". Delivery is
+at-least-once — `IScheduleStore`, `docs/scheduling.md` and `docs/hitl.md` all say so — and that
+line has been corrected in place.
+
+---
+
 ## ⏱️ fix(schedule): close the review round and pin the guards by mutation (2026-09-04)
 
 **Repo:** EDDI (`fix/review-schedules`)
@@ -94,7 +148,10 @@ the scheduled turn ran with **null input**. Scheduling is enabled by default and
 is a documented, supported backend. The columns are added with
 `ADD COLUMN IF NOT EXISTS` statements so existing databases upgrade in place, and the
 dropped `persistent_conversation_id` was separately re-opening the CAS claim on every
-heartbeat fire, breaking exactly-once execution.
+heartbeat fire, breaking the single-owner CAS claim that keeps a fire from running twice.
+(The delivery contract is at-least-once, not exactly-once — `IScheduleStore`,
+`docs/scheduling.md` and `docs/hitl.md` all say so. An earlier draft of this entry claimed
+otherwise.)
 
 **Failures were recorded as successes.** The executor read its outcome from a latch that
 counts down on the failure branch too, so an error inside the pipeline looked like a green

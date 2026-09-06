@@ -474,8 +474,24 @@ public class MongoScheduleStore implements IScheduleStore {
         }
     }
 
+    /**
+     * The filter for an outcome write, fenced to the claim that produced it.
+     * <p>
+     * {@code scheduleId} alone is not enough once a lease can be stolen: a fire
+     * that overran its lease, and whose row has since been re-claimed by a
+     * replacement fire, would otherwise release or fail the REPLACEMENT's claim on
+     * its way out — putting the row back to PENDING while a fire is still running,
+     * so the next poll starts a third copy. Matching {@code fireId} as well makes
+     * the late write match nothing, which is exactly right: the row no longer
+     * belongs to that fire. See
+     * {@link IScheduleStore#markCompleted(String, String, Instant)}.
+     */
+    private static Bson claimedBy(String scheduleId, String expectedFireId) {
+        return expectedFireId == null ? eq(ID, scheduleId) : and(eq(ID, scheduleId), eq(FIRE_ID, expectedFireId));
+    }
+
     @Override
-    public void markCompleted(String scheduleId, Instant nextFire) throws IResourceStore.ResourceStoreException {
+    public void markCompleted(String scheduleId, String expectedFireId, Instant nextFire) throws IResourceStore.ResourceStoreException {
         try {
             long nowMs = epochMillis(Instant.now());
             var updates = new ArrayList<Bson>();
@@ -496,19 +512,19 @@ public class MongoScheduleStore implements IScheduleStore {
                 updates.add(set(NEXT_FIRE, null));
             }
 
-            scheduleCollection.updateOne(eq(ID, scheduleId), combine(updates));
+            scheduleCollection.updateOne(claimedBy(scheduleId, expectedFireId), combine(updates));
         } catch (Exception e) {
             throw new IResourceStore.ResourceStoreException("Failed to mark completed: " + scheduleId, e);
         }
     }
 
     @Override
-    public void markFailed(String scheduleId, Instant nextRetryAt) throws IResourceStore.ResourceStoreException {
+    public void markFailed(String scheduleId, String expectedFireId, Instant nextRetryAt) throws IResourceStore.ResourceStoreException {
         try {
             long nowMs = epochMillis(Instant.now());
             Bson update = combine(set(FIRE_STATUS, FireStatus.FAILED.name()), set(NEXT_RETRY_AT, epochMillis(nextRetryAt)), set(CLAIMED_BY, null),
                     set(CLAIMED_AT, null), inc(FAIL_COUNT, 1), set(UPDATED_AT, nowMs));
-            scheduleCollection.updateOne(eq(ID, scheduleId), update);
+            scheduleCollection.updateOne(claimedBy(scheduleId, expectedFireId), update);
         } catch (Exception e) {
             throw new IResourceStore.ResourceStoreException("Failed to mark failed: " + scheduleId, e);
         }
@@ -521,24 +537,24 @@ public class MongoScheduleStore implements IScheduleStore {
      * {@link IScheduleStore#markSkipped}.
      */
     @Override
-    public void markSkipped(String scheduleId, Instant nextFire) throws IResourceStore.ResourceStoreException {
+    public void markSkipped(String scheduleId, String expectedFireId, Instant nextFire) throws IResourceStore.ResourceStoreException {
         try {
             long nowMs = epochMillis(Instant.now());
             Bson update = combine(set(FIRE_STATUS, FireStatus.PENDING.name()), set(NEXT_FIRE, epochMillis(nextFire)), set(CLAIMED_BY, null),
                     set(CLAIMED_AT, null), set(FIRE_ID, null), set(UPDATED_AT, nowMs));
-            scheduleCollection.updateOne(eq(ID, scheduleId), update);
+            scheduleCollection.updateOne(claimedBy(scheduleId, expectedFireId), update);
         } catch (Exception e) {
             throw new IResourceStore.ResourceStoreException("Failed to mark skipped: " + scheduleId, e);
         }
     }
 
     @Override
-    public void markDeadLettered(String scheduleId) throws IResourceStore.ResourceStoreException {
+    public void markDeadLettered(String scheduleId, String expectedFireId) throws IResourceStore.ResourceStoreException {
         try {
             long nowMs = epochMillis(Instant.now());
             Bson update = combine(set(FIRE_STATUS, FireStatus.DEAD_LETTERED.name()), set(CLAIMED_BY, null), set(CLAIMED_AT, null),
                     set(UPDATED_AT, nowMs));
-            scheduleCollection.updateOne(eq(ID, scheduleId), update);
+            scheduleCollection.updateOne(claimedBy(scheduleId, expectedFireId), update);
             LOGGER.warnf("Schedule %s dead-lettered after max retries", scheduleId);
         } catch (Exception e) {
             throw new IResourceStore.ResourceStoreException("Failed to dead-letter: " + scheduleId, e);
@@ -567,6 +583,40 @@ public class MongoScheduleStore implements IScheduleStore {
 
     // ========================= Fire Log =========================
 
+    /**
+     * Insert the fire log, then confirm its schedule still exists and remove the
+     * log again if it does not — so a fire log can never durably outlive the
+     * schedule it belongs to.
+     * <p>
+     * This is the write-side half of the erasure guarantee, and the half that
+     * actually closes the window. {@link #deleteFireLogsOfSchedulesMatching} and
+     * {@link #sweepFireLogsOf} remove the logs that exist when they run, but
+     * neither can stop a fire that is mid-flight at that moment from inserting its
+     * log afterwards — and an erasure is exactly when a schedule is most likely to
+     * be mid-fire. That late document would carry the erased user's conversationId
+     * with no schedule left to find it by.
+     * <p>
+     * MongoDB offers no cross-collection transaction and no conditional insert, so
+     * the guard cannot be a pre-check: reading the schedule <em>before</em>
+     * inserting just moves the race, because the delete can land between the read
+     * and the insert. Verifying <em>after</em> the insert has no such gap. Take the
+     * delete's three steps D1 (delete logs), D2 (delete schedules), D3 (sweep logs)
+     * against this method's W1 (insert), W2 (re-read schedule), W3 (compensate):
+     * <ul>
+     * <li>D2 lands before W2 — W2 reads from the primary, sees no schedule, and W3
+     * removes the log.</li>
+     * <li>D2 lands after W2 — W1's document already exists, so D1 (if still to run)
+     * or D3 removes it.</li>
+     * </ul>
+     * There is no ordering in which the log both survives and its schedule is gone.
+     * The compensating delete is safe by construction: it fires only when the
+     * schedule is absent, which is precisely when the log is an orphan.
+     * <p>
+     * A failure of the compensating delete is reported rather than swallowed — the
+     * schedule is gone by then, so the caller has to be able to tell a written log
+     * from a possibly-orphaned one. Callers in {@code ScheduleFireExecutor} already
+     * log and continue, so a failed log write never fails the fire itself.
+     */
     @Override
     public void logFire(ScheduleFireLog fireLog) throws IResourceStore.ResourceStoreException {
         try {
@@ -574,6 +624,11 @@ public class MongoScheduleStore implements IScheduleStore {
             doc.put(ID, fireLog.id());
             writeFireLogInstants(doc, fireLog);
             fireLogCollection.insertOne(doc);
+            if (scheduleCollection.find(eq(ID, fireLog.scheduleId())).projection(new Document(ID, 1)).first() == null) {
+                fireLogCollection.deleteOne(eq(ID, fireLog.id()));
+                LOGGER.debugf("Dropped fire log for schedule %s: the schedule was deleted while it was firing",
+                        sanitize(fireLog.scheduleId()));
+            }
         } catch (Exception e) {
             throw new IResourceStore.ResourceStoreException("Failed to log fire", e);
         }
@@ -669,9 +724,12 @@ public class MongoScheduleStore implements IScheduleStore {
      * mid-fire on one of these schedules — would survive its schedule and carry the
      * erased user's conversationId with nothing left to find it by. Hence the
      * second pass in {@link #sweepFireLogsOf}, over the ids resolved here, once the
-     * schedules are gone. A fire that commits after even THAT still orphans its
-     * log; closing that window needs a tombstone or an FK the fire path checks, a
-     * schema change beyond this fix, and both backends share the residual window.
+     * schedules are gone. A fire that commits after even THAT would still orphan
+     * its log, which is why the window is closed at the write side instead:
+     * {@link #logFire} verifies the schedule after inserting and removes the log
+     * again if it has gone. The two passes here remain the belt-and-braces for logs
+     * already written before the delete — including by a replica that had not yet
+     * observed it.
      *
      * @return the ids of the matched schedules, for the post-delete sweep
      */

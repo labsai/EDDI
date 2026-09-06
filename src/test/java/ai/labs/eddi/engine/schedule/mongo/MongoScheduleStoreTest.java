@@ -867,6 +867,57 @@ class MongoScheduleStoreTest {
         assertDoesNotThrow(() -> store.markCompleted("sched-1", null));
     }
 
+    /**
+     * Lease stealing is deliberate — {@code tryClaim} reclaims a CLAIMED row whose
+     * lease expired — so a fire that overran its lease and the replacement fire
+     * that stole it can be in flight at once. An outcome write filtered on
+     * {@code _id} alone lets the loser release or fail the WINNER's claim on its
+     * way out: the document goes back to PENDING while a fire is still running, and
+     * the next poll starts a third copy into the same conversation. Matching
+     * {@code fireId} as well makes the stale write match no document, which is the
+     * correct outcome.
+     * <p>
+     * All four transitions are covered together: fencing three and forgetting the
+     * fourth only moves the damage.
+     */
+    @Test
+    @DisplayName("mark* — every outcome write is fenced to the claim's fireId")
+    void outcomeWritesAreFencedByTheClaimsFireId() throws Exception {
+        when(scheduleCollection.updateOne(any(Bson.class), any(Bson.class))).thenReturn(mock(UpdateResult.class));
+
+        store.markCompleted("sched-1", "sched-1_fire-a", Instant.parse("2099-01-01T00:00:00Z"));
+        store.markFailed("sched-1", "sched-1_fire-a", Instant.parse("2099-01-01T00:00:00Z"));
+        store.markSkipped("sched-1", "sched-1_fire-a", Instant.parse("2099-01-01T00:00:00Z"));
+        store.markDeadLettered("sched-1", "sched-1_fire-a");
+
+        ArgumentCaptor<Bson> filter = ArgumentCaptor.forClass(Bson.class);
+        verify(scheduleCollection, times(4)).updateOne(filter.capture(), any(Bson.class));
+        for (Bson captured : filter.getAllValues()) {
+            String rendered = captured.toString();
+            assertTrue(rendered.contains("fireId") && rendered.contains("sched-1_fire-a"),
+                    "a late fire must not be able to overwrite a newer claim by schedule id alone: " + rendered);
+        }
+    }
+
+    /**
+     * The unfenced overload exists for the one caller holding no claim —
+     * {@code dismissDeadLetter}, where no fire is running by definition — and must
+     * still match by id alone, or dismissing a dead letter would silently do
+     * nothing.
+     */
+    @Test
+    @DisplayName("mark* — an unfenced caller still matches by schedule id alone")
+    void unfencedOutcomeWriteMatchesByScheduleIdAlone() throws Exception {
+        when(scheduleCollection.updateOne(any(Bson.class), any(Bson.class))).thenReturn(mock(UpdateResult.class));
+
+        store.markCompleted("sched-1", Instant.parse("2099-01-01T00:00:00Z"));
+
+        ArgumentCaptor<Bson> filter = ArgumentCaptor.forClass(Bson.class);
+        verify(scheduleCollection).updateOne(filter.capture(), any(Bson.class));
+        assertFalse(filter.getValue().toString().contains("fireId"),
+                "an unfenced write must not filter on a fireId it was not given: " + filter.getValue());
+    }
+
     // ==================== markFailed ====================
 
     @Test
@@ -962,9 +1013,84 @@ class MongoScheduleStoreTest {
 
         when(jsonSerialization.serialize(any())).thenReturn("{}");
         when(jsonSerialization.deserialize(anyString(), eq(Document.class))).thenReturn(new Document());
+        stubScheduleExists(true);
 
         assertDoesNotThrow(() -> store.logFire(fireLog));
         verify(fireLogCollection).insertOne(any(Document.class));
+    }
+
+    /**
+     * The write-side half of the erasure guarantee, and the half that actually
+     * closes the window.
+     * <p>
+     * The two cascade passes remove the fire logs that exist when they run, but
+     * neither can stop a fire that is mid-flight at that moment from inserting its
+     * log afterwards — and an erasure is exactly when a schedule is most likely to
+     * be mid-fire. That late document carries the erased user's conversationId and
+     * is findable only by a scheduleId that no longer resolves, so no erasure path
+     * can ever reach it: a GDPR erasure would report success over personal data it
+     * left behind.
+     * <p>
+     * MongoDB has no conditional insert, and a pre-check would only move the race
+     * (the delete can land between the read and the insert). Verifying AFTER the
+     * insert has no such gap: either the schedule is already gone when we look and
+     * we remove our own document, or it is still there and the delete's own two
+     * passes catch the document we have by then written.
+     */
+    @Test
+    @DisplayName("logFire — removes the log again when the schedule was deleted mid-fire")
+    void logFireRemovesTheLogWhenTheScheduleIsGone() throws Exception {
+        ScheduleFireLog fireLog = new ScheduleFireLog("log-late", "sched-erased", "fire-1",
+                Instant.now(), Instant.now(), Instant.now(), "COMPLETED", "inst-1", "conv-erased", null, 1, 0.5);
+
+        when(jsonSerialization.serialize(any())).thenReturn("{}");
+        when(jsonSerialization.deserialize(anyString(), eq(Document.class))).thenReturn(new Document());
+        stubScheduleExists(false);
+
+        assertDoesNotThrow(() -> store.logFire(fireLog));
+
+        ArgumentCaptor<Bson> deleted = ArgumentCaptor.forClass(Bson.class);
+        verify(fireLogCollection).deleteOne(deleted.capture());
+        String filter = filterJson(deleted.getValue());
+        assertTrue(filter.contains("_id") && filter.contains("log-late"),
+                "the compensating delete must target the log this call just wrote: " + filter);
+    }
+
+    /**
+     * The compensating delete must fire ONLY when the schedule is gone — otherwise
+     * every fire would silently discard its own log.
+     */
+    @Test
+    @DisplayName("logFire — keeps the log while its schedule still exists")
+    void logFireKeepsTheLogWhenTheScheduleExists() throws Exception {
+        ScheduleFireLog fireLog = new ScheduleFireLog("log-1", "sched-1", "fire-1",
+                Instant.now(), Instant.now(), Instant.now(), "COMPLETED", "inst-1", "conv-1", null, 1, 0.5);
+
+        when(jsonSerialization.serialize(any())).thenReturn("{}");
+        when(jsonSerialization.deserialize(anyString(), eq(Document.class))).thenReturn(new Document());
+        stubScheduleExists(true);
+
+        store.logFire(fireLog);
+
+        verify(fireLogCollection).insertOne(any(Document.class));
+        verify(fireLogCollection, never()).deleteOne(any(Bson.class));
+    }
+
+    /**
+     * Make {@code logFire}'s schedule lookup report the schedule present or absent.
+     * The permissive default in {@link #stubFireLogCascadeDefaults()} leaves
+     * {@code first()} returning null, i.e. absent.
+     */
+    private void stubScheduleExists(boolean exists) {
+        FindIterable<Document> iterable = mock(FindIterable.class);
+        when(iterable.projection(any())).thenReturn(iterable);
+        when(iterable.first()).thenReturn(exists ? new Document("_id", "sched-1") : null);
+        when(scheduleCollection.find(any(Bson.class))).thenReturn(iterable);
+    }
+
+    /** Canonical JSON of a filter, so an assertion can read what it matched on. */
+    private static String filterJson(Bson filter) {
+        return filter.toBsonDocument(BsonDocument.class, MongoClientSettings.getDefaultCodecRegistry()).toJson();
     }
 
     // ==================== readFireLogs ====================

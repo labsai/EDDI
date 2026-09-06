@@ -96,7 +96,7 @@ class SchedulePollerServiceBranchTest {
 
             poller.pollDueSchedules();
 
-            verify(scheduleStore).markFailed(eq("sched-1"), any());
+            verify(scheduleStore).markFailed(eq("sched-1"), any(), any());
         }
 
         @Test
@@ -107,7 +107,7 @@ class SchedulePollerServiceBranchTest {
             when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
             when(scheduleStore.tryClaim(any(), any(), any(), any())).thenReturn(true);
             when(fireExecutor.fire(any(), any(), anyInt())).thenThrow(new RuntimeException("fire error"));
-            doThrow(new RuntimeException("mark failed error")).when(scheduleStore).markFailed(any(), any());
+            doThrow(new RuntimeException("mark failed error")).when(scheduleStore).markFailed(any(), any(), any());
 
             assertDoesNotThrow(() -> poller.pollDueSchedules());
         }
@@ -125,7 +125,7 @@ class SchedulePollerServiceBranchTest {
             when(scheduleStore.tryClaim(any(), any(), any(), any())).thenReturn(true);
             when(fireExecutor.fire(any(), any(), anyInt()))
                     .thenReturn(makeFireLog("sched-1", FireStatus.COMPLETED.name()));
-            doThrow(new RuntimeException("mark error")).when(scheduleStore).markCompleted(any(), any());
+            doThrow(new RuntimeException("mark error")).when(scheduleStore).markCompleted(any(), any(), any());
 
             assertDoesNotThrow(() -> poller.pollDueSchedules());
         }
@@ -147,7 +147,7 @@ class SchedulePollerServiceBranchTest {
 
             poller.pollDueSchedules();
 
-            verify(scheduleStore).markCompleted(eq("sched-1"), any());
+            verify(scheduleStore).markCompleted(eq("sched-1"), any(), any());
         }
 
         @Test
@@ -161,7 +161,7 @@ class SchedulePollerServiceBranchTest {
 
             poller.pollDueSchedules();
 
-            verify(scheduleStore).markCompleted(eq("sched-1"), isNull());
+            verify(scheduleStore).markCompleted(eq("sched-1"), any(), isNull());
         }
 
         @Test
@@ -175,7 +175,7 @@ class SchedulePollerServiceBranchTest {
 
             poller.pollDueSchedules();
 
-            verify(scheduleStore).markCompleted(eq("sched-1"), isNull());
+            verify(scheduleStore).markCompleted(eq("sched-1"), any(), isNull());
         }
 
         @Test
@@ -190,7 +190,7 @@ class SchedulePollerServiceBranchTest {
 
             poller.pollDueSchedules();
 
-            verify(scheduleStore).markCompleted(eq("hb-1"), isNull());
+            verify(scheduleStore).markCompleted(eq("hb-1"), any(), isNull());
         }
 
         @Test
@@ -206,7 +206,7 @@ class SchedulePollerServiceBranchTest {
             poller.pollDueSchedules();
 
             // nextFire should be non-null (from cron parser)
-            verify(scheduleStore).markCompleted(eq("hb-1"), argThat(next -> next != null));
+            verify(scheduleStore).markCompleted(eq("hb-1"), any(), argThat(next -> next != null));
         }
 
         @Test
@@ -221,7 +221,7 @@ class SchedulePollerServiceBranchTest {
 
             poller.pollDueSchedules();
 
-            verify(scheduleStore).markCompleted(eq("hb-1"), isNull());
+            verify(scheduleStore).markCompleted(eq("hb-1"), any(), isNull());
         }
     }
 
@@ -282,7 +282,7 @@ class SchedulePollerServiceBranchTest {
             when(scheduleStore.tryClaim(any(), any(), any(), any())).thenReturn(true);
             when(fireExecutor.fire(any(), any(), anyInt()))
                     .thenReturn(makeFireLog("sched-1", FireStatus.FAILED.name()));
-            doThrow(new RuntimeException("mark error")).when(scheduleStore).markFailed(any(), any());
+            doThrow(new RuntimeException("mark error")).when(scheduleStore).markFailed(any(), any(), any());
 
             assertDoesNotThrow(() -> poller.pollDueSchedules());
         }
@@ -299,8 +299,8 @@ class SchedulePollerServiceBranchTest {
 
             poller.pollDueSchedules();
 
-            verify(scheduleStore).markDeadLettered("sched-1");
-            verify(scheduleStore, never()).markFailed(any(), any());
+            verify(scheduleStore).markDeadLettered(eq("sched-1"), any());
+            verify(scheduleStore, never()).markFailed(any(), any(), any());
         }
 
         @Test
@@ -315,8 +315,8 @@ class SchedulePollerServiceBranchTest {
 
             poller.pollDueSchedules();
 
-            verify(scheduleStore).markFailed(eq("sched-1"), any());
-            verify(scheduleStore, never()).markDeadLettered(any());
+            verify(scheduleStore).markFailed(eq("sched-1"), any(), any());
+            verify(scheduleStore, never()).markDeadLettered(any(), any());
         }
     }
 

@@ -346,6 +346,9 @@ class PathNavigatorTest {
         assertEquals(8, PathNavigator.getValue("properties.count-1-1", root));
         assertEquals(4, PathNavigator.getValue("properties.count-5-1", root));
         assertEquals(12, PathNavigator.getValue("properties.count+1+1", root));
+        // Unequal operands, so the two associativities disagree in BOTH directions:
+        // left-to-right is 10-1-2 = 7, right-associative would be 10-(1-2) = 11.
+        assertEquals(7, PathNavigator.getValue("properties.count-1-2", root));
     }
 
     /**
