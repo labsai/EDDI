@@ -36,8 +36,20 @@ RUN --mount=type=cache,target=/root/.m2 \
 COPY checkstyle.xml eclipse-formatter.xml ./
 
 COPY src/ src/
+# licenses/ and docs/ are for the RUNTIME stage, which is why they are copied out
+# of here again below. They used to be staged into this stage and never copied
+# anywhere else, so /licenses and /deployments/docs did not exist in the final
+# image at all: DocsService fell back to the relative default `docs`, found
+# nothing, logged one WARN, and every documentation surface in the demo - the
+# REST list/read endpoints, the MCP doc resources and the MCP doc tools, which
+# all delegate there - reported zero documents. Neither is needed to run
+# `mvn package` either, so both COPY lines were pure build-context weight.
 COPY licenses/ licenses/
 COPY docs/ docs/
+
+# The same prune the production image performs in its `docs` stage: only
+# top-level *.md is reachable at runtime, and four of those pages are internal.
+RUN rm -f docs/changelog.md docs/code-review-standards.md docs/incident-response.md docs/SUMMARY.md
 
 RUN --mount=type=cache,target=/root/.m2 \
     mvn -B package -DskipTests
@@ -63,7 +75,9 @@ COPY --from=build /src/target/quarkus-app/lib/     /deployments/lib/
 COPY --from=build /src/target/quarkus-app/*.jar    /deployments/
 COPY --from=build /src/target/quarkus-app/app/     /deployments/app/
 COPY --from=build /src/target/quarkus-app/quarkus/ /deployments/quarkus/
+COPY --from=build /src/licenses/                   /licenses/
+COPY --from=build /src/docs/*.md                   /deployments/docs/
 
 EXPOSE 7070
 
-ENTRYPOINT ["java", "-jar", "/deployments/quarkus-run.jar"]
+ENTRYPOINT ["java", "-Deddi.docs.path=/deployments/docs", "-jar", "/deployments/quarkus-run.jar"]
