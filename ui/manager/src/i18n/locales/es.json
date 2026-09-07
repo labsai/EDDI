@@ -989,7 +989,12 @@
     "importAppend": "Añadir a las llamadas",
     "importReplace": "Reemplazar todas las llamadas",
     "confirmReplace": "Sí, reemplazar todo",
-    "replaceConfirmMessage": "Esto reemplazará {{count}} llamada(s) existente(s). ¿Estás seguro?"
+    "replaceConfirmMessage": "Esto reemplazará {{count}} llamada(s) existente(s). ¿Estás seguro?",
+    "authHeaderRefLabel": "Referencia de la cabecera Authorization",
+    "authHeaderRefPlaceholder": "Opcional — ${vault:mi-clave-api} para una especificación protegida",
+    "authHeaderRefHint": "Una referencia al vault, resuelta al ejecutar la llamada. El secreto almacenado debe ser el valor completo de la cabecera, incluido cualquier prefijo Bearer.",
+    "authHeaderRefInvalid": "Debe empezar por ${vault:…}, ${vars:…} o ${caller:…}. Pegar la clave la dejaría en la URL de la petición y en todos los registros del trayecto.",
+    "authRefLiteral": "Introduzca una referencia como ${vault:mi-clave}, no la clave en sí. La clave nunca sale del vault."
   },
   "mcpcallsEditor": {
     "continueOnErrorHint": "En caso de fallo, el pipeline continúa; el error se expone en ",

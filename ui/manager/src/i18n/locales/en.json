@@ -1015,7 +1015,12 @@
     "importAppend": "Append to Calls",
     "importReplace": "Replace All Calls",
     "confirmReplace": "Yes, Replace All",
-    "replaceConfirmMessage": "This will replace {{count}} existing call(s). Are you sure?"
+    "replaceConfirmMessage": "This will replace {{count}} existing call(s). Are you sure?",
+    "authHeaderRefLabel": "Authorization header reference",
+    "authHeaderRefPlaceholder": "Optional — ${vault:my-api-key} for a spec behind auth",
+    "authHeaderRefHint": "A vault reference, resolved when the call runs. The stored secret must be the whole header value, including any Bearer prefix.",
+    "authHeaderRefInvalid": "Must start with ${vault:…}, ${vars:…} or ${caller:…}. Pasting the key itself would put it in the request URL and every log along the way.",
+    "authRefLiteral": "Enter a reference such as ${vault:my-key}, not the key itself. The key never leaves the vault."
   },
   "mcpcallsEditor": {
     "continueOnErrorHint": "On failure the pipeline continues; the error is exposed at ",

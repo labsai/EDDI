@@ -975,7 +975,12 @@
     "importAppend": "追加到调用",
     "importReplace": "替换所有调用",
     "confirmReplace": "是的，全部替换",
-    "replaceConfirmMessage": "这将替换 {{count}} 个现有调用。确定吗？"
+    "replaceConfirmMessage": "这将替换 {{count}} 个现有调用。确定吗？",
+    "authHeaderRefLabel": "Authorization 请求头引用",
+    "authHeaderRefPlaceholder": "可选 — 对需要认证的规范使用 ${vault:my-api-key}",
+    "authHeaderRefHint": "密钥库引用，在调用时解析。存储的密钥必须是完整的请求头值，包含 Bearer 前缀。",
+    "authHeaderRefInvalid": "必须以 ${vault:…}、${vars:…} 或 ${caller:…} 开头。直接粘贴密钥会将其写入请求 URL 以及沿途的每一条日志。",
+    "authRefLiteral": "请输入如 ${vault:my-key} 的引用，而不是密钥本身。密钥不会离开密钥库。"
   },
   "mcpcallsEditor": {
     "continueOnErrorHint": "失败时流水线继续；错误将暴露于 ",

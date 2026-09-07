@@ -975,7 +975,12 @@
     "importAppend": "An Aufrufe anhängen",
     "importReplace": "Alle Aufrufe ersetzen",
     "confirmReplace": "Ja, alle ersetzen",
-    "replaceConfirmMessage": "Dies ersetzt {{count}} vorhandene Aufrufe. Sind Sie sicher?"
+    "replaceConfirmMessage": "Dies ersetzt {{count}} vorhandene Aufrufe. Sind Sie sicher?",
+    "authHeaderRefLabel": "Referenz für den Authorization-Header",
+    "authHeaderRefPlaceholder": "Optional — ${vault:mein-api-key} für geschützte Spezifikationen",
+    "authHeaderRefHint": "Eine Vault-Referenz, die beim Aufruf aufgelöst wird. Das gespeicherte Secret muss den vollständigen Header-Wert enthalten, einschließlich eines Bearer-Präfixes.",
+    "authHeaderRefInvalid": "Muss mit ${vault:…}, ${vars:…} oder ${caller:…} beginnen. Der Schlüssel selbst würde sonst in der Anfrage-URL und in jedem Log auf dem Weg landen.",
+    "authRefLiteral": "Geben Sie eine Referenz wie ${vault:mein-key} an, nicht den Schlüssel selbst. Der Schlüssel verlässt den Vault nie."
   },
   "mcpcallsEditor": {
     "continueOnErrorHint": "Bei einem Fehler wird die Pipeline fortgesetzt; der Fehler ist verfügbar unter ",

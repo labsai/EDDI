@@ -183,6 +183,44 @@ export function referenceLabel(value: string): string {
 }
 
 /**
+ * Schemes EDDI accepts where a config field may name a credential *source*
+ * rather than hold one — today, OpenAPI discovery's `authHeaderRef`.
+ *
+ * `caller` is here and deliberately absent from {@link REFERENCE_SCHEMES}.
+ * `${caller:token}` is not a stored secret: it resolves to the identity of
+ * whoever is making the request, so it has no vault key to look up, nothing for
+ * `secret-key-picker` to offer and nothing for `connection-validation` to check
+ * against the key list. Widening the shared list would have made every one of
+ * those surfaces offer a pointer to a secret that does not exist.
+ */
+const AUTH_REFERENCE_PREFIXES = [
+  "${vault:",
+  "${eddivault:",
+  "${vars:",
+  "${caller:",
+] as const;
+
+/** Human-readable list of the accepted forms, for a validation message. */
+export const AUTH_REFERENCE_EXAMPLES = "${vault:…}, ${vars:…} or ${caller:…}";
+
+/**
+ * Whether a value is acceptable where EDDI wants a credential reference.
+ *
+ * Prefix-based rather than anchored, mirroring EDDI's own
+ * `ALLOWED_AUTH_REFERENCE_PREFIXES.stream().anyMatch(value::startsWith)`. The
+ * difference from {@link isSecretReference} is load-bearing in one direction
+ * that surprises people: the reference must come FIRST, so `${vault:key}` is
+ * accepted and `Bearer ${vault:key}` is not. The referenced secret therefore has
+ * to hold the complete header value, `Bearer ` included — which is why the field
+ * using this says so.
+ */
+export function isAuthReference(value: string | null | undefined): boolean {
+  if (typeof value !== "string") return false;
+  const trimmed = value.trim();
+  return AUTH_REFERENCE_PREFIXES.some((prefix) => trimmed.startsWith(prefix));
+}
+
+/**
  * Whether a reference points into the vault, as opposed to the variable store.
  *
  * The picker checks a vault key against the key list it can see; a `${vars:…}`

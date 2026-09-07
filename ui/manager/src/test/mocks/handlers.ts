@@ -1732,12 +1732,31 @@ export const handlers = [
   // setup means reintroducing a relay (shields.io or otherwise) fails the suite
   // rather than passing quietly.
 
-  // OpenAPI endpoint discovery
-  http.get("*/apicallstore/apicalls/discover-endpoints", ({ request }) => {
-    const url = new URL(request.url);
-    const specUrl = url.searchParams.get("specUrl");
+  // OpenAPI endpoint discovery.
+  //
+  // POST with a body, mirroring EDDI. The superseded GET took the credential as
+  // `?apiAuth=` and echoed it back inside every generated call; it survives on
+  // the backend only to reject a request that still carries one, so a handler
+  // for it here would let a regression back onto the old path unnoticed.
+  http.post("*/apicallstore/apicalls/discover-endpoints", async ({ request }) => {
+    const body = (await request.json().catch(() => null)) as {
+      specUrl?: string;
+      authHeaderRef?: string;
+    } | null;
+    const specUrl = body?.specUrl;
     if (!specUrl) {
-      return HttpResponse.json({ error: "specUrl query parameter is required" }, { status: 400 });
+      return HttpResponse.json({ error: "a request body with a 'specUrl' is required" }, { status: 400 });
+    }
+    // EDDI's own rule, prefix-matched: only a reference is ever inherited.
+    const authRef = body?.authHeaderRef;
+    if (
+      authRef &&
+      !["${vault:", "${eddivault:", "${vars:", "${caller:"].some((p) => authRef.startsWith(p))
+    ) {
+      return HttpResponse.json(
+        { error: "authHeaderRef must be a ${vault:…}, ${vars:…} or ${caller:…} reference, not a literal credential." },
+        { status: 400 },
+      );
     }
     return HttpResponse.json({
       title: "Petstore API",
@@ -2220,12 +2239,16 @@ export const handlers = [
     });
   }),
 
-  // MCP tool discovery endpoint
-  http.get("*/mcpcallsstore/mcpcalls/discover-tools", ({ request }) => {
-    const url = new URL(request.url);
-    const serverUrl = url.searchParams.get("url");
+  // MCP tool discovery endpoint.
+  //
+  // POST with the probed server's key in `X-Mcp-Authorization`, mirroring EDDI.
+  // No GET handler, deliberately: `onUnhandledRequest: "error"` then turns a
+  // regression back to `?apiKey=` into a failing test rather than a silent pass.
+  http.post("*/mcpcallsstore/mcpcalls/discover-tools", async ({ request }) => {
+    const body = (await request.json().catch(() => null)) as { url?: string } | null;
+    const serverUrl = body?.url;
     if (!serverUrl) {
-      return HttpResponse.json({ error: "url parameter is required" }, { status: 400 });
+      return HttpResponse.json({ error: "a request body with a 'url' is required" }, { status: 400 });
     }
     return HttpResponse.json({
       tools: [

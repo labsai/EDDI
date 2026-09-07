@@ -975,7 +975,12 @@
     "importAppend": "호출에 추가",
     "importReplace": "모든 호출 교체",
     "confirmReplace": "예, 모두 교체",
-    "replaceConfirmMessage": "기존 호출 {{count}}건을 대체합니다. 계속하시겠습니까?"
+    "replaceConfirmMessage": "기존 호출 {{count}}건을 대체합니다. 계속하시겠습니까?",
+    "authHeaderRefLabel": "Authorization 헤더 참조",
+    "authHeaderRefPlaceholder": "선택 사항 — 인증이 필요한 명세에는 ${vault:my-api-key}",
+    "authHeaderRefHint": "호출 시점에 해석되는 볼트 참조입니다. 저장된 시크릿은 Bearer 접두사를 포함한 전체 헤더 값이어야 합니다.",
+    "authHeaderRefInvalid": "${vault:…}, ${vars:…} 또는 ${caller:…} 로 시작해야 합니다. 키를 그대로 붙여넣으면 요청 URL과 경유하는 모든 로그에 남게 됩니다.",
+    "authRefLiteral": "키 자체가 아니라 ${vault:my-key} 같은 참조를 입력하세요. 키는 볼트를 벗어나지 않습니다."
   },
   "mcpcallsEditor": {
     "continueOnErrorHint": "실패 시 파이프라인이 계속됩니다. 오류는 다음 위치에 노출됩니다: ",

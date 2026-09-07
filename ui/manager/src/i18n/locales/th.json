@@ -975,7 +975,12 @@
     "importAppend": "เพิ่มต่อท้ายการเรียก",
     "importReplace": "แทนที่การเรียกทั้งหมด",
     "confirmReplace": "ใช่ แทนที่ทั้งหมด",
-    "replaceConfirmMessage": "การดำเนินการนี้จะแทนที่การเรียกที่มีอยู่ {{count}} รายการ ยืนยันหรือไม่?"
+    "replaceConfirmMessage": "การดำเนินการนี้จะแทนที่การเรียกที่มีอยู่ {{count}} รายการ ยืนยันหรือไม่?",
+    "authHeaderRefLabel": "การอ้างอิงส่วนหัว Authorization",
+    "authHeaderRefPlaceholder": "ไม่บังคับ — ${vault:my-api-key} สำหรับสเปกที่ต้องยืนยันตัวตน",
+    "authHeaderRefHint": "การอ้างอิง vault ที่จะถูกแก้ค่าเมื่อเรียกใช้งาน ความลับที่จัดเก็บต้องเป็นค่าส่วนหัวทั้งหมด รวมถึงคำนำหน้า Bearer",
+    "authHeaderRefInvalid": "ต้องขึ้นต้นด้วย ${vault:…}, ${vars:…} หรือ ${caller:…} การวางคีย์จริงจะทำให้คีย์ไปอยู่ใน URL ของคำขอและในทุกล็อกระหว่างทาง",
+    "authRefLiteral": "กรอกการอ้างอิง เช่น ${vault:my-key} ไม่ใช่คีย์จริง คีย์จะไม่ออกจาก vault"
   },
   "mcpcallsEditor": {
     "continueOnErrorHint": "เมื่อล้มเหลว ไปป์ไลน์จะดำเนินต่อ ข้อผิดพลาดจะถูกเปิดเผยที่ ",

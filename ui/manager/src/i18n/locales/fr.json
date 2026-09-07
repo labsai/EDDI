@@ -989,7 +989,12 @@
     "importAppend": "Ajouter aux appels",
     "importReplace": "Remplacer tous les appels",
     "confirmReplace": "Oui, tout remplacer",
-    "replaceConfirmMessage": "Cette action remplacera {{count}} appel(s) existant(s). Êtes-vous sûr ?"
+    "replaceConfirmMessage": "Cette action remplacera {{count}} appel(s) existant(s). Êtes-vous sûr ?",
+    "authHeaderRefLabel": "Référence de l’en-tête Authorization",
+    "authHeaderRefPlaceholder": "Facultatif — ${vault:ma-cle-api} pour une spécification protégée",
+    "authHeaderRefHint": "Une référence de coffre, résolue au moment de l’appel. Le secret stocké doit contenir la valeur complète de l’en-tête, préfixe Bearer compris.",
+    "authHeaderRefInvalid": "Doit commencer par ${vault:…}, ${vars:…} ou ${caller:…}. Coller la clé elle-même la placerait dans l’URL de la requête et dans tous les journaux traversés.",
+    "authRefLiteral": "Saisissez une référence telle que ${vault:ma-cle}, et non la clé elle-même. La clé ne quitte jamais le coffre."
   },
   "mcpcallsEditor": {
     "continueOnErrorHint": "En cas d'échec, le pipeline continue ; l'erreur est exposée à ",

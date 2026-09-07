@@ -975,7 +975,12 @@
     "importAppend": "コールに追加",
     "importReplace": "すべてのコールを置換",
     "confirmReplace": "はい、すべて置換",
-    "replaceConfirmMessage": "既存の {{count}} 件の呼び出しを置き換えます。よろしいですか？"
+    "replaceConfirmMessage": "既存の {{count}} 件の呼び出しを置き換えます。よろしいですか？",
+    "authHeaderRefLabel": "Authorization ヘッダーの参照",
+    "authHeaderRefPlaceholder": "任意 — 認証が必要な仕様には ${vault:my-api-key}",
+    "authHeaderRefHint": "呼び出し時に解決される Vault 参照です。保存されたシークレットは、Bearer 接頭辞を含むヘッダー値全体である必要があります。",
+    "authHeaderRefInvalid": "${vault:…}、${vars:…}、${caller:…} のいずれかで始めてください。キー自体を貼り付けると、リクエスト URL と経由するすべてのログに残ります。",
+    "authRefLiteral": "キー自体ではなく ${vault:my-key} のような参照を入力してください。キーが Vault を出ることはありません。"
   },
   "mcpcallsEditor": {
     "continueOnErrorHint": "失敗してもパイプラインは続行します。エラーの公開先: ",

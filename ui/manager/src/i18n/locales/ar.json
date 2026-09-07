@@ -1031,7 +1031,12 @@
     "importAppend": "إلحاق بالاستدعاءات",
     "importReplace": "استبدال جميع الاستدعاءات",
     "confirmReplace": "نعم، استبدال الكل",
-    "replaceConfirmMessage": "سيؤدي هذا إلى استبدال {{count}} من الاستدعاءات الحالية. هل أنت متأكد؟"
+    "replaceConfirmMessage": "سيؤدي هذا إلى استبدال {{count}} من الاستدعاءات الحالية. هل أنت متأكد؟",
+    "authHeaderRefLabel": "مرجع ترويسة Authorization",
+    "authHeaderRefPlaceholder": "اختياري — ${vault:my-api-key} لمواصفة تتطلب مصادقة",
+    "authHeaderRefHint": "مرجع إلى الخزنة، يُحلّ عند تنفيذ الاستدعاء. يجب أن يحتوي السر المخزّن على قيمة الترويسة كاملة، بما في ذلك بادئة Bearer.",
+    "authHeaderRefInvalid": "يجب أن يبدأ بـ ${vault:…} أو ${vars:…} أو ${caller:…}. لصق المفتاح نفسه سيضعه في عنوان الطلب وفي كل سجل يمر به.",
+    "authRefLiteral": "أدخل مرجعًا مثل ${vault:my-key}، وليس المفتاح نفسه. المفتاح لا يغادر الخزنة أبدًا."
   },
   "mcpcallsEditor": {
     "continueOnErrorHint": "عند الفشل يستمر المسار؛ ويُكشف الخطأ عند ",

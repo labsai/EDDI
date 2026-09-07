@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen, within, fireEvent } from "@testing-library/react";
+import { screen, within, fireEvent, waitFor } from "@testing-library/react";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
 import {
   ApiCallsEditor,
@@ -21,10 +21,24 @@ vi.mock("@monaco-editor/react", () => ({
   )),
 }));
 
-// Mock discoverEndpoints to avoid real network calls
+// Mock discoverEndpoints to avoid real network calls.
+//
+// `LiteralCredentialError` is re-exported rather than stubbed: the editor
+// narrows on it with `instanceof`, so a mock that omitted it left the class
+// undefined and every discovery failure threw inside the catch block. It is
+// declared inside the factory because `vi.mock` is hoisted to the top of the
+// file, so a top-level class referenced eagerly as a property value would be
+// read before its own declaration runs — `mockDiscoverEndpoints` escapes that
+// only because the arrow function defers the read.
 const mockDiscoverEndpoints = vi.fn();
 vi.mock("@/lib/api/openapi-discover", () => ({
   discoverEndpoints: (...args: unknown[]) => mockDiscoverEndpoints(...args),
+  LiteralCredentialError: class LiteralCredentialError extends Error {
+    constructor() {
+      super("authHeaderRef must be a credential reference, not a literal");
+      this.name = "LiteralCredentialError";
+    }
+  },
 }));
 
 const emptyConfig: HttpCallsConfig = {
@@ -489,6 +503,80 @@ describe("ApiCallsEditor", () => {
     );
     await user.type(screen.getByTestId("spec-url-input"), "https://api.example.com/openapi.json");
     expect(screen.getByTestId("discover-endpoints-btn")).not.toBeDisabled();
+  });
+
+  // ─── Auth-reference field ─────────────────────────────────────────
+  //
+  // The field exists because discovery moved off `?apiAuth=`. Its job is to
+  // make a literal key impossible to send, and to say why, since "pasting the
+  // key works" is what everybody expects a field like this to do.
+
+  it("leaves discovery available when no auth reference is given", async () => {
+    // Most specs are public. Requiring a reference would break the common case
+    // to protect the rare one.
+    const user = userEvent.setup();
+    renderWithProviders(<ApiCallsEditor data={emptyConfig} onChange={onChange} />);
+
+    await user.type(screen.getByTestId("spec-url-input"), "https://api.test.com/openapi.json");
+
+    expect(screen.getByTestId("discover-endpoints-btn")).not.toBeDisabled();
+  });
+
+  it("blocks discovery while the auth field holds a literal credential", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<ApiCallsEditor data={emptyConfig} onChange={onChange} />);
+
+    await user.type(screen.getByTestId("spec-url-input"), "https://api.test.com/openapi.json");
+    await user.type(screen.getByTestId("auth-header-ref-input"), "sk-live-abc123");
+
+    expect(screen.getByTestId("discover-endpoints-btn")).toBeDisabled();
+    expect(screen.getByTestId("auth-header-ref-hint")).toHaveTextContent(
+      /Must start with/,
+    );
+  });
+
+  it("accepts a vault reference and forwards it to discovery", async () => {
+    const user = userEvent.setup();
+    mockDiscoverEndpoints.mockResolvedValue({
+      title: "Test API",
+      baseUrl: "https://api.test.com",
+      endpointCount: 0,
+      groups: {},
+    });
+    renderWithProviders(<ApiCallsEditor data={emptyConfig} onChange={onChange} />);
+
+    await user.type(screen.getByTestId("spec-url-input"), "https://api.test.com/openapi.json");
+    // `fireEvent.change`, not `user.type`: user-event reads `{` as the start of
+    // a key descriptor, so typing `${vault:…}` raises a parse error.
+    fireEvent.change(screen.getByTestId("auth-header-ref-input"), {
+      target: { value: "${vault:jira-token}" },
+    });
+    await user.click(screen.getByTestId("discover-endpoints-btn"));
+
+    expect(mockDiscoverEndpoints).toHaveBeenCalledWith(
+      "https://api.test.com/openapi.json",
+      "",
+      "${vault:jira-token}",
+    );
+  });
+
+  it("explains a literal rejected by the API layer rather than showing its message", async () => {
+    // The module throws before the request goes out, so there is no backend
+    // sentence to show. Without this branch the catch fell through to "Could
+    // not parse OpenAPI spec", which blames the spec for the user's paste.
+    const user = userEvent.setup();
+    const { LiteralCredentialError } = await import("@/lib/api/openapi-discover");
+    mockDiscoverEndpoints.mockRejectedValue(new LiteralCredentialError());
+    renderWithProviders(<ApiCallsEditor data={emptyConfig} onChange={onChange} />);
+
+    await user.type(screen.getByTestId("spec-url-input"), "https://api.test.com/openapi.json");
+    await user.click(screen.getByTestId("discover-endpoints-btn"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("discovery-error")).toHaveTextContent(
+        /never leaves the vault/,
+      );
+    });
   });
 
   it("shows discovered endpoints after successful discovery", async () => {

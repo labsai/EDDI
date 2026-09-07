@@ -975,7 +975,12 @@
     "importAppend": "कॉल में जोड़ें",
     "importReplace": "सभी कॉल बदलें",
     "confirmReplace": "हाँ, सभी बदलें",
-    "replaceConfirmMessage": "इससे {{count}} मौजूदा कॉल बदल जाएँगी। क्या आप निश्चित हैं?"
+    "replaceConfirmMessage": "इससे {{count}} मौजूदा कॉल बदल जाएँगी। क्या आप निश्चित हैं?",
+    "authHeaderRefLabel": "Authorization हेडर संदर्भ",
+    "authHeaderRefPlaceholder": "ऐच्छिक — प्रमाणीकरण वाले स्पेक के लिए ${vault:my-api-key}",
+    "authHeaderRefHint": "वॉल्ट संदर्भ, जो कॉल के समय हल होता है। संग्रहीत गोपनीय मान पूरा हेडर मान होना चाहिए, जिसमें Bearer उपसर्ग भी शामिल हो।",
+    "authHeaderRefInvalid": "यह ${vault:…}, ${vars:…} या ${caller:…} से शुरू होना चाहिए। कुंजी को सीधे चिपकाने से वह अनुरोध URL और रास्ते के हर लॉग में पहुँच जाएगी।",
+    "authRefLiteral": "कुंजी के बजाय ${vault:my-key} जैसा संदर्भ दर्ज करें। कुंजी कभी वॉल्ट से बाहर नहीं जाती।"
   },
   "mcpcallsEditor": {
     "continueOnErrorHint": "विफलता पर पाइपलाइन जारी रहती है; त्रुटि यहां उजागर होती है ",

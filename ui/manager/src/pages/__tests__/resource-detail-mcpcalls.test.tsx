@@ -382,7 +382,7 @@ describe("MCP Calls Editor", () => {
 
   it("shows discovery error message when server returns error", async () => {
     server.use(
-      http.get("*/mcpcallsstore/mcpcalls/discover-tools", () => {
+      http.post("*/mcpcallsstore/mcpcalls/discover-tools", () => {
         return HttpResponse.json(
           { error: "Connection refused" },
           { status: 500 }
@@ -405,7 +405,7 @@ describe("MCP Calls Editor", () => {
 
   it("shows discovery empty state when no tools found", async () => {
     server.use(
-      http.get("*/mcpcallsstore/mcpcalls/discover-tools", () => {
+      http.post("*/mcpcallsstore/mcpcalls/discover-tools", () => {
         return HttpResponse.json({ tools: [], count: 0 });
       })
     );
@@ -427,7 +427,7 @@ describe("MCP Calls Editor", () => {
   it("shows retry button in error state and retries on click", async () => {
     let callCount = 0;
     server.use(
-      http.get("*/mcpcallsstore/mcpcalls/discover-tools", () => {
+      http.post("*/mcpcallsstore/mcpcalls/discover-tools", () => {
         callCount++;
         if (callCount === 1) {
           return HttpResponse.json(

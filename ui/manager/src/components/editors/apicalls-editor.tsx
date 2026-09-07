@@ -24,8 +24,10 @@ import {
 import { ContentEditor } from "./content-editor";
 import {
   discoverEndpoints,
+  LiteralCredentialError,
   type DiscoverEndpointsResult,
 } from "@/lib/api/openapi-discover";
+import { isAuthReference } from "@/lib/secret-reference";
 import { isValidUrl } from "@/lib/utils";
 import { EditorSection } from "./editor-section";
 
@@ -1738,6 +1740,7 @@ export function ApiCallsEditor({
 
   // Discovery state
   const [specUrl, setSpecUrl] = useState("");
+  const [authHeaderRef, setAuthHeaderRef] = useState("");
   const [discoveryResult, setDiscoveryResult] =
     useState<DiscoverEndpointsResult | null>(null);
   const [isDiscovering, setIsDiscovering] = useState(false);
@@ -1747,15 +1750,18 @@ export function ApiCallsEditor({
   const [showReplaceConfirm, setShowReplaceConfirm] = useState(false);
 
   const specUrlValid = specUrl.trim().length > 0 && isValidUrl(specUrl.trim());
+  // Blank is valid — most specs are public and discovery never needs a live
+  // credential anyway. It is a non-blank literal that must be refused.
+  const authRefValid = !authHeaderRef.trim() || isAuthReference(authHeaderRef);
 
   const handleDiscover = useCallback(async () => {
-    if (!specUrlValid) return;
+    if (!specUrlValid || !authRefValid) return;
     setIsDiscovering(true);
     setDiscoveryError(null);
     setDiscoveryResult(null);
     setSelected(new Set());
     try {
-      const result = await discoverEndpoints(specUrl);
+      const result = await discoverEndpoints(specUrl, "", authHeaderRef);
       setDiscoveryResult(result);
       // Select all by default, using collision-safe keys
       const allKeys = new Set<string>();
@@ -1768,15 +1774,20 @@ export function ApiCallsEditor({
       setHasDiscovered(true);
     } catch (err: unknown) {
       const msg =
-        err && typeof err === "object" && "message" in err
-          ? String((err as { message: string }).message)
-          : t("apiCallsEditor.discoveryError", "Could not parse OpenAPI spec");
+        err instanceof LiteralCredentialError
+          ? t(
+              "apiCallsEditor.authRefLiteral",
+              "Enter a reference such as ${vault:my-key}, not the key itself. The key never leaves the vault.",
+            )
+          : err && typeof err === "object" && "message" in err
+            ? String((err as { message: string }).message)
+            : t("apiCallsEditor.discoveryError", "Could not parse OpenAPI spec");
       setDiscoveryError(msg);
       setHasDiscovered(true);
     } finally {
       setIsDiscovering(false);
     }
-  }, [specUrl, specUrlValid, t]);
+  }, [specUrl, specUrlValid, authHeaderRef, authRefValid, t]);
 
   const toggleEndpoint = useCallback((key: string) => {
     setSelected((prev) => {
@@ -1923,7 +1934,7 @@ export function ApiCallsEditor({
             <button
               type="button"
               onClick={handleDiscover}
-              disabled={isDiscovering || !specUrlValid}
+              disabled={isDiscovering || !specUrlValid || !authRefValid}
               title={specUrl.trim() && !specUrlValid ? t("apiCallsEditor.invalidUrl", "Enter a valid http:// or https:// URL") : undefined}
               className="inline-flex h-8 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
               data-testid="discover-endpoints-btn"
@@ -1937,6 +1948,47 @@ export function ApiCallsEditor({
                 ? t("apiCallsEditor.discovering", "Parsing…")
                 : t("apiCallsEditor.discoverEndpoints", "Discover Endpoints")}
             </button>
+          </div>
+
+          {/*
+            A reference, never the key. EDDI matches this by prefix, so the
+            reference has to come first and the referenced secret must hold the
+            complete header value — "Bearer " included. Saying so here is
+            cheaper than a 400 that reads like the spec was unparseable.
+          */}
+          <div>
+            <input
+              type="text"
+              value={authHeaderRef}
+              onChange={(e) => setAuthHeaderRef(e.target.value)}
+              placeholder={t(
+                "apiCallsEditor.authHeaderRefPlaceholder",
+                "Optional — ${vault:my-api-key} for a spec behind auth",
+              )}
+              aria-invalid={!authRefValid}
+              aria-label={t(
+                "apiCallsEditor.authHeaderRefLabel",
+                "Authorization header reference",
+              )}
+              className={`h-8 w-full rounded-md border bg-background px-3 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring ${
+                authRefValid ? "border-input" : "border-destructive"
+              }`}
+              data-testid="auth-header-ref-input"
+            />
+            <p
+              className={`mt-1 text-xs ${authRefValid ? "text-muted-foreground" : "text-destructive"}`}
+              data-testid="auth-header-ref-hint"
+            >
+              {authRefValid
+                ? t(
+                    "apiCallsEditor.authHeaderRefHint",
+                    "A vault reference, resolved when the call runs. The stored secret must be the whole header value, including any Bearer prefix.",
+                  )
+                : t(
+                    "apiCallsEditor.authHeaderRefInvalid",
+                    "Must start with ${vault:…}, ${vars:…} or ${caller:…}. Pasting the key itself would put it in the request URL and every log along the way.",
+                  )}
+            </p>
           </div>
 
           {/* Discovery loading */}
