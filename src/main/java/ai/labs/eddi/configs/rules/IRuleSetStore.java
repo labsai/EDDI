@@ -10,7 +10,10 @@ import ai.labs.eddi.datastore.IResourceStore;
 import java.util.List;
 
 /**
- * @author ginccc
+ * Persistence for behaviour rule sets, the rules that decide how an agent
+ * reacts to what a user said. Consumed by the deployment machinery and the REST
+ * resource; readActions() lists the actions a rule set version can trigger,
+ * which the editor uses for completion.
  */
 public interface IRuleSetStore extends IResourceStore<RuleSetConfiguration> {
     List<String> readActions(String id, Integer version, String filter, Integer limit)
