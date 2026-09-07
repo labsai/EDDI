@@ -277,9 +277,17 @@ covering the stale-variable case, its negative control, `-Full` with a bad `-Mon
 `-MongoPort` accepted and rejected. PSScriptAnalyzer: **7 findings, 0 Error — now genuinely identical to
 `main`'s baseline.** The PR description had claimed that already and it was not true: the branch was
 adding 7 `PSAvoidUsingPositionalParameters` warnings, one per `Resolve-PublishedPort` call site, for
-14. Codacy was failing the PR on exactly those seven ("7 new issues (0 max.)"), which the earlier
-`Severity -eq 'Error'` reading of CI had missed — the local lint step tolerates warnings, Codacy does
-not. The call sites now pass named parameters, so both gates agree.
+14. Those call sites now pass named parameters.
+
+**Codacy is still red and it is not those seven.** It reports `7 new issues (0 max.)` — the same
+count before the branch's fixes, after them, and after the positional-parameter change, so the
+matching number was a coincidence. Ruled out from outside: PSScriptAnalyzer is byte-identical to
+`main` at every severity including `Information`, and shellcheck with no severity filter at all
+(Codacy's default, not CI's `--severity=warning`) reports a single `SC2129` note on a pre-existing
+line. The check publishes no annotations, an empty summary and no text — its title even reads "of at
+least  severity" with the severity name missing — so the issue list exists only inside the Codacy
+dashboard, which needs an account to read. **Open:** someone with Codacy access has to open
+[the PR page](https://app.codacy.com/gh/labsai/EDDI/pull-requests/714) and say what the seven are.
 
 **Superseded on merge.** `main` (#736) deleted `docker-compose.postgres.yml` outright — it was a
 drifted near-duplicate that could not work as the overlay the README documented, and its role is now
