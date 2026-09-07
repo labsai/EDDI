@@ -274,10 +274,12 @@ for `compose_project_name` (7 cases, `set -u` safe); shellcheck at CI's exact in
 (`--severity=warning --shell=bash`) clean; `install.ps1` parses and passes a 9-case harness under
 **both** pwsh 7.6.5 and Windows PowerShell 5.1; five end-to-end `-WhatIf` runs of the real installer
 covering the stale-variable case, its negative control, `-Full` with a bad `-MongoPort`, and explicit
-`-MongoPort` accepted and rejected. PSScriptAnalyzer: 14 findings, **0 Error** — identical to this
-branch's pre-fix state, which is what CI gates on. (The PR description's claim that the branch
-matched `main`'s baseline of 7 was wrong: the branch already added 7 `PSAvoidUsingPositionalParameters`
-warnings. None are Errors, so CI was never at risk.)
+`-MongoPort` accepted and rejected. PSScriptAnalyzer: **7 findings, 0 Error — now genuinely identical to
+`main`'s baseline.** The PR description had claimed that already and it was not true: the branch was
+adding 7 `PSAvoidUsingPositionalParameters` warnings, one per `Resolve-PublishedPort` call site, for
+14. Codacy was failing the PR on exactly those seven ("7 new issues (0 max.)"), which the earlier
+`Severity -eq 'Error'` reading of CI had missed — the local lint step tolerates warnings, Codacy does
+not. The call sites now pass named parameters, so both gates agree.
 
 **Superseded on merge.** `main` (#736) deleted `docker-compose.postgres.yml` outright — it was a
 drifted near-duplicate that could not work as the overlay the README documented, and its role is now

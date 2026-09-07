@@ -609,19 +609,19 @@ function Step-Ports {
         $script:MongoPort = ""
     }
     else {
-        $script:MongoPort = Resolve-PublishedPort "MongoDB" 27017 $MongoPortRequested "MONGO_PORT"
+        $script:MongoPort = Resolve-PublishedPort -Label "MongoDB" -DefaultPort 27017 -Requested $MongoPortRequested -EnvKey "MONGO_PORT"
     }
 
     if ($WithAuth) {
-        $script:KeycloakPort = Resolve-PublishedPort "Keycloak" 8180 $KeycloakPortRequested "KEYCLOAK_PORT"
+        $script:KeycloakPort = Resolve-PublishedPort -Label "Keycloak" -DefaultPort 8180 -Requested $KeycloakPortRequested -EnvKey "KEYCLOAK_PORT"
     }
 
     if ($WithMonitoring) {
-        $script:GrafanaPort = Resolve-PublishedPort "Grafana" 3000 $GrafanaPortRequested "GRAFANA_PORT"
-        $script:PrometheusPort = Resolve-PublishedPort "Prometheus" 9090 $PrometheusPortRequested "PROMETHEUS_PORT"
-        $script:JaegerPort = Resolve-PublishedPort "Jaeger UI" 16686 $JaegerPortRequested "JAEGER_PORT"
-        $script:OtlpGrpcPort = Resolve-PublishedPort "Jaeger OTLP gRPC" 4317 $OtlpGrpcPortRequested "OTLP_GRPC_PORT"
-        $script:OtlpHttpPort = Resolve-PublishedPort "Jaeger OTLP HTTP" 4318 $OtlpHttpPortRequested "OTLP_HTTP_PORT"
+        $script:GrafanaPort = Resolve-PublishedPort -Label "Grafana" -DefaultPort 3000 -Requested $GrafanaPortRequested -EnvKey "GRAFANA_PORT"
+        $script:PrometheusPort = Resolve-PublishedPort -Label "Prometheus" -DefaultPort 9090 -Requested $PrometheusPortRequested -EnvKey "PROMETHEUS_PORT"
+        $script:JaegerPort = Resolve-PublishedPort -Label "Jaeger UI" -DefaultPort 16686 -Requested $JaegerPortRequested -EnvKey "JAEGER_PORT"
+        $script:OtlpGrpcPort = Resolve-PublishedPort -Label "Jaeger OTLP gRPC" -DefaultPort 4317 -Requested $OtlpGrpcPortRequested -EnvKey "OTLP_GRPC_PORT"
+        $script:OtlpHttpPort = Resolve-PublishedPort -Label "Jaeger OTLP HTTP" -DefaultPort 4318 -Requested $OtlpHttpPortRequested -EnvKey "OTLP_HTTP_PORT"
     }
 }
 
