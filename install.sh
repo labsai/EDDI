@@ -125,25 +125,42 @@ ask() {
   done
 }
 
-# Check if a TCP port is in use (fallback chain: ss → lsof → nc)
+# Check if a TCP port is in use (probe order: ss → lsof → nc → /dev/tcp)
+#
+# Only ss short-circuits: when it is present, no match really does mean the port
+# is free. A negative lsof result proves nothing, because busybox's lsof (Alpine
+# and friends) ignores -i/-s entirely, lists every open file and exits 0 --
+# neither its exit code nor the absence of a "(LISTEN)" marker says anything
+# about the port. Judging by exit code alone made every port read as taken and
+# the resolver abort with "no free port found"; trusting a missing marker would
+# make every port read as free and hand the raw bind error back to Docker. So a
+# positive lsof match is trusted, and a negative one falls through to a connect
+# probe, which behaves the same on every implementation.
 port_in_use() {
   local port="$1"
+
   if command -v ss &>/dev/null; then
     # Use space/end-of-line anchor to avoid matching port 70 when checking 7070
     ss -tln 2>/dev/null | grep -qE ":${port}( |$)" && return 0
-  elif command -v lsof &>/dev/null; then
-    # Match on output, not exit code: busybox's lsof (Alpine and friends)
-    # ignores -i/-s entirely, lists every open file, and exits 0 -- by exit
-    # code alone EVERY port reads as taken, and the port resolver would abort
-    # with "no free port found". Real lsof prints "(LISTEN)" on each row;
-    # busybox's file list does not.
-    lsof -iTCP:"${port}" -sTCP:LISTEN 2>/dev/null | grep -q "LISTEN" && return 0
-  elif command -v nc &>/dev/null; then
-    nc -z 127.0.0.1 "${port}" 2>/dev/null && return 0
-  else
-    # Last resort: /dev/tcp (bash built-in)
-    (echo >/dev/tcp/127.0.0.1/"${port}") 2>/dev/null && return 0
+    return 1
   fi
+
+  if command -v lsof &>/dev/null; then
+    # Captured rather than piped into grep: `grep -q` exits on the first match
+    # and can SIGPIPE lsof, which `set -o pipefail` would then report as a
+    # failed pipeline even though the port was found.
+    local lsof_out=""
+    lsof_out=$(lsof -iTCP:"${port}" -sTCP:LISTEN 2>/dev/null) || true
+    [[ "$lsof_out" == *LISTEN* ]] && return 0
+  fi
+
+  if command -v nc &>/dev/null; then
+    nc -z 127.0.0.1 "${port}" 2>/dev/null && return 0
+    return 1
+  fi
+
+  # Last resort: /dev/tcp (bash built-in)
+  (echo >/dev/tcp/127.0.0.1/"${port}") 2>/dev/null && return 0
   return 1
 }
 
@@ -175,11 +192,28 @@ find_next_free_port() {
   echo "0"
 }
 
-# Default Compose project name: the basename of the directory holding the
-# compose files, lowercased with everything outside [a-z0-9_-] stripped.
+# The project name `docker compose` will actually use, derived the same way it
+# derives it: COMPOSE_PROJECT_NAME wins outright; otherwise it is the basename
+# of the project directory, lowercased with everything outside [a-z0-9_-]
+# stripped. The project directory is the directory of the FIRST -f file, which
+# under --local is the repo checkout rather than EDDI_DIR -- getting that wrong
+# makes our own containers look like foreign listeners, and the resolver then
+# remaps a port it should have reused (or fails an explicit one outright).
 compose_project_name() {
+  if [[ -n "${COMPOSE_PROJECT_NAME:-}" ]]; then
+    echo "$COMPOSE_PROJECT_NAME"
+    return
+  fi
+
+  local project_dir="$EDDI_DIR"
+  if [[ "${LOCAL_IMAGE:-false}" == "true" ]]; then
+    # Mirrors resolve_compose_files, which puts the repo's
+    # docker-compose.local.yml first and so makes the repo the project dir.
+    project_dir="${EDDI_REPO_ROOT:-${SCRIPT_DIR:-$(pwd)}}"
+  fi
+
   local name
-  name=$(basename "$EDDI_DIR" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9_-')
+  name=$(basename "$project_dir" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9_-')
   echo "${name:-eddi}"
 }
 

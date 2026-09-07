@@ -120,6 +120,7 @@ if ($Database -and $Database -notin @("mongodb", "postgres")) {
 # what the caller pinned (empty = "resolve it for me"); the plain ones carry the
 # default until Step-Ports resolves them, so the summary and the closing banner
 # always have something to print.
+$MongoPortRequested = $MongoPort
 $KeycloakPortRequested = $env:KEYCLOAK_PORT
 $GrafanaPortRequested = $env:GRAFANA_PORT
 $PrometheusPortRequested = $env:PROMETHEUS_PORT
@@ -127,20 +128,12 @@ $JaegerPortRequested = $env:JAEGER_PORT
 $OtlpGrpcPortRequested = $env:OTLP_GRPC_PORT
 $OtlpHttpPortRequested = $env:OTLP_HTTP_PORT
 
-foreach ($portSetting in @(
-        @{ Name = "-MongoPort"; Value = $MongoPort },
-        @{ Name = "KEYCLOAK_PORT"; Value = $KeycloakPortRequested },
-        @{ Name = "GRAFANA_PORT"; Value = $GrafanaPortRequested },
-        @{ Name = "PROMETHEUS_PORT"; Value = $PrometheusPortRequested },
-        @{ Name = "JAEGER_PORT"; Value = $JaegerPortRequested },
-        @{ Name = "OTLP_GRPC_PORT"; Value = $OtlpGrpcPortRequested },
-        @{ Name = "OTLP_HTTP_PORT"; Value = $OtlpHttpPortRequested })) {
-    $portValue = $portSetting.Value
-    if ($portValue -and ($portValue -notmatch '^\d+$' -or [int]$portValue -lt 1 -or [int]$portValue -gt 65535)) {
-        throw "Invalid $($portSetting.Name) value '$portValue'. Must be a port number (1-65535)."
-    }
-}
-
+# Each requested value is validated by Resolve-PublishedPort when the component
+# that publishes it is resolved -- not here. Validating the whole set up front
+# meant a stale GRAFANA_PORT=abc in the environment aborted a plain install that
+# never starts Grafana, and -Full rejected a bad -MongoPort before switching the
+# database to PostgreSQL. The Bash installer has always validated lazily; this
+# keeps the two symmetrical.
 $KeycloakPort = if ($KeycloakPortRequested) { $KeycloakPortRequested } else { "8180" }
 $GrafanaPort = if ($GrafanaPortRequested) { $GrafanaPortRequested } else { "3000" }
 $PrometheusPort = if ($PrometheusPortRequested) { $PrometheusPortRequested } else { "9090" }
@@ -255,10 +248,24 @@ function Find-NextFreePort([int]$Start) {
     return 0
 }
 
-# Default Compose project name: the basename of the directory holding the
-# compose files, lowercased with everything outside [a-z0-9_-] stripped.
+# The project name `docker compose` will actually use, derived the same way it
+# derives it: COMPOSE_PROJECT_NAME wins outright; otherwise it is the basename
+# of the project directory, lowercased with everything outside [a-z0-9_-]
+# stripped. The project directory is the directory of the FIRST -f file, which
+# under -Local is the repo checkout rather than $EddiDir -- getting that wrong
+# makes our own containers look like foreign listeners, and the resolver then
+# remaps a port it should have reused (or fails an explicit one outright).
 function Get-ComposeProjectName {
-    $name = (Split-Path -Path $EddiDir -Leaf).ToLowerInvariant() -replace '[^a-z0-9_-]', ''
+    if ($env:COMPOSE_PROJECT_NAME) { return $env:COMPOSE_PROJECT_NAME }
+
+    $projectDir = $EddiDir
+    if ($Local) {
+        # Mirrors Get-ComposeFiles, which puts the repo's
+        # docker-compose.local.yml first and so makes the repo the project dir.
+        $projectDir = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Location).Path }
+    }
+
+    $name = (Split-Path -Path $projectDir -Leaf).ToLowerInvariant() -replace '[^a-z0-9_-]', ''
     if (-not $name) { $name = "eddi" }
     return $name
 }
@@ -289,6 +296,12 @@ function Resolve-PublishedPort([string]$Label, [int]$DefaultPort, [string]$Reque
     $explicit = [bool]$Requested
     $preferred = $DefaultPort
     if ($explicit) {
+        # Validated here rather than at startup, so an unrelated or stale value
+        # only aborts the install that actually publishes this port.
+        # \d{1,5} keeps the [int] cast below in range for any string that passes.
+        if ($Requested -notmatch '^\d{1,5}$' -or [int]$Requested -lt 1 -or [int]$Requested -gt 65535) {
+            Write-Fail "Invalid $EnvKey value '$Requested'. Must be a port number (1-65535)."
+        }
         $preferred = [int]$Requested
     }
     else {
@@ -596,7 +609,7 @@ function Step-Ports {
         $script:MongoPort = ""
     }
     else {
-        $script:MongoPort = Resolve-PublishedPort "MongoDB" 27017 $MongoPort "MONGO_PORT"
+        $script:MongoPort = Resolve-PublishedPort "MongoDB" 27017 $MongoPortRequested "MONGO_PORT"
     }
 
     if ($WithAuth) {

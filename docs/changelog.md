@@ -49,6 +49,66 @@ bottom of this file and are never archived.
 
 ---
 
+## 🔌 fix(install): close the PR #714 review — a busybox probe that read every port as free (2026-09-07)
+
+**Repo:** EDDI (`fix/installer-mongodb-port-conflict`)
+
+Four findings from the Copilot review of [#714](https://github.com/labsai/EDDI/pull/714): two inline,
+two the review filed as "suppressed comments" in its body (no thread, so nothing to answer in place).
+All four were real. Also merged `origin/main`, which the PR had drifted behind far enough to go
+`CONFLICTING` — and per the repo's own experience a conflicting PR never runs `ci.yml` at all, so the
+merge is what puts this branch back under CI.
+
+**1. `port_in_use` had over-corrected into the opposite bug (`install.sh`).** The previous entry
+below fixed busybox lsof reading every port as *taken* by requiring `LISTEN` in the output. But the
+probe was an `elif` chain: on Alpine-class systems the lsof branch is entered, finds no `LISTEN` in
+busybox's file dump, and the `nc` / `/dev/tcp` branches are never reached — so every port now read as
+*free*, and the raw docker bind error came back. A missing marker is not evidence. The chain is now:
+`ss` short-circuits (its absence of a match really is proof); a **positive** lsof match is trusted, a
+negative one falls through to a connect probe that behaves identically on every implementation.
+Verified in a real `alpine:3.20` container with a live listener — busy port detected, free port still
+free — and mutation-checked by restoring the `elif` chain, which fails the busy case.
+
+While there: the lsof output is captured instead of piped into `grep -q`. `grep -q` exits on first
+match and can SIGPIPE the producer, which `set -o pipefail` then reports as a failed pipeline even
+though the port *was* found.
+
+**2. The PowerShell installer validated every port variable up front (`install.ps1`).** A stale
+`GRAFANA_PORT=abc` in the environment aborted a plain install that never starts Grafana, and `-Full`
+rejected a bad `-MongoPort` before switching the database to PostgreSQL. The Bash installer has
+always validated inside `resolve_published_port`, i.e. only for components that are actually enabled.
+The eager loop is gone; `Resolve-PublishedPort` now validates its own argument. `-MongoPort` also
+gains a `$MongoPortRequested` capture, matching the six overlay ports and keeping the resolved value
+from overwriting the request.
+
+**3 + 4. The Compose project name was derived two ways that Compose does not use (both scripts).**
+`compose_project_name` / `Get-ComposeProjectName` decide whether a listener is *our* container (reuse
+the port) or a foreign one (remap, or fail an explicit request). Both ignored `COMPOSE_PROJECT_NAME`,
+and both assumed the project directory is `EDDI_DIR` — but Compose derives it from the directory of
+the **first** `-f` file, which under `--local` / `-Local` is the repo checkout. Confirmed against
+docker compose 29.7.2: first `-f` in `RepoCheckout/` yields project `repocheckout`, first `-f` in
+`.eddi/` yields `eddi`, and `COMPOSE_PROJECT_NAME` overrides both. Both functions now follow the same
+three rules.
+
+**Design decision.** Detection was fixed by falling through rather than by sniffing for busybox
+(`lsof -v`, `--help`, applet name). Busybox ignores its argv here, so every sniff is a guess about
+which not-real-lsof this is; "trust a positive, verify a negative" needs no such guess and is correct
+for any implementation, present or future.
+
+**Verification.** `alpine:3.20` behavioural harness plus its mutation check; `bash:3.2.57` harness
+for `compose_project_name` (7 cases, `set -u` safe); shellcheck at CI's exact invocation
+(`--severity=warning --shell=bash`) clean; `install.ps1` parses and passes a 9-case harness under
+**both** pwsh 7.6.5 and Windows PowerShell 5.1; five end-to-end `-WhatIf` runs of the real installer
+covering the stale-variable case, its negative control, `-Full` with a bad `-MongoPort`, and explicit
+`-MongoPort` accepted and rejected. PSScriptAnalyzer: 14 findings, **0 Error** — identical to this
+branch's pre-fix state, which is what CI gates on. (The PR description's claim that the branch
+matched `main`'s baseline of 7 was wrong: the branch already added 7 `PSAvoidUsingPositionalParameters`
+warnings. None are Errors, so CI was never at risk.)
+
+**Files:** `install.sh`, `install.ps1`, `docs/changelog.md`
+
+---
+
 ## 🔐 fix(deploy): no credential in the auth component has a default any more (2026-09-07)
 
 **Repo:** EDDI (`fix/review-deploy`)
