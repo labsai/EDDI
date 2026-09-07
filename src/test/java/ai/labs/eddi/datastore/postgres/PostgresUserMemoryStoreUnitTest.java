@@ -644,6 +644,26 @@ class PostgresUserMemoryStoreUnitTest {
     }
 
     /**
+     * The failure path must not undo what the success path pseudonymised. A caller
+     * that logs or serialises this exception would otherwise persist the identifier
+     * the erasure exists to remove, and a failed erasure is exactly when someone
+     * reads the exception.
+     */
+    @Test
+    void deleteAllForUser_failureMessageCarriesThePseudonymNotTheUserId() throws Exception {
+        when(preparedStatement.executeUpdate()).thenThrow(new SQLException("DB error"));
+
+        var thrown = assertThrows(IResourceStore.ResourceStoreException.class,
+                () -> sut.deleteAllForUser("user1"));
+
+        assertFalse(thrown.getMessage().contains("user1"),
+                "the raw userId reached the erasure failure message: " + thrown.getMessage());
+        assertTrue(thrown.getMessage().contains(AuditHmac.pseudonymFor("user1")),
+                "the failure must name the same pseudonym the success path logs, or the two cannot be "
+                        + "correlated: " + thrown.getMessage());
+    }
+
+    /**
      * A userId is whatever the erasure caller supplied, and it reaches this INFO
      * line directly. Without sanitising, a CR/LF in it writes forged lines into the
      * operator's log (CWE-117) - on the GDPR erasure path, which is exactly where a

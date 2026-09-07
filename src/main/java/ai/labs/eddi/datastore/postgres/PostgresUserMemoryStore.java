@@ -553,7 +553,18 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
                         AuditHmac.pseudonymFor(userId), count);
             }
         } catch (SQLException e) {
-            throw new IResourceStore.ResourceStoreException("Failed to delete all data for userId=" + userId, e);
+            // Pseudonymised for the same reason as the success log above: a caller that
+            // logs or serialises this exception would otherwise persist the identifier
+            // the erasure exists to remove (CWE-532).
+            //
+            // The sibling methods above deliberately keep the raw userId in their
+            // messages. On a read, merge or property delete the user's data legitimately
+            // exists and their identifier appears throughout the system, so the
+            // identifier is diagnostics rather than a leak. Erasure is the one path where
+            // the whole point is that the identifier stops existing - do not "even these
+            // up" without that distinction in mind.
+            throw new IResourceStore.ResourceStoreException(
+                    "Failed to delete all data for user=" + AuditHmac.pseudonymFor(userId), e);
         }
     }
 
