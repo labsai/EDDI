@@ -116,6 +116,9 @@ Full narrative and metrics: [scheduling.md → Deployment Configuration](schedul
 | `eddi.schedule.min-interval-seconds` | `60` | Smallest cron interval a schedule may request |
 | `eddi.schedule.instance-id` | *(hostname)* | Cluster claim identity. Set explicitly where hostnames are recycled |
 | `eddi.schedule.default-timezone` | `UTC` | IANA zone for schedules that name none |
+| `eddi.schedule.fire-timeout` | `5m` | How long one conversation fire may run before it is abandoned as failed. **Keep it at or below `lease-timeout`** — past the lease another instance may reclaim the schedule regardless |
+| `eddi.schedule.fire-log-retention` | `90d` | Fire logs older than this are deleted by a periodic sweep. `0` keeps everything — a 60-second heartbeat alone writes ~525,600 rows a year |
+| `eddi.schedule.fire-log-prune-interval` | `1h` | How often that sweep runs. The `DELETE` is by timestamp and therefore idempotent, so it needs no cluster claim |
 
 ---
 
@@ -246,6 +249,26 @@ Full guide: [attachments-guide.md](attachments-guide.md).
 > The upload cap and the forward cap are different numbers on purpose: a 20 MB
 > PDF may be stored and read on demand via the `readAttachment` tool without
 > being inlined into every prompt.
+
+---
+
+## Backup, export & import
+
+Full guide: [import-export-an-agent.md](import-export-an-agent.md).
+
+| Property | Default | Description |
+|---|---|---|
+| `eddi.backup.export.retention-minutes` | `60` | How long a finished export archive stays downloadable |
+| `eddi.backup.export.sweep-interval` | `15m` | How often the retention sweep runs on its own, independently of exports |
+
+> `POST /backup/export/{agentId}` writes a ZIP under `tmp/archives/` and answers
+> with a `Location` header the client then GETs, so the file has to outlive the
+> request. Nothing else deletes it: the sweep runs before every export *and* on
+> the interval above, so an instance that stops exporting still reclaims what it
+> already wrote. It also removes the loose `tmp/*.zip` archives earlier releases
+> left behind, which are no longer downloadable. Raise the retention if a client
+> may take longer than that between the POST and the GET; lower it to bound disk
+> use on an instance that exports on a cron.
 
 ---
 

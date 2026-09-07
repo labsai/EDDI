@@ -68,7 +68,8 @@ Log in to Grafana with `admin` / `admin`, then open **Dashboards → EDDI** — 
 `Persistent Memory — Dream & Summarization` ·
 `Integrations — MCP, A2A Identity, OpenAI-compatible API` ·
 `Capability Registry & Connections` · `Secrets Vault` · `Tenancy, Quotas & Audit` ·
-`Platform Operator` · `NATS JetStream` · `Runtime context (Quarkus / JVM built-ins)`
+`Platform Operator` · `NATS JetStream` · `Backup — Export, Import & Sync` ·
+`Runtime context (Quarkus / JVM built-ins)`
 
 ---
 
@@ -263,10 +264,27 @@ eddi_team_cadence_claims_reclaimed_total    # Stale claims reclaimed after claim
 eddi_schedule_poll_count_total              # Poll cycles
 eddi_schedule_fire_count_total              # Schedules fired
 eddi_schedule_fire_failed_total             # Fire failures
+eddi_schedule_fire_skipped_total            # Fires the coordinator dropped without running the turn
 eddi_schedule_claim_conflict_total          # Claim conflicts (multi-instance)
 eddi_schedule_fire_deadlettered_total       # Dead-lettered schedules
 eddi_schedule_fire_duration_seconds         # Fire latency (timer)
+eddi_schedule_firelog_pruned_total          # Fire-log rows removed by the retention sweep
 ```
+
+`eddi_schedule_fire_skipped_total` is neither a success nor a failure. The
+coordinator dropped the turn without consuming the input — the conversation was
+already IN_PROGRESS or AWAITING_HUMAN — so the schedule is re-armed at its next
+cadence with `failCount` untouched, and it will never dead-letter on skips
+alone. A skip rate that stays high is therefore the one scheduling problem the
+failure and dead-letter counters cannot show you: a
+`conversationStrategy=persistent` heartbeat aimed at a conversation that is
+never free (a human is chatting in it, or it is parked on a HITL approval) has
+its message dropped every single cycle while every other metric stays green.
+
+`eddi_schedule_firelog_pruned_total` counts rows, not sweeps. Flat while the
+fire-log table keeps growing means either retention is switched off
+(`eddi.schedule.fire-log-retention=0`) or the sweep is throwing — the poller
+logs that failure at ERROR.
 
 ### Tenant Quota Metrics
 
@@ -466,6 +484,29 @@ eddi_openai_request_duration_seconds        # Request latency (timer)
 eddi_openai_conversations_created_total     # Conversations created via the /v1 adapter
 eddi_caller_identity_resolution_total       # Caller-identity resolutions; tags: outcome, reference
 ```
+
+### Backup, Export & Sync Metrics
+
+```text
+eddi_backup_export_count_total                    # Agent exports attempted
+eddi_backup_export_failure_count_total            # Exports that failed
+eddi_backup_import_count_total                    # Archive imports attempted
+eddi_backup_import_failure_count_total            # Imports that failed
+eddi_backup_upgrade_count_total                   # Upgrade/sync runs attempted (ZIP upgrade, /sync, /sync/batch)
+eddi_backup_upgrade_failure_count_total           # Upgrade/sync runs that failed outright
+eddi_backup_upgrade_resource_updated_count_total  # Resources updated in place by a sync
+eddi_backup_upgrade_resource_created_count_total  # Resources created in the target by a sync
+eddi_backup_upgrade_resource_skipped_count_total  # Matched resources whose content was already identical
+eddi_backup_upgrade_resource_failure_count_total  # Resources a sync could not process (the 207 body lists them)
+```
+
+> The four `resource` counters explain a successful no-op. An all-skipped run is
+> answered with `200 OK`: source and target already agree, nothing was written and
+> no agent version was burned. (`201 Created` means something *was* written,
+> `207 Multi-Status` that part of it failed — see `IRestImportService`.) A
+> `created` line where `updated` is expected means the matcher is not joining
+> source and target extensions and every sync is duplicating the configuration
+> tree.
 
 ### Session & Listing Metrics
 

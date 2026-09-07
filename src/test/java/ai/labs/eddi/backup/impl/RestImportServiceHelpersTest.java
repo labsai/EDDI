@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.backup.impl;
 
+import io.quarkus.runtime.LaunchMode;
 import org.junit.jupiter.api.*;
 
 import java.lang.reflect.Method;
@@ -293,33 +294,29 @@ class RestImportServiceHelpersTest {
     class IsDevMode {
 
         @Test
-        @DisplayName("returns false for prod profile")
-        void prodProfile() throws Exception {
-            String original = System.getProperty("quarkus.profile");
+        @DisplayName("follows the launch mode, not the quarkus.profile system property")
+        void followsLaunchMode() throws Exception {
+            // The system property is only set when someone passed
+            // -Dquarkus.profile=... on the command line, so a container started the
+            // normal way with QUARKUS_PROFILE=dev looked like production and rejected
+            // every http:// sync source with a message pointing at prod configuration.
+            String originalProfile = System.getProperty("quarkus.profile");
+            LaunchMode originalMode = LaunchMode.current();
             try {
+                LaunchMode.set(LaunchMode.DEVELOPMENT);
+
                 System.setProperty("quarkus.profile", "prod");
-                boolean result = invokeIsDevMode();
-                assertFalse(result);
-            } finally {
-                if (original != null) {
-                    System.setProperty("quarkus.profile", original);
-                } else {
-                    System.clearProperty("quarkus.profile");
-                }
-            }
-        }
+                assertTrue(invokeIsDevMode(),
+                        "isDevMode must ignore the quarkus.profile system property and follow the launch mode");
 
-        @Test
-        @DisplayName("returns true for dev profile")
-        void devProfile() throws Exception {
-            String original = System.getProperty("quarkus.profile");
-            try {
+                LaunchMode.set(LaunchMode.NORMAL);
                 System.setProperty("quarkus.profile", "dev");
-                boolean result = invokeIsDevMode();
-                assertTrue(result);
+                assertFalse(invokeIsDevMode(),
+                        "isDevMode must ignore the quarkus.profile system property and follow the launch mode");
             } finally {
-                if (original != null) {
-                    System.setProperty("quarkus.profile", original);
+                LaunchMode.set(originalMode);
+                if (originalProfile != null) {
+                    System.setProperty("quarkus.profile", originalProfile);
                 } else {
                     System.clearProperty("quarkus.profile");
                 }
@@ -327,19 +324,24 @@ class RestImportServiceHelpersTest {
         }
 
         @Test
-        @DisplayName("returns true for test profile")
-        void testProfile() throws Exception {
-            String original = System.getProperty("quarkus.profile");
+        @DisplayName("maps each launch mode to a fixed answer: NORMAL false, DEVELOPMENT and TEST true")
+        void mapsEveryLaunchMode() throws Exception {
+            // This used to compare invokeIsDevMode() against a test-local copy of the
+            // very expression under test, so it passed whatever isDevMode returned —
+            // including, under a plain surefire run (LaunchMode.NORMAL), the opposite
+            // of what its own name claimed.
+            LaunchMode originalMode = LaunchMode.current();
             try {
-                System.setProperty("quarkus.profile", "test");
-                boolean result = invokeIsDevMode();
-                assertTrue(result);
+                LaunchMode.set(LaunchMode.NORMAL);
+                assertFalse(invokeIsDevMode(), "a production launch is not dev mode");
+
+                LaunchMode.set(LaunchMode.DEVELOPMENT);
+                assertTrue(invokeIsDevMode(), "quarkus:dev is dev mode");
+
+                LaunchMode.set(LaunchMode.TEST);
+                assertTrue(invokeIsDevMode(), "a test run is dev mode");
             } finally {
-                if (original != null) {
-                    System.setProperty("quarkus.profile", original);
-                } else {
-                    System.clearProperty("quarkus.profile");
-                }
+                LaunchMode.set(originalMode);
             }
         }
 

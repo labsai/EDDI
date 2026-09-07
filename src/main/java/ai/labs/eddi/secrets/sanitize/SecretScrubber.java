@@ -44,7 +44,18 @@ import java.util.regex.Pattern;
 public class SecretScrubber {
 
     private static final Logger LOGGER = Logger.getLogger(SecretScrubber.class);
-    private static final String REDACTED = "${vault:REDACTED}";
+
+    /**
+     * The marker written in place of a secret value.
+     * <p>
+     * Public because readers of scrubbed content have to recognise it: the upgrade
+     * path puts the target's own value back wherever the source carries this
+     * placeholder, and it used to compare against its own copy of the literal — so
+     * changing the marker here would have silently stopped that matching and
+     * overwritten a production agent's live credentials with placeholders, with no
+     * compile error and no failing test.
+     */
+    public static final String REDACTED = "${vault:REDACTED}";
 
     /**
      * Minimum length for entropy analysis (short strings are less likely to be

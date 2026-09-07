@@ -26,7 +26,6 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.utils.RestUtilities;
 import ai.labs.eddi.utils.RuntimeUtilities;
-import org.jboss.logging.Logger;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -90,8 +89,18 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
     private final IRestRagStore restRagStore;
 
     private Map<String, IResourceService> resourceServices;
-
-    private static final Logger log = Logger.getLogger(ResourceClientLibrary.class);
+    /**
+     * The same types {@link #resourceServices} registers, resolved to the store
+     * rather than to the REST facade.
+     * <p>
+     * Version resolution is a READ, so it belongs on the store side of the split
+     * described in this class's Javadoc: a cascade must not have to own a
+     * configuration in order to ask which version of it currently exists. Keep this
+     * map in step with {@code resourceServices} — a type registered there and
+     * missing here answers {@code null} from {@link #getCurrentResourceId(URI)},
+     * which callers must treat as "cannot resolve", never as "no live version".
+     */
+    private Map<String, IResourceStore<?>> resourceStores;
 
     @Inject
     public ResourceClientLibrary(IParserStore parserStore, IDictionaryStore dictionaryStore, IRuleSetStore ruleSetStore,
@@ -126,6 +135,23 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
     @Override
     public void init() throws ResourceClientLibraryException {
         this.resourceServices = new HashMap<>();
+        this.resourceStores = new HashMap<>();
+
+        // Same keys as resourceServices below, including the two-host aliases, so a
+        // reference written with the legacy authority resolves its version the same
+        // way it resolves its content.
+        resourceStores.put("ai.labs.parser", parserStore);
+        resourceStores.put("ai.labs.regulardictionary", dictionaryStore);
+        resourceStores.put("ai.labs.dictionary", dictionaryStore);
+        resourceStores.put("ai.labs.behavior", ruleSetStore);
+        resourceStores.put("ai.labs.rules", ruleSetStore);
+        resourceStores.put("ai.labs.httpcalls", apiCallsStore);
+        resourceStores.put("ai.labs.apicalls", apiCallsStore);
+        resourceStores.put("ai.labs.llm", llmStore);
+        resourceStores.put("ai.labs.output", outputStore);
+        resourceStores.put("ai.labs.property", propertySetterStore);
+        resourceStores.put("ai.labs.mcpcalls", mcpCallsStore);
+        resourceStores.put("ai.labs.rag", ragStore);
 
         resourceServices.put("ai.labs.parser", new IResourceService() {
             @Override
@@ -342,17 +368,47 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
         return proxy.duplicate(resourceId.getId(), resourceId.getVersion());
     }
 
+    /**
+     * Deletes the resource a reference names.
+     *
+     * <p>
+     * An unregistered type is an error, not a silent skip. Returning
+     * {@code Response.ok()} here made {@code RestOrphanAdmin.purgeOrphans} count
+     * every unhandled orphan as "purged" — the whole {@code ai.labs.workflow}
+     * category, which is the largest one, since a deleted agent is exactly what
+     * leaves workflows unreferenced. The operator got a converged-looking report
+     * for an operation that had deleted nothing, forever. Matching
+     * {@link #duplicateResource}'s behaviour means a caller either deletes or is
+     * told it did not.
+     * </p>
+     */
     @Override
     public Response deleteResource(URI uri, boolean permanent) throws ServiceException {
         String type = uri.getHost();
         IResourceService proxy = resourceServices.get(type);
         if (RuntimeUtilities.isNullOrEmpty(proxy)) {
-            log.warnf("Could not find proxy for type '%s' in uri '%s' — skipping delete", type, uri);
-            return Response.ok().build();
+            throw new ServiceException(String.format("Could not find proxy for type '%s' in uri '%s' — nothing was deleted", type, uri));
         }
 
         IResourceId resourceId = RestUtilities.extractResourceId(uri);
         return proxy.delete(resourceId.getId(), resourceId.getVersion(), permanent);
+    }
+
+    @Override
+    public IResourceId getCurrentResourceId(URI uri) {
+        if (uri == null) {
+            return null;
+        }
+        IResourceStore<?> store = resourceStores.get(uri.getHost());
+        IResourceId resourceId = RestUtilities.extractResourceId(uri);
+        if (store == null || resourceId == null || resourceId.getId() == null) {
+            return null;
+        }
+        try {
+            return store.getCurrentResourceId(resourceId.getId());
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            return null;
+        }
     }
 
     private interface IResourceService {
