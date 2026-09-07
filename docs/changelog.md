@@ -49,6 +49,179 @@ bottom of this file and are never archived.
 
 ---
 
+## 🧾 fix(gdpr): name the conversations an export lost, and stop a cache miss disowning a delete (2026-09-07)
+
+**Repo:** EDDI (`fix/review-audit-gdpr`)
+
+Six review comments, four of which were raised only inside collapsed review-body sections that
+never became inline threads, so nobody had opened them.
+
+**A cache failure disowned a delete that had succeeded.** In `deleteUserData`, `forgetRestriction`
+sat between the memory delete and the count assignment inside one `try`, so an eviction failure
+reported zero memories erased and named `userMemories` as the failed step — for a delete that had
+already committed. The count is now assigned immediately after the delete, and cache eviction is its
+own step recording `restrictionCache`.
+
+**The export silently dropped conversations it could not read.** A snapshot that threw, or came back
+null between the id lookup and the read, was logged and skipped while `complete()` knew nothing about
+it — the same reports-success-while-incomplete failure this branch exists to fix, one method away.
+Failed ids are now collected, surfaced on `UserDataExport` and the MCP payload, counted in the
+`GDPR_EXPORT` audit entry, and folded into `complete()`.
+
+**Two documents described an API that no longer exists.** The erasure example in
+`docs/gdpr-compliance.md` predated six counters, `failedSteps` and `complete`, and the export note
+still said 206; both are corrected, and the operator is told to check `complete` before filing an
+Art. 17 request as fulfilled. `docs/audit-ledger.md` listed the wrong indexes and claimed the
+collection takes inserts only — `pseudonymizeByUserId` issues an `updateMany` under Art. 17(3)(e).
+
+**Two tests that could pass while broken.** `McpGdprToolsTest` now derives its expected key set from
+`GdprDeletionResult`'s record components, so a component added to REST cannot silently miss MCP; and
+the pseudonym assertion checks the full `pseudonymFor` value rather than just the prefix, which a
+pseudonym computed over the wrong input would have satisfied.
+
+---
+
+## 🕵️ fix(gdpr): log the pseudonym, not the identifier the erasure just removed (2026-09-07)
+
+**Repo:** EDDI (`fix/review-audit-gdpr`)
+
+A reviewer pushed further than the previous round did, and was right to. Sanitising the `userId` in
+the GDPR delete-all log stopped a caller forging log records, but it left the identifier itself
+sitting in the log — on the one code path whose entire purpose is to remove that identifier. Logs
+outlive the database and travel further than it does, so an erasure that writes the user's id into
+them has not finished the job (CWE-532).
+
+Both user-memory stores now log `AuditHmac.pseudonymFor(userId)`: the same deterministic SHA-256 the
+erasure cascade already substitutes into the audit ledger. An operator can still correlate the log
+line with the ledger entry, and neither holds the identifier. The pseudonym is hex, so it also
+cannot carry a record boundary — the injection fix is subsumed rather than discarded.
+
+`PostgresUserMemoryStore.deleteAllForUser` gained the null guard `MongoUserMemoryStore` has always
+had. Erasing "all entries for user null" is not a request anyone means, and the pseudonym refuses a
+null identifier rather than hashing one.
+
+The regression test asserts the stronger contract: the raw id must not appear in the captured log at
+all, and the pseudonym prefix must. Reverting the change fails it with the offending line quoted.
+
+---
+
+## 📤 fix(gdpr): stop calling an export complete while four data categories are missing (2026-09-07)
+
+**Repo:** EDDI (`fix/review-audit-gdpr`)
+
+Six review comments, plus the log-injection round.
+
+**The portability export overstated itself.** `conversationsTruncated` was the only completeness
+signal, but the endpoint's own interface documents that every export omits group transcripts,
+shared artifacts, schedules and HITL journal entries. A user whose data lived only in those
+categories received a 200 the API described as complete — a GDPR Art. 20 answer that is not true.
+`UserDataExport` now derives `complete` and `omittedCategories`, both mirrored into the MCP payload
+so the two surfaces agree, and the response carries the distinction in the status line as well as
+the body.
+
+**206 was the wrong status and is now 207.** 206 Partial Content is a *range* status and means
+something specific about byte ranges. 207 Multi-Status says "composite operation, read the body",
+which is what this is, and it is already what the sibling erasure endpoint uses. Because the four
+categories are always omitted today, the export always answers 207; the 200 branch returns when
+those exporters land. The four missing exporters are deliberately not implemented here.
+
+**A warning claimed a write that had not happened.** `warnIfCostBudgetIsUnenforceable` ran before
+`setQuota`, so a failing store still logged that the limit was stored and would apply. Moved after
+the write returns.
+
+**The SSE and synchronous quota surfaces disagreed.** A `QuotaAccountingUnavailableException` with
+no message produced `"message":""` on the streaming path while the synchronous mapper produced
+`Quota accounting unavailable`. Both now use one shared fallback.
+
+**Two stores gave a different refusal reason than the gates around them.** The Mongo and PostgreSQL
+tenant-quota stores said "Cost accounting failed" where every sibling gate says "Quota accounting
+unavailable — denying request for safety". Aligned.
+
+**A documentation contradiction, half real.** `AuditLedgerService` has two overflow paths, and only
+one dead-letters. `submit()` reserves its slot before a sequence is assigned, so a rejected
+submission is simply counted and dropped; `offerBounded()` on the retry paths dead-letters, because
+those entries already hold a chain position. The Failure Handling prose described the second and
+generalised it to both. It is now a table naming each path and its recoverability, with the
+consequence stated: a dropped submission is unrecoverable *and* leaves the chain `INTACT`, so
+`eddi_audit_entries_dropped_total` is the only signal and a clean `/auditstore/verify` is not proof
+of completeness.
+
+**One comment was wrong and is recorded as such.** A reviewer said a fixture stubbed the wrong
+descriptor read. The call graph is the other way round — `describe()` reaches `readDescriptor`, not
+`readCurrentDescriptor`, and the latter appears nowhere in the service. What misled the reviewer was
+the fixture's own comment, which claimed the opposite; the comment was corrected and the stub left
+alone. Following the suggestion would have stopped the test reaching the production guard at all.
+
+**Log injection.** The GDPR delete-all logs on both user-memory stores wrote the caller-supplied
+`userId` raw. Both now sanitize it — on the erasure path, which is exactly where a log has to be
+trustworthy.
+
+---
+
+## 🔐 fix(gdpr): stop caching "not restricted" by default; make foreign audit sequences visible (2026-09-06)
+
+**Repo:** EDDI (`fix/review-audit-gdpr`)
+
+Two reviewer comments had been reported closed but were not. Both are now closed properly, and the
+second one is closed by admitting what is not fixed rather than by claiming it is.
+
+**The Art. 18 restriction cache failed open by default.** A previous pass added
+`eddi.gdpr.restriction-cache-ttl-seconds` and made `0` disable the cache, but left the default at
+30 seconds — so on a stock multi-replica deployment a node that had cached "not restricted" kept
+processing for up to 30 seconds after another node applied the restriction. That is exactly the
+window the comment described, and an opt-in switch does not close it. The default is now `0`:
+every turn reads the store, and caching becomes an explicit single-node or conversation-affinity
+optimisation, documented as such. The alternative considered was a positive-only cache, which was
+rejected because it would only ever help restricted users — the rare case — while still delaying
+an *un*restriction across the cluster.
+
+**Audit sequence allocation is still not cluster-safe, and now says so.** The reviewer asked for a
+storage-level atomic reservation plus a unique `(conversationId, sequence)` constraint and retry.
+That is deferred: it moves a store round trip from once per conversation to once per entry on the
+pipeline thread, and it is a schema change on two backends. The constraint must not land on its
+own either — for an audit ledger a rejected insert silently drops a record, which is worse than a
+duplicate the verifier can detect. What was genuinely missing and is cheap is *detection*:
+`flush()` now re-reads the store's maximum for each conversation it wrote and, if the store already
+holds a position at or beyond this node's next free one, increments
+`eddi_audit_sequence_collisions_total`, logs a WARN naming the conversation, and advances its
+counter past the foreign rows. An operator running multi-replica without affinity sees it in
+metrics instead of discovering it as a `BROKEN` verdict at verify time. The detector has no false
+positives and is documented as partial: two nodes handing out an identical range leave a maximum
+consistent with both counters and are still only caught at verify time.
+
+`IAuditStore` and `docs/audit-ledger.md` now lead with the limitation, the deferred fix, and why it
+is deferred, so the row can no longer be read as "already correct".
+
+---
+
+## 📒 fix(audit,gdpr,tenancy): repair ledger persistence, erasure reporting and quota windows (2026-09-04)
+
+**Repo:** EDDI (`fix/review-audit-gdpr`)
+
+From the whole-repository code review. The subsystem a regulated buyer is actually paying
+for did not work on a supported backend.
+
+**The PostgreSQL audit backend could not store entries EDDI legitimately produces.**
+`conversation_id`, `AGENT_ID` and `AGENT_VERSION` were `NOT NULL`, and the insert unboxed a
+nullable `agentVersion` with `setInt`, throwing an NPE that escaped `appendBatch`'s catch
+entirely. Six shipped call sites pass a literal null — ordinary HITL approvals and group
+turns among them — so a single compliance or oversight entry **discarded roughly three
+flush windows of unrelated conversations' audit data**, while the compliance event itself
+was never recorded. On the read side `getInt` mapped a stored SQL NULL to `0`, which the
+HMAC canonical form renders differently, so any such row would have verified as tampered.
+
+The ledger is append-only evidence, not logs. Losing other conversations' entries because
+one entry is malformed is the worst possible failure mode for it.
+
+**GDPR erasure returned 200 and "complete" even when steps failed**, and reported memories
+as deleted before deleting them. It now reports per-step outcomes and answers 207 when the
+cascade is partial. The MCP admin surface for the same operation hardcoded
+`"status": "completed"` and is now driven by the real result, so an operator — or an agent
+calling the tool — is no longer told a lossy erasure succeeded.
+
+**Quota windows** were compared against a stale in-memory view, and the bootstrap silently
+ignored later configuration changes; both now warn when stored and configured values
+diverge instead of quietly preferring one.
 ## ⏸️ fix(schedule): a human-approval pause is a skip, not a failure (2026-09-07)
 
 **Repo:** EDDI (`fix/review-schedules`)
@@ -509,6 +682,16 @@ behind forever.
 
 Every behavioural change is pinned by a test proven to fail with its fix reverted.
 
+Three pre-existing tests were **failing on the first attempt at this branch** while the
+work reported itself green — caught by an independent reviewer running them. They are now
+genuinely closed, and closed the right way: the fixtures were corrected to stub what
+production actually calls. Five more tests in the same classes had begun passing
+*vacuously*, because the change bypassed the dead-letter branch they were written to cover;
+their stubs are restored so they exercise it again.
+
+`maxMonthlyCostUsd` is stored and displayed but never enforced, because
+`TenantQuotaService.recordCost` has no production caller. That is left as a product gap and
+now surfaces as an explicit warning rather than a silent no-op.
 Two things the auditor caught and this branch corrects rather than ships: the signing
 keypair was being destroyed from the vault on a **soft** delete, on the path that exists
 precisely to be recoverable; and a unique compound index was created unconditionally at

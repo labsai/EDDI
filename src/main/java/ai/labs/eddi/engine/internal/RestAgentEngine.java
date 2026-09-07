@@ -9,6 +9,8 @@ import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.*;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictedException;
+import ai.labs.eddi.engine.gdpr.ProcessingRestrictionUnavailableException;
+import ai.labs.eddi.engine.gdpr.ProcessingRestrictionUnavailableExceptionMapper;
 import ai.labs.eddi.engine.hitl.HitlAccessGuard;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.api.IRestAgentEngine;
@@ -32,7 +34,9 @@ import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.engine.tenancy.QuotaAccountingUnavailableException;
 import ai.labs.eddi.engine.tenancy.QuotaExceededException;
+import ai.labs.eddi.engine.tenancy.rest.QuotaAccountingUnavailableExceptionMapper;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -255,6 +259,23 @@ public class RestAgentEngine implements IRestAgentEngine {
         } catch (ProcessingRestrictedException e) {
             LOGGER.warnf("GDPR processing restricted: %s", e.getMessage());
             response.resume(Response.status(Response.Status.FORBIDDEN).type(TEXT_PLAIN).entity(e.getMessage()).build());
+        } catch (ProcessingRestrictionUnavailableException e) {
+            // Same reason as the quota and backpressure branches below: say() is
+            // resumed through an AsyncResponse, so
+            // ProcessingRestrictionUnavailableExceptionMapper never runs and the
+            // generic handler turned a store failover into a 500 with two ERROR stack
+            // traces per turn — hiding an outage from any monitoring keyed on 503,
+            // and on the hottest path in the system. Body and headers mirror the
+            // mapper so both surfaces look identical to clients — including the null
+            // guard, because Map.of throws NullPointerException on a null value and an
+            // exception raised inside a catch clause is not seen by the sibling
+            // catches: the AsyncResponse would never be resumed and the request would
+            // hang to its timeout.
+            LOGGER.warnf("GDPR restriction status unavailable for conversation %s: %s", sanitize(conversationId), e.getMessage());
+            response.resume(Response.status(Response.Status.SERVICE_UNAVAILABLE)
+                    .entity(Map.of("error", "restriction_status_unavailable",
+                            "message", ProcessingRestrictionUnavailableExceptionMapper.messageOf(e)))
+                    .type(MediaType.APPLICATION_JSON).header("Retry-After", "5").build());
         } catch (ResourceNotFoundException e) {
             response.resume(new NotFoundException());
         } catch (ConversationNotFoundException e) {
@@ -277,6 +298,18 @@ public class RestAgentEngine implements IRestAgentEngine {
             response.resume(Response.status(TOO_MANY_REQUESTS)
                     .entity(Map.of("error", "quota_exceeded", "message", e.getMessage()))
                     .type(MediaType.APPLICATION_JSON).header("Retry-After", "60").build());
+        } catch (QuotaAccountingUnavailableException e) {
+            // Before the RejectedExecutionException branch below, which it extends:
+            // that branch would already answer 503 rather than 500, but with
+            // "capacity_exceeded", and this is not capacity. The quota store could
+            // not answer at all, so the honest error code names that. The message
+            // comes from the mapper's accessor so all three surfaces that report this
+            // condition read one fallback rather than three copies of a literal.
+            LOGGER.warnf("Quota accounting unavailable for conversation %s: %s", sanitize(conversationId), e.getMessage());
+            response.resume(Response.status(Response.Status.SERVICE_UNAVAILABLE)
+                    .entity(Map.of("error", "quota_accounting_unavailable",
+                            "message", QuotaAccountingUnavailableExceptionMapper.messageOf(e)))
+                    .type(MediaType.APPLICATION_JSON).header("Retry-After", "5").build());
         } catch (RejectedExecutionException e) {
             // Same reason as the quota branch above: say() is resumed through an
             // AsyncResponse, so RejectedExecutionExceptionMapper never runs and the
