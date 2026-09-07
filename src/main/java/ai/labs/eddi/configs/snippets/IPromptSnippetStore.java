@@ -10,9 +10,11 @@ import ai.labs.eddi.datastore.IResourceStore;
 import java.util.List;
 
 /**
- * Store interface for {@link PromptSnippet} configuration documents.
+ * Persistence store for reusable prompt-snippet documents.
+ * {@code PromptSnippetService} reads them into the LLM template data map so
+ * system prompts can pull in {@code {snippets.name}} fragments at task
+ * execution time.
  *
- * @author ginccc
  * @since 6.0.0
  */
 public interface IPromptSnippetStore extends IResourceStore<PromptSnippet> {

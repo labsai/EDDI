@@ -12,7 +12,11 @@ import ai.labs.eddi.engine.security.spaces.AccessScope;
 import java.util.List;
 
 /**
- * @author ginccc
+ * Persistence store for document descriptors — display name, ownership, sharing
+ * and timestamps listed in the Manager UI, kept separate from the configuration
+ * document itself. REST list endpoints and {@code ResourceAccessGuard} query
+ * this store, including the {@link AccessScope}-filtered overload for
+ * caller-visible results.
  */
 public interface IDocumentDescriptorStore extends IDescriptorStore<DocumentDescriptor> {
 

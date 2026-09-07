@@ -8,8 +8,10 @@ import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.datastore.IResourceStore;
 
 /**
- * Store interface for channel integration configurations. Uses the DB-agnostic
- * {@code AbstractResourceStore} via {@code IResourceStorageFactory}.
+ * Persistence store for channel integration configurations (Slack and similar
+ * platforms). {@code ChannelTargetRouter} and the REST channel API load these
+ * to route incoming events onto agents or groups, independently of
+ * {@code AgentConfiguration}.
  *
  * @since 6.1.0
  */

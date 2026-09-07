@@ -8,10 +8,9 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.datastore.IResourceStore;
 
 /**
- * Store interface for group configurations. Uses the DB-agnostic
- * {@code AbstractResourceStore} via {@code IResourceStorageFactory}.
- *
- * @author ginccc
+ * Persistence store for multi-agent group configurations (members, discussion
+ * style, phases). {@code GroupConversationService} and the group REST API load
+ * these to run structured discussions.
  */
 public interface IAgentGroupStore extends IResourceStore<AgentGroupConfiguration> {
 }
