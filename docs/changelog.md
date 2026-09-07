@@ -49,6 +49,34 @@ bottom of this file and are never archived.
 
 ---
 
+## 🏷️ fix(ci): a release tag could execute on the runner (2026-09-07)
+
+**Repo:** EDDI (`fix/review-quality-gates`)
+
+`PRIMARY_TAG` is `${GITHUB_REF#refs/tags/}`, and the only check on it was a *prefix* comparison
+against the pom version. So `6.3.0-$(id)` passed — a legal git ref name, therefore pushable — and
+nine `run:` blocks spliced it in with `${{ }}`, which the runner substitutes into the script text
+*before* bash parses it. Two of those blocks hold the Docker Hub credentials and the Sigstore
+keyless identity. Pushing a tag needs write access, so this is not anonymous execution; it is
+tag-push rights becoming arbitrary commands in the job where the release secrets live.
+
+The whole tag is now matched against
+`^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$` before the parity check, and every one of
+the nine sites takes the value through `env:` instead of interpolation. All 54 published tags since
+4.8.0 match; the pattern carries no version literal, so the single-source-of-truth guard stays
+satisfied, and it agrees with the no-`v`-prefix rule the release trigger depends on.
+
+Two relational tests pin it. One lifts the pattern out of the YAML, compiles it, and runs 6 accepted
+and 18 rejected tags through it, so it grades the regex's behaviour rather than its presence — shown
+by a second experiment that widened the pattern to `^[0-9].*$` and still failed. The other sweeps
+every workflow for `${{ }}` interpolation of the tag inside a `run:` block, so a new site cannot
+reappear.
+
+`ReleaseVersionSourceTest` caught the first draft of the error message for quoting a literal version
+as an example, which would have gone stale on the next bump. The guard works.
+
+---
+
 ## 🧷 fix(build): a gate test that passed with its guard deleted (2026-09-07)
 
 **Repo:** EDDI (`fix/review-quality-gates`)

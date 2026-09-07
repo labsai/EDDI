@@ -108,6 +108,30 @@ class BuildQualityGatesTest {
     private static final Pattern UNQUOTED_GITHUB_FILE_REDIRECTION = Pattern.compile(">>?\\s*\\$GITHUB_(?:STEP_SUMMARY|OUTPUT|ENV|PATH)\\b");
 
     /**
+     * The {@code RELEASE_TAG_PATTERN='…'} assignment in {@code ci.yml}, capturing
+     * the allowlist itself so the test can compile it and run tags through it
+     * rather than comparing it to a literal. Single-quoted in the workflow so bash
+     * hands the regex to {@code [[ =~ ]]} unexpanded.
+     */
+    private static final Pattern RELEASE_TAG_PATTERN_ASSIGNMENT = Pattern.compile("RELEASE_TAG_PATTERN='([^']+)'");
+
+    /**
+     * A {@code ${{ … }}} expression naming the {@code primary-tag} job/step output,
+     * from either {@code steps.meta} or {@code needs.docker}. Harmless in an action
+     * input or in markdown; command injection inside a {@code run:} block.
+     */
+    private static final Pattern PRIMARY_TAG_INTERPOLATION = Pattern.compile("\\$\\{\\{[^{}]*primary-tag[^{}]*\\}\\}");
+
+    /**
+     * A line opening a {@code run:} step key, with group 1 anchored at the
+     * {@code run} token so its column can be read off. Matches both {@code run: |}
+     * and the {@code - run: …} list-item form, and does not match a {@code run:}
+     * appearing inside a script body (which is indented past its own key and never
+     * starts a line at the key's column).
+     */
+    private static final Pattern RUN_STEP_KEY = Pattern.compile("^\\s*(?:- )?(run):(?:\\s|$)");
+
+    /**
      * The flag that decides whether the coverage gate runs at all. Since the gate
      * carries {@code <skip>${skipITs}</skip>} it is inert in every build that does
      * not pass this, so a CI job has to.
@@ -574,6 +598,141 @@ class BuildQualityGatesTest {
                         + " reads the pom for both sides — passes either way.");
         assertTrue(ci.contains("::error::Tag '${PRIMARY_TAG}' does not match pom.xml version"),
                 "the tag/pom mismatch must fail the docker job with a ::error:: annotation, not just log");
+    }
+
+    /**
+     * CWE-78. The pom-parity check above is a <em>prefix</em> check
+     * ({@code "${POM_VERSION}-"*}), so on its own it accepts {@code 6.3.0-$(id)} —
+     * a perfectly legal git ref name. That tag becomes {@code PRIMARY_TAG}, a job
+     * output, and then a Docker tag, a {@code --build-arg} and a cosign subject in
+     * five downstream jobs, two of which hold the Docker Hub credentials and the
+     * Sigstore signing identity. Pushing a tag needs write access, so this is not
+     * anonymous RCE; it is the escalation from tag-push rights to arbitrary command
+     * execution beside the release secrets, which is a materially larger grant than
+     * "may cut a release".
+     * <p>
+     * This grades the allowlist <em>relationally</em> — it lifts the pattern out of
+     * the workflow, compiles it, and runs tags through it — because a literal
+     * assertion would pass against a pattern that had been quietly widened to
+     * {@code .*}. Bash ERE and {@link Pattern} agree on the constructs used here,
+     * so the regex this compiles is the regex {@code [[ =~ ]]} applies.
+     */
+    @Test
+    @DisplayName("the release build validates the whole tag against a strict allowlist")
+    void releaseTagIsValidatedAgainstAStrictAllowlist() throws Exception {
+        String ci = read(CI_WORKFLOW);
+
+        Matcher assignment = RELEASE_TAG_PATTERN_ASSIGNMENT.matcher(ci);
+        assertTrue(assignment.find(),
+                CI_WORKFLOW + " no longer assigns RELEASE_TAG_PATTERN='…'. The tag comes from GITHUB_REF and reaches"
+                        + " a Docker tag, a --build-arg and a cosign subject, so the WHOLE tag has to clear an"
+                        + " allowlist — a prefix check against the pom version accepts 6.3.0-$(id).");
+        String allowlist = assignment.group(1);
+
+        assertTrue(ci.contains("if [[ ! \"$PRIMARY_TAG\" =~ $RELEASE_TAG_PATTERN ]]; then"),
+                "RELEASE_TAG_PATTERN is assigned but never applied to $PRIMARY_TAG in " + CI_WORKFLOW
+                        + ". A pattern nothing matches against validates nothing. Pattern was: " + allowlist);
+        assertTrue(ci.contains("::error::Tag '${PRIMARY_TAG}' is not a valid release tag"),
+                "a rejected tag must fail the docker job with a ::error:: annotation naming the offending tag,"
+                        + " not just log");
+        assertTrue(allowlist.startsWith("^") && allowlist.endsWith("$"),
+                "the allowlist must anchor BOTH ends, or it degrades to the prefix check it replaces —"
+                        + " '6.3.0-$(id)' contains a matching '6.3.0'. Pattern was: " + allowlist);
+
+        Pattern accepted = Pattern.compile(allowlist);
+
+        // A legitimate release must still go through. Every tag this project has
+        // published since 4.8.0 has this shape.
+        for (String tag : List.of("6.3.0", "6.3.0-RC2", "6.0.0-RC1", "10.12.34", "6.3.0-rc.1", "6.3.0-beta-2")) {
+            assertTrue(accepted.matcher(tag).matches(),
+                    "the allowlist rejects the legitimate release tag '" + tag + "', which would break the release"
+                            + " path it is meant to protect. Pattern was: " + allowlist);
+        }
+
+        // Every one of these is a legal git ref name, so every one of these is
+        // pushable. None may reach a shell.
+        List<String> mustReject = List.of(
+                "6.3.0-$(id)", "6.3.0-`id`", "6.3.0;id", "6.3.0 && id", "6.3.0|id", "6.3.0\nid",
+                "6.3.0'", "6.3.0\"", "6.3.0-${IFS}id", "$(id)", "6.3.0 6.3.1", "6.3.0-a>b",
+                "v6.3.0", "6.3", "6.3.0-", "6.3.0.", "", "-6.3.0");
+        for (String tag : mustReject) {
+            assertFalse(accepted.matcher(tag).matches(),
+                    "the allowlist accepts '" + tag + "'. It is a legal git ref name, so it is pushable, and"
+                            + " PRIMARY_TAG is spliced into docker/cosign command lines in the jobs holding the"
+                            + " registry credentials. Pattern was: " + allowlist);
+        }
+    }
+
+    /**
+     * The other half of the CWE-78 fix, and the half a targeted assertion cannot
+     * hold: {@code ${{ }}} is substituted into the script text <em>before</em> bash
+     * parses it, so one new {@code PRIMARY_TAG="${{ … }}"} line anywhere reopens
+     * command injection no matter how strict the allowlist above is. Validation and
+     * {@code env:} are belt and braces — neither is redundant, because the
+     * allowlist protects against a crafted tag while {@code env:} protects against
+     * the allowlist being widened later.
+     * <p>
+     * A sweep rather than a fixed list of steps, for the same reason
+     * {@link #githubEnvironmentFileRedirectionsAreQuoted} is one: the failure mode
+     * is a <em>new</em> site, and a list only ever covers the sites that already
+     * existed. {@code needs.docker.outputs.primary-tag} in an action input or in
+     * release-notes markdown is fine — this looks only inside {@code run:}.
+     */
+    @Test
+    @DisplayName("no run: block splices the release tag into its shell source")
+    void theReleaseTagNeverReachesShellSourceByInterpolation() throws Exception {
+        List<Path> workflows;
+        try (Stream<Path> paths = Files.list(WORKFLOWS)) {
+            workflows = paths.filter(path -> path.getFileName().toString().endsWith(".yml")).sorted().toList();
+        }
+        assertFalse(workflows.isEmpty(),
+                "found no workflow under " + WORKFLOWS.toAbsolutePath() + ", so this sweep grades nothing —"
+                        + " teach it where the workflows moved rather than leaving it vacuous");
+
+        List<String> spliced = new ArrayList<>();
+        for (Path workflow : workflows) {
+            List<String> lines = read(workflow).lines().toList();
+            int runIndent = -1;
+            for (int i = 0; i < lines.size(); i++) {
+                String line = lines.get(i);
+                boolean insideRunBody = runIndent >= 0 && (line.isBlank() || indentOf(line) > runIndent);
+                if (runIndent >= 0 && !insideRunBody) {
+                    runIndent = -1;
+                }
+                int runKey = runKeyColumn(line);
+                if (runKey >= 0) {
+                    runIndent = runKey;
+                }
+                if ((insideRunBody || runKey >= 0) && PRIMARY_TAG_INTERPOLATION.matcher(line).find()) {
+                    spliced.add(workflow + ":" + (i + 1) + "  " + line.strip());
+                }
+            }
+        }
+
+        assertEquals(List.of(), spliced,
+                "these run: blocks interpolate the release tag with ${{ }}. The runner substitutes that into the"
+                        + " script text BEFORE bash parses it, so a tag such as 6.3.0-$(id) executes on the runner —"
+                        + " quoting it inside the script cannot help. Bind it with `env:  PRIMARY_TAG: ${{ … }}` and"
+                        + " reference \"$PRIMARY_TAG\" in the script instead");
+    }
+
+    /** Number of leading space characters on {@code line}. */
+    private static int indentOf(String line) {
+        int i = 0;
+        while (i < line.length() && line.charAt(i) == ' ') {
+            i++;
+        }
+        return i;
+    }
+
+    /**
+     * The column at which a line opens a {@code run:} step key, or {@code -1} if it
+     * does not. {@code - run: |} puts the key two columns right of the list dash,
+     * and the block body is everything indented further than that.
+     */
+    private static int runKeyColumn(String line) {
+        Matcher matcher = RUN_STEP_KEY.matcher(line);
+        return matcher.find() ? matcher.start(1) : -1;
     }
 
     /**

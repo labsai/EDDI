@@ -957,6 +957,34 @@ jobs:
             PRIMARY_TAG="${GITHUB_REF#refs/tags/}"
             IS_RELEASE="true"
 
+            # The tag is attacker-shaped input: it is whatever the person with tag-push
+            # rights typed, and from here it becomes a Docker tag, a --build-arg and a
+            # cosign subject in half a dozen downstream jobs. The pom-parity check below
+            # is a PREFIX check ("${POM_VERSION}-"*), so on its own it happily accepts
+            # 6.3.0-$(id) or 6.3.0-`id` — and every job that consumed this output used to
+            # splice it into shell source with ${{ }}, which the runner substitutes BEFORE
+            # bash parses the script. That turns tag-push rights into arbitrary command
+            # execution in the jobs holding the Docker Hub credentials and the Sigstore
+            # signing identity. Two halves to the fix and BOTH are load-bearing:
+            #   1. validate the WHOLE tag here against this allowlist, and
+            #   2. pass it downstream through `env:`, never through ${{ }} in a `run:`.
+            # The shape is the one every release since 4.8.0 has used and the one the
+            # semver-alias branch below can actually parse: MAJOR.MINOR.PATCH with an
+            # optional pre-release suffix. No `v` prefix — the workflow triggers on
+            # tags: ["[0-9]*"] (AGENTS.md 1), so a v-tag fires nothing at all and
+            # failing loudly here beats a release that silently never ran. It is also
+            # exactly the character set a Docker tag permits, so it cannot mint an
+            # unpushable image reference.
+            RELEASE_TAG_PATTERN='^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$'
+            if [[ ! "$PRIMARY_TAG" =~ $RELEASE_TAG_PATTERN ]]; then
+              # No example version in this message: a literal here would be a hand-copied
+              # release number that goes stale on the next pom bump, which is the drift
+              # ReleaseVersionSourceTest exists to keep out of this file. The pattern is
+              # the specification, so print the pattern.
+              echo "::error::Tag '${PRIMARY_TAG}' is not a valid release tag. Release tags must match ${RELEASE_TAG_PATTERN} — MAJOR.MINOR.PATCH, optionally followed by a '-' pre-release suffix, and with no 'v' prefix. Delete the tag and re-tag with a conforming name."
+              exit 1
+            fi
+
             # The tag is what EDDI_VERSION (and therefore the Red Hat `version`
             # LABEL, the :latest alias and the certification submission) is built
             # from, while application.properties derives systemRuntime.projectVersion,
@@ -1010,8 +1038,11 @@ jobs:
         run: ./mvnw clean package -DskipTests -Dformatter.skip=true -Dcheckstyle.skip=true -Plicense-gen -B
 
       - name: Build Docker image
+        # PRIMARY_TAG arrives through env:, never through ${{ }} — see the note on
+        # RELEASE_TAG_PATTERN in "Compute Docker tags".
+        env:
+          PRIMARY_TAG: ${{ steps.meta.outputs.primary-tag }}
         run: |
-          PRIMARY_TAG="${{ steps.meta.outputs.primary-tag }}"
           IS_RELEASE="${{ steps.meta.outputs.is-release }}"
           IS_STABLE="${{ steps.meta.outputs.is-stable }}"
 
@@ -1066,9 +1097,10 @@ jobs:
         # This runs against the image already in the local daemon, before login,
         # so a failure stops the publish. The post-push smoke test keeps the
         # signature verification, which genuinely can only run after publication.
+        env:
+          PRIMARY_TAG: ${{ steps.meta.outputs.primary-tag }}
         run: |
           set -uo pipefail
-          PRIMARY_TAG="${{ steps.meta.outputs.primary-tag }}"
           MONGO_URI="mongodb://localhost:27017/eddi?retryWrites=true&w=majority&connectTimeoutMS=10000&socketTimeoutMS=30000"
 
           docker run -d --name eddi-boot-mongodb --network host mongo:7.0.14
@@ -1147,12 +1179,13 @@ jobs:
 
       - name: Push to Docker Hub
         id: docker-push
+        env:
+          PRIMARY_TAG: ${{ steps.meta.outputs.primary-tag }}
         run: |
-          PRIMARY_TAG="${{ steps.meta.outputs.primary-tag }}"
           IS_RELEASE="${{ steps.meta.outputs.is-release }}"
           IS_STABLE="${{ steps.meta.outputs.is-stable }}"
 
-          docker push ${DOCKER_IMAGE}:${PRIMARY_TAG}
+          docker push "${DOCKER_IMAGE}:${PRIMARY_TAG}"
           if [[ "$IS_STABLE" == "true" ]]; then
             docker push ${DOCKER_IMAGE}:${{ steps.meta.outputs.minor-tag }}
             docker push ${DOCKER_IMAGE}:${{ steps.meta.outputs.major-tag }}
@@ -1162,7 +1195,7 @@ jobs:
           fi
 
           # Capture the pushed image digest for provenance attestation
-          DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' ${DOCKER_IMAGE}:${PRIMARY_TAG} | cut -d'@' -f2)
+          DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "${DOCKER_IMAGE}:${PRIMARY_TAG}" | cut -d'@' -f2)
           echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
           echo "### ✅ Pushed to Docker Hub" >> "$GITHUB_STEP_SUMMARY"
           echo "Image digest: \`${DIGEST}\`" >> "$GITHUB_STEP_SUMMARY"
@@ -1171,13 +1204,14 @@ jobs:
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
 
       - name: Sign Docker images (keyless)
+        env:
+          PRIMARY_TAG: ${{ steps.meta.outputs.primary-tag }}
         run: |
-          PRIMARY_TAG="${{ steps.meta.outputs.primary-tag }}"
           IS_RELEASE="${{ steps.meta.outputs.is-release }}"
           IS_STABLE="${{ steps.meta.outputs.is-stable }}"
 
           echo "=== Signing ${DOCKER_IMAGE}:${PRIMARY_TAG} ==="
-          cosign sign --yes ${DOCKER_IMAGE}:${PRIMARY_TAG}
+          cosign sign --yes "${DOCKER_IMAGE}:${PRIMARY_TAG}"
 
           if [[ "$IS_STABLE" == "true" ]]; then
             echo "=== Signing semver aliases ==="
@@ -1249,13 +1283,14 @@ jobs:
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
 
       - name: Verify Docker image signature
+        env:
+          PRIMARY_TAG: ${{ needs.docker.outputs.primary-tag }}
         run: |
-          PRIMARY_TAG="${{ needs.docker.outputs.primary-tag }}"
           echo "=== Verifying signature for ${DOCKER_IMAGE}:${PRIMARY_TAG} ==="
           cosign verify \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
             --certificate-identity-regexp '^https://github\.com/labsai/EDDI/\.github/workflows/ci\.yml@refs/(heads/main|tags/.+)$' \
-            ${DOCKER_IMAGE}:${PRIMARY_TAG}
+            "${DOCKER_IMAGE}:${PRIMARY_TAG}"
           echo "✅ Image signature verified"
           echo "### 🔏 Image Signature Verified" >> "$GITHUB_STEP_SUMMARY"
 
@@ -1277,8 +1312,9 @@ jobs:
           done
 
       - name: Start EDDI
+        env:
+          PRIMARY_TAG: ${{ needs.docker.outputs.primary-tag }}
         run: |
-          PRIMARY_TAG="${{ needs.docker.outputs.primary-tag }}"
           echo "Starting ${DOCKER_IMAGE}:${PRIMARY_TAG}..."
 
           docker run -d --name eddi \
@@ -1287,7 +1323,7 @@ jobs:
             -e "EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true" \
             -e "EDDI_MCP_ALLOW_UNAUTHENTICATED=true" \
             -e "EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED=true" \
-            ${DOCKER_IMAGE}:${PRIMARY_TAG}
+            "${DOCKER_IMAGE}:${PRIMARY_TAG}"
 
       - name: Wait for healthy
         run: |
@@ -1544,16 +1580,18 @@ jobs:
           password: ${{ secrets.DOCKER_PASSWORD }}
 
       - name: Pull pushed image
+        env:
+          PRIMARY_TAG: ${{ needs.docker.outputs.primary-tag }}
         run: |
-          PRIMARY_TAG="${{ needs.docker.outputs.primary-tag }}"
           echo "Pulling ${DOCKER_IMAGE}:${PRIMARY_TAG}..."
-          docker pull ${DOCKER_IMAGE}:${PRIMARY_TAG}
+          docker pull "${DOCKER_IMAGE}:${PRIMARY_TAG}"
 
       - name: Verify Red Hat labels present
+        env:
+          PRIMARY_TAG: ${{ needs.docker.outputs.primary-tag }}
         run: |
-          PRIMARY_TAG="${{ needs.docker.outputs.primary-tag }}"
           echo "=== Checking required Red Hat labels ==="
-          LABELS=$(docker inspect ${DOCKER_IMAGE}:${PRIMARY_TAG} --format '{{json .Config.Labels}}')
+          LABELS=$(docker inspect "${DOCKER_IMAGE}:${PRIMARY_TAG}" --format '{{json .Config.Labels}}')
           echo "$LABELS" | python3 -m json.tool
           MISSING=0
           for label in name vendor version release summary description; do
@@ -1570,13 +1608,14 @@ jobs:
           fi
 
       - name: Verify /licenses in container
+        env:
+          PRIMARY_TAG: ${{ needs.docker.outputs.primary-tag }}
         run: |
-          PRIMARY_TAG="${{ needs.docker.outputs.primary-tag }}"
           echo "=== /licenses directory ==="
-          docker run --rm --entrypoint="" ${DOCKER_IMAGE}:${PRIMARY_TAG} ls -la /licenses/
+          docker run --rm --entrypoint="" "${DOCKER_IMAGE}:${PRIMARY_TAG}" ls -la /licenses/
           echo ""
           echo "=== THIRD-PARTY.txt exists ==="
-          docker run --rm --entrypoint="" ${DOCKER_IMAGE}:${PRIMARY_TAG} \
+          docker run --rm --entrypoint="" "${DOCKER_IMAGE}:${PRIMARY_TAG}" \
             test -f /licenses/THIRD-PARTY.txt && echo "✅ THIRD-PARTY.txt found" || { echo "❌ THIRD-PARTY.txt missing"; exit 1; }
 
       - name: Install preflight
