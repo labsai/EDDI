@@ -194,6 +194,144 @@ Two tests are recorded honestly as characterization rather than guards: the snip
 name-fallback row is what `main` always emitted, and `RestUtilities.createConflictException`
 was a behaviourally identical refactor. Neither can fail without its change, and both say
 so.
+## 🧼 fix(configs): sanitize every cascade-delete log argument, not most of them (2026-09-06)
+
+**Repo:** EDDI (`fix/review-config-delete`)
+
+CodeQL raised eight log-injection alerts on this branch: a REST path parameter reached a log call
+unsanitized, so a caller could put CR/LF in an Agent or workflow id and forge log records
+(CWE-117). Every flagged argument now goes through `LogSanitizer.sanitize`.
+
+The more useful part was what the alerts did *not* cover. `RestAgentStore` was left with the same
+tainted `id` sanitized on one line and raw sixteen lines above it, on the schedule-cascade pair
+that CodeQL could not reach because it needs the schedule store to throw. Uneven coverage in one
+file is worse than none, because the next reader assumes the file is done. Every log argument in
+that class is now sanitized: caller ids, store-sourced ids, and exception messages.
+
+`URI`-typed arguments are deliberately left alone — `URI.create` rejects control characters, so a
+URI object cannot carry a record boundary in the first place.
+
+Ten regression tests drive a CR/LF payload through the real code paths and assert no newline
+reaches the log. They guard against vacuity twice: the capture must be non-empty, and it must
+contain a marker from the specific line under test — otherwise a closed logger or an unreached
+branch would pass. `captureLogsOf` moved to a shared `LogCaptureSupport` rather than being copied.
+
+One argument is honestly not pinned: `pinned.getId()` on the plan-cascade failure path. It comes
+from `RestUtilities.extractResourceId`, whose validity gate returns null for anything containing
+CR/LF, so the value cannot be driven. It is defensive, not reachable.
+
+---
+
+## 🧹 fix(configs): stop cascading deletes removing resources someone else still uses (2026-09-06)
+
+**Repo:** EDDI (`fix/review-config-delete`)
+
+Review round on this branch: 20 comments, 6 fixed, 13 confirmed already correct, 1 disputed with
+code evidence. The six fixes share one shape — a delete that asked the right question at the wrong
+moment.
+
+**Cascade deletes checked references before the parent was gone.** `planCascade` has to ask
+"is this referenced by more than one thing" while the Agent still counts itself, but by the time
+each child delete actually runs the Agent is deleted and the count has moved. A workflow that a
+second Agent adopted in between was deleted anyway. Both `RestAgentStore` and `RestWorkflowStore`
+now re-ask immediately before each child delete, and a candidate that is still referenced
+increments the `X-Cascade-Skipped` counter instead of being removed.
+
+**The orphan purge trusted a reverse lookup that ignores old versions.** Both lookups in
+`isReferencedNow` skip referrers that are not a resource's current version, while the mark scan
+deliberately counts every version a deployment record pins. The purge loop now also re-runs the
+deployed-agent scan per candidate and fails closed when the scan is incomplete or throws.
+
+**Vault key rotation could sweep the key it had just written.** `versionsToSweep` treated an empty
+list of valid versions as "nothing to keep" rather than as an unknown bound, so a rotation whose
+identity update had not yet landed swept the new key. Empty is now handled exactly like null: the
+full scan range is preserved and nothing is deleted on an unknown bound.
+
+**Soft-deleting a descriptor marked the wrong version.** Descriptor versions advance independently
+of the resource's, so the soft path now resolves the descriptor's own current version the way the
+permanent path already did.
+
+**Files:** `RestAgentStore`, `RestWorkflowStore`, `RestOrphanAdmin`, `AgentSigningService`,
+`RestVersionInfo`, and their tests.
+
+---
+
+## 🛡️ fix(configs): close the CodeQL alerts and the review round (2026-09-04)
+
+**Repo:** EDDI (`fix/review-config-delete`)
+
+Follow-up on the same branch, from two independent review rounds, a diff-coverage pass, and
+four CodeQL alerts this branch introduced.
+
+**CodeQL, all four fixed in code rather than dismissed.** Two high-severity integer overflows
+in the new `ResourceUtilities` paging helper, where a caller-supplied index and limit were
+combined without bounds so a large value wrapped and produced a nonsensical window; the inputs
+are now clamped before the arithmetic. Two log-injection sites where a user-provided value
+reached a log statement unsanitised, now routed through the sanitiser the codebase already
+uses elsewhere rather than a second one.
+
+**A functional regression the branch's own suite could not see.** `RetryConfiguration` gained a
+total-backoff budget, and every test in that class stayed green while the behaviour changed.
+Found by the reviewer, fixed, and pinned by a test that fails without it.
+
+**Four tests were proven vacuous by mutation.** One claimed to pin a new
+`!config.getCapabilities().isEmpty()` guard; removing that guard left it green. Another
+asserted the consequence of a stub the real collaborator refuses to produce. Each was rewritten
+to fail on the regression it names, or deleted with an honest gap recorded — a test that cannot
+fail is worse than none, because it hides the hole.
+
+**Diff coverage** of changed lines: 89.9% to 99.5% line, 80.1% to 92.7% branch, with 38 tests
+added and each proven against a mutation of the line it protects.
+
+---
+
+## 🗑️ fix(configs): make destructive configuration deletes safe, atomic and honest (2026-09-04)
+
+**Repo:** EDDI (`fix/review-config-delete`)
+
+From the whole-repository code review. The destructive configuration paths destroyed data
+that was still in use, and reported success while doing it.
+
+**Orphan purge deleted live configuration.** References are version-pinned by design, and
+`DocumentDescriptorFilter` rewrites a descriptor's `resource` to the new version on every
+PUT. So a single edit of a rule set leaves the descriptor saying `?version=2` while every
+workflow that was not re-pointed still says `?version=1`. The scan compared those full
+versioned URI strings, found no match, classified the config an orphan, and
+`DELETE /administration/orphans` removed **all** of its versions — destroying a config a
+live workflow was still resolving. The comparison is now on version-independent identity,
+so any referenced version protects the resource. The remaining deliberate gap (only the
+current version of each agent is scanned) is documented rather than silently present.
+
+**Cascade delete tore down workflows before the guard that could still reject it.** A
+version-mismatched cascade deleted the workflows and schedules of the version it read, then
+answered 409. And the reference check asked whether *one pinned version* was still
+referenced before deleting *every* version, so a workflow another agent still used was
+destroyed.
+
+**Reverse lookups crashed on soft-deleted rows.** `AgentStore` and `WorkflowStore` threw
+`ResourceNotFoundException` as soon as one referencing document had been soft-deleted,
+which disabled the "is this still referenced?" check entirely — the check is caught and
+logged, so cascade delete simply stopped protecting shared resources.
+
+**Version-0 history rows escaped permanent deletion** on MongoDB, so `deletePermanently`
+and GDPR erasure both reported success while leaving an undeletable descriptor tombstone
+behind forever.
+
+### Regression coverage
+
+Every behavioural change is pinned by a test proven to fail with its fix reverted.
+
+Two things the auditor caught and this branch corrects rather than ships: the signing
+keypair was being destroyed from the vault on a **soft** delete, on the path that exists
+precisely to be recoverable; and a unique compound index was created unconditionally at
+startup, which fails with a duplicate-key error on exactly the deployments the finding says
+already hold duplicates. Both are now conditional and safe.
+
+Six pre-existing cascade assertions were flipped from `permanent=true` to `permanent=false`.
+That inversion is deliberate and correct: permanently removing a shared resource stays an
+explicit, non-cascading request. A functional regression in `RetryConfiguration`'s new
+backoff budget was found by the auditor while the class's own suite stayed green, and is
+fixed with a test that fails without it.
 ## 🔀 fix(build): repair `main` while merging it into the v5 compatibility branch (2026-09-06)
 
 **Repo:** EDDI (`fix/review-legacy-compat`)
