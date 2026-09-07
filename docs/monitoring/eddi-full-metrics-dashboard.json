@@ -10298,6 +10298,157 @@
               "sort": "desc"
             }
           }
+        },
+        {
+          "id": 159,
+          "type": "timeseries",
+          "title": "Audit chain positions allocated by another replica",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_audit_sequence_collisions_total` — the audit ledger found a chain position already stored that this node had not handed out, which means a second replica is allocating positions for the same conversation. Sequence allocation is a `MAX(sequence)` read rather than an atomic reservation, so this produces duplicate positions and `/auditstore/verify` grades those conversations BROKEN. Any non-zero value means the deployment is running multiple replicas without conversation affinity — fix the routing. It is a partial detector: two nodes handing out an identical range are only caught at verify time.",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 12,
+            "y": 42
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(rate(eddi_audit_sequence_collisions_total{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "hidden",
+              "placement": "bottom",
+              "showLegend": false,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "single",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 158,
+          "type": "timeseries",
+          "title": "Quota refusals caused by the store, not by a limit",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_tenant_quota_unavailable_total` by `type` — the quota store could not answer, so the turn was refused for safety without any limit being reached — a driver failure in whichever store is configured (`MongoException` in `MongoTenantQuotaStore`, the default backend, or `SQLException` in `PostgresTenantQuotaStore`). These used to be counted on `eddi_tenant_quota_denied_total` and answered 429 with `Retry-After: 60`, so a database outage looked exactly like a tenant burning through its allowance on the panels above. They now answer 503 `quota_accounting_unavailable`. Any sustained non-zero value here is an infrastructure problem, not a capacity decision — alert on it separately from the denial panels.",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 42
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (type) (rate(eddi_tenant_quota_unavailable_total{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "{{type}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
         }
       ]
     },
