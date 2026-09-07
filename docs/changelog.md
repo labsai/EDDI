@@ -1040,6 +1040,158 @@ explicit, non-cascading request. A functional regression in `RetryConfiguration`
 backoff budget was found by the auditor while the class's own suite stayed green, and is
 fixed with a test that fails without it.
 
+---
+
+## 🐳 fix(docker): move the base image digest and stop the weekly check suppressing itself (2026-09-06)
+
+**Repo:** EDDI (`fix/base-image-digest-and-check`)
+
+`main` has not published an image since 2026-08-30. Every CI run fails at **Scan Docker image
+for vulnerabilities**, and every job after it — push, cosign signing, SLSA provenance, smoke
+test, GitHub release, Red Hat catalog publish — is skipped. Reproduced locally with the gate's
+own flags (`--severity CRITICAL,HIGH --ignore-unfixed`), which exits 1 on six findings, all
+from the base image:
+
+| Package | CVE | Installed | Fixed in |
+|---|---|---|---|
+| `curl-minimal`, `libcurl-minimal` | CVE-2026-8286 (TLS config mismatch) | 7.76.1-40.el9 | 7.76.1-40.el9_8.5 |
+| `curl-minimal`, `libcurl-minimal` | CVE-2026-9547 (SSH host key bypass) | 7.76.1-40.el9 | 7.76.1-40.el9_8.5 |
+| `sqlite-libs` | CVE-2026-11822, CVE-2026-11824 (FTS5 RCE, heap overflow) | 3.34.1-10.el9_8 | 3.34.1-11.el9_8 |
+
+**Digest update, not a stopgap.** The pin was build `1.24-3.1786536503` (2026-08-12). Red Hat
+republished the tag on 2026-08-24 as `1.24-3.1787587037`; the `1.24` tag now resolves to
+`sha256:d5f7e0c5…`, which carries all four fixes. Per the remediation procedure in
+[`AGENTS.md`](../AGENTS.md) this is the clean path — the pin moves, it is never dropped, and no
+`microdnf update` line is needed. Rebuilt from the amended Dockerfile and re-ran the gate: zero
+findings, exit 0. Also booted the image against MongoDB and drove a two-turn rule-based
+conversation end to end (create ruleset → output set → workflow → agent → deploy → start →
+say), plus the smoke-test assertions CI makes: health `UP` on all four checks, `/openapi` 200,
+all three security headers present.
+
+### Why nobody was told
+
+`base-image-check.yml` **saw** the new digest on 2026-08-31 and declined to open the PR. Its
+Dependabot guard matched any open PR whose branch starts `dependabot/docker/`, and #716 —
+which bumps the *demo* image's `eclipse-temurin` base in `Dockerfile.demo` — satisfies that.
+This repo has more than one Dockerfile, so the branch prefix was never a sufficient test. The
+guard now requires the candidate PR to actually touch `$DOCKERFILE`, checked with
+`gh pr view --json files` and an exact whole-line `grep -qxF`. Verified against the live repo:
+both open Dependabot Docker PRs (#716, #631) touch only `Dockerfile.demo`, so the guard now
+falls through and the digest PR would be created.
+
+### Review round — which way the guard should fail
+
+Both CodeRabbit and Copilot flagged the same thing: the guard suppressed `gh` stderr with
+`2>/dev/null`, so an API error was indistinguishable from "no match". Right, and fixed —
+stderr is no longer discarded, both `gh` calls have their exit status checked, and each failure
+emits a `::warning::` annotation naming what could not be read.
+
+Where the two bots disagreed was the *direction* of the failure. CodeRabbit asked to exit the
+workflow on any API error ("fail closed"); Copilot asked to warn and continue with an empty
+list. Took Copilot's direction, deliberately: fail-closed here means no PR that week, which is
+the same outcome as the bug being fixed, whereas degrading toward *opening* the PR risks at
+worst a duplicate that is visible and closed in one click. Nor is a red job a reliable alarm in
+this repo — this very workflow failed on 2026-07-13, 07-20, 07-27 and 08-03, four consecutive
+weeks, with nobody acting on it. When the guard cannot complete it now also writes a
+"Dependabot guard degraded" block into the step summary, so a duplicate is explained rather
+than merely appearing.
+
+A second review round caught that the degraded summary was itself conditional: it was gated on
+`[ -z "$DEPENDABOT_PR" ]`, so if one candidate's file list was unreadable and a *later* candidate
+matched, the block was suppressed. The skip decision is sound in that case, but a candidate went
+unchecked and the summary said nothing. The gate is now on the degraded flag alone, with wording
+that distinguishes the two outcomes. (The `::warning::` annotation always fired either way; only
+the summary was being hidden.)
+
+A third round caught that the degraded reason was a scalar, so a run where two lookups failed
+reported only the last one. It is a list now, and the summary prints every failed lookup as its
+own bullet.
+
+Exercised the rewritten guard against a stubbed `gh` on all five paths: Dependabot PRs touching
+only `Dockerfile.demo` (no match, PR created — the original bug's correct behaviour), one
+touching the production Dockerfile (match, skipped), `gh pr list` failing, `gh pr view` failing
+per-PR, and the mixed case above where the first lookup fails and the second matches. The block
+is clean under `shellcheck --severity=style`.
+
+Worth recording that the first run of that fifth case printed nothing at all, which looked like
+the new conditional was broken. It was the *harness*: it locates the end of the guard fragment by
+matching `if [ -n "$DEPENDABOT_PR" ]; then`, and the fix introduces a nested `if` on the same
+condition, so the extractor cut the fragment in half and produced an unterminated block. It now
+matches only at the run-block's own indentation. The same shape of mistake as the `PATH` one in
+the UBI 10 entry: twice now the test rig has been the thing that broke, and both times it first
+presented as a bug in the code under test.
+
+The failure mode is worth naming because it is the quiet kind: the weekly job reported
+**success**, its own summary said the digest had changed, and the outcome line read
+`Dependabot PR #716 already covers this Dockerfile`. Nothing was red except the thing the
+automation existed to prevent.
+
+### UBI 10 — evaluated, not adopted
+
+Checked whether the app runs on `ubi10/openjdk-25-runtime`, since Red Hat's own Quarkus
+material still shows UBI 9. It does. Same UID 185, same `run-java.sh` entrypoint, same
+`JBOSS_CONTAINER_*` module layout, `curl` and `microdnf` both present, and the *identical* JDK
+build on both (`25.0.4.1+1-LTS`, Red_Hat-25.0.4.1.1-1) — so no JVM-level difference at all.
+The unmodified Dockerfile builds on it with only the `FROM` line changed; the image boots,
+passes the container `HEALTHCHECK`, serves `/openapi` and `/manage/`, emits an identical set of
+startup warnings, and runs the same two-turn conversation. Trivy reports **zero** findings at
+every severity, against 10 HIGH and 223 MEDIUM/LOW on UBI 9. It is also ~19 MB smaller.
+
+One real behavioural difference, and it is in the OS crypto policy rather than the JVM: RHEL 10
+additionally disables the static-RSA TLS 1.2 suites (`TLS_RSA_WITH_AES_*_CBC_*`,
+`TLS_RSA_WITH_AES_*_GCM_*`). Red Hat's OpenJDK honours `/etc/crypto-policies/back-ends/java.config`,
+and `java -XshowSettings:security:properties` confirms the suites land in the JVM's
+`jdk.tls.disabledAlgorithms` on UBI 10 and not on UBI 9. Every current LLM provider negotiates
+ECDHE and is unaffected — TLS to the OpenAI, Anthropic and Google endpoints succeeds from
+inside the UBI 10 image — but an on-prem endpoint offering only non-forward-secret suites would
+connect on UBI 9 and fail on UBI 10.
+
+Not switched in this change. The base OS is what `redhat-certify.yml` submits to the Red Hat
+container catalog, and a major-version move is a certification decision rather than a CVE fix.
+Kept separate so the digest bump can land immediately and unblock releases.
+
+### Follow-up not taken here
+
+`base-image-check.yml`'s "newer tag" probe only scans `1.25`…`1.29` **within the same
+repository**, so it cannot surface a UBI 10 image no matter how long one exists. Left as-is;
+widening it belongs with the decision above.
+
+### Merge with #736 — two guards for the same bug, combined
+
+#736 landed on `main` first and had independently fixed the same Dependabot false match, so the
+merge was a conflict between two working implementations rather than a text collision. Neither
+was strictly better, and each carried something the other lacked.
+
+`main` asked `gh pr list --app dependabot`; this branch asked `--author 'app/dependabot'`.
+`--app` is right: `--author` is the *user* filter and does not reliably match an App-authored
+PR, so the candidate list can come back empty, the skip never fires, and the job opens a
+duplicate — the mirror image of the bug being fixed. `main`'s reasoning about
+`dependabot.yml` watching three directories (`/src/main/docker`, `/mcp-sidecar`,
+`/.clusterfuzzlite`) is also the more complete statement of why the branch prefix was never
+sufficient; the demo image was only the instance that happened to bite.
+
+This branch, in turn, surfaces `gh` failures instead of swallowing them. `main` wrapped both
+lookups in `2>/dev/null || echo ""`, which restores the original failure mode in a new place:
+an unreadable candidate silently becomes "not a match", and nothing says so. The three
+follow-up commits here exist for exactly that.
+
+Resolved by taking `--app dependabot` and `main`'s reasoning into this branch's structure, so
+the guard both queries correctly and reports when it could not. Verified the merged workflow
+parses as YAML and that all six `run` blocks pass `bash -n`.
+
+**The digest now applies to two `FROM` lines.** #736 split the image into a throwaway `docs`
+stage plus the runtime stage, both carrying the pin. Its own comment requires the two to move
+together — `base-image-check.yml` parses the last `FROM` and its `sed` rewrites every line
+carrying the pin — so bumping one would leave the vulnerable base in the published image and
+silently desynchronise the automation. Both moved. `EddiImageDockerfileTest` (also new in
+#736) pins the integration image to the production file and uses synthetic digests rather
+than the real one, so it required no change.
+
+**Files:** [`src/main/docker/Dockerfile`](../src/main/docker/Dockerfile),
+[`.github/workflows/base-image-check.yml`](../.github/workflows/base-image-check.yml)
+
+---
+
 ## 🔀 fix(build): repair `main` while merging it into the v5 compatibility branch (2026-09-06)
 
 **Repo:** EDDI (`fix/review-legacy-compat`)

@@ -167,29 +167,75 @@ jobs:
 
           # Check whether Dependabot already has a PR for THIS Dockerfile.
           #
-          # Treating any open `dependabot/docker/*` branch as covering it was
-          # only ever safe while a single Docker ecosystem existed. dependabot.yml
-          # now watches three directories — /src/main/docker, /mcp-sidecar and
-          # /.clusterfuzzlite — and every one of them opens branches under that
-          # same prefix. A sidecar or fuzzing-image bump would therefore be read
-          # as "the production base image is already covered" and suppress the
-          # digest PR this job exists to raise, for as long as it stayed open.
-          # Ask each candidate which files it actually touches instead of
-          # inferring it from the branch name.
+          # The branch prefix alone is not enough. dependabot.yml watches three
+          # directories — /src/main/docker, /mcp-sidecar and /.clusterfuzzlite —
+          # and every one of them opens branches under `dependabot/docker/`. A
+          # demo, sidecar or fuzzing-image bump therefore reads as "the
+          # production base image is already covered" and suppresses the digest
+          # PR this job exists to raise, for as long as it stays open. That is
+          # not hypothetical: it silently suppressed the production UBI digest
+          # bump while the CI image scan was failing on the exact CVEs the bump
+          # fixes. Ask each candidate which files it actually touches.
           #
           # `--app dependabot`, not `--author 'app/dependabot'`: --author is the
           # user filter and does not reliably match an App-authored PR, so the
           # candidate list could come back empty and the skip below never fire —
-          # which is a duplicate digest PR, the exact outcome this block exists
-          # to prevent. --app is the documented App filter (gh >= 2.28).
+          # a duplicate digest PR, the opposite failure. --app is the documented
+          # App filter (gh >= 2.28).
+          #
+          # Every `gh` failure is annotated rather than swallowed, and the guard
+          # then degrades toward *opening* the PR. That direction is deliberate:
+          # a duplicate PR is visible and closed in one click, whereas a skipped
+          # one is the silent failure above. Failing the step instead would be no
+          # safer — this workflow was red for four consecutive weeks (2026-07-13
+          # through 08-03) with nobody acting on it, so "the job goes red" is not
+          # a reliable channel here.
           DEPENDABOT_PR=""
-          for candidate in $(gh pr list --app dependabot --state open \
-            --json number,headRefName -q '.[] | select(.headRefName | startswith("dependabot/docker/")) | .number' 2>/dev/null || echo ""); do
-            if gh pr view "$candidate" --json files -q '.files[].path' 2>/dev/null | grep -Fxq "$DOCKERFILE"; then
-              DEPENDABOT_PR="$candidate"
+          # Every failed lookup, not just the most recent one — a scalar here would
+          # report "PR #631 could not be read" on a run where #716 failed too.
+          DEGRADED_REASONS=()
+
+          if ! CANDIDATES=$(gh pr list --app dependabot --state open \
+            --json number,headRefName -q '.[] | select(.headRefName | startswith("dependabot/docker/")) | .number'); then
+            echo "::warning::Could not list Dependabot PRs — continuing as if none are open"
+            DEGRADED_REASONS+=("the list of open Dependabot PRs could not be read")
+            CANDIDATES=""
+          fi
+
+          for PR in $CANDIDATES; do
+            if ! PR_FILES=$(gh pr view "$PR" --json files -q '.files[].path'); then
+              echo "::warning::Could not read the file list of Dependabot PR #${PR} — not treating it as a match"
+              DEGRADED_REASONS+=("the file list of PR #${PR} could not be read")
+              continue
+            fi
+            if printf '%s\n' "$PR_FILES" | grep -qxF "$DOCKERFILE"; then
+              DEPENDABOT_PR="$PR"
               break
             fi
           done
+
+          # Record a degraded lookup whether or not a later candidate matched.
+          # Gating this on an empty $DEPENDABOT_PR would hide the failure in the
+          # case where one candidate was unreadable and a subsequent one matched:
+          # the decision is then sound, but a candidate still went unchecked and
+          # the summary should say so.
+          if [ ${#DEGRADED_REASONS[@]} -gt 0 ]; then
+            {
+              echo "### ⚠️ Dependabot guard degraded"
+              for REASON in "${DEGRADED_REASONS[@]}"; do
+                echo "- ${REASON}"
+              done
+              echo ""
+              if [ -n "$DEPENDABOT_PR" ]; then
+                echo "PR #${DEPENDABOT_PR} matched \`${DOCKERFILE}\` anyway, so skipping is still"
+                echo "correct — but at least one candidate went unchecked."
+              else
+                echo "This run could not rule out a Dependabot PR covering \`${DOCKERFILE}\`."
+                echo "Proceeding anyway — check for a duplicate."
+              fi
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
           if [ -n "$DEPENDABOT_PR" ]; then
             echo "Dependabot PR #${DEPENDABOT_PR} already covers ${DOCKERFILE} — skipping"
             echo "### ℹ️ Dependabot PR #${DEPENDABOT_PR} already open for Docker digest" >> "$GITHUB_STEP_SUMMARY"
