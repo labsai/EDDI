@@ -447,6 +447,7 @@ eddi_snippets_cache_misses_total            # Prompt-snippet cache misses
 eddi_counterweight_activation_count_total   # Counterweight activations; tag: level (normal|cautious|strict|unknown)
 eddi_counterweight_strict_downgraded_total  # strict downgraded because the model could not honour it
 eddi_identity_masking_applied_total         # Identity-masking passes applied
+eddi_guardrail_toolresult_count_total       # Tool results inspected by the tool-result guardrail; tag: outcome
 ```
 
 ### Agent Identity & Signing Metrics
@@ -548,6 +549,39 @@ eddi_audit_sequence_collisions_total        # Chain positions allocated by anoth
 without conversation affinity, where two nodes allocate the same per-conversation chain
 positions and `/auditstore/verify` then grades those conversations `BROKEN`. See
 [Chain sequences and multi-replica deployments](audit-ledger.md#chain-sequences-and-multi-replica-deployments).
+
+### Dream (Background Memory Consolidation) Metrics
+
+```text
+eddi_dream_users_processed_total            # Users a dream cycle worked through
+eddi_dream_entries_pruned_total             # Stale memory entries removed
+eddi_dream_entries_summarized_total         # Entries folded into a consolidation
+eddi_dream_contradictions_found_total       # Same-key/different-value pairs flagged
+eddi_dream_cycles_failed_total              # Dream cycles that aborted
+eddi_dream_summarization_failed_total       # LLM summarization steps that failed
+eddi_dream_duration_seconds                 # Dream cycle duration (timer)
+```
+
+A rising `eddi_dream_summarization_failed_total` with a flat
+`eddi_dream_cycles_failed_total` is the signature of missing credentials: stale pruning
+keeps working while every summarization step gets a provider 401. Set
+`userMemoryConfig.dream.parameters` — see [user-memory.md](user-memory.md).
+
+### Conversation Summarization Metrics
+
+```text
+eddi_summarization_calls_total              # Rolling-summary generations attempted
+eddi_summarization_errors_total             # Rolling-summary generations that failed
+eddi_summarization_duration_seconds         # Summarization duration (timer)
+```
+
+### Connection Resolution Metrics
+
+```text
+eddi_connection_resolve_count_total         # Connection resolutions; tags: authType, binding, outcome
+eddi_connection_resolve_time_seconds        # Connection resolution duration (timer); tags: authType, binding
+eddi_connection_grant_missing_count_total   # Resolutions refused for a missing grant; tag: binding
+```
 
 ### Deployed Agents
 

@@ -25,6 +25,7 @@ import java.security.Principal;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
@@ -77,13 +78,13 @@ class A2ATaskHandlerTest {
         when(identity.isAnonymous()).thenReturn(false);
         Principal principal = () -> principalName;
         when(identity.getPrincipal()).thenReturn(principal);
-        return new A2ATaskHandler(conversationService, cacheFactory, identity, agentCardService);
+        return new A2ATaskHandler(conversationService, cacheFactory, identity, agentCardService, 60, Optional.empty());
     }
 
     private A2ATaskHandler anonymousHandler() {
         SecurityIdentity identity = mock(SecurityIdentity.class);
         when(identity.isAnonymous()).thenReturn(true);
-        return new A2ATaskHandler(conversationService, cacheFactory, identity, agentCardService);
+        return new A2ATaskHandler(conversationService, cacheFactory, identity, agentCardService, 60, Optional.empty());
     }
 
     private static Map<String, Object> sendParams(String taskId, String contextId, String text) {
@@ -483,6 +484,59 @@ class A2ATaskHandlerTest {
     }
 
     // ─── Test helper: simple ConcurrentHashMap-based ICache ─────
+
+    /**
+     * The turn budget was a hard-coded 60 seconds, so an agent with a tool loop or
+     * a model cascade timed out on the A2A surface only: the peer got "Internal
+     * error" while the conversation carried on running server-side, and a retry on
+     * the same contextId then landed on the still-running conversation. The REST
+     * surface has always used the operator's own
+     * {@code systemRuntime.agentTimeoutInSeconds}, so inheriting it here is the
+     * smaller of the two possible defaults.
+     */
+    @Nested
+    @DisplayName("turn timeout")
+    class TaskTimeoutTests {
+
+        private A2ATaskHandler handlerWith(int agentTimeout, Optional<Integer> override) {
+            SecurityIdentity identity = mock(SecurityIdentity.class);
+            when(identity.isAnonymous()).thenReturn(false);
+            when(identity.getPrincipal()).thenReturn((Principal) () -> PEER_A);
+            return new A2ATaskHandler(conversationService, cacheFactory, identity, agentCardService, agentTimeout, override);
+        }
+
+        private int configuredTimeoutOf(A2ATaskHandler h) throws Exception {
+            var field = A2ATaskHandler.class.getDeclaredField("taskTimeoutSeconds");
+            field.setAccessible(true);
+            return field.getInt(h);
+        }
+
+        @Test
+        @DisplayName("inherits the REST surface's agent timeout when no override is set")
+        void inheritsTheAgentTimeout() throws Exception {
+            assertEquals(600, configuredTimeoutOf(handlerWith(600, Optional.empty())),
+                    "an operator who raised systemRuntime.agentTimeoutInSeconds has already decided how long a turn may take");
+        }
+
+        @Test
+        @DisplayName("a dedicated override wins over the agent timeout")
+        void theOverrideWins() throws Exception {
+            assertEquals(45, configuredTimeoutOf(handlerWith(600, Optional.of(45))),
+                    "eddi.a2a.task-timeout-seconds exists for a deployment whose peers cannot wait the full turn budget");
+        }
+
+        /**
+         * A non-positive budget would make {@code Future.get} return immediately and
+         * fail every peer request, so it falls back rather than shipping a surface that
+         * can never answer.
+         */
+        @Test
+        @DisplayName("a non-positive override falls back rather than failing every request")
+        void nonPositiveOverrideFallsBack() throws Exception {
+            assertEquals(120, configuredTimeoutOf(handlerWith(120, Optional.of(0))));
+            assertEquals(120, configuredTimeoutOf(handlerWith(120, Optional.of(-5))));
+        }
+    }
 
     private static class MapCache<K, V> extends ConcurrentHashMap<K, V> implements ICache<K, V> {
 

@@ -208,7 +208,7 @@ Conversation.init()
 
 Recall order (`most_recent` or `most_accessed`) and the maximum number of recalled entries come from the agent's `userMemoryConfig`, but only when the agent sets **`enableMemoryTools: true`** — that flag is what attaches the block (and, when the block is absent, a defaults instance whose field defaults are **`most_recent` ordering and 50 entries**).
 
-> **Known inconsistency:** with `enableMemoryTools: false` the config is never attached at all — whether or not a `userMemoryConfig` block is declared — and a separate hard-coded default in `Conversation` (`DEFAULT_MAX_RECALL_ENTRIES = 1000`) applies instead, so the effective cap silently changes by a factor of 20 depending on that flag, and a `maxRecallEntries` declared without it has no effect. Treat 50 as the intended default and set `enableMemoryTools: true` plus an explicit `maxRecallEntries` if the number matters to you; unifying the two constants is tracked as a code fix.
+> **Note:** with `enableMemoryTools: false` the config is never attached, so the defaults on `UserMemoryConfig` apply — `maxRecallEntries` is 50 either way. This used to differ: a separate hard-coded default in `Conversation` recalled 1000 entries when no config was attached, so the effective cap changed twentyfold depending on that flag and a `maxRecallEntries` declared without `enableMemoryTools` had no effect. The two are now the same constant. Set `enableMemoryTools: true` plus an explicit `maxRecallEntries` if the number matters to you.
 
 ### 2. Pipeline Execution
 

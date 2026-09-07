@@ -413,8 +413,8 @@ on `localhost:7070`. This is the standard production pattern.
 ### Option 2: TLS Directly in Quarkus
 
 ```properties
-quarkus.http.ssl.certificate.file=/path/to/cert.pem
-quarkus.http.ssl.certificate.key-file=/path/to/key.pem
+quarkus.http.ssl.certificate.files=/path/to/cert.pem
+quarkus.http.ssl.certificate.key-files=/path/to/key.pem
 quarkus.http.ssl-port=8443
 ```
 

@@ -918,11 +918,16 @@ public class LlmTask implements ILifecycleTask {
                     "Streaming response timed out", responseContent, task, currentStep);
         }
 
-        // 5. Refusal heuristic — simple check for common refusal patterns
+        // 5. Refusal heuristic — configured prefixes, defaulting to the four that were
+        // hard-coded here. Locale.ROOT because the bare toLowerCase() mangles the
+        // dotted/dotless I on a Turkish-locale JVM, which would silently stop
+        // "I cannot" matching on exactly the deployments least likely to notice.
         if (!isNullOrEmpty(responseContent)) {
-            String lower = responseContent.trim().toLowerCase();
-            if (lower.startsWith("i'm sorry, i can't") || lower.startsWith("i cannot")
-                    || lower.startsWith("i'm not able to") || lower.startsWith("as an ai")) {
+            String lower = responseContent.trim().toLowerCase(Locale.ROOT);
+            List<String> refusalPatterns = validation.getRefusalPatterns();
+            boolean refused = refusalPatterns != null && refusalPatterns.stream().filter(Objects::nonNull).map(p -> p.toLowerCase(Locale.ROOT))
+                    .anyMatch(lower::startsWith);
+            if (refused) {
                 responseContent = applyValidationAction(validation.getOnRefusal(), "refusal_detected",
                         "LLM response appears to be a refusal", responseContent, task, currentStep);
             }

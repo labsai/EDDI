@@ -51,10 +51,6 @@ public class Conversation implements IConversation {
     private static final String CONVERSATION_START = "CONVERSATION_START";
     private static final String CONVERSATION_END = "CONVERSATION_END";
 
-    // Default recall settings for agents without UserMemoryConfig
-    private static final String DEFAULT_RECALL_ORDER = "most_recent";
-    private static final int DEFAULT_MAX_RECALL_ENTRIES = 1000;
-
     private final List<IExecutableWorkflow> executableWorkflows;
     private final IConversationMemory conversationMemory;
     private final IPropertiesHandler propertiesHandler;
@@ -240,10 +236,21 @@ public class Conversation implements IConversation {
             String agentId = memory.getAgentId();
             List<String> groupIds = extractGroupIds(context);
 
-            // Use config-specific recall settings if available, else defaults
+            // One authority for the defaults: the field initialisers on
+            // UserMemoryConfig. There used to be a second set of constants here for the
+            // absent-config case, and they disagreed — 1000 recalled entries with no
+            // block, 50 with an empty one. So adding "userMemoryConfig": {...} for an
+            // unrelated reason (say, to set defaultVisibility) cut recall twentyfold,
+            // in a diff that does not mention maxRecallEntries. Nothing above DEBUG
+            // said so, and templates for the dropped keys render empty rather than
+            // failing. Constructing the defaults instead makes "no block" and "empty
+            // block" provably identical.
             AgentConfiguration.UserMemoryConfig config = memory.getUserMemoryConfig();
-            String recallOrder = config != null ? config.getRecallOrder() : DEFAULT_RECALL_ORDER;
-            int maxEntries = config != null ? config.getMaxRecallEntries() : DEFAULT_MAX_RECALL_ENTRIES;
+            if (config == null) {
+                config = new AgentConfiguration.UserMemoryConfig();
+            }
+            String recallOrder = config.getRecallOrder();
+            int maxEntries = config.getMaxRecallEntries();
 
             List<UserMemoryEntry> entries = store.getVisibleEntries(userId, agentId, groupIds, recallOrder, maxEntries);
 

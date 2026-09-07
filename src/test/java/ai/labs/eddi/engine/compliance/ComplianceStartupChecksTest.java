@@ -5,8 +5,10 @@
 package ai.labs.eddi.engine.compliance;
 
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -19,7 +21,20 @@ class ComplianceStartupChecksTest {
 
     /** Signed ledger, so the audit check stays quiet unless a test asks for it. */
     private static ComplianceStartupChecks checks(Optional<String> sslCert, boolean dbAcknowledged) {
-        return new ComplianceStartupChecks(sslCert, dbAcknowledged, Optional.of("a-master-key"), true, false);
+        return checks(sslCert.map(List::of), Optional.empty(), dbAcknowledged, Optional.of("a-master-key"), true, false);
+    }
+
+    /**
+     * The TLS half of the constructor takes the two keys Quarkus actually reads:
+     * {@code quarkus.http.ssl.certificate.files} (a list) and
+     * {@code …key-store-file}. It used to take the singular
+     * {@code …certificate.file}, which no working TLS configuration sets — so the
+     * warning fired for operators who had configured TLS correctly, and stayed
+     * quiet for operators who had set a key Quarkus ignores.
+     */
+    private static ComplianceStartupChecks checks(Optional<List<String>> certFiles, Optional<String> keyStoreFile, boolean dbAcknowledged,
+                                                  Optional<String> vaultKey, boolean auditEnabled, boolean signingRequired) {
+        return new ComplianceStartupChecks(certFiles, keyStoreFile, dbAcknowledged, vaultKey, auditEnabled, signingRequired);
     }
 
     @Test
@@ -71,7 +86,7 @@ class ComplianceStartupChecksTest {
     @Test
     @DisplayName("missing vault key with signing required fails startup")
     void missingVaultKeyWithSigningRequiredFailsStartup() {
-        var checks = new ComplianceStartupChecks(Optional.of("/cert.pem"), true, Optional.of(""), true, true);
+        var checks = checks(Optional.of(List.of("/cert.pem")), Optional.empty(), true, Optional.of(""), true, true);
 
         var thrown = assertThrows(IllegalStateException.class, () -> checks.onStartup(null));
         assertTrue(thrown.getMessage().contains("audit-signing-required"),
@@ -83,28 +98,88 @@ class ComplianceStartupChecksTest {
     @Test
     @DisplayName("an absent vault key still fails when signing is required")
     void absentVaultKeyWithSigningRequiredFailsStartup() {
-        var checks = new ComplianceStartupChecks(Optional.of("/cert.pem"), true, Optional.empty(), true, true);
+        var checks = checks(Optional.of(List.of("/cert.pem")), Optional.empty(), true, Optional.empty(), true, true);
         assertThrows(IllegalStateException.class, () -> checks.onStartup(null));
     }
 
     @Test
     @DisplayName("missing vault key only warns when signing is not required")
     void missingVaultKeyOnlyWarnsByDefault() {
-        var checks = new ComplianceStartupChecks(Optional.of("/cert.pem"), true, Optional.empty(), true, false);
+        var checks = checks(Optional.of(List.of("/cert.pem")), Optional.empty(), true, Optional.empty(), true, false);
         assertDoesNotThrow(() -> checks.onStartup(null));
     }
 
     @Test
     @DisplayName("a configured vault key satisfies the requirement")
     void configuredVaultKeyPassesTheRequirement() {
-        var checks = new ComplianceStartupChecks(Optional.of("/cert.pem"), true, Optional.of("a-master-key"), true, true);
+        var checks = checks(Optional.of(List.of("/cert.pem")), Optional.empty(), true, Optional.of("a-master-key"), true, true);
         assertDoesNotThrow(() -> checks.onStartup(null));
     }
 
     @Test
     @DisplayName("a disabled audit ledger is not held to the signing requirement")
     void disabledAuditLedgerIsExempt() {
-        var checks = new ComplianceStartupChecks(Optional.of("/cert.pem"), true, Optional.empty(), false, true);
+        var checks = checks(Optional.of(List.of("/cert.pem")), Optional.empty(), true, Optional.empty(), false, true);
         assertDoesNotThrow(() -> checks.onStartup(null));
+    }
+
+    /**
+     * The TLS check read {@code quarkus.http.ssl.certificate.file} — singular. The
+     * real Quarkus keys are {@code …certificate.files} and {@code …key-files},
+     * plural, and there is no deprecated singular alias. So the warning fired for
+     * every operator who had configured TLS correctly, and — worse — following the
+     * banner's own advice by setting the singular key silenced the warning while
+     * Quarkus ignored it entirely, leaving the check reporting satisfied on a
+     * plaintext listener.
+     */
+    @Nested
+    @DisplayName("TLS detection")
+    class TlsDetectionTests {
+
+        @Test
+        @DisplayName("the PEM pair Quarkus actually reads counts as configured")
+        void certificateFilesCountAsConfigured() {
+            var checks = checks(Optional.of(List.of("/etc/tls/cert.pem")), Optional.empty(), true, Optional.of("k"), true, false);
+            assertDoesNotThrow(() -> checks.onStartup(null));
+            assertTrue(tlsConfigured(checks), "quarkus.http.ssl.certificate.files is how a PEM-based TLS listener is configured");
+        }
+
+        @Test
+        @DisplayName("a keystore counts as configured too")
+        void keyStoreCountsAsConfigured() {
+            var checks = checks(Optional.empty(), Optional.of("/etc/tls/keystore.p12"), true, Optional.of("k"), true, false);
+            assertTrue(tlsConfigured(checks), "a keystore is the other supported way to terminate TLS in Quarkus");
+        }
+
+        @Test
+        @DisplayName("no certificate at all is reported as unconfigured")
+        void absentCertificateIsUnconfigured() {
+            assertFalse(tlsConfigured(checks(Optional.empty(), Optional.empty(), true, Optional.of("k"), true, false)));
+        }
+
+        /**
+         * An empty list and a blank path are what a half-written Helm values file
+         * produces. Neither configures TLS, so neither may silence the warning.
+         */
+        @Test
+        @DisplayName("an empty or blank value does not silence the warning")
+        void emptyOrBlankIsUnconfigured() {
+            assertFalse(tlsConfigured(checks(Optional.of(List.of()), Optional.empty(), true, Optional.of("k"), true, false)),
+                    "an empty file list configures nothing");
+            assertFalse(tlsConfigured(checks(Optional.of(List.of("   ")), Optional.empty(), true, Optional.of("k"), true, false)),
+                    "a blank path configures nothing");
+            assertFalse(tlsConfigured(checks(Optional.empty(), Optional.of(" "), true, Optional.of("k"), true, false)),
+                    "a blank keystore path configures nothing");
+        }
+
+        private boolean tlsConfigured(ComplianceStartupChecks checks) {
+            try {
+                var field = ComplianceStartupChecks.class.getDeclaredField("tlsConfigured");
+                field.setAccessible(true);
+                return field.getBoolean(checks);
+            } catch (ReflectiveOperationException e) {
+                throw new AssertionError("the TLS verdict field was renamed; update this test", e);
+            }
+        }
     }
 }

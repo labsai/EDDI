@@ -10,6 +10,7 @@ import jakarta.enterprise.event.Observes;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -27,21 +28,30 @@ public class ComplianceStartupChecks {
 
     private static final Logger LOGGER = Logger.getLogger("ai.labs.eddi.COMPLIANCE");
 
-    private final String sslCertFile;
+    private final boolean tlsConfigured;
     private final boolean dbEncryptionAcknowledged;
     private final String vaultMasterKey;
     private final boolean auditEnabled;
     private final boolean auditSigningRequired;
 
     public ComplianceStartupChecks(
-            @ConfigProperty(name = "quarkus.http.ssl.certificate.file") Optional<String> sslCertFile,
+            @ConfigProperty(name = "quarkus.http.ssl.certificate.files") Optional<List<String>> sslCertFiles,
+            @ConfigProperty(name = "quarkus.http.ssl.certificate.key-store-file") Optional<String> sslKeyStoreFile,
             @ConfigProperty(name = "eddi.compliance.database-encryption-acknowledged",
                             defaultValue = "false") boolean dbEncryptionAcknowledged,
             @ConfigProperty(name = "eddi.vault.master-key") Optional<String> vaultMasterKey,
             @ConfigProperty(name = "eddi.audit.enabled", defaultValue = "true") boolean auditEnabled,
             @ConfigProperty(name = "eddi.compliance.audit-signing-required",
                             defaultValue = "false") boolean auditSigningRequired) {
-        this.sslCertFile = sslCertFile.orElse("");
+        // The real Quarkus keys are plural: quarkus.http.ssl.certificate.files and
+        // .key-files. This check read the singular "…certificate.file", which no
+        // working TLS configuration ever sets, so an operator who terminated TLS in
+        // Quarkus correctly still got the warning on every boot. Worse in the other
+        // direction: following the old banner and setting the singular key silenced
+        // the warning while Quarkus ignored it, so the check reported satisfied on a
+        // plaintext listener. Accept either the PEM pair or a keystore.
+        this.tlsConfigured = sslCertFiles.filter(files -> files.stream().anyMatch(f -> f != null && !f.isBlank())).isPresent()
+                || sslKeyStoreFile.filter(f -> !f.isBlank()).isPresent();
         this.dbEncryptionAcknowledged = dbEncryptionAcknowledged;
         this.vaultMasterKey = vaultMasterKey.orElse("");
         this.auditEnabled = auditEnabled;
@@ -108,7 +118,7 @@ public class ComplianceStartupChecks {
     }
 
     private void checkTls() {
-        if (sslCertFile == null || sslCertFile.isBlank()) {
+        if (!tlsConfigured) {
             LOGGER.warn("""
 
                     +------------------------------------------------------------------+
@@ -122,8 +132,8 @@ public class ComplianceStartupChecks {
                     |  this warning is safe to ignore.                                 |
                     |                                                                  |
                     |  To suppress, configure TLS directly:                            |
-                    |    quarkus.http.ssl.certificate.file=/path/to/cert.pem           |
-                    |    quarkus.http.ssl.certificate.key-file=/path/to/key.pem        |
+                    |    quarkus.http.ssl.certificate.files=/path/to/cert.pem          |
+                    |    quarkus.http.ssl.certificate.key-files=/path/to/key.pem       |
                     |                                                                  |
                     |  See: https://docs.labs.ai/hipaa-compliance                      |
                     +------------------------------------------------------------------+
