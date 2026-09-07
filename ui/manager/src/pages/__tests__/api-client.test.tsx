@@ -201,10 +201,29 @@ describe("ApiClient", () => {
     } catch (error: unknown) {
       expect(isApiError(error)).toBe(true);
       if (isApiError(error)) {
-        expect(error.message.length).toBeLessThanOrEqual(401); // 400 + the ellipsis
+        // 800, raised from 400 so a strict-parser rejection survives: EDDI
+        // names the unknown field and then lists every field the model
+        // declares, and the list is the half that says what to type.
+        expect(error.message.length).toBeLessThanOrEqual(801); // 800 + the ellipsis
         expect(error.message.endsWith("…")).toBe(true);
       }
     }
+  });
+
+  it("keeps a message that fits inside the cap whole", async () => {
+    // The cap was raised, not removed, and this is the half that says so: a
+    // test asserting only the ceiling passes against a client that truncates
+    // everything to one character.
+    const message = "y".repeat(700);
+    vi.spyOn(global, "fetch").mockResolvedValue(
+      new Response(message, {
+        status: 400,
+        statusText: "Bad Request",
+        headers: { "Content-Type": "text/plain" },
+      }),
+    );
+
+    await expect(api.get("/test")).rejects.toMatchObject({ message });
   });
 
   // JSON.parse("null") succeeds and yields null — reading `.message` off it

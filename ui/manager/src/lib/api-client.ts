@@ -70,11 +70,19 @@ export function isApiError(error: unknown): error is ApiError {
 }
 
 /**
- * Longest error message worth surfacing. Backend validator messages are one
- * sentence; anything past this is a stack trace or an HTML page, and pasting
- * either into a toast tells the user nothing.
+ * Longest error message worth surfacing. Anything past this is a stack trace,
+ * and pasting one into a toast tells the user nothing. (An HTML page never gets
+ * this far — `extractErrorMessage` rejects markup outright.)
+ *
+ * Not one sentence, which is what this assumed at 400. EDDI's strict
+ * configuration parser rejects an unknown field with the field name, the model,
+ * the JSON path, *every field the model declares*, and a closing sentence
+ * explaining why it refused rather than dropping the key. The field list is the
+ * actionable half — it is what turns "this failed" into "you meant
+ * `setOnActions`" — and on a wide model it sat past 400, so the half that told
+ * the author what to type was the half that got cut.
  */
-const MAX_ERROR_MESSAGE_CHARS = 400;
+const MAX_ERROR_MESSAGE_CHARS = 800;
 
 /**
  * Pull a displayable message out of an error response body.
@@ -123,6 +131,29 @@ function truncateMessage(message: string): string {
     : message;
 }
 
+/**
+ * A parsed body together with the status it arrived with.
+ *
+ * `ApiClient` throws on a non-2xx and hands back only the body on everything
+ * else, which is the right default for the ~75 call sites that treat "it did
+ * not throw" as "it worked". It is the wrong default for the endpoints EDDI has
+ * since taught to answer *partially*: GDPR erasure and export answer 207 when
+ * the cascade did not finish, and upgrade and sync answer 200 / 201 / 207 for
+ * already-identical / wrote-something / some-resources-failed. All of those are
+ * 2xx, so `response.ok` cannot tell them apart and the Manager reported every
+ * one of them as a clean success.
+ *
+ * Deliberately just the status. A header accessor would round the shape out,
+ * and nothing needs one: the only header-carried signal in this family,
+ * `X-Schedules-Skipped`, is read by `backup.ts`, which bypasses `ApiClient`
+ * entirely because it posts zip bodies. Adding an accessor with no caller is
+ * the same defect as an endpoint wrapper nobody renders.
+ */
+export interface ApiResponse<T> {
+  data: T;
+  status: number;
+}
+
 /** Extract a human-readable message from any caught error */
 export function getErrorMessage(error: unknown): string {
   if (isApiError(error)) {
@@ -167,6 +198,30 @@ class ApiClient {
     body?: unknown,
     requestHeaders?: Record<string, string>
   ): Promise<T> {
+    const { data } = await this.requestWithResponse<T>(
+      method,
+      path,
+      body,
+      requestHeaders,
+    );
+    return data;
+  }
+
+  /**
+   * As {@link request}, but keeps the status and headers.
+   *
+   * One implementation, not two: the body handling below is subtle enough
+   * (204 and 202 are empty, a `Location` is merged into the parsed body, a
+   * `Content-Length: 0` beats a JSON parse, a non-JSON 2xx is an error rather
+   * than `undefined`) that a second copy would drift from it, and the drift
+   * would show up as one endpoint behaving differently from every other.
+   */
+  private async requestWithResponse<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+    requestHeaders?: Record<string, string>
+  ): Promise<ApiResponse<T>> {
     const url = `${this.baseUrl}${path}`;
 
     const mergedHeaders = { ...this.headers, ...requestHeaders };
@@ -195,9 +250,14 @@ class ApiClient {
       throw await apiErrorFromResponse(response, response.statusText, url);
     }
 
+    const envelope = (data: T): ApiResponse<T> => ({
+      data,
+      status: response.status,
+    });
+
     // Handle 202 Accepted and 204 No Content (empty body responses)
     if (response.status === 202 || response.status === 204) {
-      return undefined as T;
+      return envelope(undefined as T);
     }
 
     // Handle Location header (POST 201, PUT 200 with new version)
@@ -206,25 +266,25 @@ class ApiClient {
       // Try to also parse JSON body if present, merge with location
       try {
         const body = await response.json();
-        return { ...body, location } as T;
+        return envelope({ ...body, location } as T);
       } catch {
-        return { location } as T;
+        return envelope({ location } as T);
       }
     }
 
     // Handle empty body responses (e.g. DELETE returning 200 with no body)
     const contentLength = response.headers.get("Content-Length");
     if (contentLength === "0") {
-      return undefined as T;
+      return envelope(undefined as T);
     }
 
     // Try parsing JSON, gracefully handle empty or non-JSON bodies
     const text = await response.text();
     if (!text) {
-      return undefined as T;
+      return envelope(undefined as T);
     }
     try {
-      return JSON.parse(text) as T;
+      return envelope(JSON.parse(text) as T);
     } catch {
       // Non-JSON body on a success response — treat as an error rather
       // than silently returning undefined (which would be cached by
@@ -251,6 +311,20 @@ class ApiClient {
 
   delete<T>(path: string): Promise<T> {
     return this.request<T>("DELETE", path);
+  }
+
+  /**
+   * The `*WithResponse` family, for the endpoints where a 2xx is not yet an
+   * answer — see {@link ApiResponse}. Prefer the plain verb everywhere else:
+   * an envelope at a call site that ignores it only adds a `.data`. There is no
+   * `postWithResponse` because nothing posts to such an endpoint yet.
+   */
+  getWithResponse<T>(path: string): Promise<ApiResponse<T>> {
+    return this.requestWithResponse<T>("GET", path);
+  }
+
+  deleteWithResponse<T>(path: string): Promise<ApiResponse<T>> {
+    return this.requestWithResponse<T>("DELETE", path);
   }
 }
 
