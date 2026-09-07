@@ -107,4 +107,20 @@ public class JsonSchemaCreatorTest {
         assertTrue(properties.has("targetServerUrl"), "ApiCallsConfiguration schema must have 'targetServerUrl' property");
         assertTrue(properties.has("httpCalls"), "ApiCallsConfiguration schema must have 'httpCalls' property");
     }
+
+    /**
+     * A class's schema is a pure function of its structure, and the Manager hits
+     * {@code GET /{store}/jsonSchema} on every editor open, across fifteen sibling
+     * endpoints. Each call used to build a fresh generator and reflect over the
+     * whole type graph — {@code AgentConfiguration} alone has a dozen nested
+     * classes.
+     */
+    @Test
+    void generateSchema_isCachedPerClass() throws Exception {
+        String first = schemaCreator.generateSchema(AgentConfiguration.class);
+        String second = schemaCreator.generateSchema(AgentConfiguration.class);
+
+        assertSame(first, second, "the same class must return the cached schema instance");
+        assertNotSame(first, schemaCreator.generateSchema(WorkflowConfiguration.class), "each class caches its own schema");
+    }
 }

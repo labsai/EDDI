@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.runtime.internal;
 
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.stream.Collectors;
 
 /**
@@ -40,6 +41,17 @@ public final class CronDescriber {
      * @return human-readable description
      */
     public static String describe(String cronExpression) {
+        try {
+            return describeParsed(cronExpression);
+        } catch (RuntimeException e) {
+            // A description is presentation only. It is computed on every read of a
+            // schedule, so a field this helper cannot parse must degrade to a string
+            // rather than turn a GET of a stored, valid schedule into a 400/500.
+            return "Invalid cron expression: " + cronExpression;
+        }
+    }
+
+    private static String describeParsed(String cronExpression) {
         if (cronExpression == null || cronExpression.isBlank()) {
             return "Invalid cron expression";
         }
@@ -104,7 +116,11 @@ public final class CronDescriber {
 
         // Day of week
         if (!dow.equals("*")) {
-            Set<Integer> dowValues = CronParser.parseField(dow, 0, 6);
+            // 0..7, not 0..6: standard cron accepts 7 as Sunday and CronParser.validate
+            // does too, so describing a schedule that was legitimately created with
+            // "0 9 * * 7" must not throw. Normalise 7 to 0 exactly as
+            // CronParser.computeNextFire does, or Sunday would be labelled twice.
+            Set<Integer> dowValues = normalizeSunday(CronParser.parseField(dow, 0, 7));
             if (isWeekdays(dowValues)) {
                 sb.append(" on every weekday");
             } else if (isWeekends(dowValues)) {
@@ -141,6 +157,21 @@ public final class CronDescriber {
         } catch (NumberFormatException e) {
             return num;
         }
+    }
+
+    /**
+     * Map day-of-week 7 onto 0 — both denote Sunday in standard cron. Mirrors
+     * {@code CronParser.normalizeDaysOfWeek} so a description and the fire times it
+     * describes cannot disagree.
+     */
+    private static Set<Integer> normalizeSunday(Set<Integer> dowValues) {
+        if (!dowValues.contains(7)) {
+            return dowValues;
+        }
+        Set<Integer> normalized = new TreeSet<>(dowValues);
+        normalized.remove(7);
+        normalized.add(0);
+        return normalized;
     }
 
     private static boolean isWeekdays(Set<Integer> dows) {

@@ -17,6 +17,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.net.URI;
+
 import java.util.ArrayList;
 import java.util.List;
 
@@ -164,6 +166,85 @@ class WorkflowStoreTest {
         List<DocumentDescriptor> result = store.getWorkflowDescriptorsContainingResource(
                 "eddi://ai.labs.behavior/behaviorId?version=1", false);
         assertTrue(result.isEmpty());
+    }
+
+    /**
+     * A soft-deleted workflow keeps a history row that still contains the resource
+     * URI, so the history search returns it — but it has no current row, and
+     * {@code getCurrentVersion} answers -1, which made {@code getCurrentResourceId}
+     * throw. The throw was unguarded, so one soft-deleted workflow made
+     * {@code deleteResourceSafely} fail closed on EVERY resource from then on:
+     * cascade cleanup became a permanent no-op with an ERROR per attempt.
+     */
+    @Test
+    @DisplayName("getWorkflowDescriptorsContainingResource — a soft-deleted workflow in the history hits is skipped, not fatal")
+    void skipsHistoryOnlyWorkflowsWithNoCurrentVersion() throws Exception {
+        String resourceURI = "eddi://ai.labs.output/outputstore/outputsets/out1?version=1";
+
+        IResourceStore.IResourceId deletedWorkflow = mock(IResourceStore.IResourceId.class);
+        when(deletedWorkflow.getId()).thenReturn("222222222222222222222222");
+        when(deletedWorkflow.getVersion()).thenReturn(1);
+        IResourceStore.IResourceId liveWorkflow = mock(IResourceStore.IResourceId.class);
+        when(liveWorkflow.getId()).thenReturn("111111111111111111111111");
+        when(liveWorkflow.getVersion()).thenReturn(1);
+
+        when(resourceStorage.findResourceIdsContaining(anyString(), anyString())).thenReturn(List.of(liveWorkflow));
+        when(resourceStorage.findHistoryResourceIdsContaining(anyString(), anyString())).thenReturn(List.of(deletedWorkflow));
+        when(resourceStorage.getCurrentVersion("222222222222222222222222")).thenReturn(-1);
+        when(resourceStorage.getCurrentVersion("111111111111111111111111")).thenReturn(1);
+
+        DocumentDescriptor descriptor = new DocumentDescriptor();
+        descriptor.setResource(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/111111111111111111111111?version=1"));
+        when(documentDescriptorStore.readDescriptor("111111111111111111111111", 1)).thenReturn(descriptor);
+
+        List<DocumentDescriptor> result = store.getWorkflowDescriptorsContainingResource(resourceURI, false);
+
+        assertEquals(1, result.size());
+        verify(documentDescriptorStore, never()).readDescriptor(eq("222222222222222222222222"), anyInt());
+    }
+
+    /**
+     * The version used to be scraped as "everything after the last '='", which
+     * threw an undeclared {@link NumberFormatException} for a URI with no version
+     * query or with a second query parameter. Callers feed stored
+     * {@code config.uri} values in verbatim, and the caller treats any throw as
+     * "reference check failed — NOT cascade-deleting", so one unversioned reference
+     * disabled cascade cleanup entirely.
+     */
+    @Test
+    @DisplayName("getWorkflowDescriptorsContainingResource — a URI without a usable version is a declared ResourceStoreException")
+    void rejectsUnversionedResourceUri() {
+        for (String uri : List.of("eddi://ai.labs.output/outputstore/outputsets/out1",
+                "eddi://ai.labs.output/outputstore/outputsets/out1?other=2",
+                "eddi://ai.labs.output/outputstore/outputsets/out1?version=abc",
+                "eddi://ai.labs.output/outputstore/outputsets/out1?version=0")) {
+            assertThrows(IResourceStore.ResourceStoreException.class,
+                    () -> store.getWorkflowDescriptorsContainingResource(uri, false), "must refuse: " + uri);
+        }
+        verifyNoInteractions(resourceStorage);
+    }
+
+    /**
+     * The inputs that make {@code URI.create} itself blow up, rather than merely
+     * parsing to something unusable. This method is fed step {@code config.uri}
+     * values verbatim by the cascade, and an unchecked
+     * {@code IllegalArgumentException} is not in its {@code throws} clause: it
+     * escapes the caller's {@code catch (ResourceStoreException)} and takes the
+     * whole delete with it. Null, blank and syntactically illegal all have to come
+     * back as the same declared refusal.
+     */
+    @Test
+    @DisplayName("getWorkflowDescriptorsContainingResource — null, blank and unparsable URIs are the same declared refusal")
+    void rejectsUnparsableResourceUri() {
+        assertThrows(IResourceStore.ResourceStoreException.class,
+                () -> store.getWorkflowDescriptorsContainingResource(null, false), "null must be refused, not NPE");
+        assertThrows(IResourceStore.ResourceStoreException.class,
+                () -> store.getWorkflowDescriptorsContainingResource("   ", false), "blank must be refused");
+        // A space in the authority is a syntax error for java.net.URI.
+        assertThrows(IResourceStore.ResourceStoreException.class,
+                () -> store.getWorkflowDescriptorsContainingResource("eddi://ai labs/store/x?version=1", false),
+                "an unparsable URI must be refused, not raise IllegalArgumentException");
+        verifyNoInteractions(resourceStorage);
     }
 
     // ==================== deleteAllPermanently ====================

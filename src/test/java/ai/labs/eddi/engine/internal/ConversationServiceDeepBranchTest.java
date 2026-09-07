@@ -31,7 +31,9 @@ import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.runtime.IConversationCoordinator;
 import ai.labs.eddi.engine.runtime.IConversationSetup;
 import ai.labs.eddi.engine.runtime.IRuntime;
+import ai.labs.eddi.engine.tenancy.QuotaAccountingUnavailableException;
 import ai.labs.eddi.engine.tenancy.QuotaExceededException;
+import ai.labs.eddi.engine.tenancy.QuotaRefusal;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
@@ -47,6 +49,7 @@ import org.mockito.Mock;
 import java.util.*;
 import java.util.HashSet;
 import java.util.Stack;
+import java.util.concurrent.RejectedExecutionException;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -117,6 +120,8 @@ class ConversationServiceDeepBranchTest {
     private static final String CONVERSATION_ID = "112233445566778899aabbcc";
     private static final String USER_ID = "user-deep-test";
     private static final int AGENT_TIMEOUT = 60;
+    /** The reason string every store uses for an accounting outage. */
+    private static final String ACCOUNTING_UNAVAILABLE = "Quota accounting unavailable — denying request for safety";
 
     @SuppressWarnings("unchecked")
     @BeforeEach
@@ -388,6 +393,37 @@ class ConversationServiceDeepBranchTest {
             assertThrows(QuotaExceededException.class,
                     () -> conversationService.startConversation(ENV, AGENT_ID, USER_ID, Map.of()));
         }
+
+        /**
+         * A quota STORE OUTAGE is not an over-quota denial. Both refuse the turn, but
+         * the exception decides the status the caller sees: 429 with
+         * {@code Retry-After: 60} tells a client to back off for a minute on the
+         * strength of a limit the tenant never reached, while
+         * {@code QuotaAccountingUnavailableException} is answered 503
+         * {@code quota_accounting_unavailable}. Before the split only the reason string
+         * differed — which no client and no dashboard reads.
+         */
+        @Test
+        @DisplayName("startConversation — accounting unavailable throws the outage type, not QuotaExceededException")
+        void quotaAccountingUnavailable() throws Exception {
+            when(conversationSetup.computeAnonymousUserIdIfEmpty(any(), any()))
+                    .thenReturn(USER_ID);
+            IAgent mockAgent = mock(IAgent.class);
+            when(agentFactory.getLatestReadyAgent(ENV, AGENT_ID)).thenReturn(mockAgent);
+            when(tenantQuotaService.acquireConversationSlot())
+                    .thenReturn(QuotaCheckResult.unavailable(ACCOUNTING_UNAVAILABLE));
+
+            var ex = assertThrows(QuotaAccountingUnavailableException.class,
+                    () -> conversationService.startConversation(ENV, AGENT_ID, USER_ID, Map.of()));
+
+            assertEquals(ACCOUNTING_UNAVAILABLE, ex.getMessage());
+            assertNotEquals(QuotaExceededException.class, ex.getClass(),
+                    "answering 429 for an outage sends the wrong Retry-After and spikes the wrong metric");
+            assertInstanceOf(QuotaRefusal.class, ex,
+                    "the group engines abort on the marker, so an outage must still carry it");
+            assertInstanceOf(RejectedExecutionException.class, ex,
+                    "every surface that already answers 503 for backpressure must answer 503 for this without enumerating it");
+        }
     }
 
     // ==================== isUndoAvailable / isRedoAvailable ====================
@@ -567,6 +603,32 @@ class ConversationServiceDeepBranchTest {
                             false, false, List.of(),
                             new InputData("hello", Map.of()), false, handler));
         }
+
+        /**
+         * See {@code startConversation}'s twin: the API-call gate splits the same way.
+         */
+        @Test
+        @DisplayName("say — accounting unavailable throws the outage type, not QuotaExceededException")
+        void sayQuotaAccountingUnavailable() throws Exception {
+            var snapshot = createSnapshot();
+            when(conversationMemoryStore.loadConversationMemorySnapshot(CONVERSATION_ID))
+                    .thenReturn(snapshot);
+            IAgent mockAgent = mock(IAgent.class);
+            when(agentFactory.getAgent(ENV, AGENT_ID, 1)).thenReturn(mockAgent);
+            when(tenantQuotaService.acquireApiCallSlot())
+                    .thenReturn(QuotaCheckResult.unavailable(ACCOUNTING_UNAVAILABLE));
+
+            var handler = mock(ConversationResponseHandler.class);
+
+            var ex = assertThrows(QuotaAccountingUnavailableException.class,
+                    () -> conversationService.say(ENV, AGENT_ID, CONVERSATION_ID,
+                            false, false, List.of(),
+                            new InputData("hello", Map.of()), false, handler));
+
+            assertEquals(ACCOUNTING_UNAVAILABLE, ex.getMessage());
+            assertNotEquals(QuotaExceededException.class, ex.getClass());
+            assertInstanceOf(QuotaRefusal.class, ex);
+        }
     }
 
     // ==================== sayStreaming — validation branches ====================
@@ -624,6 +686,36 @@ class ConversationServiceDeepBranchTest {
                     () -> conversationService.sayStreaming(ENV, AGENT_ID, CONVERSATION_ID,
                             false, false, List.of(),
                             new InputData("hello", Map.of()), handler));
+        }
+
+        /**
+         * The streaming twin. It matters independently because
+         * {@code RestAgentEngineStreaming.buildErrorEvent} branches on the concrete
+         * type to pick {@code quota_accounting_unavailable} over
+         * {@code quota_exceeded}; if this gate collapsed the two, that branch could
+         * never fire.
+         */
+        @Test
+        @DisplayName("sayStreaming — accounting unavailable throws the outage type, not QuotaExceededException")
+        void quotaAccountingUnavailable() throws Exception {
+            var snapshot = createSnapshot();
+            when(conversationMemoryStore.loadConversationMemorySnapshot(CONVERSATION_ID))
+                    .thenReturn(snapshot);
+            IAgent mockAgent = mock(IAgent.class);
+            when(agentFactory.getAgent(ENV, AGENT_ID, 1)).thenReturn(mockAgent);
+            when(tenantQuotaService.acquireApiCallSlot())
+                    .thenReturn(QuotaCheckResult.unavailable(ACCOUNTING_UNAVAILABLE));
+
+            var handler = mock(StreamingResponseHandler.class);
+
+            var ex = assertThrows(QuotaAccountingUnavailableException.class,
+                    () -> conversationService.sayStreaming(ENV, AGENT_ID, CONVERSATION_ID,
+                            false, false, List.of(),
+                            new InputData("hello", Map.of()), handler));
+
+            assertEquals(ACCOUNTING_UNAVAILABLE, ex.getMessage());
+            assertNotEquals(QuotaExceededException.class, ex.getClass());
+            assertInstanceOf(QuotaRefusal.class, ex);
         }
 
         @Test

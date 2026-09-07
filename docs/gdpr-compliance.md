@@ -16,7 +16,8 @@ curl -X DELETE https://your-eddi-instance/admin/gdpr/{userId} \
   -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
 ```
 
-The response includes per-store counts:
+The response carries a count for every store the cascade touches, plus whether
+the cascade actually finished:
 ```json
 {
   "userId": "user-123",
@@ -25,11 +26,42 @@ The response includes per-store counts:
   "conversationMappingsDeleted": 3,
   "logsPseudonymized": 42,
   "auditEntriesPseudonymized": 156,
+  "attachmentsDeleted": 4,
+  "journalEntriesDeleted": 2,
+  "checkpointsDeleted": 9,
+  "groupConversationsDeleted": 1,
+  "sharedArtifactsDeleted": 0,
+  "schedulesDeleted": 0,
+  "failedSteps": [],
+  "complete": true,
   "completedAt": "2026-04-02T15:30:00Z"
 }
 ```
 
-**Via MCP:** Use the `delete_user_data` tool with `confirmation="CONFIRM"`.
+> **Check `complete` before filing the request as fulfilled.** The cascade
+> deliberately continues past a failing store, so the categories after it are
+> still erased — which is exactly why `conversationsDeleted: 0` on its own cannot
+> be read as "this user had no conversations". When any step throws, the endpoint
+> answers **207 Multi-Status**, `complete` is `false`, and `failedSteps` names the
+> steps that did not run. Some of the user's data is still there: re-run the
+> erasure and do not report it to the data subject as done. A cascade in which
+> every step succeeded answers **200** with an empty `failedSteps`.
+>
+> The step names are `userMemories`, `restrictionCache`, `conversationIdLookup`,
+> `attachments`, `hitlToolJournal`, `conversationDescriptors`,
+> `conversationCheckpoints`, `conversations`, `conversationMappingIntents`,
+> `conversationMappings`, `conversationMappingCache`, `groupConversations`,
+> `sharedArtifacts`, `schedules`, `databaseLogs` and `auditLedger`, and they name
+> the stores in the list below plus the two cache evictions and the two lookups
+> the cascade needs to reach them. `conversationIdLookup` is the worst one to
+> see: the id resolution the per-conversation sweeps depend on failed, so those
+> sweeps ran over nothing and their zero counts mean "not attempted", not
+> "nothing to do".
+
+**Via MCP:** Use the `delete_user_data` tool with `confirmation="CONFIRM"`. It
+reports the same outcome: `status` is `"completed"` only when every step
+succeeded and `"partially_completed"` otherwise, alongside the same `complete`
+and `failedSteps`.
 
 **What happens:**
 1. User memories — **permanently deleted**
@@ -62,7 +94,37 @@ The export includes all user data in a structured, machine-readable JSON format:
   the binaries themselves are not inlined and must be fetched via the attachment
   download API
 
-**Via MCP:** Use the `export_user_data` tool.
+> **Check `complete` before handing the bundle to the data subject.** The endpoint
+> answers **200** only when the bundle covers everything EDDI holds on the user,
+> and **207 Multi-Status** otherwise. Three things can make it incomplete, and each
+> is named in the payload:
+>
+> - `omittedCategories` — personal-data categories this exporter does not reach.
+>   **Today this list is never empty**: group conversation transcripts, shared
+>   artifacts, schedules and HITL journal entries are erased by the Art. 17
+>   cascade as this user's personal data but are not yet exportable. So the export
+>   endpoint currently answers **207 on every request** and `complete` is always
+>   `false`. It becomes 200 when those four exporters land.
+> - `conversationsTruncated` — the per-request conversation cap (1,000) bit,
+>   because each snapshot is a full document load assembled in memory on the
+>   request thread. `totalConversations` says how many the user actually has, and
+>   the omitted ones remain retrievable individually through the conversation API.
+> - `failedConversationIds` — conversations the exporter could not load at all,
+>   listed by id, and therefore absent from `conversations`. Retry the export or
+>   fetch those ids individually.
+>
+> A bundle with `complete: false` is **not** a complete Art. 15 / Art. 20
+> response — do not file the request as fulfilled on it. (The audit-record cap of
+> 10,000 is still reported in the server log only.)
+>
+> 207 rather than 206 Partial Content, which earlier releases sent: 206 is a range
+> status and RFC 9110 requires a `Content-Range` alongside it, which this endpoint
+> neither reads nor produces. Any client still branching on 206 needs updating.
+
+**Via MCP:** Use the `export_user_data` tool. It reports the same fields in the
+payload — `complete`, `omittedCategories`, `conversationsTruncated`,
+`totalConversations` and `failedConversationIds` — and an agent acting on its
+answer must not report an incomplete bundle as fulfilled.
 
 ### 3. Right to Restriction of Processing (GDPR Art. 18 / LGPD Art. 18)
 
@@ -90,6 +152,30 @@ curl -X DELETE https://your-eddi-instance/admin/gdpr/{userId}/restrict \
 - Existing data is preserved (not deleted)
 - Restriction status is stored as a user memory entry
 - All restriction/unrestriction events are logged in the audit ledger
+
+**Caching the restriction flag — `eddi.gdpr.restriction-cache-ttl-seconds` (default `0`, i.e. no caching)**
+
+The flag is read at conversation start and again on every `say`/`sayStreaming`, so it sits on
+the hottest path in the system. **By default it is nonetheless read from the store every
+time**: no verdict is cached, a restriction applied on any replica takes effect on every
+replica at once, and a store outage always answers **503**
+(`ProcessingRestrictionUnavailableException`) rather than being absorbed by a cached verdict.
+The cost of that default is one indexed lookup per turn.
+
+Setting the property above `0` switches on a **node-local** cache with that TTL.
+`restrict`/`unrestrict` publish through it, so the node serving the admin call applies the
+change on the very next turn — but there is no cross-node invalidation, so **any other node
+keeps answering "not restricted" from its own cache until the TTL expires**, and for the same
+reason keeps answering from cache during a store outage instead of failing closed. A cached
+negative verdict is a suspended Art. 18 legal control, which is why it is not the default.
+
+- **Multi-replica without conversation affinity** — keep the default (`0`). This is the only
+  safe setting there until cluster-wide invalidation exists.
+- **Single node, or a cluster with conversation affinity** — every turn of a conversation and
+  every admin call reach the same node, which is what makes the explicit invalidation
+  sufficient. Setting e.g. `eddi.gdpr.restriction-cache-ttl-seconds=30` there buys back the
+  per-turn lookup. Treat it as an explicit topology assertion, not a tuning knob: it is wrong
+  the moment a second replica is added.
 
 **Use cases:**
 - User disputes accuracy of stored data (Art. 18(1)(a))
@@ -138,6 +224,40 @@ EDDI provides no application-level audit purge.
 > silent no-op — no audit entry was ever deleted by it. The property has been
 > removed; if your deployment sets `eddi.audit.retentionDays` (or
 > `EDDI_AUDIT_RETENTIONDAYS`), drop it and use database-level archival instead.
+
+### The audit dead-letter sink holds personal data, and erasure does not reach it
+
+When the ledger cannot persist an entry it writes that entry to the dead-letter
+sink — NATS JetStream when a connection is available, otherwise the JSONL file
+at `eddi.audit.dead-letter-path` (default
+`/opt/eddi/data/eddi-audit-deadletter.jsonl`). **The record is the whole audit
+entry**: the `userId`, the verbatim prompt and response, the LLM detail and the
+tool calls, plus the HMAC and agent signature. It has to be, or a dropped entry
+is neither replayable nor usable as evidence of what the ledger itself lost.
+
+The consequence for Art. 17 is that the sink is a **second location holding
+personal data that the erasure cascade does not touch**. `DELETE
+/admin/gdpr/{userId}` pseudonymizes the ledger and the database logs; nothing
+rewrites the JSONL file or the JetStream subject. Secret *redaction* has already
+been applied to the entry (see
+[Secret Redaction](audit-ledger.md#secret-redaction)), but user content has not,
+because preserving the entry is the whole point of the sink.
+
+As the controller you must therefore:
+
+- [ ] Treat `eddi.audit.dead-letter-path` (and the `eddi.deadletter.audit`
+      JetStream subject) as an audit-data location in your record of processing
+      activities, with the same access controls and encryption at rest as the
+      ledger itself.
+- [ ] Include it in the erasure procedure: either replay and truncate it once
+      the store is healthy again, or pseudonymize the affected records by hand.
+      `eddi_audit_entries_dropped_total` tells you whether the sink has ever
+      been written to; a zero counter and an absent file mean there is nothing
+      to do.
+- [ ] Give it a retention period. As with the ledger, EDDI never expires it.
+
+A non-empty dead-letter sink is an incident, not a steady state — see
+[Incident Response](incident-response.md).
 
 **Data minimization (Art. 5(1)(e)):** Review the default retention periods
 and reduce them to the minimum necessary for your use case.

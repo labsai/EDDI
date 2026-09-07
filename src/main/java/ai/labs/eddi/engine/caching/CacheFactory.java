@@ -16,7 +16,15 @@ import java.util.concurrent.ConcurrentHashMap;
 public class CacheFactory implements ICacheFactory {
     private final ConcurrentHashMap<String, Cache<?, ?>> caches = new ConcurrentHashMap<>();
 
-    // Cache size configs (previously in infinispan-embedded.xml)
+    // Cache size configs (previously in infinispan-embedded.xml).
+    //
+    // Keyed by string on purpose — this is a registry, and importing the service
+    // classes that request each cache would point the dependency the wrong way.
+    // CacheFactoryTest binds the entries that have a named constant
+    // (GdprComplianceService.RESTRICTION_CACHE_NAME,
+    // TenantQuotaService.QUOTA_CACHE_NAME) back to it, so renaming one without
+    // updating this map fails there rather than silently reverting that cache to
+    // DEFAULT_MAX_SIZE.
     private static final Map<String, Long> CACHE_SIZES = Map.ofEntries(
             Map.entry("userConversations", 10_000L),
             Map.entry("agentTriggers", 1_000L),
@@ -34,6 +42,20 @@ public class CacheFactory implements ICacheFactory {
             // this cap only exists to bound memory if pages are produced faster than
             // they age out.
             Map.entry("paginated-tool-responses", 1_000L),
+
+            // Keyed by userId like "userConversations", so the keyspace is the number
+            // of ACTIVE users rather than a fixed set: at the 1_000 default a
+            // deployment with a few thousand concurrent users thrashes precisely under
+            // load, and Caffeine's W-TinyLFU then rejects the newly inserted key
+            // rather than an old one (see RATE_SIZED_EVICTION_HEADROOM). A miss is not
+            // an error, so nothing would log it — the per-turn store round trip on the
+            // hottest path in the system would simply come back. One Boolean per user.
+            Map.entry("gdprProcessingRestrictions", 10_000L),
+
+            // Keyed by tenantId, and tenants are few even in multi-tenant deployments.
+            // Listed rather than left to the default so the sizing sits on record next
+            // to the per-user caches above.
+            Map.entry("tenantQuotas", 1_000L),
 
             // Floor only — the real capacity is derived from the TTL the cache is
             // asked for, see RATE_SIZED_CACHES. This entry applies solely if something
@@ -93,6 +115,20 @@ public class CacheFactory implements ICacheFactory {
         double ttlSeconds = ttl.toMillis() / 1000.0;
         long required = (long) Math.ceil(peakRps * ttlSeconds * RATE_SIZED_EVICTION_HEADROOM);
         return Math.max(configured, required);
+    }
+
+    /**
+     * Whether {@code cacheName} has its own entry in {@link #CACHE_SIZES}, as
+     * opposed to inheriting {@link #DEFAULT_MAX_SIZE}.
+     * <p>
+     * Exists because {@link #maximumSizeFor} cannot tell the two apart: a cache
+     * deliberately listed at 1,000 and a cache nobody sized both answer 1,000, so a
+     * test asserting the number alone stays green when the entry is deleted — which
+     * is precisely the regression the entries were added to prevent, and a cache
+     * that silently reverts to the default logs nothing.
+     */
+    static boolean hasExplicitSize(String cacheName) {
+        return CACHE_SIZES.containsKey(cacheName);
     }
 
     @Override

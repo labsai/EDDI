@@ -5,6 +5,9 @@
 package ai.labs.eddi.utils;
 
 import ai.labs.eddi.datastore.IResourceStore;
+import jakarta.ws.rs.WebApplicationException;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -27,6 +30,42 @@ class RestUtilitiesTest {
     void createURI_withSinglePart_returnsThatPart() {
         URI uri = RestUtilities.createURI("eddi://ai.labs.agents/abc");
         assertEquals("eddi://ai.labs.agents/abc", uri.toString());
+    }
+
+    // --- createConflictException ---
+
+    /**
+     * The 409 a client gets when it tries to create a resource that already exists,
+     * with the existing resource's URI as the body — the only thing that tells the
+     * caller where to look. Nothing exercised this path at all, which is awkward
+     * for a method just switched from instantiating RESTEasy Reactive's internal
+     * {@code ResponseBuilderImpl} to the portable {@code Response.status(...)} API:
+     * entity and media-type handling is exactly where two builder implementations
+     * would differ.
+     */
+    @Test
+    void createConflictException_carriesTheExistingResourceUriAsPlainText() {
+        WebApplicationException exception = RestUtilities.createConflictException(
+                "eddi://ai.labs.agents/agentstore/agents/",
+                new IResourceStore.IResourceId() {
+                    @Override
+                    public String getId() {
+                        return "5262b802dc6c4008b54c7c0b58100f97";
+                    }
+
+                    @Override
+                    public Integer getVersion() {
+                        return 3;
+                    }
+                });
+
+        Response response = exception.getResponse();
+        assertEquals(409, response.getStatus());
+        assertEquals("eddi://ai.labs.agents/agentstore/agents/5262b802dc6c4008b54c7c0b58100f97?version=3",
+                response.getEntity(),
+                "the body must point the caller at the resource that already exists");
+        assertEquals(MediaType.TEXT_PLAIN_TYPE, response.getMediaType(),
+                "a bare URI body must not be announced as anything but text/plain");
     }
 
     // --- extractResourceId ---

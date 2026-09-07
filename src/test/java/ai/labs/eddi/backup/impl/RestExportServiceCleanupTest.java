@@ -36,6 +36,9 @@ import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.attribute.FileTime;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -90,7 +93,7 @@ class RestExportServiceCleanupTest {
                 mock(IDictionaryStore.class), mock(IRuleSetStore.class), mock(IApiCallsStore.class),
                 mock(ILlmStore.class), mock(IPropertySetterStore.class), mock(IOutputStore.class),
                 mock(IMcpCallsStore.class), mock(IRagStore.class), mock(IPromptSnippetStore.class),
-                jsonSerialization, zipArchive, secretScrubber, scheduleStore, mock(ResourceAccessGuard.class));
+                jsonSerialization, zipArchive, secretScrubber, scheduleStore, mock(ResourceAccessGuard.class), mock(BackupMetrics.class));
 
         tmpDir = Paths.get(FileUtilities.buildPath(System.getProperty("user.dir"), "tmp"));
         exportRoot = tmpDir.resolve("export");
@@ -116,6 +119,7 @@ class RestExportServiceCleanupTest {
         // Belt and braces: if an assertion fails mid-test, do not leave the repo dirty.
         deleteRecursively(exportRoot);
         deleteRecursively(legacyScratchDir);
+        deleteRecursively(tmpDir.resolve("archives"));
     }
 
     @Test
@@ -134,7 +138,7 @@ class RestExportServiceCleanupTest {
             return null;
         }).when(zipArchive).createZip(anyString(), anyString(), any());
 
-        exportService.exportAgent(AGENT_ID, 1, null);
+        exportService.exportAgent(AGENT_ID, 1, null, null, null);
 
         assertEquals(1, zippedSources.size());
         Path zippedSource = zippedSources.get(0).toAbsolutePath().normalize();
@@ -160,6 +164,83 @@ class RestExportServiceCleanupTest {
     }
 
     @Test
+    @DisplayName("finished archives land in tmp/archives/ and expire, instead of accumulating forever")
+    void finishedArchivesExpire() throws Exception {
+        List<Path> archiveTargets = new ArrayList<>();
+        doAnswer(inv -> {
+            Path target = Paths.get(inv.getArgument(1, String.class)).toAbsolutePath().normalize();
+            archiveTargets.add(target);
+            Files.createDirectories(target.getParent());
+            Files.writeString(target, "zip-bytes");
+            return null;
+        }).when(zipArchive).createZip(anyString(), anyString(), any());
+
+        exportService.exportAgent(AGENT_ID, 1, null, null, null);
+
+        assertEquals(1, archiveTargets.size());
+        Path archive = archiveTargets.getFirst();
+        Path archiveRoot = tmpDir.resolve("archives").toAbsolutePath().normalize();
+        // Their own directory is what lets the sweep delete by age without ever
+        // looking at the export scratch tree or the import staging root.
+        assertEquals(archiveRoot, archive.getParent(),
+                "the finished ZIP must live in tmp/archives/, not loose in tmp/");
+        assertTrue(Files.exists(archive));
+
+        // Nothing deleted these before: the scratch tree was cleaned up but the ZIP
+        // itself stayed in tmp/ forever, so every export permanently consumed disk.
+        Path stale = archiveRoot.resolve("stale-download-1.zip");
+        Files.writeString(stale, "zip-bytes");
+        Files.setLastModifiedTime(stale, FileTime.from(Instant.now().minus(Duration.ofDays(1))));
+
+        Path fresh = archiveRoot.resolve("fresh-download-1.zip");
+        Files.writeString(fresh, "zip-bytes");
+
+        exportService.exportAgent(AGENT_ID, 1, null, null, null);
+
+        assertFalse(Files.exists(stale), "an expired archive must be swept: " + stale);
+        assertTrue(Files.exists(fresh), "an archive inside the retention window must be kept: " + fresh);
+    }
+
+    @Test
+    @DisplayName("archives leaked into tmp/ by earlier releases are swept too")
+    void legacyLooseArchivesAreReclaimed() throws Exception {
+        doAnswer(inv -> {
+            Path target = Paths.get(inv.getArgument(1, String.class)).toAbsolutePath().normalize();
+            Files.createDirectories(target.getParent());
+            Files.writeString(target, "zip-bytes");
+            return null;
+        }).when(zipArchive).createZip(anyString(), anyString(), any());
+
+        // Before this branch archives were written straight into tmp/. Nothing ever
+        // deleted them, and getAgentZipArchive now resolves only under tmp/archives,
+        // so an instance upgraded in place would keep every historical export forever
+        // while being unable to serve any of them.
+        Path legacyStale = tmpDir.resolve("d12-legacy-export-1.zip");
+        Files.createDirectories(tmpDir);
+        Files.writeString(legacyStale, "zip-bytes");
+        Files.setLastModifiedTime(legacyStale, FileTime.from(Instant.now().minus(Duration.ofDays(1))));
+
+        Path legacyFresh = tmpDir.resolve("d12-legacy-export-2.zip");
+        Files.writeString(legacyFresh, "zip-bytes");
+
+        Path notAnArchive = tmpDir.resolve("d12-legacy-notes.txt");
+        Files.writeString(notAnArchive, "keep me");
+        Files.setLastModifiedTime(notAnArchive, FileTime.from(Instant.now().minus(Duration.ofDays(1))));
+
+        try {
+            exportService.exportAgent(AGENT_ID, 1, null, null, null);
+
+            assertFalse(Files.exists(legacyStale), "an expired legacy archive must be reclaimed: " + legacyStale);
+            assertTrue(Files.exists(legacyFresh), "a legacy archive inside the retention window must be kept");
+            assertTrue(Files.exists(notAnArchive), "the sweep must only ever delete .zip files");
+        } finally {
+            Files.deleteIfExists(legacyStale);
+            Files.deleteIfExists(legacyFresh);
+            Files.deleteIfExists(notAnArchive);
+        }
+    }
+
+    @Test
     @DisplayName("a failing export still deletes its scratch tree")
     void failedExportLeavesNoResidue() throws Exception {
         List<Path> zippedSources = new ArrayList<>();
@@ -168,7 +249,7 @@ class RestExportServiceCleanupTest {
             throw new IOException("disk full");
         }).when(zipArchive).createZip(anyString(), anyString(), any());
 
-        assertThrows(IOException.class, () -> exportService.exportAgent(AGENT_ID, 1, null));
+        assertThrows(IOException.class, () -> exportService.exportAgent(AGENT_ID, 1, null, null, null));
 
         assertEquals(1, zippedSources.size());
         Path perRequestRoot = zippedSources.get(0).toAbsolutePath().normalize().getParent().getParent();
@@ -189,13 +270,13 @@ class RestExportServiceCleanupTest {
             if (nestedExportStarted.compareAndSet(false, true)) {
                 // A second export of the same agent (same version, even) starts and
                 // finishes — including its cleanup — while this one is mid-flight.
-                exportService.exportAgent(AGENT_ID, 1, null);
+                exportService.exportAgent(AGENT_ID, 1, null, null, null);
                 ownFilesSurvivedOverlap.set(Files.exists(source.resolve(AGENT_ID + ".agent.json")));
             }
             return null;
         }).when(zipArchive).createZip(anyString(), anyString(), any());
 
-        exportService.exportAgent(AGENT_ID, 1, null);
+        exportService.exportAgent(AGENT_ID, 1, null, null, null);
 
         assertEquals(2, zippedSources.size(), "both the outer and the nested export must have been zipped");
         assertNotEquals(zippedSources.get(0), zippedSources.get(1),
@@ -222,9 +303,9 @@ class RestExportServiceCleanupTest {
                     .thenThrow(new IResourceStore.ResourceNotFoundException("no such agent"));
 
             assertThrows(IResourceStore.ResourceNotFoundException.class,
-                    () -> exportService.exportAgent("import", 1, null));
+                    () -> exportService.exportAgent("import", 1, null, null, null));
             assertThrows(IResourceStore.ResourceNotFoundException.class,
-                    () -> exportService.exportAgent("d12pendingdownload-1.zip", 1, null));
+                    () -> exportService.exportAgent("d12pendingdownload-1.zip", 1, null, null, null));
 
             assertTrue(Files.exists(importStagingMarker),
                     "exporting an agent named 'import' wiped the import staging tree: " + importStagingMarker);

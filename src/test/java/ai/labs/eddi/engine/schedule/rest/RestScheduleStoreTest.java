@@ -16,14 +16,20 @@ import ai.labs.eddi.engine.security.OwnershipValidator;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
+import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.InternalServerErrorException;
+import jakarta.ws.rs.NotFoundException;
+import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.security.Principal;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import jakarta.ws.rs.NotFoundException;
 import static org.junit.jupiter.api.Assertions.*;
@@ -37,15 +43,20 @@ class RestScheduleStoreTest {
 
     private IScheduleStore scheduleStore;
     private ScheduleFireExecutor fireExecutor;
+    private SchedulePollerService pollerService;
     private SecurityIdentity identity;
     private RestScheduleStore rest;
 
     @BeforeEach
-    void setUp() {
+    void setUp() throws Exception {
         scheduleStore = mock(IScheduleStore.class);
         fireExecutor = mock(ScheduleFireExecutor.class);
-        var pollerService = mock(SchedulePollerService.class);
+        pollerService = mock(SchedulePollerService.class);
         identity = mock(SecurityIdentity.class);
+        // A manual fire claims the schedule first, exactly as the poller does, so it
+        // cannot run concurrently with the poller's own fire of the same schedule.
+        // Default the claim to "won" so tests about anything else still reach the fire.
+        when(pollerService.claimForManualFire(any())).thenReturn(true);
 
         rest = new RestScheduleStore();
         // Inject mocks (field injection in REST — we use reflection for tests)
@@ -194,22 +205,22 @@ class RestScheduleStoreTest {
 
     @Test
     void readAll_delegatesToStore() throws Exception {
-        when(scheduleStore.readAllSchedules(500)).thenReturn(List.of());
+        when(scheduleStore.readAllSchedules(anyInt(), anyInt(), anyBoolean())).thenReturn(List.of());
 
-        List<ScheduleConfiguration> result = rest.readAllSchedules(null);
+        List<ScheduleConfiguration> result = rest.readAllSchedules(null, 500, 0);
 
         assertEquals(0, result.size());
-        verify(scheduleStore).readAllSchedules(500);
+        verify(scheduleStore).readAllSchedules(eq(500), eq(0), anyBoolean());
     }
 
     @Test
     void readAll_filtersByAgentId() throws Exception {
-        when(scheduleStore.readSchedulesByAgentId("agent-1")).thenReturn(List.of());
+        when(scheduleStore.readSchedulesByAgentId(anyString(), anyInt(), anyInt(), anyBoolean())).thenReturn(List.of());
 
-        rest.readAllSchedules("agent-1");
+        rest.readAllSchedules("agent-1", 500, 0);
 
-        verify(scheduleStore).readSchedulesByAgentId("agent-1");
-        verify(scheduleStore, never()).readAllSchedules(anyInt());
+        verify(scheduleStore).readSchedulesByAgentId(eq("agent-1"), eq(500), eq(0), anyBoolean());
+        verify(scheduleStore, never()).readAllSchedules(anyInt(), anyInt(), anyBoolean());
     }
 
     // --- Enable / Disable ---
@@ -273,6 +284,10 @@ class RestScheduleStoreTest {
 
         assertEquals(200, response.getStatus());
         verify(fireExecutor).fire(any(), any(), anyInt());
+        // setUp() stubs claimForManualFire to "won" so tests about anything else still
+        // reach the executor. Assert it here, on the canonical happy path, so the claim
+        // step is not invisible to every pre-existing fireNow test.
+        verify(pollerService).claimForManualFire(regular);
     }
 
     @Test
@@ -372,27 +387,49 @@ class RestScheduleStoreTest {
         verify(scheduleStore, never()).updateSchedule(eq("r1"), any());
     }
 
+    /**
+     * The redaction must reach the STORE, not filter the page after it comes back.
+     * <p>
+     * Post-filtering counted limit/offset over rows the caller could not see. HITL
+     * timeout schedules are minted programmatically, one per paused conversation,
+     * in bursts, and sort newest-first — so an editor's first page could
+     * legitimately come back short, or entirely empty, while later pages held their
+     * own schedules. A client obeying the documented "a full page may be truncated,
+     * request the next one" rule then stopped paging and never saw them: the
+     * truncation signal was wrong for exactly the role the redaction exists for.
+     */
     @Test
-    void readAllSchedules_redactsHitlForEditor() throws Exception {
+    void readAllSchedules_asksTheStoreToExcludeHitlForEditor() throws Exception {
         when(identity.hasRole("eddi-admin")).thenReturn(false);
-        when(scheduleStore.readAllSchedules(anyInt()))
-                .thenReturn(List.of(makeCronSchedule("r1"), hitlSchedule("h1")));
+        when(scheduleStore.readAllSchedules(anyInt(), anyInt(), anyBoolean())).thenReturn(List.of(makeCronSchedule("r1")));
 
-        List<ScheduleConfiguration> result = rest.readAllSchedules(null);
+        List<ScheduleConfiguration> result = rest.readAllSchedules(null, 500, 0);
 
         assertEquals(1, result.size());
         assertEquals("r1", result.get(0).getId());
+        verify(scheduleStore).readAllSchedules(500, 0, true);
+    }
+
+    @Test
+    void readAllSchedules_byAgentId_asksTheStoreToExcludeHitlForEditor() throws Exception {
+        when(identity.hasRole("eddi-admin")).thenReturn(false);
+        when(scheduleStore.readSchedulesByAgentId(anyString(), anyInt(), anyInt(), anyBoolean())).thenReturn(List.of());
+
+        rest.readAllSchedules("agent-1", 500, 0);
+
+        verify(scheduleStore).readSchedulesByAgentId("agent-1", 500, 0, true);
     }
 
     @Test
     void readAllSchedules_showsHitlForAdmin() throws Exception {
         when(identity.hasRole("eddi-admin")).thenReturn(true);
-        when(scheduleStore.readAllSchedules(anyInt()))
+        when(scheduleStore.readAllSchedules(anyInt(), anyInt(), anyBoolean()))
                 .thenReturn(List.of(makeCronSchedule("r1"), hitlSchedule("h1")));
 
-        List<ScheduleConfiguration> result = rest.readAllSchedules(null);
+        List<ScheduleConfiguration> result = rest.readAllSchedules(null, 500, 0);
 
         assertEquals(2, result.size());
+        verify(scheduleStore).readAllSchedules(500, 0, false);
     }
 
     // --- Cross-user schedules: a schedule runs AS its userId ---
@@ -700,6 +737,744 @@ class RestScheduleStoreTest {
 
         assertEquals(200, response.getStatus());
         verify(fireExecutor).fire(any(), any(), anyInt());
+    }
+
+    // --- Manual fire: claim, then release through the state machine ---
+
+    /**
+     * A manual fire used to run with no claim at all, so it could execute
+     * concurrently with the poller's own fire of the same schedule — and with
+     * conversationStrategy=persistent both pushed a turn into the SAME
+     * conversation.
+     */
+    @Test
+    void fireNow_claimsBeforeFiringAndReleasesAfterwards() throws Exception {
+        var schedule = makeCronSchedule("f1");
+        when(scheduleStore.readSchedule("f1")).thenReturn(schedule);
+        var fireLog = fireLog("f1", FireStatus.COMPLETED.name());
+        when(fireExecutor.fire(any(), any(), anyInt())).thenReturn(fireLog);
+
+        Response response = rest.fireNow("f1");
+
+        assertEquals(200, response.getStatus());
+        var inOrder = inOrder(pollerService, fireExecutor);
+        inOrder.verify(pollerService).claimForManualFire(schedule);
+        inOrder.verify(fireExecutor).fire(eq(schedule), any(), anyInt());
+        inOrder.verify(pollerService).recordManualFireOutcome(schedule, fireLog);
+    }
+
+    @Test
+    void fireNow_refusedClaimIsAConflictNotAServerError() throws Exception {
+        when(scheduleStore.readSchedule("f2")).thenReturn(makeCronSchedule("f2"));
+        when(pollerService.claimForManualFire(any())).thenReturn(false);
+
+        Response response = rest.fireNow("f2");
+
+        assertEquals(409, response.getStatus());
+        verify(fireExecutor, never()).fire(any(), any(), anyInt());
+    }
+
+    /** A manual fire that throws must still release the claim. */
+    @Test
+    void fireNow_fireThrows_stillReleasesTheClaim() throws Exception {
+        var schedule = makeCronSchedule("f3");
+        when(scheduleStore.readSchedule("f3")).thenReturn(schedule);
+        when(fireExecutor.fire(any(), any(), anyInt())).thenThrow(new RuntimeException("boom"));
+
+        assertThrows(InternalServerErrorException.class, () -> rest.fireNow("f3"));
+
+        verify(pollerService).recordManualFireOutcome(schedule, null);
+    }
+
+    /**
+     * A refused claim is not always "someone else is firing it". {@code tryClaim}
+     * accepts only PENDING, FAILED-and-due and a CLAIMED row with an expired lease,
+     * so a dead-lettered schedule is refused too — and it is one of the states an
+     * operator presses "Fire now" from. Answering it with "already being fired" is
+     * factually wrong and hides {@code /retry}, the endpoint that would actually
+     * help.
+     */
+    @Test
+    void fireNow_deadLetteredScheduleSaysSoInsteadOfClaimingSomeoneIsFiringIt() throws Exception {
+        var schedule = makeCronSchedule("f4");
+        schedule.setFireStatus(FireStatus.DEAD_LETTERED);
+        schedule.setFailCount(5);
+        when(scheduleStore.readSchedule("f4")).thenReturn(schedule);
+        when(pollerService.claimForManualFire(any())).thenReturn(false);
+
+        Response response = rest.fireNow("f4");
+
+        assertEquals(409, response.getStatus());
+        String body = (String) response.getEntity();
+        assertTrue(body.contains("dead-lettered"), "expected the dead-letter reason, got: " + body);
+        assertTrue(body.contains("/retry"), "expected the retry endpoint to be named, got: " + body);
+        assertFalse(body.contains("already being fired"),
+                "a dead-lettered schedule is not being fired by anyone: " + body);
+    }
+
+    /**
+     * Same defect, the other refused state: a FAILED schedule whose retry backoff
+     * has not elapsed.
+     * <p>
+     * The message must also point somewhere that WORKS. It used to name
+     * {@code POST /retry}, but {@code requeueDeadLetter} filters on
+     * {@code fireStatus=DEAD_LETTERED} on both backends, so a FAILED schedule sent
+     * there gets a 404 "not found or not dead-lettered" — sending the operator
+     * hunting for something that does not exist, which is the very thing this
+     * message was rewritten to stop. {@code setScheduleEnabled} clears fireStatus,
+     * failCount and nextRetryAt unconditionally, so {@code /enable} is the endpoint
+     * that actually recovers it.
+     */
+    @Test
+    void fireNow_failedScheduleInBackoffPointsAtAnEndpointThatCanRecoverIt() throws Exception {
+        var schedule = makeCronSchedule("f5");
+        schedule.setFireStatus(FireStatus.FAILED);
+        schedule.setFailCount(2);
+        schedule.setNextRetryAt(Instant.parse("2099-01-01T00:00:00Z"));
+        when(scheduleStore.readSchedule("f5")).thenReturn(schedule);
+        when(pollerService.claimForManualFire(any())).thenReturn(false);
+
+        Response response = rest.fireNow("f5");
+
+        assertEquals(409, response.getStatus());
+        String body = (String) response.getEntity();
+        assertTrue(body.contains("FAILED"), "expected the FAILED state to be named, got: " + body);
+        assertTrue(body.contains("2099-01-01T00:00:00Z"),
+                "expected the pending retry time, got: " + body);
+        assertTrue(body.contains("/enable"),
+                "a FAILED schedule is recovered through /enable, not /retry: " + body);
+        assertFalse(body.contains("/retry"),
+                "/retry accepts only DEAD_LETTERED and would answer 404 here: " + body);
+        assertFalse(body.contains("already being fired"),
+                "a schedule waiting out its backoff is not being fired by anyone: " + body);
+    }
+
+    /**
+     * The retry time is optional in that message. A FAILED schedule whose
+     * {@code nextRetryAt} was never written — an older row, or one whose
+     * {@code markFailed} did not land — must not produce a dangling "(next retry at
+     * null)"; the recovery instruction is the part that has to survive.
+     */
+    @Test
+    void fireNow_failedScheduleWithNoRetryTime_omitsTheParentheticalInsteadOfSayingNull() throws Exception {
+        var schedule = makeCronSchedule("f5b");
+        schedule.setFireStatus(FireStatus.FAILED);
+        schedule.setFailCount(2);
+        schedule.setNextRetryAt(null);
+        when(scheduleStore.readSchedule("f5b")).thenReturn(schedule);
+        when(pollerService.claimForManualFire(any())).thenReturn(false);
+
+        Response response = rest.fireNow("f5b");
+
+        assertEquals(409, response.getStatus());
+        String body = (String) response.getEntity();
+        assertFalse(body.contains("next retry at"),
+                "with no retry time recorded there is nothing to report: " + body);
+        assertFalse(body.contains("null"), "a missing instant must not be printed: " + body);
+        assertTrue(body.contains("/enable"), body);
+    }
+
+    /**
+     * A store failure while claiming is a 500, not a 409.
+     * <p>
+     * {@code claimSchedule} swallowed every exception and returned false, which
+     * {@code fireNow} maps to "already being fired (claimed by another instance or
+     * the poller)" — a statement about the cluster that nothing had checked, handed
+     * to an operator during a database blip. It also bumped
+     * {@code eddi.schedule.claim.conflict}, the metric operators are told means
+     * instances racing for the same schedule.
+     */
+    @Test
+    void fireNow_storeFailureWhileClaiming_isAServerErrorNotAConflict() throws Exception {
+        var schedule = makeCronSchedule("f7");
+        when(scheduleStore.readSchedule("f7")).thenReturn(schedule);
+        when(pollerService.claimForManualFire(any()))
+                .thenThrow(new IResourceStore.ResourceStoreException("db down"));
+
+        assertThrows(InternalServerErrorException.class, () -> rest.fireNow("f7"));
+
+        verify(fireExecutor, never()).fire(any(), anyString(), anyInt());
+    }
+
+    /** A genuinely CLAIMED schedule keeps the original wording. */
+    @Test
+    void fireNow_claimedScheduleStillSaysItIsAlreadyBeingFired() throws Exception {
+        var schedule = makeCronSchedule("f6");
+        schedule.setFireStatus(FireStatus.CLAIMED);
+        when(scheduleStore.readSchedule("f6")).thenReturn(schedule);
+        when(pollerService.claimForManualFire(any())).thenReturn(false);
+
+        Response response = rest.fireNow("f6");
+
+        assertEquals(409, response.getStatus());
+        assertTrue(((String) response.getEntity()).contains("already being fired"));
+    }
+
+    /**
+     * The attempt number of a manual fire is the attempt it actually is, not a
+     * constant 1.
+     * <p>
+     * {@code fireNow} passed a literal 1, so a schedule already on its third failed
+     * attempt logged a manual retry as "attempt 1" — the fire log then read as a
+     * fresh first try and gave no hint that this schedule had been failing. Every
+     * other assertion in this class uses {@code anyInt()}, and the one place a
+     * concrete number was stubbed used a schedule with failCount 0, where the old
+     * constant and the new expression are indistinguishable. This uses a non-zero
+     * failCount, which is the whole point of the change.
+     */
+    @Test
+    void fireNow_attemptNumberContinuesTheFailureSequence() throws Exception {
+        var schedule = makeCronSchedule("f7");
+        schedule.setFailCount(3);
+        when(scheduleStore.readSchedule("f7")).thenReturn(schedule);
+        when(fireExecutor.fire(any(), any(), anyInt())).thenReturn(fireLog("f7", FireStatus.COMPLETED.name()));
+
+        assertEquals(200, rest.fireNow("f7").getStatus());
+
+        verify(fireExecutor).fire(eq(schedule), any(), eq(4));
+        verify(fireExecutor, never()).fire(any(), any(), eq(1));
+    }
+
+    /**
+     * The claim release must not run under a set interrupt flag.
+     * <p>
+     * {@code ScheduleFireExecutor.fire} deliberately re-asserts an interrupt that a
+     * blocking call inside it consumed, so on the interrupted path — client
+     * disconnect, shutdown, RESTEasy cancellation — {@code fireNow}'s finally block
+     * runs with the flag set. The synchronous Mongo driver then throws
+     * {@code MongoInterruptedException} on connection checkout, and
+     * {@code recordManualFireOutcome} swallows it: the claim is never released and
+     * {@code failCount} never increments, which is exactly the leak the finally
+     * exists to prevent, self-healing only once the lease expires.
+     * {@code SchedulePollerService.fireClaimedSchedule} parks the flag around its
+     * identical bookkeeping; this path has to do the same — and restore it
+     * afterwards, or the cancellation signal is lost instead.
+     */
+    @Test
+    void fireNow_interruptedFire_releasesTheClaimWithTheFlagParkedThenRestoresIt() throws Exception {
+        var schedule = makeCronSchedule("f8");
+        when(scheduleStore.readSchedule("f8")).thenReturn(schedule);
+        // Mirror ScheduleFireExecutor.restoreInterrupt: the flag is set when fire()
+        // returns on the interrupted path.
+        when(fireExecutor.fire(any(), any(), anyInt())).thenAnswer(inv -> {
+            Thread.currentThread().interrupt();
+            return fireLog("f8", FireStatus.FAILED.name());
+        });
+        var flagDuringRelease = new AtomicBoolean(true);
+        doAnswer(inv -> {
+            flagDuringRelease.set(Thread.currentThread().isInterrupted());
+            return null;
+        }).when(pollerService).recordManualFireOutcome(any(), any());
+
+        try {
+            rest.fireNow("f8");
+
+            assertFalse(flagDuringRelease.get(),
+                    "the bookkeeping write must not run under a set interrupt flag — the sync Mongo "
+                            + "driver throws MongoInterruptedException on connection checkout and the claim leaks");
+            assertTrue(Thread.currentThread().isInterrupted(),
+                    "the interrupt must be re-asserted afterwards, or the cancellation signal is swallowed");
+        } finally {
+            Thread.interrupted(); // never leak a set flag into the next test
+        }
+    }
+
+    // --- Update: a store failure must not silently un-claim a running fire ---
+
+    /**
+     * A store failure while reading the stored schedule must ABORT the update.
+     * <p>
+     * The carry-over used to swallow every exception from {@code readSchedule} and
+     * return, after which the PUT went ahead with the body's own values — and
+     * {@code applyDefaults} has already stamped {@code fireStatus = PENDING} onto
+     * the body. That was the mid-fire un-claim the carry-over exists to prevent,
+     * reintroduced by nothing worse than a transient store blip. Only NOT-FOUND may
+     * be shrugged off (the store's own update is about to surface the 404).
+     */
+    @Test
+    void update_storeFailureWhileReadingTheStoredScheduleAbortsInsteadOfUnClaiming() throws Exception {
+        when(scheduleStore.readSchedule("u9")).thenThrow(new IResourceStore.ResourceStoreException("db down"));
+
+        var body = makeCronSchedule("u9");
+        body.setFireStatus(null);
+        body.setUserId("system:scheduler");
+
+        Response response = rest.updateSchedule("u9", body);
+
+        assertEquals(500, response.getStatus(), "an unreadable schedule must deny the update, not proceed blind");
+        verify(scheduleStore, never()).updateSchedule(anyString(), any());
+    }
+
+    /**
+     * Every guard on the PUT path plus the carry-over shares ONE read.
+     * <p>
+     * There used to be three — {@code requireAdminForHitl}, the stored-owner guard
+     * and the carry-over each issued their own — so the fields carried over came
+     * from a different query than the one the guards judged, and the unit tests had
+     * to stub the reads in call order (breaking whenever a guard moved). Asserting
+     * the count pins the property rather than the sequence.
+     */
+    @Test
+    void update_readsTheStoredScheduleExactlyOnce() throws Exception {
+        var stored = makeCronSchedule("u10");
+        stored.setUserId("system:scheduler");
+        when(scheduleStore.readSchedule("u10")).thenReturn(stored);
+
+        var body = makeCronSchedule("u10");
+        body.setUserId("system:scheduler");
+
+        assertEquals(200, rest.updateSchedule("u10", body).getStatus());
+
+        verify(scheduleStore, times(1)).readSchedule("u10");
+    }
+
+    /**
+     * The PUT must not carry the fire lifecycle across at all.
+     * <p>
+     * Copying {@code fireStatus}/{@code failCount} from a read made the update a
+     * read-modify-write over live state: a carry-over that observed PENDING,
+     * followed by a poller {@code tryClaim} before the UPDATE landed, wrote PENDING
+     * back over the fresh claim. Narrowing a race is not closing it — the two
+     * fields are now out of both stores' update statements, and the REST layer must
+     * not put them back.
+     */
+    @Test
+    void update_doesNotCarryTheFireLifecycleOntoTheBody() throws Exception {
+        var stored = makeCronSchedule("u11");
+        stored.setUserId("system:scheduler");
+        stored.setFireStatus(FireStatus.CLAIMED);
+        stored.setFailCount(3);
+        stored.setClaimedBy("instance-7");
+        stored.setLastFired(Instant.parse("2026-01-01T00:00:00Z"));
+        when(scheduleStore.readSchedule("u11")).thenReturn(stored);
+
+        var body = makeCronSchedule("u11");
+        body.setUserId("system:scheduler");
+
+        rest.updateSchedule("u11", body);
+
+        ArgumentCaptor<ScheduleConfiguration> written = ArgumentCaptor.forClass(ScheduleConfiguration.class);
+        verify(scheduleStore).updateSchedule(eq("u11"), written.capture());
+        assertEquals("instance-7", written.getValue().getClaimedBy(), "the claim record must still be preserved");
+        assertEquals(Instant.parse("2026-01-01T00:00:00Z"), written.getValue().getLastFired(),
+                "fire history must still be preserved");
+        assertNotEquals(FireStatus.CLAIMED, written.getValue().getFireStatus(),
+                "fireStatus must not be carried over — the stores no longer write it, and copying it here "
+                        + "would reintroduce the read-modify-write");
+        assertEquals(0, written.getValue().getFailCount(), "failCount must not be carried over either");
+    }
+
+    // --- Validation: client mistakes are 400, not 500 ---
+
+    /**
+     * {@code Instant.parse} throws {@link java.time.format.DateTimeParseException},
+     * which is a {@code DateTimeException} and NOT an
+     * {@code IllegalArgumentException} — so it slipped past the 400 handler and
+     * surfaced as a 500 "Failed to create schedule", with a stack trace, for a
+     * typo.
+     */
+    @Test
+    void create_malformedOneTimeAt_isBadRequestNotServerError() throws Exception {
+        var s = makeCronSchedule("bad-1");
+        s.setCronExpression(null);
+        s.setOneTimeAt("2026-09-03 10:00"); // not ISO-8601
+
+        Response response = rest.createSchedule(s);
+
+        assertEquals(400, response.getStatus());
+        verify(scheduleStore, never()).createSchedule(any());
+    }
+
+    /** An empty POST body deserializes to null; dereferencing it produced a 500. */
+    @Test
+    void create_nullBody_isBadRequestNotServerError() {
+        Response response = rest.createSchedule(null);
+
+        assertEquals(400, response.getStatus());
+    }
+
+    /**
+     * A syntactically valid cron that can never match (February 30th) made
+     * CronParser throw {@code IllegalStateException}, which is not an
+     * {@code IllegalArgumentException} and so escaped as a 500.
+     */
+    @Test
+    void create_unsatisfiableCron_isBadRequestNotServerError() throws Exception {
+        var s = makeCronSchedule("bad-2");
+        s.setCronExpression("0 0 30 2 *");
+
+        Response response = rest.createSchedule(s);
+
+        assertEquals(400, response.getStatus());
+        verify(scheduleStore, never()).createSchedule(any());
+    }
+
+    // --- createdBy ---
+
+    /**
+     * createdBy exists to answer "who created this schedule" when a rogue one keeps
+     * starting conversations. Nothing on this path ever set it, so every schedule
+     * created through the public API had it null.
+     */
+    @Test
+    void create_stampsCreatedByFromTheAuthenticatedCaller() throws Exception {
+        asEditor("alice");
+        when(scheduleStore.createSchedule(any())).thenReturn("new-id");
+
+        rest.createSchedule(makeCronSchedule(null));
+
+        var captor = ArgumentCaptor.forClass(ScheduleConfiguration.class);
+        verify(scheduleStore).createSchedule(captor.capture());
+        assertEquals("alice", captor.getValue().getCreatedBy());
+    }
+
+    // --- Update preserves provenance and the fire lifecycle ---
+
+    /**
+     * A PUT edits configuration; it must not rewrite provenance or the fire
+     * lifecycle. Both are absent from the normal request shape, so taking them from
+     * the body nulled createdAt/createdBy/lastFired and reset the state of a fire
+     * that was still running — re-opening its claim.
+     */
+    @Test
+    void update_carriesOverProvenanceAndClaimStateFromTheStoredSchedule() throws Exception {
+        var stored = makeCronSchedule("u1");
+        Instant createdAt = Instant.now().minusSeconds(86400);
+        stored.setCreatedAt(createdAt);
+        stored.setCreatedBy("alice");
+        stored.setLastFired(Instant.now().minusSeconds(600));
+        stored.setFireStatus(FireStatus.CLAIMED);
+        stored.setClaimedBy("node-7");
+        stored.setFailCount(2);
+        stored.setPersistentConversationId("conv-keep");
+        when(scheduleStore.readSchedule("u1")).thenReturn(stored);
+
+        var body = makeCronSchedule("u1"); // the normal PUT shape: no audit fields
+        body.setName("renamed");
+        rest.updateSchedule("u1", body);
+
+        var captor = ArgumentCaptor.forClass(ScheduleConfiguration.class);
+        verify(scheduleStore).updateSchedule(eq("u1"), captor.capture());
+        ScheduleConfiguration persisted = captor.getValue();
+        assertEquals("renamed", persisted.getName(), "the editable fields must still be applied");
+        assertEquals(createdAt, persisted.getCreatedAt());
+        assertEquals("alice", persisted.getCreatedBy());
+        assertNotNull(persisted.getLastFired());
+        assertEquals("node-7", persisted.getClaimedBy());
+        assertEquals("conv-keep", persisted.getPersistentConversationId());
+        // fireStatus and failCount are deliberately NOT carried over any more — the
+        // stores no longer write them at all, so copying them here would only
+        // reintroduce the read-modify-write. See
+        // update_doesNotCarryTheFireLifecycleOntoTheBody.
+    }
+
+    // --- Enable re-arms a one-shot ---
+
+    /**
+     * computeNextFireForSchedule handled only HEARTBEAT and cron and fell through
+     * to null for a one-shot. Both stores skip the re-arm when nextFire is null, so
+     * enable answered 200, the row read back enabled=true, and nextFire stayed NULL
+     * — which findDueSchedules can never match on either backend. The schedule sat
+     * enabled-but-dead forever, with no error anywhere.
+     */
+    @Test
+    void enable_oneShotSchedule_isArmedWithANonNullNextFire() throws Exception {
+        var oneShot = makeCronSchedule("os1");
+        oneShot.setCronExpression(null);
+        oneShot.setOneTimeAt(Instant.now().minusSeconds(3600).toString()); // already fired
+        oneShot.setEnabled(false);
+        when(scheduleStore.readSchedule("os1")).thenReturn(oneShot);
+
+        Response response = rest.enableSchedule("os1");
+
+        assertEquals(200, response.getStatus());
+        var nextFire = ArgumentCaptor.forClass(Instant.class);
+        verify(scheduleStore).setScheduleEnabled(eq("os1"), eq(true), nextFire.capture());
+        assertNotNull(nextFire.getValue(), "a re-enabled one-shot with a null nextFire can never be claimed again");
+    }
+
+    /**
+     * A stored row with nothing to arm to — no cron, no heartbeat interval, no
+     * one-shot instant — must still be enabled, with a null nextFire. The store's
+     * contract is that enabling clears the failure state whether or not a nextFire
+     * was computed; refusing here, or inventing an instant, would either strand a
+     * recoverable schedule or arm one with no cadence to fire on.
+     * <p>
+     * This is the case that pins the NULL half of the re-arm's one-shot guard.
+     * {@code computeRearmNextFire} reaches {@code getOneTimeAt()} on every schedule
+     * with no recurrence, so a guard that tested only for blankness would
+     * dereference null here and turn a plain enable into a 500 — its blank half is
+     * pinned by
+     * {@link #enable_blankCronAndBlankOneTimeAt_areTreatedAsAbsentNotAsValues}.
+     */
+    @Test
+    void enable_scheduleWithNoCadenceAtAll_isStillEnabledWithANullNextFire() throws Exception {
+        var orphan = makeCronSchedule("no-cadence");
+        orphan.setCronExpression(null);
+        orphan.setOneTimeAt(null);
+        orphan.setHeartbeatIntervalSeconds(null);
+        when(scheduleStore.readSchedule("no-cadence")).thenReturn(orphan);
+
+        Response response = assertDoesNotThrow(() -> rest.enableSchedule("no-cadence"),
+                "a schedule with no cadence is ordinary input, not a server error");
+
+        assertEquals(200, response.getStatus());
+        var nextFire = ArgumentCaptor.forClass(Instant.class);
+        verify(scheduleStore).setScheduleEnabled(eq("no-cadence"), eq(true), nextFire.capture());
+        assertNull(nextFire.getValue(),
+                "nothing to arm to means no nextFire — inventing one arms a schedule with no cadence to fire on");
+    }
+
+    /**
+     * A BLANK cron or oneTimeAt is as absent as a null one, and the distinction is
+     * not academic: a JSON body that sends {@code ""} for a field it is not using
+     * stores an empty string, and treating that as a real value hands
+     * {@code CronParser}/{@code Instant.parse} an empty input, which throws and
+     * turns a plain enable into a 500.
+     * <p>
+     * Blankness is only meaningful as a DISCRIMINATOR, so both sides are asserted
+     * on the same field: a blank {@code oneTimeAt} leaves the row unarmed, and a
+     * real one arms it. Answering null for both would satisfy the first half alone
+     * — which is exactly what enabling did before the one-shot was handled here at
+     * all, leaving the row {@code enabled=true} with a NULL nextFire that
+     * {@code findDueSchedules} can never match on either backend.
+     */
+    @Test
+    void enable_blankCronAndBlankOneTimeAt_areTreatedAsAbsentNotAsValues() throws Exception {
+        var blanks = makeCronSchedule("blanks");
+        blanks.setCronExpression("   ");
+        blanks.setOneTimeAt("   ");
+        when(scheduleStore.readSchedule("blanks")).thenReturn(blanks);
+
+        Response response = assertDoesNotThrow(() -> rest.enableSchedule("blanks"),
+                "a blank cadence field must be read as absent, not handed to the parsers");
+
+        assertEquals(200, response.getStatus());
+        verify(scheduleStore).setScheduleEnabled("blanks", true, null);
+
+        var real = makeCronSchedule("blanks-vs-real");
+        real.setCronExpression("   ");
+        real.setOneTimeAt(Instant.now().plusSeconds(3600).toString());
+        when(scheduleStore.readSchedule("blanks-vs-real")).thenReturn(real);
+
+        assertEquals(200, rest.enableSchedule("blanks-vs-real").getStatus());
+        var armed = ArgumentCaptor.forClass(Instant.class);
+        verify(scheduleStore).setScheduleEnabled(eq("blanks-vs-real"), eq(true), armed.capture());
+        assertNotNull(armed.getValue(),
+                "a real oneTimeAt is not blank — answering null for it too leaves the row enabled but unclaimable");
+    }
+
+    /**
+     * A HEARTBEAT row whose interval is missing falls back to its cron expression
+     * rather than arming on a null interval. Validation rejects that shape on
+     * create, so it only arises from a row written by an older build — but enabling
+     * such a row must produce a real instant, not an NPE from
+     * {@code plusSeconds(null)}.
+     */
+    @Test
+    void enable_heartbeatRowWithNoInterval_fallsBackToItsCronExpression() throws Exception {
+        var mixed = makeCronSchedule("hb-no-interval");
+        mixed.setTriggerType(TriggerType.HEARTBEAT);
+        mixed.setHeartbeatIntervalSeconds(null);
+        mixed.setCronExpression("0 9 * * *");
+        when(scheduleStore.readSchedule("hb-no-interval")).thenReturn(mixed);
+
+        Response response = rest.enableSchedule("hb-no-interval");
+
+        assertEquals(200, response.getStatus());
+        var nextFire = ArgumentCaptor.forClass(Instant.class);
+        verify(scheduleStore).setScheduleEnabled(eq("hb-no-interval"), eq(true), nextFire.capture());
+        assertNotNull(nextFire.getValue());
+        assertTrue(nextFire.getValue().isAfter(Instant.now()),
+                "the cron fallback must arm a future instant: " + nextFire.getValue());
+    }
+
+    /**
+     * A PUT with an empty body deserializes to null. Every guard on the update path
+     * has to tolerate that and answer 400 — dereferencing it produced an NPE and a
+     * 500 for what is plainly a client mistake, and the stored schedule must not be
+     * touched.
+     */
+    @Test
+    void update_nullBody_isBadRequestAndLeavesTheStoredScheduleAlone() throws Exception {
+        when(scheduleStore.readSchedule("u-null")).thenReturn(makeCronSchedule("u-null"));
+
+        Response response = rest.updateSchedule("u-null", null);
+
+        assertEquals(400, response.getStatus());
+        verify(scheduleStore, never()).updateSchedule(anyString(), any());
+    }
+
+    /**
+     * A blank agentId is as absent as a null one — a schedule with nothing to fire
+     * against must be refused rather than stored and then failing on every fire.
+     */
+    @Test
+    void create_blankAgentId_isRejectedAndNothingIsStored() throws Exception {
+        var schedule = new ScheduleConfiguration();
+        schedule.setAgentId("   ");
+        schedule.setCronExpression("0 9 * * *");
+        schedule.setMessage("Good morning");
+
+        Response response = rest.createSchedule(schedule);
+
+        assertEquals(400, response.getStatus());
+        verify(scheduleStore, never()).createSchedule(any());
+    }
+
+    /**
+     * The minimum-interval policy is enforced on the TIGHTEST gap the expression
+     * can produce, not on the gap that happens to follow now. "0,30 * * * *" fires
+     * twice an hour, so its tightest gap is 1800 s and it must be refused under a
+     * one-hour floor.
+     */
+    @Test
+    void create_cronTighterThanTheMinimumInterval_isRejected() throws Exception {
+        setField(rest, "minIntervalSeconds", 3600L);
+
+        var schedule = new ScheduleConfiguration();
+        schedule.setAgentId("agent-1");
+        schedule.setCronExpression("0,30 * * * *");
+        schedule.setMessage("Too often");
+
+        Response response = rest.createSchedule(schedule);
+
+        assertEquals(400, response.getStatus());
+        verify(scheduleStore, never()).createSchedule(any());
+    }
+
+    @Test
+    void create_cronAtOrAboveTheMinimumInterval_isAccepted() throws Exception {
+        setField(rest, "minIntervalSeconds", 1800L);
+        when(scheduleStore.createSchedule(any())).thenReturn("ok-id");
+
+        var schedule = new ScheduleConfiguration();
+        schedule.setAgentId("agent-1");
+        schedule.setCronExpression("0,30 * * * *");
+        schedule.setMessage("Exactly on the floor");
+
+        assertEquals(201, rest.createSchedule(schedule).getStatus());
+    }
+
+    /**
+     * "0 0 30 2 *" — February 30th — is syntactically valid and can never match, so
+     * {@code CronParser} walks its whole two-year horizon and gives up with an
+     * {@link IllegalStateException}. On create that is already translated to a 400
+     * (see {@code create_unsatisfiableCron_isBadRequestNotServerError}); this is
+     * the same expression reached through {@code POST /schedules/{id}/enable},
+     * which has no validation in front of it at all: create/update run
+     * {@code validateSchedule} first, but enable reads the STORED row and arms it
+     * directly. Rows carrying such an expression are real — they predate validation
+     * or drift out of the parser's horizon as time passes.
+     * <p>
+     * The contract this pins is that the re-arm must FAIL LOUDLY rather than fall
+     * back to a null nextFire: {@code setScheduleEnabled} with a null nextFire is
+     * the documented "enabled, nothing to arm" shape, so swallowing the parser's
+     * refusal here would answer 200 and leave the row enabled and permanently
+     * unclaimable — {@code next_fire <= ?} is UNKNOWN for NULL on Postgres and BSON
+     * type bracketing excludes null on Mongo — with no error anywhere.
+     * <p>
+     * Asserted as "an error status, and the row is left alone" rather than as one
+     * specific code. Today the answer is a 500, which is arguably the wrong one:
+     * the {@code IllegalArgumentException} translation inside
+     * {@code computeNextFire} is dead on this path because {@code setEnabled}
+     * catches {@code Exception} into a 500 above it, and making that translation
+     * matter (a 400 — the stored expression is bad input, not a server fault) is a
+     * production fix worth making. Pinning 500 here would fail this test the moment
+     * someone makes it, which is the opposite of what the test is for.
+     */
+    @Test
+    void enable_storedCronThatCanNeverFire_isRefusedRatherThanArmedWithNoNextFire() throws Exception {
+        var stranded = makeCronSchedule("feb-30");
+        stranded.setCronExpression("0 0 30 2 *");
+        stranded.setEnabled(false);
+        when(scheduleStore.readSchedule("feb-30")).thenReturn(stranded);
+
+        WebApplicationException refusal = assertThrows(WebApplicationException.class,
+                () -> rest.enableSchedule("feb-30"),
+                "a re-arm that cannot compute a fire time must not report success");
+        assertTrue(refusal.getResponse().getStatus() >= 400,
+                "the refusal has to reach the operator as an error, not as a 2xx or a redirect: "
+                        + refusal.getResponse().getStatus());
+
+        verify(scheduleStore, never()).setScheduleEnabled(anyString(), anyBoolean(), any());
+    }
+
+    // --- Fire-log limits ---
+
+    /**
+     * The limit was passed straight through, and the backends read it differently:
+     * the MongoDB driver treats limit(0) as "no limit" while PostgreSQL's LIMIT 0
+     * returns nothing, so ?limit=0 dumped every fire log ever written on one
+     * backend and an empty list on the other.
+     */
+    @Test
+    void readFireLogs_nonPositiveLimit_isRejected() {
+        assertThrows(BadRequestException.class, () -> rest.readFireLogs("s1", 0));
+        assertThrows(BadRequestException.class, () -> rest.readFireLogs("s1", -5));
+    }
+
+    @Test
+    void readFireLogs_hugeLimit_isCapped() throws Exception {
+        when(scheduleStore.readFireLogs(eq("s1"), anyInt())).thenReturn(List.of());
+
+        rest.readFireLogs("s1", 10_000_000);
+
+        verify(scheduleStore).readFireLogs("s1", 500);
+    }
+
+    @Test
+    void readFailedFires_nonPositiveLimit_isRejected() {
+        assertThrows(BadRequestException.class, () -> rest.readFailedFires(0));
+    }
+
+    @Test
+    void readAllSchedules_nonPositiveLimit_isRejected() {
+        assertThrows(BadRequestException.class, () -> rest.readAllSchedules(null, 0, 0));
+    }
+
+    @Test
+    void readAllSchedules_hugeLimit_isCappedAndNegativeOffsetClamped() throws Exception {
+        when(scheduleStore.readAllSchedules(anyInt(), anyInt(), anyBoolean())).thenReturn(List.of());
+
+        rest.readAllSchedules(null, 999_999, -10);
+
+        verify(scheduleStore).readAllSchedules(eq(1000), eq(0), anyBoolean());
+    }
+
+    // --- Heartbeat descriptions ---
+
+    /**
+     * Truncating integer division described 90 s as "Every minute", 5400 s as
+     * "Every hour" and 129600 s as "Every day" — telling an operator reading the
+     * list that the agent fires 1.5x more often than it does. A coarser unit is
+     * only correct when the interval divides into it exactly.
+     */
+    @Test
+    void readSchedule_heartbeatDescription_doesNotRoundTheIntervalDown() throws Exception {
+        assertEquals("Every 90 seconds", describeHeartbeatVia(90L));
+        assertEquals("Every 90 minutes", describeHeartbeatVia(5400L));
+        assertEquals("Every 36 hours", describeHeartbeatVia(129600L));
+        // exact multiples still read naturally
+        assertEquals("Every minute", describeHeartbeatVia(60L));
+        assertEquals("Every hour", describeHeartbeatVia(3600L));
+        assertEquals("Every day", describeHeartbeatVia(86400L));
+        assertEquals("Every 30 seconds", describeHeartbeatVia(30L));
+    }
+
+    private String describeHeartbeatVia(long intervalSeconds) throws Exception {
+        var s = new ScheduleConfiguration();
+        s.setId("hb");
+        s.setTriggerType(TriggerType.HEARTBEAT);
+        s.setAgentId("agent-1");
+        s.setHeartbeatIntervalSeconds(intervalSeconds);
+        when(scheduleStore.readSchedule("hb")).thenReturn(s);
+        return rest.readSchedule("hb").getCronDescription();
+    }
+
+    private static ScheduleFireLog fireLog(String scheduleId, String status) {
+        return new ScheduleFireLog("log-1", scheduleId, "fire-1", Instant.now(), Instant.now(), Instant.now(), status,
+                "test-instance", "conv-1", null, 1, 0.0);
     }
 
     private record TestPrincipal(String name) implements Principal {
