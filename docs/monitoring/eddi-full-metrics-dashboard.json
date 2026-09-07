@@ -6569,7 +6569,8 @@
         {
           "id": 77,
           "type": "timeseries",
-          "title": "Poll / fire / fail",
+          "title": "Poll / fire / fail / skip",
+          "description": "`skipped` is neither a success nor a failure: the coordinator dropped the turn without consuming the input (the conversation was IN_PROGRESS or AWAITING_HUMAN), so the schedule was re-armed at its next cadence with failCount untouched and will never dead-letter on skips alone. A skip line that tracks the fire line is a schedule whose message is being dropped every cycle while `failed` and `deadlettered` stay flat.",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
@@ -6613,6 +6614,17 @@
               "editorMode": "code",
               "range": true,
               "legendFormat": "failed"
+            },
+            {
+              "refId": "D",
+              "expr": "sum(rate(eddi_schedule_fire_skipped_total{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "skipped"
             }
           ],
           "fieldConfig": {
@@ -6843,6 +6855,81 @@
             {
               "refId": "A",
               "expr": "sum(rate(eddi_schedule_claim_conflict_total{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "hidden",
+              "placement": "bottom",
+              "showLegend": false,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "single",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 158,
+          "type": "timeseries",
+          "title": "Fire logs pruned",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_schedule_firelog_pruned_total` — rows the retention sweep removed from the fire log. Flat while the table keeps growing means retention is off (`eddi.schedule.fire-log-retention=0`) or the sweep is failing — the poller logs that at ERROR.",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 30
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(rate(eddi_schedule_firelog_pruned_total{job=~\"$job\"}[$__rate_interval]))",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
