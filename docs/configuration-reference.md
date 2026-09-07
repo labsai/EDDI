@@ -252,6 +252,26 @@ Full guide: [attachments-guide.md](attachments-guide.md).
 
 ---
 
+## Backup, export & import
+
+Full guide: [import-export-an-agent.md](import-export-an-agent.md).
+
+| Property | Default | Description |
+|---|---|---|
+| `eddi.backup.export.retention-minutes` | `60` | How long a finished export archive stays downloadable |
+| `eddi.backup.export.sweep-interval` | `15m` | How often the retention sweep runs on its own, independently of exports |
+
+> `POST /backup/export/{agentId}` writes a ZIP under `tmp/archives/` and answers
+> with a `Location` header the client then GETs, so the file has to outlive the
+> request. Nothing else deletes it: the sweep runs before every export *and* on
+> the interval above, so an instance that stops exporting still reclaims what it
+> already wrote. It also removes the loose `tmp/*.zip` archives earlier releases
+> left behind, which are no longer downloadable. Raise the retention if a client
+> may take longer than that between the POST and the GET; lower it to bound disk
+> use on an instance that exports on a cron.
+
+---
+
 ## Protocols & integrations
 
 ### MCP

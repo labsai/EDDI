@@ -49,6 +49,28 @@ bottom of this file and are never archived.
 
 ---
 
+## ⏸️ fix(schedule): a human-approval pause is a skip, not a failure (2026-09-07)
+
+**Repo:** EDDI (`fix/review-schedules`)
+
+Two review comments that were raised but never posted as inline threads, so nobody had opened them.
+
+**A scheduled turn that paused for human approval was dead-lettered.** `ConversationService.say`
+throws `ConversationAwaitingApprovalException` *before* the response handler is wired, so the
+`SKIPPED` branch this branch added for exactly that case could never run. The executor's broad catch
+recorded the fire `FAILED`, incremented `failCount`, and eventually dead-lettered a conversation
+whose only crime was waiting for a human. A catch for that exception now sits ahead of the broad one
+and sets `FireStatus.SKIPPED`.
+
+**The Mongo existence probe claimed a primary read it never requested.** `logFire`'s compensating
+re-read asked for no read preference, so it inherited `ReadPreference.nearest()` from the single
+`MongoDatabase` producer and could be answered by a lagging secondary still holding the schedule
+that had just been deleted — while its own Javadoc said it "reads from the primary". The probe now
+asks for the primary explicitly, and the Javadoc describes what the code requests rather than what a
+deployment might happen to be configured as.
+
+---
+
 ## ⏰ fix(schedule): a fire log can no longer outlive the schedule it belongs to (2026-09-06)
 
 **Repo:** EDDI (`fix/review-schedules`)
@@ -191,6 +213,311 @@ both documented in `docs/metrics.md` and charted in the Grafana dashboard, becau
 Recorded honestly as unverifiable locally: the `SafeHttpClient` redirect tests need a
 loopback socket, and the new DDL and Mongo codec paths are only exercised against real
 backends in CI.
+## 🔁 test(backup): reach the rollback path without a multi-agent archive (2026-09-07)
+
+**Repo:** EDDI (`fix/review-backup-sync`)
+
+Merging main brought in two import-rollback tests from #733 that build an archive with **two** agent
+files, land the first and fail the second. This branch independently forbids that: `singleAgentFileIn`
+rejects a multi-agent archive, because an operator who approved importing one agent was getting
+several, with the `Location` header pointing at whichever file happened to be enumerated last.
+
+Both are right, and as written they cannot both hold. The guard stays; the tests were reshaped to
+reach the same rollback through a single-agent archive whose **schedule write** fails. That is the
+first step after the Agent is created and registered, which the production comment at the call site
+already says is deliberate: schedules carry the id of the agent they fire, so they are written after
+the Agent but before descriptor bookkeeping, "so a failure there still rolls them back".
+
+Every assertion survives in substance — the Agent is registered, its row is deleted, and it is taken
+back out of the capability index; and for the second test, a registry that throws on `unregister`
+still must not abandon the workflow delete that follows it. Proven by deleting `unregisterCapabilities`
+from the rollback: `Wanted but not invoked: capabilityRegistryService.unregister(...)`.
+
+---
+
+## 🔑 fix(backup): a reordered config list could hand one endpoint another's credential (2026-09-07)
+
+**Repo:** EDDI (`fix/review-backup-sync`)
+
+Three review comments and a round of CodeQL alerts. The first is the serious one.
+
+**Secrets were restored into the wrong entry.** `ScrubbedSecrets.merge` paired source and target
+list elements by index. An httpCalls config whose entries had been reordered between export and
+sync therefore kept each source entry's own `uri` while taking the target's value at that position:
+the billing call kept `https://billing.example.com` and received the *analytics* token. An
+inserted entry was worse — a newly added call to an attacker-chosen host inherited the credential
+that had been at its index. That is a credential disclosure to whatever endpoint sits at the other
+position, not merely a lost secret.
+
+Elements are now bound by stable identity (`name`, `id`, `key`) wherever they carry one, requiring
+a unique target match. Elements with none — a bare string in an array — fall back to position only
+when the lists are the same length and the two elements are identical in everything the scrubber
+did not replace. Anything else refuses and keeps its placeholder, which the caller already logs for
+the operator. Refusing beats guessing here: a lost secret costs an operator one re-entered key, a
+misplaced one goes to somebody else's server.
+
+**A workflow-only change was dropped and reported as skipped.** When a workflow diff was `UPDATE`
+with no extension changes, nothing wrote the source config, so reordered steps or an added
+condition silently did not arrive — and the run said "skipped", so the operator was told nothing
+had gone wrong. The executor now adopts the source workflow, but only when every extension
+reference it carries also exists in the target at the same canonical key; otherwise it refuses and
+names the step, the same refusal the branch already makes for a new extension. Adopted references
+are repointed onto the target's own resource URIs, because a cross-instance source names the
+*other* instance's ids. A source workflow with no steps is refused outright rather than emptying a
+live pipeline, and an adoption that comes out identical to the target is suppressed so a
+cross-instance no-op does not burn a version.
+
+**A dispatch test asserted something that could not fail.** It checked `agentUri()` was non-null,
+which is returned whether or not anything was written, so a miswired store row passed. It now
+asserts the result carries no failures and that the store was actually invoked; two sibling tests
+that provoked a failure and asserted nothing about it were strengthened the same way.
+
+**Log injection.** Snippet names, extension types and names, workflow and agent ids all come from
+the archive and reached the log unsanitized. Every log argument in `UpgradeExecutor` and
+`SourceUrlValidator` now goes through `LogSanitizer.sanitize`. Most of those values happen to be
+URI-derived and so cannot carry a control character, but a snippet name is free-form text and
+genuinely could — that is the one the new test drives.
+
+---
+
+## 🧪 test(backup): replace the tests that could not fail, close the CodeQL round (2026-09-06)
+
+**Repo:** EDDI (`fix/review-backup-sync`)
+
+Two passes on the same branch: 22 review comments (mostly CodeQL log-injection alerts) and a
+mutation audit of the tests this branch had added.
+
+**Every alert was already closed in the source, but two had no test that could fail if the fix
+were removed.** Those guards were added. The rest were verified line by line against the working
+tree rather than against the previous pass's notes.
+
+**The mutation audit is the more useful half.** Fable re-ran each new test with the production
+change surgically reverted and found several that passed anyway — coverage without a contract.
+They are now rewritten to assert what the changed line actually implements:
+
+- The snippet-rollback test asserted a call count; it now proves that a snippet created during a
+  failed import is recorded on the `ImportTransaction` and deleted again by `rollbackCreatedResources`,
+  and that a snippet *merged* into an existing one is never deleted.
+- `BackupMetrics.upgradeCompleted` was checked by reading counters back, which cannot distinguish
+  `increment(0)` from no call at all — both leave a `SimpleMeterRegistry` counter at zero. It now
+  asserts the calls themselves against a recording registry.
+- The workflow pass-through tests asserted a rendered string that a re-serialised model also
+  produces. They now assert the archive's own text survives byte for byte, which catches the real
+  loss: re-rendering adds an `extensions` field the archive never carried.
+- The extension-failure test now asserts the exact key set the matcher builds from the target,
+  including the occurrence ordinal, rather than a substring a wrongly-keyed map would also satisfy.
+
+**Recorded gaps, stated rather than papered over.** Two defensive lines cannot be pinned by a unit
+test and their tests were deleted rather than left as decoration: `recordCreatedSnippet`'s
+null-URI guard and `resolveSnippetIdsByName`'s null-listing guard both sit inside a broader
+`catch (Exception)`, so removing either still leaves the class green. A test that cannot fail is
+worse than no test, because it hides the hole.
+
+Diff coverage of the branch's changed lines: 94.1% line, 84.2% branch.
+
+---
+
+## 🔁 fix(backup): repair agent export, import and sync (2026-09-04)
+
+**Repo:** EDDI (`fix/review-agent-sync`)
+
+From the whole-repository code review. **Granular sync/upgrade did nothing at all**, and
+its preview said otherwise — the single most serious finding of the review, and it was
+broken three independent ways at once.
+
+1. `UpgradeExecutor` asked `StructuralMatcher.buildPreview` for a *content-less* preview
+   (`includeContent=false`), so `sourceJson` and `targetJson` were both null for every
+   matched resource. The action then reduced to `Objects.equals(null, null)` → `SKIP`, and
+   the executor skips every SKIP. Every resource that already existed in the target was
+   silently left untouched.
+2. Extension URIs were read from `step.getExtensions()`, but the engine stores them in
+   `step.getConfig().get("uri")`, so the target extension map came back empty.
+3. The ZIP and remote sources keyed their extension maps by resource-store authority
+   (`ai.labs.rules`) while the target keyed by workflow step type
+   (`eddi://ai.labs.behavior`), so the two sides could never join even with (1) and (2)
+   fixed.
+
+The REST preview endpoints pass `includeContent=true` and therefore showed real
+differences. An operator saw a diff, applied it, received success, and nothing changed.
+
+**Fixed** by a new `WorkflowExtensions` — one scan that is the single source of truth for
+how a workflow points at its extension configs. Both producers and the matcher derive
+keys from it, so source and target are guaranteed to join. The canonical key is
+`<stepType>#<occurrence>/<path>`, which also fixes a workflow with two steps of the same
+type collapsing onto one key and repointing both at the second resource. The diff action
+is now decided from content that is always loaded; `includeContent` governs only what is
+returned to the caller.
+
+### Also in this branch
+
+- **Exported ZIPs were never deleted** and accumulated in the working directory. They now
+  land in `tmp/archives/` and are swept by age (`eddi.backup.export.retention-minutes`,
+  default 60); the 404 message states the real retention instead of a fictional one.
+- **A non-ASCII agent name produced an undownloadable archive.** `URLEncoder` output like
+  `M%C3%BCller+Bot` was written literally to disk, and the download endpoint's character
+  class then rejected the decoded form. Names are slugified instead, and a
+  `Content-Disposition` header carries the readable filename.
+- **Schedules were exported but never imported** — silently dropped on every round trip
+  while the ZIP visibly contained them. Import now reads them, repoints them at the new
+  agent with fire bookkeeping reset, and rolls them back with the rest of the transaction.
+- **A v5 export ZIP imported nothing and reported 200.** The importer only looked for
+  `.agent.json`, never the v5 `.bot.json` it deliberately still accepts elsewhere.
+- **`strategy=upgrade` without `targetAgentId`** silently fell through to create, producing
+  a duplicate agent; it is now a 400 naming the parameter.
+- **A selectively-exported ZIP could not be re-imported**: a deselected extension file is
+  absent from the archive while the workflow still references it, and `readResources`
+  handed the resulting null straight to `store.create()`.
+
+### Regression coverage
+
+Every behavioural change is pinned by a test **proven to fail with its fix reverted**.
+`ExtensionSourceKeyContractTest` writes a real archive to disk and stubs a real remote,
+then asserts both producers emit identical canonical keys *and* that every extension joins
+the target as UPDATE rather than CREATE; its fixture deliberately carries two `httpcalls`
+steps so the collapse-by-type defect is caught too.
+
+Two tests are recorded honestly as characterization rather than guards: the snippet
+name-fallback row is what `main` always emitted, and `RestUtilities.createConflictException`
+was a behaviourally identical refactor. Neither can fail without its change, and both say
+so.
+## 🧼 fix(configs): sanitize every cascade-delete log argument, not most of them (2026-09-06)
+
+**Repo:** EDDI (`fix/review-config-delete`)
+
+CodeQL raised eight log-injection alerts on this branch: a REST path parameter reached a log call
+unsanitized, so a caller could put CR/LF in an Agent or workflow id and forge log records
+(CWE-117). Every flagged argument now goes through `LogSanitizer.sanitize`.
+
+The more useful part was what the alerts did *not* cover. `RestAgentStore` was left with the same
+tainted `id` sanitized on one line and raw sixteen lines above it, on the schedule-cascade pair
+that CodeQL could not reach because it needs the schedule store to throw. Uneven coverage in one
+file is worse than none, because the next reader assumes the file is done. Every log argument in
+that class is now sanitized: caller ids, store-sourced ids, and exception messages.
+
+`URI`-typed arguments are deliberately left alone — `URI.create` rejects control characters, so a
+URI object cannot carry a record boundary in the first place.
+
+Ten regression tests drive a CR/LF payload through the real code paths and assert no newline
+reaches the log. They guard against vacuity twice: the capture must be non-empty, and it must
+contain a marker from the specific line under test — otherwise a closed logger or an unreached
+branch would pass. `captureLogsOf` moved to a shared `LogCaptureSupport` rather than being copied.
+
+One argument is honestly not pinned: `pinned.getId()` on the plan-cascade failure path. It comes
+from `RestUtilities.extractResourceId`, whose validity gate returns null for anything containing
+CR/LF, so the value cannot be driven. It is defensive, not reachable.
+
+---
+
+## 🧹 fix(configs): stop cascading deletes removing resources someone else still uses (2026-09-06)
+
+**Repo:** EDDI (`fix/review-config-delete`)
+
+Review round on this branch: 20 comments, 6 fixed, 13 confirmed already correct, 1 disputed with
+code evidence. The six fixes share one shape — a delete that asked the right question at the wrong
+moment.
+
+**Cascade deletes checked references before the parent was gone.** `planCascade` has to ask
+"is this referenced by more than one thing" while the Agent still counts itself, but by the time
+each child delete actually runs the Agent is deleted and the count has moved. A workflow that a
+second Agent adopted in between was deleted anyway. Both `RestAgentStore` and `RestWorkflowStore`
+now re-ask immediately before each child delete, and a candidate that is still referenced
+increments the `X-Cascade-Skipped` counter instead of being removed.
+
+**The orphan purge trusted a reverse lookup that ignores old versions.** Both lookups in
+`isReferencedNow` skip referrers that are not a resource's current version, while the mark scan
+deliberately counts every version a deployment record pins. The purge loop now also re-runs the
+deployed-agent scan per candidate and fails closed when the scan is incomplete or throws.
+
+**Vault key rotation could sweep the key it had just written.** `versionsToSweep` treated an empty
+list of valid versions as "nothing to keep" rather than as an unknown bound, so a rotation whose
+identity update had not yet landed swept the new key. Empty is now handled exactly like null: the
+full scan range is preserved and nothing is deleted on an unknown bound.
+
+**Soft-deleting a descriptor marked the wrong version.** Descriptor versions advance independently
+of the resource's, so the soft path now resolves the descriptor's own current version the way the
+permanent path already did.
+
+**Files:** `RestAgentStore`, `RestWorkflowStore`, `RestOrphanAdmin`, `AgentSigningService`,
+`RestVersionInfo`, and their tests.
+
+---
+
+## 🛡️ fix(configs): close the CodeQL alerts and the review round (2026-09-04)
+
+**Repo:** EDDI (`fix/review-config-delete`)
+
+Follow-up on the same branch, from two independent review rounds, a diff-coverage pass, and
+four CodeQL alerts this branch introduced.
+
+**CodeQL, all four fixed in code rather than dismissed.** Two high-severity integer overflows
+in the new `ResourceUtilities` paging helper, where a caller-supplied index and limit were
+combined without bounds so a large value wrapped and produced a nonsensical window; the inputs
+are now clamped before the arithmetic. Two log-injection sites where a user-provided value
+reached a log statement unsanitised, now routed through the sanitiser the codebase already
+uses elsewhere rather than a second one.
+
+**A functional regression the branch's own suite could not see.** `RetryConfiguration` gained a
+total-backoff budget, and every test in that class stayed green while the behaviour changed.
+Found by the reviewer, fixed, and pinned by a test that fails without it.
+
+**Four tests were proven vacuous by mutation.** One claimed to pin a new
+`!config.getCapabilities().isEmpty()` guard; removing that guard left it green. Another
+asserted the consequence of a stub the real collaborator refuses to produce. Each was rewritten
+to fail on the regression it names, or deleted with an honest gap recorded — a test that cannot
+fail is worse than none, because it hides the hole.
+
+**Diff coverage** of changed lines: 89.9% to 99.5% line, 80.1% to 92.7% branch, with 38 tests
+added and each proven against a mutation of the line it protects.
+
+---
+
+## 🗑️ fix(configs): make destructive configuration deletes safe, atomic and honest (2026-09-04)
+
+**Repo:** EDDI (`fix/review-config-delete`)
+
+From the whole-repository code review. The destructive configuration paths destroyed data
+that was still in use, and reported success while doing it.
+
+**Orphan purge deleted live configuration.** References are version-pinned by design, and
+`DocumentDescriptorFilter` rewrites a descriptor's `resource` to the new version on every
+PUT. So a single edit of a rule set leaves the descriptor saying `?version=2` while every
+workflow that was not re-pointed still says `?version=1`. The scan compared those full
+versioned URI strings, found no match, classified the config an orphan, and
+`DELETE /administration/orphans` removed **all** of its versions — destroying a config a
+live workflow was still resolving. The comparison is now on version-independent identity,
+so any referenced version protects the resource. The remaining deliberate gap (only the
+current version of each agent is scanned) is documented rather than silently present.
+
+**Cascade delete tore down workflows before the guard that could still reject it.** A
+version-mismatched cascade deleted the workflows and schedules of the version it read, then
+answered 409. And the reference check asked whether *one pinned version* was still
+referenced before deleting *every* version, so a workflow another agent still used was
+destroyed.
+
+**Reverse lookups crashed on soft-deleted rows.** `AgentStore` and `WorkflowStore` threw
+`ResourceNotFoundException` as soon as one referencing document had been soft-deleted,
+which disabled the "is this still referenced?" check entirely — the check is caught and
+logged, so cascade delete simply stopped protecting shared resources.
+
+**Version-0 history rows escaped permanent deletion** on MongoDB, so `deletePermanently`
+and GDPR erasure both reported success while leaving an undeletable descriptor tombstone
+behind forever.
+
+### Regression coverage
+
+Every behavioural change is pinned by a test proven to fail with its fix reverted.
+
+Two things the auditor caught and this branch corrects rather than ships: the signing
+keypair was being destroyed from the vault on a **soft** delete, on the path that exists
+precisely to be recoverable; and a unique compound index was created unconditionally at
+startup, which fails with a duplicate-key error on exactly the deployments the finding says
+already hold duplicates. Both are now conditional and safe.
+
+Six pre-existing cascade assertions were flipped from `permanent=true` to `permanent=false`.
+That inversion is deliberate and correct: permanently removing a shared resource stays an
+explicit, non-cascading request. A functional regression in `RetryConfiguration`'s new
+backoff budget was found by the auditor while the class's own suite stayed green, and is
+fixed with a test that fails without it.
 ## 🔀 fix(build): repair `main` while merging it into the v5 compatibility branch (2026-09-06)
 
 **Repo:** EDDI (`fix/review-legacy-compat`)
