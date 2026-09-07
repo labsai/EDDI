@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.output.rest;
 
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.output.IOutputStore;
 import ai.labs.eddi.configs.output.IRestOutputStore;
 import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
@@ -33,8 +34,9 @@ public class RestOutputStore implements IRestOutputStore {
     private final RestVersionInfo<OutputConfigurationSet> restVersionInfo;
 
     @Inject
-    public RestOutputStore(IOutputStore outputStore, IDocumentDescriptorStore documentDescriptorStore, IJsonSchemaCreator jsonSchemaCreator) {
-        restVersionInfo = new RestVersionInfo<>(resourceURI, outputStore, documentDescriptorStore);
+    public RestOutputStore(IOutputStore outputStore, IDocumentDescriptorStore documentDescriptorStore, IJsonSchemaCreator jsonSchemaCreator,
+            ResourceAccessGuard resourceAccessGuard) {
+        restVersionInfo = new RestVersionInfo<>(resourceURI, outputStore, documentDescriptorStore, resourceAccessGuard);
         this.outputStore = outputStore;
         this.jsonSchemaCreator = jsonSchemaCreator;
     }
@@ -55,6 +57,9 @@ public class RestOutputStore implements IRestOutputStore {
 
     @Override
     public OutputConfigurationSet readOutputSet(String id, Integer version, String filter, String order, Integer index, Integer limit) {
+        // Reaches IOutputStore directly for its filter/order arguments, so the check
+        // RestVersionInfo.read would have applied has to be made explicitly here.
+        restVersionInfo.requireViewAccess(id);
         try {
             return outputStore.read(id, version, filter, order, index, limit);
         } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {
@@ -64,6 +69,7 @@ public class RestOutputStore implements IRestOutputStore {
 
     @Override
     public List<String> readOutputKeys(String id, Integer version, String filter, Integer limit) {
+        restVersionInfo.requireViewAccess(id);
         try {
             return outputStore.readActions(id, version, filter, limit);
         } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
@@ -88,6 +94,7 @@ public class RestOutputStore implements IRestOutputStore {
 
     @Override
     public Response patchOutputSet(String id, Integer version, List<PatchInstruction<OutputConfigurationSet>> patchInstructions) {
+        restVersionInfo.requireEditAccess(id);
         try {
             OutputConfigurationSet currentOutputConfigurationSet = outputStore.read(id, version);
             OutputConfigurationSet patchedOutputConfigurationSet = patchDocument(currentOutputConfigurationSet, patchInstructions);
@@ -120,6 +127,9 @@ public class RestOutputStore implements IRestOutputStore {
 
     @Override
     public Response duplicateOutputSet(String id, Integer version) {
+        // Duplicating reads the source, so it needs read access to it; the copy is
+        // created fresh and stamped to the caller by DocumentDescriptorFilter.
+        restVersionInfo.requireViewAccess(id);
         restVersionInfo.validateParameters(id, version);
         try {
             var outputConfigurationSet = outputStore.read(id, version);

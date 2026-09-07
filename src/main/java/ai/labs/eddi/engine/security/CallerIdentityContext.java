@@ -11,6 +11,10 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.function.Supplier;
 
@@ -37,6 +41,25 @@ public class CallerIdentityContext {
     private static final Logger LOGGER = Logger.getLogger(CallerIdentityContext.class);
 
     private static final ThreadLocal<CallerIdentity> CURRENT = new ThreadLocal<>();
+
+    /**
+     * Header a caller supplies a {@code CALLER_SUPPLIED} connection's credential
+     * in, once per connection: {@code <connectionName> <credential value>}.
+     * <p>
+     * Named for the existing {@code X-EDDI-Conversation-Id} convention.
+     */
+    public static final String CONNECTION_CREDENTIAL_HEADER = "X-EDDI-Connection-Credential";
+
+    /**
+     * How many such headers are read. An agent referencing more than a handful of
+     * caller-supplied connections in one turn is a config mistake, and the cap
+     * keeps a hostile client from making header parsing the expensive part of a
+     * request.
+     */
+    private static final int MAX_CONNECTION_CREDENTIALS = 16;
+
+    /** Longest credential value read. Generous for a JWT, bounded against abuse. */
+    private static final int MAX_CREDENTIAL_CHARS = 8192;
 
     private final SecurityIdentity securityIdentity;
     private final CurrentVertxRequest currentVertxRequest;
@@ -65,6 +88,13 @@ public class CallerIdentityContext {
     public CallerIdentity capture() {
         try {
             if (securityIdentity == null || securityIdentity.isAnonymous()) {
+                // An anonymous request gets no identity, so any connection credential it
+                // carried is dropped — deliberately: a caller that has not authenticated
+                // must not be able to make EDDI spend a credential on its behalf. Said out
+                // loud, because the symptom otherwise is a CALLER_SUPPLIED connection
+                // failing closed while the operator can see the header going out, and
+                // nothing anywhere connects the two.
+                warnIfConnectionCredentialsDropped();
                 return null;
             }
             // Token and principal are captured independently: an authenticated
@@ -80,12 +110,110 @@ public class CallerIdentityContext {
             if (token == null && (userId == null || userId.isBlank())) {
                 return null;
             }
-            return new CallerIdentity(token, userId, currentRequestOrigin());
+            return new CallerIdentity(token, userId, currentRequestOrigin(), captureConnectionCredentials());
         } catch (Exception e) {
             // No active request context — nothing to capture. Not an error.
             LOGGER.debugf("No caller identity to capture: %s", e.getMessage());
             return null;
         }
+    }
+
+    /**
+     * Credentials the caller supplied for {@code CALLER_SUPPLIED} connections, read
+     * from repeated {@value #CONNECTION_CREDENTIAL_HEADER} headers.
+     * <p>
+     * Each header line is {@code <connectionName> <credential value>} — the
+     * connection name up to the first space, everything after it the whole header
+     * value to send. Splitting on the first space rather than parsing a delimiter
+     * keeps values containing spaces ({@code "Bearer abc"}) intact without an
+     * escaping scheme.
+     * <p>
+     * A header rather than a body field because the carrier must be one the
+     * conversation store never sees: the request body becomes conversation input.
+     * <p>
+     * Malformed and duplicate entries are <em>dropped</em>, not guessed at. A
+     * duplicate name silently resolving to whichever line iterated last would
+     * decide by ordering which of two credentials a call is made with, so both are
+     * dropped and the connection fails closed with a message the operator can act
+     * on — louder than sending one of them and hoping it was the right one.
+     */
+    private Map<String, String> captureConnectionCredentials() {
+        try {
+            return readConnectionCredentials();
+        } catch (Exception e) {
+            // Its own boundary, not the caller's. capture() answers a failure by
+            // returning no identity at all, and letting a header-parsing problem take
+            // that path would drop the caller's TOKEN too — turning a bad credential
+            // header into a broken ${caller:token} somewhere unrelated.
+            LOGGER.warnf("Could not read %s headers: %s", CONNECTION_CREDENTIAL_HEADER, e.getMessage());
+            return Map.of();
+        }
+    }
+
+    /**
+     * Say so when an unauthenticated request carried connection credentials. Never
+     * logs the values, and never the connection names either — the header is
+     * attacker-controllable on an anonymous path, so its content does not belong in
+     * a log line.
+     */
+    private void warnIfConnectionCredentialsDropped() {
+        try {
+            var current = currentVertxRequest.getCurrent();
+            if (current == null) {
+                return;
+            }
+            var lines = current.request().headers().getAll(CONNECTION_CREDENTIAL_HEADER);
+            if (lines != null && !lines.isEmpty()) {
+                LOGGER.warnf("Ignoring %d %s header(s): the request is not authenticated, and a connection credential is only accepted "
+                        + "from an authenticated caller.", lines.size(), CONNECTION_CREDENTIAL_HEADER);
+            }
+        } catch (Exception e) {
+            LOGGER.debugf("Could not inspect %s headers on an anonymous request: %s", CONNECTION_CREDENTIAL_HEADER, e.getMessage());
+        }
+    }
+
+    private Map<String, String> readConnectionCredentials() {
+        var current = currentVertxRequest.getCurrent();
+        if (current == null) {
+            return Map.of();
+        }
+        List<String> lines = current.request().headers().getAll(CONNECTION_CREDENTIAL_HEADER);
+        if (lines == null || lines.isEmpty()) {
+            return Map.of();
+        }
+        if (lines.size() > MAX_CONNECTION_CREDENTIALS) {
+            LOGGER.warnf("Ignoring %s headers: %d supplied, at most %d are read.", CONNECTION_CREDENTIAL_HEADER, lines.size(),
+                    MAX_CONNECTION_CREDENTIALS);
+            return Map.of();
+        }
+        var credentials = new HashMap<String, String>();
+        var duplicated = new HashSet<String>();
+        for (String line : lines) {
+            if (line == null) {
+                continue;
+            }
+            int split = line.indexOf(' ');
+            if (split <= 0 || split == line.length() - 1) {
+                LOGGER.warnf("Ignoring a malformed %s header: expected '<connectionName> <value>'.", CONNECTION_CREDENTIAL_HEADER);
+                continue;
+            }
+            String name = line.substring(0, split).trim();
+            String value = line.substring(split + 1).trim();
+            if (name.isEmpty() || value.isEmpty() || value.length() > MAX_CREDENTIAL_CHARS) {
+                LOGGER.warnf("Ignoring a %s header with an empty name, an empty value, or a value over %d characters.",
+                        CONNECTION_CREDENTIAL_HEADER, MAX_CREDENTIAL_CHARS);
+                continue;
+            }
+            if (credentials.put(name, value) != null) {
+                duplicated.add(name);
+            }
+        }
+        for (String name : duplicated) {
+            // Never resolve a duplicate by ordering — see the note above.
+            credentials.remove(name);
+            LOGGER.warnf("Ignoring the credentials for connection '%s': it was supplied more than once and only one can be sent.", name);
+        }
+        return credentials;
     }
 
     /**

@@ -109,7 +109,8 @@ This ordering is important: vault secrets can contain global variable references
 | **A2A Tool Providers** | API keys, agent URLs |
 | **Embedding Model Factory** | All embedding model parameters |
 | **Embedding Store Factory** | All embedding store parameters |
-| **Slack Channel Router** | Channel configuration values (bot tokens, etc.) |
+
+> **Channel integrations are not on this list.** `ChannelTargetRouter` resolves the platform config of a channel integration (Slack bot tokens, signing secrets, …) through `SecretResolver`, which understands `${vault:...}` only. A `${vars:...}` reference placed there is passed through verbatim to the channel API.
 
 ## REST API
 

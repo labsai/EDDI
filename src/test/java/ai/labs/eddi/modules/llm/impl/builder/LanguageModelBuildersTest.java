@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl.builder;
 
+import dev.langchain4j.model.ollama.OllamaChatRequestParameters;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import org.junit.jupiter.api.DisplayName;
@@ -200,6 +201,69 @@ class LanguageModelBuildersTest {
                     "maxTokens maps onto Ollama's num_predict");
             assertEquals(0.77, defaults.topP(), 1e-9);
             assertEquals(Integer.valueOf(23), defaults.topK());
+        }
+
+        /**
+         * The knob that decides whether a first local-LLM agent looks alive.
+         * <p>
+         * A reasoning model left on its own default thinks before it answers, and the
+         * reasoning is not part of the streamed content — so the chat window shows
+         * nothing for many seconds and then the whole answer at once, which reads as a
+         * hang. Asserted through {@code defaultRequestParameters}, since that is what
+         * the outgoing request is built from.
+         */
+        @Test
+        @DisplayName("think reaches the model, and unset leaves the model's own default")
+        void thinkReachesTheModel() {
+            Map<String, String> params = new HashMap<>();
+            params.put("model", "gemma3n:e4b");
+            params.put("baseUrl", "http://localhost:11434");
+
+            var unset = (OllamaChatRequestParameters) builder.build(params).defaultRequestParameters();
+            assertNull(unset.think(), "unset must stay unset — it is a third, meaningful state");
+
+            params.put("think", "false");
+            var off = (OllamaChatRequestParameters) builder.build(params).defaultRequestParameters();
+            assertEquals(Boolean.FALSE, off.think());
+
+            params.put("think", "true");
+            var on = (OllamaChatRequestParameters) builder.build(params).defaultRequestParameters();
+            assertEquals(Boolean.TRUE, on.think());
+        }
+
+        @Test
+        @DisplayName("think reaches the streaming model too — the only place it is visible")
+        void thinkReachesTheStreamingModel() {
+            Map<String, String> params = new HashMap<>();
+            params.put("model", "gemma3n:e4b");
+            params.put("baseUrl", "http://localhost:11434");
+            params.put("think", "false");
+
+            var defaults = (OllamaChatRequestParameters) builder.buildStreaming(params).defaultRequestParameters();
+
+            assertEquals(Boolean.FALSE, defaults.think());
+        }
+
+        @Test
+        @DisplayName("think and returnThinking are recognised, so neither is warned about as unread")
+        void thinkingParametersAreRecognised() {
+            assertTrue(builder.recognisedParameters().contains("think"));
+            assertTrue(builder.recognisedParameters().contains("returnThinking"));
+        }
+
+        @Test
+        @DisplayName("an unparseable think leaves the default rather than pinning it to false")
+        void unparseableThinkIsIgnored() {
+            Map<String, String> params = new HashMap<>();
+            params.put("model", "gemma3n:e4b");
+            params.put("baseUrl", "http://localhost:11434");
+            params.put("think", "yes please");
+
+            var defaults = (OllamaChatRequestParameters) builder.build(params).defaultRequestParameters();
+
+            // Boolean.parseBoolean would have made this false, silently turning
+            // reasoning off on a typo.
+            assertNull(defaults.think());
         }
 
         @Test

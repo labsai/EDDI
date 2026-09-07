@@ -34,6 +34,18 @@ public interface IConversationService {
 
     /**
      * Start a new conversation with the latest ready Agent version.
+     * <p>
+     * {@code userId} is taken as given, but how much it is worth is decided here
+     * and recorded with the conversation for the rest of its life: it counts as
+     * verified only when an authenticated caller's own principal name is what was
+     * passed. A caller that names some other user — the {@code /v1} adapter
+     * believing {@code X-OpenWebUI-User-Id}, a webhook relaying a third-party id —
+     * has asserted that user, not proved them, and the conversation is marked
+     * accordingly. Per-user SaaS credentials are released against that mark, so a
+     * caller cannot mint a conversation as somebody else and spend their tokens. A
+     * conversation started from inside a running pipeline turn inherits the parent
+     * conversation's mark instead, since a pipeline thread has no caller to judge
+     * by.
      *
      * @throws AgentNotReadyException
      *             if no version of the Agent is deployed

@@ -159,20 +159,33 @@ The operator creates a route automatically. With the CR above, the route would b
 | **Port**            | `7070`                                                    |
 | **Health endpoint** | `GET /q/health/ready`                                     |
 | **Java**            | OpenJDK 25 (Red Hat build)                                |
-| **Framework**       | Quarkus 3.34.x                                            |
+| **Framework**       | Quarkus (version pinned in `pom.xml`)                     |
 
 ### Quick Start
 
 ```bash
 docker pull labsai/eddi:latest
-docker run -i --rm -p 7070:7070 labsai/eddi
+docker run -i --rm -p 7070:7070 \
+  -e EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true \
+  -e EDDI_MCP_ALLOW_UNAUTHENTICATED=true \
+  -e EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED=true \
+  labsai/eddi
 ```
 
-For production deployments with MongoDB:
+> The container runs in production launch mode, where `AuthStartupGuard` and `HighValueSurfaceGuard` refuse to boot while OIDC is disabled. Either enable OIDC (`QUARKUS_OIDC_TENANT_ENABLED=true` plus a configured realm) or pass the three opt-outs above — without one of the two, startup fails and the container never serves traffic.
+
+For production deployments with MongoDB, enable OIDC rather than the
+unauthenticated opt-outs — those exist so a local container can boot past
+`AuthStartupGuard`, and they leave `/secretstore` and `/mcp` open to anyone who
+can reach the port:
 
 ```bash
 docker run -d \
   -p 7070:7070 \
-  -e QUARKUS_MONGODB_CONNECTION_STRING=mongodb://mongo:27017 \
+  -e MONGODB_CONNECTIONSTRING='mongodb://mongo:27017/eddi?retryWrites=true&w=majority' \
+  -e QUARKUS_OIDC_TENANT_ENABLED=true \
+  -e QUARKUS_OIDC_AUTH_SERVER_URL='https://keycloak.example.com/realms/eddi' \
+  -e QUARKUS_OIDC_CLIENT_ID=eddi \
+  -e QUARKUS_OIDC_CREDENTIALS_SECRET="$OIDC_CLIENT_SECRET" \
   labsai/eddi:6.3.0
 ```

@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.mcpcalls.rest;
 
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.mcpcalls.IMcpCallsStore;
 import ai.labs.eddi.configs.mcpcalls.IRestMcpCallsStore;
@@ -48,8 +49,9 @@ public class RestMcpCallsStore implements IRestMcpCallsStore {
 
     @Inject
     public RestMcpCallsStore(IMcpCallsStore mcpCallsStore, IDocumentDescriptorStore documentDescriptorStore, IJsonSchemaCreator jsonSchemaCreator,
-            McpToolProviderManager mcpToolProviderManager) {
-        restVersionInfo = new RestVersionInfo<>(resourceURI, mcpCallsStore, documentDescriptorStore);
+            McpToolProviderManager mcpToolProviderManager,
+            ResourceAccessGuard resourceAccessGuard) {
+        restVersionInfo = new RestVersionInfo<>(resourceURI, mcpCallsStore, documentDescriptorStore, resourceAccessGuard);
         this.mcpCallsStore = mcpCallsStore;
         this.jsonSchemaCreator = jsonSchemaCreator;
         this.mcpToolProviderManager = mcpToolProviderManager;

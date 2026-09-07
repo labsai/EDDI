@@ -115,7 +115,7 @@ This is the standard way to use the Langchain task - just connect to an LLM and 
 | `systemMessage`            | string  | System message for LLM context                        | ""                |
 | `prompt`                   | string  | Override user input (if not set, uses actual input)   | ""                |
 | **Context Control**        |         |                                                       |                   |
-| `logSizeLimit`             | int     | Conversation history limit                            | -1 (unlimited)    |
+| `logSizeLimit`             | int     | Conversation history limit (`-1` = unlimited, `0` = none) | falls back to `conversationHistoryLimit` (default 10) |
 | `includeFirstAgentMessage` | boolean | Include first agent message in context                | true              |
 | **Output Control**         |         |                                                       |                   |
 | `convertToObject`          | boolean | Parse response as JSON. Enables three-layer enforcement: system prompt reinforcement, native API JSON mode (see the [provider matrix](#native-json-mode--provider-matrix)), and pre-parse validation | false             |
@@ -267,11 +267,12 @@ Both stored shapes therefore keep working: a config that sets only `streamingTim
     {
       "actions": ["send_message"],
       "id": "geminiChat",
-      "type": "gemini",
+      "type": "gemini-vertex",
       "description": "Google Gemini chat",
       "parameters": {
         "publisher": "vertex-ai",
         "projectId": "your-project-id",
+        "location": "us-central1",
         "modelId": "gemini-pro",
         "temperature": "0.7",
         "timeout": "15000",
@@ -294,8 +295,10 @@ Both stored shapes therefore keep working: a config that sets only `streamingTim
       "type": "ollama",
       "description": "Ollama local model chat",
       "parameters": {
-        "model": "llama3",
-        "timeout": "15000",
+        "baseUrl": "http://ollama:11434",
+        "model": "llama3.2:3b",
+        "timeout": "120000",
+        "think": "false",
         "systemMessage": "You are a helpful assistant",
         "addToOutput": "true"
       }
@@ -303,6 +306,38 @@ Both stored shapes therefore keep working: a config that sets only `streamingTim
   ]
 }
 ```
+
+**Ollama-specific parameters**
+
+| Parameter        | Effect                                                                                      |
+| ---------------- | ------------------------------------------------------------------------------------------- |
+| `baseUrl`        | Ollama's address. Default `http://localhost:11434`, overridable deployment-wide with `EDDI_OLLAMA_DEFAULT_BASE_URL`. |
+| `model`          | Model tag as `ollama list` reports it, e.g. `llama3.2:3b`.                                   |
+| `think`          | `"true"` / `"false"`. Unset leaves it to Ollama and the model — see below.                    |
+| `returnThinking` | `"true"` surfaces the separate `thinking` field instead of discarding it. Off by default.     |
+| `temperature`, `maxTokens`, `topP`, `topK` | Standard sampling controls. `maxTokens` maps to Ollama's `num_predict`. |
+
+> **Reaching Ollama from a container.** Inside the `eddi` container `localhost`
+> is the container. Use `http://host.docker.internal:11434` for an Ollama on the
+> host, or bring up the overlay —
+> `docker compose -f docker-compose.yml -f docker-compose.ollama.yml up -d` —
+> which puts Ollama on the same network as `http://ollama:11434` and pre-fills
+> that base URL for new agents.
+
+> **Reasoning models look like a hang.** gemma3n, deepseek-r1, qwen3 and friends
+> think before they answer, and where that reasoning goes depends on the model:
+>
+> - Reported in a separate `thinking` field — not part of the streamed content, so
+>   a streaming chat window shows nothing at all for as long as the model reasons,
+>   then the whole answer at once. `"returnThinking": "true"` surfaces it instead
+>   of discarding it.
+> - Prepended to the content itself as `<think>…</think>` — the tags stream into
+>   the reply, where the user sees them. `returnThinking` does not affect this
+>   case; there is no `thinking` field to parse.
+>
+> `"think": "false"` turns reasoning off entirely and is the quickest way to a
+> model that answers immediately. Give such a model a generous `timeout` either
+> way.
 
 #### Hugging Face
 
@@ -621,6 +656,9 @@ When `enableBuiltInTools: true`, you can use these tools:
 | **Text Summarizer** | Summarize long text                             | `textsummarizer` |
 | **PDF Reader**      | Extract text from PDF URLs (SSRF-protected)     | `pdfreader`      |
 | **Weather**         | Get weather information                         | `weather`        |
+| **Tool Response Paging** | Fetch the next page of a tool response that was truncated by `toolResponseLimits` | `fetch_page` / `fetch_tool_response_page` |
+
+> Because a non-empty `builtInToolsWhitelist` enables **only** the tools it names, a whitelist that includes verbose tools should also include `fetch_page` — otherwise truncated tool responses cannot be paged through.
 
 ### Tool Configuration (Server-Side)
 
@@ -683,11 +721,11 @@ Omitting `builtInToolsWhitelist` enables all available built-in tools.
 
 ## Custom HTTP Tools
 
-In addition to built-in tools, you can give your agent access to any configured EDDI HTTP call. This allows the agent to interact with your own APIs or third-party services.
+In addition to built-in tools, your agent gets access to the EDDI HTTP calls configured in its own workflow. This allows the agent to interact with your own APIs or third-party services.
 
 ### Configuration
 
-To enable custom tools, add the `tools` property to your task configuration with a list of HTTP call URIs.
+Exposure is controlled by `enableHttpCallTools` (default `true`). Every `eddi://ai.labs.httpcalls` step in the agent's workflow is discovered automatically — there is no per-call list to maintain. Set it to `false` to expose none of them.
 
 ```json
 {
@@ -700,21 +738,22 @@ To enable custom tools, add the `tools` property to your task configuration with
         "modelName": "gpt-4o"
       },
       "enableBuiltInTools": true,
-      "tools": [
-        "eddi://ai.labs.httpcalls/get_stock_price?version=1",
-        "eddi://ai.labs.httpcalls/create_jira_ticket?version=1"
-      ]
+      "enableHttpCallTools": true
     }
   ]
 }
 ```
 
+The same applies to MCP calls via `enableMcpCallTools` (also default `true`), which discovers the `mcpcalls` configs in the workflow.
+
+> **Legacy**: the `tools` property (a list of httpcall URIs) still exists, but its entries are **not** resolved — listing a URI there grants no access. Its only remaining effect is to switch the task into agent mode, which `enableBuiltInTools` or `a2aAgents` do as well.
+
 ### How it Works
 
-1.  **Configuration**: You provide the URIs of the HTTP calls you want the agent to use.
-2.  **Discovery**: The agent is automatically informed about these tools and how to use them.
-3.  **Execution**: When the agent decides to use a tool, it calls the `executeHttpCall` function with the tool's URI and necessary arguments.
-4.  **Security**: The agent can **only** execute the HTTP calls explicitly listed in the `tools` array. It cannot make arbitrary HTTP requests to the internet.
+1.  **Configuration**: You add httpcall steps to the agent's workflow, as you would for `ApiCallsTask`.
+2.  **Discovery**: Each `ApiCall` in those configurations becomes its own tool, named after the ApiCall's `name`, described by its `description`, and with one string parameter per entry in its `parameters` map. That name is also the key used by `toolPricing`, `toolRateLimits` and `toolCacheScopes`, and the name `toolApprovals` patterns match on (alongside the `http.method:path` form).
+3.  **Execution**: When the agent decides to use a tool, it calls that tool by name (e.g. `get_stock_price`) with the arguments the schema declares.
+4.  **Security**: The agent can **only** execute the HTTP calls present in its workflow. It cannot make arbitrary HTTP requests to the internet. To narrow the agent's reach, narrow the httpcalls configuration in its workflow — or set `enableHttpCallTools: false`.
 
 ---
 
@@ -750,8 +789,8 @@ The Langchain task supports advanced pre-request and post-response processing fo
       "postResponse": {
         "propertyInstructions": [
           {
-            "name": "lastResponseTime",
-            "valueString": "{{currentTimestamp}}",
+            "name": "lastRespondingAgent",
+            "valueString": "{conversationInfo.agentId}",
             "scope": "conversation"
           }
         ],
@@ -760,15 +799,15 @@ The Langchain task supports advanced pre-request and post-response processing fo
             "pathToTargetArray": "response.suggestions",
             "iterationObjectName": "item",
             "outputType": "text",
-            "outputValue": "{{item.text}}"
+            "outputValue": "{item.text}"
           }
         ],
         "qrBuildInstructions": [
           {
             "pathToTargetArray": "response.quickReplies",
             "iterationObjectName": "reply",
-            "quickReplyValue": "{{reply.text}}",
-            "quickReplyExpressions": "{{reply.action}}"
+            "quickReplyValue": "{reply.text}",
+            "quickReplyExpressions": "{reply.action}"
           }
         ]
       }
@@ -919,7 +958,7 @@ set `toolResponseLimits`, or raise `maxToolContextTokens`.
 
 ```json
 {
-  "type": "LANGCHAIN",
+  "type": "openai",
   "parameters": { "modelName": "gpt-4o" },
   "enableBuiltInTools": true,
   "builtInToolsWhitelist": ["websearch", "webscraper"],
@@ -937,31 +976,31 @@ The Langchain task configurations can be managed via REST API endpoints.
 ### Endpoints Overview
 
 1. **Read JSON Schema**
-   - **Endpoint:** `GET /langchainstore/langchains/jsonSchema`
+   - **Endpoint:** `GET /llmstore/llms/jsonSchema`
    - **Description:** Retrieves the JSON schema for validating Langchain configurations
 
 2. **List Langchain Descriptors**
-   - **Endpoint:** `GET /langchainstore/langchains/descriptors`
+   - **Endpoint:** `GET /llmstore/llms/descriptors`
    - **Description:** Returns a list of all Langchain configurations with optional filters
 
 3. **Read Langchain Configuration**
-   - **Endpoint:** `GET /langchainstore/langchains/{id}`
+   - **Endpoint:** `GET /llmstore/llms/{id}`
    - **Description:** Fetches a specific Langchain configuration by its ID
 
 4. **Update Langchain Configuration**
-   - **Endpoint:** `PUT /langchainstore/langchains/{id}`
+   - **Endpoint:** `PUT /llmstore/llms/{id}`
    - **Description:** Updates an existing Langchain configuration
 
 5. **Create Langchain Configuration**
-   - **Endpoint:** `POST /langchainstore/langchains`
+   - **Endpoint:** `POST /llmstore/llms`
    - **Description:** Creates a new Langchain configuration
 
 6. **Duplicate Langchain Configuration**
-   - **Endpoint:** `POST /langchainstore/langchains/{id}`
+   - **Endpoint:** `POST /llmstore/llms/{id}`
    - **Description:** Duplicates an existing Langchain configuration
 
 7. **Delete Langchain Configuration**
-   - **Endpoint:** `DELETE /langchainstore/langchains/{id}`
+   - **Endpoint:** `DELETE /llmstore/llms/{id}`
    - **Description:** Deletes a specific Langchain configuration
 
 ---
@@ -1026,7 +1065,7 @@ quiet: http, MCP, A2A and dynamic tools dispatch under their configured name, so
 a tool called `websearch` **was** priced and refused before `enforceBudget`
 existed. If you relied on such a ceiling, add the flag — every task carrying a
 ceiling without it is named once in a startup WARN. Cost is tracked and reported
-(`GET /llm/toolhistory/costs`, `eddi.tool.costs`) either way. The deployment-wide
+(`GET /llm/tools/costs`, `eddi.tool.costs`) either way. The deployment-wide
 default comes from `eddi.tools.budget.enforce-by-default` (default `false`).
 
 The check runs *before* each call and uses `<=`, so the call that crosses the
@@ -1173,18 +1212,24 @@ To trigger the Langchain task, configure Behavior Rules to emit the appropriate 
 
 ```json
 {
-  "name": "Send to LLM",
-  "rules": [
+  "behaviorGroups": [
     {
-      "name": "User asks question",
-      "conditions": [
+      "name": "Send to LLM",
+      "behaviorRules": [
         {
-          "type": "occurrence",
-          "occurrence": "currentstep",
-          "value": "input:initial"
+          "name": "User asks question",
+          "conditions": [
+            {
+              "type": "inputmatcher",
+              "configs": {
+                "expressions": "*",
+                "occurrence": "currentStep"
+              }
+            }
+          ],
+          "actions": ["send_message"]
         }
-      ],
-      "actions": ["send_message"]
+      ]
     }
   ]
 }
@@ -1412,8 +1457,8 @@ This means:
 The LLM Lifecycle Task provides a flexible, unified interface for integrating LLMs into EDDI agents:
 
 1. ✅ **Simple by Default** - Start with basic chat, add tools when needed
-2. ✅ **12 Provider Support** - OpenAI, Anthropic, Google, Mistral, Azure, Bedrock, Oracle, Ollama, Hugging Face, Jlama + OpenAI-compatible (DeepSeek, Cohere)
-3. ✅ **Built-in Tools** - 8 tools available when you enable agent mode
+2. ✅ **12 Provider Support** - OpenAI, Anthropic, Google Gemini, Google Vertex AI, Mistral, Azure, Bedrock, Oracle, Ollama, Hugging Face, Jlama + OpenAI-compatible (DeepSeek, Cohere)
+3. ✅ **Built-in Tools** - 9 tools available when you enable agent mode
 4. ✅ **Tool Execution Pipeline** - Rate limiting, caching, cost tracking for every tool call
 5. ✅ **Security Hardened** - SSRF protection, sandboxed math evaluation, input validation
 6. ✅ **Fine-Grained Control** - Pre/post processing, context management, templating

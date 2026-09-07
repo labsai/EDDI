@@ -25,6 +25,7 @@ import java.security.Principal;
 import java.util.List;
 import java.util.Map;
 
+import java.io.IOException;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -191,7 +192,7 @@ class McpHitlToolsTest {
 
     @Test
     void approveGroup_malformedTaskApprovals_returnsBadRequest() throws Exception {
-        when(json.deserialize(eq("{bad"), eq(Map.class))).thenThrow(new java.io.IOException("parse"));
+        when(json.deserialize(eq("{bad"), eq(Map.class))).thenThrow(new IOException("parse"));
         String out = tools.approveGroupPhase("g1", "gc1", "APPROVED", null, "{bad");
         assertTrue(out.contains("\"errorCode\":\"BAD_REQUEST\""), out);
         verifyNoInteractions(groupConversationService);

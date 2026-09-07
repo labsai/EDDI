@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
+import ai.labs.eddi.connections.ConnectionParameterGuard;
 import ai.labs.eddi.secrets.SecretResolver;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
@@ -28,6 +29,7 @@ import java.time.Duration;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.TreeMap;
+import dev.langchain4j.model.azure.AzureOpenAiEmbeddingModel;
 
 /**
  * Creates and caches {@link EmbeddingModel} instances based on
@@ -90,6 +92,7 @@ public class EmbeddingModelFactory {
     private EmbeddingModel build(RagConfiguration config) {
         Map<String, String> rawParams = config.getEmbeddingParameters() != null ? config.getEmbeddingParameters() : Map.of();
         Map<String, String> params = globalVariableResolver.resolveAll(rawParams);
+        ConnectionParameterGuard.rejectConnectionReferences(params);
         params = secretResolver.resolveSecrets(params);
         String provider = config.getEmbeddingProvider();
         LOGGER.infof("Building embedding model for provider: %s", provider);
@@ -145,7 +148,7 @@ public class EmbeddingModelFactory {
      * </ul>
      */
     private EmbeddingModel buildAzureOpenAi(Map<String, String> params) {
-        var builder = dev.langchain4j.model.azure.AzureOpenAiEmbeddingModel.builder()
+        var builder = AzureOpenAiEmbeddingModel.builder()
                 .deploymentName(params.getOrDefault("deploymentName", "text-embedding-3-small")).apiKey(params.get("apiKey"));
 
         if (params.containsKey("endpoint")) {

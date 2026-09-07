@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.configs.apicalls.rest;
 
+import static org.mockito.ArgumentMatchers.any;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.apicalls.model.ApiEndpointDiscoveryRequest;
 import ai.labs.eddi.configs.apicalls.IApiCallsStore;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
@@ -41,7 +43,7 @@ class RestApiCallsStoreBranchTest {
     @BeforeEach
     void setUp() {
         openMocks(this);
-        restApiCallsStore = new RestApiCallsStore(apiCallsStore, documentDescriptorStore, jsonSchemaCreator);
+        restApiCallsStore = new RestApiCallsStore(apiCallsStore, documentDescriptorStore, jsonSchemaCreator, mock(ResourceAccessGuard.class));
     }
 
     @Nested
@@ -75,7 +77,7 @@ class RestApiCallsStoreBranchTest {
         @DisplayName("returns descriptors list")
         void returnsDescriptors() throws Exception {
             var desc = new DocumentDescriptor();
-            when(documentDescriptorStore.readDescriptors(eq("ai.labs.apicalls"), anyString(), anyInt(), anyInt(), eq(false)))
+            when(documentDescriptorStore.readDescriptors(eq("ai.labs.apicalls"), anyString(), anyInt(), anyInt(), eq(false), any()))
                     .thenReturn(List.of(desc));
 
             List<DocumentDescriptor> result = restApiCallsStore.readApiCallsDescriptors("", 0, 10);

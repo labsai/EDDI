@@ -17,7 +17,10 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.function.Executable;
 
+import java.time.Clock;
+import java.time.Instant;
 import java.time.YearMonth;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -46,6 +49,22 @@ class MongoTenantQuotaStoreContainerTest extends MongoTestBase {
     private static final String USAGE_COLLECTION = "tenant_usage";
     private static final String TENANT_ID = "tenant-container";
 
+    /**
+     * "Now", pinned.
+     * <p>
+     * The counters live in wall-clock-aligned windows, so every assertion that two
+     * increments add up is really an assertion that both landed in the same window
+     * — and with the real clock nothing made that true. Two calls milliseconds
+     * apart straddle a minute boundary about once in six hundred runs, the counter
+     * reads 1 where the test expects 2, and CI fails on a change that touched none
+     * of this.
+     * <p>
+     * Deliberately mid-window on every axis — 12:30:30 on the 15th — so no
+     * assertion here can pass by sitting exactly on a boundary either.
+     */
+    private static final Instant FIXED_NOW = Instant.parse("2026-06-15T12:30:30Z");
+    private static final Clock FIXED_CLOCK = Clock.fixed(FIXED_NOW, ZoneOffset.UTC);
+
     private MongoTenantQuotaStore sut;
     private MongoCollection<Document> usage;
 
@@ -54,7 +73,7 @@ class MongoTenantQuotaStoreContainerTest extends MongoTestBase {
         dropCollections("tenant_quotas", USAGE_COLLECTION);
         // Re-created per test: the constructor is what (re)builds the unique index
         // that the dropped collection just lost.
-        sut = new MongoTenantQuotaStore(getDatabase());
+        sut = new MongoTenantQuotaStore(getDatabase(), FIXED_CLOCK);
         usage = getDatabase().getCollection(USAGE_COLLECTION);
     }
 
@@ -186,6 +205,56 @@ class MongoTenantQuotaStoreContainerTest extends MongoTestBase {
         }
 
         @Test
+        @DisplayName("the minute boundary itself rolls the counter — the flake, made deterministic")
+        void minuteBoundaryRollsTheCounter() {
+            // This is the scenario that used to arrive by luck.
+            // `allThreeCountersInterleaved`
+            // increments twice and expects 2, which only holds while both calls sit in one
+            // wall-clock minute; when CI happened to run them either side of :00 the
+            // counter
+            // read 1 and a PR that touched nothing here went red.
+            //
+            // Advancing the clock deliberately asserts the behaviour that was previously
+            // just a hazard: the same two calls, straddling the boundary on purpose, must
+            // roll rather than accumulate. It also pins the wiring — with the store reading
+            // Instant.now() directly instead of its clock field, the counter would reach 2
+            // and this fails.
+            var steppingClock = new Clock() {
+                private Instant now = Instant.parse("2026-06-15T12:30:59Z");
+
+                @Override
+                public ZoneId getZone() {
+                    return ZoneOffset.UTC;
+                }
+
+                @Override
+                public Clock withZone(ZoneId zone) {
+                    return this;
+                }
+
+                @Override
+                public Instant instant() {
+                    return now;
+                }
+
+                void advanceTo(String iso) {
+                    now = Instant.parse(iso);
+                }
+            };
+            var stepping = new MongoTenantQuotaStore(getDatabase(), steppingClock);
+
+            assertTrue(stepping.tryIncrementApiCalls(TENANT_ID, 5).allowed());
+            assertEquals(1, stepping.getUsage(TENANT_ID).apiCallsThisMinute());
+
+            steppingClock.advanceTo("2026-06-15T12:31:00Z");
+
+            assertTrue(stepping.tryIncrementApiCalls(TENANT_ID, 5).allowed());
+            assertEquals(1, stepping.getUsage(TENANT_ID).apiCallsThisMinute(),
+                    "a new minute starts a new budget rather than continuing the old count");
+            assertEquals(1, usageDocumentCount(), "and still one document for the tenant");
+        }
+
+        @Test
         @DisplayName("an expired minute window resets the api-call counter")
         void expiredMinuteWindowResets() {
             assertTrue(sut.tryIncrementApiCalls(TENANT_ID, 1).allowed());
@@ -206,7 +275,7 @@ class MongoTenantQuotaStoreContainerTest extends MongoTestBase {
                     .append("apiCallsThisMinute", 0)
                     .append("minuteStart", 0L)
                     .append("monthlyCostUsd", 40.0)
-                    .append("costMonth", YearMonth.now(ZoneOffset.UTC).minusMonths(1).toString()));
+                    .append("costMonth", YearMonth.now(FIXED_CLOCK).minusMonths(1).toString()));
 
             QuotaCheckResult result = assertDoesNotThrow(() -> sut.tryAddCost(TENANT_ID, 5.0, 100.0));
 

@@ -30,6 +30,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import static ai.labs.eddi.engine.memory.ConversationMemoryUtilities.convertConversationMemory;
 import static ai.labs.eddi.engine.memory.ConversationMemoryUtilities.convertConversationMemorySnapshot;
 
@@ -457,6 +458,16 @@ class ConversationStepRunner {
     }
 
     void cacheConversationState(String conversationId, ConversationState conversationState) {
+        if (conversationState == null) {
+            // Caffeine rejects a null value with a bare NullPointerException, and
+            // ConversationService.getConversationState caches BEFORE its own "no such
+            // conversation" check — so a conversation that does not exist produced a
+            // 500 from inside the cache instead of reaching the line that throws
+            // ConversationNotFoundException. There is also nothing to cache: "not
+            // found" is not a state, and caching it would keep it being served for the
+            // TTL even after the conversation appeared.
+            return;
+        }
         conversationStateCache.put(conversationId, conversationState);
     }
 
@@ -480,10 +491,21 @@ class ConversationStepRunner {
         return conversationMemoryStore.storeConversationMemorySnapshotIfState(memorySnapshot, expectedState);
     }
 
+    /**
+     * @param conversationId
+     *            sanitized into the message, because this message does not stay
+     *            server-side: {@code RestAgentEngineStreaming} echoes a
+     *            {@code ConversationNotFoundException}'s text into an SSE
+     *            {@code error} event, and the id is a caller-supplied path
+     *            parameter. {@code sanitize} strips ISO control characters and the
+     *            Unicode line separators, so neither the event's JSON nor a log
+     *            line can be broken by the value. The twin construction site,
+     *            {@code ConversationService#requireSnapshot}, already did this.
+     */
     static void checkConversationMemoryNotNull(IConversationMemory conversationMemory, String conversationId) {
         if (conversationMemory == null) {
             String message = "No conversation found with conversationId: %s";
-            message = String.format(message, conversationId);
+            message = String.format(message, sanitize(conversationId));
             throw new ConversationNotFoundException(message);
         }
     }

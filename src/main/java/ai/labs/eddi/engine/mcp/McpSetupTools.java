@@ -157,7 +157,8 @@ public class McpSetupTools {
             // a model provisioning an agent must not raise its own iteration budget.
             var request = new CreateApiAgentRequest(agentName, systemPrompt, openApiSpec, provider, model, apiKey, apiBaseUrl, apiAuth, endpoints,
                     enableQuickReplies, enableSentimentAnalysis, deploy, environment, llmBaseUrl, null, mcpServerUrls, null,
-                    null); // vaultKeyName — withheld for the reason given on setup_agent
+                    null, // vaultKeyName — withheld for the reason given on setup_agent
+                    null); // apiAuthHeader — withheld for the reason given on the record
             var result = agentSetupService.createApiAgent(request);
             return jsonSerialization.serialize(result);
         } catch (AgentSetupException e) {

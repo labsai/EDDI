@@ -153,6 +153,11 @@ class OutputItemTemplatingTest {
     void everyRegisteredSubTypeDeclaresItsOwnTemplating() throws Exception {
         var subTypes = OutputItem.class.getAnnotation(JsonSubTypes.class);
         assertNotNull(subTypes);
+        // One entry per output class. A retired type id is a second NAME on its
+        // class's existing entry (botFace on AgentFaceOutputItem's, via
+        // @JsonSubTypes.Type#names), never a second entry — so entries and classes
+        // stay one-to-one and this count keeps meaning "every output class reachable
+        // from the wire format".
         assertEquals(8, subTypes.value().length);
 
         for (var subType : subTypes.value()) {

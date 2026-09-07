@@ -4,10 +4,10 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
-import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
-import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
+import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
@@ -55,8 +55,8 @@ import static org.mockito.Mockito.*;
  */
 class RagContextProviderExtendedTest {
 
-    private IRestAgentStore restAgentStore;
-    private IRestWorkflowStore restWorkflowStore;
+    private IAgentStore restAgentStore;
+    private IWorkflowStore restWorkflowStore;
     private IResourceClientLibrary resourceClientLibrary;
     private EmbeddingModelFactory embeddingModelFactory;
     private EmbeddingStoreFactory embeddingStoreFactory;
@@ -68,8 +68,8 @@ class RagContextProviderExtendedTest {
     @BeforeEach
     void setUp() {
         WorkflowTraversal.clearCache();
-        restAgentStore = mock(IRestAgentStore.class);
-        restWorkflowStore = mock(IRestWorkflowStore.class);
+        restAgentStore = mock(IAgentStore.class);
+        restWorkflowStore = mock(IWorkflowStore.class);
         resourceClientLibrary = mock(IResourceClientLibrary.class);
         embeddingModelFactory = mock(EmbeddingModelFactory.class);
         embeddingStoreFactory = mock(EmbeddingStoreFactory.class);
@@ -124,12 +124,12 @@ class RagContextProviderExtendedTest {
 
         @Test
         @DisplayName("enableWorkflowRag=true but no workflow steps → return null")
-        void workflowRagNoSteps() {
+        void workflowRagNoSteps() throws Exception {
             var task = new LlmConfiguration.Task();
             task.setEnableWorkflowRag(true);
 
             // Agent returns null → no workflow steps
-            when(restAgentStore.readAgent("agent-1", 1)).thenReturn(null);
+            when(restAgentStore.read("agent-1", 1)).thenReturn(null);
 
             assertNull(ragContextProvider.retrieveContext(memory, task, "query"));
         }
@@ -399,8 +399,12 @@ class RagContextProviderExtendedTest {
         var agentConfig = new AgentConfiguration();
         agentConfig.setWorkflows(List.of(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/wf-1?version=1")));
 
-        when(restAgentStore.readAgent("agent-1", 1)).thenReturn(agentConfig);
-        when(restWorkflowStore.readWorkflow("wf-1", 1)).thenReturn(workflowConfig);
+        try {
+            when(restAgentStore.read("agent-1", 1)).thenReturn(agentConfig);
+            when(restWorkflowStore.read("wf-1", 1)).thenReturn(workflowConfig);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
 
         try {
             when(resourceClientLibrary.getResource(any(URI.class), eq(RagConfiguration.class)))

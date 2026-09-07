@@ -12,6 +12,7 @@ import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.configs.migration.IMigrationManager;
 import ai.labs.eddi.configs.migration.ChannelConnectorMigration;
+import ai.labs.eddi.configs.migration.WorkspaceAccessIndexMigration;
 import ai.labs.eddi.configs.migration.V6QuteMigration;
 import ai.labs.eddi.configs.migration.V6RenameMigration;
 import ai.labs.eddi.configs.rules.IRuleSetStore;
@@ -84,7 +85,8 @@ class AgentDeploymentManagementTest {
                 deploymentStore, agentFactory, agentStore, agentsReadiness,
                 conversationMemoryStore, documentDescriptorStore,
                 migrationManager, v6RenameMigration, v6QuteMigration,
-                channelConnectorMigration, runtime, workflowStore, ruleSetStore, 30);
+                channelConnectorMigration, mock(WorkspaceAccessIndexMigration.class),
+                runtime, workflowStore, ruleSetStore, 30);
     }
 
     @Nested

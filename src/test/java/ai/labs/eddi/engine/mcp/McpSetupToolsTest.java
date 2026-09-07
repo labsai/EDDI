@@ -34,6 +34,7 @@ import org.mockito.ArgumentCaptor;
 import java.net.URI;
 import java.util.List;
 
+import io.quarkus.security.identity.SecurityIdentity;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -90,7 +91,7 @@ class McpSetupToolsTest {
         when(secretProvider.isAvailable()).thenReturn(false);
 
         service = new AgentSetupService(restInterfaceFactory, agentAdmin, secretProvider, "http://localhost:11434");
-        var mockIdentity = mock(io.quarkus.security.identity.SecurityIdentity.class);
+        var mockIdentity = mock(SecurityIdentity.class);
         lenient().when(mockIdentity.isAnonymous()).thenReturn(true);
         tools = new McpSetupTools(service, jsonSerialization, mockIdentity, false);
     }
@@ -267,7 +268,7 @@ class McpSetupToolsTest {
         when(AgentStore.createAgent(any())).thenReturn(Response.created(URI.create("/agentstore/agents/agent-1?version=1")).build());
 
         var vaultTools = new McpSetupTools(vaultService, jsonSerialization,
-                mock(io.quarkus.security.identity.SecurityIdentity.class), false);
+                mock(SecurityIdentity.class), false);
 
         vaultTools.setupAgent("Vault Agent", "You are helpful", "openai", "gpt-4o", "sk-live-secret", null, null, null,
                 null, null, null, null, false, null);
@@ -863,7 +864,7 @@ class McpSetupToolsTest {
         hitl.setToolApprovals(toolApprovals);
 
         service.createApiAgent(new CreateApiAgentRequest("Agent", "prompt", SIMPLE_SPEC, null, null, "key",
-                null, null, null, null, null, false, null, null, hitl, null, null, null));
+                null, null, null, null, null, false, null, null, hitl, null, null, null, null));
 
         var agentCaptor = ArgumentCaptor.forClass(AgentConfiguration.class);
         verify(AgentStore).createAgent(agentCaptor.capture());
@@ -879,7 +880,7 @@ class McpSetupToolsTest {
         stubApiAgentStores();
 
         service.createApiAgent(new CreateApiAgentRequest("Agent", "prompt", SIMPLE_SPEC, null, null, "key",
-                null, null, null, null, null, false, null, null, null, null, null, null));
+                null, null, null, null, null, false, null, null, null, null, null, null, null));
 
         var agentCaptor = ArgumentCaptor.forClass(AgentConfiguration.class);
         verify(AgentStore).createAgent(agentCaptor.capture());
@@ -899,7 +900,7 @@ class McpSetupToolsTest {
         stubApiAgentStores();
 
         service.createApiAgent(new CreateApiAgentRequest("Agent", "prompt", SIMPLE_SPEC, null, null, "key",
-                null, null, null, null, null, false, null, null, null, null, 30, null));
+                null, null, null, null, null, false, null, null, null, null, 30, null, null));
 
         var llmCaptor = ArgumentCaptor.forClass(LlmConfiguration.class);
         verify(langchainStore).createLlm(llmCaptor.capture());
@@ -911,7 +912,7 @@ class McpSetupToolsTest {
         stubApiAgentStores();
 
         service.createApiAgent(new CreateApiAgentRequest("Agent", "prompt", SIMPLE_SPEC, null, null, "key",
-                null, null, null, null, null, false, null, null, null, null, null, null));
+                null, null, null, null, null, false, null, null, null, null, null, null, null));
 
         var llmCaptor = ArgumentCaptor.forClass(LlmConfiguration.class);
         verify(langchainStore).createLlm(llmCaptor.capture());
@@ -929,7 +930,7 @@ class McpSetupToolsTest {
                 .thenReturn(Response.created(URI.create("/mcpcallstore/mcpcalls/mcp-1?version=1")).build());
 
         service.createApiAgent(new CreateApiAgentRequest("Agent", "prompt", SIMPLE_SPEC, null, null, "key",
-                null, null, null, null, null, false, null, null, null, "https://mcp.example.com/sse", null, null));
+                null, null, null, null, null, false, null, null, null, "https://mcp.example.com/sse", null, null, null));
 
         var packageCaptor = ArgumentCaptor.forClass(WorkflowConfiguration.class);
         verify(WorkflowStore).createWorkflow(packageCaptor.capture());

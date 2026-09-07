@@ -60,7 +60,7 @@ EDDI uses **Streamable HTTP** transport, served by the Quarkus MCP Server extens
 
 | Tool               | Description                                                                                |
 | ------------------ | ------------------------------------------------------------------------------------------ |
-| `read_agent_logs`  | Read server-side pipeline logs (errors, LLM timeouts) filtered by agent/conversation/level |
+| `read_agent_logs`  | Read server-side pipeline logs (errors, LLM timeouts) filtered by agent/conversation/level. An unscoped or agent-only read additionally requires `eddi-admin` — it pulls from a shared buffer mixing every user's logs; only a `conversationId`-scoped read is open to a viewer (owner or admin) |
 | `read_audit_trail` | Read per-task audit entries with LLM details, timing, cost, and tool calls                 |
 
 ### Setup Tools (2)
@@ -76,7 +76,7 @@ EDDI uses **Streamable HTTP** transport, served by the Quarkus MCP Server extens
 
 | Tool                    | Description                                                                                                                                                                                         |
 | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `create_schedule`       | Create a new scheduled agent trigger (cron job or heartbeat). For CRON: provide `cronExpression`. For HEARTBEAT: provide `heartbeatIntervalSeconds`. Heartbeats default to persistent conversations |
+| `create_schedule`       | Create a new scheduled agent trigger (cron job or heartbeat). For CRON: provide `cron`. For HEARTBEAT: provide `heartbeatIntervalSeconds`. Heartbeats default to persistent conversations |
 | `list_schedules`        | List all scheduled agent triggers with name, type, cron/interval, status, next fire time, and fire count. Optionally filter by agentId                                                              |
 | `read_schedule`         | Read a schedule's full configuration including recent fire history (last 10 executions)                                                                                                             |
 | `delete_schedule`       | Delete a scheduled agent trigger                                                                                                                                                                    |
@@ -97,7 +97,7 @@ EDDI uses **Streamable HTTP** transport, served by the Quarkus MCP Server extens
 | `read_group_conversation`   | Read a group conversation transcript                                                                                                                       |
 | `list_group_conversations`  | List past group discussions for a group, with state and timestamps                                                                                         |
 | `start_group_discussion`    | Start a discussion asynchronously (returns immediately with groupConversationId). Poll with `read_group_conversation`                                     |
-| `delete_group_conversation` | Delete a group conversation and cascade-delete all member conversations                                                                                    |
+| `delete_group_conversation` | Delete a group conversation. Its shared artifacts and any ephemeral agents are deleted; member conversations are **ended**, not deleted, and remain readable |
 | `followup_with_member`      | Ask one member a follow-up on a finished discussion. The agent retains its full context; question and answer are both recorded on the group transcript. Accepts an agent ID or a member's display name |
 | `continue_group_discussion` | Continue a finished discussion with a new question. Every member re-runs the phases retaining memory of prior rounds; the round counter increments        |
 | `close_group_conversation`  | Close a conversation permanently — ends member conversations and cleans up dynamically-created agents. No further follow-ups or continuations             |
@@ -560,7 +560,7 @@ Delete an agent trigger for a given intent. After deletion, `chat_managed` calls
 
 ```
 # 1. Create an agent (using setup_agent or the Manager UI)
-setup_agent(name: "Support Agent", systemPrompt: "You are a helpful support agent...", ...)
+setup_agent(agentName: "Support Agent", systemPrompt: "You are a helpful support agent...", ...)
 → { agentId: "abc123", version: 1, status: "deployed" }
 
 # 2. Create a trigger mapping an intent to this agent
@@ -618,9 +618,9 @@ These are the **actual Keycloak role strings** the tools check (not aliases). Ro
 
 | Role           | Scope |
 | -------------- | ----- |
-| `eddi-viewer`  | Read-only + running conversations: `list_*`, `read_*`, `get_*`, `discover_agents`, `chat_with_agent`/`talk_to_agent`/`chat_managed`, `read_agent_logs`/`read_audit_trail`, and the memory **read** tools (`list_user_memories`, `get_visible_memories`, `search_user_memories`, `get_memory_by_key`, `count_user_memories`) |
-| `eddi-editor`  | Viewer + authoring: `setup_agent`, `create_api_agent`, group create/update, resource create/update, trigger/schedule/channel authoring |
-| `eddi-admin`   | Editor + destructive/deployment ops: `deploy_agent`/`undeploy_agent`, `delete_*`, resource delete, and the **memory writes** (`upsert_user_memory`, `delete_user_memory`, `delete_all_user_memories`) + **GDPR** tools (`delete_user_data`, `export_user_data`) |
+| `eddi-viewer`  | The conversation tools (`list_agents`, `list_agent_configs`, `get_agent`, `discover_agents`, `create_conversation`, `talk_to_agent`/`chat_with_agent`/`chat_managed`, `read_conversation`, `read_conversation_log`, `list_conversations`, `read_agent_logs`, `read_audit_trail`), running a discussion and reading its transcript (`describe_discussion_styles`, `discuss_with_group`, `start_group_discussion`, `read_group_conversation`, `list_group_conversations`, `followup_with_member`, `continue_group_discussion`, `list_team_backlog`, `list_group_templates`), and the memory **read** tools (`list_user_memories`, `get_visible_memories`, `search_user_memories`, `get_memory_by_key`, `count_user_memories`). `read_agent_logs` additionally requires `eddi-admin` unless a `conversationId` is supplied |
+| `eddi-editor`  | `setup_agent`, `create_api_agent`, and the group configuration/lifecycle tools: `list_groups`, `read_group`, `create_group`, `update_group`, `delete_group`, `create_group_from_template`, `add_team_task`, `close_group_conversation`, `delete_group_conversation` |
+| `eddi-admin`   | **Every** tool in `McpAdminTools`, read as well as write — `deploy_agent`/`undeploy_agent`, `get_deployment_status`, agent and resource CRUD (`list_workflows`, `read_workflow`, `read_resource`, `create_resource`, `update_resource`, `delete_resource`, `list_agent_resources`, `apply_agent_changes`), and trigger/schedule/channel authoring *and* listing — plus the **memory writes** (`upsert_user_memory`, `delete_user_memory`, `delete_all_user_memories`) and **GDPR** tools (`delete_user_data`, `export_user_data`) |
 | `eddi-approver`| Decide HITL approvals (with the conversation owner and `eddi-admin`): `resume_conversation`, `approve_group_phase`, `cancel_*`, `*_pending_approvals`, `*_approval_status` — see [HITL](hitl.md#who-may-decide) |
 
 ## Sentiment Monitoring

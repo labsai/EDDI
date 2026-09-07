@@ -10,7 +10,9 @@ import ai.labs.eddi.configs.output.IOutputStore;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration.WorkflowStep;
 import ai.labs.eddi.configs.dictionary.IRestAction;
+import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.utils.CollectionUtilities;
 import ai.labs.eddi.utils.RestUtilities;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -32,9 +34,12 @@ public class RestAction implements IRestAction {
     private final IRuleSetStore behaviorStore;
     private final IApiCallsStore httpCallsStore;
     private final IOutputStore outputStore;
+    private final ResourceAccessGuard accessGuard;
 
     @Inject
-    public RestAction(IWorkflowStore workflowStore, IRuleSetStore behaviorStore, IApiCallsStore httpCallsStore, IOutputStore outputStore) {
+    public RestAction(IWorkflowStore workflowStore, IRuleSetStore behaviorStore, IApiCallsStore httpCallsStore, IOutputStore outputStore,
+            ResourceAccessGuard accessGuard) {
+        this.accessGuard = accessGuard;
         this.workflowStore = workflowStore;
         this.behaviorStore = behaviorStore;
         this.httpCallsStore = httpCallsStore;
@@ -44,6 +49,11 @@ public class RestAction implements IRestAction {
     @Override
     public List<String> readActions(String workflowId, Integer workflowVersion, String filter, Integer limit) {
         List<String> retActions = new LinkedList<>();
+        // This fans out from one workflow into whichever rule sets, api calls, output
+        // sets and dictionaries it references, reading those stores directly. The
+        // workflow is the entry point the caller named, so it is what access is
+        // decided against — without this the helper reads any workflow, unguarded.
+        accessGuard.requireAccess(workflowId, AccessLevel.VIEW, "workflow");
         try {
             var workflowConfiguration = workflowStore.read(workflowId, workflowVersion);
 

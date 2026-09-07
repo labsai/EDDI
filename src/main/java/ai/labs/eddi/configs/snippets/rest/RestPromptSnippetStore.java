@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.snippets.rest;
 
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.snippets.IPromptSnippetStore;
 import ai.labs.eddi.configs.snippets.IRestPromptSnippetStore;
 import ai.labs.eddi.configs.snippets.model.PromptSnippet;
@@ -35,9 +36,10 @@ public class RestPromptSnippetStore implements IRestPromptSnippetStore {
 
     @Inject
     public RestPromptSnippetStore(IPromptSnippetStore snippetStore, IDocumentDescriptorStore documentDescriptorStore,
-            PromptSnippetService snippetService) {
+            PromptSnippetService snippetService,
+            ResourceAccessGuard resourceAccessGuard) {
         this.snippetStore = snippetStore;
-        this.restVersionInfo = new RestVersionInfo<>(resourceURI, snippetStore, documentDescriptorStore);
+        this.restVersionInfo = new RestVersionInfo<>(resourceURI, snippetStore, documentDescriptorStore, resourceAccessGuard);
         this.snippetService = snippetService;
     }
 
@@ -48,6 +50,7 @@ public class RestPromptSnippetStore implements IRestPromptSnippetStore {
 
     @Override
     public PromptSnippet readSnippet(String id, Integer version) {
+        restVersionInfo.requireViewAccess(id);
         try {
             return snippetStore.read(id, version);
         } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {

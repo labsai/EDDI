@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
+import ai.labs.eddi.connections.ConnectionParameterGuard;
 import ai.labs.eddi.modules.llm.impl.builder.ILanguageModelBuilder;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.model.SecretReference;
@@ -215,6 +216,7 @@ public class ChatModelRegistry {
         // Resolve global variable references, then vault secrets (late-binding:
         // after Qute, before builder.build())
         var resolvedParams = globalVariableResolver.resolveAll(builderParams(filteredParams));
+        ConnectionParameterGuard.rejectConnectionReferences(resolvedParams);
         resolvedParams = secretResolver.resolveSecrets(resolvedParams);
         var modelBuilder = languageModelApiConnectorBuilders.get(type).get();
         modelBuilder.warnAboutUnrecognisedParameters(type, resolvedParams);
@@ -267,6 +269,7 @@ public class ChatModelRegistry {
             // Resolve global variable references, then vault secrets (late-binding:
             // after Qute, before builder.build())
             var resolvedParams = globalVariableResolver.resolveAll(builderParams(filteredParams));
+            ConnectionParameterGuard.rejectConnectionReferences(resolvedParams);
             resolvedParams = secretResolver.resolveSecrets(resolvedParams);
             var modelBuilder = languageModelApiConnectorBuilders.get(type).get();
             modelBuilder.warnAboutUnrecognisedParameters(type, resolvedParams);

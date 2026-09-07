@@ -8,13 +8,13 @@ The EDDI Manager is a modern **React 19 single-page application** for building, 
 
 ## Access
 
-Open your browser to the EDDI root URL:
+Open your browser to the Manager URL:
 
 ```
-http://localhost:7070
+http://localhost:7070/manage
 ```
 
-The Manager is the default landing page. No `apiUrl` query parameter is needed — the Manager automatically connects to the backend that serves it.
+The EDDI root URL (`http://localhost:7070`) redirects to the `/welcome` chooser on a first visit, where you pick between the Manager and the Workforce workspace; the choice is remembered afterwards and the root sends you straight there. No `apiUrl` query parameter is needed — the Manager automatically connects to the backend that serves it.
 
 ## Features
 

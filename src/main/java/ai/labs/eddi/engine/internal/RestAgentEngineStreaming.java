@@ -5,10 +5,20 @@
 package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.api.IConversationService.AgentMismatchException;
+import ai.labs.eddi.engine.api.IConversationService.AgentNotReadyException;
+import ai.labs.eddi.engine.api.IConversationService.ConversationAwaitingApprovalException;
+import ai.labs.eddi.engine.api.IConversationService.ConversationEndedException;
+import ai.labs.eddi.engine.api.IConversationService.ConversationNotFoundException;
+import ai.labs.eddi.engine.api.IConversationService.StreamingResponseHandler;
 import ai.labs.eddi.engine.api.IRestAgentEngineStreaming;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictedException;
+import ai.labs.eddi.engine.gdpr.ProcessingRestrictionUnavailableException;
+import ai.labs.eddi.engine.gdpr.ProcessingRestrictionUnavailableExceptionMapper;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
+import ai.labs.eddi.engine.tenancy.QuotaAccountingUnavailableException;
 import ai.labs.eddi.engine.tenancy.QuotaExceededException;
+import ai.labs.eddi.engine.tenancy.rest.QuotaAccountingUnavailableExceptionMapper;
 
 import ai.labs.eddi.engine.lifecycle.TaskId;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
@@ -21,12 +31,12 @@ import jakarta.ws.rs.sse.SseEventSink;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
-import static ai.labs.eddi.utils.LogSanitizer.sanitize;
-
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
  * SSE streaming implementation — maps ConversationService streaming events to
@@ -51,7 +61,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
 
     private static final Logger LOGGER = Logger.getLogger(RestAgentEngineStreaming.class);
-    private static final com.fasterxml.jackson.databind.ObjectMapper MAPPER = new com.fasterxml.jackson.databind.ObjectMapper();
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     /**
      * Audit actor recorded when a turn is cancelled because the SSE client went
@@ -135,7 +145,7 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
 
         try {
             conversationService.sayStreaming(conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData,
-                    new IConversationService.StreamingResponseHandler() {
+                    new StreamingResponseHandler() {
                         @Override
                         public void onTaskStart(TaskId taskId, String taskType, int index) {
                             stream.send("task_start",
@@ -234,12 +244,12 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
      * the opaque internal-error shape.
      * <p>
      * These are not internal errors: the non-streaming twin
-     * ({@code RestAgentEngine}) gives each a proper status (409/410/404/429/403)
-     * with a client-safe body, and before this method the SAME condition on the
-     * streaming path surfaced as {@code {"message":"Internal server error"}} —
-     * observed live when a message was sent into an AWAITING_HUMAN conversation:
-     * the backend refused correctly and the client rendered an opaque 500-style
-     * blob with no way to react.
+     * ({@code RestAgentEngine}) gives each a proper status
+     * (409/410/404/429/403/503) with a client-safe body, and before this method the
+     * SAME condition on the streaming path surfaced as {@code {"message":"Internal
+     * server error"}} — observed live when a message was sent into an
+     * AWAITING_HUMAN conversation: the backend refused correctly and the client
+     * rendered an opaque 500-style blob with no way to react.
      * <p>
      * Per exception, the message mirrors exactly what the twin already discloses —
      * echoed for the conditions whose message is a fixed safe template
@@ -257,24 +267,52 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
     private String buildKnownConditionOrOpaqueErrorEvent(String context, Exception e) {
         String code;
         String message;
-        if (e instanceof IConversationService.ConversationAwaitingApprovalException) {
+        if (e instanceof ConversationAwaitingApprovalException) {
             code = "awaiting_approval";
             message = e.getMessage();
-        } else if (e instanceof IConversationService.ConversationEndedException) {
+        } else if (e instanceof ConversationNotFoundException) {
+            // The twin answers 404 here. This message is a fixed template carrying
+            // only the caller's own (sanitized) conversationId, so it is echoed
+            // rather than replaced — no new disclosure.
+            code = "conversation_not_found";
+            message = e.getMessage();
+        } else if (e instanceof ConversationEndedException) {
             code = "conversation_ended";
             message = "Conversation has ended";
-        } else if (e instanceof IConversationService.AgentNotReadyException) {
+        } else if (e instanceof AgentNotReadyException) {
             code = "agent_not_ready";
             message = "Agent is not deployed or not ready";
-        } else if (e instanceof IConversationService.AgentMismatchException) {
+        } else if (e instanceof AgentMismatchException) {
             code = "agent_mismatch";
             message = "Agent version mismatch";
+        } else if (e instanceof QuotaAccountingUnavailableException quotaUnavailable) {
+            // Before QuotaExceededException is irrelevant (they are unrelated types),
+            // but the distinction is the same one RestAgentEngine draws: the store
+            // could not answer, so this is not the tenant being over a limit. The
+            // message is this class's own fixed text and names nothing internal, so
+            // it is echoed rather than replaced — through the mapper's accessor, so a
+            // thrower that supplies no message produces the same sentence here as on
+            // the other two surfaces instead of "message":"".
+            code = "quota_accounting_unavailable";
+            message = QuotaAccountingUnavailableExceptionMapper.messageOf(quotaUnavailable);
         } else if (e instanceof QuotaExceededException) {
             code = "quota_exceeded";
             message = e.getMessage();
         } else if (e instanceof ProcessingRestrictedException) {
             code = "processing_restricted";
             message = e.getMessage();
+        } else if (e instanceof ProcessingRestrictionUnavailableException restrictionUnavailable) {
+            // The twin answers 503 restriction_status_unavailable. Without this
+            // branch a store failover reached the client as
+            // {"message":"Internal server error"} on every streamed turn, with an
+            // ERROR stack trace per turn behind it — the honest-503 fix had landed on
+            // the synchronous start endpoint only. The message is a fixed template
+            // naming no deployment internals, so it is echoed rather than replaced —
+            // through the mapper's accessor, so a thrower that supplies no message
+            // produces the same sentence here as on the other two surfaces instead of
+            // an empty one.
+            code = "restriction_status_unavailable";
+            message = ProcessingRestrictionUnavailableExceptionMapper.messageOf(restrictionUnavailable);
         } else {
             return logAndBuildOpaqueErrorEvent(context, e);
         }
@@ -489,10 +527,44 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
         return Double.isFinite(v) ? v : 0.0;
     }
 
+    /**
+     * Escapes a string for embedding in the hand-built JSON of an SSE event.
+     *
+     * <p>
+     * The replace-chain this grew from covered {@code \ " \n \r \t} and left every
+     * other control character raw, which is invalid inside a JSON string (RFC 8259
+     * §7) and makes the event unparseable for a strict client. The values reaching
+     * here are not all ours: a tool name comes from an LLM, an error summary from
+     * an exception message, and a conversation id straight off the request path.
+     * U+2028 and U+2029 are legal JSON but terminate a line in JavaScript, so they
+     * are escaped too rather than shipped to a browser.
+     * </p>
+     */
     private String escapeJson(String text) {
-        if (text == null)
+        if (text == null) {
             return "";
-        return text.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t");
+        }
+        var sb = new StringBuilder(text.length() + 16);
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            switch (c) {
+                case '\\' -> sb.append("\\\\");
+                case '"' -> sb.append("\\\"");
+                case '\n' -> sb.append("\\n");
+                case '\r' -> sb.append("\\r");
+                case '\t' -> sb.append("\\t");
+                case '\b' -> sb.append("\\b");
+                case '\f' -> sb.append("\\f");
+                default -> {
+                    if (c < 0x20 || c == '\u2028' || c == '\u2029') {
+                        sb.append(String.format("\\u%04x", (int) c));
+                    } else {
+                        sb.append(c);
+                    }
+                }
+            }
+        }
+        return sb.toString();
     }
 
     private String toJsonArray(Object obj) {

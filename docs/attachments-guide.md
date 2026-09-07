@@ -7,16 +7,19 @@
 ### Send an Image via URL
 
 ```bash
-POST /agents/{conversationId}/say?message=What%20is%20in%20this%20image?
+POST /agents/{conversationId}
 Content-Type: application/json
 
 {
-  "attachment_0": {
-    "type": "object",
-    "value": {
-      "mimeType": "image/png",
-      "url": "https://example.com/photo.png",
-      "fileName": "photo.png"
+  "input": "What is in this image?",
+  "context": {
+    "attachment_0": {
+      "type": "object",
+      "value": {
+        "mimeType": "image/png",
+        "url": "https://example.com/photo.png",
+        "fileName": "photo.png"
+      }
     }
   }
 }
@@ -25,16 +28,19 @@ Content-Type: application/json
 ### Send an Image via Base64
 
 ```bash
-POST /agents/{conversationId}/say?message=Describe%20this%20icon
+POST /agents/{conversationId}
 Content-Type: application/json
 
 {
-  "attachment_0": {
-    "type": "object",
-    "value": {
-      "mimeType": "image/png",
-      "data": "iVBORw0KGgoAAAANSUhEUgAAAAE...",
-      "fileName": "icon.png"
+  "input": "Describe this icon",
+  "context": {
+    "attachment_0": {
+      "type": "object",
+      "value": {
+        "mimeType": "image/png",
+        "data": "iVBORw0KGgoAAAANSUhEUgAAAAE...",
+        "fileName": "icon.png"
+      }
     }
   }
 }
@@ -46,30 +52,33 @@ The image is automatically forwarded to the LLM as multimodal content. The LLM "
 
 ## How It Works
 
-```
+```text
 Client sends context with attachment_* keys
-           │
-           ▼
-┌──────────────────────────────────┐
-│  Conversation.prepareLifecycleData()  │
-│                                       │
-│  AttachmentContextExtractor parses    │
-│  attachment_0, attachment_1, ...      │
-│  into List<Attachment> objects        │
-│                                       │
-│  Stored in memory: "attachments"      │
-└──────────────┬───────────────────┘
-               │
-    ┌──────────┼──────────┐
-    ▼          ▼          ▼
-┌────────┐ ┌────────┐ ┌────────────┐
-│BehaviorRules│ │LlmTask│ │Other Tasks │
-│             │ │       │ │            │
-│ContentType- │ │Multi- │ │Read from   │
-│Matcher      │ │modal  │ │memory key  │
-│condition    │ │Message│ │"attachments"│
-│             │ │Enhancer││            │
-└────────┘ └────────┘ └────────────┘
+                          │
+                          ▼
+        ┌─────────────────────────────────────┐
+        │ Conversation.prepareLifecycleData() │
+        │                                     │
+        │ AttachmentContextExtractor parses   │
+        │ attachment_0, attachment_1, ...     │
+        │ into List<Attachment> objects       │
+        │                                     │
+        │ Stored in memory: "attachments"     │
+        └───────────────────────┬─────────────┘
+                                │
+         ┌──────────────────────┼─────────────────────┐
+         ▼                      ▼                     ▼
+┌──────────────────┐  ┌───────────────────┐  ┌──────────────────┐
+│ BehaviorRules    │  │ LlmTask           │  │ Other Tasks      │
+│                  │  │                   │  │                  │
+│ ContentType-     │  │ AttachmentFor-    │  │ Read from the    │
+│ Matcher matches  │  │ warder resolves   │  │ "attachments"    │
+│ on MIME type,    │  │ bytes, gates on   │  │ memory key       │
+│ so a PDF and an  │  │ ModelCapability-  │  │ directly         │
+│ image can take   │  │ Service, emits    │  │                  │
+│ different paths  │  │ langchain4j       │  │                  │
+│                  │  │ Content           │  │                  │
+└──────────────────┘  └───────────────────┘  └──────────────────┘
 ```
 
 ### Pipeline Stages
@@ -77,7 +86,7 @@ Client sends context with attachment_* keys
 1. **Context Extraction** — `AttachmentContextExtractor` parses `attachment_*` context keys into `Attachment` objects
 2. **Memory Storage** — Attachments are stored as `List<Attachment>` in the `attachments` memory key
 3. **Rule Matching** — `ContentTypeMatcher` condition matches on MIME types for routing
-4. **LLM Forwarding** — `MultimodalMessageEnhancer` converts attachments to langchain4j `ImageContent` and enhances the user message
+4. **LLM Forwarding** — `AttachmentForwarder` resolves each attachment's bytes, gates it on `ModelCapabilityService`, and converts it to the right langchain4j `Content` on the outgoing user message
 
 ---
 
@@ -140,13 +149,24 @@ Content-Type: multipart/form-data
 }
 ```
 
-The returned `storageRef` can then be used in subsequent conversation turns by setting it as the `url` in an attachment context key. The storage backend (GridFS or PostgreSQL) is selected automatically based on the configured datastore.
+The returned `storageRef` can then be used in subsequent conversation turns by setting it as the `storageRef` field in an attachment context key. It takes precedence over `url` and `data`, and the authoritative `mimeType` and `sizeBytes` are resolved server-side from the store, so they need not be supplied:
+
+```json
+{
+  "attachment_0": {
+    "type": "object",
+    "value": { "storageRef": "gridfs://68abc123def456", "fileName": "report.pdf" }
+  }
+}
+```
+
+The storage backend (GridFS or PostgreSQL) is selected automatically based on the configured datastore.
 
 | Response Code | Meaning |
 |---|---|
 | `201` | File stored successfully |
-| `400` | No file provided |
-| `503` | No attachment storage configured |
+| `400` | No file provided, file exceeds `eddi.attachments.max-size-bytes`, or the store rejected the file |
+| `500` | Storage or I/O error |
 
 ---
 
@@ -166,12 +186,13 @@ Attachment context keys must match the pattern `attachment_*`:
 
 | Field | Required | Description |
 |---|---|---|
-| `mimeType` | Yes | MIME type (e.g., `image/png`, `application/pdf`) |
-| `url` | One of url/data | External URL reference |
-| `data` | One of url/data | Base64-encoded content |
+| `storageRef` | One of storageRef/url/data | Reference to a previously uploaded blob (see Path C) |
+| `mimeType` | Yes, unless `storageRef` is used | MIME type (e.g., `image/png`, `application/pdf`) |
+| `url` | One of storageRef/url/data | External URL reference |
+| `data` | One of storageRef/url/data | Base64-encoded content |
 | `fileName` | No | Original filename (for metadata/logging) |
 
-If both `url` and `data` are present, `url` takes precedence.
+`storageRef` has the highest precedence; if both `url` and `data` are present, `url` takes precedence.
 
 ---
 
@@ -198,19 +219,40 @@ All attachments are forwarded to the LLM in a single multimodal user message.
 
 ## LLM Multimodal Support
 
-The `MultimodalMessageEnhancer` automatically converts attachments to the appropriate langchain4j content type:
+`AttachmentForwarder` is the single place an attachment becomes langchain4j
+`Content` on the outgoing user message. For each attachment it resolves the
+bytes from whichever source supplied them (stored blob, URL, inline base64)
+under uniform per-file and aggregate byte caps, asks `ModelCapabilityService`
+what the configured provider/model can actually accept, and emits accordingly:
 
-| MIME Type | langchain4j Content | Provider Support |
+| MIME Type | Model has the capability | Model does not |
 |---|---|---|
-| `image/*` | `ImageContent` | OpenAI GPT-4o, Gemini, Claude 3, Ollama (LLaVA) |
-| `application/pdf` | Metadata text (future: `PdfFileContent`) | Gemini |
-| `audio/*` | Metadata text (future: `AudioContent`) | Gemini |
-| Other | Metadata text description | All (text-only) |
+| `image/*` | `ImageContent` — the URL is passed through when the provider fetches URLs itself, otherwise the bytes are downloaded and inlined as base64 | Metadata note |
+| `application/pdf` | Native `PdfFileContent` | PDFBox text extraction, inlined as `TextContent` |
+| `audio/*` | `AudioContent` | Metadata note |
+| text-like (`text/*`, JSON, XML, CSV, YAML) | Decoded and inlined as `TextContent` — **no capability required**, so this works on every model | — |
+| Anything else | Metadata note pointing the model at the `readAttachment` tool | Metadata note |
 
-For unsupported MIME types, a text description is injected so the LLM knows an attachment was present:
+Note the difference between the last two rows: a CSV is *read* into the prompt,
+whereas a `.zip` is only *announced*. The metadata note looks like this:
+
 ```
-[Attachment: report.csv (text/csv, 15240 bytes)]
+[Attachment: archive.zip (application/zip, 15240 bytes)]
 ```
+
+**Nothing is dropped silently.** Text extracted from a PDF is persisted to the
+`attachments:extracts` memory key so later turns can stitch it back into the
+history, and every drop, cap-skip and capability gate is appended to
+`attachments:errors` — which is where to look first when a model claims it
+cannot see a file you attached.
+
+### Observability
+
+| Metric | Type | Meaning |
+|---|---|---|
+| `eddi.attachment.forwarded` | Counter | Attachments converted to `Content` |
+| `eddi.attachment.reinlined` | Counter | Extracted text stitched back into conversation history |
+| `eddi.attachment.errors` | Counter | Drops, cap-skips and capability gates |
 
 ---
 
@@ -276,13 +318,11 @@ Use `contentTypeMatcher` to create different workflows based on attachment type:
 
 ## Template Access
 
-Attachments are available in templates via the memory namespace:
+`{memory.current.attachments}` renders as an empty string. Attachments are written to the current step's data store under the `attachments` memory key (`storeData`), while `{memory.current.*}` resolves against the step's `ConversationOutput` — a different map.
 
-```
-Current step attachments: {memory.current.attachments}
-```
+The `attachment_*` **context** keys are a different matter: `MemoryItemConverter` publishes the request context into the template model, so `{context.attachment_0.mimeType}`, `{context.attachment_0.url}` and `{context.attachment_0.fileName}` do resolve for attachments supplied that way.
 
-This can be useful for logging, debugging, or constructing custom prompts that reference attachment metadata.
+To act on attachments, read the `attachments` memory key from a task, or match on them declaratively with `contentTypeMatcher` in a behavior rule.
 
 ---
 
@@ -297,6 +337,6 @@ Two group-specific bounds: the per-turn cap (`eddi.attachments.max-per-turn`) ap
 ## Architecture Notes
 
 - **No inline storage**: Attachment payloads are never stored inline in conversation memory documents. Only metadata references are persisted.
-- **Transient base64**: The `base64Data` field is `transient` — it exists only during the pipeline turn. For persistence, use the upload endpoint with `IAttachmentStorage`.
-- **DB-agnostic**: The `IAttachmentStorage` SPI supports MongoDB (GridFS) and PostgreSQL (bytea) implementations.
-- **GDPR cleanup**: `IAttachmentStorage.deleteByConversation()` removes all attachments when a conversation is deleted.
+- **Transient base64**: The `base64Data` field is `transient` — it exists only during the pipeline turn. For persistence, use the upload endpoint with `IAttachmentStore`.
+- **DB-agnostic**: The `IAttachmentStore` SPI supports MongoDB (GridFS) and PostgreSQL (bytea) implementations.
+- **GDPR cleanup**: `IAttachmentStore.deleteByConversation()` removes all attachments when a conversation is deleted.

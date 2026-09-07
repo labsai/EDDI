@@ -40,7 +40,7 @@ Properties support four scopes that control their lifetime:
 | `step` | Current conversation turn only | Not persisted | Temporary data needed only for this response |
 | `conversation` | Entire conversation session | Persisted in conversation memory | User preferences within a session, extracted entities |
 | `longTerm` | Across conversations | Persisted in user property store | User profile data, preferences that should survive between sessions |
-| `secret` | Across conversations (encrypted) | Persisted via SecretsVault | API keys, tokens, sensitive credentials |
+| `secret` | Current conversation session (the property holds a `${vault:...}` reference) | Plaintext encrypted into SecretsVault under `<agentId>.<propertyName>`; the property itself is conversation-scoped and is not reloaded in a new conversation | API keys, tokens, sensitive credentials |
 
 ### Choosing the Right Scope
 
@@ -82,18 +82,22 @@ The PropertySetter task (`ai.labs.property`) sets properties based on triggered 
 
 ```json
 {
-  "setOnActions": ["greet_user"],
-  "propertyInstructions": [
+  "setOnActions": [
     {
-      "name": "greeted",
-      "valueString": "true",
-      "scope": "conversation"
-    },
-    {
-      "name": "preferred_language",
-      "valueString": "{context.language}",
-      "scope": "longTerm",
-      "visibility": "global"
+      "actions": ["greet_user"],
+      "setProperties": [
+        {
+          "name": "greeted",
+          "valueString": "true",
+          "scope": "conversation"
+        },
+        {
+          "name": "preferred_language",
+          "valueString": "{context.language}",
+          "scope": "longTerm",
+          "visibility": "global"
+        }
+      ]
     }
   ]
 }
@@ -202,9 +206,9 @@ Conversation.init()
       └─→ Available as {properties.key} in all templates
 ```
 
-Recall order (`most_recent` or `most_accessed`) and the maximum number of recalled entries come from the agent's `userMemoryConfig`. The documented defaults are **`most_recent` ordering and 50 entries** — the field defaults of `AgentConfiguration.UserMemoryConfig`, which apply as soon as the agent declares a `userMemoryConfig` block, however small.
+Recall order (`most_recent` or `most_accessed`) and the maximum number of recalled entries come from the agent's `userMemoryConfig`, but only when the agent sets **`enableMemoryTools: true`** — that flag is what attaches the block (and, when the block is absent, a defaults instance whose field defaults are **`most_recent` ordering and 50 entries**).
 
-> **Known inconsistency:** an agent with *no* `userMemoryConfig` block at all falls back to a separate hard-coded default in `Conversation` (`DEFAULT_MAX_RECALL_ENTRIES = 1000`) rather than to the 50 above, so the effective cap silently changes by a factor of 20 depending on whether the block is present. Treat 50 as the intended default and set `maxRecallEntries` explicitly if the number matters to you; unifying the two constants is tracked as a code fix.
+> **Known inconsistency:** with `enableMemoryTools: false` the config is never attached at all — whether or not a `userMemoryConfig` block is declared — and a separate hard-coded default in `Conversation` (`DEFAULT_MAX_RECALL_ENTRIES = 1000`) applies instead, so the effective cap silently changes by a factor of 20 depending on that flag, and a `maxRecallEntries` declared without it has no effect. Treat 50 as the intended default and set `enableMemoryTools: true` plus an explicit `maxRecallEntries` if the number matters to you; unifying the two constants is tracked as a code fix.
 
 ### 2. Pipeline Execution
 
@@ -238,10 +242,12 @@ Conversation.postConversationLifecycleTasks()
 
 Properties with `scope=secret` are automatically handled by the SecretsVault:
 
-1. During pipeline execution, the secret value is available in memory normally
-2. At teardown, the value is encrypted and stored in SecretsVault
-3. The in-memory property value is scrubbed (replaced with a vault reference)
-4. On next conversation init, the value is loaded from the vault and decrypted
+1. The moment the property instruction runs, `PropertySetterTask` stores the plaintext in SecretsVault under `<agentId>.<name>`
+2. The raw input is scrubbed from the conversation step
+3. The property value becomes a `${vault:<agentId>.<name>}` reference with `conversation` scope
+4. Downstream consumers (`ChatModelRegistry`, `ApiCallExecutor`, `SecretResolver`) resolve the reference at point-of-use
+
+If the vault is unavailable or disabled, the turn fails closed with a `LifecycleException` rather than persisting the plaintext — set `EDDI_VAULT_MASTER_KEY`.
 
 ```json
 {

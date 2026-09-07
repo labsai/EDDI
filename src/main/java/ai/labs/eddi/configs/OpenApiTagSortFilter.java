@@ -10,6 +10,7 @@ import org.eclipse.microprofile.openapi.OASFilter;
 import org.eclipse.microprofile.openapi.models.OpenAPI;
 
 import java.util.Comparator;
+import org.eclipse.microprofile.openapi.models.tags.Tag;
 
 /**
  * Sorts OpenAPI tags alphabetically at build time, producing a stable,
@@ -25,7 +26,7 @@ public class OpenApiTagSortFilter implements OASFilter {
         if (openAPI.getTags() != null) {
             var sorted = new ArrayList<>(openAPI.getTags());
             sorted.sort(Comparator.comparing(
-                    org.eclipse.microprofile.openapi.models.tags.Tag::getName));
+                    Tag::getName));
             openAPI.setTags(sorted);
         }
     }

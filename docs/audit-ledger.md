@@ -9,7 +9,7 @@ The Audit Ledger provides a **write-once, append-only** trail of every lifecycle
 
 Every time a conversation turn is processed, each lifecycle task (parser, behavior rules, HTTP calls, LangChain, output, etc.) generates an audit entry. These entries are:
 
-1. **Scrubbed** — secrets are redacted (API keys, bearer tokens, vault references)
+1. **Scrubbed** — secrets are redacted (API keys, bearer tokens); vault references are left legible
 2. **Signed** — HMAC-SHA256 computed over all fields for tamper detection
 3. **Batched** — queued in-memory and flushed to the database every few seconds
 4. **Immutable** — stored in a write-once collection with no update or delete operations
@@ -20,6 +20,8 @@ Every time a conversation turn is processed, each lifecycle task (parser, behavi
 | ----------------------------------- | ------- | ----------------------------------------------------------- |
 | `eddi.audit.enabled`                | `true`  | Enable/disable the audit ledger                             |
 | `eddi.audit.flush-interval-seconds` | `3`     | How often to flush queued entries to the database           |
+| `eddi.audit.max-queue-size`         | `100000` | Bound on the in-memory queue. Entries arriving past the bound are **dropped** and counted on `eddi_audit_entries_dropped_total` — only the flush-retry path dead-letters |
+| `eddi.audit.dead-letter-path`       | `/opt/eddi/data/eddi-audit-deadletter.jsonl` | File-based dead-letter log, used when NATS is unavailable |
 | `EDDI_VAULT_MASTER_KEY`             | (none)  | Vault master key — also used to derive the HMAC signing key |
 
 > **Note:** If `EDDI_VAULT_MASTER_KEY` is not set, audit entries are stored without HMAC integrity hashes. A warning is logged at startup.
@@ -78,30 +80,95 @@ GET /auditstore/{conversationId}/count
 
 Returns the total number of audit entries for a conversation.
 
+### Verify a Conversation's Integrity
+
+```
+GET /auditstore/verify/{conversationId}?skip=0&limit=1000
+```
+
+Recomputes every entry's HMAC and checks the per-conversation `sequence` for gaps. `limit` defaults to `1000` with a hard ceiling of `10000`; a non-positive value falls back to the default rather than meaning "unbounded". A non-zero `skip` makes the chain check report the range's own continuity only — the run can then not be anchored at sequence 0, so a deleted *first* entry is invisible on a paginated sweep.
+
+### Verify an Agent's Integrity
+
+```
+GET /auditstore/verify/agent/{agentId}?agentVersion=1&skip=0&limit=1000
+```
+
+Same per-entry HMAC check across all of an agent's conversations. Because the sweep spans many conversations, the chain verdict is `NOT_APPLICABLE`. The `agentVersion` parameter is optional; the `skip`/`limit` semantics are those of the conversation sweep.
+
 ## HMAC Integrity
 
 When the vault master key is configured, each audit entry is signed with HMAC-SHA256:
 
 1. A **signing key** is derived from the vault master key using PBKDF2 with a distinct salt (`eddi-audit-hmac-v1`, 600K iterations). This makes the audit signing key cryptographically independent from the vault's KEK.
 2. A **canonical string** is built from all entry fields (excluding the HMAC itself), with map keys sorted alphabetically for deterministic output. Nested maps and lists are canonicalized recursively.
-3. The HMAC is computed and stored as `v2:<64 hex chars>`.
+3. The HMAC is computed and stored as `v4:<64 hex chars>`. The v4 canonical form signs the user identifier as an identity token rather than verbatim (so a GDPR pseudonymisation does not invalidate the signature it had), includes the per-conversation `sequence`, and signs the timestamp as epoch milliseconds truncated to milliseconds.
 
-To verify an entry has not been tampered with, recompute the HMAC and compare it to the stored value.
+To verify entries have not been tampered with, use the verification endpoints above rather than recomputing digests by hand — verification has to pick the canonicalizer from the entry's own version tag.
 
 ### Canonical form versioning
 
 The stored value carries the version of the canonical form it was computed over, and verification picks the canonicalizer from that tag:
 
-| Stored value      | Canonical form | Written by                |
-| ----------------- | -------------- | ------------------------- |
-| `v2:<hex>`        | v2             | current                   |
-| `<hex>` (no tag)  | v1             | before delimiter escaping |
+| Stored value      | Canonical form | Written by                                  |
+| ----------------- | -------------- | ------------------------------------------- |
+| `v4:<hex>`        | v4             | current                                     |
+| `v3:<hex>`        | v3             | before the timestamp was signed as epoch-millis |
+| `v2:<hex>`        | v2             | before the identity token and `sequence`    |
+| `<hex>` (no tag)  | v1             | before delimiter escaping                   |
 
 **v1** joined keys and values with `=`, `,`, `{}`, `[]` and `|` without escaping them, so the map-to-string mapping was not injective: `{"a": "x", "b": "y"}` and `{"a": "x,b=y"}` canonicalize to the same bytes and therefore share one valid HMAC — a tampered entry could verify as intact. That became reachable once `toolCalls` started carrying tool-trace `arguments`/`result` strings, which the model and the user write.
 
 **v2** escapes every delimiter inside keys and scalars and type-tags every value (`s:` scalar, `m` map, `l` list, `n` null), so a string can never render like a nested structure.
 
+**v3** changes two fields: the user identifier is signed through an identity token rather than verbatim, so a GDPR pseudonymisation no longer invalidates the signature it had, and the per-conversation `sequence` joins the signed payload, so an entry cannot be renumbered and a deletion leaves a gap verification can see.
+
+**v4** signs the timestamp as epoch milliseconds instead of `Instant.toString()`. No backend stores the precision v3 signed — PostgreSQL's `TIMESTAMPTZ` keeps microseconds, MongoDB's `Date` keeps milliseconds — so an entry read back never carried the value that had been signed and no v3 digest recomputed cleanly. Milliseconds is the coarser floor of the two, so a v4 signature round-trips through either backend without loss.
+
 Verification never falls back from v2 to v1 — that would hand the collision straight back — and pre-existing untagged rows keep verifying under v1, so an upgrade does not turn the historical ledger into a wall of "tampered".
+
+### Chain sequences and multi-replica deployments
+
+The `sequence` signed into v3/v4 is a per-conversation chain position, allocated from a
+counter each node seeds by reading `MAX(sequence)` for that conversation from the store.
+
+**That read is not an atomic reservation.** Entries sit in a node-local queue for up to
+`eddi.audit.flush-interval-seconds` before the store can see them, so two nodes serving
+consecutive turns of the *same conversation* inside that window both read the same maximum
+and both hand out the positions after it. Neither backend indexes
+`(conversationId, sequence)` uniquely, so the duplicate is stored, and
+`/auditstore/verify` grades a duplicate exactly like a deletion — `BROKEN`.
+
+> **Known limitation — operational requirement:** a multi-replica deployment needs
+> **conversation affinity** (route every turn of one conversation to the same node) for chain
+> integrity. Without it, duplicate sequences are produced and `/auditstore/verify` grades the
+> affected conversations `BROKEN`. HMAC verification of individual entries still holds — only
+> the chain-continuity check is affected.
+
+**Deferred fix, and why it is deferred.** Removing that requirement needs storage-level
+atomic allocation — PostgreSQL `UPDATE … RETURNING` on a per-conversation counter row,
+MongoDB `findOneAndUpdate` with `$inc` — plus a unique `(conversationId, sequence)`
+constraint and a retry on collision. It is tracked as follow-up work rather than shipped here
+because it moves a store round trip from once per conversation to once per *entry*, on the
+pipeline thread, and it is a schema change on both backends.
+
+The unique constraint on its own would make things worse, not better: without the allocator
+that makes collisions impossible, a rejected insert **silently drops an audit record**,
+whereas the duplicate it prevents at least surfaces as a detectable `BROKEN` verdict.
+
+**Detection in the meantime — `eddi_audit_sequence_collisions_total`.** After each flush the
+ledger re-reads `MAX(sequence)` for the conversations it just wrote. If the store already
+holds a position this node has not handed out yet, another replica is allocating for the same
+conversation: the ledger logs a WARN naming the conversation, increments
+`eddi_audit_sequence_collisions_total`, and continues its own chain past the foreign rows. An
+operator running without affinity therefore sees the problem in metrics instead of
+discovering it at verify time.
+
+- Any non-zero value means "multi-replica without conversation affinity" — fix the routing.
+- It is a **partial** detector: two nodes that hand out exactly the same range leave a stored
+  maximum consistent with both counters, and only `/auditstore/verify` sees that duplicate.
+- Cost is one indexed `MAX(sequence)` read per conversation per flush, on the ledger's writer
+  thread — never on the pipeline thread.
 
 ## Secret Redaction
 
@@ -111,28 +178,81 @@ All string values in audit entries pass through the `SecretRedactionFilter` befo
 - Anthropic API keys (`sk-ant-...`)
 - Bearer tokens (JWTs and opaque tokens)
 - Generic API key patterns (`apikey=...`, `token=...`, etc.)
-- Vault references (`${vault:...}`)
+
+A `${vault:...}` reference is deliberately **not** redacted: it is a pointer to a secret, not a secret, and the key name it carries is ordinary configuration. Leaving it legible keeps a `<REDACTED>` marker meaning what it is designed to mean — that a value embedded a secret *literal*. A resolved secret does not look like a reference and is caught by the rules above, and `${vault:key}SECRET-TAIL` is redacted as a whole rather than treated as a bare reference.
 
 Redaction is applied recursively to nested maps and lists.
 
 ## Failure Handling
 
-If a database write fails, entries are **re-queued** for the next flush cycle. After 3 consecutive failures, entries are dropped and an error is logged. This prevents unbounded memory growth while maximizing data retention.
+If a database write fails, entries are **re-queued** for the next flush cycle. After 3 consecutive failures, the batch is dropped from the queue and written to a **dead-letter sink** — NATS JetStream (subject `eddi.deadletter.audit`) when a connection is available, otherwise the JSONL file at `eddi.audit.dead-letter-path`.
+
+**Queue overflow has two outcomes, and only one of them is recoverable.** Both increment `eddi_audit_entries_dropped_total`, so the counter on its own does not say which happened:
+
+| Overflow path | What happens at `eddi.audit.max-queue-size` | Recoverable? |
+| ------------- | ------------------------------------------- | ------------ |
+| **Re-queue** — a failed batch coming back from the flush retry, or entries the retry budget never reached | Written to the dead-letter sink instead of growing the heap | **Yes** — replay from the sink |
+| **Submit** — a fresh entry arriving from the pipeline while the queue is already full | Refused outright: counted and logged at WARN, **not** dead-lettered | **No** — the entry is gone |
+
+The asymmetry is deliberate. A re-queued entry has already consumed its chain position, so discarding it without a record would leave a gap `/auditstore/verify` grades `BROKEN` with nothing to attribute it to — the sink is what makes that gap explicable. A refused submission has not been sequenced yet (`submit()` reserves the queue slot *before* taking a chain position, exactly so a refusal burns no number), so it leaves the chain intact and verify reports nothing at all.
+
+> **A dropped submission is unrecoverable and invisible to chain verification.** `eddi_audit_entries_dropped_total` rising while `/auditstore/verify` still says `INTACT` is the only signal that audit evidence was lost. Alert on the counter; do not treat a clean verify as proof of completeness.
+
+> **The dead-letter record is the whole entry, and that makes the sink a personal-data location.** It carries the `userId`, the verbatim input and output, the LLM detail and tool calls, plus the entry's own timestamp, sequence, HMAC and agent signature — anything less is not replayable, and without the `sequence` an operator cannot prove which chain positions the ledger itself abandoned, so every self-inflicted gap reads as `BROKEN` rather than `INCOMPLETE`. Secret redaction has already been applied, but user content has not.
+>
+> The GDPR erasure cascade pseudonymizes the ledger and the database logs; it does **not** touch `eddi.audit.dead-letter-path` or the `eddi.deadletter.audit` subject. Give the sink the same access controls, encryption at rest and retention handling as the ledger, and include it in your Art. 17 procedure — see [The audit dead-letter sink holds personal data](gdpr-compliance.md#the-audit-dead-letter-sink-holds-personal-data-and-erasure-does-not-reach-it).
+>
+> The image creates the default directory (`/opt/eddi/data`) and hands it to the runtime user, and the ledger reports at startup if the configured location is not writable — the sink's unavailability should be discovered before the incident that needs it, not from an error line nested inside the error line reporting the drop.
 
 ## Storage
 
 ### MongoDB (default)
 
 - Collection: `audit_ledger`
-- Indexes: `conversationId`, `(agentId, agentVersion)`, `timestamp` (descending)
-- Operations: `insertOne`, `insertMany` only — no update or delete
+- Indexes: `conversationId`, `(agentId, agentVersion)`, `timestamp` (descending), `userId`, `(conversationId asc, timestamp desc)`, `(conversationId asc, sequence desc)`
+- Operations: `insertOne` and `insertMany`, plus one exception — `pseudonymizeByUserId` issues an `updateMany` that overwrites `userId` under GDPR Art. 17(3)(e). Nothing else mutates a stored entry, and nothing ever deletes one. The mutation is HMAC-preserving for v3 rows (the signature covers the identity *token*, which is the same for an identifier and its pseudonym)
+
+#### Building the MongoDB indexes ahead of a deploy
+
+The last three of those indexes are new in this release: `userId` backs the GDPR export and erasure scans, and the two compound ones serve the per-conversation read's filter and sort together (which is what stops large conversations hitting MongoDB's in-memory sort limit) and back `maxSequence`.
+
+`AuditStore`'s constructor issues all six `createIndex` calls synchronously, so on an existing multi-million-document `audit_ledger` the thread that first builds the bean blocks until the new ones are built. The collection stays readable and writable while they build — MongoDB 4.2+ takes the exclusive lock only briefly at the start and end — but the first request that touches the ledger after a deploy waits it out.
+
+To take that wait out of the deploy, build them first:
+
+```javascript
+db.audit_ledger.createIndex({ userId: 1 });
+db.audit_ledger.createIndex({ conversationId: 1, timestamp: -1 });
+db.audit_ledger.createIndex({ conversationId: 1, sequence: -1 });
+```
+
+`createIndex` is idempotent for an identical key pattern, so the startup calls then find the indexes already present and return immediately.
 
 ### PostgreSQL
 
 - Table: `audit_ledger` (auto-created on first use)
 - Hybrid storage: indexed columns (conversation_id, agent_id, agent_version, timestamp) + JSONB for variable data
-- Activated with `@IfBuildProfile("postgres")`
+- Selected at runtime with `eddi.datastore.type=postgres` (default `mongodb`), resolved by `DataStoreProducers.auditStore(...)` — both backends ship in the same image
 - Same insert-only contract as MongoDB
+
+#### Upgrading an existing PostgreSQL ledger
+
+This release adds `idx_audit_user` on `audit_ledger (user_id)` — without it the GDPR export and erasure scans are sequential scans over the largest never-pruned table in the system.
+
+The index is created by `ensureSchema()`, which runs lazily on the **first audit write after the deploy**, on the audit-ledger writer thread. A plain `CREATE INDEX` takes a `SHARE` lock, so while it builds:
+
+- audit inserts block and the ledger's queue fills toward `eddi.audit.max-queue-size` (entries refused past the bound are counted on `eddi_audit_entries_dropped_total`, not dead-lettered),
+- REST audit reads wait on the same monitor.
+
+On a multi-million-row ledger that pause is measured in minutes. If you cannot take it, build the index out of band **before** deploying:
+
+```sql
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_audit_user ON audit_ledger (user_id);
+-- CONCURRENTLY leaves an INVALID index behind if it fails; verify:
+SELECT indisvalid FROM pg_index WHERE indexrelid = 'idx_audit_user'::regclass;
+```
+
+`IF NOT EXISTS` then makes the startup statement a no-op. EDDI does not issue `CONCURRENTLY` itself: it would be legal (`ensureSchema` runs on an autocommit statement, not inside a transaction block), but a failed run leaves an INVALID index that nothing in the adapter would notice or repair.
 
 ## Architecture
 

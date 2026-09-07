@@ -5,19 +5,49 @@
 #
 #   kubectl apply -f https://raw.githubusercontent.com/labsai/EDDI/main/k8s/quickstart.yaml
 #
-# After deploying, generate the vault master key. EDDI reads its secrets from a
-# mounted FILE rather than environment variables (env is readable via
-# /proc/<pid>/environ and leaks into crash dumps), so the Secret holds one
-# properties file:
+# This manifest deliberately does NOT contain the eddi-secrets Secret. A Secret
+# shipped here would be re-applied on every `kubectl apply -f`, overwriting the
+# vault master key you generate below — and everything encrypted with the old
+# key would become permanently undecryptable. So the EDDI pod stays in
+# ContainerCreating until you create it, and starts by itself once it exists.
 #
-#   printf 'eddi.vault.master-key=%s\n' "$(openssl rand -base64 24)" \
-#     > /tmp/application-secrets.properties
+# Generate the vault master key. EDDI reads its secrets from a mounted FILE
+# rather than environment variables (env is readable via /proc/<pid>/environ and
+# leaks into crash dumps), so the Secret holds one properties file:
+#
+#   set -euo pipefail
+#
+#   # mktemp gives an unpredictable name created 0600, so another local user
+#   # cannot pre-create the path or point it at a symlink.
+#   secrets_file=$(mktemp "${TMPDIR:-/tmp}/eddi-secrets.XXXXXX")
+#   trap 'shred -u "$secrets_file" 2>/dev/null || rm -f "$secrets_file"' EXIT
+#
+#   # Fail closed on a key that already exists. This block mints a NEW one, so
+#   # re-running it over a live eddi-secrets makes everything encrypted under
+#   # the current key permanently undecryptable — the same trap this manifest
+#   # avoids by shipping no Secret. Rotate deliberately with
+#   # `bash k8s/create-secrets.sh --force`.
+#   if kubectl get secret eddi-secrets --namespace=eddi >/dev/null 2>&1; then
+#     echo "eddi-secrets already exists — refusing to install a new key." >&2
+#     exit 1
+#   fi
+#
+#   # Fail closed: an empty key would create a Secret that silently leaves the
+#   # vault inert and secrets in plaintext.
+#   key=$(openssl rand -base64 24)
+#   [ -n "$key" ] || { echo "vault key generation failed" >&2; exit 1; }
+#   printf 'eddi.vault.master-key=%s\n' "$key" > "$secrets_file"
+#
+#   # The Secret key must be named application-secrets.properties — that is the
+#   # filename the Deployment mounts. A bare temp path would name it otherwise.
+#   # NOT piped through `--dry-run=client | kubectl apply`: that would replace a
+#   # live Secret silently and exit 0. A bare create refuses with AlreadyExists.
 #   kubectl create secret generic eddi-secrets \
 #     --namespace=eddi \
-#     --from-file=/tmp/application-secrets.properties
-#   shred -u /tmp/application-secrets.properties
+#     --from-file=application-secrets.properties="$secrets_file"
 #
-# Then restart EDDI to pick up the key:
+# If EDDI was already running with a different key, restart it to pick the new
+# one up (not needed on a first install — the pod is waiting for the Secret):
 #
 #   kubectl rollout restart deployment/eddi -n eddi
 #
@@ -65,20 +95,13 @@ data:
   EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED: "true"
 
 ---
-# --- EDDI Secret (placeholder — see instructions above) ---
-apiVersion: v1
-kind: Secret
-metadata:
-  name: eddi-secrets
-  namespace: eddi
-  labels:
-    app.kubernetes.io/name: eddi
-type: Opaque
-stringData:
-  # One key holding a Quarkus properties file; mounted at
-  # /etc/eddi/secrets and loaded through QUARKUS_CONFIG_LOCATIONS.
-  application-secrets.properties: |
-    eddi.vault.master-key=
+# --- EDDI Secret ---
+#
+# Intentionally absent. Create eddi-secrets out-of-band with the command in the
+# header above; it holds one key, "application-secrets.properties", mounted at
+# /etc/eddi/secrets and loaded through QUARKUS_CONFIG_LOCATIONS. Shipping it
+# here would make every re-apply of this file destroy the operator's vault
+# master key.
 
 ---
 # --- MongoDB Service ---

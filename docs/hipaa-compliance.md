@@ -15,7 +15,7 @@ GDPR/CCPA operations, see [gdpr-compliance.md](gdpr-compliance.md).
 
 | HIPAA Safeguard | EDDI Feature | Status |
 |---|---|---|
-| **Access Control** (§164.312(a)) | Keycloak OIDC + RBAC roles (`admin`, `editor`, `viewer`) | ✅ Built-in |
+| **Access Control** (§164.312(a)) | Keycloak OIDC + RBAC roles (`eddi-admin`, `eddi-editor`, `eddi-user`, `eddi-viewer`, `eddi-approver`) — enumerated per endpoint, no hierarchy | ✅ Built-in |
 | **Audit Controls** (§164.312(b)) | HMAC-signed immutable audit ledger | ✅ Built-in |
 | **Integrity Controls** (§164.312(c)) | HMAC tamper detection on all audit entries | ✅ Built-in |
 | **Person Authentication** (§164.312(d)) | Keycloak with JWT/OIDC, MFA-capable | ✅ Built-in |
@@ -243,8 +243,10 @@ As the HIPAA-covered entity or business associate deploying EDDI:
 - [ ] **RBAC**: Assign minimum necessary roles to each operator
 - [ ] **Data Retention**: Review `eddi.conversations.deleteEndedConversationsOnceOlderThanDays`
       — reduce from 365 to minimum necessary
-- [ ] **User Memory Purge**: Configure `eddi.usermemory.auto-purge-days` if
-      PHI is stored in user memories
+- [ ] **User Memory Purge**: Configure `eddi.usermemories.deleteOlderThanDays`
+      if PHI is stored in user memories. It ships as `-1`, which disables the
+      sweep entirely — persistent user memories are kept forever until you set a
+      positive number of days
 - [ ] **Emergency Access**: Document emergency access procedure with
       two-person authorization
 - [ ] **Risk Assessment**: Complete HIPAA Security Risk Assessment for your

@@ -22,11 +22,11 @@ Context enables your agents to:
 | **Direction** | Input to EDDI               | Managed by EDDI                |
 | **Lifetime**  | Per request                 | Persistent across conversation |
 | **Purpose**   | Inject external data        | Store conversation history     |
-| **Usage**     | `${context.userName}`       | `${memory.current.input}`      |
+| **Usage**     | `{context.userName}`        | `{memory.current.input}`       |
 
 ### Context Types
 
-EDDI supports three context types:
+EDDI supports four context types:
 
 1. **`string`**: Simple text values
 
@@ -41,9 +41,18 @@ EDDI supports three context types:
    ```
 
 3. **`expressions`**: Parsed semantic expressions
+
    ```json
    "intent": {"type": "expressions", "value": "purchase(product)"}
    ```
+
+4. **`array`**: A list of values
+
+   ```json
+   "tags": {"type": "array", "value": ["a", "b"]}
+   ```
+
+> An `array` context is readable in output templates and HTTP call bodies, but it can never be matched by a `contextmatcher` — see [Behavior Rules → Limitations](behavior-rules.md#limitations). Send the data as an `object` (and match with `objectKeyPath`) if you need to match into it.
 
 ### How Context is Used
 
@@ -70,10 +79,10 @@ Your App → POST /agents/conv456
    IF context.accountType = "premium" THEN httpcall(get-balance)
 
 → HTTP Call uses context:
-   GET /api/accounts/${context.userId}/balance
+   GET /api/accounts/{context.userId}/balance
 
 → Output Template uses context:
-   "Hello! Your premium account balance is ${httpCalls.balance.amount}"
+   "Hello! Your premium account balance is {memory.current.httpCalls.balance.amount}"
 
 → Response to Your App:
    "Hello! Your premium account balance is $1,250.00"
@@ -94,7 +103,7 @@ In order to talk to **EDDI** with context, send a **`POST`** request to `/agents
 | {conversationId}                 | (`Path` **parameter**): `String Id` of the **conversation** that you wish to **send** the message to.                                                                                                                                                                                   |
 | returnDetailed (Optional)        | (`Query` **parameter**):`Boolean` - Default : `false` Will return all sub results of the entire `conversation steps`, otherwise only public ones such as `input, action, output & quickReplies`.                                                                                        |
 | returnCurrentStepOnly (Optional) | (`Query` **parameter**):`Boolean` - Default : `true` Will return only the latest `conversationStep` that has just been processed, otherwise returns all `conversationSteps` since the beginning of this `conversation`.                                                                 |
-| Request Body                     | a `JSON` object sent in the request body consists of the usual input text (message to the agent) only this time we are going to provide `context` information through a `key value` data structure ; the Context value must have one of the following : `string,object or expressions.` |
+| Request Body                     | a `JSON` object sent in the request body consists of the usual input text (message to the agent) only this time we are going to provide `context` information through a `key value` data structure ; the Context value must have one of the following : `string, object, expressions or array.` |
 |                                  |                                                                                                                                                                                                                                                                                         |
 
 ## Example

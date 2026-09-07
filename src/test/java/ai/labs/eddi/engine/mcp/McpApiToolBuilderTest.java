@@ -221,6 +221,49 @@ class McpApiToolBuilderTest {
     }
 
     @Test
+    @DisplayName("apiAuth goes in a caller-named header, not only Authorization")
+    void parseAndBuild_setsCustomAuthHeader() {
+        var result = McpApiToolBuilder.parseAndBuild(PETSTORE_SPEC, null, null, "key-id:secret", "x-api-key");
+
+        for (var config : result.configsByGroup().values()) {
+            for (ApiCall call : config.getHttpCalls()) {
+                var headers = call.getRequest().getHeaders();
+                assertEquals("key-id:secret", headers.get("x-api-key"));
+                // The default must not be sent as well: an API reading Authorization
+                // would then see a credential meant for a different scheme.
+                assertNull(headers.get(McpApiToolBuilder.DEFAULT_AUTH_HEADER));
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("an unnamed header keeps the pre-existing Authorization behaviour")
+    void parseAndBuild_defaultsToAuthorizationHeader() {
+        for (String unnamed : new String[]{null, "", "   "}) {
+            var result = McpApiToolBuilder.parseAndBuild(PETSTORE_SPEC, null, null, "Bearer sk-test-key", unnamed);
+            for (var config : result.configsByGroup().values()) {
+                for (ApiCall call : config.getHttpCalls()) {
+                    assertEquals("Bearer sk-test-key", call.getRequest().getHeaders().get("Authorization"),
+                            "apiAuthHeader=" + unnamed);
+                }
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("a header name is trimmed, but never sanitised into a different name")
+    void parseAndBuild_rejectsInvalidAuthHeaderName() {
+        assertEquals("x-api-key", McpApiToolBuilder.resolveAuthHeader("  x-api-key  "));
+
+        // A silently-stripped CR/LF would send the credential under a name the API
+        // does not read — the call then fails as "unauthorised", not as misconfigured.
+        for (String bad : new String[]{"x-api-key\r\nX-Injected: 1", "x api key", "x-api-key:", "a".repeat(65)}) {
+            var ex = assertThrows(IllegalArgumentException.class, () -> McpApiToolBuilder.resolveAuthHeader(bad));
+            assertTrue(ex.getMessage().contains("valid HTTP header name"), ex.getMessage());
+        }
+    }
+
+    @Test
     void parseAndBuild_filtersEndpoints() {
         var result = McpApiToolBuilder.parseAndBuild(PETSTORE_SPEC, "GET /pets,POST /store/order", null, null);
 

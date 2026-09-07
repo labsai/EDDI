@@ -19,7 +19,6 @@
         "apiKey": "${vault:OPENAI_KEY}",
         "modelName": "gpt-4o",
         "systemMessage": "You are a helpful assistant",
-        "sendConversation": "true",
         "addToOutput": "true"
       }
     }
@@ -40,9 +39,9 @@ Use the **Secrets Vault**. API keys and other sensitive values are encrypted at 
 **Via REST API:**
 
 ```bash
-curl -X PUT http://localhost:7070/secretstore/secrets/MY_API_KEY \
-  -H "Content-Type: text/plain" \
-  -d "sk-abc123..."
+curl -X PUT http://localhost:7070/secretstore/secrets/default/MY_API_KEY \
+  -H "Content-Type: application/json" \
+  -d '{"value": "sk-abc123...", "description": "OpenAI production key"}'
 ```
 
 **In LangChain configs,** reference secrets using vault syntax:

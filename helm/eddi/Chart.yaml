@@ -11,7 +11,15 @@ type: application
 # leaves caches and mirrors unable to tell them apart. It sat at 1.0.0 across
 # three releases because nothing enforces this; nothing packages the chart yet,
 # which is the only reason that was harmless.
-version: 1.0.1
+#
+# 2.0.0, not 1.1.0: this release is BREAKING for an existing values file.
+# `manager.*`, `monitoring.*` and `namespace` are removed outright,
+# `eddi.oidc.authServerUrl` loses its default and becomes `required` when you
+# bring your own IdP, and two new render-time requirements appear —
+# `eddi.oidc.publicUrl` when OIDC is on, `nats.buildProfileImage` when
+# messagingType is not in-memory. An upgrade that keeps an old values file
+# either fails to render or silently drops a setting.
+version: 2.0.0
 appVersion: "6.3.0"
 home: https://eddi.labs.ai
 sources:

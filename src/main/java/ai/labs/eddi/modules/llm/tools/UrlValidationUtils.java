@@ -139,8 +139,14 @@ public final class UrlValidationUtils {
      * <li>Unspecified (0.0.0.0/8)</li>
      * <li>Cloud metadata (169.254.169.254)</li>
      * </ul>
+     * <p>
+     * Public because it is the single definition of "unsafe outbound address" for
+     * the whole codebase: {@code SourceUrlValidator}, which guards the remote agent
+     * sync endpoints, delegates here rather than keeping the second, weaker copy it
+     * used to have (that one missed RFC 4193 ULA and RFC 6598 CGNAT, because the
+     * JDK predicates alone do not cover them).
      */
-    static boolean isPrivateAddress(InetAddress address) {
+    public static boolean isPrivateAddress(InetAddress address) {
         // JDK covers: loopback, site-local (RFC 1918 for IPv4, fec0::/10 for IPv6),
         // link-local, any-local (0.0.0.0, ::)
         if (address.isLoopbackAddress() || address.isSiteLocalAddress() || address.isLinkLocalAddress() || address.isAnyLocalAddress()

@@ -98,3 +98,7 @@ licenses/THIRD-PARTY.txt
 # fuzzing mode (JAZZER_FUZZ=1). Thousands of small files, regenerated every run.
 # The inputs worth keeping are checked in under src/test/resources/**/*Inputs/.
 .cifuzz-corpus/
+
+# Python bytecode from scripts/ (e.g. rotate-changelog.py)
+__pycache__/
+*.py[cod]

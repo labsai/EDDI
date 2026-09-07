@@ -79,7 +79,7 @@ class ApiCallExecutorValidationErrorTest {
 
         CallerIdentityResolver callerIdentityResolver = mock(CallerIdentityResolver.class);
         executor = new ApiCallExecutor(httpClient, jsonSerialization, runtime, prePostUtils, globalVariableResolver, secretResolver,
-                callerIdentityResolver, new CallerIdentityContext(null, null), new RequestRedactor(callerIdentityResolver), false,
+                callerIdentityResolver, new CallerIdentityContext(null, null), new RequestRedactor(callerIdentityResolver), null, false,
                 DEFAULT_TIMEOUT_MILLIS, DEFAULT_MAX_RESPONSE_SIZE);
 
         memory = mock(IConversationMemory.class);

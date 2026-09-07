@@ -62,10 +62,20 @@ Enable advanced memory features (LLM tools, Dream consolidation, guardrails, rec
       "preserveAgentProvenance": false,
       "maxCostPerRun": 0.50
     }
-  },
+  }
+}
+```
+
+The LLM task (`langchain.json`) must separately enable built-in tools — `builtInToolsWhitelist` is a field of the LLM task, not of the agent:
+
+```json
+{
+  "enableBuiltInTools": true,
   "builtInToolsWhitelist": ["usermemory"]
 }
 ```
+
+Attaching the memory tools is a three-way conjunction across the two configuration files: the agent's `enableMemoryTools: true` **and** its `userMemoryConfig` **and** the LLM task's `enableBuiltInTools: true`, with `builtInToolsWhitelist` either omitted (all built-ins) or containing `"usermemory"`. Miss any part and the agent gets no memory tools, with only a WARN in the log.
 
 > **Note:** Basic `longTerm` property persistence (via `PropertySetterTask`) works for **all** agents regardless of `enableMemoryTools`. The flag only gates advanced features: LLM UserMemoryTool, Dream consolidation, write guardrails, and custom recall settings.
 
@@ -76,7 +86,9 @@ Enable advanced memory features (LLM tools, Dream consolidation, guardrails, rec
 | `maxEntriesPerUser` | `int` | `500` | Maximum memory entries per user |
 | `maxRecallEntries` | `int` | `50` | Maximum entries returned by recall |
 | `recallOrder` | `String` | `"most_recent"` | `"most_recent"` (by updatedAt) or `"most_accessed"` (by accessCount) |
-| `onCapReached` | `String` | `"evict_oldest"` | `"reject"` (block new writes) or `"evict_oldest"` (push out of recall window) |
+| `onCapReached` | `String` | `"evict_oldest"` | `"reject"` (refuse the write once `maxEntriesPerUser` is reached) or `"evict_oldest"` (permanently delete this agent's oldest entries to make room — entries owned by other agents are never evicted) |
+| `defaultVisibility` | `String` | `"self"` | Visibility applied to a `longTerm` property that sets none (an unparseable value, or no `userMemoryConfig` at all, falls back to `global`) |
+| `autoRecallCategories` | `List<String>` | `["preference","fact"]` | Categories recalled automatically at conversation start |
 
 ### Guardrails
 
@@ -92,7 +104,7 @@ Enable advanced memory features (LLM tools, Dream consolidation, guardrails, rec
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `enabled` | `boolean` | `false` | Enable background consolidation |
-| `pruneStaleAfterDays` | `int` | `90` | Remove entries not accessed in N days. Set to 0 to disable. |
+| `pruneStaleAfterDays` | `int` | `90` | Remove entries whose `updatedAt` (last write) is older than N days. Recalling an entry does **not** refresh this — only a write does. Set to 0 to disable. |
 | `detectContradictions` | `boolean` | `true` | Flag entries with same key but different values |
 | `summarizeInteractions` | `boolean` | `false` | Enable LLM-driven memory consolidation |
 | `summarizeMinEntries` | `int` | `5` | Minimum entries in a group before summarization triggers |
@@ -108,7 +120,7 @@ Enable advanced memory features (LLM tools, Dream consolidation, guardrails, rec
 
 ## LLM Tools
 
-When `usermemory` is in the agent's `builtInToolsWhitelist`, the LLM gets access to four tools:
+When the LLM task has `enableBuiltInTools: true` and `usermemory` is in its `builtInToolsWhitelist` (or no whitelist is set), the LLM gets access to four tools:
 
 ### `rememberFact`
 
@@ -231,11 +243,29 @@ The `delete_all_user_memories` MCP tool and `DELETE /{userId}` REST endpoint per
 
 The Dream service performs background maintenance on user memories:
 
-1. **Stale Pruning** — Removes entries not accessed in `pruneStaleAfterDays` days. This is a deterministic operation with zero LLM cost.
+1. **Stale Pruning** — Removes entries whose `updatedAt` (last write) is older than `pruneStaleAfterDays` days. Recalling an entry does **not** refresh `updatedAt`, so a fact read in every conversation is still pruned if nothing has rewritten it. This is a deterministic operation with zero LLM cost.
 
 2. **Contradiction Detection** — Identifies entries with the same key but different values (e.g., `language=English` from Agent A vs `language=German` from Agent B). V1 uses key-based matching; future versions will use LLM-driven semantic analysis.
 
 3. **Interaction Summarization** — When `summarizeInteractions=true`, compresses multiple related facts into consolidated summaries using the configured LLM. Entries are grouped by the `summarizeGroupBy` strategy (per-category or all together), and each group above `summarizeMinEntries` is distilled into `summarizeTargetEntries` entries. Safety guarantees: new entries are inserted before originals are deleted; LLM failures or invalid responses preserve the original entries.
+
+### Scheduling a Dream Cycle
+
+Setting `dream.enabled: true` does not start anything on its own — it is the per-agent veto that is checked when a dream schedule fires. Dream runs through the regular cluster-aware schedule machinery, so a cycle only happens if you also create a `ScheduleConfiguration` that targets it:
+
+```json
+{
+  "name": "nightly-dream",
+  "triggerType": "CRON",
+  "cronExpression": "0 3 * * *",
+  "agentId": "<agentId>",
+  "agentVersion": 1,
+  "userId": "<userId>",
+  "metadata": { "dreamType": "dream_consolidation" }
+}
+```
+
+`ScheduleFireExecutor` recognises the `dreamType` marker and dispatches to `DreamService` with the schedule's `agentId`, `agentVersion` and `userId`. The cron expression lives on the schedule — `dream.schedule` in the agent config is a documentation-only hint that the engine never reads.
 
 ### Metrics
 

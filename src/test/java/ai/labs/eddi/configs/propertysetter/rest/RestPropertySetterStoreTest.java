@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.propertysetter.rest;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.propertysetter.IPropertySetterStore;
 import ai.labs.eddi.configs.propertysetter.model.PropertySetterConfiguration;
@@ -32,7 +33,7 @@ class RestPropertySetterStoreTest {
         propertySetterStore = mock(IPropertySetterStore.class);
         var documentDescriptorStore = mock(IDocumentDescriptorStore.class);
         jsonSchemaCreator = mock(IJsonSchemaCreator.class);
-        restStore = new RestPropertySetterStore(propertySetterStore, documentDescriptorStore, jsonSchemaCreator);
+        restStore = new RestPropertySetterStore(propertySetterStore, documentDescriptorStore, jsonSchemaCreator, mock(ResourceAccessGuard.class));
     }
 
     @Nested

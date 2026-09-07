@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.backup.impl;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.backup.IZipArchive;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
@@ -93,7 +94,7 @@ class RestExportServiceBranchTest {
                 dictionaryStore, ruleSetStore, apiCallsStore, llmStore,
                 propertySetterStore, outputStore, mcpCallsStore, ragStore,
                 snippetStore, jsonSerialization, zipArchive, secretScrubber,
-                scheduleStore);
+                scheduleStore, mock(ResourceAccessGuard.class), mock(BackupMetrics.class));
     }
 
     // =========================================================
@@ -405,21 +406,21 @@ class RestExportServiceBranchTest {
         @DisplayName("agentId with .. throws BadRequestException")
         void agentIdPathTraversal() {
             assertThrows(BadRequestException.class,
-                    () -> exportService.exportAgent("../etc", 1, null));
+                    () -> exportService.exportAgent("../etc", 1, null, null, null));
         }
 
         @Test
         @DisplayName("null agentId throws BadRequestException")
         void nullAgentId() {
             assertThrows(BadRequestException.class,
-                    () -> exportService.exportAgent(null, 1, null));
+                    () -> exportService.exportAgent(null, 1, null, null, null));
         }
 
         @Test
         @DisplayName("agentId with slash throws BadRequestException")
         void agentIdWithSlash() {
             assertThrows(BadRequestException.class,
-                    () -> exportService.exportAgent("agent/id", 1, null));
+                    () -> exportService.exportAgent("agent/id", 1, null, null, null));
         }
     }
 

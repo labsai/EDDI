@@ -29,6 +29,13 @@ public record ProviderFailure(String source, String identifier, Kind kind, Strin
         /** Reached, but the discovery call itself failed. */
         CONNECTION_FAILURE,
         /** Skipped because the circuit breaker is open for this source. */
-        CIRCUIT_OPEN
+        CIRCUIT_OPEN,
+        /**
+         * Reached, and it asked for credentials. Distinct from
+         * {@link #CONNECTION_FAILURE} because it is fixed by configuring a credential
+         * rather than by waiting — and because it must not feed a circuit breaker whose
+         * purpose is to stop hammering a struggling server.
+         */
+        AUTHENTICATION_REQUIRED
     }
 }

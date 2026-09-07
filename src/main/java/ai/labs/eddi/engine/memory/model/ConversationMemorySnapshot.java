@@ -8,6 +8,7 @@ import ai.labs.eddi.datastore.serialization.Id;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.properties.model.Property;
+import ai.labs.eddi.engine.security.ResolutionPrincipal;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
@@ -50,6 +51,15 @@ public class ConversationMemorySnapshot {
     private String agentId;
     private Integer agentVersion;
     private String userId;
+    /**
+     * How {@link #userId} came to be, fixed at creation. Absent in documents
+     * written before 6.2.0, which deserialize to {@code null} — read as NOT
+     * verified, so a legacy conversation must be restarted once before it can
+     * resolve a {@code PER_USER} connection. That polarity is the point: the
+     * conversations this field exists to distrust are exactly the ones that predate
+     * it.
+     */
+    private ResolutionPrincipal.Provenance resolutionProvenance;
     private Deployment.Environment environment;
     private ConversationState conversationState;
     private String hitlPausedWorkflowId;
@@ -346,6 +356,14 @@ public class ConversationMemorySnapshot {
 
     public void setUserId(String userId) {
         this.userId = userId;
+    }
+
+    public ResolutionPrincipal.Provenance getResolutionProvenance() {
+        return resolutionProvenance;
+    }
+
+    public void setResolutionProvenance(ResolutionPrincipal.Provenance resolutionProvenance) {
+        this.resolutionProvenance = resolutionProvenance;
     }
 
     public Deployment.Environment getEnvironment() {

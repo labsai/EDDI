@@ -4,8 +4,15 @@
  */
 package ai.labs.eddi.backup.impl;
 
+import ai.labs.eddi.engine.schedule.IRestScheduleStore;
+import ai.labs.eddi.engine.schedule.IScheduleStore;
+import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.engine.security.spaces.SpaceContext;
 import ai.labs.eddi.backup.IZipArchive;
 import ai.labs.eddi.backup.model.ImportPreview;
+import ai.labs.eddi.backup.model.UpgradeResult;
+import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
@@ -22,6 +29,7 @@ import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import jakarta.enterprise.inject.Instance;
 import jakarta.enterprise.inject.spi.CDI;
+import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
@@ -36,6 +44,7 @@ import java.io.InputStream;
 import java.net.URI;
 import java.nio.file.Files;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -69,6 +78,8 @@ import static org.mockito.Mockito.when;
 class RestImportServiceRollbackAndCleanupTest {
 
     private static final String AGENT_ORIGIN_ID = "aaaa11112222333344445555";
+    private static final String SCHEDULE_ORIGIN_ID = "ffff11112222333344445555";
+    private static final String NEW_AGENT_ID = "dddd11112222333344445555";
     private static final String WORKFLOW_ORIGIN_ID = "bbbb11112222333344445555";
     private static final String NEW_WORKFLOW_ID = "cccc11112222333344445555";
     private static final String NEW_SNIPPET_ID = "eeee11112222333344445555";
@@ -93,7 +104,8 @@ class RestImportServiceRollbackAndCleanupTest {
         importService = new RestImportService(
                 zipArchive, jsonSerialization,
                 mock(IMigrationManager.class), documentDescriptorStore,
-                mock(TemplateSyntaxMigrator.class), structuralMatcher, upgradeExecutor);
+                mock(TemplateSyntaxMigrator.class), structuralMatcher, upgradeExecutor, mock(IScheduleStore.class), mock(BackupMetrics.class),
+                mock(ResourceAccessGuard.class), mock(SpaceContext.class));
     }
 
     // ==================== D11 — rollback of a partial import ====================
@@ -220,6 +232,119 @@ class RestImportServiceRollbackAndCleanupTest {
             }
         }
 
+        /**
+         * Import creates Agents through the store directly, so it registers their
+         * skills itself — and the capability index is a process-local map that nothing
+         * else prunes. A ZIP that landed one Agent and then failed therefore deleted
+         * the Agent row while leaving its skills behind, so {@code findBySkill} and A2A
+         * discovery kept answering with an agent id that no longer existed, until the
+         * next restart.
+         */
+        @Test
+        @DisplayName("a rolled-back Agent is taken back out of the capability index")
+        void rolledBackAgentIsUnregisteredFromTheCapabilityIndex() throws Exception {
+            var workflowStore = mock(IWorkflowStore.class);
+            var agentStore = mock(IAgentStore.class);
+            var capabilityRegistry = mock(CapabilityRegistryService.class);
+            var restScheduleStore = mock(IRestScheduleStore.class);
+            stubOneCapableAgentWithOneScheduleZip();
+
+            when(workflowStore.create(any())).thenReturn(resourceId(NEW_WORKFLOW_ID, 1));
+            // The Agent lands and is registered; the archive's schedule — the first
+            // write after it — blows up, so everything this ZIP created is rolled back.
+            when(agentStore.create(any())).thenReturn(resourceId(NEW_AGENT_ID, 1));
+            when(restScheduleStore.createSchedule(any()))
+                    .thenThrow(new IllegalStateException("schedule store unavailable"));
+
+            try (MockedStatic<CDI> cdiMock = mockStatic(CDI.class)) {
+                stubBean(stubCdi(cdiMock, workflowStore, agentStore, capabilityRegistry),
+                        IRestScheduleStore.class, restScheduleStore);
+
+                assertThrows(InternalServerErrorException.class,
+                        () -> importService.importAgent(
+                                new ByteArrayInputStream(new byte[0]), "create", null, null, null));
+
+                verify(capabilityRegistry).register(eq(NEW_AGENT_ID), any());
+                verify(agentStore).deleteAllPermanently(NEW_AGENT_ID);
+                verify(capabilityRegistry).unregister(NEW_AGENT_ID);
+            }
+        }
+
+        /**
+         * Adding an imported Agent to the discovery index is best-effort: the Agent row
+         * is already written by the time it happens, so a registry that cannot be
+         * updated must not turn a completed import into a 500 — and must certainly not
+         * trigger the rollback, which would delete an Agent the caller was about to be
+         * told it had.
+         */
+        @Test
+        @DisplayName("a capability index that refuses the registration does not fail the import")
+        void registrationFailureDoesNotFailTheImport() throws Exception {
+            var workflowStore = mock(IWorkflowStore.class);
+            var agentStore = mock(IAgentStore.class);
+            var capabilityRegistry = mock(CapabilityRegistryService.class);
+            stubOneCapableAgentZip();
+
+            when(workflowStore.create(any())).thenReturn(resourceId(NEW_WORKFLOW_ID, 1));
+            when(agentStore.create(any())).thenReturn(resourceId(NEW_AGENT_ID, 1));
+            doThrow(new IllegalStateException("registry unavailable"))
+                    .when(capabilityRegistry).register(anyString(), any());
+
+            try (MockedStatic<CDI> cdiMock = mockStatic(CDI.class)) {
+                stubCdi(cdiMock, workflowStore, agentStore, capabilityRegistry);
+
+                Response response = importService.importAgent(
+                        new ByteArrayInputStream(new byte[0]), "create", null, null, null);
+
+                // An imported Agent's skills must be offered to the index at all —
+                // import creates Agents through the store directly, so without this
+                // call they stayed invisible to capabilityMatch rules and to A2A
+                // discovery until the node restarted, with no error to explain it.
+                verify(capabilityRegistry).register(eq(NEW_AGENT_ID), any());
+                assertEquals(201, response.getStatus(), "the Agent was written; a discovery-index failure is not the caller's problem");
+                verify(agentStore, never()).deleteAllPermanently(anyString());
+                verify(workflowStore, never()).deleteAllPermanently(anyString());
+            }
+        }
+
+        /**
+         * The rollback's own steps are each guarded so one failure cannot mask the
+         * original error or abandon the resources it has not reached yet. An
+         * unreachable capability index while unwinding must still leave every created
+         * resource deleted.
+         */
+        @Test
+        @DisplayName("a capability index that refuses the unregistration does not abandon the rest of the rollback")
+        void unregistrationFailureDoesNotAbandonTheRollback() throws Exception {
+            var workflowStore = mock(IWorkflowStore.class);
+            var agentStore = mock(IAgentStore.class);
+            var capabilityRegistry = mock(CapabilityRegistryService.class);
+            var restScheduleStore = mock(IRestScheduleStore.class);
+            stubOneCapableAgentWithOneScheduleZip();
+
+            when(workflowStore.create(any())).thenReturn(resourceId(NEW_WORKFLOW_ID, 1));
+            when(agentStore.create(any())).thenReturn(resourceId(NEW_AGENT_ID, 1));
+            when(restScheduleStore.createSchedule(any()))
+                    .thenThrow(new IllegalStateException("schedule store unavailable"));
+            doThrow(new IllegalStateException("registry unavailable"))
+                    .when(capabilityRegistry).unregister(anyString());
+
+            try (MockedStatic<CDI> cdiMock = mockStatic(CDI.class)) {
+                stubBean(stubCdi(cdiMock, workflowStore, agentStore, capabilityRegistry),
+                        IRestScheduleStore.class, restScheduleStore);
+
+                assertThrows(InternalServerErrorException.class,
+                        () -> importService.importAgent(
+                                new ByteArrayInputStream(new byte[0]), "create", null, null, null));
+
+                verify(capabilityRegistry).unregister(NEW_AGENT_ID);
+                verify(agentStore).deleteAllPermanently(NEW_AGENT_ID);
+                // Rolled back newest first, so this one comes AFTER the failing
+                // unregistration — it is the proof the loop was not abandoned.
+                verify(workflowStore).deleteAllPermanently(NEW_WORKFLOW_ID);
+            }
+        }
+
         @Test
         @DisplayName("a successful import deletes nothing")
         void successfulImportDoesNotRollBack() throws Exception {
@@ -254,7 +379,9 @@ class RestImportServiceRollbackAndCleanupTest {
         void createImportCleansUp() throws Exception {
             AtomicReference<File> unzipped = stubEmptyZip();
 
-            importService.importAgent(new ByteArrayInputStream(new byte[0]), "create", null, null, null);
+            // An archive with no agent file is now a 400, and the tree must go anyway.
+            assertThrows(BadRequestException.class, () -> importService.importAgent(
+                    new ByteArrayInputStream(new byte[0]), "create", null, null, null));
 
             assertUnzippedDirectoryRemoved(unzipped);
         }
@@ -286,9 +413,9 @@ class RestImportServiceRollbackAndCleanupTest {
         void legacyPreviewCleansUp() throws Exception {
             AtomicReference<File> unzipped = stubEmptyZip();
 
-            ImportPreview preview = importService.previewImport(new ByteArrayInputStream(new byte[0]), null);
+            assertThrows(BadRequestException.class,
+                    () -> importService.previewImport(new ByteArrayInputStream(new byte[0]), null));
 
-            assertNotNull(preview);
             assertUnzippedDirectoryRemoved(unzipped);
         }
 
@@ -309,7 +436,8 @@ class RestImportServiceRollbackAndCleanupTest {
         void upgradeImportCleansUp() throws Exception {
             AtomicReference<File> unzipped = stubEmptyZip();
             when(upgradeExecutor.executeUpgrade(any(), eq("target-1"), any(), any()))
-                    .thenReturn(URI.create("eddi://ai.labs.agent/agentstore/agents/" + AGENT_ORIGIN_ID + "?version=2"));
+                    .thenReturn(new UpgradeResult(URI.create("eddi://ai.labs.agent/agentstore/agents/" + AGENT_ORIGIN_ID + "?version=2"), true, 1, 0,
+                            0, List.of()));
 
             importService.importAgent(
                     new ByteArrayInputStream(new byte[0]), "upgrade", null, "target-1", null);
@@ -361,6 +489,56 @@ class RestImportServiceRollbackAndCleanupTest {
         when(jsonSerialization.deserialize(eq("AGENTJSON"), eq(AgentConfiguration.class))).thenReturn(agentConfig);
         when(jsonSerialization.deserialize(eq("WORKFLOWJSON"), eq(WorkflowConfiguration.class)))
                 .thenReturn(new WorkflowConfiguration());
+    }
+
+    /**
+     * As {@link #stubAgentWithOneWorkflowZip()}, but the single agent declares a
+     * skill — so the import reaches the capability registration at all. One agent,
+     * not two, because a second agent re-reads the workflow directory under its
+     * already-remapped id and fails for a reason that has nothing to do with this
+     * test.
+     */
+    private void stubOneCapableAgentZip() throws Exception {
+        stubAgentWithOneWorkflowZip();
+
+        URI workflowUri = URI.create(
+                "eddi://ai.labs.workflow/workflowstore/workflows/" + WORKFLOW_ORIGIN_ID + "?version=1");
+        var agentConfig = new AgentConfiguration();
+        agentConfig.setWorkflows(List.of(workflowUri));
+        agentConfig.setCapabilities(List.of(new AgentConfiguration.Capability("translation", Map.of(), "high")));
+        when(jsonSerialization.deserialize(eq("AGENTJSON"), eq(AgentConfiguration.class))).thenReturn(agentConfig);
+    }
+
+    /**
+     * As {@link #stubOneCapableAgentZip()}, plus a {@code schedules/} directory
+     * holding one schedule — the shape that makes a half-imported ZIP reachable
+     * from a single-agent archive, which is the only kind the import accepts.
+     * <p>
+     * Schedules carry the id of the agent they fire, so they are deliberately
+     * written <em>after</em> the Agent exists (and its skills are registered) and
+     * before the descriptor bookkeeping. A schedule that cannot be written fails
+     * the whole import, so it is the first thing that can blow up with a registered
+     * Agent already recorded on the transaction.
+     */
+    private void stubOneCapableAgentWithOneScheduleZip() throws Exception {
+        stubOneCapableAgentZip();
+
+        doAnswer(inv -> {
+            File dir = inv.getArgument(1);
+            dir.mkdirs();
+            Files.writeString(new File(dir, AGENT_ORIGIN_ID + ".agent.json").toPath(), "AGENTJSON");
+            File workflowDir = new File(new File(dir, WORKFLOW_ORIGIN_ID), "1");
+            workflowDir.mkdirs();
+            Files.writeString(new File(workflowDir, WORKFLOW_ORIGIN_ID + ".workflow.json").toPath(), "WORKFLOWJSON");
+            File schedulesDir = new File(dir, "schedules");
+            schedulesDir.mkdirs();
+            Files.writeString(new File(schedulesDir, SCHEDULE_ORIGIN_ID + ".schedule.json").toPath(), "SCHEDULEJSON");
+            return null;
+        }).when(zipArchive).unzip(any(InputStream.class), any(File.class));
+
+        var schedule = new ScheduleConfiguration();
+        schedule.setName("nightly");
+        when(jsonSerialization.deserialize(eq("SCHEDULEJSON"), eq(ScheduleConfiguration.class))).thenReturn(schedule);
     }
 
     /**
@@ -421,6 +599,35 @@ class RestImportServiceRollbackAndCleanupTest {
         Instance<IAgentStore> agentInstance = mock(Instance.class);
         when(cdi.select(IAgentStore.class)).thenReturn(agentInstance);
         when(agentInstance.get()).thenReturn(agentStore);
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static CDI stubCdi(MockedStatic<CDI> cdiMock, IWorkflowStore workflowStore, IAgentStore agentStore,
+                               CapabilityRegistryService capabilityRegistry) {
+        CDI cdi = mock(CDI.class);
+        cdiMock.when(CDI::current).thenReturn(cdi);
+
+        Instance<IWorkflowStore> workflowInstance = mock(Instance.class);
+        when(cdi.select(IWorkflowStore.class)).thenReturn(workflowInstance);
+        when(workflowInstance.get()).thenReturn(workflowStore);
+
+        Instance<IAgentStore> agentInstance = mock(Instance.class);
+        when(cdi.select(IAgentStore.class)).thenReturn(agentInstance);
+        when(agentInstance.get()).thenReturn(agentStore);
+
+        Instance<CapabilityRegistryService> registryInstance = mock(Instance.class);
+        when(cdi.select(CapabilityRegistryService.class)).thenReturn(registryInstance);
+        when(registryInstance.get()).thenReturn(capabilityRegistry);
+
+        return cdi;
+    }
+
+    /** Adds one more bean to a {@link CDI} already stubbed by {@link #stubCdi}. */
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static <T> void stubBean(CDI cdi, Class<T> beanClass, T bean) {
+        Instance<T> instance = mock(Instance.class);
+        when(cdi.select(beanClass)).thenReturn(instance);
+        when(instance.get()).thenReturn(bean);
     }
 
     @SuppressWarnings({"unchecked", "rawtypes"})

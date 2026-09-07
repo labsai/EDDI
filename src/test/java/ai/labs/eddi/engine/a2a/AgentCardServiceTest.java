@@ -5,7 +5,7 @@
 package ai.labs.eddi.engine.a2a;
 
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
-import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.datastore.IResourceStore;
@@ -22,13 +22,13 @@ import static org.mockito.Mockito.*;
 
 class AgentCardServiceTest {
 
-    private IRestAgentStore restAgentStore;
+    private IAgentStore restAgentStore;
     private IDocumentDescriptorStore documentDescriptorStore;
     private AgentCardService service;
 
     @BeforeEach
     void setUp() {
-        restAgentStore = mock(IRestAgentStore.class);
+        restAgentStore = mock(IAgentStore.class);
         documentDescriptorStore = mock(IDocumentDescriptorStore.class);
         service = new AgentCardService(
                 restAgentStore,
@@ -62,7 +62,7 @@ class AgentCardServiceTest {
                 }
             };
             when(restAgentStore.getCurrentResourceId("agent-1")).thenReturn(resourceId);
-            when(restAgentStore.readAgent("agent-1", 1)).thenReturn(null);
+            when(restAgentStore.read("agent-1", 1)).thenReturn(null);
             assertNull(service.getAgentCard("agent-1"));
         }
 
@@ -81,7 +81,7 @@ class AgentCardServiceTest {
                 }
             };
             when(restAgentStore.getCurrentResourceId("agent-1")).thenReturn(resourceId);
-            when(restAgentStore.readAgent("agent-1", 1)).thenReturn(config);
+            when(restAgentStore.read("agent-1", 1)).thenReturn(config);
             assertNull(service.getAgentCard("agent-1"));
         }
 
@@ -101,7 +101,7 @@ class AgentCardServiceTest {
                 }
             };
             when(restAgentStore.getCurrentResourceId("agent-1")).thenReturn(resourceId);
-            when(restAgentStore.readAgent("agent-1", 1)).thenReturn(config);
+            when(restAgentStore.read("agent-1", 1)).thenReturn(config);
 
             var card = service.getAgentCard("agent-1");
             assertNotNull(card);
@@ -136,7 +136,7 @@ class AgentCardServiceTest {
                 }
             };
             when(restAgentStore.getCurrentResourceId("agent-1")).thenReturn(resourceId);
-            when(restAgentStore.readAgent("agent-1", 1)).thenReturn(config);
+            when(restAgentStore.read("agent-1", 1)).thenReturn(config);
 
             var descriptor = new DocumentDescriptor();
             descriptor.setName("Refund Specialist");
@@ -162,7 +162,7 @@ class AgentCardServiceTest {
                 }
             };
             when(restAgentStore.getCurrentResourceId("agent-2")).thenReturn(resourceId);
-            when(restAgentStore.readAgent("agent-2", 1)).thenReturn(config);
+            when(restAgentStore.read("agent-2", 1)).thenReturn(config);
             when(documentDescriptorStore.readDescriptor("agent-2", 1)).thenReturn(new DocumentDescriptor());
 
             assertEquals("EDDI Agent agent-2", service.getAgentCard("agent-2").name());
@@ -258,13 +258,13 @@ class AgentCardServiceTest {
 
         @Test
         void emptyList_whenNoDescriptors() throws Exception {
-            when(restAgentStore.readAgentDescriptors("", 0, 100)).thenReturn(null);
+            when(documentDescriptorStore.readDescriptors("ai.labs.agent", "", 0, 100, false)).thenReturn(null);
             assertTrue(service.listA2AAgents().isEmpty());
         }
 
         @Test
         void emptyList_onException() throws Exception {
-            when(restAgentStore.readAgentDescriptors("", 0, 100))
+            when(documentDescriptorStore.readDescriptors("ai.labs.agent", "", 0, 100, false))
                     .thenThrow(new RuntimeException("DB error"));
             assertTrue(service.listA2AAgents().isEmpty());
         }
@@ -273,7 +273,7 @@ class AgentCardServiceTest {
         void skipsDescriptors_withNullResource() throws Exception {
             var desc = new DocumentDescriptor();
             desc.setResource(null);
-            when(restAgentStore.readAgentDescriptors("", 0, 100)).thenReturn(List.of(desc));
+            when(documentDescriptorStore.readDescriptors("ai.labs.agent", "", 0, 100, false)).thenReturn(List.of(desc));
             assertTrue(service.listA2AAgents().isEmpty());
         }
 
@@ -281,7 +281,7 @@ class AgentCardServiceTest {
         void skipsDescriptors_withEmptyPath() throws Exception {
             var desc = new DocumentDescriptor();
             desc.setResource(URI.create("eddi://ai.labs.agent"));
-            when(restAgentStore.readAgentDescriptors("", 0, 100)).thenReturn(List.of(desc));
+            when(documentDescriptorStore.readDescriptors("ai.labs.agent", "", 0, 100, false)).thenReturn(List.of(desc));
             assertTrue(service.listA2AAgents().isEmpty());
         }
     }

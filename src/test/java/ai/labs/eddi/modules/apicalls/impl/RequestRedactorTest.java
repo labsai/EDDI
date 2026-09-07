@@ -15,6 +15,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import java.net.URLEncoder;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
@@ -208,7 +209,7 @@ class RequestRedactorTest {
             // matches Bearer\s+. That produced a value redacted in queryParams and
             // plaintext one field away in uri.
             var map = new HashMap<String, Object>();
-            map.put(IRequest.KEY_URI, "https://x/y?auth=" + java.net.URLEncoder.encode(BEARER, java.nio.charset.StandardCharsets.UTF_8));
+            map.put(IRequest.KEY_URI, "https://x/y?auth=" + URLEncoder.encode(BEARER, java.nio.charset.StandardCharsets.UTF_8));
             redactor.redactRequestMap(map);
             String redacted = map.get(IRequest.KEY_URI).toString();
             assertFalse(redacted.contains("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), redacted);
@@ -217,7 +218,7 @@ class RequestRedactorTest {
         @Test
         void anEncodedVaultReferenceIsStillRedacted() {
             var map = new HashMap<String, Object>();
-            map.put(IRequest.KEY_URI, "https://x/y?k=" + java.net.URLEncoder.encode("${vault:billing}", java.nio.charset.StandardCharsets.UTF_8));
+            map.put(IRequest.KEY_URI, "https://x/y?k=" + URLEncoder.encode("${vault:billing}", java.nio.charset.StandardCharsets.UTF_8));
             redactor.redactRequestMap(map);
             assertFalse(map.get(IRequest.KEY_URI).toString().contains("billing"), map.get(IRequest.KEY_URI).toString());
         }

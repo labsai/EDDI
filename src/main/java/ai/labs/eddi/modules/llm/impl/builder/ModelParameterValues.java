@@ -11,6 +11,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.function.Consumer;
 import java.util.function.DoubleConsumer;
 import java.util.function.IntConsumer;
 import java.util.function.LongConsumer;
@@ -154,6 +155,31 @@ final class ModelParameterValues {
     }
 
     /**
+     * Boolean variant of {@link #applyInt}, for tri-state provider options where
+     * <em>unset</em> is a third, meaningful value.
+     * <p>
+     * Deliberately not {@code Boolean.parseBoolean(parameters.get(key))}: that maps
+     * an absent key, a typo and an explicit {@code "false"} all to {@code false},
+     * which would silently pin the option instead of leaving the provider default —
+     * the exact difference between "do not think" and "let the model decide" on
+     * Ollama.
+     */
+    static void applyBoolean(Map<String, String> parameters, String key, Consumer<Boolean> setter) {
+        String raw = rawValue(parameters, key);
+        if (raw == null) {
+            return;
+        }
+        if ("true".equalsIgnoreCase(raw)) {
+            setter.accept(Boolean.TRUE);
+        } else if ("false".equalsIgnoreCase(raw)) {
+            setter.accept(Boolean.FALSE);
+        } else {
+            LOGGER.warnf("LLM parameter '%s' is not a boolean ('%s') — leaving the provider default in place.",
+                    sanitize(key), sanitize(raw));
+        }
+    }
+
+    /**
      * The trimmed value, or {@code null} when the key is absent, empty or nothing
      * but whitespace.
      * <p>
@@ -176,7 +202,7 @@ final class ModelParameterValues {
 
     private static <T> T rejected(String key, String raw, String expected) {
         LOGGER.warnv("LLM parameter ''{0}'' is not a valid {1} (''{2}'') — falling back to the model default.",
-                key, expected, raw);
+                sanitize(key), expected, sanitize(raw));
         return null;
     }
 }

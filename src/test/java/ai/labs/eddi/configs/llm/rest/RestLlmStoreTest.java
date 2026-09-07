@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.llm.rest;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.llm.ILlmStore;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
@@ -32,7 +33,7 @@ class RestLlmStoreTest {
         llmStore = mock(ILlmStore.class);
         var documentDescriptorStore = mock(IDocumentDescriptorStore.class);
         jsonSchemaCreator = mock(IJsonSchemaCreator.class);
-        restStore = new RestLlmStore(llmStore, documentDescriptorStore, jsonSchemaCreator);
+        restStore = new RestLlmStore(llmStore, documentDescriptorStore, jsonSchemaCreator, mock(ResourceAccessGuard.class));
     }
 
     @Nested

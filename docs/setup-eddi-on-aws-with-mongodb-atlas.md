@@ -68,13 +68,22 @@ This guide provides step-by-step instructions to set up EDDI on Amazon ECS and c
    }
    ],
    "essential": true,
-   "command": [
-   "/bin/bash"
-   ],
    "environment": [
    {
    "name": "JAVA_OPTS_APPEND",
    "value": "-Dmongodb.connectionString=mongodb+srv://<user>:<password>@<host>/eddi?retryWrites=true&w=majority -Dmongodb.database=eddi"
+   },
+   {
+   "name": "EDDI_SECURITY_ALLOW_UNAUTHENTICATED",
+   "value": "true"
+   },
+   {
+   "name": "EDDI_MCP_ALLOW_UNAUTHENTICATED",
+   "value": "true"
+   },
+   {
+   "name": "EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED",
+   "value": "true"
    }
    ],
    "mountPoints": [],
@@ -150,6 +159,8 @@ This guide provides step-by-step instructions to set up EDDI on Amazon ECS and c
    "memory": "2048"
 }
 ```
+
+> ⚠️ **About the three `*_ALLOW_UNAUTHENTICATED` variables.** A Fargate task runs in production launch mode, where EDDI refuses to start without authentication: `AuthStartupGuard` fails startup unless OIDC is enabled or `EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true`, and `HighValueSurfaceGuard` fails startup unless `/mcp` and `/secretstore` are either protected or explicitly opted out. The opt-outs above are only acceptable for a task in a private subnet with no public ingress. For anything reachable from outside, drop all three and set `QUARKUS_OIDC_TENANT_ENABLED=true` plus your Keycloak realm settings instead — see [`security.md`](security.md).
 
 ### 2. Create an ECS Cluster
 

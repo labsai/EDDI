@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
@@ -16,6 +18,7 @@ import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.runtime.internal.IDeploymentListener;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
+import ai.labs.eddi.engine.tenancy.QuotaAccountingUnavailableException;
 import ai.labs.eddi.engine.tenancy.QuotaExceededException;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
@@ -73,10 +76,10 @@ class RestAgentAdministrationQuotaTest {
         lenient().when(deploymentStore.readDeploymentInfos(any())).thenReturn(List.of());
         lenient().when(tenantQuotaService.checkAgentQuota(anyString(), anyInt())).thenReturn(QuotaCheckResult.OK);
 
-        admin = new RestAgentAdministration(runtime, agentFactory, deploymentStore,
+        admin = new RestAgentAdministration(runtime, agentFactory, mock(IAgentStore.class), deploymentStore,
                 mock(IConversationMemoryStore.class), mock(IRestConversationStore.class),
                 mock(IDocumentDescriptorStore.class), mock(IDeploymentListener.class),
-                mock(IScheduleStore.class), tenantQuotaService);
+                mock(IScheduleStore.class), tenantQuotaService, mock(ResourceAccessGuard.class));
     }
 
     private static DeploymentInfo deployed(String agentId, int version) {
@@ -116,6 +119,30 @@ class RestAgentAdministrationQuotaTest {
             // try block, catch(Exception) would have rethrown InternalServerErrorException
             // and this would fail — which is exactly the 429-becomes-500 regression.
             assertEquals("Agent limit (2) reached", thrown.getMessage());
+            verify(runtime, never()).submitCallable(any(Callable.class), any());
+        }
+
+        /**
+         * Finding f1-02. A quota store that cannot answer is not a tenant over its
+         * limit. Both refuse the deploy, but only one of them is the tenant's fault:
+         * answering 429 {@code quota_exceeded} with {@code Retry-After: 60} for an
+         * outage tells the operator (and any MCP client driving the deploy) to undeploy
+         * an agent that is not the problem, while the dashboard counts the very same
+         * request on {@code eddi.tenant.quota.unavailable{type=agent}}. The three gates
+         * in {@code ConversationService} already split the two; this one did not.
+         */
+        @Test
+        @DisplayName("an accounting outage throws QuotaAccountingUnavailableException (503), not QuotaExceededException (429)")
+        void accountingOutageIsNotReportedAsOverQuota() throws Exception {
+            when(deploymentStore.readDeploymentInfos(any())).thenReturn(List.of(deployed("agent-a", 1)));
+            when(tenantQuotaService.checkAgentQuota(eq(TENANT), eq(1)))
+                    .thenReturn(QuotaCheckResult.unavailable("Quota accounting unavailable - denying request for safety"));
+
+            QuotaAccountingUnavailableException thrown = assertThrows(QuotaAccountingUnavailableException.class,
+                    () -> admin.deployAgent(Deployment.Environment.production, NEW_AGENT, 1, true, false));
+
+            assertEquals("Quota accounting unavailable - denying request for safety", thrown.getMessage());
+            // Still fails closed: nothing is deployed while the store cannot be read.
             verify(runtime, never()).submitCallable(any(Callable.class), any());
         }
     }

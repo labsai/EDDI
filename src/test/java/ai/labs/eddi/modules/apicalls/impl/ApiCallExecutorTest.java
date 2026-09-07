@@ -78,7 +78,7 @@ class ApiCallExecutorTest {
         when(globalVariableResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
 
         executor = new ApiCallExecutor(httpClient, jsonSerialization, runtime, prePostUtils, globalVariableResolver, secretResolver,
-                callerIdentityResolver, callerIdentityContext, new RequestRedactor(callerIdentityResolver), false, DEFAULT_TIMEOUT_MILLIS,
+                callerIdentityResolver, callerIdentityContext, new RequestRedactor(callerIdentityResolver), null, false, DEFAULT_TIMEOUT_MILLIS,
                 DEFAULT_MAX_RESPONSE_SIZE);
 
         memory = mock(IConversationMemory.class);
@@ -450,7 +450,7 @@ class ApiCallExecutorTest {
         realContext.bind(new CallerIdentity("caller-jwt-value", "alice", "https://eddi.example:443"));
         var realResolver = new CallerIdentityResolver(realContext, true);
         var executorWithRealResolver = new ApiCallExecutor(httpClient, jsonSerialization, runtime, prePostUtils, globalVariableResolver,
-                secretResolver, realResolver, realContext, new RequestRedactor(realResolver), false, DEFAULT_TIMEOUT_MILLIS,
+                secretResolver, realResolver, realContext, new RequestRedactor(realResolver), null, false, DEFAULT_TIMEOUT_MILLIS,
                 DEFAULT_MAX_RESPONSE_SIZE);
         try {
             ApiCall call = createSimpleApiCall("redact-call", false);
@@ -760,7 +760,7 @@ class ApiCallExecutorTest {
         realContext.bind(new CallerIdentity("caller-jwt-value", "alice", "https://eddi.example:443"));
         var realResolver = new CallerIdentityResolver(realContext, true);
         var executorWithRealResolver = new ApiCallExecutor(httpClient, jsonSerialization, runtime, prePostUtils, globalVariableResolver,
-                secretResolver, realResolver, realContext, new RequestRedactor(realResolver), false, DEFAULT_TIMEOUT_MILLIS,
+                secretResolver, realResolver, realContext, new RequestRedactor(realResolver), null, false, DEFAULT_TIMEOUT_MILLIS,
                 DEFAULT_MAX_RESPONSE_SIZE);
         try {
             ApiCall call = createSimpleApiCall("path-ref-call", false);
@@ -965,7 +965,7 @@ class ApiCallExecutorTest {
     @Test
     void execute_ssrfProtectionEnabled_blocksInternalUrl() {
         ApiCallExecutor protectedExecutor = new ApiCallExecutor(httpClient, jsonSerialization, runtime, prePostUtils, globalVariableResolver,
-                secretResolver, callerIdentityResolver, callerIdentityContext, new RequestRedactor(callerIdentityResolver), true,
+                secretResolver, callerIdentityResolver, callerIdentityContext, new RequestRedactor(callerIdentityResolver), null, true,
                 DEFAULT_TIMEOUT_MILLIS, DEFAULT_MAX_RESPONSE_SIZE);
         ApiCall call = createSimpleApiCall("ssrf-call", false);
         // 169.254.169.254 is a literal IP (no DNS) blocked by UrlValidationUtils.
@@ -975,7 +975,7 @@ class ApiCallExecutorTest {
     @Test
     void execute_ssrfProtectionEnabled_disablesRedirectsOnPublicUrl() throws Exception {
         ApiCallExecutor protectedExecutor = new ApiCallExecutor(httpClient, jsonSerialization, runtime, prePostUtils, globalVariableResolver,
-                secretResolver, callerIdentityResolver, callerIdentityContext, new RequestRedactor(callerIdentityResolver), true,
+                secretResolver, callerIdentityResolver, callerIdentityContext, new RequestRedactor(callerIdentityResolver), null, true,
                 DEFAULT_TIMEOUT_MILLIS, DEFAULT_MAX_RESPONSE_SIZE);
         ApiCall call = createSimpleApiCall("redir-call", false);
         setupSuccessResponse(200, "ok", "text/plain");

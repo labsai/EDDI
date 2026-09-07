@@ -6,9 +6,9 @@ package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.configs.agents.IAgentStore;
-import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
-import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
+import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
@@ -76,7 +76,7 @@ class AgentOrchestratorLocalToolAssemblyTest {
         return new AgentOrchestrator(calculator, dateTime, webSearch, dataFormatter, webScraper, textSummarizer,
                 pdfReader, weather, fetchPage,
                 mock(ToolExecutionService.class), mock(McpToolProviderManager.class), mock(A2AToolProviderManager.class),
-                mock(IRestAgentStore.class), mock(IRestWorkflowStore.class), mock(IResourceClientLibrary.class),
+                mock(IWorkflowStore.class), mock(IResourceClientLibrary.class),
                 mock(IApiCallExecutor.class), mock(IJsonSerialization.class), mock(IMemoryItemConverter.class),
                 mock(IUserMemoryStore.class), mock(ToolResponseTruncator.class), mock(TenantQuotaService.class),
                 mock(MemorySnapshotService.class), mock(AgentSetupService.class), mock(CapabilityRegistryService.class),
@@ -204,7 +204,7 @@ class AgentOrchestratorLocalToolAssemblyTest {
         var whitelist = List.of("calculator", "converse_with_agent");
 
         var specs = orchestrator().buildToolSetup(task(true, whitelist), memoryWithUserMemory()).builtInSpecs();
-        var names = specs.stream().map(dev.langchain4j.agent.tool.ToolSpecification::name).toList();
+        var names = specs.stream().map(ToolSpecification::name).toList();
 
         // The DISPATCH name, not the canonical slug: the whitelist is keyed by slug
         // ("calculator") but the assembled spec carries the @Tool method name.
@@ -238,7 +238,7 @@ class AgentOrchestratorLocalToolAssemblyTest {
         task.setToolLoadingStrategy(LlmConfiguration.ToolLoadingStrategy.LAZY);
 
         var names = orchestrator().buildToolSetup(task, memory()).toolSpecs().stream()
-                .map(dev.langchain4j.agent.tool.ToolSpecification::name).toList();
+                .map(ToolSpecification::name).toList();
 
         assertTrue(names.contains("discover_tools"), "LAZY must still advertise the meta-tool: " + names);
     }

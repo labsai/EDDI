@@ -27,8 +27,47 @@ When you export an agent, EDDI packages:
 - ✅ Version information
 - ✅ Configuration metadata
 - ✅ **Origin IDs** (resource identifiers for merge tracking)
+- ✅ **Prompt snippets** the agent's configurations reference, under `snippets/`
+- ✅ **Scheduled triggers** (cron and heartbeat) of the agent, under `schedules/`
 
 **Note**: Conversations and conversation history are **NOT** exported (only configurations).
+HITL approval-timeout schedules are not exported either: they are safety timers for one
+pending approval on that deployment, and the import surface refuses to mint them for anybody.
+
+### Selecting What to Export
+
+Three independent query parameters filter the archive. Each is **three-state**: absent means
+"no selection was expressed for this type" and exports all of it, a value filters, and a
+present-but-empty value means "none of them".
+
+| Parameter           | Filters                                | Absent           | Empty (`&selectedSnippets=`) |
+| ------------------- | -------------------------------------- | ---------------- | ---------------------------- |
+| `selectedResources` | Extension resources (by resource id)    | all of them      | all of them (blank = no filter) |
+| `selectedSnippets`  | Prompt snippets (by resource id)        | all referenced   | none                         |
+| `selectedSchedules` | Scheduled triggers (by schedule id)     | all of the agent | none                         |
+
+`selectedResources` is the exception: it is the older parameter and only a **non-blank**
+value filters, so a blank one is a full export. Agent and workflow skeletons are always
+included.
+
+When `selectedResources` omits an extension, the exported workflow **keeps the step that
+referenced it** — the archive states what the source deployment actually runs. What happens
+to a reference the archive cannot satisfy is the importer's call, because only it knows the
+strategy: **`merge` answers it from the target's own copy** of that configuration (and
+`400`s naming the resource when the target has none), while **`create` drops the step** —
+there is nothing on a brand-new agent to answer it with — and logs a warning naming it.
+
+> Dropping the step on export instead makes `merge` destructive: it replaces the target's
+> workflow with the archived one, so exporting only the behaviour rules from staging and
+> merging them into production would delete production's own LLM and output steps.
+
+### Archive Retention
+
+A finished archive lives under `tmp/archives/` and is deleted after
+`eddi.backup.export.retention-minutes` (default `60`). The sweep runs both before each
+export and on a timer (`eddi.backup.export.sweep-interval`, default `15m`), so an instance
+that stops exporting still reclaims what it wrote. Read the filename from the `Location`
+header and download it within the window; afterwards the download answers `404`.
 
 ### Import Strategies
 
@@ -108,11 +147,13 @@ PRODUCTION EDDI  (has the agent from first import)
 **Scenario 1: Promoting to Production (first time)**
 
 ```bash
-# 1. Export from test environment
-curl -X POST http://test.eddi.com/backup/export/agent123?agentVersion=1
+# 1. Export from test environment — the Location header names the ZIP
+LOCATION=$(curl -s -D - -o /dev/null -X POST \
+  "http://test.eddi.com/backup/export/agent123?agentVersion=1" \
+  | grep -i '^location:' | tr -d '\r' | awk '{print $2}')
 
 # 2. Download the ZIP
-curl -O http://test.eddi.com/backup/export/agent123-1.zip
+curl -o agent123-1.zip "http://test.eddi.com${LOCATION}"
 
 # 3. Import to production (creates new agent)
 curl -X POST -H "Content-Type: application/zip" \
@@ -126,8 +167,10 @@ curl -X POST http://prod.eddi.com/administration/production/deploy/{newAgentId}?
 
 ```bash
 # 1. Export updated agent from dev
-curl -X POST http://dev.eddi.com/backup/export/agent123?agentVersion=3
-curl -O http://dev.eddi.com/backup/export/agent123-3.zip
+LOCATION=$(curl -s -D - -o /dev/null -X POST \
+  "http://dev.eddi.com/backup/export/agent123?agentVersion=3" \
+  | grep -i '^location:' | tr -d '\r' | awk '{print $2}')
+curl -o agent123-3.zip "http://dev.eddi.com${LOCATION}"
 
 # 2. Preview what would change in production
 curl -X POST -H "Content-Type: application/zip" \
@@ -147,7 +190,7 @@ curl -X POST http://prod.eddi.com/administration/production/deploy/{agentId}?ver
 # Preview first to get the origin IDs
 curl -X POST -H "Content-Type: application/zip" \
   --data-binary @agent123-3.zip http://prod.eddi.com/backup/import/preview
-# Response includes originId for each resource
+# Response includes sourceId for each resource
 
 # Merge only the behavior rules and HTTP calls (by origin ID)
 curl -X POST -H "Content-Type: application/zip" \
@@ -155,15 +198,25 @@ curl -X POST -H "Content-Type: application/zip" \
   "http://prod.eddi.com/backup/import?strategy=merge&selectedResources=origin-beh-1,origin-http-1"
 ```
 
+> **`selectedResources` covers every preview row, not just the extensions.** Naming two
+> extension ids deselects everything else the preview listed — including the archive's
+> **scheduled triggers**, which are then not imported. The answer says so: the `201`
+> carries `X-Schedules-Skipped: <count>` whenever the selection left schedules out, and
+> the same count is logged at `INFO`. List the schedule `sourceId`s alongside the
+> extension ones if you want them, or omit the parameter entirely to take the whole
+> archive. Prompt snippets are the one exception: they are matched by name and imported
+> regardless of the selection.
+
 **Scenario 4: Disaster Recovery**
 
 ```bash
 # Regular automated backup (cron job)
 #!/bin/bash
 DATE=$(date +%Y%m%d)
-curl -X POST http://prod.eddi.com/backup/export/agent123?agentVersion=1
-curl -O http://prod.eddi.com/backup/export/agent123-1.zip
-mv agent123-1.zip "backups/agent123-$DATE.zip"
+LOCATION=$(curl -s -D - -o /dev/null -X POST \
+  "http://prod.eddi.com/backup/export/agent123?agentVersion=1" \
+  | grep -i '^location:' | tr -d '\r' | awk '{print $2}')
+curl -o "backups/agent123-$DATE.zip" "http://prod.eddi.com${LOCATION}"
 aws s3 cp "backups/agent123-$DATE.zip" s3://agent-backups/
 
 # Restore after failure
@@ -217,13 +270,19 @@ Send a **`POST`** request to export. The response `Location` header contains the
 | API Endpoint | `/backup/export/{agentId}?agentVersion={version}` |
 | Response     | `Location` header with ZIP download URL           |
 
+The filename is `{urlEncodedAgentName}-{agentId}-{agentVersion}.zip` whenever the agent's
+descriptor carries a name (it drops to `{agentId}-{agentVersion}.zip` only for a nameless
+agent), so read it from the `Location` header rather than constructing it.
+
 **Example:**
 
 ```bash
-curl -X POST http://localhost:7070/backup/export/agent123?agentVersion=1
-# Response Header: Location: /backup/export/agent123-1.zip
+LOCATION=$(curl -s -D - -o /dev/null -X POST \
+  "http://localhost:7070/backup/export/agent123?agentVersion=1" \
+  | grep -i '^location:' | tr -d '\r' | awk '{print $2}')
+# e.g. /backup/export/My+Agent-agent123-1.zip
 
-curl -O http://localhost:7070/backup/export/agent123-1.zip
+curl -O "http://localhost:7070${LOCATION}"
 ```
 
 ### Importing an Agent (Create)
@@ -261,34 +320,44 @@ Dry-run analysis: returns what would change without modifying any data.
 
 ```json
 {
-  "agentOriginId": "original-agent-id-from-source",
-  "agentName": "My Agent",
+  "sourceAgentId": "original-agent-id-from-source",
+  "sourceAgentName": "My Agent",
+  "targetAgentId": "local-agent-id",
+  "targetAgentName": "My Agent",
   "resources": [
     {
-      "originId": "original-resource-id",
+      "sourceId": "original-resource-id",
       "resourceType": "agent",
       "name": "My Agent",
       "action": "UPDATE",
-      "localId": "local-agent-id",
-      "localVersion": 1
+      "targetId": "local-agent-id",
+      "targetVersion": 1,
+      "matchStrategy": "originId",
+      "workflowIndex": -1
     },
     {
-      "originId": "original-behavior-id",
+      "sourceId": "original-behavior-id",
       "resourceType": "behavior",
       "name": "Greeting Rules",
       "action": "CREATE",
-      "localId": null,
-      "localVersion": null
+      "targetId": null,
+      "targetVersion": null,
+      "matchStrategy": null,
+      "workflowIndex": 0
     }
   ]
 }
 ```
+
+Upgrade previews additionally populate `sourceContent` and `targetContent` with the
+raw JSON of each side. The `sourceId` values are what `selectedResources` expects.
 
 **Actions:**
 
 - `CREATE` — No matching local resource found; will be created
 - `UPDATE` — Matching local resource found; will be updated
 - `SKIP` — Resource is unchanged; will be skipped
+- `CONFLICT` — Match is ambiguous; must be resolved manually
 
 ### Importing an Agent (Merge)
 
@@ -318,6 +387,11 @@ curl -X POST -H "Content-Type: application/zip" \
   "http://localhost:7070/backup/import?strategy=merge&selectedResources=origin-id-1,origin-id-2"
 ```
 
+`selectedResources` is one flat list over **every** row the preview returned — extensions
+and scheduled triggers alike — so anything not named is left out. A selection of extension
+ids therefore imports no schedules; the response then carries `X-Schedules-Skipped: <count>`
+and the same count is logged at `INFO`. Omit the parameter to import the whole archive.
+
 > **Important:** The agent will not be deployed after import — you must deploy it yourself using the [Deployment API](deployment-management-of-agents.md).
 
 ---
@@ -339,6 +413,66 @@ curl -X POST -H "Content-Type: application/zip" \
 ```
 
 The upgrade strategy matches resources by **structure** (workflow position, extension type, snippet name) rather than by origin ID. See [Agent Sync](agent-sync-guide.md) for details on how structural matching works.
+
+### Upgrade response codes
+
+An upgrade (and every `/backup/sync` call, which shares the same executor) answers with one
+of three statuses. **All three are 2xx**, so a client must branch on the status code, not on
+`response.ok`:
+
+| Status                 | Meaning                                                                                     |
+| ---------------------- | ------------------------------------------------------------------------------------------- |
+| `200 OK`               | Source and target already agree. Nothing was written and no agent version was burned.        |
+| `201 Created`          | Everything landed and something was written.                                                 |
+| `207 Multi-Status`     | **Partially applied.** The body's `failures[]` names every resource that could not be written. |
+
+The body is an `UpgradeResult` (`agentUri`, `agentUpdated`, `updated`, `created`, `skipped`,
+`failures[]`) on all three, and the `Location` header is present on all three.
+
+### Restoring an EDDI 5.x archive
+
+A genuine 5.x export names its agent file `<id>.bot.json` and its workflow file
+`<id>.package.json` with a `packageExtensions` step list. Both are accepted, and legacy
+`eddi://` URIs are rewritten to their v6 form on the way in.
+
+### What happens to schedules on import
+
+Imported schedules are repointed at the agent the import just wrote, and everything belonging
+to the source deployment is reset: `nextFire` is recomputed from the cron expression (an
+archived one is either long past — firing during the restore — or absent, so it would never
+fire), `agentVersion` goes back to `0` ("latest"), and the tenant and persistent conversation
+are cleared. Every write goes through the ordinary schedule API, so the same rules apply as
+when creating a schedule by hand: a schedule may not run as another user unless you are an
+administrator, its agent's USE gate is checked, and its cron expression is validated. A
+schedule that is refused fails the whole import with that status.
+
+**`userId` is source-deployment state too.** It is the identity every fire *acts as*, minted by
+whichever identity provider the source instance used, so it is kept only when it is already
+your own and cleared otherwise — the imported schedule then runs as the system scheduler until
+you assign an owner. Two consequences worth knowing: you can import somebody else's archive
+without being an administrator, and a **Dream consolidation** schedule arrives with no owner and
+rejects its first fire with a message naming the field to set. Set `userId` on it after the
+import (`PUT /schedulestore/schedules/{id}`) — that is deliberately louder than silently
+consolidating the memories of whichever local user happens to hold the archived id.
+
+With `strategy=merge`, a schedule whose **name** matches one the target agent already has is
+updated in place rather than added, so re-importing the same agent does not accumulate
+duplicate cron jobs. Such an update replaces what the schedule *does* — cron, message, agent —
+but never **who it runs as**: when the archive brings no identity of its own (the usual case,
+per the paragraph above), the owner already on the target is kept. Otherwise every promotion
+reset that schedule to the system scheduler, which stops Dream consolidation and drops the
+schedule's ownership protection. The target's HITL approval timers are excluded from that name matching —
+they are per-conversation safety timers, never part of an agent's configuration, and the export
+side leaves them out for the same reason. If the import fails after a schedule was overwritten,
+the target's original is written back as part of the rollback. The merge preview says so:
+a schedule whose name the target already uses is listed as `UPDATE` with that schedule's id,
+not as `CREATE`.
+
+Schedules also honour `selectedResources`: unticking one in the import preview keeps it out.
+Because that parameter is a single flat list across every preview row, a caller who names
+only extension ids leaves **all** of them out — the import answers `X-Schedules-Skipped: <count>`
+and logs the same number at `INFO`, rather than a bare `201` for an agent whose nightly job
+did not come back. Name the schedule ids too, or leave `selectedResources` off.
 
 ## Live Sync (Without ZIP)
 

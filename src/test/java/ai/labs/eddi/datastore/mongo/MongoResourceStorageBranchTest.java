@@ -22,6 +22,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 import java.util.function.Consumer;
 
+import org.bson.BsonDocument;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -77,12 +78,14 @@ class MongoResourceStorageBranchTest {
 
         new MongoResourceStorage<>(database, "indexed", documentBuilder, String.class, "field1", "field2");
 
-        // The ID_FIELD+VERSION_FIELD unique index on currentCollection +
-        // two indexes on each collection for field1, field2
-        // = 1 (unique on current) + 2 (on current) + 2 (on history) = 5 createIndex
-        // calls
+        // current: 1 unique (_id, _version) + field1 + field2 = 3
+        // history: 1 on the nested (_id._id, _id._version) + field1 + field2 = 3.
+        // The history one was added with the nested-id filter that fixed the version-0
+        // escape: the built-in _id index covers the whole embedded subdocument and
+        // cannot serve a dotted path into it, so without it removeAllPermanently and
+        // readHistoryLatest COLLSCAN. This assertion read 2 and so pinned its absence.
         verify(curCol, times(3)).createIndex(any(Bson.class), any());
-        verify(histCol, times(2)).createIndex(any(Bson.class), any());
+        verify(histCol, times(3)).createIndex(any(Bson.class), any());
     }
 
     // ==================== findHistoryResourceIdsContaining ====================
@@ -151,7 +154,7 @@ class MongoResourceStorageBranchTest {
 
             Document doc = new Document("_id", new ObjectId(VALID_ID)).append("_version", 1);
             FindIterable<Document> iterable = mock(FindIterable.class);
-            when(currentCollection.find(any(org.bson.BsonDocument.class))).thenReturn(iterable);
+            when(currentCollection.find(any(BsonDocument.class))).thenReturn(iterable);
             when(iterable.sort(any(Document.class))).thenReturn(iterable);
             when(iterable.limit(anyInt())).thenReturn(iterable);
             when(iterable.skip(anyInt())).thenReturn(iterable);
@@ -181,7 +184,7 @@ class MongoResourceStorageBranchTest {
             when(qfs.getConnectingType()).thenReturn(IResourceFilter.QueryFilters.ConnectingType.OR);
 
             FindIterable<Document> iterable = mock(FindIterable.class);
-            when(currentCollection.find(any(org.bson.BsonDocument.class))).thenReturn(iterable);
+            when(currentCollection.find(any(BsonDocument.class))).thenReturn(iterable);
             when(iterable.sort(any(Document.class))).thenReturn(iterable);
             when(iterable.limit(anyInt())).thenReturn(iterable);
             when(iterable.skip(anyInt())).thenReturn(iterable);
@@ -205,7 +208,7 @@ class MongoResourceStorageBranchTest {
             when(qfs.getConnectingType()).thenReturn(IResourceFilter.QueryFilters.ConnectingType.AND);
 
             FindIterable<Document> iterable = mock(FindIterable.class);
-            when(currentCollection.find(any(org.bson.BsonDocument.class))).thenReturn(iterable);
+            when(currentCollection.find(any(BsonDocument.class))).thenReturn(iterable);
             when(iterable.sort(any(Document.class))).thenReturn(iterable);
             when(iterable.limit(anyInt())).thenReturn(iterable);
             when(iterable.skip(anyInt())).thenReturn(iterable);

@@ -4,7 +4,7 @@
  */
 package ai.labs.eddi.integrations.channels;
 
-import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.channels.IChannelIntegrationStore;
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.channels.model.ChannelTarget;
@@ -38,7 +38,7 @@ class ChannelTargetRouterTest {
     @Mock
     private IRestAgentAdministration agentAdmin;
     @Mock
-    private IRestAgentStore agentStore;
+    private IAgentStore agentStore;
     @Mock
     private SecretResolver secretResolver;
     @Mock

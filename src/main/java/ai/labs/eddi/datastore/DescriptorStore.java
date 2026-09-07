@@ -55,6 +55,29 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
     private static final String FIELD_ORIGIN_ID = "originId";
 
     /**
+     * The materialised access-control index on {@code DocumentDescriptor}, which
+     * every owner-filtered listing ANDs a predicate on.
+     *
+     * <h3>What this index does and does not buy</h3> Declared here so both backends
+     * create it, and so a future exact-match or prefix query on the field is
+     * served. It does <b>not</b> make the current access predicate index-backed:
+     * that predicate is an unanchored regex ({@code |token|} has to match
+     * mid-string), and neither MongoDB nor PostgreSQL can use a btree index for
+     * one. The scoped listing is therefore a scan.
+     * <p>
+     * That is not a regression — the type predicate this store has always applied
+     * ({@code "eddi://" + type + ".*"}) is a regex scan too, so the access group
+     * adds predicates to a scan rather than turning an indexed lookup into one —
+     * but it is a real ceiling on a collection shared with conversation
+     * descriptors. Making it index-backed means storing the tokens as an
+     * <em>array</em> and querying with {@code $in} / a GIN index, which needs
+     * {@link IResourceFilter} to grow an operator beyond "string means regex".
+     * Worth doing; deliberately not done blind, since the PostgreSQL half cannot be
+     * verified without a PostgreSQL to run it on.
+     */
+    public static final String FIELD_ACCESS_INDEX = "accessIndex";
+
+    /**
      * Every field this store filters or sorts on. Passed to the storage factory so
      * BOTH backends index them — MongoDB as ascending single-field indexes,
      * PostgreSQL as expression indexes on the shared {@code resources} table.
@@ -64,7 +87,7 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
      * listing as a full scan with a regex and a text sort on top.
      */
     private static final String[] INDEXED_FIELDS = {FIELD_RESOURCE, FIELD_USER_ID, FIELD_NAME, FIELD_AGENT_NAME, FIELD_DESCRIPTION,
-            FIELD_LAST_MODIFIED, FIELD_DELETED, FIELD_ORIGIN_ID};
+            FIELD_LAST_MODIFIED, FIELD_DELETED, FIELD_ORIGIN_ID, FIELD_ACCESS_INDEX};
 
     private final ModifiableHistorizedResourceStore<T> descriptorResourceStore;
     private final IResourceStorage<T> resourceStorage;
@@ -80,6 +103,43 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
 
     @Override
     public List<T> readDescriptors(String type, String filter, Integer index, Integer limit, boolean includeDeleted)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+        return readDescriptors(type, filter, index, limit, includeDeleted, null);
+    }
+
+    /**
+     * As {@link #readDescriptors(String, String, Integer, Integer, boolean)}, with
+     * an extra group of filters ANDed into the query.
+     * <p>
+     * Used to restrict a listing to what the caller may see. The restriction is
+     * applied <em>in the query</em>, not to the returned page: filtering afterwards
+     * would return short pages and force the kind of scan-budgeted back-fill
+     * {@code RestConversationStore} has to do for conversations, where no such
+     * predicate exists.
+     * <p>
+     * The parameter is a raw {@code QueryFilters} rather than the
+     * {@code AccessScope} that produces it, so this package keeps knowing nothing
+     * about the security model — {@code DocumentDescriptorStore} does the
+     * conversion.
+     *
+     * @param accessRestriction
+     *            an additional filter group, or {@code null} for no restriction
+     */
+    public List<T> readDescriptors(String type, String filter, Integer index, Integer limit, boolean includeDeleted,
+                                   IResourceFilter.QueryFilters accessRestriction)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+        return readDescriptors(type, filter, index, limit, includeDeleted, accessRestriction, null);
+    }
+
+    /**
+     * As above, with a further AND-ed group — used to narrow a listing to one
+     * space.
+     *
+     * @param extraRestriction
+     *            an additional filter group, or {@code null}
+     */
+    public List<T> readDescriptors(String type, String filter, Integer index, Integer limit, boolean includeDeleted,
+                                   IResourceFilter.QueryFilters accessRestriction, IResourceFilter.QueryFilters extraRestriction)
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
 
         List<IResourceFilter.QueryFilter> queryFiltersRequired = new LinkedList<>();
@@ -114,14 +174,21 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
             skip = 0;
         }
 
-        IResourceFilter.QueryFilters[] allFilters;
+        // Groups are always ANDed together, so appending the access restriction as its
+        // own group narrows the result without disturbing how the optional text filter
+        // ORs within itself.
+        List<IResourceFilter.QueryFilters> filterGroups = new LinkedList<>();
+        filterGroups.add(required);
         if (!queryFiltersOptional.isEmpty()) {
-            IResourceFilter.QueryFilters optional = new IResourceFilter.QueryFilters(IResourceFilter.QueryFilters.ConnectingType.OR,
-                    queryFiltersOptional);
-            allFilters = new IResourceFilter.QueryFilters[]{required, optional};
-        } else {
-            allFilters = new IResourceFilter.QueryFilters[]{required};
+            filterGroups.add(new IResourceFilter.QueryFilters(IResourceFilter.QueryFilters.ConnectingType.OR, queryFiltersOptional));
         }
+        if (accessRestriction != null && !accessRestriction.getQueryFilters().isEmpty()) {
+            filterGroups.add(accessRestriction);
+        }
+        if (extraRestriction != null && !extraRestriction.getQueryFilters().isEmpty()) {
+            filterGroups.add(extraRestriction);
+        }
+        IResourceFilter.QueryFilters[] allFilters = filterGroups.toArray(new IResourceFilter.QueryFilters[0]);
 
         // Use the storage-level findResources for database-agnostic querying
         List<IResourceStore.IResourceId> matchingIds = resourceStorage.findResources(allFilters, FIELD_LAST_MODIFIED, skip, effectiveLimit);

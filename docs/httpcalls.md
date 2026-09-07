@@ -26,12 +26,12 @@ Typically, Behavior Rules decide **when** to make an API call by triggering an a
 
 ### Key Features
 
-- **Template-based**: Use conversation memory in URLs, headers, and body (e.g., `${context.userName}`)
+- **Template-based**: Use conversation memory in URLs, headers, and body (e.g., `{context.userName}`)
 - **Response handling**: Save JSON responses to memory for use in outputs or subsequent calls
 - **Chaining**: One HttpCall's response can be used in another HttpCall
 - **Quick reply generation**: Automatically create quick reply buttons from API response arrays
 - **Property extraction**: Extract specific values from responses and save them to conversation memory
-- **Batch requests**: Make multiple API calls by iterating over an array
+- **Batch requests**: Make multiple API calls by iterating over an array (requires `"fireAndForget": true`)
 - **Fire and forget**: Optional asynchronous calls that don't wait for a response
 - **Caller identity**: Call an API *as the signed-in user* with `${caller:token}` — see [Calling as the signed-in user](#calling-as-the-signed-in-user)
 
@@ -163,7 +163,7 @@ We will emphasize the `httpCall` model and go through an example step by step, y
         "propertyInstructions": [
           {
             "name": "string",
-            "value": "string",
+            "valueString": "string",
             "scope": "string",
             "fromObjectPath": "savedObjName.something.something",
             "override": boolean,
@@ -187,19 +187,19 @@ We will emphasize the `httpCall` model and go through an example step by step, y
 
 An `httpCall` is mainly composed from the `targetServer` `array` of `httpCalls`, the latter will have request where you put all details about your actual **http request** (`method`,`path`,`headers`, etc..) and postResponse where you can define what happens after the `httpCall` has been executed and a `response` has been received; such as quick replies by using `qrBuildInstruction`.
 
-You can use _**`${memory.current.httpCalls.<responseObjectName>}`**_ to access your `JSON` object, so you can use it in `output templating` or in another `httpCall`, for example an `httpCall` will get the `oAuth` `token` and another `httpCall` will use in the `http` `headers` to authenticate to an API.
+You can use _**`{memory.current.httpCalls.<responseObjectName>}`**_ to access your `JSON` object, so you can use it in `output templating` or in another `httpCall`, for example an `httpCall` will get the `oAuth` `token` and another `httpCall` will use in the `http` `headers` to authenticate to an API.
 
 ### Description of the model
 
 | Element                                                                     | Description                                                                                                                                                                                                                      |
 | --------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | targetServerUrl                                                             | (`String`) `root/context` path of the `httpCall` (e.g `http://example.com/api)`                                                                                                                                                  |
-| httpCall.saveResponse                                                       | (`Boolean`) whether to save the `JSON` response into `${memory.current.httpCalls}`                                                                                                                                               |
+| httpCall.saveResponse                                                       | (`Boolean`) whether to save the `JSON` response into `{memory.current.httpCalls}`                                                                                                                                               |
 | httpCall.fireAndForget                                                      | (`Boolean`) whether to execute the request without waiting for a response to be returned, (useful for `POST`)                                                                                                                    |
 | httpCall.responseObjectName                                                 | (`String`) name of the `JSON` object so it can be accessed from other `httpCalls` or `outputsets`.                                                                                                                               |
 | httpCall.responseHeaderObjectName                                           | (`String`) name under which the RESPONSE headers are stored, reachable as `{memory.current.httpCalls.<responseHeaderObjectName>.<Header-Name>}` and, for an LLM tool, returned under the result's `headers` key. Unset by default — set it only when the answer you need is in a header (a `201`'s `Location`, say) rather than the body, since headers reach conversation memory unredacted. Header names are matched case-insensitively, and credential-bearing headers (`Set-Cookie`, `WWW-Authenticate`, …) are never stored. |
 | httpCall.actions                                                            | (`String`) name of the `output`/`behavior` set mapped to this http call.                                                                                                                                                         |
-| httpCall.preRequest.batchRequests.pathToTargetArray                         | (`String`) `JSON` path to the target array to be used as body of requests e.g: "`memory.current.output`"                                                                                                                         |
+| httpCall.preRequest.batchRequests.pathToTargetArray                         | (`String`) `JSON` path to the target array to be used as body of requests e.g: "`memory.current.output`". Only honoured when `fireAndForget` is `true`; on a call that waits for a response the batch instruction is ignored and exactly one request is sent. |
 | httpCall.preRequest.batchRequests.iterationObjectName                       | (`String`) name of the variable to be used for each element of array found in `pathToTargetArray`                                                                                                                                |
 | httpCall.request.path                                                       | (`String`) path in the `targetServer` of the `httpCall` (e.g /`books`)                                                                                                                                                           |
 | httpCall.request.headers                                                    | (`Array`:\<key, value> ) for each `httpCall HTTP header`                                                                                                                                                                         |
@@ -212,7 +212,7 @@ You can use _**`${memory.current.httpCalls.<responseObjectName>}`**_ to access y
 | httpCall.postResponse.qrBuildInstructions[].quickReplyValue                 | (`String`) `Qute expression` to use as a `quickReply` value.                                                                                                                                                                |
 | httpCall.postResponse.qrBuildInstructions[].quickReplyExpressions           | (`String`) `expression` to retrieve a property from `iterationObjectName`.                                                                                                                                                       |
 | httpCall.postResponse.propertyInstructions.name                             | (`String`) name of property to be used in templating                                                                                                                                                                             |
-| httpCall.postResponse.propertyInstructions.value                            | (`String`) a static value can be set here if `fromObjectPath` is not defined.                                                                                                                                                    |
+| httpCall.postResponse.propertyInstructions.valueString                      | (`String`) a static value can be set here if `fromObjectPath` is not defined. Typed siblings exist for other value types: `valueInt`, `valueFloat`, `valueBoolean`, `valueObject`, `valueList`.                                   |
 | httpCall.postResponse.propertyInstructions.scope                            | <p>(<code>String</code>) Can be either : </p><p><code>step</code> used for only for one user interaction </p><p><code>conversation</code> for entire conversation and </p><p><code>longTerm</code> for between conversations</p> |
 | httpCall.postResponse.propertyInstructions.fromObjectPath                   | (`String`) JSON path to the saved object e.g `savedObjName.something.something`                                                                                                                                                  |
 | httpCall.postResponse.propertyInstructions.override                         | (`Boolean`) flag for override                                                                                                                                                                                                    |
@@ -223,13 +223,13 @@ You can use _**`${memory.current.httpCalls.<responseObjectName>}`**_ to access y
 
 | HTTP Method | API Endpoint                                    | Request Body    | Response                              |
 | ----------- | ----------------------------------------------- | --------------- | ------------------------------------- |
-| POST        | `/httpcallsstore/httpcalls`                     | http-call-model | N/A                                   |
-| GET         | `/httpcallsstore/httpcalls/descriptors`         | N/A             | list of references to http-call-model |
-| DELETE      | `/httpcallsstore/httpcalls/{id}`                | N/A             | N/A                                   |
-| GET         | `/httpcallsstore/httpcalls/{id}`                | N/A             | http-call-model                       |
-| PUT         | `/httpcallsstore/httpcalls/{id}`                | http-call-model | N/A                                   |
-| GET         | `/httpcallsstore/httpcalls/{id}/currentversion` | N/A             | http-call-model                       |
-| POST        | `/httpcallsstore/httpcalls/{id}/currentversion` | http-call-model | N/A                                   |
+| POST        | `/apicallstore/apicalls`                     | http-call-model | N/A                                   |
+| GET         | `/apicallstore/apicalls/descriptors`         | N/A             | list of references to http-call-model |
+| DELETE      | `/apicallstore/apicalls/{id}`                | N/A             | N/A                                   |
+| GET         | `/apicallstore/apicalls/{id}`                | N/A             | http-call-model                       |
+| PUT         | `/apicallstore/apicalls/{id}`                | http-call-model | N/A                                   |
+| GET         | `/apicallstore/apicalls/{id}/currentversion` | N/A             | current version number (`text/plain` integer) |
+| POST        | `/apicallstore/apicalls/{id}/currentversion` | N/A             | `303` redirect to `/apicallstore/apicalls/{id}?version=<latest>` |
 
 ### httpCall Sample
 
@@ -278,7 +278,7 @@ You can use _**`${memory.current.httpCalls.<responseObjectName>}`**_ to access y
         "propertyInstructions": [
           {
             "name": "nameOfPropertyToBeUsedInTemplating",
-            "value": "StaticValueHereIfFromObjectPathIsNotDefined",
+            "valueString": "StaticValueHereIfFromObjectPathIsNotDefined",
             "scope": "step",
             "fromObjectPath": "savedObjName.something.something",
             "override": true,
@@ -299,14 +299,16 @@ You can use _**`${memory.current.httpCalls.<responseObjectName>}`**_ to access y
                 501,
                 502
               ]
-            },
-            "qrBuildInstruction": {
-              "pathToTargetArray": "savedObjName.data.topics",
-              "iterationObjectName": "topic",
-              "templateFilterExpression": "${topic.subType} != 'specialSubType'",
-              "quickReplyValue": "{topic.name}",
-              "quickReplyExpressions": "property(topic_id({topic.id}))"
             }
+          }
+        ],
+        "qrBuildInstructions": [
+          {
+            "pathToTargetArray": "savedObjName.data.topics",
+            "iterationObjectName": "topic",
+            "templateFilterExpression": "topic.subType != 'specialSubType'",
+            "quickReplyValue": "{topic.name}",
+            "quickReplyExpressions": "property(topic_id({topic.id}))"
           }
         ]
       }
@@ -327,7 +329,7 @@ For the sake of simplicity we will use a free weather API to fetch weather of ci
 
 _Request URL_
 
-`POST` `http://localhost:7070/regulardictionarystore/regulardictionaries`
+`POST` `http://localhost:7070/dictionarystore/dictionaries`
 
 _Request Body_
 
@@ -361,7 +363,7 @@ _Response Code_
 
 `201`
 
-> The `Location` header contains the resource URI, e.g. `eddi://ai.labs.regulardictionary/regulardictionarystore/regulardictionaries/<id>?version=1`
+> The `Location` header contains the resource URI, e.g. `eddi://ai.labs.dictionary/dictionarystore/dictionaries/<id>?version=1`
 
 ### 2 - Create the behaviorSet
 
@@ -369,7 +371,7 @@ _Response Code_
 
 _Request URL_
 
-`POST` `http://localhost:7070/behaviorstore/behaviorsets`
+`POST` `http://localhost:7070/rulestore/rulesets`
 
 _Response Body_
 
@@ -422,7 +424,7 @@ _Request Body_
 }
 ```
 
-> The `Location` header contains the resource URI, e.g. `eddi://ai.labs.behavior/behaviorstore/behaviorsets/<id>?version=1`
+> The `Location` header contains the resource URI, e.g. `eddi://ai.labs.rules/rulestore/rulesets/<id>?version=1`
 
 ### 3 - Create the **httpCall**
 
@@ -430,7 +432,7 @@ Note that we can pass user input to the http call using _**`{memory.current.inpu
 
 _Request URL_
 
-`POST` `http://localhost:7070/httpcallsstore/httpcalls`
+`POST` `http://localhost:7070/apicallstore/apicalls`
 
 _Request Body_
 
@@ -470,7 +472,7 @@ _Response Code_
 
 `201`
 
-> The `Location` header contains the resource URI, e.g. `eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/<id>?version=1`
+> The `Location` header contains the resource URI, e.g. `eddi://ai.labs.apicalls/apicallstore/apicalls/<id>?version=1`
 
 ### 4 - Create the outputSet
 
@@ -540,13 +542,13 @@ _Response Code_
 
 _Request URL_
 
-`POST` `http://localhost:7070/packagestore/packages`
+`POST` `http://localhost:7070/workflowstore/workflows`
 
 _Request Body_
 
 ```javascript
 {
-  "packageExtensions": [
+  "workflowSteps": [
     {
       "type": "eddi://ai.labs.parser",
       "extensions": {
@@ -572,7 +574,7 @@ _Request Body_
           {
             "type": "eddi://ai.labs.parser.dictionaries.regular",
             "config": {
-              "uri": "eddi://ai.labs.regulardictionary/regulardictionarystore/regulardictionaries/{{dictionary_id}}?version=1"
+              "uri": "eddi://ai.labs.dictionary/dictionarystore/dictionaries/{{dictionary_id}}?version=1"
             }
           }
         ],
@@ -600,13 +602,13 @@ _Request Body_
     {
       "type": "eddi://ai.labs.behavior",
       "config": {
-        "uri": "eddi://ai.labs.behavior/behaviorstore/behaviorsets/{{behaviourset_id}}?version=1"
+        "uri": "eddi://ai.labs.rules/rulestore/rulesets/{{behaviourset_id}}?version=1"
       }
     },
     {
       "type": "eddi://ai.labs.httpcalls",
       "config": {
-        "uri": "eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/{{httpcall_id}}?version=1"
+        "uri": "eddi://ai.labs.apicalls/apicallstore/apicalls/{{httpcall_id}}?version=1"
       }
     },
     {
@@ -632,7 +634,7 @@ Response Code
 
 `201`
 
-> The `Location` header contains the resource URI, e.g. `eddi://ai.labs.package/packagestore/packages/<id>?version=1`
+> The `Location` header contains the resource URI, e.g. `eddi://ai.labs.workflow/workflowstore/workflows/<id>?version=1`
 
 ### 6 - Creating the agent
 
@@ -644,8 +646,8 @@ _Request Body_
 
 ```javascript
 {
-  "packages": [
-    "eddi://ai.labs.package/packagestore/packages/{{package_id}}?version=1"
+  "workflows": [
+    "eddi://ai.labs.workflow/workflowstore/workflows/{{package_id}}?version=1"
   ],
   "channels": []
 }
@@ -681,7 +683,7 @@ _Response Code_
 
 _Request URL_
 
-`POST` `http://localhost:7070/agents/**<env>**/**<agent_id>**`
+`POST` `http://localhost:7070/agents/**<agent_id>**/start?environment=**<env>**`
 
 _Response Body_
 
@@ -697,7 +699,7 @@ _Response Code_
 
 _Request URL_
 
-`POST` `http://localhost:7070/agents/<env>/<agent_id>/<conversation_id>?returnDetailed=false&returnCurrentStepOnly=true`
+`POST` `http://localhost:7070/agents/<conversation_id>?returnDetailed=false&returnCurrentStepOnly=true`
 
 _Request Body_
 
@@ -750,7 +752,7 @@ _Response Code_
 
 _Request URL_
 
-`POST` `http://localhost:7070/agents/<env>/<agent_id>/<conversation_id>?returnDetailed=false&returnCurrentStepOnly=true`
+`POST` `http://localhost:7070/agents/<conversation_id>?returnDetailed=false&returnCurrentStepOnly=true`
 
 _Request Body_
 

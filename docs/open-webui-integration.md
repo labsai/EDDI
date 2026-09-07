@@ -651,7 +651,7 @@ Set `logSizeLimit: "0"` if you want each turn to carry no conversation history a
   "workflowSteps": [
     { "type": "eddi://ai.labs.parser",    "extensions": { "dictionaries": [], "corrections": [] }, "config": {} },
     { "type": "eddi://ai.labs.behavior",  "extensions": {}, "config": { "uri": "eddi://ai.labs.rules/rulestore/rulesets/…0002?version=1" } },
-    { "type": "eddi://ai.labs.langchain", "extensions": {}, "config": { "uri": "eddi://ai.labs.llm/llmstore/llms/…0003?version=1" } }
+    { "type": "eddi://ai.labs.llm",       "extensions": {}, "config": { "uri": "eddi://ai.labs.llm/llmstore/llms/…0003?version=1" } }
   ]
 }
 ```

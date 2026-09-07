@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.parser.rest;
 
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.parser.IParserStore;
 import ai.labs.eddi.configs.parser.IRestParserStore;
 import ai.labs.eddi.configs.parser.model.ParserConfiguration;
@@ -26,8 +27,9 @@ public class RestParserStore implements IRestParserStore {
     private final RestVersionInfo<ParserConfiguration> restVersionInfo;
 
     @Inject
-    public RestParserStore(IParserStore parserStore, IDocumentDescriptorStore documentDescriptorStore) {
-        restVersionInfo = new RestVersionInfo<>(resourceURI, parserStore, documentDescriptorStore);
+    public RestParserStore(IParserStore parserStore, IDocumentDescriptorStore documentDescriptorStore,
+            ResourceAccessGuard resourceAccessGuard) {
+        restVersionInfo = new RestVersionInfo<>(resourceURI, parserStore, documentDescriptorStore, resourceAccessGuard);
         this.parserStore = parserStore;
     }
 

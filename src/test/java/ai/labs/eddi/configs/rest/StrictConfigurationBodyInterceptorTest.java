@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.rest;
 
+import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
 import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
 import ai.labs.eddi.datastore.serialization.SerializationCustomizer;
 import ai.labs.eddi.engine.model.InputData;
@@ -80,6 +81,92 @@ class StrictConfigurationBodyInterceptorTest {
         assertTrue(entity.contains("behaviorGroupz"), "the offending field must be named: " + entity);
         assertTrue(entity.contains("behaviorGroups"), "the legal fields must be listed: " + entity);
         verify(context, never()).proceed();
+    }
+
+    @Test
+    @DisplayName("a value of the wrong shape is a 400 that says where and what, not an empty body")
+    void wrongValueShapeIsExplained() throws Exception {
+        // Exactly the payload docs/developer-quickstart.md used to publish:
+        // valueAlternatives documented as a list of strings, modelled as a list of
+        // typed OutputItems. RESTEasy answered 400 with content-length: 0 — no
+        // field, no expectation, no indication the body was even the problem.
+        var context = context(OutputConfigurationSet.class, """
+                {
+                  "outputSet": [
+                    {
+                      "action": "welcome_action",
+                      "timesOccurred": 0,
+                      "outputs": [ { "valueAlternatives": [ "Hello!" ] } ]
+                    }
+                  ]
+                }
+                """);
+
+        var thrown = assertThrows(BadRequestException.class, () -> interceptor.aroundReadFrom(context));
+
+        assertEquals(400, thrown.getResponse().getStatus());
+        String entity = String.valueOf(thrown.getResponse().getEntity());
+        assertFalse(entity.isBlank(), "the response must carry a message at all");
+        assertTrue(entity.contains("valueAlternatives"),
+                "the failing JSON path must be named: " + entity);
+        assertTrue(entity.contains("jsonSchema"),
+                "the reader needs somewhere to look up the right shape: " + entity);
+        // Naming only the expectation leaves the reader to work out which value on
+        // the line was wrong.
+        assertTrue(entity.contains("expected an object with a 'type' field"),
+                "the message must say what belongs there: " + entity);
+        assertTrue(entity.contains("found a string"),
+                "the message must say what was there instead: " + entity);
+        // The single most useful thing here: OutputItem is polymorphic, and the
+        // legal discriminators are exactly what the author could not guess.
+        assertTrue(entity.contains("text") && entity.contains("quickReply"),
+                "the legal type ids must be listed: " + entity);
+        verify(context, never()).proceed();
+    }
+
+    @Test
+    @DisplayName("an unknown polymorphic 'type' names it, and lists the ones that exist")
+    void unknownTypeIdIsExplained() throws Exception {
+        var context = context(OutputConfigurationSet.class, """
+                {
+                  "outputSet": [
+                    {
+                      "action": "welcome_action",
+                      "timesOccurred": 0,
+                      "outputs": [ { "valueAlternatives": [ { "type": "txt", "text": "Hello!" } ] } ]
+                    }
+                  ]
+                }
+                """);
+
+        var thrown = assertThrows(BadRequestException.class, () -> interceptor.aroundReadFrom(context));
+        String entity = String.valueOf(thrown.getResponse().getEntity());
+
+        assertTrue(entity.contains("'txt' is not a known 'type'"),
+                "the rejected id must be quoted back: " + entity);
+        assertTrue(entity.contains("text"), "the legal ids must be listed: " + entity);
+        assertFalse(entity.contains("ai.labs.eddi"),
+                "an API error must not leak internal class names: " + entity);
+    }
+
+    @Test
+    @DisplayName("the wrong-shape message stays free of Java type names")
+    void wrongShapeMessageIsNotAStackTrace() throws Exception {
+        var context = context(OutputConfigurationSet.class, """
+                { "outputSet": [ { "action": "a", "timesOccurred": "not-a-number" } ] }
+                """);
+
+        var thrown = assertThrows(BadRequestException.class, () -> interceptor.aroundReadFrom(context));
+        String entity = String.valueOf(thrown.getResponse().getEntity());
+
+        assertFalse(entity.contains("ai.labs.eddi"),
+                "an API error must not leak internal class names: " + entity);
+        assertFalse(entity.contains("com.fasterxml"),
+                "an API error must not leak Jackson internals: " + entity);
+        // A Java type name adds nothing a JSON author can act on, and "expected a
+        // int here" reads as a bug in the message rather than in the payload.
+        assertTrue(entity.contains("expected a whole number here"),
+                "the expectation must be stated in JSON terms: " + entity);
     }
 
     @Test

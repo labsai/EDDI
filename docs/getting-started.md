@@ -11,8 +11,8 @@ This article will help you to get started with **EDDI**.
 EDDI is a **middleware orchestration service** for conversational AI. When you run EDDI, you're starting:
 
 1. **The EDDI Service**: A Java/Quarkus application that exposes REST APIs for agent management and conversations
-2. **MongoDB**: A database that stores agent configurations, packages, and conversation history
-3. **Optional UI**: A web-based dashboard for managing agents (accessible at http://localhost:7070)
+2. **A database**: MongoDB (default) or PostgreSQL, storing agent configurations, workflows, and conversation history
+3. **The Manager dashboard**: A web UI bundled into the same service — no separate deployment. `http://localhost:7070/` redirects to the `/welcome` chooser, the admin dashboard is at `/manage`, and `/workforce` is the group-conversation workspace
 
 Once running, you can:
 
@@ -21,6 +21,36 @@ Once running, you can:
 - Connect to LLM services (OpenAI, Claude, Gemini, etc.)
 - Build complex conversation flows with behavior rules
 - Call external APIs from your agent logic
+
+## Verifying It Works
+
+Whichever option you pick below, these three checks tell you the install
+succeeded. They are the same ones CI runs against every published image, so if
+they pass, the service is genuinely up — not merely listening.
+
+```bash
+# 1. Readiness — the only check that also proves the database is reachable
+curl -sf http://localhost:7070/q/health/ready
+# → {"status":"UP","checks":[...]}
+
+# 2. The REST API is serving its own contract
+curl -sf -o /dev/null -w '%{http_code}' http://localhost:7070/openapi
+# → 200
+
+# 3. No agents yet — an empty list is the correct answer on a fresh install
+curl -sf http://localhost:7070/agentstore/agents/descriptors
+# → []
+```
+
+Step 3 assumes authentication is off, which is the default
+(`quarkus.oidc.tenant-enabled=false`). If you chose Keycloak in the install
+wizard, that call returns `401` until you send a bearer token — a `401` there
+still means the service is healthy. Steps 1 and 2 are always unauthenticated.
+
+If step 1 returns `DOWN` or refuses the connection, the service is running but
+the database is not — check `docker compose logs eddi`. A fresh install has **no
+agents deployed**; see [Creating your first Agent](creating-your-first-agent/README.md)
+or activate the Platform Operator at `/manage/operator`.
 
 ## Installation Options
 
@@ -44,20 +74,20 @@ The wizard guides you through choosing a database (MongoDB or PostgreSQL), optio
 
 ### Option 1 - EDDI with Docker (Manual)
 
-There are two ways to use `Docker` with **EDDI**, either with **`docker-compose`** or launch the container manually.
+There are two ways to run **EDDI** under Docker: with **Docker Compose**, or by launching the containers manually.
 
-_**Prerequisite**: You need an up and running `Docker` environment. (For references, see:_ [https://docs.docker.com/learn/](https://docs.docker.com/learn/))
+> **Prerequisite:** a working Docker installation — see the [Docker documentation](https://docs.docker.com/learn/). Compose v2 ships as the `docker compose` subcommand; the standalone `docker-compose` binary is end-of-life and is not used here.
 
-### Use docker-compose (recommended)
+### Use Docker Compose (recommended)
 
-1. `Checkout` the `docker-compose` file from `Github`:[`https://github.com/labsai/EDDI/blob/main/docker-compose.yml`](https://github.com/labsai/EDDI/blob/main/docker-compose.yml)
-2. Run Docker Command:
+1. Download [`docker-compose.yml`](https://github.com/labsai/EDDI/blob/main/docker-compose.yml) from GitHub, into an empty directory
+2. Start it:
 
+   ```bash
+   docker compose up
    ```
-    docker-compose up
-   ```
 
-### Use launch docker containers manually
+### Launch the containers manually
 
 1.  Create a shared network
 
@@ -85,7 +115,43 @@ EDDI runs natively on any Kubernetes cluster (minikube, kind, GKE, EKS, AKS).
 
 ```bash
 kubectl apply -f https://raw.githubusercontent.com/labsai/EDDI/main/k8s/quickstart.yaml
-bash k8s/create-secrets.sh  # generate vault key
+```
+
+The manifest deploys EDDI with an **empty** vault master key, so it starts but
+cannot encrypt secrets. Generate the key next. `create-secrets.sh` lives in the
+repository, so this step needs a checkout:
+
+```bash
+git clone https://github.com/labsai/EDDI.git && cd EDDI
+bash k8s/create-secrets.sh --auto
+kubectl rollout restart deployment/eddi -n eddi
+```
+
+Without a checkout, do the same thing by hand — EDDI reads secrets from a
+mounted *file*, not environment variables, because env is readable through
+`/proc/<pid>/environ` and leaks into crash dumps:
+
+```bash
+set -euo pipefail
+
+# mktemp gives an unpredictable name created 0600, so another local user
+# cannot pre-create the path or point it at a symlink.
+secrets_file=$(mktemp "${TMPDIR:-/tmp}/eddi-secrets.XXXXXX")
+trap 'shred -u "$secrets_file" 2>/dev/null || rm -f "$secrets_file"' EXIT
+
+# Fail closed: an empty key would create a Secret that silently leaves the
+# vault inert and secrets in plaintext.
+key=$(openssl rand -base64 24)
+[ -n "$key" ] || { echo "vault key generation failed" >&2; exit 1; }
+printf 'eddi.vault.master-key=%s\n' "$key" > "$secrets_file"
+
+# The Secret key must be named application-secrets.properties — that is the
+# filename the Deployment mounts. A bare temp path would name it otherwise.
+kubectl create secret generic eddi-secrets \
+  --namespace=eddi \
+  --from-file=application-secrets.properties="$secrets_file"
+
+kubectl rollout restart deployment/eddi -n eddi
 ```
 
 **Using Kustomize overlays:**
@@ -108,8 +174,12 @@ See the [Kubernetes Deployment Guide](kubernetes.md) for full details including 
 #### _Prerequisites:_
 
 - Java 25
-- Maven 3.9+
 - MongoDB ≥ 6.0 (or PostgreSQL)
+- Docker, if you want Dev Services to start the database for you
+
+No local Maven install is needed — the repository ships the Maven wrapper
+(`./mvnw`, or `.\mvnw.cmd` on Windows), which downloads the pinned version on
+first use.
 
 ### How to run the project
 
@@ -141,16 +211,16 @@ docker pull labsai/eddi
 
 ### Run Docker image
 
-For production, launch standalone mongodb and then start an eddi instance as defined in the docker-compose file
+For production, launch a standalone MongoDB and then start an EDDI instance as defined in `docker-compose.yml`
 
 ```bash
-docker-compose up
+docker compose up
 ```
 
 For development, use
 
 ```bash
-docker-compose -f docker-compose.yml -f docker-compose.local.yml up
+docker compose -f docker-compose.yml -f docker-compose.local.yml up
 ```
 
 For integration testing run

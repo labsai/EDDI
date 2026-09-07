@@ -84,7 +84,7 @@ class ApiCallExecutorPathEncodingTest {
 
         executor = new ApiCallExecutor(httpClient, jsonSerialization, runtime, prePostUtils, globalVariableResolver,
                 secretResolver, callerIdentityResolver, callerIdentityContext, new RequestRedactor(callerIdentityResolver),
-                false, DEFAULT_TIMEOUT_MILLIS, DEFAULT_MAX_RESPONSE_SIZE);
+                null, false, DEFAULT_TIMEOUT_MILLIS, DEFAULT_MAX_RESPONSE_SIZE);
 
         memory = mock(IConversationMemory.class);
         when(memory.getCurrentStep()).thenReturn(mock(IWritableConversationStep.class));

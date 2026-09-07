@@ -17,6 +17,7 @@ import java.lang.reflect.Method;
 import java.net.InetSocketAddress;
 import java.util.*;
 
+import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
@@ -370,7 +371,7 @@ class A2AToolProviderManagerDeepBranchTest {
             // Execute the tool to trigger executeA2ATask
             var toolName = result.toolSpecs().get(0).name();
             var executor = result.executors().get(toolName);
-            var toolRequest = dev.langchain4j.agent.tool.ToolExecutionRequest.builder()
+            var toolRequest = ToolExecutionRequest.builder()
                     .name(toolName)
                     .arguments("{\"message\": \"test\"}")
                     .build();
@@ -405,7 +406,7 @@ class A2AToolProviderManagerDeepBranchTest {
             var result = manager.discoverTools(List.of(config));
             var toolName = result.toolSpecs().get(0).name();
             var executor = result.executors().get(toolName);
-            var toolRequest = dev.langchain4j.agent.tool.ToolExecutionRequest.builder()
+            var toolRequest = ToolExecutionRequest.builder()
                     .name(toolName)
                     .arguments("{\"message\": \"test\"}")
                     .build();
@@ -438,7 +439,7 @@ class A2AToolProviderManagerDeepBranchTest {
             var result = manager.discoverTools(List.of(config));
             var toolName = result.toolSpecs().get(0).name();
             var executor = result.executors().get(toolName);
-            var toolRequest = dev.langchain4j.agent.tool.ToolExecutionRequest.builder()
+            var toolRequest = ToolExecutionRequest.builder()
                     .name(toolName)
                     .arguments("{\"message\": \"test\"}")
                     .build();
@@ -471,7 +472,7 @@ class A2AToolProviderManagerDeepBranchTest {
             var result = manager.discoverTools(List.of(config));
             var toolName = result.toolSpecs().get(0).name();
             var executor = result.executors().get(toolName);
-            var toolRequest = dev.langchain4j.agent.tool.ToolExecutionRequest.builder()
+            var toolRequest = ToolExecutionRequest.builder()
                     .name(toolName)
                     .arguments("{\"message\": \"test\"}")
                     .build();
@@ -508,7 +509,7 @@ class A2AToolProviderManagerDeepBranchTest {
             var result = manager.discoverTools(List.of(config));
             var toolName = result.toolSpecs().get(0).name();
             var executor = result.executors().get(toolName);
-            var toolRequest = dev.langchain4j.agent.tool.ToolExecutionRequest.builder()
+            var toolRequest = ToolExecutionRequest.builder()
                     .name(toolName)
                     .arguments("{\"message\": \"test\"}")
                     .build();
@@ -541,7 +542,7 @@ class A2AToolProviderManagerDeepBranchTest {
             var result = manager.discoverTools(List.of(config));
             var toolName = result.toolSpecs().get(0).name();
             var executor = result.executors().get(toolName);
-            var toolRequest = dev.langchain4j.agent.tool.ToolExecutionRequest.builder()
+            var toolRequest = ToolExecutionRequest.builder()
                     .name(toolName)
                     .arguments("{\"message\": \"test\"}")
                     .build();
@@ -579,7 +580,7 @@ class A2AToolProviderManagerDeepBranchTest {
             var result = manager.discoverTools(List.of(config));
             var toolName = result.toolSpecs().get(0).name();
             var executor = result.executors().get(toolName);
-            var toolRequest = dev.langchain4j.agent.tool.ToolExecutionRequest.builder()
+            var toolRequest = ToolExecutionRequest.builder()
                     .name(toolName)
                     .arguments("{\"message\": \"test\"}")
                     .build();

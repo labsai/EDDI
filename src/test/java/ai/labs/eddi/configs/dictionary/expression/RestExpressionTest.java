@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.dictionary.expression;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.dictionary.IDictionaryStore;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
@@ -37,7 +38,7 @@ class RestExpressionTest {
     void setUp() {
         workflowStore = mock(IWorkflowStore.class);
         dictionaryStore = mock(IDictionaryStore.class);
-        restExpression = new RestExpression(workflowStore, dictionaryStore);
+        restExpression = new RestExpression(workflowStore, dictionaryStore, mock(ResourceAccessGuard.class));
     }
 
     @Test

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.output.rest.keys;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.output.IOutputStore;
 import ai.labs.eddi.configs.rules.IRuleSetStore;
 import ai.labs.eddi.configs.rules.model.RuleConfiguration;
@@ -38,7 +39,7 @@ class RestOutputActionsTest {
         workflowStore = mock(IWorkflowStore.class);
         behaviorStore = mock(IRuleSetStore.class);
         outputStore = mock(IOutputStore.class);
-        restOutputActions = new RestOutputActions(workflowStore, behaviorStore, outputStore);
+        restOutputActions = new RestOutputActions(workflowStore, behaviorStore, outputStore, mock(ResourceAccessGuard.class));
     }
 
     @Test

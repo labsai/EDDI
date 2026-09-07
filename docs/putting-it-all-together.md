@@ -45,10 +45,10 @@ We'll need:
 **Purpose**: Teach the agent hotel-related language
 
 ```bash
-curl -X POST http://localhost:7070/regulardictionarystore/regulardictionaries \
+curl -X POST http://localhost:7070/dictionarystore/dictionaries \
   -H "Content-Type: application/json" \
   -d '{
-    "language": "en",
+    "lang": "en",
     "words": [
       {
         "word": "hotel",
@@ -89,7 +89,7 @@ curl -X POST http://localhost:7070/regulardictionarystore/regulardictionaries \
   }'
 ```
 
-**Returns**: `eddi://ai.labs.regulardictionary/regulardictionarystore/regulardictionaries/DICT_ID?version=1`
+**Returns**: `eddi://ai.labs.dictionary/dictionarystore/dictionaries/DICT_ID?version=1`
 
 **How it connects**: Parser will use this dictionary to convert "I want to book a hotel" → `["intent(book)", "entity(hotel)"]`
 
@@ -98,7 +98,7 @@ curl -X POST http://localhost:7070/regulardictionarystore/regulardictionaries \
 **Purpose**: Define conversation logic and when to trigger actions
 
 ```bash
-curl -X POST http://localhost:7070/behaviorstore/behaviorsets \
+curl -X POST http://localhost:7070/rulestore/rulesets \
   -H "Content-Type: application/json" \
   -d '{
     "behaviorGroups": [
@@ -137,7 +137,8 @@ curl -X POST http://localhost:7070/behaviorstore/behaviorsets \
                 "type": "contextmatcher",
                 "configs": {
                   "contextKey": "city",
-                  "contextType": "string"
+                  "contextType": "string",
+                  "string": "Paris"
                 }
               }
             ],
@@ -157,7 +158,8 @@ curl -X POST http://localhost:7070/behaviorstore/behaviorsets \
                 "type": "contextmatcher",
                 "configs": {
                   "contextKey": "selectedRoom",
-                  "contextType": "string"
+                  "contextType": "string",
+                  "string": "101"
                 }
               }
             ],
@@ -169,13 +171,15 @@ curl -X POST http://localhost:7070/behaviorstore/behaviorsets \
   }'
 ```
 
-**Returns**: `eddi://ai.labs.behavior/behaviorstore/behaviorsets/BEHAVIOR_ID?version=1`
+**Returns**: `eddi://ai.labs.rules/rulestore/rulesets/BEHAVIOR_ID?version=1`
 
 **How it connects**:
 
 - Welcome rule triggers on first message → shows welcome output
-- Check Availability rule triggers when user asks about availability AND city is in context → calls API
-- Book Room rule triggers when user wants to book AND room is selected → creates booking
+- Check Availability rule triggers when user asks about availability AND the `city` context equals the configured value → calls API
+- Book Room rule triggers when user wants to book AND the `selectedRoom` context equals the configured value → creates booking
+
+> A `contextmatcher` with `contextType: "string"` must also carry the `string` value it compares against — it is an equality test, not a presence test. Omitting it fails rule-set deserialization, and the agent deployment ends in `ERROR` instead of `READY`.
 
 ## Step 3: Create Property Configuration
 
@@ -185,16 +189,26 @@ curl -X POST http://localhost:7070/behaviorstore/behaviorsets \
 curl -X POST http://localhost:7070/propertysetterstore/propertysetters \
   -H "Content-Type: application/json" \
   -d '{
-    "propertyInstructions": [
+    "setOnActions": [
       {
-        "name": "city",
-        "fromObjectPath": "input",
-        "scope": "conversation"
+        "actions": ["httpcall(check-availability)"],
+        "setProperties": [
+          {
+            "name": "city",
+            "fromObjectPath": "memory.current.input",
+            "scope": "conversation"
+          }
+        ]
       },
       {
-        "name": "selectedRoom",
-        "fromObjectPath": "input",
-        "scope": "conversation"
+        "actions": ["httpcall(create-booking)"],
+        "setProperties": [
+          {
+            "name": "selectedRoom",
+            "fromObjectPath": "memory.current.input",
+            "scope": "conversation"
+          }
+        ]
       }
     ]
   }'
@@ -202,14 +216,14 @@ curl -X POST http://localhost:7070/propertysetterstore/propertysetters \
 
 **Returns**: `eddi://ai.labs.property/propertysetterstore/propertysetters/PROPERTY_ID?version=1`
 
-**How it connects**: When user says "Paris", property extractor saves it as `context.city` for use in behavior rules and HTTP calls
+**How it connects**: Property instructions are keyed by the actions that trigger them — when the behavior rule emits `httpcall(check-availability)`, the property setter saves the turn's input as the `city` property, available as `{properties.city}` in HTTP calls and output templates
 
 ## Step 4: Create HTTP Calls
 
 **Purpose**: Integrate with hotel booking API
 
 ```bash
-curl -X POST http://localhost:7070/httpcallsstore/httpcalls \
+curl -X POST http://localhost:7070/apicallstore/apicalls \
   -H "Content-Type: application/json" \
   -d '{
     "targetServerUrl": "https://api.hotels.example.com",
@@ -229,12 +243,14 @@ curl -X POST http://localhost:7070/httpcallsstore/httpcalls \
           }
         },
         "postResponse": {
-          "qrBuildInstruction": {
-            "pathToTargetArray": "availableRooms.rooms",
-            "iterationObjectName": "room",
-            "quickReplyValue": "{room.name}",
-            "quickReplyExpressions": "property(room_id({room.id}))"
-          }
+          "qrBuildInstructions": [
+            {
+              "pathToTargetArray": "availableRooms.rooms",
+              "iterationObjectName": "room",
+              "quickReplyValue": "{room.name}",
+              "quickReplyExpressions": "property(room_id({room.id}))"
+            }
+          ]
         }
       },
       {
@@ -267,7 +283,7 @@ curl -X POST http://localhost:7070/httpcallsstore/httpcalls \
   }'
 ```
 
-**Returns**: `eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/HTTP_ID?version=1`
+**Returns**: `eddi://ai.labs.apicalls/apicallstore/apicalls/HTTP_ID?version=1`
 
 **How it connects**:
 
@@ -339,51 +355,59 @@ curl -X POST http://localhost:7070/outputstore/outputsets \
 **Purpose**: Bundle all components together
 
 ```bash
-curl -X POST http://localhost:7070/packagestore/packages \
+curl -X POST http://localhost:7070/workflowstore/workflows \
   -H "Content-Type: application/json" \
   -d '{
-    "packageExtensions": [
+    "workflowSteps": [
       {
-        "type": "eddi://ai.labs.parser.dictionaries.regular",
+        "type": "eddi://ai.labs.parser",
+        "config": {},
         "extensions": {
-          "uri": "eddi://ai.labs.regulardictionary/regulardictionarystore/regulardictionaries/DICT_ID?version=1"
+          "dictionaries": [
+            {
+              "type": "eddi://ai.labs.parser.dictionaries.regular",
+              "config": {
+                "uri": "eddi://ai.labs.dictionary/dictionarystore/dictionaries/DICT_ID?version=1"
+              }
+            }
+          ],
+          "corrections": []
         }
       },
       {
-        "type": "eddi://ai.labs.behavior",
-        "extensions": {
-          "uri": "eddi://ai.labs.behavior/behaviorstore/behaviorsets/BEHAVIOR_ID?version=1"
-        },
+        "type": "eddi://ai.labs.rules",
         "config": {
+          "uri": "eddi://ai.labs.rules/rulestore/rulesets/BEHAVIOR_ID?version=1",
           "appendActions": true
         }
       },
       {
         "type": "eddi://ai.labs.property",
-        "extensions": {
+        "config": {
           "uri": "eddi://ai.labs.property/propertysetterstore/propertysetters/PROPERTY_ID?version=1"
         }
       },
       {
-        "type": "eddi://ai.labs.httpcalls",
-        "extensions": {
-          "uri": "eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/HTTP_ID?version=1"
+        "type": "eddi://ai.labs.apicalls",
+        "config": {
+          "uri": "eddi://ai.labs.apicalls/apicallstore/apicalls/HTTP_ID?version=1"
         }
       },
       {
         "type": "eddi://ai.labs.output",
-        "extensions": {
+        "config": {
           "uri": "eddi://ai.labs.output/outputstore/outputsets/OUTPUT_ID?version=1"
         }
       },
       {
-        "type": "eddi://ai.labs.templating"
+        "type": "eddi://ai.labs.templating",
+        "config": {}
       }
     ]
   }'
 ```
 
-**Returns**: `eddi://ai.labs.package/packagestore/packages/WORKFLOW_ID?version=1`
+**Returns**: `eddi://ai.labs.workflow/workflowstore/workflows/WORKFLOW_ID?version=1`
 
 **How it connects**: Workflow defines the order of lifecycle tasks and loads all configurations
 
@@ -396,7 +420,7 @@ curl -X POST http://localhost:7070/agentstore/agents \
   -H "Content-Type: application/json" \
   -d '{
     "packages": [
-      "eddi://ai.labs.package/packagestore/packages/WORKFLOW_ID?version=1"
+      "eddi://ai.labs.workflow/workflowstore/workflows/WORKFLOW_ID?version=1"
     ]
   }'
 ```
@@ -418,24 +442,16 @@ curl -X POST "http://localhost:7070/administration/production/deploy/AGENT_ID?ve
 ### Initial Conversation
 
 ```bash
-curl -X POST "http://localhost:7070/agents/AGENT_ID/start" \
+curl -i -X POST "http://localhost:7070/agents/AGENT_ID/start" \
   -H "Content-Type: application/json" \
   -d '{}'
 ```
 
-**Response**:
+**Response**: `201 Created` with an empty body — the conversation id is returned in the `Location` header as an `eddi://` URI, and `CONV_ID` is its last path segment:
 
-```json
-{
-  "conversationId": "CONV_ID",
-  "conversationOutputs": [
-    {
-      "output": [
-        "Welcome to Hotel Booking Agent! I can help you find and book hotel rooms. Which city are you interested in?"
-      ]
-    }
-  ]
-}
+```text
+HTTP/1.1 201 Created
+Location: eddi://ai.labs.conversation/conversationstore/conversations/CONV_ID
 ```
 
 ### Provide City and Check Availability

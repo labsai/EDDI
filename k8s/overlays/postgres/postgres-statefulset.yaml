@@ -29,10 +29,27 @@ spec:
           ports:
             - containerPort: 5432
               name: postgres
-          envFrom:
-            - secretRef:
-                name: postgres-secrets
+          # Named keys, not `envFrom: secretRef`. The Secret also carries
+          # postgres-secrets.properties (mounted into EDDI as a file), and that
+          # key is not a legal C_IDENTIFIER — with envFrom the kubelet skipped
+          # it and emitted an InvalidEnvironmentVariableNames warning event on
+          # every pod start and restart.
           env:
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secrets
+                  key: POSTGRES_DB
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secrets
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secrets
+                  key: POSTGRES_PASSWORD
             - name: PGDATA
               value: /var/lib/postgresql/data/pgdata
           volumeMounts:

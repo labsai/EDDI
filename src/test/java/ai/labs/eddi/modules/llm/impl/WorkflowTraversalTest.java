@@ -4,9 +4,9 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
-import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
-import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
+import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration.WorkflowStep;
 import ai.labs.eddi.engine.memory.IConversationMemory;
@@ -37,16 +37,16 @@ import static org.mockito.Mockito.*;
 class WorkflowTraversalTest {
 
     private IConversationMemory memory;
-    private IRestAgentStore agentStore;
-    private IRestWorkflowStore workflowStore;
+    private IAgentStore agentStore;
+    private IWorkflowStore workflowStore;
     private IResourceClientLibrary resourceClientLibrary;
 
     @BeforeEach
     void setUp() {
         WorkflowTraversal.clearCache();
         memory = mock(IConversationMemory.class);
-        agentStore = mock(IRestAgentStore.class);
-        workflowStore = mock(IRestWorkflowStore.class);
+        agentStore = mock(IAgentStore.class);
+        workflowStore = mock(IWorkflowStore.class);
         resourceClientLibrary = mock(IResourceClientLibrary.class);
     }
 
@@ -89,7 +89,7 @@ class WorkflowTraversalTest {
         void emptyWhenAgentConfigFails() throws Exception {
             when(memory.getAgentId()).thenReturn("agent-1");
             when(memory.getAgentVersion()).thenReturn(1);
-            when(agentStore.readAgent("agent-1", 1)).thenThrow(new RuntimeException("DB error"));
+            when(agentStore.read("agent-1", 1)).thenThrow(new RuntimeException("DB error"));
 
             var result = WorkflowTraversal.discoverConfigs(memory, "eddi://ai.labs.httpcalls",
                     String.class, agentStore, workflowStore, resourceClientLibrary);
@@ -104,7 +104,7 @@ class WorkflowTraversalTest {
             when(memory.getAgentVersion()).thenReturn(1);
             var agentConfig = new AgentConfiguration();
             agentConfig.setWorkflows(List.of());
-            when(agentStore.readAgent("agent-1", 1)).thenReturn(agentConfig);
+            when(agentStore.read("agent-1", 1)).thenReturn(agentConfig);
 
             var result = WorkflowTraversal.discoverConfigs(memory, "eddi://ai.labs.httpcalls",
                     String.class, agentStore, workflowStore, resourceClientLibrary);
@@ -120,7 +120,7 @@ class WorkflowTraversalTest {
             var agentConfig = new AgentConfiguration();
             // URI with no path — opaque URI
             agentConfig.setWorkflows(List.of(URI.create("mailto:test")));
-            when(agentStore.readAgent("agent-1", 1)).thenReturn(agentConfig);
+            when(agentStore.read("agent-1", 1)).thenReturn(agentConfig);
 
             var result = WorkflowTraversal.discoverConfigs(memory, "eddi://ai.labs.httpcalls",
                     String.class, agentStore, workflowStore, resourceClientLibrary);
@@ -135,7 +135,7 @@ class WorkflowTraversalTest {
             when(memory.getAgentVersion()).thenReturn(1);
             var agentConfig = new AgentConfiguration();
             agentConfig.setWorkflows(List.of(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/wf-1")));
-            when(agentStore.readAgent("agent-1", 1)).thenReturn(agentConfig);
+            when(agentStore.read("agent-1", 1)).thenReturn(agentConfig);
 
             var result = WorkflowTraversal.discoverConfigs(memory, "eddi://ai.labs.httpcalls",
                     String.class, agentStore, workflowStore, resourceClientLibrary);
@@ -151,14 +151,14 @@ class WorkflowTraversalTest {
             var agentConfig = new AgentConfiguration();
             agentConfig.setWorkflows(List.of(
                     URI.create("eddi://ai.labs.workflow/workflowstore/workflows/wf-1?version=1")));
-            when(agentStore.readAgent("agent-1", 1)).thenReturn(agentConfig);
+            when(agentStore.read("agent-1", 1)).thenReturn(agentConfig);
 
             var wfConfig = new WorkflowConfiguration();
             var step = new WorkflowStep();
             step.setType(URI.create("eddi://ai.labs.httpcalls"));
             step.setConfig(Map.of("uri", "eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/hc-1?version=1"));
             wfConfig.setWorkflowSteps(List.of(step));
-            when(workflowStore.readWorkflow("wf-1", 1)).thenReturn(wfConfig);
+            when(workflowStore.read("wf-1", 1)).thenReturn(wfConfig);
             when(resourceClientLibrary.getResource(any(URI.class), eq(String.class)))
                     .thenReturn("mockConfig");
 
@@ -177,14 +177,14 @@ class WorkflowTraversalTest {
             var agentConfig = new AgentConfiguration();
             agentConfig.setWorkflows(List.of(
                     URI.create("eddi://ai.labs.workflow/workflowstore/workflows/wf-1?version=1")));
-            when(agentStore.readAgent("agent-1", 1)).thenReturn(agentConfig);
+            when(agentStore.read("agent-1", 1)).thenReturn(agentConfig);
 
             var wfConfig = new WorkflowConfiguration();
             var step = new WorkflowStep();
             step.setType(URI.create("eddi://ai.labs.httpcalls"));
             step.setConfig(Map.of()); // no "uri" key
             wfConfig.setWorkflowSteps(List.of(step));
-            when(workflowStore.readWorkflow("wf-1", 1)).thenReturn(wfConfig);
+            when(workflowStore.read("wf-1", 1)).thenReturn(wfConfig);
 
             var result = WorkflowTraversal.discoverConfigs(memory, "eddi://ai.labs.httpcalls",
                     String.class, agentStore, workflowStore, resourceClientLibrary);
@@ -200,14 +200,14 @@ class WorkflowTraversalTest {
             var agentConfig = new AgentConfiguration();
             agentConfig.setWorkflows(List.of(
                     URI.create("eddi://ai.labs.workflow/workflowstore/workflows/wf-1?version=1")));
-            when(agentStore.readAgent("agent-1", 1)).thenReturn(agentConfig);
+            when(agentStore.read("agent-1", 1)).thenReturn(agentConfig);
 
             var wfConfig = new WorkflowConfiguration();
             var step = new WorkflowStep();
             step.setType(URI.create("eddi://ai.labs.rules"));
             step.setConfig(Map.of("uri", "something"));
             wfConfig.setWorkflowSteps(List.of(step));
-            when(workflowStore.readWorkflow("wf-1", 1)).thenReturn(wfConfig);
+            when(workflowStore.read("wf-1", 1)).thenReturn(wfConfig);
 
             var result = WorkflowTraversal.discoverConfigs(memory, "eddi://ai.labs.httpcalls",
                     String.class, agentStore, workflowStore, resourceClientLibrary);
@@ -223,14 +223,14 @@ class WorkflowTraversalTest {
             var agentConfig = new AgentConfiguration();
             agentConfig.setWorkflows(List.of(
                     URI.create("eddi://ai.labs.workflow/workflowstore/workflows/wf-1?version=1")));
-            when(agentStore.readAgent("agent-1", 1)).thenReturn(agentConfig);
+            when(agentStore.read("agent-1", 1)).thenReturn(agentConfig);
 
             var wfConfig = new WorkflowConfiguration();
             var step = new WorkflowStep();
             step.setType(URI.create("eddi://ai.labs.httpcalls"));
             step.setConfig(Map.of("uri", "eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/hc-1?version=1"));
             wfConfig.setWorkflowSteps(List.of(step));
-            when(workflowStore.readWorkflow("wf-1", 1)).thenReturn(wfConfig);
+            when(workflowStore.read("wf-1", 1)).thenReturn(wfConfig);
             when(resourceClientLibrary.getResource(any(URI.class), eq(String.class)))
                     .thenThrow(new ServiceException("Load failed"));
 
@@ -248,8 +248,8 @@ class WorkflowTraversalTest {
             var agentConfig = new AgentConfiguration();
             agentConfig.setWorkflows(List.of(
                     URI.create("eddi://ai.labs.workflow/workflowstore/workflows/wf-1?version=1")));
-            when(agentStore.readAgent("agent-1", 1)).thenReturn(agentConfig);
-            when(workflowStore.readWorkflow("wf-1", 1)).thenThrow(new RuntimeException("Workflow not found"));
+            when(agentStore.read("agent-1", 1)).thenReturn(agentConfig);
+            when(workflowStore.read("wf-1", 1)).thenThrow(new RuntimeException("Workflow not found"));
 
             var result = WorkflowTraversal.discoverConfigs(memory, "eddi://ai.labs.httpcalls",
                     String.class, agentStore, workflowStore, resourceClientLibrary);
@@ -279,8 +279,8 @@ class WorkflowTraversalTest {
             assertEquals(1, first.size());
             assertEquals(1, second.size(), "the cached traversal must carry the same configs, not an empty list");
             assertEquals("hc", second.get(0).config());
-            verify(agentStore, times(1)).readAgent("agent-1", 1);
-            verify(workflowStore, times(1)).readWorkflow(workflowIdOf("agent-1"), 1);
+            verify(agentStore, times(1)).read("agent-1", 1);
+            verify(workflowStore, times(1)).read(workflowIdOf("agent-1"), 1);
         }
 
         @Test
@@ -293,12 +293,12 @@ class WorkflowTraversalTest {
             WorkflowTraversal.discoverConfigs(memory, HTTPCALLS, String.class, agentStore, workflowStore, resourceClientLibrary, t0);
             WorkflowTraversal.discoverConfigs(memory, HTTPCALLS, String.class, agentStore, workflowStore, resourceClientLibrary,
                     t0 + WorkflowTraversal.CACHE_TTL_MILLIS - 1);
-            verify(agentStore, times(1)).readAgent("agent-1", 1);
+            verify(agentStore, times(1)).read("agent-1", 1);
 
             var afterExpiry = WorkflowTraversal.discoverConfigs(memory, HTTPCALLS, String.class, agentStore, workflowStore,
                     resourceClientLibrary, t0 + WorkflowTraversal.CACHE_TTL_MILLIS);
 
-            verify(agentStore, times(2)).readAgent("agent-1", 1);
+            verify(agentStore, times(2)).read("agent-1", 1);
             assertEquals(1, afterExpiry.size());
         }
 
@@ -350,7 +350,7 @@ class WorkflowTraversalTest {
             when(memory.getAgentId()).thenReturn("agent-1");
             when(memory.getAgentVersion()).thenReturn(2);
             discover(HTTPCALLS, String.class);
-            verify(agentStore).readAgent("agent-1", 2);
+            verify(agentStore).read("agent-1", 2);
         }
 
         @Test
@@ -358,7 +358,7 @@ class WorkflowTraversalTest {
         void workflowLoadFailureIsNotCached() throws Exception {
             wireAgent("agent-1", 1, step(HTTPCALLS, HC_URI));
             when(resourceClientLibrary.getResource(any(URI.class), eq(String.class))).thenReturn("hc");
-            when(workflowStore.readWorkflow(workflowIdOf("agent-1"), 1))
+            when(workflowStore.read(workflowIdOf("agent-1"), 1))
                     .thenThrow(new RuntimeException("transient store blip"))
                     .thenReturn(workflow(step(HTTPCALLS, HC_URI)));
 
@@ -390,7 +390,7 @@ class WorkflowTraversalTest {
             assertTrue(discover(HTTPCALLS, String.class).isEmpty());
             assertTrue(discover(HTTPCALLS, String.class).isEmpty());
 
-            verify(agentStore, times(1)).readAgent("agent-1", 1);
+            verify(agentStore, times(1)).read("agent-1", 1);
         }
 
         @Test
@@ -437,8 +437,8 @@ class WorkflowTraversalTest {
             var agentConfig = new AgentConfiguration();
             agentConfig.setWorkflows(
                     List.of(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + workflowIdOf(agentId) + "?version=1")));
-            lenient().when(agentStore.readAgent(agentId, version)).thenReturn(agentConfig);
-            lenient().when(workflowStore.readWorkflow(workflowIdOf(agentId), 1)).thenReturn(workflow(steps));
+            lenient().when(agentStore.read(agentId, version)).thenReturn(agentConfig);
+            lenient().when(workflowStore.read(workflowIdOf(agentId), 1)).thenReturn(workflow(steps));
         }
     }
 

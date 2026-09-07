@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.configs.descriptors.rest;
 
+import ai.labs.eddi.engine.security.spaces.AccessScope;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.descriptors.model.SimpleDocumentDescriptor;
@@ -33,7 +35,7 @@ class RestDocumentDescriptorStoreTest {
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
-        restStore = new RestDocumentDescriptorStore(documentDescriptorStore);
+        restStore = new RestDocumentDescriptorStore(documentDescriptorStore, listingGuard());
     }
 
     @Test
@@ -41,10 +43,10 @@ class RestDocumentDescriptorStoreTest {
     void readDescriptors() throws Exception {
         var desc = new DocumentDescriptor();
         desc.setName("test");
-        when(documentDescriptorStore.readDescriptors("agent", "filter", 0, 10, false))
+        when(documentDescriptorStore.readDescriptors(eq("agent"), eq("filter"), eq(0), eq(10), eq(false), any()))
                 .thenReturn(List.of(desc));
 
-        List<DocumentDescriptor> result = restStore.readDescriptors("agent", "filter", 0, 10);
+        List<DocumentDescriptor> result = restStore.readDescriptors("agent", "filter", 0, 10, "");
         assertEquals(1, result.size());
         assertEquals("test", result.get(0).getName());
     }
@@ -52,21 +54,21 @@ class RestDocumentDescriptorStoreTest {
     @Test
     @DisplayName("readDescriptors — throws InternalServerErrorException on ResourceStoreException")
     void readDescriptorsStoreException() throws Exception {
-        when(documentDescriptorStore.readDescriptors(any(), any(), any(), any(), eq(false)))
+        when(documentDescriptorStore.readDescriptors(any(), any(), any(), any(), eq(false), any()))
                 .thenThrow(new IResourceStore.ResourceStoreException("db error"));
 
         assertThrows(InternalServerErrorException.class,
-                () -> restStore.readDescriptors("agent", null, 0, 10));
+                () -> restStore.readDescriptors("agent", null, 0, 10, ""));
     }
 
     @Test
     @DisplayName("readDescriptors — throws NotFoundException on ResourceNotFoundException")
     void readDescriptorsNotFound() throws Exception {
-        when(documentDescriptorStore.readDescriptors(any(), any(), any(), any(), eq(false)))
+        when(documentDescriptorStore.readDescriptors(any(), any(), any(), any(), eq(false), any()))
                 .thenThrow(new IResourceStore.ResourceNotFoundException("not found"));
 
         assertThrows(NotFoundException.class,
-                () -> restStore.readDescriptors("agent", null, 0, 10));
+                () -> restStore.readDescriptors("agent", null, 0, 10, ""));
     }
 
     @Test
@@ -277,5 +279,18 @@ class RestDocumentDescriptorStoreTest {
 
         assertThrows(NotFoundException.class,
                 () -> restStore.patchDescriptor("id1", 1, instruction));
+    }
+
+    /**
+     * A guard that sees everything. {@code listingScope()} is chained onto
+     * ({@code .withinSpace(...)}), and production never returns null there — only a
+     * bare mock does, so the stub keeps the double honest rather than making the
+     * call site defend against its own bean.
+     */
+    private static ResourceAccessGuard listingGuard() {
+        ResourceAccessGuard guard = mock(ResourceAccessGuard.class);
+        lenient().when(guard.seesEverything()).thenReturn(true);
+        lenient().when(guard.listingScope()).thenReturn(AccessScope.unrestricted());
+        return guard;
     }
 }

@@ -8,7 +8,7 @@
 
 - **Stateful Sessions**: Each conversation maintains its own state (conversation memory) that persists across multiple interactions
 - **Conversation ID**: Unique identifier that references a specific conversation session
-- **Lifecycle States**: Conversations transition through states: `READY`, `IN_PROGRESS`, `ENDED`, `ERROR`
+- **Lifecycle States**: Conversations transition through states: `READY`, `IN_PROGRESS`, `ENDED`, `EXECUTION_INTERRUPTED`, `ERROR`, `AWAITING_HUMAN`
 - **History Management**: Full conversation history is maintained, with support for undo/redo operations
 - **Context Passing**: External context can be injected into conversations at any step
 
@@ -49,6 +49,8 @@ In this section we will explain how to **send/receive messages** from an Agent. 
 
 ### Response Model
 
+`/start` itself returns `201` with a `location` header and **no body**. The model below is the conversation memory snapshot returned by the send (`POST /agents/{conversationId}`) and receive (`GET /agents/{conversationId}`) endpoints.
+
 ```javascript
 {
   "agentId": "string",
@@ -56,7 +58,8 @@ In this section we will explain how to **send/receive messages** from an Agent. 
   "userId": "string",
   "environment": "string",
   "conversationState": "string",
-  "redoCacheSize": 0,
+  "undoAvailable": Boolean,
+  "redoAvailable": Boolean,
   "conversationOutputs": [
                 "input"    :    "string",
                 "expressions"    :    <arrayOfString>,
@@ -94,8 +97,9 @@ In this section we will explain how to **send/receive messages** from an Agent. 
 | agentVersion                   | (`integer`) The version of the agent that sent the reply.                                                                                                                                                                                                                          |
 | userId                         | (`String`) The id of the user who interacted with the agent.                                                                                                                                                                                                                       |
 | environment                    | (`String`) the name of the environment where the agent is deployed                                                                                                                                                                                                                 |
-| conversationState              | <p>(<code>String</code>) The state of the current conversation, could be:</p><p><code>READY</code>, </p><p><code>IN_PROGRESS</code>, </p><p><code>ENDED</code>, </p><p><code>EXECUTION_INTERRUPTED</code>, </p><p><code>ERROR</code></p>                                           |
-| redoCount                      | (`integer`) if undo has been performed, this number indicates how many times redo can be done (=times undo has been triggered)                                                                                                                                                     |
+| conversationState              | <p>(<code>String</code>) The state of the current conversation, could be:</p><p><code>READY</code>, </p><p><code>IN_PROGRESS</code>, </p><p><code>ENDED</code>, </p><p><code>EXECUTION_INTERRUPTED</code>, </p><p><code>ERROR</code>, </p><p><code>AWAITING_HUMAN</code> (paused for human approval — resume via <code>POST /agents/{conversationId}/resume</code>)</p> |
+| undoAvailable                  | (`boolean`) `true` when at least one conversation step can be undone.                                                                                                                                                                                                             |
+| redoAvailable                  | (`boolean`) `true` when at least one undone step can be redone. It is a flag, not a depth — the redo cache can hold several steps.                                                                                                                                                |
 | conversationOutputs            | (`Array`: <`conversationOutput`>) Array of `conversationOutput`                                                                                                                                                                                                                    |
 | conversationOutput.input       | (`String`) The user's input.                                                                                                                                                                                                                                                       |
 | conversationOutput.expressions | (`Array`: <`String`>) an array of the `expressions` involved in the creation of this reply (output).                                                                                                                                                                               |
@@ -124,7 +128,8 @@ In this section we will explain how to **send/receive messages** from an Agent. 
   "userId": "anonymous-zj1p1GDtM5",
   "environment": "production",
   "conversationState": "READY",
-  "redoCacheSize": 0,
+  "undoAvailable": false,
+  "redoAvailable": false,
   "conversationOutputs": [
     {
       "input": "madrid",
@@ -318,7 +323,8 @@ Response Body
   "agentVersion": 1,
   "environment": "production",
   "conversationState": "READY",
-  "redoCacheSize": 0,
+  "undoAvailable": false,
+  "redoAvailable": false,
   "conversationSteps": [
     {
       "conversationStep": [
@@ -346,13 +352,14 @@ Response Body
 | API endpoint     | `/agents/{conversationId}`                                                           |
 | {conversationId} | (`Path` **parameter**): `String Id` of the **conversation** that you wish to **receive** a the message from. |
 | returnDetailed   | (`Query` **parameter**):`Boolean` - **Default** : `false`                                                    |
-|                  |                                                                                                              |
+| returnCurrentStepOnly | (`Query` **parameter**):`Boolean` - **Default** : `true`. When `true`, only the latest conversation step is returned. Set it to `false` to get the full history. |
+| returningFields  | (`Query` **parameter**, repeatable):`String` - restricts the snapshot to the named fields.                   |
 
 ### Example
 
 _Request URL:_
 
-`http://localhost:7070/agents/5add1fe8a081a228a0588d1c?returnDetailed=false`
+`http://localhost:7070/agents/5add1fe8a081a228a0588d1c?returnDetailed=false&returnCurrentStepOnly=false`
 
 _Response Body_
 
@@ -362,7 +369,8 @@ _Response Body_
   "agentVersion": 1,
   "environment": "production",
   "conversationState": "READY",
-  "redoCacheSize": 0,
+  "undoAvailable": false,
+  "redoAvailable": false,
   "conversationSteps": [
     {
       "conversationStep": [
@@ -425,7 +433,7 @@ One of EDDI's most powerful features is the ability to **go back in time** withi
 
 EDDI maintains a **redo cache** of undone conversation steps. When you undo a step, it's moved to this cache. You can then either:
 
-- Continue the conversation (clears redo cache)
+- Continue the conversation (the undone step stays in the cache)
 - Redo the step (restores it from cache)
 
 ```
@@ -521,7 +529,7 @@ curl -X POST "http://localhost:7070/agents/CONV_ID/redo"
 ```bash
 # 1. Start conversation
 curl -X POST "http://localhost:7070/agents/AGENT_ID/start" -d '{}'
-# Returns: {"conversationId": "CONV_ID"}
+# Returns: 201 with "location: /agents/CONV_ID" header (no body)
 
 # 2. Send message
 curl -X POST "http://localhost:7070/agents/CONV_ID" \
@@ -547,12 +555,12 @@ curl -X POST "http://localhost:7070/agents/CONV_ID" \
 
 # 6. Wait, maybe flight was right. Check if redo is available
 curl -X GET "http://localhost:7070/agents/CONV_ID/redo"
-# Returns: false (because we sent a new message, clearing redo cache)
+# Returns: true (the redo cache survives new messages — Step 3 is still cached)
 ```
 
 ### Redo Cache Behavior
 
-**Important**: The redo cache is cleared when you send a new message after an undo. This prevents inconsistent conversation states.
+**Important**: The redo cache is **not** cleared when you send a new message after an undo. The undone step stays on the stack, so a redo after continuing the conversation splices it back on top of the step you just appended.
 
 ```
 Normal flow:
@@ -563,25 +571,40 @@ Step 1 → Step 2 | [Step 3 cached]
          ↓ can redo
 
 After new message:
-Step 1 → Step 2 → Step 4
-         ↓ redo cache cleared (Step 3 lost)
+Step 1 → Step 2 → Step 4 | [Step 3 still cached]
+         ↓ redo now yields Step 1 → Step 2 → Step 4 → Step 3
 ```
 
-### Checking Redo Cache Size
+### Checking Whether Undo / Redo Is Available
 
-The conversation response includes `redoCacheSize` field:
+There are two ways to ask, and they answer different questions.
+
+**`GET` the action's own path** — a bare JSON boolean, nothing else:
+
+```bash
+curl -X GET "http://localhost:7070/agents/CONV_ID/undo"   # → true | false
+curl -X GET "http://localhost:7070/agents/CONV_ID/redo"   # → true | false
+```
+
+`GET` asks; `POST` to the same path performs the action. That symmetry is easy
+to trip over — a `POST /agents/CONV_ID/undo` you meant as a check will actually
+undo the step.
+
+**Read the conversation snapshot**, which carries both flags alongside the rest
+of the state:
 
 ```json
 {
   "conversationId": "CONV_ID",
-  "redoCacheSize": 0,
-  "conversationState": "READY"
+  "conversationState": "READY",
+  "undoAvailable": true,
+  "redoAvailable": false
 }
 ```
 
-- `redoCacheSize: 0` - No undo has been performed, redo not available
-- `redoCacheSize: 1` - One undo performed, one redo available
-- `redoCacheSize: 2` - Two undos performed, two redos available
+These are **booleans, not depths**. The redo cache is a stack and can hold more
+than one step, but neither the REST contract nor the snapshot exposes how many —
+`redoAvailable: true` means "at least one", and that is all you can rely on.
 
 ### Use Cases
 
@@ -624,7 +647,7 @@ Developer tests:
 ### Best Practices
 
 1. **Always check availability** before calling undo/redo to avoid errors
-2. **Inform users** when undo clears redo cache (UX consideration)
+2. **Inform users** that continuing after an undo leaves the undone step redoable (UX consideration)
 3. **Be careful with side effects** - undo doesn't reverse external API calls
 4. **Use for user convenience** - great for conversational UX
 5. **Log undo/redo** - helps with analytics and debugging

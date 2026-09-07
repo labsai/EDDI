@@ -69,9 +69,17 @@ public interface IResourceSource extends AutoCloseable {
      * @param config
      *            the full workflow configuration
      * @param extensions
-     *            map of step type URI → extension data. Key is the
-     *            WorkflowStep.type string (e.g., "ai.labs.llm"). Each type appears
-     *            at most once per workflow, making the match deterministic.
+     *            map of extension reference key → extension data. The key is
+     *            {@code <stepType>#<occurrence>/<path>}, as produced by
+     *            {@code WorkflowExtensions.scan} — e.g.
+     *            {@code eddi://ai.labs.llm#0/config} or
+     *            {@code eddi://ai.labs.parser#0/extensions/dictionaries/0/config}.
+     *            Every producer (ZIP, remote instance) and the local target derive
+     *            the key from that one scan, which is what makes the two sides
+     *            join. The occurrence ordinal is part of the key deliberately: a
+     *            workflow may carry several steps of the same type — a pre-LLM and
+     *            a post-LLM httpCalls step, say — and each keeps its own entry
+     *            rather than collapsing onto one.
      */
     record WorkflowSourceData(
             String sourceId,
@@ -91,7 +99,8 @@ public interface IResourceSource extends AutoCloseable {
      * @param type
      *            the file extension type (e.g., "langchain", "httpcalls")
      * @param stepType
-     *            the WorkflowStep.type URI (e.g., "ai.labs.llm")
+     *            the WorkflowStep.type URI as the workflow actually stores it,
+     *            scheme included (e.g., {@code eddi://ai.labs.llm})
      * @param contentJson
      *            the full serialized config JSON
      */

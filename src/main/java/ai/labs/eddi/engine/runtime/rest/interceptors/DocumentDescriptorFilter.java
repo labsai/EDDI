@@ -8,7 +8,10 @@ import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDescriptorStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
+import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.descriptors.model.ResourceDescriptor;
+import ai.labs.eddi.engine.security.spaces.DescriptorAccess;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.utils.RestUtilities;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.BadRequestException;
@@ -37,6 +40,7 @@ import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 public class DocumentDescriptorFilter implements ContainerResponseFilter {
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final IConversationDescriptorStore conversationDescriptorStore;
+    private final ResourceAccessGuard resourceAccessGuard;
 
     private static final Logger log = Logger.getLogger(DocumentDescriptorFilter.class);
 
@@ -44,9 +48,11 @@ public class DocumentDescriptorFilter implements ContainerResponseFilter {
     UriInfo uriInfo;
 
     @Inject
-    public DocumentDescriptorFilter(IDocumentDescriptorStore documentDescriptorStore, IConversationDescriptorStore conversationDescriptorStore) {
+    public DocumentDescriptorFilter(IDocumentDescriptorStore documentDescriptorStore, IConversationDescriptorStore conversationDescriptorStore,
+            ResourceAccessGuard resourceAccessGuard) {
         this.documentDescriptorStore = documentDescriptorStore;
         this.conversationDescriptorStore = conversationDescriptorStore;
+        this.resourceAccessGuard = resourceAccessGuard;
     }
 
     @Override
@@ -75,8 +81,10 @@ public class DocumentDescriptorFilter implements ContainerResponseFilter {
                                     try {
                                         documentDescriptorStore.readDescriptor(resourceId.getId(), resourceId.getVersion());
                                     } catch (IResourceStore.ResourceNotFoundException e) {
+                                        // The only place a configuration descriptor is born, and therefore the only
+                                        // place ownership can be stamped without every store having to remember to.
                                         documentDescriptorStore.createDescriptor(resourceId.getId(), resourceId.getVersion(),
-                                                createDocumentDescriptor(createdResourceURI));
+                                                resourceAccessGuard.stampNewDescriptor(createDocumentDescriptor(createdResourceURI)));
                                     }
                                 }
                             }
@@ -91,6 +99,13 @@ public class DocumentDescriptorFilter implements ContainerResponseFilter {
                                     resourceId.getVersion() - 1);
                             resourceDescriptor.setLastModifiedOn(new Date(System.currentTimeMillis()));
                             resourceDescriptor.setResource(createNewVersionOfResource(resourceDescriptor.getResource(), resourceId.getVersion()));
+                            // Carrying the descriptor object forward already carries ownership with it. The
+                            // index is rebuilt anyway so that a descriptor written before this feature
+                            // acquires one the first time it is touched, letting an existing deployment
+                            // converge without waiting for the backfill migration.
+                            if (resourceDescriptor instanceof DocumentDescriptor documentDescriptor) {
+                                DescriptorAccess.rebuildIndex(documentDescriptor);
+                            }
                             descriptorStore.updateDescriptor(resourceId.getId(), resourceId.getVersion() - 1, resourceDescriptor);
                         }
                     }

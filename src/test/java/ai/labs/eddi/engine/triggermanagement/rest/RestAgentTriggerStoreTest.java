@@ -4,12 +4,15 @@
  */
 package ai.labs.eddi.engine.triggermanagement.rest;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.triggermanagement.IAgentTriggerStore;
+import ai.labs.eddi.engine.model.AgentDeployment;
 import ai.labs.eddi.engine.triggermanagement.model.AgentTriggerConfiguration;
+import io.quarkus.security.ForbiddenException;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -30,6 +33,7 @@ class RestAgentTriggerStoreTest {
 
     private RestAgentTriggerStore restAgentTriggerStore;
     private IAgentTriggerStore agentTriggerStore;
+    private ResourceAccessGuard resourceAccessGuard;
     private ICache<String, AgentTriggerConfiguration> cache;
 
     @SuppressWarnings("unchecked")
@@ -40,7 +44,26 @@ class RestAgentTriggerStoreTest {
         cache = mock(ICache.class);
         doReturn(cache).when(cacheFactory).getCache("agentTriggers");
 
-        restAgentTriggerStore = new RestAgentTriggerStore(agentTriggerStore, cacheFactory);
+        resourceAccessGuard = mock(ResourceAccessGuard.class);
+        restAgentTriggerStore = new RestAgentTriggerStore(agentTriggerStore, cacheFactory, resourceAccessGuard);
+    }
+
+    @Test
+    void createAgentTrigger_agentTheCallerMayNotUse_refused() throws Exception {
+        // A trigger routes inbound messages into conversations with the agents its
+        // deployments name, and that routing runs with no interactive caller — below
+        // the USE gate by design. So the gate lives at authoring time; without it,
+        // pointing a trigger at a private agent is a standing bypass of the check on
+        // /agents/{id}/start.
+        var deployment = new AgentDeployment();
+        deployment.setAgentId("abcdef1234567890abcdef");
+        var configuration = new AgentTriggerConfiguration();
+        configuration.setIntent("greeting");
+        configuration.getAgentDeployments().add(deployment);
+        doThrow(new ForbiddenException("no")).when(resourceAccessGuard).requireAgentUseAccess("abcdef1234567890abcdef");
+
+        assertThrows(ForbiddenException.class, () -> restAgentTriggerStore.createAgentTrigger(configuration));
+        verify(agentTriggerStore, never()).createAgentTrigger(any());
     }
 
     @Test

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.mcp;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.triggermanagement.IRestAgentTriggerStore;
 import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
@@ -42,6 +43,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
+import io.quarkus.security.identity.SecurityIdentity;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -79,14 +81,15 @@ class McpConversationToolsTest {
         RestAgentEngine = mock(IRestAgentEngine.class);
         // Default: lenient serialize returns empty JSON
         lenient().when(jsonSerialization.serialize(any())).thenReturn("{}");
-        var mockIdentity = mock(io.quarkus.security.identity.SecurityIdentity.class);
+        var mockIdentity = mock(SecurityIdentity.class);
         lenient().when(mockIdentity.isAnonymous()).thenReturn(true);
         // Authorization disabled: the guard admits every caller (an unstubbed
         // descriptor store reads back no descriptor, i.e. no owner to check against).
         var conversationAccessGuard = new ConversationAccessGuard(mockIdentity, new OwnershipValidator(false),
                 mock(IConversationDescriptorStore.class));
         tools = new McpConversationTools(conversationService, agentAdmin, AgentStore, restInterfaceFactory, jsonSerialization, boundedLogStore,
-                auditStore, AgentTriggerStore, userConversationStore, RestAgentEngine, mockIdentity, conversationAccessGuard, false);
+                auditStore, AgentTriggerStore, userConversationStore, RestAgentEngine, mockIdentity, conversationAccessGuard,
+                mock(ResourceAccessGuard.class), false);
     }
 
     // --- listAgents ---
@@ -130,23 +133,23 @@ class McpConversationToolsTest {
     @Test
     void listAgentConfigs_returnsDescriptors() throws IOException {
         var descriptor = new DocumentDescriptor();
-        when(AgentStore.readAgentDescriptors("", 0, 20)).thenReturn(List.of(descriptor));
+        when(AgentStore.readAgentDescriptors("", 0, 20, "")).thenReturn(List.of(descriptor));
         when(jsonSerialization.serialize(any())).thenReturn("[{\"name\":\"TestAgent\"}]");
 
         String result = tools.listAgentConfigs(null, null);
 
         assertNotNull(result);
-        verify(AgentStore).readAgentDescriptors("", 0, 20);
+        verify(AgentStore).readAgentDescriptors("", 0, 20, "");
     }
 
     @Test
     void listAgentConfigs_withFilterAndLimit() throws IOException {
-        when(AgentStore.readAgentDescriptors("search", 0, 5)).thenReturn(Collections.emptyList());
+        when(AgentStore.readAgentDescriptors("search", 0, 5, "")).thenReturn(Collections.emptyList());
         when(jsonSerialization.serialize(any())).thenReturn("[]");
 
         tools.listAgentConfigs("search", 5);
 
-        verify(AgentStore).readAgentDescriptors("search", 0, 5);
+        verify(AgentStore).readAgentDescriptors("search", 0, 5, "");
     }
 
     // --- createConversation ---

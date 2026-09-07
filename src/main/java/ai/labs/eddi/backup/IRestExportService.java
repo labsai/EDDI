@@ -27,12 +27,27 @@ public interface IRestExportService {
 
     @POST
     @Path("{agentId}")
-    @Operation(description = "Export a Agent as a ZIP file. When selectedResources is provided, "
-            + "only those resource IDs are included in the ZIP (agent + workflow skeletons are always included).")
+    @Operation(description = "Export an agent as a ZIP file. Only a NON-BLANK selectedResources "
+            + "filters: then just those extension resource IDs are included in the ZIP, and the "
+            + "exported workflow still carries the steps that reference the omitted ones, so an import "
+            + "with strategy=merge answers them from the target's own copies instead of deleting those "
+            + "steps from it; strategy=create drops such a step (agent + workflow skeletons are always "
+            + "included). A blank or absent "
+            + "selectedResources is a full export of every extension resource. "
+            + "Snippets and schedules are selected through their own parameters, "
+            + "because their preview rows are newer than selectedResources: omit a parameter and every "
+            + "referenced snippet / every schedule of the agent is exported, pass it (even empty) and "
+            + "only the listed IDs are. HITL approval-timeout schedules are never exported — they are "
+            + "safety timers for one pending approval on this deployment, and the import surface "
+            + "refuses to mint them for anybody. "
+            + "The Location header names the finished archive, which is kept for "
+            + "eddi.backup.export.retention-minutes and then deleted.")
     Response exportAgent(@PathParam("agentId") String agentId,
                          @QueryParam("agentVersion")
                          @DefaultValue("1") Integer agentVersion,
-                         @QueryParam("selectedResources") String selectedResourceIds);
+                         @QueryParam("selectedResources") String selectedResourceIds,
+                         @QueryParam("selectedSnippets") String selectedSnippetIds,
+                         @QueryParam("selectedSchedules") String selectedScheduleIds);
 
     @POST
     @Path("{agentId}/preview")

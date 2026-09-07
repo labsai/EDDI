@@ -23,6 +23,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.micrometer.core.instrument.Tag;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
@@ -191,11 +193,14 @@ class McpToolProviderManagerAdditionalTest {
         private Map<String, String> headersFor(McpServerConfig config, McpCallContext callContext) throws Exception {
             var manager = new McpToolProviderManager(globalVariableResolver, secretResolver,
                     new CallerIdentityResolver(context, true), context, false, 1024, 300000L);
+            // The connectionBound flag is false throughout this class: these tests are
+            // about ${caller:…}, and a connection reference takes a different branch
+            // with its own tests.
             var method = McpToolProviderManager.class.getDeclaredMethod("authorizationHeader", String.class, McpServerConfig.class,
-                    boolean.class, McpCallContext.class);
+                    boolean.class, boolean.class, McpCallContext.class);
             method.setAccessible(true);
             @SuppressWarnings("unchecked")
-            var headers = (Map<String, String>) method.invoke(manager, config.getApiKey(), config, true, callContext);
+            var headers = (Map<String, String>) method.invoke(manager, config.getApiKey(), config, true, false, callContext);
             return headers;
         }
 
@@ -260,10 +265,10 @@ class McpToolProviderManagerAdditionalTest {
             var manager = new McpToolProviderManager(globalVariableResolver, secretResolver,
                     new CallerIdentityResolver(context, true), context, false, 1024, 300000L);
             var method = McpToolProviderManager.class.getDeclaredMethod("authorizationHeader", String.class, McpServerConfig.class,
-                    boolean.class, McpCallContext.class);
+                    boolean.class, boolean.class, McpCallContext.class);
             method.setAccessible(true);
             @SuppressWarnings("unchecked")
-            var onDiscovery = (Map<String, String>) method.invoke(manager, "static-key", config, false, discovery());
+            var onDiscovery = (Map<String, String>) method.invoke(manager, "static-key", config, false, false, discovery());
             assertEquals("Bearer static-key", onDiscovery.get("Authorization"), "discovery keeps the service credential");
         }
     }
@@ -307,7 +312,7 @@ class McpToolProviderManagerAdditionalTest {
         @Test
         @DisplayName("outcomes are counted without leaking a URL or a credential")
         void discoveryOutcomesAreCountedSafely() throws Exception {
-            var registry = new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
+            var registry = new SimpleMeterRegistry();
             // A spy with the network seam stubbed: pointing the real client at an
             // unreachable host would make this test depend on DNS and wait out the
             // 30-second default timeout.
@@ -321,7 +326,7 @@ class McpToolProviderManagerAdditionalTest {
             spied.discoverTools(List.of(config));
 
             var tagValues = registry.getMeters().stream().flatMap(m -> m.getId().getTags().stream())
-                    .map(io.micrometer.core.instrument.Tag::getValue).toList();
+                    .map(Tag::getValue).toList();
             assertFalse(tagValues.contains("super-secret-literal-key"), "a credential must never become a metric tag");
             assertFalse(tagValues.stream().anyMatch(v -> v.contains("unreachable-metrics-test")),
                     "a server URL is unbounded cardinality and must not be a tag: " + tagValues);

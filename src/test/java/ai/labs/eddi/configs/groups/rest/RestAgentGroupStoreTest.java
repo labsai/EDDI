@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.groups.rest;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
@@ -45,7 +46,8 @@ class RestAgentGroupStoreTest {
         jsonSchemaCreator = mock(IJsonSchemaCreator.class);
         workspaceStore = mock(IGroupWorkspaceStore.class);
         scheduleStore = mock(IScheduleStore.class);
-        restStore = new RestAgentGroupStore(groupStore, documentDescriptorStore, jsonSchemaCreator, workspaceStore, scheduleStore);
+        restStore = new RestAgentGroupStore(groupStore, documentDescriptorStore, jsonSchemaCreator, workspaceStore, scheduleStore,
+                mock(ResourceAccessGuard.class));
     }
 
     @Nested

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.integrations.openai;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.engine.model.Deployment.Status;
@@ -56,7 +57,7 @@ class AgentModelResolverTest {
     }
 
     private AgentModelResolver resolver(OpenAiCompatConfig config) {
-        var resolver = new AgentModelResolver(agentFactory, descriptorStore, config);
+        var resolver = new AgentModelResolver(agentFactory, descriptorStore, config, permissiveUseGuard());
         resolver.initCache();
         return resolver;
     }
@@ -366,5 +367,13 @@ class AgentModelResolverTest {
 
         resolver.invalidate();
         assertEquals(4, resolver.listModels().size());
+    }
+
+    /**
+     * A guard that admits every agent: a bare mock's void requireAgentUseAccess
+     * does nothing. The /v1 USE gate has its own tests.
+     */
+    private static ResourceAccessGuard permissiveUseGuard() {
+        return mock(ResourceAccessGuard.class);
     }
 }

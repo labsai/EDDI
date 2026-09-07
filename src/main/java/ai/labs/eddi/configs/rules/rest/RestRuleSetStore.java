@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.rules.IRuleSetStore;
 import ai.labs.eddi.configs.rules.IRestRuleSetStore;
 import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
@@ -30,8 +31,9 @@ public class RestRuleSetStore implements IRestRuleSetStore {
     private final RestVersionInfo<RuleSetConfiguration> restVersionInfo;
 
     @Inject
-    public RestRuleSetStore(IRuleSetStore behaviorStore, IDocumentDescriptorStore documentDescriptorStore, IJsonSchemaCreator jsonSchemaCreator) {
-        restVersionInfo = new RestVersionInfo<>(resourceURI, behaviorStore, documentDescriptorStore);
+    public RestRuleSetStore(IRuleSetStore behaviorStore, IDocumentDescriptorStore documentDescriptorStore, IJsonSchemaCreator jsonSchemaCreator,
+            ResourceAccessGuard resourceAccessGuard) {
+        restVersionInfo = new RestVersionInfo<>(resourceURI, behaviorStore, documentDescriptorStore, resourceAccessGuard);
         this.behaviorStore = behaviorStore;
         this.jsonSchemaCreator = jsonSchemaCreator;
     }

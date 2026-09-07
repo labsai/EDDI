@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.dictionary.rest;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.dictionary.IDictionaryStore;
 import ai.labs.eddi.configs.dictionary.model.DictionaryConfiguration;
@@ -40,7 +41,7 @@ class RestDictionaryStoreTest {
         dictionaryStore = mock(IDictionaryStore.class);
         var documentDescriptorStore = mock(IDocumentDescriptorStore.class);
         jsonSchemaCreator = mock(IJsonSchemaCreator.class);
-        restStore = new RestDictionaryStore(dictionaryStore, documentDescriptorStore, jsonSchemaCreator);
+        restStore = new RestDictionaryStore(dictionaryStore, documentDescriptorStore, jsonSchemaCreator, mock(ResourceAccessGuard.class));
     }
 
     @Nested

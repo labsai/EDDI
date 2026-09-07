@@ -39,6 +39,8 @@ import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
+import ai.labs.eddi.engine.security.ResolutionPrincipal;
+import ai.labs.eddi.engine.security.ResolutionPrincipalContext;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.PendingApprovalSummary;
 import io.micrometer.core.instrument.Counter;
@@ -56,6 +58,8 @@ import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
 
+import java.security.NoSuchAlgorithmException;
+import java.security.MessageDigest;
 import static ai.labs.eddi.engine.memory.ConversationMemoryUtilities.convertConversationMemorySnapshot;
 import static ai.labs.eddi.engine.memory.ConversationMemoryUtilities.convertSimpleConversationMemorySnapshot;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -495,8 +499,15 @@ class ConversationHitlService {
                         // The resume runs as the caller who approved: the identity was
                         // captured on the REST request thread above, because this body
                         // already runs on a pool thread with no request context.
+                        // Both bindings, because the approver drives the request but the
+                        // conversation owner owns the credentials: the CallerIdentity is
+                        // what audit and ${caller:token} must see, while a PER_USER
+                        // credential the resumed turn spends belongs to the user who
+                        // asked — never to the administrator who approved on their
+                        // behalf.
                         conversationService.waitForExecutionFinishOrTimeout(loggingContext, conversationId,
-                                runtime.submitCallable(callerIdentityContext.withIdentity(resumeCallerIdentity, resumeCallable),
+                                runtime.submitCallable(withConversationPrincipal(memory,
+                                        callerIdentityContext.withIdentity(resumeCallerIdentity, resumeCallable)),
                                         resumeFinished, null));
                     } finally {
                         // value-conditional: never evict a newer execution's registration
@@ -559,6 +570,38 @@ class ConversationHitlService {
             restorePauseAfterFailedResume(conversationId, memory, true);
             throw new ResourceStoreException("Failed to resume conversation: " + e.getLocalizedMessage(), e);
         }
+    }
+
+    /**
+     * Binds the resumed turn's {@link ResolutionPrincipal} — the conversation's own
+     * owner and the provenance persisted with it — around the work that continues
+     * the pipeline.
+     * <p>
+     * Both halves come from the STORED memory, never from the resume request: a
+     * resume proves who approved, and says nothing about who owns the conversation
+     * being approved. Deriving here from the request identity would resolve a
+     * PER_USER credential against the approver, and refusing to bind at all would
+     * fail every PER_USER resolution on the resume path — the two ways this turn
+     * can be wrong.
+     * <p>
+     * {@code ResolutionPrincipalContext} restores the previous binding in a
+     * {@code finally}, the same way {@code CallerIdentityContext} does around the
+     * identity it wraps here — pool threads are reused across conversations.
+     * <p>
+     * Read off the facade rather than held as a field because the context is
+     * CDI-field-injected and this collaborator is constructed inside the facade's
+     * constructor, before injection has run. A {@code null} context means the
+     * facade was built outside CDI (as the direct-construction unit tests do);
+     * nothing is bound and every PER_USER resolution fails closed, which is the
+     * safe direction.
+     */
+    private Callable<Void> withConversationPrincipal(IConversationMemory memory, Callable<Void> work) {
+        ResolutionPrincipalContext principalContext = conversationService.resolutionPrincipalContext;
+        if (principalContext == null) {
+            return work;
+        }
+        return principalContext.withPrincipal(
+                new ResolutionPrincipal(memory.getUserId(), memory.getResolutionProvenance()), work);
     }
 
     /**
@@ -934,7 +977,7 @@ class ConversationHitlService {
     /** SHA-256 hex of the given string (lower-case, 64 chars). */
     static String sha256Hex(String s) {
         try {
-            var md = java.security.MessageDigest.getInstance("SHA-256");
+            var md = MessageDigest.getInstance("SHA-256");
             byte[] hash = md.digest(s.getBytes(java.nio.charset.StandardCharsets.UTF_8));
             var sb = new StringBuilder(hash.length * 2);
             for (byte b : hash) {
@@ -942,7 +985,7 @@ class ConversationHitlService {
                 sb.append(Character.forDigit(b & 0xF, 16));
             }
             return sb.toString();
-        } catch (java.security.NoSuchAlgorithmException e) {
+        } catch (NoSuchAlgorithmException e) {
             // SHA-256 is guaranteed present on every JVM; unreachable.
             throw new IllegalStateException("SHA-256 unavailable", e);
         }

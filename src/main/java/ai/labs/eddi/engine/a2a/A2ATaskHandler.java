@@ -56,6 +56,7 @@ public class A2ATaskHandler {
     static final String ANONYMOUS_PEER = "a2a:anonymous";
 
     private final IConversationService conversationService;
+    private final AgentCardService agentCardService;
 
     /**
      * The calling peer's identity. The JSON-RPC endpoint is {@code @Authenticated},
@@ -91,7 +92,9 @@ public class A2ATaskHandler {
     private final ICache<String, String> contextConversationCache;
 
     @Inject
-    public A2ATaskHandler(IConversationService conversationService, ICacheFactory cacheFactory, SecurityIdentity identity) {
+    public A2ATaskHandler(IConversationService conversationService, ICacheFactory cacheFactory, SecurityIdentity identity,
+            AgentCardService agentCardService) {
+        this.agentCardService = agentCardService;
         this.conversationService = conversationService;
         this.taskConversationCache = cacheFactory.getCache(CACHE_NAME);
         this.contextConversationCache = cacheFactory.getCache(CACHE_NAME + ":context");
@@ -124,6 +127,17 @@ public class A2ATaskHandler {
         String userInput = extractTextFromMessage(message);
         if (userInput == null || userInput.isBlank()) {
             throw new InvalidA2ARequestException("No text content found in message parts");
+        }
+
+        // A2A sits outside the workspace model on purpose — a peer is a remote system,
+        // not an EDDI user, so it has no space to scope to. But the gate this surface
+        // does claim is `isA2aEnabled()` on the target, and discovery was enforcing it
+        // while conversing was not: a peer that knew an id could talk to an agent
+        // nobody had opted into A2A, private ones included. getAgentCard returns null
+        // for both "no such agent" and "not A2A-enabled", which is the same refusal a
+        // peer gets from discovery.
+        if (agentCardService.getAgentCard(agentId) == null) {
+            throw new InvalidA2ARequestException("Agent is not available over A2A: " + agentId);
         }
 
         // Resolve or create conversation — scoped to the calling peer
