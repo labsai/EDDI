@@ -25,8 +25,8 @@
              langchain4j-community.version were byte-identical duplicates of
              langchain4j.version and langchain4j-beta.version), which made a
              half-finished bump the likely outcome of any upgrade. -->
-        <langchain4j.version>1.19.0</langchain4j.version>
-        <langchain4j-beta.version>1.19.0-beta29</langchain4j-beta.version>
+        <langchain4j.version>1.20.0</langchain4j.version>
+        <langchain4j-beta.version>1.20.0-beta30</langchain4j-beta.version>
         <jandex-maven-plugin.version>3.6.0</jandex-maven-plugin.version>
         <maven.compiler.parameters>true</maven.compiler.parameters>
         <surefire-plugin.version>3.5.6</surefire-plugin.version>
