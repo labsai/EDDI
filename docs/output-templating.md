@@ -185,6 +185,40 @@ If you are upgrading from EDDI v5, template syntax is automatically migrated:
 | `#json.method()` | `{json:method()}` |
 | `a + '/' + b` | `{a}/{b}` |
 
+## Previewing a template
+
+Rather than deploying an agent to find out what a template resolves to, resolve it directly:
+
+```
+POST /administration/preview/template
+```
+
+Requires the `eddi-admin` or `eddi-editor` role.
+
+```json
+{
+  "template": "Hello {properties.firstName}, your booking is {properties.bookingId}.",
+  "conversationId": "68b1f0c2d4e5a60012ab34cd"
+}
+```
+
+`conversationId` is optional. With it, the template resolves against that conversation's real
+memory; without it, against built-in sample data. Because supplying a conversation returns the
+flattened variable values as well as the resolved text, the role check is paired with a
+per-conversation ownership check — an editor cannot read someone else's conversation this way.
+
+```json
+{
+  "resolved": "Hello Ada, your booking is BK-12345.",
+  "availableVariables": ["properties.firstName", "properties.bookingId", "memory.current.input"],
+  "variableValues": { "properties.firstName": "Ada", "properties.bookingId": "BK-12345" },
+  "error": null
+}
+```
+
+A template that fails to render returns the failure in `error` rather than as an HTTP error, so a
+preview of a broken template still tells you which variables were available.
+
 ## _**Additional Information:**_
 
 [Quarkus Qute documentation.](https://quarkus.io/guides/qute-reference)

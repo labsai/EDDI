@@ -151,6 +151,7 @@ Follow this order unless the user explicitly requests something different.
 | —     | LLM Provider Expansion   | Added Mistral, Azure OpenAI, Bedrock, Oracle GenAI (12 providers; see `docs/langchain.md`)                                     |
 | —     | Quarkus LTS              | LTS platform upgrade, Java 25 module fix (version pinned in `pom.xml`)                              |
 | 12    | CI/CD                    | GitHub Actions unified pipeline, Docker Hub push, CircleCI removed                                  |
+| —     | OpenTelemetry Tracing    | Per-task `eddi.pipeline.task` spans from `LifecycleManager`, MCP circuit breakers — see [`docs/monitoring/monitoring-guide.md`](docs/monitoring/monitoring-guide.md) |
 | 11a   | Persistent Memory        | IUserMemoryStore, UserMemoryTool, DreamService, McpMemoryTools, Property.Visibility                 |
 | —     | Conversation Windows     | Token-aware windowing, rolling summary, ConversationRecallTool                                      |
 | —     | Agentic Improvements 1–5 | Counterweights, MCP governance, capability registry, multimodal attachments, agent signing          |
@@ -172,7 +173,7 @@ Follow this order unless the user explicitly requests something different.
 | —     | Memory Architecture       | Commit flags, RAG threshold, context selection, auto-compaction, property consolidation (see `planning/memory-architecture-plan.md`) |
 | —     | Session Forking           | State snapshotting, conversation forking (see `planning/agentic-improvements-plan.md` §7)                                                 |
 | —     | Conversation Chaining     | Cross-session context carry-over (see `planning/conversation-window-management.md` Strategy 3)                                       |
-| 9     | DAG Pipeline              | Parallel tasks, circuit breakers, OpenTelemetry tracing                                                                                   |
+| 9     | DAG Pipeline              | Parallel task execution and the dependency graph. OpenTelemetry tracing and MCP circuit breakers already shipped — see Completed          |
 | —     | HITL — remaining          | EDDI-Manager approvals UI (Manager repo) and the reserved `inGroupTurns: INBOX` mode for member *tool-call* pauses. Core framework shipped; humans as group *members* shipped in 10c — see Completed. `VoteConfig.tiePolicy: HUMAN_DECIDES` is likewise still save-time rejected pending its own resume machinery |
 | —     | Guardrails                | Config-driven input/output guardrails in LlmTask (see `planning/guardrails-architecture.md`)                                         |
 | 11b   | Multi-Channel             | Teams adapter (Slack already ships via HITL approval channels; see `planning/multi-agent-ux-improvements.md`)                        |
@@ -801,7 +802,7 @@ Matcher:      "actions" : "ask_for_model"
 | `longTerm`     | Persisted to `usermemories` collection across conversations                                                                                   |
 | `secret`       | Auto-vaulted: plaintext stored in SecretsVault, raw input scrubbed from memory, vault reference (`${vault:...}`) stored as property value |
 
-> **Warning**: `scope: "secret"` requires the vault to be active (`EDDI_VAULT_MASTER_KEY` env var set). If vault is disabled (common in dev mode), `autoVaultSecret()` fails and falls back to storing plaintext — but logs an ERROR that may confuse users. For wizard-style agents that collect API keys and pass them to an endpoint (see §5.6), prefer `scope: "conversation"` and delegate vaulting to the receiving service.
+> **Warning**: `scope: "secret"` requires the vault to be active (`EDDI_VAULT_MASTER_KEY` env var set). If the vault is disabled — which is the shipped default — `autoVaultSecret()` **fails closed**: it scrubs the plaintext from the conversation step, logs an ERROR, and throws a `LifecycleException` naming `EDDI_VAULT_MASTER_KEY`. The whole turn fails; the plaintext is never persisted. (An earlier release persisted the plaintext instead; that behaviour was removed deliberately — see the comment in `PropertySetterTask.autoVaultSecret` and `docs/properties.md`.) For wizard-style agents that collect API keys and pass them to an endpoint (see §5.6), prefer `scope: "conversation"` and delegate vaulting to the receiving service — a dev instance without a master key cannot complete a secret-scoped turn at all.
 
 #### Capturing user input vs. setting fixed values
 
@@ -901,7 +902,20 @@ The file naming convention is `{id}.{type}.json` where `{id}` matches the last p
     {outputId}.descriptor.json
     {llmId}.langchain.json        → LLM configuration (file ext stays "langchain", URI uses "llm")
     {llmId}.descriptor.json
+    {dictionaryId}.regulardictionary.json → Regular dictionary (URI uses "dictionary")
+    {dictionaryId}.descriptor.json
+    {mcpId}.mcpcalls.json         → MCP tool calls
+    {mcpId}.descriptor.json
+    {ragId}.rag.json              → RAG retrieval configuration
+    {ragId}.descriptor.json
+snippets/
+  {snippetId}.snippet.json        → Prompt snippets (root, agent, or version level)
+schedules/
+  {scheduleId}.schedule.json      → Agent schedules
 ```
+
+> The authoritative list of file extensions is `AbstractBackupService`'s `*_EXT` constants —
+> twelve of them. Check against that file rather than against this block if the two ever disagree.
 
 > **Important**: File extensions use legacy names (`behavior`, `httpcalls`, `langchain`) while URIs use v6 names (`rules`, `apicalls`, `llm`). The import service maps between them via `AbstractBackupService` constants.
 
@@ -935,6 +949,8 @@ Always use v6 canonical URIs in new configs:
 | `eddi://ai.labs.httpcalls` | `eddi://ai.labs.apicalls/...` | Optional — API calls        |
 | `eddi://ai.labs.output`    | `eddi://ai.labs.output/...`   | Usually yes — user messages |
 | `eddi://ai.labs.llm`       | `eddi://ai.labs.llm/...`      | Optional — LLM interaction  |
+| `eddi://ai.labs.mcpcalls`  | `eddi://ai.labs.mcpcalls/...` | Optional — MCP tool calls   |
+| `eddi://ai.labs.templating`| — (no config URI)             | Yes when any output or system prompt contains `{…}` placeholders — must be last |
 
 ### 5.6 Reference Implementation
 

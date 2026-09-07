@@ -559,6 +559,13 @@ Both stored shapes therefore keep working: a config that sets only `streamingTim
 | `toolCacheScopes`          | map      | Per-tool cache partition: `user`/`conversation`/`global` | (all `user`)   |
 | `defaultToolCacheScope`    | string   | Cache partition for tools without an override    | `user`                 |
 | `enableRateLimiting`       | boolean  | Limit tool/LLM usage rate                        | true                   |
+| `toolLoadingStrategy`      | string   | `EAGER` sends every tool spec on every request. `LAZY` sends only a `discover_tools` meta-tool, and injects the tools the model asks for from the next iteration on. Use `LAZY` when a large tool set is crowding the context window | `EAGER` |
+| `maxToolsInContext`        | int      | Maximum tool specifications returned per discovery call under `LAZY`. Ignored under `EAGER` | 20 |
+| `retry`                    | object   | Retry policy for LLM calls — see [Retry configuration](#retry-configuration) | (none) |
+| `responseValidation`       | object   | Validates the model's response and applies a remediation action. Policies: `onEmpty`, `onTruncation`, `onContentFilter`, `onRefusal`, `onStreamingTimeout` | (none) |
+| `maxRagContextChars`       | int      | Ceiling on the assembled RAG context, in characters. `-1` or `0` disables it and restores the older unbounded behaviour | 20000 |
+| `maxSystemPromptChars`     | int      | Hard ceiling on the whole assembled system prompt, applied after RAG context, counterweight, identity masking and response-format blocks are appended. `-1` leaves it untouched | -1 |
+| `conversationSummary`      | object   | Rolling conversation summary — see [Rolling Conversation Summary](#rolling-conversation-summary) | (none) |
 
 ### Behavioral Safety (Counterweight & Identity Masking)
 
@@ -657,6 +664,7 @@ When `enableBuiltInTools: true`, you can use these tools:
 | **PDF Reader**      | Extract text from PDF URLs (SSRF-protected)     | `pdfreader`      |
 | **Weather**         | Get weather information                         | `weather`        |
 | **Tool Response Paging** | Fetch the next page of a tool response that was truncated by `toolResponseLimits` | `fetch_page` / `fetch_tool_response_page` |
+| **Conversation Recall** | Drill back into turns the [rolling summary](#rolling-conversation-summary) has compressed. Only assembled when `conversationSummary.enabled` is true | `conversationRecall` |
 
 > Because a non-empty `builtInToolsWhitelist` enables **only** the tools it names, a whitelist that includes verbose tools should also include `fetch_page` — otherwise truncated tool responses cannot be paged through.
 
@@ -912,6 +920,68 @@ This agent:
 - **All other providers**: Uses an approximate tokenizer (characters ÷ 4)
 
 When `maxContextTokens` is -1 (default), the existing `conversationHistoryLimit` step-count behavior applies. **Full backward compatibility is guaranteed.**
+
+### Retry Configuration
+
+`retry` on an LLM task bounds how the engine re-attempts a failed model call. Only errors the
+engine classifies as retriable are retried — transport faults, rate limits and 5xx responses —
+never a malformed request or an authentication failure.
+
+```json
+{
+  "retry": {
+    "maxAttempts": 3,
+    "backoffDelayMs": 1000,
+    "backoffMultiplier": 2.0,
+    "maxBackoffDelayMs": 10000
+  }
+}
+```
+
+| Parameter            | Type   | Description                                          | Default |
+| -------------------- | ------ | ---------------------------------------------------- | ------- |
+| `maxAttempts`        | int    | Total attempts including the first                   | 3       |
+| `backoffDelayMs`     | long   | Delay before the second attempt                      | 1000    |
+| `backoffMultiplier`  | double | Multiplier applied to the delay after each failure   | 2.0     |
+| `maxBackoffDelayMs`  | long   | Ceiling on any single delay                          | 10000   |
+
+The engine clamps these so a config cannot pin a pipeline thread: at most 10 attempts, at most
+30 seconds for one backoff, and at most 60 seconds of backoff in total across the retry sequence.
+A clamped value is reported once in a WARN.
+
+### Rolling Conversation Summary
+
+The third windowing strategy compresses older turns into a running summary that is injected into
+the system message, and keeps only the most recent turns verbatim. Unlike token-aware windowing,
+nothing is dropped outright: the model still sees what happened, in condensed form, and can drill
+back into the full text through the `conversationRecall` built-in tool.
+
+```json
+{
+  "conversationSummary": {
+    "enabled": true,
+    "recentWindowSteps": 5,
+    "maxSummaryTokens": 800,
+    "excludePropertiesFromSummary": true,
+    "maxRecallTurns": 20
+  }
+}
+```
+
+| Parameter                      | Type    | Description                                                                                     | Default |
+| ------------------------------ | ------- | ----------------------------------------------------------------------------------------------- | ------- |
+| `enabled`                      | boolean | Master switch. Nothing is summarized while this is false                                         | false   |
+| `llmProvider`                  | string  | Provider for the summarization call. Inherits the parent task's provider when unset              | (inherit) |
+| `llmModel`                     | string  | Model for the summarization call. Inherits the parent task's model when unset                    | (inherit) |
+| `maxSummaryTokens`             | int     | Token ceiling on the generated summary                                                           | 800     |
+| `excludePropertiesFromSummary` | boolean | Tell the summarizer to skip facts already captured as persistent properties                      | true    |
+| `recentWindowSteps`            | int     | Conversation steps kept verbatim alongside the summary. Everything older is covered by it        | 5       |
+| `maxRecallTurns`               | int     | Maximum verbatim turns returned per `conversationRecall` invocation                              | 20      |
+
+> **Watch the whitelist.** A non-empty `builtInToolsWhitelist` enables only the tools it names, and
+> `conversationRecall` is one of them. Enabling the rolling summary on a task whose whitelist does
+> not include `conversationRecall` leaves the model unable to drill back into summarized turns — it
+> answers from the condensed view with no error and no log line.
 
 ### In-Turn Tool Context Budget
 

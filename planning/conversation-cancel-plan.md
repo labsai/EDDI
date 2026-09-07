@@ -1,5 +1,8 @@
 # Conversation Cancellation & Lifecycle Control
 
+> **Status: IMPLEMENTED.** `DiscussionControlToken` / `ControlSignal` and
+> `POST /agents/{conversationId}/cancel` (`IRestAgentEngine`) shipped. Kept as the design record.
+>
 > **Scope**: Cancel/stop for group discussions and regular conversations.  
 > **HITL prerequisite**: This plan designs the detection mechanism (safe-point checking) to be reusable for HITL. However, HITL pause/resume requires significant additional work beyond what cancel provides — this is documented honestly in §6.
 
@@ -7,7 +10,8 @@
 
 ## 1. Problem Statement
 
-Currently, neither group discussions nor regular agent conversations can be stopped mid-execution.
+When this plan was written, neither group discussions nor regular agent conversations could be
+stopped mid-execution.
 
 - **Group discussions**: The `executeDiscussion()` loop runs all phases to completion. SSE client disconnect silently drops events but the backend keeps calling LLM agents — wasting tokens and compute.
 - **Regular conversations**: The `Conversation.say()` method submits work via `ConversationCoordinator.submitInOrder()` which runs the full lifecycle pipeline (parser → rules → LLM → output → property setter). There is no way to externally cancel an in-flight turn.

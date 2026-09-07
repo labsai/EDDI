@@ -62,10 +62,13 @@ Now we will align the just created `LifecycleTasks` in the `Workflow`. Make a **
 
 | Name                         | Description                                          | Required |
 | ---------------------------- | ---------------------------------------------------- | -------- |
-| packageextensions            | `Array` of `WorkflowExtension`                       |          |
-| WorkflowExtension.type       | possible values, see table below "`Extension Types`" |          |
-| WorkflowExtension.extensions | `Array` of `Object`                                  | False    |
-| WorkflowExtension.config     | `Config` object, but can be empty.                   | True     |
+| workflowSteps                | `Array` of `WorkflowStep`                            | True     |
+| WorkflowStep.type            | possible values, see table below "`Extension Types`" |          |
+| WorkflowStep.extensions      | `Array` of `Object`                                  | False    |
+| WorkflowStep.config          | `Config` object, but can be empty.                   | True     |
+
+`workflowExtensions` is still accepted as a v5 alias. No other spelling is: writes go through a
+strict parser that rejects an unknown top-level key with a `400`.
 
 Extension Types in this examples
 

@@ -1,5 +1,10 @@
 # Observability & Pipeline Architecture Plan
 
+> **Status: ALL FOUR ITEMS SHIPPED.** Kept as the design record. OpenTelemetry tracing,
+> the LlmTask decomposition, the coordinator queue bound with its gauges, and the Grafana
+> dashboards are all in the tree — see [`docs/monitoring/monitoring-guide.md`](../docs/monitoring/monitoring-guide.md)
+> for what was delivered. Do not pick items from this file up as available work.
+>
 > **Context:** These are larger architectural improvements deferred from the v6.0.2 security sprint. They span the pipeline engine, coordinator, and observability infrastructure.
 
 ## Prerequisite Reading

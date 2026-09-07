@@ -176,30 +176,50 @@ The entire pipeline lives in a single file: [`.github/workflows/ci.yml`](../.git
 ```text
 ┌──────────────────┐
 │  build-and-test  │  ← Always runs (push, PR, tag)
-│  mvnw verify     │     Tests + JaCoCo coverage
+│  mvnw clean test │     Unit tests only
 └────────┬─────────┘
          │
-    ┌────┴────┐
-    │         │
-    ▼         ▼
-┌────────┐  ┌──────────────────┐
-│ docker │  │ preflight-check  │  ← PRs only
-│ build  │  │ Red Hat dry-run  │
-│ + push │  └──────────────────┘
-└────┬───┘
-     │
-     ▼
-┌────────────┐
-│ smoke-test │  ← Starts image + MongoDB, checks /q/health/ready
-└────────────┘
+         ├──────────────┬─────────────┬────────────┐
+         ▼              ▼             ▼            ▼
+┌──────────────────┐ ┌────────────┐ ┌────────┐ ┌──────────┐
+│ integration-test │ │ trivy-scan │ │ codeql │ │ gitleaks │
+│ mvnw verify      │ └─────┬──────┘ └───┬────┘ └────┬─────┘
+│ -DskipITs=false  │       │            │           │
+│ ITs + the JaCoCo │       │            │           │
+│ 90/80 gate       │       │            │           │
+└────────┬─────────┘       │            │           │
+         └─────────────────┴────────────┴───────────┘
+                           │
+              ┌────────────┴────────────┐
+              ▼                         ▼
+         ┌────────┐          ┌──────────────────┐
+         │ docker │          │ preflight-check  │  ← PRs only
+         │ build  │          │ Red Hat dry-run  │
+         │ + push │          └──────────────────┘
+         └───┬────┘
+             ▼
+       ┌────────────┐
+       │ smoke-test │  ← Starts image + MongoDB, checks /q/health/ready
+       └────────────┘
 ```
+
+Nothing is published until every gate above `docker` has passed. Its `needs` list is
+`[detect-changes, build-and-test, integration-test, trivy-scan, codeql, gitleaks]`, so a failing
+CVE scan, a secret leak, a CodeQL finding or a coverage shortfall each block the push on their
+own. **`build-and-test` runs `mvnw clean test`, not `verify`** — `integration-test` is the only
+job that runs the JaCoCo 90/80 coverage gate.
 
 ### Job Details
 
 | Job | Runs on | Condition | Duration |
 |---|---|---|---|
 | **build-and-test** | Every push/PR/tag | When changed paths match the `code` filter (`src/**`, `pom.xml`, `.github/workflows/**`, `Dockerfile*`, `docker-compose*.yml`, `.dockerignore`, `k8s/**`, `helm/**`, `mvnw*`, `.mvn/**`); always on tags | ~3-5 min |
-| **docker** | Push to `main` or a tag matching `[0-9]*` | `[skip docker]` to skip (ignored on tags) | ~3-4 min |
+| **integration-test** | Same as build-and-test | Runs `mvnw verify -DskipITs=false`; the only job that enforces the JaCoCo 90/80 gate | ~10-15 min |
+| **codeql** | Every push/PR/tag on the `code` filter | SAST build + analysis; blocks `docker` | ~8-12 min |
+| **trivy-scan** | Same | Filesystem CVE scan, `exit-code 1`; blocks `docker` | ~2-3 min |
+| **gitleaks** | Same | Secret scanning; blocks `docker` | ~1 min |
+| **sbom** | Same | CycloneDX SBOM; does not block `docker` | ~2 min |
+| **docker** | Push to `main` or a tag matching `[0-9]*` | `[skip docker]` to skip (ignored on tags). Needs build-and-test, integration-test, trivy-scan, codeql and gitleaks | ~3-4 min |
 | **smoke-test** | After `docker` succeeds | Same as docker | ~1-2 min |
 | **preflight-check** | Pull requests only | Always on PRs | ~5-7 min |
 

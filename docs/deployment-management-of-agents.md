@@ -112,6 +112,8 @@ The undeployment of a specific agent is done through a **`POST`** to **`/adminis
 | {environment} | (`Path parameter`):`String` deployment environment: `production` (default) or `test`             |
 | {agentId}     | (`Path parameter`):`String` id of the agent that you wish to **undeploy**.               |
 | version       | (`Query parameter`, **required**):`Integer` version of the agent that you wish to **undeploy**. |
+| endAllActiveConversations | (`Query parameter`, optional, default `false`):`Boolean` end the agent's active conversations instead of refusing. Without it, undeploying an agent that has active conversations returns `409`. |
+| undeployThisAndAllPreviousAgentVersions | (`Query parameter`, optional, default `false`):`Boolean` also undeploy every earlier version, counting down to version 1. |
 
 ### Example :
 
@@ -128,6 +130,17 @@ _Response Body_
 _Response Code_
 
 `202`
+
+### Conflict: the agent has active conversations
+
+If the agent has at least one active conversation and `endAllActiveConversations` is `false`,
+the endpoint answers `409 Conflict` with a `text/plain` body naming the count. Nothing is
+undeployed. This is the normal case for a live agent, so a caller that treats any non-2xx as a
+hard failure will abort a rollback here.
+
+Retry with `endAllActiveConversations=true` to end those conversations and proceed:
+
+`http://localhost:7070/administration/production/undeploy/5aaf98e19f7dd421ac3c7de9?version=1&endAllActiveConversations=true`
 
 
 ## **Check the deployment status of an agent:**
