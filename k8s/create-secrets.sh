@@ -225,6 +225,13 @@ cleanup_secret_file
 trap - EXIT
 echo -e "${GREEN}✅${RESET}"
 
+# Everything below reports an INSTALLED key, so it must only ever be reachable
+# after a create that succeeded. It is, here: the create above is unconditional
+# and every failure exits through `fail`. This script has no --dry-run, which is
+# what kept it clear of the defect its PowerShell twin had — there
+# SupportsShouldProcess can decline the create under -WhatIf, and the box below
+# was printed for a Secret that was never made. If a dry-run mode is ever added
+# here, gate this block on the create having happened.
 echo ""
 echo -e "  ${YELLOW}┌─ 🔑 Vault Master Key ──────────────────────────────┐${RESET}"
 echo -e "  ${YELLOW}│                                                    │${RESET}"

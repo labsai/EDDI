@@ -15,6 +15,10 @@
 #
 # Usage:
 #   bash k8s/create-secrets.sh              # once, before the first apply
+#   # The auth component ships no default Keycloak admin password; its pod does
+#   # not start until this Secret exists.
+#   kubectl create secret generic keycloak-admin -n eddi \
+#     --from-literal=password="$(openssl rand -base64 24)"
 #   kubectl apply -k k8s/examples/mongodb-full/
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization

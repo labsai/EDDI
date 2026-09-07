@@ -78,10 +78,30 @@ spec:
           env:
             - name: KC_BOOTSTRAP_ADMIN_USERNAME
               value: "admin"
-            # ⚠️  Dev credential. Replace before exposing this outside a
-            # throwaway cluster — it is the master-realm superuser.
+            # No default, and no literal: this is the master-realm superuser,
+            # and the `keycloak` Service below is a ClusterIP that every pod in
+            # the namespace can reach. A shipped `value: "admin"` was therefore
+            # not a "dev credential" an operator would notice and change — it
+            # was a guessable superuser password on whatever cluster the
+            # component was applied to, this file being the only place saying
+            # otherwise.
+            #
+            # secretKeyRef with optional unset (the default) FAILS CLOSED: with
+            # no Secret the kubelet cannot build the container and the pod sits
+            # in CreateContainerConfigError with `secret "keycloak-admin" not
+            # found`, rather than coming up reachable with a known password.
+            # Create it once, before the first apply:
+            #
+            #   kubectl create secret generic keycloak-admin -n eddi \
+            #     --from-literal=password="$(openssl rand -base64 24)"
+            #
+            # Helm renders the same env var from `keycloak.adminPassword`, which
+            # `required` refuses to default — see helm/eddi/templates/keycloak.yaml.
             - name: KC_BOOTSTRAP_ADMIN_PASSWORD
-              value: "admin"
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-admin
+                  key: password
             - name: KC_HTTP_PORT
               value: "8080"
             # /health/* are disabled unless this is set — without it the probes

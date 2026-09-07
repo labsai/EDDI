@@ -206,6 +206,15 @@ if ($Force) {
 # QUARKUS_CONFIG_LOCATIONS at it — secrets are deliberately NOT injected as
 # environment variables, which are readable from /proc/<pid>/environ and leak
 # into crash dumps and child processes.
+#
+# $secretInstalled gates the report below, because ShouldProcess can decline
+# this block. Under -WhatIf it declines every write, so the run created nothing
+# — and the key box, "Secret created in namespace" and the "Next steps" apply
+# commands were printed anyway. That told an operator a master key had been
+# installed when none had, and printed a key that exists in no cluster, no file
+# and no vault: file it and the real install later generates a different one;
+# act on the next steps and the pod waits forever for a Secret nobody made.
+$secretInstalled = $false
 if ($PSCmdlet.ShouldProcess("Kubernetes", "Create secret 'eddi-secrets' in '$Namespace'")) {
     $secretFile = Join-Path ([System.IO.Path]::GetTempPath()) ("eddi-secrets-" + [guid]::NewGuid().ToString() + ".properties")
     try {
@@ -237,6 +246,22 @@ if ($PSCmdlet.ShouldProcess("Kubernetes", "Create secret 'eddi-secrets' in '$Nam
         exit 1
     }
     Write-Information -MessageData "  Creating eddi-secrets... ✅" -InformationAction Continue
+    $secretInstalled = $true
+}
+
+if (-not $secretInstalled) {
+    # The only way here is ShouldProcess declining — -WhatIf, or a -Confirm
+    # answered no. Every failing create path above exits non-zero.
+    Write-Information -MessageData "" -InformationAction Continue
+    Write-Information -MessageData "  ⚠️  Nothing was created: the create was declined (-WhatIf / -Confirm)." -InformationAction Continue
+    Write-Information -MessageData "     eddi-secrets does NOT exist in namespace $Namespace and no vault" -InformationAction Continue
+    Write-Information -MessageData "     master key was installed. The key generated for this run is" -InformationAction Continue
+    Write-Information -MessageData "     deliberately not printed — it was never stored anywhere, so keeping" -InformationAction Continue
+    Write-Information -MessageData "     it would be keeping a key for a Secret that does not exist." -InformationAction Continue
+    Write-Information -MessageData "" -InformationAction Continue
+    Write-Information -MessageData "     Re-run without -WhatIf to install one." -InformationAction Continue
+    Write-Information -MessageData "" -InformationAction Continue
+    exit 0
 }
 
 Write-Information -MessageData "" -InformationAction Continue

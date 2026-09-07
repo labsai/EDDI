@@ -37,7 +37,7 @@
     "zh-TW"
   ],
   "defaultLocale": "en",
-  "sslRequired": "none",
+  "sslRequired": "external",
   "registrationAllowed": false,
   "loginWithEmailAllowed": true,
   "duplicateEmailsAllowed": false,
@@ -209,13 +209,6 @@
       "email": "eddi@localhost",
       "enabled": true,
       "emailVerified": true,
-      "credentials": [
-        {
-          "type": "password",
-          "value": "eddi",
-          "temporary": true
-        }
-      ],
       "realmRoles": [
         "eddi-admin",
         "eddi-editor"

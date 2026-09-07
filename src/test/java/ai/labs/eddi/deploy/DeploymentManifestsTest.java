@@ -886,6 +886,70 @@ class DeploymentManifestsTest {
                     CREATE_SECRETS_PS1 + " -Force deleted the live key and then did not install a new one. "
                             + rotated);
         }
+
+        /**
+         * A generator may report an installed master key exactly when it installed one.
+         * <p>
+         * {@code SupportsShouldProcess} makes {@code -WhatIf} decline every write in
+         * create-secrets.ps1 — the namespace, the {@code -Force} delete and the create
+         * — and the run then fell through to the "Save this key!" box, "Secret created
+         * in namespace" and the {@code kubectl apply -k} next steps regardless. Two
+         * lies in one run: a key was reported as installed when nothing was written,
+         * and the key printed for safekeeping existed in no cluster, no file and no
+         * vault. File it and the real install later generates a different one; act on
+         * the next steps and the pod waits forever for a Secret nobody made.
+         * <p>
+         * Asserted as the biconditional rather than as "-WhatIf prints nothing",
+         * because the property is what matters and it also covers the paths that
+         * legitimately print: a genuine install must still show the key, since the
+         * script is the only place it exists. Every mode either script has is swept, so
+         * a future early-return that forgets the box fails here too.
+         * <p>
+         * create-secrets.sh has no analogous path and is not changed: it offers no
+         * dry-run, its create is unconditional, and every failure leaves through
+         * {@code fail}. It is swept anyway — the two are documented as equivalent, and
+         * this is the invariant they have to stay equivalent on.
+         */
+        @Test
+        @DisplayName("neither generator reports a key it did not install")
+        void generatorsReportAKeyOnlyWhenTheyInstalledOne() throws Exception {
+            List<GeneratorRun> runs = new ArrayList<>();
+            for (String mode : List.of("exists", "notfound", "unreachable", "forbidden")) {
+                runs.add(runShellGenerator(mode));
+            }
+            runs.add(runShellGenerator("exists", true));
+            for (GeneratorRun run : runs) {
+                assertEquals(run.issued("create secret generic eddi-secrets"), run.reportedAnInstalledKey(),
+                        CREATE_SECRETS_SH + " printed the vault master key and reported eddi-secrets as "
+                                + "created without issuing the create (or installed one and never printed "
+                                + "it — the key exists nowhere else). " + run);
+            }
+
+            runs.clear();
+            for (String mode : List.of("exists", "notfound", "unreachable", "forbidden")) {
+                runs.add(runPowerShellGenerator(mode));
+            }
+            runs.add(runPowerShellGenerator("exists", true));
+            runs.add(runPowerShellGenerator("notfound", false, true));
+            runs.add(runPowerShellGenerator("exists", true, true));
+            for (GeneratorRun run : runs) {
+                assertEquals(run.issued("create secret generic eddi-secrets"), run.reportedAnInstalledKey(),
+                        CREATE_SECRETS_PS1 + " printed the vault master key and reported eddi-secrets as "
+                                + "created without issuing the create (or installed one and never printed "
+                                + "it). Under -WhatIf ShouldProcess declines every write, so the operator was "
+                                + "handed a key for a Secret that exists in no cluster. " + run);
+            }
+
+            // Vacuity guard: the biconditional is satisfied trivially if -WhatIf ever
+            // starts writing, which is the one thing -WhatIf must never do.
+            GeneratorRun dryRun = runPowerShellGenerator("notfound", false, true);
+            assertFalse(dryRun.issued("create secret generic eddi-secrets"),
+                    CREATE_SECRETS_PS1 + " -WhatIf created eddi-secrets. " + dryRun);
+            assertEquals(0, dryRun.exitCode(),
+                    CREATE_SECRETS_PS1 + " -WhatIf exited non-zero. A declined dry run is not a failure, and "
+                            + "an installer that exits 1 on it will be retried without -WhatIf by a script "
+                            + "that cannot tell the two apart. " + dryRun);
+        }
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -938,6 +1002,88 @@ class DeploymentManifestsTest {
             assertTrue(Files.exists(KUSTOMIZE_REALM), KUSTOMIZE_REALM + " must ship with the auth component");
             assertTrue(Files.exists(HELM_REALM),
                     HELM_REALM + " must ship inside the chart — .Files.Get cannot read outside it");
+        }
+
+        /**
+         * KC_BOOTSTRAP_ADMIN_PASSWORD is the master-realm superuser, and the
+         * {@code keycloak} Service in front of it is a ClusterIP: every pod in the
+         * namespace can reach it. It shipped in the kustomize component as
+         * {@code value: "admin"} under a comment asking the operator to change it —
+         * which is a guessable superuser on any cluster where nobody read the comment,
+         * and an audit finding on every cluster where somebody did.
+         * <p>
+         * Neither delivery path may carry a literal, and neither may DEFAULT one:
+         * <ul>
+         * <li>kustomize takes it from a Secret through {@code secretKeyRef}. With
+         * {@code optional} unset the kubelet cannot build the container until that
+         * Secret exists, so the component fails closed — CreateContainerConfigError
+         * naming the missing Secret — instead of coming up reachable with a known
+         * password. {@code optional: true} would restore exactly the old failure mode
+         * in a new shape: Keycloak boots, with no bootstrap admin at all.</li>
+         * <li>Helm renders it through {@code required}, which refuses to template a
+         * chart whose {@code keycloak.adminPassword} is unset.</li>
+         * </ul>
+         * Failing closed is only usable if the operator is told what to create, so the
+         * Secret named in the manifest is asserted to be the Secret the component
+         * header and docs/kubernetes.md hand out a {@code kubectl create secret}
+         * command for — read out of the YAML rather than remembered here, so renaming
+         * it in one place and not the others fails.
+         */
+        @Test
+        @DisplayName("the keycloak bootstrap admin password has no default on either delivery path")
+        void bootstrapAdminPasswordIsSuppliedByTheOperatorOnBothPaths() throws IOException {
+            JsonNode passwordVariable = null;
+            for (JsonNode variable : documentOfKind(KUSTOMIZE_KEYCLOAK, "StatefulSet")
+                    .path("spec").path("template").path("spec").path("containers").get(0).path("env")) {
+                if ("KC_BOOTSTRAP_ADMIN_PASSWORD".equals(variable.path("name").asText())) {
+                    passwordVariable = variable;
+                }
+            }
+            assertTrue(passwordVariable != null,
+                    KUSTOMIZE_KEYCLOAK + " sets no KC_BOOTSTRAP_ADMIN_PASSWORD. Keycloak then creates no "
+                            + "bootstrap admin and there is nobody to administer the realm with");
+            assertFalse(passwordVariable.has("value"),
+                    KUSTOMIZE_KEYCLOAK + " sets KC_BOOTSTRAP_ADMIN_PASSWORD to the literal `"
+                            + passwordVariable.path("value").asText() + "`. That is the master-realm "
+                            + "superuser password, in the repository, on a workload fronted by a ClusterIP "
+                            + "every pod in the namespace can reach — a comment telling the operator to "
+                            + "change it is not a control. It must come from a Secret the operator creates");
+
+            JsonNode reference = passwordVariable.path("valueFrom").path("secretKeyRef");
+            String secretName = reference.path("name").asText();
+            assertFalse(secretName.isBlank(),
+                    KUSTOMIZE_KEYCLOAK + " must read KC_BOOTSTRAP_ADMIN_PASSWORD from a secretKeyRef");
+            assertFalse(reference.path("key").asText().isBlank(),
+                    KUSTOMIZE_KEYCLOAK + " names no key inside Secret `" + secretName + "`");
+            assertFalse(reference.path("optional").asBoolean(false),
+                    KUSTOMIZE_KEYCLOAK + " marks the `" + secretName + "` reference optional, so a missing "
+                            + "Secret starts Keycloak with the variable simply unset rather than failing "
+                            + "closed. Keycloak then boots with no bootstrap admin, silently, which is the "
+                            + "same class of surprise as the default password this replaced");
+
+            String creationCommand = "kubectl create secret generic " + secretName;
+            for (Path instruction : List.of(AUTH_COMPONENT, K8S_DOC)) {
+                assertTrue(read(instruction).contains(creationCommand),
+                        instruction + " never says `" + creationCommand + "`, but " + KUSTOMIZE_KEYCLOAK
+                                + " will not start a pod until that Secret exists. A component that fails "
+                                + "closed has to say exactly what to create, in the place the operator is "
+                                + "reading when they hit it");
+            }
+
+            String bootstrapPassword = read(HELM_KEYCLOAK).lines()
+                    .dropWhile(line -> !line.contains("- name: KC_BOOTSTRAP_ADMIN_PASSWORD"))
+                    .filter(line -> line.contains("value:"))
+                    .findFirst()
+                    .orElse("");
+            assertTrue(bootstrapPassword.contains("required "),
+                    HELM_KEYCLOAK + " renders KC_BOOTSTRAP_ADMIN_PASSWORD without `required`, so a chart "
+                            + "installed without keycloak.adminPassword templates an empty password rather "
+                            + "than refusing. Rendered as: " + bootstrapPassword.strip());
+            assertEquals("", YAML.readTree(HELM.resolve("values.yaml").toFile())
+                    .path("keycloak").path("adminPassword").asText(),
+                    HELM.resolve("values.yaml") + " gives keycloak.adminPassword a default, which is what "
+                            + "`required` in " + HELM_KEYCLOAK + " exists to prevent — a defaulted value "
+                            + "satisfies it and ships as the identity provider for the whole deployment");
         }
 
         /**
@@ -1439,6 +1585,90 @@ class DeploymentManifestsTest {
                 assertTrue(redirects.stream().anyMatch(uri -> !uri.contains("localhost")),
                         realm + " allows redirects to localhost only, so the Manager SPA served through an "
                                 + "ingress cannot complete a login. Redirect URIs: " + redirects);
+            }
+        }
+
+        /**
+         * The realm-level switch that decides whether Keycloak will speak cleartext. It
+         * shipped as {@code none}, which is "never require TLS, from anywhere" — every
+         * login form, every authorization code and every token exchange served over
+         * plain HTTP to any caller that asked, on all three delivery paths.
+         * <p>
+         * The assertion is on the PROPERTY — TLS is required for callers outside the
+         * local network — not on one spelling, so {@code all} (stricter still)
+         * satisfies it and only the settings that permit cleartext externally fail.
+         * <p>
+         * {@code external}, Keycloak's own default, keeps every documented quick start
+         * working: {@code kubectl port-forward svc/keycloak 8080:8080} reaches the pod
+         * as 127.0.0.1, docker-compose's published port arrives from the bridge
+         * gateway, and EDDI's backchannel to {@code http://keycloak:8080} comes from an
+         * RFC 1918 pod address. All three are local addresses, which this setting
+         * exempts; what it stops is a public hostname served over HTTP.
+         */
+        @Test
+        @DisplayName("the realm requires TLS for clients outside the local network")
+        void realmRequiresTlsForExternalClients() throws IOException {
+            for (Path realm : List.of(COMPOSE_REALM, KUSTOMIZE_REALM, HELM_REALM)) {
+                String sslRequired = JSON.readTree(realm.toFile()).path("sslRequired").asText();
+                assertTrue(Set.of("external", "all").contains(sslRequired),
+                        realm + " sets sslRequired to `" + sslRequired + "`, which lets Keycloak serve the "
+                                + "login form, the authorization code and the token endpoint over cleartext "
+                                + "HTTP to a caller outside the local network. Only `external` (TLS for "
+                                + "non-local clients, which is Keycloak's own default and leaves the "
+                                + "port-forward and docker-compose quick starts working) or `all` (TLS for "
+                                + "everyone) require TLS at all");
+            }
+        }
+
+        /**
+         * No shipped realm may carry a password for an account that holds EDDI's
+         * privileged roles.
+         * <p>
+         * The {@code eddi} fixture shipped as {@code eddi}/{@code eddi} with
+         * {@code eddi-admin} and {@code eddi-editor} — a full EDDI administrator with a
+         * password equal to its username, in a public repository, imported by BOTH
+         * cluster delivery paths. "Development component" describes the manifests, not
+         * the network: the Keycloak Service is a ClusterIP, so anything running in the
+         * cluster could use it, and nothing stops the auth component being applied to a
+         * shared one. {@code "temporary": true} was not a mitigation either — the
+         * compose overlay's own header records that Keycloak 26 does not turn it into
+         * an UPDATE_PASSWORD action on realm import, so these logged straight in.
+         * <p>
+         * Asserted as a relationship — privileged implies no shipped credential —
+         * rather than against a remembered username, so a second admin fixture added
+         * later is covered by construction. The unprivileged fixtures (viewer, user)
+         * are deliberately untouched.
+         * <p>
+         * The last assertion is what stops this passing vacuously: deleting every
+         * privileged user, rather than its password, would otherwise satisfy the loop
+         * while removing the role wiring the operator is told to reuse.
+         */
+        @Test
+        @DisplayName("no realm copy ships a password for a privileged account")
+        void privilegedRealmUsersShipWithoutACredential() throws IOException {
+            Set<String> privileged = Set.of("eddi-admin", "eddi-editor");
+            for (Path realm : List.of(COMPOSE_REALM, KUSTOMIZE_REALM, HELM_REALM)) {
+                List<String> privilegedUsers = new ArrayList<>();
+                for (JsonNode user : JSON.readTree(realm.toFile()).path("users")) {
+                    List<String> roles = stringList(user.get("realmRoles"));
+                    if (roles.stream().noneMatch(privileged::contains)) {
+                        continue;
+                    }
+                    String username = user.path("username").asText();
+                    privilegedUsers.add(username);
+                    assertFalse(user.path("credentials").elements().hasNext(),
+                            realm + " seeds `" + username + "` with " + roles + " AND a credential. That is a "
+                                    + "guessable full EDDI administrator on every cluster this realm is "
+                                    + "imported into, reachable through the Keycloak ClusterIP from any pod. "
+                                    + "A privileged fixture may ship its ROLES — the operator sets a password "
+                                    + "in the admin console — but never a password");
+                }
+                assertFalse(privilegedUsers.isEmpty(),
+                        realm + " seeds no user holding " + privileged + " at all. The credential-free `eddi` "
+                                + "account is what the component headers, NOTES.txt and docs/kubernetes.md "
+                                + "tell the operator to set a password on; removing it instead of its "
+                                + "password leaves those instructions pointing at nothing — and makes the "
+                                + "assertion above pass by having nothing to check");
             }
         }
 
@@ -2911,6 +3141,16 @@ class DeploymentManifestsTest {
             return kubectlCalls.stream().anyMatch(issued -> issued.startsWith(call));
         }
 
+        /**
+         * Whether the run told the operator that a vault master key is now installed:
+         * the "Save this key!" box (which prints the key itself) and the "Secret
+         * created in namespace" line are the two claims either script makes, and both
+         * are only true of a Secret that was actually written.
+         */
+        boolean reportedAnInstalledKey() {
+            return output.contains("Save this key") || output.contains("Secret created in namespace");
+        }
+
         @Override
         public String toString() {
             return "Exit status " + exitCode + "; kubectl calls " + kubectlCalls + "; output:\n" + output;
@@ -2945,16 +3185,24 @@ class DeploymentManifestsTest {
 
     private static GeneratorRun runPowerShellGenerator(String stubMode, boolean force)
             throws IOException, InterruptedException {
+        return runPowerShellGenerator(stubMode, force, false);
+    }
+
+    private static GeneratorRun runPowerShellGenerator(String stubMode, boolean force, boolean whatIf)
+            throws IOException, InterruptedException {
         Path pwsh = locateOnPath(WINDOWS ? "pwsh.exe" : "pwsh");
         assumeTrue(pwsh != null, "no PowerShell 7 available to run " + CREATE_SECRETS_PS1
                 + "; CI's ubuntu-latest runner has one");
 
         Path stubDirectory = kubectlStub("pwsh", WINDOWS);
-        Path log = freshLog("pwsh-" + stubMode + (force ? "-force" : ""));
+        Path log = freshLog("pwsh-" + stubMode + (force ? "-force" : "") + (whatIf ? "-whatif" : ""));
         List<String> command = new ArrayList<>(List.of(pwsh.toString(), "-NoProfile", "-NonInteractive", "-File",
                 CREATE_SECRETS_PS1.toAbsolutePath().toString(), "-Auto", "-Namespace", "eddi-stub"));
         if (force) {
             command.add("-Force");
+        }
+        if (whatIf) {
+            command.add("-WhatIf");
         }
         return execute(command, log, Map.of(
                 "KUBECTL_STUB_MODE", stubMode,

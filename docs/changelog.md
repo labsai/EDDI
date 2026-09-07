@@ -49,6 +49,44 @@ bottom of this file and are never archived.
 
 ---
 
+## 🔐 fix(deploy): no credential in the auth component has a default any more (2026-09-07)
+
+**Repo:** EDDI (`fix/review-deploy`)
+
+Three review comments on the development auth overlay, all of them fair.
+
+**The shipped realm allowed cleartext for everything.** `sslRequired: "none"` let Keycloak serve the
+login form, the authorization code and the token endpoint over plain HTTP to any caller. It is now
+`"external"` in all three realm copies — Keycloak exempts local addresses, so every documented path
+still works: the quick start uses `kubectl port-forward` (arrives as `127.0.0.1`), compose sees the
+bridge gateway, and EDDI's backchannel runs pod-to-pod on RFC 1918. The one case where `external`
+would bite, a pod CIDR outside RFC 1918 such as `100.64.0.0/10`, is documented with the
+`X-Forwarded-Proto` requirement rather than left to be discovered.
+
+**The secret generator printed a key it had not installed.** Under any `-WhatIf` run the PowerShell
+script reached the key box, because the report block sat outside the `ShouldProcess` gate — telling
+an operator a master key was installed when nothing was, and printing a secret that exists nowhere.
+It now tracks whether the create actually happened. The bash twin has no dry-run mode and so no
+equivalent path; that invariant is now written down next to its key box, and the new test sweeps
+both scripts so the two cannot drift.
+
+**The component shipped a guessable full administrator.** `admin/admin` plus a privileged
+`eddi/eddi` account, on a workload fronted by a ClusterIP every pod in the namespace can reach. The
+"development only" framing is real but does not cover that, and `"temporary": true` is not a
+mitigation — Keycloak 26 drops the required action on realm import, which this repo had already
+recorded. `KC_BOOTSTRAP_ADMIN_PASSWORD` now comes from an operator-created Secret with no default,
+so the component fails closed with `secret "keycloak-admin" not found`; and the privileged `eddi`
+fixture ships with no credential at all, keeping its roles so recovery is one console action rather
+than recreating a user, two roles and a group. The unprivileged fixtures are untouched, so the demo
+login still works.
+
+Each change is pinned by a relational assertion rather than a literal: the realm must require TLS
+for external clients, a generator may print a key only if it issued the create, no shipped manifest
+may carry a usable default privileged password, and the Secret name in the YAML must appear in the
+`kubectl create secret` command the docs give.
+
+---
+
 ## 🧭 fix(ci): build on every operator document the manifest suite asserts about (2026-09-07)
 
 **Repo:** EDDI (`fix/review-deploy`)

@@ -17,10 +17,27 @@
 # component's patches are applied into the PARENT's resource set, which is what
 # makes them reach eddi-config.
 #
+# ⚠️  CREATE THE KEYCLOAK ADMIN SECRET FIRST — the pod does not start without
+# it. keycloak-statefulset.yaml reads KC_BOOTSTRAP_ADMIN_PASSWORD from a Secret
+# with no default, because the `keycloak` Service is a ClusterIP every pod in
+# the namespace can reach and the shipped `admin`/`admin` was a guessable
+# superuser on any cluster this component was applied to:
+#
+#   kubectl create secret generic keycloak-admin -n eddi \
+#     --from-literal=password="$(openssl rand -base64 24)"
+#
+# Without it the pod stays in CreateContainerConfigError with
+# `secret "keycloak-admin" not found`.
+#
 # Pre-configured test users, seeded from eddi-realm.json — DEV ONLY:
-#   eddi   / eddi    (eddi-admin + eddi-editor)
 #   viewer / viewer  (eddi-viewer — read-only)
 #   user   / user    (eddi-user)
+#
+# The privileged `eddi` account (eddi-admin + eddi-editor) is seeded WITHOUT a
+# password, for the same reason: it used to ship as eddi/eddi, which is full
+# EDDI administration for anything that can reach the Service. Give it one in
+# the Keycloak admin console (Users → eddi → Credentials → Set password) after
+# the first boot, or grant the two roles to an account of your own.
 #
 # ⚠️  Exposing this beyond `kubectl port-forward`? Four settings have to be
 # changed, and none of them can be derived — but they carry TWO different URLs.

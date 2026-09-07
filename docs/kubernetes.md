@@ -128,7 +128,7 @@ on one does not work by design — and are composed with a database overlay.
 
 | Component | Description | Helm Values |
 |---|---|---|
-| **Keycloak Auth** | OIDC authentication | `--set keycloak.enabled=true --set eddi.oidc.enabled=true --set eddi.oidc.publicUrl=http://localhost:8080 --set keycloak.adminPassword=…` |
+| **Keycloak Auth** | OIDC authentication — ⚠️ Kustomize needs the `keycloak-admin` Secret created first, see [Authentication](#authentication-keycloak) | `--set keycloak.enabled=true --set eddi.oidc.enabled=true --set eddi.oidc.publicUrl=http://localhost:8080 --set keycloak.adminPassword=…` |
 | **NATS JetStream** | Durable, ordered messaging | ⚠️ needs an image built with `-Dquarkus.profile=nats` — see [Durable Messaging](#durable-messaging-production) |
 | **Monitoring** | Prometheus + Grafana | — (Kustomize only: `k8s/overlays/monitoring/`) |
 | **Ingress** | External HTTPS access | `--set ingress.enabled=true --set ingress.hosts[0].host=eddi.example.com` |
@@ -170,6 +170,11 @@ Ready-made examples are provided in `k8s/examples/`:
 ```bash
 # Create the vault Secret once, before the first apply
 bash k8s/create-secrets.sh
+
+# This example includes the auth component, which has no default admin
+# password — create its Secret too, or Keycloak never starts
+kubectl create secret generic keycloak-admin -n eddi \
+  --from-literal=password="$(openssl rand -base64 24)"
 
 # MongoDB + Keycloak auth + Monitoring
 kubectl apply -k k8s/examples/mongodb-full/
@@ -272,6 +277,52 @@ Realm import is **one-shot**. It seeds an empty database and is skipped once the
 realm exists, so later edits to the JSON do not reach a running Keycloak — change
 those in the admin console. Keycloak keeps that database on a PVC, so a restart
 no longer wipes it.
+
+#### No credential in this component has a default
+
+Neither delivery path ships a password for the Keycloak superuser or for the
+privileged EDDI account. Both used to, and both were reachable: the `keycloak`
+Service is a `ClusterIP`, so `admin`/`admin` and `eddi`/`eddi` were a guessable
+master-realm superuser and a guessable full EDDI administrator for anything
+running in the cluster — "development component" is a property of the manifests,
+not of the network they are applied to.
+
+**1. Create the Keycloak admin Secret before the first apply (Kustomize only —
+the pod does not start without it):**
+
+```bash
+kubectl create secret generic keycloak-admin -n eddi \
+  --from-literal=password="$(openssl rand -base64 24)"
+```
+
+`keycloak-statefulset.yaml` reads `KC_BOOTSTRAP_ADMIN_PASSWORD` from it through
+`secretKeyRef` with no default, so a missing Secret fails closed — the pod stays
+in `CreateContainerConfigError` with `secret "keycloak-admin" not found` rather
+than coming up with a known password. Helm asks for the same value as
+`keycloak.adminPassword`, which `required` refuses to default.
+
+**2. Give the `eddi` account a password after the first boot.** The realm seeds
+it with the `eddi-admin` and `eddi-editor` roles and **no credential**, so it
+cannot be logged into until you set one: admin console → *Users* → `eddi` →
+*Credentials* → *Set password*. Or grant those two realm roles to an account you
+create yourself and leave `eddi` unused. The unprivileged fixtures
+(`viewer`/`viewer`, `user`/`user`) still log straight in.
+
+#### TLS
+
+The realm ships `"sslRequired": "external"`, Keycloak's own default: HTTPS is
+required for requests from outside the local network, and loopback and private
+addresses are still served over HTTP. The documented quick start —
+`kubectl port-forward svc/keycloak 8080:8080`, browser on `http://localhost:8080`
+— arrives at the pod as `127.0.0.1` and is unaffected, and so is EDDI's
+in-cluster backchannel to `http://keycloak:8080` from an RFC 1918 pod address.
+Exposing Keycloak on a public hostname now requires TLS in front of it, with the
+proxy forwarding the HTTPS scheme (`X-Forwarded-Proto`) so Keycloak sees it.
+
+> On a cluster whose pod CIDR is outside RFC 1918 — `100.64.0.0/10` on some
+> managed offerings — Keycloak does not count the backchannel as local and will
+> demand HTTPS for it. Terminate TLS in front of Keycloak, or set the realm's
+> `sslRequired` back to `none` on that cluster deliberately.
 
 Four settings have to change together, and none of them can be derived — but
 they carry **two different URLs**. Behind an Ingress those are two different
