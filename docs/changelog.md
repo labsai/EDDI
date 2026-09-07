@@ -279,6 +279,14 @@ branch's pre-fix state, which is what CI gates on. (The PR description's claim t
 matched `main`'s baseline of 7 was wrong: the branch already added 7 `PSAvoidUsingPositionalParameters`
 warnings. None are Errors, so CI was never at risk.)
 
+**Superseded on merge.** `main` (#736) deleted `docker-compose.postgres.yml` outright — it was a
+drifted near-duplicate that could not work as the overlay the README documented, and its role is now
+`docker-compose.postgres-only.yml`. This branch's two fixes to that file (the doubled `7070:7070`
+publish, and moving `postgres` to a loopback binding) are moot: the replacement already interpolates
+`${EDDI_PORT:-7070}` once and publishes no database port at all. The merge takes the deletion, and
+the `POSTGRES_PORT` line this branch added to `.env.example` is removed with it — it pointed at a file
+that no longer exists.
+
 **Files:** `install.sh`, `install.ps1`, `docs/changelog.md`
 
 ---
