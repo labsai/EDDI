@@ -2807,7 +2807,12 @@
     "targetContent": "ターゲット",
     "sourceContent": "ソース",
     "diffHiddenLines": "変更のない {{lines}} 行を表示",
-    "diffRawComparison": "有効な JSON ではないため、プレーンテキストとして比較します。書式だけの違いも変更として表示されます。"
+    "diffRawComparison": "有効な JSON ではないため、プレーンテキストとして比較します。書式だけの違いも変更として表示されます。",
+    "partialTitle": "一部のリソースがインポートされませんでした",
+    "partialBody": "エージェントの残りの部分は書き込まれました。以下のリソースはそのまま残っており、対応が必要です。",
+    "partialCounts": "{{created}} 件作成、{{updated}} 件更新、{{failed}} 件失敗。",
+    "schedulesSkipped_other": "アーカイブ内の {{count}} 件のスケジュールは、選択に含まれていなかったためインポートされませんでした。",
+    "schedulesSkipped_one": "アーカイブ内の {{count}} 件のスケジュールは、選択に含まれていなかったためインポートされませんでした。"
   },
   "syncPage": {
     "title": "エージェントの同期",

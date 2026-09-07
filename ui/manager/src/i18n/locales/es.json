@@ -2834,7 +2834,13 @@
     "targetContent": "Destino",
     "sourceContent": "Origen",
     "diffHiddenLines": "Mostrar {{lines}} líneas sin cambios",
-    "diffRawComparison": "JSON no válido: se compara como texto plano, así que una diferencia solo de formato también aparece como un cambio."
+    "diffRawComparison": "JSON no válido: se compara como texto plano, así que una diferencia solo de formato también aparece como un cambio.",
+    "partialTitle": "Algunos recursos no se importaron",
+    "partialBody": "El resto del agente se escribió. Estos recursos quedaron como estaban y requieren atención.",
+    "partialCounts": "{{created}} creados, {{updated}} actualizados, {{failed}} fallidos.",
+    "schedulesSkipped_one": "No se importó {{count}} programación del archivo, porque la selección no la incluía.",
+    "schedulesSkipped_other": "No se importaron {{count}} programaciones del archivo, porque la selección no las incluía.",
+    "schedulesSkipped_many": "No se importaron {{count}} programaciones del archivo, porque la selección no las incluía."
   },
   "syncPage": {
     "title": "Sincronización de agentes",

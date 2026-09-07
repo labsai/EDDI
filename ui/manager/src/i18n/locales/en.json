@@ -3026,7 +3026,12 @@
     "targetContent": "Target",
     "sourceContent": "Source",
     "diffHiddenLines": "Show {{lines}} unchanged lines",
-    "diffRawComparison": "Not valid JSON — compared as plain text, so a difference of formatting alone also shows up as a change."
+    "diffRawComparison": "Not valid JSON — compared as plain text, so a difference of formatting alone also shows up as a change.",
+    "partialTitle": "Some resources were not imported",
+    "partialBody": "The rest of the agent was written. These resources were left as they were and need attention.",
+    "partialCounts": "{{created}} created, {{updated}} updated, {{failed}} failed.",
+    "schedulesSkipped_one": "{{count}} schedule in the archive was not imported, because the selection did not include it.",
+    "schedulesSkipped_other": "{{count}} schedules in the archive were not imported, because the selection did not include them."
   },
   "sync": {
     "actionCreate": "New",

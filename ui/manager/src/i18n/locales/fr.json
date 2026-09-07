@@ -2834,7 +2834,13 @@
     "targetContent": "Cible",
     "sourceContent": "Source",
     "diffHiddenLines": "Afficher {{lines}} lignes inchangées",
-    "diffRawComparison": "JSON non valide — comparaison en texte brut : une simple différence de mise en forme apparaît donc aussi comme une modification."
+    "diffRawComparison": "JSON non valide — comparaison en texte brut : une simple différence de mise en forme apparaît donc aussi comme une modification.",
+    "partialTitle": "Certaines ressources n’ont pas été importées",
+    "partialBody": "Le reste de l’agent a été écrit. Ces ressources sont restées telles quelles et demandent votre attention.",
+    "partialCounts": "{{created}} créées, {{updated}} mises à jour, {{failed}} en échec.",
+    "schedulesSkipped_one": "{{count}} planification de l’archive n’a pas été importée, car la sélection ne l’incluait pas.",
+    "schedulesSkipped_other": "{{count}} planifications de l’archive n’ont pas été importées, car la sélection ne les incluait pas.",
+    "schedulesSkipped_many": "{{count}} planifications de l’archive n’ont pas été importées, car la sélection ne les incluait pas."
   },
   "syncPage": {
     "title": "Synchronisation d'agents",

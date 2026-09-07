@@ -2807,7 +2807,12 @@
     "targetContent": "目标",
     "sourceContent": "源",
     "diffHiddenLines": "显示 {{lines}} 行未更改内容",
-    "diffRawComparison": "不是有效的 JSON——按纯文本比较，因此仅格式上的差异也会显示为更改。"
+    "diffRawComparison": "不是有效的 JSON——按纯文本比较，因此仅格式上的差异也会显示为更改。",
+    "partialTitle": "部分资源未导入",
+    "partialBody": "智能体的其余部分已写入。这些资源保持原样，需要处理。",
+    "partialCounts": "已创建 {{created}} 个，已更新 {{updated}} 个，失败 {{failed}} 个。",
+    "schedulesSkipped_other": "存档中有 {{count}} 个计划任务未被导入，因为所选内容未包含它们。",
+    "schedulesSkipped_one": "存档中有 {{count}} 个计划任务未被导入，因为所选内容未包含它们。"
   },
   "syncPage": {
     "title": "智能体同步",

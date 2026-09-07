@@ -2807,7 +2807,12 @@
     "targetContent": "대상 (Target)",
     "sourceContent": "원본 (Source)",
     "diffHiddenLines": "변경되지 않은 {{lines}}줄 표시",
-    "diffRawComparison": "유효한 JSON이 아니므로 일반 텍스트로 비교합니다. 서식만 다른 경우에도 변경으로 표시됩니다."
+    "diffRawComparison": "유효한 JSON이 아니므로 일반 텍스트로 비교합니다. 서식만 다른 경우에도 변경으로 표시됩니다.",
+    "partialTitle": "일부 리소스를 가져오지 못했습니다",
+    "partialBody": "에이전트의 나머지 부분은 기록되었습니다. 아래 리소스는 그대로 남아 있으며 조치가 필요합니다.",
+    "partialCounts": "{{created}}개 생성, {{updated}}개 업데이트, {{failed}}개 실패.",
+    "schedulesSkipped_other": "아카이브의 일정 {{count}}개가 선택에 포함되지 않아 가져오지 않았습니다.",
+    "schedulesSkipped_one": "아카이브의 일정 {{count}}개가 선택에 포함되지 않아 가져오지 않았습니다."
   },
   "syncPage": {
     "title": "에이전트 동기화",

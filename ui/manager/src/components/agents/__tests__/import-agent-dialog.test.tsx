@@ -240,9 +240,12 @@ describe("ImportAgentDialog", () => {
     const user = userEvent.setup();
     await navigateToPreview(user);
 
+    // The mock resolves with what the real function resolves with. It used to
+    // call `onSuccess()` bare, which no longer describes the contract: the merge
+    // now reports how many of the archive's schedules the selection left out.
     mockMergeMutate.mockImplementation(
-      (_args: unknown, opts: { onSuccess?: () => void }) => {
-        opts.onSuccess?.();
+      (_args: unknown, opts: { onSuccess?: (r: unknown) => void }) => {
+        opts.onSuccess?.({ location: "", schedulesSkipped: null });
       }
     );
     await user.click(screen.getByTestId("import-confirm-merge"));
@@ -252,6 +255,48 @@ describe("ImportAgentDialog", () => {
     expect(args.file).toBeInstanceOf(File);
     expect(args.selectedSourceIds).toEqual(expect.arrayContaining(["o1", "o2", "o3"]));
     expect(onSuccess).toHaveBeenCalled();
+  });
+
+  // --- Partial outcomes ---
+  //
+  // Upgrade and sync answer 201 wrote-something, 200 already-identical and 207
+  // some-resources-failed, all inside the 2xx range. The dialog used to close
+  // on every one of them, so a half-applied sync looked exactly like a clean
+  // one and the list of what was left behind went nowhere.
+
+  it("stays open and names the resources a partial import could not write", async () => {
+    const { onClose } = renderDialog();
+    const user = userEvent.setup();
+    await navigateToPreview(user);
+
+    mockMergeMutate.mockImplementation(
+      (_args: unknown, opts: { onSuccess?: (r: unknown) => void }) => {
+        opts.onSuccess?.({ location: "", schedulesSkipped: 2 });
+      }
+    );
+    await user.click(screen.getByTestId("import-confirm-merge"));
+
+    expect(screen.getByTestId("import-outcome")).toBeInTheDocument();
+    expect(screen.getByTestId("import-schedules-skipped")).toHaveTextContent("2");
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("closes on a clean import, as it always did", async () => {
+    // The other half of the pin: a dialog that always stopped on the outcome
+    // step would satisfy the test above while making every import two clicks.
+    const { onClose } = renderDialog();
+    const user = userEvent.setup();
+    await navigateToPreview(user);
+
+    mockMergeMutate.mockImplementation(
+      (_args: unknown, opts: { onSuccess?: (r: unknown) => void }) => {
+        opts.onSuccess?.({ location: "", schedulesSkipped: null });
+      }
+    );
+    await user.click(screen.getByTestId("import-confirm-merge"));
+
+    expect(screen.queryByTestId("import-outcome")).not.toBeInTheDocument();
+    expect(onClose).toHaveBeenCalled();
   });
 
   // --- Navigation ---

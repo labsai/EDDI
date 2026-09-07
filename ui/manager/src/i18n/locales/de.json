@@ -2973,7 +2973,12 @@
     "targetContent": "Ziel",
     "sourceContent": "Quelle",
     "diffHiddenLines": "{{lines}} unveränderte Zeilen anzeigen",
-    "diffRawComparison": "Kein gültiges JSON – Vergleich als reiner Text, daher erscheint auch ein reiner Formatierungsunterschied als Änderung."
+    "diffRawComparison": "Kein gültiges JSON – Vergleich als reiner Text, daher erscheint auch ein reiner Formatierungsunterschied als Änderung.",
+    "partialTitle": "Einige Ressourcen wurden nicht importiert",
+    "partialBody": "Der Rest des Agenten wurde geschrieben. Diese Ressourcen blieben unverändert und erfordern Aufmerksamkeit.",
+    "partialCounts": "{{created}} erstellt, {{updated}} aktualisiert, {{failed}} fehlgeschlagen.",
+    "schedulesSkipped_one": "{{count}} Zeitplan im Archiv wurde nicht importiert, weil die Auswahl ihn nicht enthielt.",
+    "schedulesSkipped_other": "{{count}} Zeitpläne im Archiv wurden nicht importiert, weil die Auswahl sie nicht enthielt."
   },
   "syncPage": {
     "title": "Agenten-Synchronisierung",

@@ -1,6 +1,6 @@
 import { useState, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { X, ArrowLeft, ArrowRight } from "lucide-react";
+import { X, ArrowLeft, ArrowRight, AlertTriangle } from "lucide-react";
 import {
   useImportAgent,
   usePreviewImport,
@@ -10,7 +10,7 @@ import {
   useExecuteSync,
   usePreviewSync,
 } from "@/hooks/use-backup";
-import type { ImportPreview, DocumentDescriptor } from "@/lib/api/backup";
+import type { ImportPreview, DocumentDescriptor, SyncExecution } from "@/lib/api/backup";
 import { Button } from "@/components/ui/button";
 import { useInfiniteAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
 import { SyncConfigPanel } from "@/components/agents/sync-config-panel";
@@ -23,7 +23,15 @@ interface ImportAgentDialogProps {
   onSuccess: () => void;
 }
 
-type Step = "upload" | "strategy" | "target" | "preview" | "importing";
+/**
+ * `outcome` is the step a partial result lands on.
+ *
+ * EDDI answers 201 wrote-something, 200 already-identical and 207
+ * some-resources-failed — all 2xx. Closing the dialog on every one of them, as
+ * this did, reported a half-applied sync exactly like a clean one, and the only
+ * record of what was left behind was the response body nobody read.
+ */
+type Step = "upload" | "strategy" | "target" | "preview" | "importing" | "outcome";
 type Strategy = "create" | "merge" | "upgrade" | "sync";
 
 export function ImportAgentDialog({ open, onClose, onSuccess }: ImportAgentDialogProps) {
@@ -38,6 +46,8 @@ export function ImportAgentDialog({ open, onClose, onSuccess }: ImportAgentDialo
   const [expandedDiff, setExpandedDiff] = useState<string | null>(null);
   const [workflowOrder, setWorkflowOrder] = useState<string[]>([]);
   const [dragging, setDragging] = useState(false);
+  const [outcome, setOutcome] = useState<SyncExecution | null>(null);
+  const [schedulesSkipped, setSchedulesSkipped] = useState<number | null>(null);
 
   // Target state for upgrade
   const [targetAgentId, setTargetAgentId] = useState<string | null>(null);
@@ -68,6 +78,8 @@ export function ImportAgentDialog({ open, onClose, onSuccess }: ImportAgentDialo
     setExpandedDiff(null);
     setWorkflowOrder([]);
     setDragging(false);
+    setOutcome(null);
+    setSchedulesSkipped(null);
     setTargetAgentId(null);
     setSyncUrl("");
     setSyncAuth("");
@@ -162,11 +174,38 @@ export function ImportAgentDialog({ open, onClose, onSuccess }: ImportAgentDialo
 
     const selectedIds = Array.from(selected);
 
+    /**
+     * The data changed either way, so the list behind the dialog is refreshed
+     * on every outcome. What changes is whether the dialog may close: a partial
+     * result has to stay on screen, because it names resources the operator now
+     * has to go and fix by hand and nothing else in the product records them.
+     */
+    function settle(execution: SyncExecution) {
+      onSuccess();
+      if (execution.outcome === "partial") {
+        setOutcome(execution);
+        setStep("outcome");
+        return;
+      }
+      handleClose();
+    }
+
     if (strategy === "merge" && file) {
       mergeMutation.mutate(
         { file, selectedSourceIds: selectedIds },
         {
-          onSuccess: () => { onSuccess(); handleClose(); },
+          onSuccess: (result) => {
+            onSuccess();
+            if (result.schedulesSkipped !== null) {
+              // `selectedResources` is one flat list over every preview row, so
+              // selecting extensions alone drops every schedule in the archive.
+              // The header is the only place that is stated.
+              setSchedulesSkipped(result.schedulesSkipped);
+              setStep("outcome");
+              return;
+            }
+            handleClose();
+          },
           onError: (err) => { setError(err.message); setStep("preview"); },
         }
       );
@@ -174,7 +213,7 @@ export function ImportAgentDialog({ open, onClose, onSuccess }: ImportAgentDialo
       importUpgradeMutation.mutate(
         { file, targetAgentId, selectedSourceIds: selectedIds, workflowOrder },
         {
-          onSuccess: () => { onSuccess(); handleClose(); },
+          onSuccess: settle,
           onError: (err) => { setError(err.message); setStep("preview"); },
         }
       );
@@ -190,7 +229,7 @@ export function ImportAgentDialog({ open, onClose, onSuccess }: ImportAgentDialo
           sourceAuth: syncAuth,
         },
         {
-          onSuccess: () => { onSuccess(); handleClose(); },
+          onSuccess: settle,
           onError: (err) => { setError(err.message); setStep("preview"); },
         }
       );
@@ -342,6 +381,79 @@ export function ImportAgentDialog({ open, onClose, onSuccess }: ImportAgentDialo
               <p className="text-sm text-muted-foreground">
                 {t("importDialog.importing", "Importing agent...")}
               </p>
+            </div>
+          )}
+
+          {/* === Step: Outcome ===
+              Only reached when something needs saying. A clean import still
+              closes straight away. */}
+          {step === "outcome" && (
+            <div className="flex-1 space-y-4 overflow-y-auto py-4" data-testid="import-outcome">
+              {outcome?.outcome === "partial" && (
+                <>
+                  <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3">
+                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+                    <div className="space-y-1">
+                      <p className="text-sm font-medium text-destructive">
+                        {t("importDialog.partialTitle", "Some resources were not imported")}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {t(
+                          "importDialog.partialBody",
+                          "The rest of the agent was written. These resources were left as they were and need attention.",
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                  <ul className="space-y-2" data-testid="import-failures">
+                    {(outcome.result?.failures ?? []).map((failure) => (
+                      <li
+                        key={`${failure.resourceType}:${failure.sourceId}`}
+                        className="rounded-md border border-border bg-card p-2.5"
+                      >
+                        <p className="text-xs font-medium text-foreground">
+                          {failure.name || failure.sourceId}{" "}
+                          <span className="font-normal text-muted-foreground">
+                            ({failure.resourceType})
+                          </span>
+                        </p>
+                        <p className="mt-0.5 text-xs text-destructive">{failure.reason}</p>
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="text-xs text-muted-foreground" data-testid="import-counts">
+                    {t("importDialog.partialCounts", {
+                      created: outcome.result?.created ?? 0,
+                      updated: outcome.result?.updated ?? 0,
+                      failed: outcome.result?.failures?.length ?? 0,
+                      defaultValue:
+                        "{{created}} created, {{updated}} updated, {{failed}} failed.",
+                    })}
+                  </p>
+                </>
+              )}
+
+              {schedulesSkipped !== null && (
+                <div
+                  className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3"
+                  data-testid="import-schedules-skipped"
+                >
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+                  <p className="text-xs text-foreground">
+                    {t("importDialog.schedulesSkipped", {
+                      count: schedulesSkipped,
+                      defaultValue:
+                        "{{count}} schedule(s) in the archive were not imported, because the selection did not include them.",
+                    })}
+                  </p>
+                </div>
+              )}
+
+              <div className="flex justify-end">
+                <Button onClick={handleClose} data-testid="import-outcome-close">
+                  {t("common.close", "Close")}
+                </Button>
+              </div>
             </div>
           )}
         </div>

@@ -2834,7 +2834,13 @@
     "targetContent": "Alvo",
     "sourceContent": "Origem",
     "diffHiddenLines": "Mostrar {{lines}} linhas inalteradas",
-    "diffRawComparison": "JSON inválido — comparado como texto simples, portanto uma diferença apenas de formatação também aparece como alteração."
+    "diffRawComparison": "JSON inválido — comparado como texto simples, portanto uma diferença apenas de formatação também aparece como alteração.",
+    "partialTitle": "Alguns recursos não foram importados",
+    "partialBody": "O resto do agente foi escrito. Estes recursos ficaram como estavam e precisam de atenção.",
+    "partialCounts": "{{created}} criados, {{updated}} atualizados, {{failed}} falharam.",
+    "schedulesSkipped_one": "{{count}} agendamento do arquivo não foi importado, porque a seleção não o incluía.",
+    "schedulesSkipped_other": "{{count}} agendamentos do arquivo não foram importados, porque a seleção não os incluía.",
+    "schedulesSkipped_many": "{{count}} agendamentos do arquivo não foram importados, porque a seleção não os incluía."
   },
   "syncPage": {
     "title": "Sincronização",

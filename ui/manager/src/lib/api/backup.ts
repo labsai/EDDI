@@ -68,6 +68,108 @@ export interface DocumentDescriptor {
   lastModifiedOn: string;
 }
 
+// ==================== Upgrade / sync outcomes ====================
+
+/** One resource an upgrade could not process. */
+export interface ResourceFailure {
+  sourceId: string;
+  resourceType: string;
+  name: string | null;
+  reason: string;
+}
+
+/**
+ * What an upgrade or sync actually did.
+ *
+ * `hasFailures` and `wroteAnything` exist on EDDI's record as derived methods
+ * but are NOT on the wire — Jackson serialises a record's components, and
+ * neither is one — so they are computed here from the fields that are.
+ */
+export interface UpgradeResult {
+  agentUri: string | null;
+  agentUpdated: boolean;
+  updated: number;
+  created: number;
+  skipped: number;
+  failures: ResourceFailure[];
+}
+
+/**
+ * How an upgrade or sync ended.
+ *
+ * EDDI answers three different 2xx codes here and says so in its own javadoc:
+ * "All three are 2xx, so a client must branch on the status code rather than on
+ * response.ok." Before this existed the Manager read only the `Location`
+ * header, so a half-applied sync, a clean one and a no-op were indistinguishable.
+ */
+export type SyncOutcome = "wrote" | "identical" | "partial";
+
+export interface SyncExecution {
+  outcome: SyncOutcome;
+  result: UpgradeResult | null;
+  /** The `Location` header, kept because callers used to read only this. */
+  location: string;
+}
+
+/** One agent's outcome inside a batch sync. */
+export interface BatchSyncResult {
+  sourceAgentId: string;
+  targetAgentId: string | null;
+  /** What the upgrade did, or null when it could not run at all. */
+  result: UpgradeResult | null;
+  /** Why it could not run, or null on success. */
+  error: string | null;
+}
+
+export interface BatchSyncExecution {
+  /** True when at least one mapping failed — HTTP 207, or 500 when all did. */
+  partial: boolean;
+  results: BatchSyncResult[];
+}
+
+/** Whether an upgrade left any resource unprocessed. */
+export function hasFailures(result: UpgradeResult | null | undefined): boolean {
+  return (result?.failures?.length ?? 0) > 0;
+}
+
+/**
+ * Read the outcome from the status, which is the only place it is stated.
+ *
+ * 201 wrote something, 200 means source and target were already identical (no
+ * agent version was burned), 207 means some resources failed. The body is
+ * consulted only as a fallback for a backend that predates the split.
+ */
+function outcomeOf(status: number, result: UpgradeResult | null): SyncOutcome {
+  if (status === 207 || hasFailures(result)) return "partial";
+  if (status === 200) return "identical";
+  return "wrote";
+}
+
+/** Parse a JSON body, tolerating an empty or non-JSON one. */
+async function readJson<T>(response: Response): Promise<T | null> {
+  const text = await response.text();
+  if (!text) return null;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A JSON body that must be a list, or an empty one.
+ *
+ * These calls bypass `ApiClient` because they send `application/zip` and custom
+ * sync headers, so they also miss its guard against a non-JSON 2xx. A reverse
+ * proxy answering 200 with an HTML page is the realistic case, and without this
+ * the batch summary died on `results.some is not a function` — an unhandled
+ * TypeError in place of an error the caller could report.
+ */
+async function readJsonArray<T>(response: Response): Promise<T[]> {
+  const parsed = await readJson<unknown>(response);
+  return Array.isArray(parsed) ? (parsed as T[]) : [];
+}
+
 /**
  * Parse an EDDI resource URI into its id and version.
  *
@@ -215,10 +317,23 @@ export async function previewImport(file: File): Promise<ImportPreview> {
  * Import a agent with merge strategy.
  * POST /backup/import?strategy=merge&selectedResources=...
  */
+export interface MergeImportResult {
+  location: string;
+  /**
+   * How many of the archive's schedules `selectedResources` left out.
+   *
+   * Absent — null here — when it left out none, which is every import that does
+   * not filter. `selectedResources` is one flat list over every preview row, so
+   * naming extension ids only silently drops every schedule in the archive;
+   * this header is the only thing that says so.
+   */
+  schedulesSkipped: number | null;
+}
+
 export async function importAgentMerge(
   file: File,
   selectedSourceIds?: string[]
-): Promise<string> {
+): Promise<MergeImportResult> {
   const params = new URLSearchParams({ strategy: "merge" });
   if (selectedSourceIds && selectedSourceIds.length > 0) {
     params.set("selectedResources", selectedSourceIds.join(","));
@@ -234,8 +349,13 @@ export async function importAgentMerge(
     throw new Error(`Merge import failed: ${res.statusText}`);
   }
 
-  const location = res.headers.get("Location");
-  return location || "";
+  const raw = res.headers.get("X-Schedules-Skipped");
+  const parsed = raw === null ? Number.NaN : Number(raw);
+  return {
+    location: res.headers.get("Location") || "",
+    schedulesSkipped:
+      Number.isInteger(parsed) && parsed > 0 ? parsed : null,
+  };
 }
 
 // ==================== Selective Export ====================
@@ -254,17 +374,46 @@ export async function previewExport(
 }
 
 /**
+ * Which rows an export should carry, when the caller is filtering.
+ *
+ * Three separate lists rather than one, because EDDI reads them with three
+ * different rules and conflating them loses data in two directions:
+ *
+ * - `resources` — extension resource ids. A BLANK value is a full export, so
+ *   the parameter is omitted rather than sent empty when nothing is selected.
+ * - `snippets` and `schedules` — newer than `selectedResources`, and inverted:
+ *   OMIT the parameter and every referenced snippet / every schedule of the
+ *   agent is exported; pass it, *even empty*, and only the listed ids are. So
+ *   `[]` and `undefined` mean opposite things here, which is why they are
+ *   `string[] | undefined` and not defaulted.
+ */
+export interface ExportSelection {
+  resources?: string[];
+  snippets?: string[];
+  schedules?: string[];
+}
+
+/**
  * Export agent with selected resources only.
  * POST /backup/export/{agentId}?agentVersion={version}&selectedResources=id1,id2
  */
 export async function exportAgentSelective(
   agentId: string,
   version: number,
-  selectedResourceIds: string[]
+  selectedResourceIds: string[],
+  selection: Omit<ExportSelection, "resources"> = {}
 ): Promise<void> {
   const params = new URLSearchParams({ agentVersion: String(version) });
   if (selectedResourceIds.length > 0) {
     params.set("selectedResources", selectedResourceIds.join(","));
+  }
+  // `!== undefined`, not truthiness: an empty list is a meaningful value here
+  // ("export none of these"), and dropping it would export all of them.
+  if (selection.snippets !== undefined) {
+    params.set("selectedSnippets", selection.snippets.join(","));
+  }
+  if (selection.schedules !== undefined) {
+    params.set("selectedSchedules", selection.schedules.join(","));
   }
   const res = await fetch(
     `${api.getBaseUrl()}/backup/export/${agentId}?${params}`,
@@ -304,7 +453,7 @@ export async function importAgentUpgrade(
   targetAgentId: string,
   selectedSourceIds?: string[],
   workflowOrder?: string[]
-): Promise<string> {
+): Promise<SyncExecution> {
   const params = new URLSearchParams({ strategy: "upgrade", targetAgentId });
   if (selectedSourceIds?.length) {
     params.set("selectedResources", selectedSourceIds.join(","));
@@ -319,7 +468,12 @@ export async function importAgentUpgrade(
     body: file,
   });
   if (!res.ok) throw new Error(`Upgrade import failed: ${res.statusText}`);
-  return res.headers.get("Location") || "";
+  const result = await readJson<UpgradeResult>(res);
+  return {
+    outcome: outcomeOf(res.status, result),
+    result,
+    location: res.headers.get("Location") || "",
+  };
 }
 
 // ==================== Live Sync ====================
@@ -397,7 +551,7 @@ export async function executeSync(
   selectedResources: string[] | null,
   workflowOrder: string[] | null,
   sourceAuth: string
-): Promise<void> {
+): Promise<SyncExecution> {
   const params = new URLSearchParams({ sourceUrl, sourceAgentId });
   if (sourceVersion != null) params.set("sourceAgentVersion", String(sourceVersion));
   if (targetAgentId) params.set("targetAgentId", targetAgentId);
@@ -409,6 +563,12 @@ export async function executeSync(
     headers: mergedHeaders(sourceAuth),
   });
   if (!res.ok) throw new Error(`Sync execute failed: ${res.statusText}`);
+  const result = await readJson<UpgradeResult>(res);
+  return {
+    outcome: outcomeOf(res.status, result),
+    result,
+    location: res.headers.get("Location") || "",
+  };
 }
 
 /**
@@ -419,7 +579,7 @@ export async function executeSyncBatch(
   sourceUrl: string,
   requests: SyncRequest[],
   sourceAuth: string
-): Promise<void> {
+): Promise<BatchSyncExecution> {
   const params = new URLSearchParams({ sourceUrl });
   const res = await fetch(`${api.getBaseUrl()}/backup/import/sync/batch?${params}`, {
     method: "POST",
@@ -429,5 +589,19 @@ export async function executeSyncBatch(
     },
     body: JSON.stringify(requests),
   });
+
+  // 500 when EVERY mapping failed, and the body is still the per-agent list.
+  // Read it before throwing: "all five agents failed" is the one case where the
+  // reasons matter most, and `res.statusText` alone carries none of them.
+  if (res.status === 500) {
+    const results = await readJsonArray<BatchSyncResult>(res);
+    if (results.length > 0) return { partial: true, results };
+  }
   if (!res.ok) throw new Error(`Batch sync failed: ${res.statusText}`);
+
+  const results = await readJsonArray<BatchSyncResult>(res);
+  return {
+    partial: res.status === 207 || results.some((r) => r.error || hasFailures(r.result)),
+    results,
+  };
 }
