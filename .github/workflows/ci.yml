@@ -962,12 +962,12 @@ jobs:
             # cosign subject in half a dozen downstream jobs. The pom-parity check below
             # is a PREFIX check ("${POM_VERSION}-"*), so on its own it happily accepts
             # 6.3.0-$(id) or 6.3.0-`id` — and every job that consumed this output used to
-            # splice it into shell source with ${{ }}, which the runner substitutes BEFORE
-            # bash parses the script. That turns tag-push rights into arbitrary command
-            # execution in the jobs holding the Docker Hub credentials and the Sigstore
-            # signing identity. Two halves to the fix and BOTH are load-bearing:
+            # splice it into shell source with an Actions expression, which the runner
+            # substitutes BEFORE bash parses the script. That turns tag-push rights into
+            # arbitrary command execution in the jobs holding the Docker Hub credentials
+            # and the Sigstore signing identity. Two halves, BOTH load-bearing:
             #   1. validate the WHOLE tag here against this allowlist, and
-            #   2. pass it downstream through `env:`, never through ${{ }} in a `run:`.
+            #   2. pass it downstream through `env:`, never by interpolating it into a `run:`.
             # The shape is the one every release since 4.8.0 has used and the one the
             # semver-alias branch below can actually parse: MAJOR.MINOR.PATCH with an
             # optional pre-release suffix. No `v` prefix — the workflow triggers on

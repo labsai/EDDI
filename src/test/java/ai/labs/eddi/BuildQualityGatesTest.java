@@ -664,6 +664,60 @@ class BuildQualityGatesTest {
     }
 
     /**
+     * An empty {@code ${{ }}} anywhere in a {@code run:} body is a workflow-level
+     * syntax error, not a comment.
+     * <p>
+     * The runner interpolates every expression in a {@code run:} block into the
+     * script text before bash sees it, and it does not know that a {@code #} makes
+     * the rest of the line a shell comment — so an expression written inside one is
+     * still evaluated, and an empty expression fails to parse. GitHub then rejects
+     * the whole file: no job runs, the run is listed by PATH rather than by the
+     * workflow's {@code name:}, and every required check simply never reports. A PR
+     * in that state shows nothing failing, which is worse than a red build.
+     * <p>
+     * This cost a real debugging round on this branch: a comment written to explain
+     * that the tag must not be interpolated contained the literal token it was
+     * warning about, and disabled the entire pipeline.
+     */
+    @Test
+    @DisplayName("no workflow interpolates an empty expression inside a run: block")
+    void noRunBlockContainsAnEmptyExpression() throws Exception {
+        List<Path> workflows;
+        try (Stream<Path> paths = Files.list(WORKFLOWS)) {
+            workflows = paths.filter(path -> path.getFileName().toString().endsWith(".yml")).sorted().toList();
+        }
+        assertFalse(workflows.isEmpty(),
+                "found no workflow under " + WORKFLOWS.toAbsolutePath() + ", so this sweep grades nothing");
+
+        List<String> empties = new ArrayList<>();
+        for (Path workflow : workflows) {
+            List<String> lines = read(workflow).lines().toList();
+            int runIndent = -1;
+            for (int i = 0; i < lines.size(); i++) {
+                String line = lines.get(i);
+                boolean insideRunBody = runIndent >= 0 && (line.isBlank() || indentOf(line) > runIndent);
+                if (runIndent >= 0 && !insideRunBody) {
+                    runIndent = -1;
+                }
+                int runKey = runKeyColumn(line);
+                if (runKey >= 0) {
+                    runIndent = runKey;
+                }
+                if ((insideRunBody || runKey >= 0) && line.replace(" ", "").contains("${{}}")) {
+                    empties.add(workflow + ":" + (i + 1) + "  " + line.strip());
+                }
+            }
+        }
+
+        assertEquals(List.of(), empties,
+                "these lines sit inside a run: block and contain an empty ${{ }}. The runner evaluates every"
+                        + " expression in the script text — a leading # does not exempt it — and an empty one is a"
+                        + " syntax error that makes GitHub reject the whole workflow file. No job runs, the run is"
+                        + " listed by path instead of by name, and the required checks never report at all, so the"
+                        + " PR looks merely unfinished rather than broken. Write the token without the braces");
+    }
+
+    /**
      * The other half of the CWE-78 fix, and the half a targeted assertion cannot
      * hold: {@code ${{ }}} is substituted into the script text <em>before</em> bash
      * parses it, so one new {@code PRIMARY_TAG="${{ … }}"} line anywhere reopens
