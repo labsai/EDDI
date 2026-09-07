@@ -102,7 +102,19 @@ services:
     entrypoint: ["/bin/sh", "/seed.sh"]
 
   open-webui:
-    image: ghcr.io/open-webui/open-webui:main
+    # The one image in the compose set that is NOT version-pinned, and the only
+    # one that floats deliberately rather than by oversight. `:main` is
+    # open-webui's rolling development tag, so the same `docker compose up`
+    # produces a different UI on every run and a breaking change upstream turns
+    # this documented demo of the /v1 adapter into an unreproducible bug report.
+    #
+    # Pin it: set OPEN_WEBUI_VERSION to a released tag from
+    # https://github.com/open-webui/open-webui/releases (e.g.
+    # `OPEN_WEBUI_VERSION=v0.6.5 docker compose -f docker-compose.openwebui.yml up`),
+    # or add it to .env. The default stays `main` because a wrong literal here
+    # fails the pull outright, which is a worse first run than a drifting UI —
+    # so choosing the tag is left to whoever can check the release list.
+    image: ghcr.io/open-webui/open-webui:${OPEN_WEBUI_VERSION:-main}
     ports:
       - "${OPEN_WEBUI_PORT:-3000}:8080"
     environment:

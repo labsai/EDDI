@@ -49,6 +49,180 @@ bottom of this file and are never archived.
 
 ---
 
+## 🏷️ fix(ci): a release tag could execute on the runner (2026-09-07)
+
+**Repo:** EDDI (`fix/review-quality-gates`)
+
+`PRIMARY_TAG` is `${GITHUB_REF#refs/tags/}`, and the only check on it was a *prefix* comparison
+against the pom version. So `6.3.0-$(id)` passed — a legal git ref name, therefore pushable — and
+nine `run:` blocks spliced it in with `${{ }}`, which the runner substitutes into the script text
+*before* bash parses it. Two of those blocks hold the Docker Hub credentials and the Sigstore
+keyless identity. Pushing a tag needs write access, so this is not anonymous execution; it is
+tag-push rights becoming arbitrary commands in the job where the release secrets live.
+
+The whole tag is now matched against
+`^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$` before the parity check, and every one of
+the nine sites takes the value through `env:` instead of interpolation. All 54 published tags since
+4.8.0 match; the pattern carries no version literal, so the single-source-of-truth guard stays
+satisfied, and it agrees with the no-`v`-prefix rule the release trigger depends on.
+
+Two relational tests pin it. One lifts the pattern out of the YAML, compiles it, and runs 6 accepted
+and 18 rejected tags through it, so it grades the regex's behaviour rather than its presence — shown
+by a second experiment that widened the pattern to `^[0-9].*$` and still failed. The other sweeps
+every workflow for `${{ }}` interpolation of the tag inside a `run:` block, so a new site cannot
+reappear.
+
+`ReleaseVersionSourceTest` caught the first draft of the error message for quoting a literal version
+as an example, which would have gone stale on the next bump. The guard works.
+
+---
+
+## 🧷 fix(build): a gate test that passed with its guard deleted (2026-09-07)
+
+**Repo:** EDDI (`fix/review-quality-gates`)
+
+Four review comments, two of them the kind this whole review exists to catch.
+
+**A gate test was green with the thing it guards removed.** `dependabotSkipBlock()` falls back to
+returning the rest of the workflow when the guard is absent, and that text still contains both
+`--json files` and `"$DOCKERFILE"` — so both assertions passed against a workflow with no
+de-duplication at all. Confirmed empirically before fixing: guard physically deleted, old
+assertions, `Tests run: 20, Failures: 0`. The test now tracks whether the loop found the guard and
+asserts it afterwards, and fails with the guard gone.
+
+**`defaultTestDeadLetterPath()` still accepted the source tree.** It checked only
+`Path.isAbsolute()`, so a `java.io.tmpdir` pointing at the repository root or a child was allowed
+and the sink landed back in the tree — the artifact this branch removed, reachable through a JVM
+flag instead of a code change. It now also rejects a temp directory inside the project directory,
+naming the property and the value. Containment uses `Path.startsWith`, which matches whole name
+elements, so a sibling that merely shares a textual prefix is still accepted; that control case is
+asserted so a regression to string comparison fails.
+
+**Dependabot PRs were selected with the wrong filter.** `gh pr list --author 'app/dependabot'` is
+the user filter and is not guaranteed to return App-authored PRs. An empty result is silent here —
+the skip never fires and the job raises a digest PR duplicating Dependabot's. Now `--app dependabot`.
+
+**Unquoted redirections.** 83 of them, into `$GITHUB_STEP_SUMMARY`, `$GITHUB_OUTPUT`, `$GITHUB_ENV`
+and `$GITHUB_PATH` across three workflows, all quoted — and a new test sweeps every workflow so the
+count cannot creep back.
+
+---
+
+## 🪝 fix(githooks): fetch from the remote being pushed to (2026-09-07)
+
+**Repo:** EDDI (`fix/review-quality-gates`)
+
+The pre-push hook's shallow-clone recovery fetch named `origin` literally, while git passes the
+remote as `$1`. A push to any other remote fetched from the wrong one. The effect is narrow — the
+fetch is reached only after `merge-base --is-ancestor` has already failed — but it made the recovery
+path silently useless for anyone pushing to a fork or a second remote, which is exactly the
+contributor workflow `CONTRIBUTING.md` describes. The hook now captures the remote argument and uses
+it.
+
+---
+
+## 🔧 fix(build): make the base-image check ask which Dockerfile, declare the YAML dependency (2026-09-06)
+
+**Repo:** EDDI (`fix/review-quality-gates`)
+
+Eight review comments, four behavioural. All eight were proven in a single mutation run that
+reverted every behaviour at once and produced exactly eight named failures, one per comment, with
+no cross-talk.
+
+**The base-image check skipped itself on the wrong pull request.** It treated the first open
+`dependabot/docker/*` branch as covering the production Dockerfile, but `dependabot.yml` declares
+three docker ecosystems (`/src/main/docker`, `/mcp-sidecar`, `/.clusterfuzzlite`) and all three push
+branches under that prefix. A sidecar or fuzzing bump therefore silenced the check for the image
+that actually ships. It now asks `gh pr view --json files` whether the PR touches the production
+Dockerfile before skipping.
+
+**A dependency was reaching the classpath by accident.** `jackson-dataformat-yaml` was arriving
+only through `json-schema-validator`'s transitive tree, so an unrelated bump could have removed it
+and broken YAML parsing with no declaration to point at. It is now declared alongside the CSV and
+XML modules.
+
+**The dead-letter path trusted `java.io.tmpdir`.** A relative or empty value resolved against the
+working directory, which put the audit dead-letter file inside the source tree. It is now rejected
+with an `IllegalStateException` naming the property. The matching test also no longer requires the
+*global* absence of `eddi-audit-deadletter.jsonl` — a stale file from an older checkout made it
+fail for the wrong reason — and instead snapshots the repository-root sink and asserts it is
+unchanged.
+
+**Note for the merge order.** This branch arms the build gates: Checkstyle moves to
+`failOnViolation`, and the formatter from `format` to `validate`. It should merge **last**, after a
+pre-flight run of the armed gates against main with everything else already in, or it will turn
+green branches red on violations they currently get away with.
+
+---
+
+## 🧪 test(build): make the gate tests unable to pass a disarmed gate (2026-09-04)
+
+**Repo:** EDDI (`fix/review-quality-gates`)
+
+Follow-up on the same branch, from an independent review round and four GitHub Copilot
+comments. Every one was the same defect in a different place: a test that grades the build
+gates while itself being satisfiable by a disarmed gate.
+
+- **The coverage-gate test graded only what survived.** It walked the JaCoCo limits and
+  asserted a value per counter it found, so deleting the `BRANCH` limit — or emptying the
+  `<limits>` block entirely — still passed. It now compares the whole limit map against
+  `{INSTRUCTION=0.90, BRANCH=0.80}`, so a deleted, renamed or retuned limit fails.
+- **The langchain4j pinning test let an unpinned artifact through**, because the condition
+  began `version != null`. An artifact with no `<version>` falls back to a BOM or transitive
+  version, which is exactly what the test exists to forbid. Reproduced first by stripping the
+  version from a real dependency and watching the old test pass.
+- **The version-duplication sweep named `redhat-certify.yml` as an offender and did not scan
+  it.** Reintroducing the very `default:` this branch removed would have passed. The sweep now
+  covers five files and a dedicated assertion rejects any `default:` on that workflow's
+  `version` input — the check that still bites after `pom.xml` moves past the stale literal.
+- **The CI `code` path filter omitted `README.md` and `AGENTS.md`**, so a PR touching only
+  those skipped the tests that grade them. Rather than fix the pair by hand, a new test derives
+  the requirement: it sweeps the test tree for root documents any test opens, parses the filter
+  out of `ci.yml`, and fails if one is unlisted. It asserts the sweep found something, so it
+  cannot go vacuous itself.
+
+**Not changed, deliberately:** the same gap exists for `docs/**`, where three more tests grade
+documentation. `ci.yml` documents skipping the build for docs-only changes as intentional, so
+widening it is a policy decision rather than a review fix.
+
+---
+
+## 🚦 fix(build): make the style, coverage and image gates able to fail (2026-09-04)
+
+**Repo:** EDDI (`fix/review-quality-gates`)
+
+From the whole-repository code review. Several of this project's quality gates were wired
+so that they could not fail — which is the root cause the review named for why the other
+findings shipped at all.
+
+- **Checkstyle ran with `failOnViolation=false`.** The import and file-size rules AGENTS.md
+  calls mandatory could not fail anything, and are violated on `main` today.
+- **The formatter's `format` goal rewrote tracked sources on every compile** instead of
+  checking them, so a contributor's build silently edited files rather than reporting them.
+- **The JaCoCo 90/80 gate graded `jacoco-merged.exec`** in runs where the integration tests
+  never produced it, so `./mvnw verify` failed a clean, all-green tree at 89 %. It now
+  carries `<skip>${skipITs}</skip>` and runs where the data actually exists.
+- **Failsafe was pinned to Surefire's version property**, so the two could silently diverge.
+- **The container integration tests built a hand-copied Dockerfile** that had already
+  drifted from the production one, so what CI verified was not what ships. They now build
+  the real image.
+- **The project version was duplicated as a literal** in the OpenAPI info block and in
+  `application.properties`; both now resolve from the build.
+
+### Regression coverage
+
+`BuildQualityGatesTest` and `ReleaseVersionSourceTest` assert the gates are armed — that
+Checkstyle fails on violation, that the coverage check is skip-aware rather than
+unconditionally disabled, and that no version literal is reintroduced. `EddiImageDockerfileTest`
+pins the integration image to the production Dockerfile.
+
+Recorded honestly as unverifiable here: the image build itself and the two version
+assertions need Docker and MongoDB Dev Services, so they compile but have never executed
+locally. CI is the authority for those.
+
+**Reviewer note.** This branch changes the local build contract: `./mvnw compile` now fails
+on unformatted or badly-imported sources instead of quietly rewriting them. AGENTS.md is
+updated to say so, because the previous wording described the old behaviour.
 ## 🔌 fix(install): close the PR #714 review — a busybox probe that read every port as free (2026-09-07)
 
 **Repo:** EDDI (`fix/installer-mongodb-port-conflict`)
