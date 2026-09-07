@@ -4624,6 +4624,18 @@
     "emptySpaceDescription": "In anderen Arbeitsbereichen gibt es möglicherweise Agenten, die Sie sehen können.",
     "showAllSpaces": "Alle Arbeitsbereiche anzeigen",
     "useOnlyMenu": "Nur zum Chatten mit Ihnen geteilt.",
-    "switcherCurrent": "Arbeitsbereich wechseln — aktuell {{space}}"
+    "switcherCurrent": "Arbeitsbereich wechseln — aktuell {{space}}",
+    "transfer": {
+      "title": "Eigentum übertragen",
+      "hint": "Nur für Administratoren. Verwenden Sie dies, wenn die aktuelle Eigentümerin oder der aktuelle Eigentümer ausgeschieden ist und niemand sonst Zugriff gewähren kann.",
+      "placeholder": "user:alice",
+      "action": "Übertragen",
+      "confirm": "Übertragung bestätigen",
+      "subjectRequired": "Geben Sie die Person an, die Eigentümer werden soll.",
+      "done": "Eigentum übertragen",
+      "warning": "Dies ersetzt den aktuellen Eigentümer ({{owner}}). Er verliert die Kontrolle über diese Ressource.",
+      "cascade_one": "Eigentümer bei {{count}} Ressource geändert",
+      "cascade_other": "Eigentümer bei {{count}} Ressourcen geändert"
+    }
   }
 }

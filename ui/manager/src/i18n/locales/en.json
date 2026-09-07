@@ -4624,6 +4624,18 @@
     "emptySpaceDescription": "Other workspaces may have agents you can see.",
     "showAllSpaces": "Show all workspaces",
     "useOnlyMenu": "Shared with you for chatting only.",
-    "switcherCurrent": "Switch workspace — currently {{space}}"
+    "switcherCurrent": "Switch workspace — currently {{space}}",
+    "transfer": {
+      "title": "Transfer ownership",
+      "hint": "Administrators only. Use this when the current owner has left and nobody else can grant access.",
+      "placeholder": "user:alice",
+      "action": "Transfer",
+      "confirm": "Confirm transfer",
+      "subjectRequired": "Enter the person to make owner.",
+      "done": "Ownership transferred",
+      "warning": "This replaces the current owner ({{owner}}). They lose control of this resource.",
+      "cascade_one": "Owner changed on {{count}} resource",
+      "cascade_other": "Owner changed on {{count}} resources"
+    }
   }
 }

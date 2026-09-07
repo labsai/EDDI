@@ -16,14 +16,16 @@ import {
   revokeShare,
   setResourceVisibility,
   shareResource,
+  transferOwnership,
   type AccessLevel,
   type ResourceVisibility,
   type ShareResult,
 } from "@/lib/api/sharing";
 import { describeSpace, isUserSubject, parseSubjectInput } from "@/lib/spaces";
+import { useHasRole } from "@/hooks/use-auth";
 
 /** Which mutation produced a {@link ShareResult}, so the summary can name it. */
-type ShareAction = "share" | "revoke" | "visibility";
+type ShareAction = "share" | "revoke" | "visibility" | "transfer";
 
 interface ShareDialogProps {
   open: boolean;
@@ -74,6 +76,9 @@ export function ShareDialog({ open, onClose, resourceId, resourceName }: ShareDi
   });
 
   const isOwner = levelIncludes(info?.callerLevel, "OWN");
+  // Transfer is `@RolesAllowed("eddi-admin")` on the backend, and is the only
+  // control here that a non-owner may legitimately use.
+  const isAdmin = useHasRole("eddi-admin");
 
   const afterChange = useCallback(
     async (result: ShareResult, action: ShareAction) => {
@@ -87,6 +92,13 @@ export function ShareDialog({ open, onClose, resourceId, resourceName }: ShareDi
       await queryClient.invalidateQueries({ queryKey: agentKeys.all });
       await queryClient.invalidateQueries({ queryKey: agentKeys.detail(resourceId) });
       await queryClient.invalidateQueries({ queryKey: agentKeys.descriptor(resourceId) });
+      // The workflow and extension listings too, now that this dialog is
+      // reachable from them. Sharing is by descriptor id and works on any
+      // resource, so invalidating only the agent keys left the ownership badge
+      // and `callerLevel` on those pages showing the state from before the
+      // share — the same staleness the agent detail key was added to fix.
+      await queryClient.invalidateQueries({ queryKey: ["workflows"] });
+      await queryClient.invalidateQueries({ queryKey: ["resources"] });
     },
     [refetch, queryClient, resourceId]
   );
@@ -200,6 +212,16 @@ export function ShareDialog({ open, onClose, resourceId, resourceName }: ShareDi
                 "Only the owner can change who has access. Ask them if you need this shared more widely."
               )}
             </p>
+          )}
+
+          {isAdmin && (
+            <TransferOwnership
+              resourceId={resourceId}
+              currentOwner={info.ownerId ?? null}
+              busy={busy}
+              onBusy={setBusy}
+              onTransferred={afterChange}
+            />
           )}
 
           {isOwner && (
@@ -321,6 +343,122 @@ export function ShareDialog({ open, onClose, resourceId, resourceName }: ShareDi
   );
 }
 
+/**
+ * Reassign a resource's owner. Administrators only.
+ *
+ * Not the same operation as granting someone `OWN`, which is what the section
+ * above does, and the difference is exactly why this exists:
+ *
+ * - Granting OWN *adds* a second owner, and requires being the owner yourself.
+ * - Transferring *replaces* the owner, and is `@RolesAllowed("eddi-admin")`.
+ *
+ * So when a resource's owner leaves the organisation, nobody who remains can
+ * grant themselves access through the section above — there is no owner left to
+ * do it. EDDI documents that as the case this endpoint is for. The Manager
+ * implemented the call and never gave anyone a way to reach it.
+ *
+ * Confirmed before it fires, for the reason the OWN grant is: it changes who
+ * controls the resource, and it is not the admin's own to undo afterwards.
+ */
+function TransferOwnership({
+  resourceId,
+  currentOwner,
+  busy,
+  onBusy,
+  onTransferred,
+}: {
+  resourceId: string;
+  currentOwner: string | null;
+  busy: boolean;
+  onBusy: (busy: boolean) => void;
+  onTransferred: (result: ShareResult, action: ShareAction) => Promise<void>;
+}) {
+  const { t } = useTranslation();
+  const [input, setInput] = useState("");
+  const [confirmed, setConfirmed] = useState<string | null>(null);
+
+  const parsed = parseSubjectInput(input);
+  const subject = "error" in parsed ? null : parsed.subject;
+  const awaitingConfirmation = subject !== null && confirmed === subject;
+
+  const handleTransfer = useCallback(async () => {
+    const result = parseSubjectInput(input);
+    if ("error" in result) {
+      toast.error(
+        t("workspaces.transfer.subjectRequired", "Enter the person to make owner."),
+      );
+      return;
+    }
+    // Bound to the subject it was shown for, so retyping the name withdraws it
+    // — the same rule the OWN grant follows, and for the same reason.
+    if (confirmed !== result.subject) {
+      setConfirmed(result.subject);
+      return;
+    }
+    onBusy(true);
+    try {
+      // `spaceId` is left to the server: it derives the new owner's personal
+      // space, and a client guessing at the encoding is the failure mode
+      // `GET /workspaces` exists to remove.
+      const transferred = await transferOwnership(resourceId, result.subject);
+      await onTransferred(transferred, "transfer");
+      setInput("");
+      setConfirmed(null);
+      toast.success(t("workspaces.transfer.done", "Ownership transferred"));
+    } catch (e) {
+      toast.error(getErrorMessage(e));
+    } finally {
+      onBusy(false);
+    }
+  }, [input, confirmed, resourceId, onBusy, onTransferred, t]);
+
+  return (
+    <section className="space-y-2 rounded-md border border-amber-500/30 bg-amber-500/5 p-3" data-testid="transfer-ownership">
+      <h3 className="text-sm font-medium">
+        {t("workspaces.transfer.title", "Transfer ownership")}
+      </h3>
+      <p className="text-xs text-muted-foreground">
+        {t(
+          "workspaces.transfer.hint",
+          "Administrators only. Use this when the current owner has left and nobody else can grant access.",
+        )}
+      </p>
+      <div className="flex flex-col gap-2 sm:flex-row">
+        <Input
+          value={input}
+          onChange={(e) => {
+            setInput(e.target.value);
+            setConfirmed(null);
+          }}
+          placeholder={t("workspaces.transfer.placeholder", "user:alice")}
+          disabled={busy}
+          aria-label={t("workspaces.transfer.title", "Transfer ownership")}
+          data-testid="transfer-subject-input"
+        />
+        <Button
+          variant={awaitingConfirmation ? "destructive" : "outline"}
+          onClick={handleTransfer}
+          disabled={busy || !input.trim()}
+          data-testid="transfer-submit"
+        >
+          {awaitingConfirmation
+            ? t("workspaces.transfer.confirm", "Confirm transfer")
+            : t("workspaces.transfer.action", "Transfer")}
+        </Button>
+      </div>
+      {awaitingConfirmation && (
+        <p className="text-xs text-destructive" role="alert" data-testid="transfer-warning">
+          {t("workspaces.transfer.warning", {
+            owner: currentOwner ?? t("workspaces.share.unowned", "No recorded owner"),
+            defaultValue:
+              "This replaces the current owner ({{owner}}). They lose control of this resource.",
+          })}
+        </p>
+      )}
+    </section>
+  );
+}
+
 function OwnerLine({ ownerId, spaceId }: { ownerId: string | null; spaceId: string | null }) {
   const { t } = useTranslation();
   const space = describeSpace(spaceId);
@@ -416,10 +554,15 @@ function CascadeSummary({ result, action }: { result: ShareResult; action: Share
     <div className="space-y-2 rounded-md border border-border bg-muted/30 p-3" data-testid="share-cascade-summary">
       <p className="text-sm">
         {/* Which verb matters: "Applied to 3 resources" after a revoke reads as
-            though access had been granted. */}
+            though access had been granted, and after a transfer it says nothing
+            about who now owns them. */}
         {action === "revoke"
           ? t("workspaces.share.cascadeRevoked", "Removed from {{count}} resource", { count: updated.length })
-          : t("workspaces.share.cascadeApplied", "Applied to {{count}} resource", { count: updated.length })}
+          : action === "transfer"
+            ? t("workspaces.transfer.cascade", "Owner changed on {{count}} resource", {
+                count: updated.length,
+              })
+            : t("workspaces.share.cascadeApplied", "Applied to {{count}} resource", { count: updated.length })}
       </p>
       {skipped.length > 0 && (
         <div className="space-y-1">

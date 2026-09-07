@@ -4666,6 +4666,19 @@
     "emptySpaceDescription": "Otros espacios pueden tener agentes que usted puede ver.",
     "showAllSpaces": "Mostrar todos los espacios",
     "useOnlyMenu": "Compartido con usted solo para chatear.",
-    "switcherCurrent": "Cambiar de espacio de trabajo — actualmente {{space}}"
+    "switcherCurrent": "Cambiar de espacio de trabajo — actualmente {{space}}",
+    "transfer": {
+      "title": "Transferir la propiedad",
+      "hint": "Solo administradores. Úselo cuando el propietario actual se haya marchado y nadie más pueda conceder acceso.",
+      "placeholder": "user:alice",
+      "action": "Transferir",
+      "confirm": "Confirmar transferencia",
+      "subjectRequired": "Indique la persona que será propietaria.",
+      "done": "Propiedad transferida",
+      "warning": "Esto sustituye al propietario actual ({{owner}}). Perderá el control de este recurso.",
+      "cascade_one": "Propietario cambiado en {{count}} recurso",
+      "cascade_other": "Propietario cambiado en {{count}} recursos",
+      "cascade_many": "Propietario cambiado en {{count}} recursos"
+    }
   }
 }

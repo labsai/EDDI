@@ -4624,6 +4624,18 @@
     "emptySpaceDescription": "其他工作区可能有您可以查看的智能体。",
     "showAllSpaces": "显示所有工作区",
     "useOnlyMenu": "仅共享给您用于对话。",
-    "switcherCurrent": "切换工作区 — 当前为 {{space}}"
+    "switcherCurrent": "切换工作区 — 当前为 {{space}}",
+    "transfer": {
+      "title": "转移所有权",
+      "hint": "仅限管理员。当前所有者离开且无人能够授予访问权限时使用。",
+      "placeholder": "user:alice",
+      "action": "转移",
+      "confirm": "确认转移",
+      "subjectRequired": "请输入将成为所有者的人员。",
+      "done": "所有权已转移",
+      "warning": "这将取代当前所有者（{{owner}}），其将失去对该资源的控制权。",
+      "cascade_other": "已更改 {{count}} 项资源的所有者",
+      "cascade_one": "已更改 {{count}} 项资源的所有者"
+    }
   }
 }

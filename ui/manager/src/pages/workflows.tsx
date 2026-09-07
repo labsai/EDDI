@@ -1,7 +1,10 @@
 import { useState, useMemo, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { Workflow, Search, Plus, ExternalLink, Trash2, Copy, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
+import { Workflow, Search, Plus, ExternalLink, Trash2, Copy, Share2, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 import { accessFor } from "@/lib/access";
+import { useSpaces } from "@/hooks/use-spaces";
+import { OwnershipBadge } from "@/components/workspaces/ownership-badge";
+import { ShareDialog } from "@/components/workspaces/share-dialog";
 import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/api-client";
 import {
@@ -37,6 +40,11 @@ export function WorkflowsPage() {
   const [view, setView] = useState<ViewMode>(() => getStoredViewMode("workflows"));
   const [sortField, setSortField] = useState<SortField>("modified");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
+  const [shareTarget, setShareTarget] = useState<{ id: string; name: string } | null>(null);
+  // Sharing is by descriptor id, which every resource type has — see the note
+  // in resource-list.tsx. A workflow is shareable on the backend and was not
+  // shareable here.
+  const { enabled: workspacesEnabled } = useSpaces();
 
   // Auto-trigger workflows onboarding chapter
   const maybeAutoStart = useOnboarding((s) => s.maybeAutoStart);
@@ -267,6 +275,12 @@ export function WorkflowsPage() {
                           {wf.name || t("packages.unnamed", "Unnamed Workflow")}
                           <ExternalLink className="ms-1 inline h-3 w-3 opacity-40" />
                         </Link>
+                        <OwnershipBadge
+                          className="ms-2 align-middle"
+                          ownerId={wf.ownerId}
+                          spaceId={wf.spaceId}
+                          visibility={wf.visibility}
+                        />
                       </td>
                       <td className="px-5 py-3">
                         <span className="font-mono text-xs text-muted-foreground">
@@ -285,25 +299,44 @@ export function WorkflowsPage() {
                       </td>
                       <td className="px-5 py-3 text-end">
                         <div className="inline-flex items-center gap-1">
+                          {workspacesEnabled && wf.access.canOwn && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                              onClick={() => setShareTarget({ id: wf.id, name: wf.name || wf.id })}
+                              title={t("workspaces.share.title", "Share")}
+                              aria-label={t("workspaces.share.title", "Share")}
+                              data-testid={`workflow-share-${wf.id}`}
+                            >
+                              <Share2 aria-hidden="true" />
+                            </Button>
+                          )}
                           {wf.access.canView && (
-                            <button
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-muted-foreground hover:text-foreground"
                               onClick={() => handleDuplicate(wf.id, wf.version)}
-                              className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
                               title={t("common.duplicate", "Duplicate")}
+                              aria-label={t("common.duplicate", "Duplicate")}
                               data-testid={`workflow-duplicate-${wf.id}`}
                             >
-                              <Copy className="h-4 w-4" />
-                            </button>
+                              <Copy aria-hidden="true" />
+                            </Button>
                           )}
                           {wf.access.canOwn && (
-                            <button
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                               onClick={() => handleDelete(wf.id, wf.version)}
-                              className="rounded-md p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
                               title={t("common.delete")}
+                              aria-label={t("common.delete")}
                               data-testid={`workflow-delete-${wf.id}`}
                             >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
+                              <Trash2 aria-hidden="true" />
+                            </Button>
                           )}
                         </div>
                       </td>
@@ -329,6 +362,16 @@ export function WorkflowsPage() {
         open={createOpen}
         onClose={() => setCreateOpen(false)}
       />
+
+      {/* Share dialog */}
+      {shareTarget && (
+        <ShareDialog
+          open
+          onClose={() => setShareTarget(null)}
+          resourceId={shareTarget.id}
+          resourceName={shareTarget.name}
+        />
+      )}
 
       {/* Delete confirmation */}
       <AlertDialog

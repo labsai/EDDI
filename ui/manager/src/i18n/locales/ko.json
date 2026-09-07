@@ -4624,6 +4624,18 @@
     "emptySpaceDescription": "다른 작업 공간에 볼 수 있는 에이전트가 있을 수 있습니다.",
     "showAllSpaces": "모든 작업 공간 표시",
     "useOnlyMenu": "대화 전용으로 공유되었습니다.",
-    "switcherCurrent": "작업 공간 전환 — 현재 {{space}}"
+    "switcherCurrent": "작업 공간 전환 — 현재 {{space}}",
+    "transfer": {
+      "title": "소유권 이전",
+      "hint": "관리자 전용입니다. 현재 소유자가 떠나 다른 누구도 접근 권한을 부여할 수 없을 때 사용하세요.",
+      "placeholder": "user:alice",
+      "action": "이전",
+      "confirm": "이전 확인",
+      "subjectRequired": "소유자가 될 사람을 입력하세요.",
+      "done": "소유권이 이전되었습니다",
+      "warning": "현재 소유자({{owner}})를 대체하며, 해당 사용자는 이 리소스에 대한 제어권을 잃습니다.",
+      "cascade_other": "리소스 {{count}}개의 소유자를 변경했습니다",
+      "cascade_one": "리소스 {{count}}개의 소유자를 변경했습니다"
+    }
   }
 }

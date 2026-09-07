@@ -17,6 +17,7 @@ import {
   ExternalLink,
   Copy,
   Trash2,
+  Share2,
 } from "lucide-react";
 import { getResourceType } from "@/lib/api/resources";
 import { parseResourceUri } from "@/lib/api/agents";
@@ -25,6 +26,9 @@ import { ResourceCard } from "@/components/resources/resource-card";
 import { CreateResourceDialog } from "@/components/resources/create-resource-dialog";
 import type { AgentDescriptor } from "@/lib/api/agents";
 import { accessFor } from "@/lib/access";
+import { useSpaces } from "@/hooks/use-spaces";
+import { OwnershipBadge } from "@/components/workspaces/ownership-badge";
+import { ShareDialog } from "@/components/workspaces/share-dialog";
 import type { LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -56,6 +60,12 @@ export function ResourceListPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; version: number } | null>(null);
   const [view, setView] = useState<ViewMode>(() => getStoredViewMode(`resources-${type}`));
+  const [shareTarget, setShareTarget] = useState<{ id: string; name: string } | null>(null);
+  // EDDI shares by DESCRIPTOR id — `/descriptorstore/descriptors/{id}/shares`
+  // takes any resource, not only an agent. The Manager wired the dialog to the
+  // agents page alone, so a workflow or extension could not be shared, and its
+  // existing grants could be neither seen nor revoked.
+  const { enabled: workspacesEnabled } = useSpaces();
 
   // Reset search when switching between resource types (React reuses
   // the component, so useState values persist across route param changes).
@@ -272,6 +282,12 @@ export function ResourceListPage() {
                           {item.name || t("resources.unnamed", "Unnamed Resource")}
                           <ExternalLink className="ms-1 inline h-3 w-3 opacity-40" />
                         </Link>
+                        <OwnershipBadge
+                          className="ms-2 align-middle"
+                          ownerId={item.ownerId}
+                          spaceId={item.spaceId}
+                          visibility={item.visibility}
+                        />
                       </td>
                       <td className="px-5 py-3">
                         <span className="font-mono text-xs text-muted-foreground">
@@ -290,27 +306,46 @@ export function ResourceListPage() {
                       </td>
                       <td className="px-5 py-3 text-end">
                         <div className="inline-flex items-center gap-1">
+                          {workspacesEnabled && item.access.canOwn && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                              onClick={() => setShareTarget({ id: item.id, name: item.name || item.id })}
+                              title={t("workspaces.share.title", "Share")}
+                              aria-label={t("workspaces.share.title", "Share")}
+                              data-testid={`resource-share-${item.id}`}
+                            >
+                              <Share2 aria-hidden="true" />
+                            </Button>
+                          )}
                           {/* Duplicate reads the whole configuration to copy
                               it, so it needs VIEW; deleting is the owner's. */}
                           {item.access.canView && (
-                            <button
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-muted-foreground hover:text-foreground"
                               onClick={() => handleDuplicate(item.id, item.version)}
-                              className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
                               title={t("common.duplicate", "Duplicate")}
+                              aria-label={t("common.duplicate", "Duplicate")}
                               data-testid={`resource-duplicate-${item.id}`}
                             >
-                              <Copy className="h-4 w-4" />
-                            </button>
+                              <Copy aria-hidden="true" />
+                            </Button>
                           )}
                           {item.access.canOwn && (
-                            <button
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                               onClick={() => handleDelete(item.id, item.version)}
-                              className="rounded-md p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
                               title={t("common.delete")}
+                              aria-label={t("common.delete")}
                               data-testid={`resource-delete-${item.id}`}
                             >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
+                              <Trash2 aria-hidden="true" />
+                            </Button>
                           )}
                         </div>
                       </td>
@@ -330,6 +365,16 @@ export function ResourceListPage() {
         typeSlug={type ?? ""}
         typeName={typeName}
       />
+
+      {/* Share dialog */}
+      {shareTarget && (
+        <ShareDialog
+          open
+          onClose={() => setShareTarget(null)}
+          resourceId={shareTarget.id}
+          resourceName={shareTarget.name}
+        />
+      )}
 
       {/* Delete confirmation */}
       <AlertDialog
