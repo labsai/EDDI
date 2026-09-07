@@ -4,15 +4,20 @@
  */
 package ai.labs.eddi.backup.impl;
 
+import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.engine.security.spaces.SpaceContext;
 import ai.labs.eddi.backup.IZipArchive;
 import ai.labs.eddi.backup.model.ImportPreview;
+import ai.labs.eddi.backup.model.UpgradeResult;
 import ai.labs.eddi.backup.model.SyncMapping;
 import ai.labs.eddi.backup.model.SyncRequest;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.migration.IMigrationManager;
 import ai.labs.eddi.configs.migration.TemplateSyntaxMigrator;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import io.quarkus.runtime.LaunchMode;
+import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
@@ -59,7 +64,8 @@ class RestImportServiceExtendedBranchTest {
         importService = new RestImportService(
                 zipArchive, jsonSerialization,
                 migrationManager, documentDescriptorStore,
-                templateSyntaxMigrator, structuralMatcher, upgradeExecutor, mock(ResourceAccessGuard.class));
+                templateSyntaxMigrator, structuralMatcher, upgradeExecutor, mock(IScheduleStore.class), mock(BackupMetrics.class),
+                mock(ResourceAccessGuard.class), mock(SpaceContext.class));
     }
 
     // =========================================================
@@ -71,21 +77,15 @@ class RestImportServiceExtendedBranchTest {
     class UpgradeStrategyTarget {
 
         @Test
-        @DisplayName("upgrade strategy with null targetAgentId falls through to normal import")
-        void upgradeWithNullTargetFallsThrough() throws Exception {
-            doAnswer(inv -> {
-                File dir = inv.getArgument(1);
-                dir.mkdirs();
-                return null;
-            }).when(zipArchive).unzip(any(InputStream.class), any(File.class));
+        @DisplayName("upgrade strategy with null targetAgentId is rejected")
+        void upgradeWithNullTargetIsRejected() {
+            // Falling through to the create path here produced a brand-new duplicate
+            // agent and reported 201, so a dropped query parameter silently doubled
+            // the deployment's agent list.
+            var ex = assertThrows(BadRequestException.class, () -> importService.importAgent(
+                    new ByteArrayInputStream(new byte[0]), "upgrade", null, null, null));
+            assertTrue(ex.getMessage().contains("targetAgentId"), ex.getMessage());
 
-            // "upgrade" strategy + null targetAgentId => does NOT take upgrade path,
-            // falls to importAgentZipFile
-            Response response = importService.importAgent(
-                    new ByteArrayInputStream(new byte[0]), "upgrade", null, null, null);
-
-            assertNotNull(response);
-            // Should not have called upgradeExecutor
             verify(upgradeExecutor, never()).executeUpgrade(any(), anyString(), any(), any());
         }
 
@@ -94,7 +94,7 @@ class RestImportServiceExtendedBranchTest {
         void upgradeCaseInsensitive() throws Exception {
             URI resultUri = URI.create("eddi://ai.labs.agent/agentstore/agents/t1?version=1");
             when(upgradeExecutor.executeUpgrade(any(), eq("t1"), isNull(), isNull()))
-                    .thenReturn(resultUri);
+                    .thenReturn(new UpgradeResult(resultUri, true, 1, 0, 0, List.of()));
 
             doAnswer(inv -> {
                 File dir = inv.getArgument(1);
@@ -191,11 +191,10 @@ class RestImportServiceExtendedBranchTest {
                 return null;
             }).when(zipArchive).unzip(any(InputStream.class), any(File.class));
 
-            // " " (whitespace) should be treated as blank → legacy path
-            var result = importService.previewImport(
-                    new ByteArrayInputStream(new byte[0]), "  ");
-
-            assertNotNull(result);
+            // " " (whitespace) should be treated as blank → legacy path, which then
+            // rejects the archive because it holds no agent file at all.
+            assertThrows(BadRequestException.class, () -> importService.previewImport(
+                    new ByteArrayInputStream(new byte[0]), "  "));
             verify(structuralMatcher, never()).buildPreview(any(), anyString(), anyBoolean());
         }
     }
@@ -377,21 +376,19 @@ class RestImportServiceExtendedBranchTest {
         @Test
         @DisplayName("executeSync with HTTP in prod mode throws")
         void httpInProdMode() {
-            // Default quarkus.profile is "prod" (or unset)
-            // http:// should be rejected unless dev mode
-            String originalProfile = System.getProperty("quarkus.profile");
+            // The launch mode, not the quarkus.profile system property: isDevMode
+            // reads LaunchMode.current(), so setting the property here controlled
+            // nothing and this passed only because surefire's default mode happens to
+            // be NORMAL. Set what the code under test actually reads.
+            LaunchMode originalMode = LaunchMode.current();
             try {
-                System.setProperty("quarkus.profile", "prod");
+                LaunchMode.set(LaunchMode.NORMAL);
                 assertThrows(IllegalArgumentException.class,
                         () -> importService.executeSync(
                                 "http://example.com", "src", 1, "tgt",
                                 null, null, null));
             } finally {
-                if (originalProfile != null) {
-                    System.setProperty("quarkus.profile", originalProfile);
-                } else {
-                    System.clearProperty("quarkus.profile");
-                }
+                LaunchMode.set(originalMode);
             }
         }
 
@@ -444,7 +441,7 @@ class RestImportServiceExtendedBranchTest {
         void emptyWorkflowOrder() throws Exception {
             URI resultUri = URI.create("eddi://ai.labs.agent/agentstore/agents/t1?version=1");
             when(upgradeExecutor.executeUpgrade(any(), eq("t1"), isNull(), isNull()))
-                    .thenReturn(resultUri);
+                    .thenReturn(new UpgradeResult(resultUri, true, 1, 0, 0, List.of()));
 
             doAnswer(inv -> {
                 File dir = inv.getArgument(1);
@@ -467,7 +464,7 @@ class RestImportServiceExtendedBranchTest {
         void workflowOrderWithSpaces() throws Exception {
             URI resultUri = URI.create("eddi://ai.labs.agent/agentstore/agents/t1?version=1");
             when(upgradeExecutor.executeUpgrade(any(), eq("t1"), isNull(), eq(List.of("wf1", "wf2"))))
-                    .thenReturn(resultUri);
+                    .thenReturn(new UpgradeResult(resultUri, true, 1, 0, 0, List.of()));
 
             doAnswer(inv -> {
                 File dir = inv.getArgument(1);
@@ -496,7 +493,7 @@ class RestImportServiceExtendedBranchTest {
         void trailingCommas() throws Exception {
             URI resultUri = URI.create("eddi://ai.labs.agent/agentstore/agents/t1?version=1");
             when(upgradeExecutor.executeUpgrade(any(), eq("t1"), eq(Set.of("r1", "r2")), isNull()))
-                    .thenReturn(resultUri);
+                    .thenReturn(new UpgradeResult(resultUri, true, 1, 0, 0, List.of()));
 
             doAnswer(inv -> {
                 File dir = inv.getArgument(1);

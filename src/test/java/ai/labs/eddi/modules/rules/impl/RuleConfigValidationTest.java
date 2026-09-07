@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.rules.impl;
 
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.lifecycle.exceptions.WorkflowConfigurationException;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
@@ -314,6 +315,11 @@ class RuleConfigValidationTest {
 
         @Override
         public Response deleteResource(URI uri, boolean permanent) {
+            return null;
+        }
+
+        @Override
+        public IResourceStore.IResourceId getCurrentResourceId(URI uri) {
             return null;
         }
     }

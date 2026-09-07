@@ -165,15 +165,26 @@ class StreamingLegacyChatExecutor {
     }
 
     /**
-     * Resolve the attempt count from the task's retry config, clamped to at least
-     * one: {@code maxAttempts <= 0} means "don't retry", not "never call the
-     * model". Without the clamp the retry loop body never runs and the caller gets
-     * a null response indistinguishable from silence.
+     * Resolve the attempt count from the task's retry config, bounded at both ends.
+     *
+     * <p>
+     * At least one: {@code maxAttempts <= 0} means "don't retry", not "never call
+     * the model". Without that the retry loop body never runs and the caller gets a
+     * null response indistinguishable from silence.
+     * </p>
+     *
+     * <p>
+     * And at most {@code RetryConfiguration.MAX_ATTEMPTS_CEILING}. This used to
+     * read {@code getMaxAttempts()} raw, so the engine ceiling that bounds the tool
+     * loop did not apply here: the identical {@code retry} block was capped on one
+     * path and unbounded on the other, and a streaming task could hold its worker
+     * for as many attempts as the config asked for.
+     * </p>
      */
     private static int resolveMaxAttempts(LlmConfiguration.Task task) {
         RetryConfiguration retryConfig = task != null ? task.getRetry() : null;
         int configured = retryConfig != null && retryConfig.getMaxAttempts() != null ? retryConfig.getMaxAttempts() : 1;
-        return Math.max(1, configured);
+        return Math.max(1, RetryConfiguration.clampAttempts(configured));
     }
 
     /**
@@ -334,6 +345,11 @@ class StreamingLegacyChatExecutor {
 
         Map<String, Object> metadata = new HashMap<>();
         String responseText = null;
+        // Carried across attempts so this loop honours the same total-backoff
+        // budget executeWithRetry applies. The per-sleep ceiling alone does not
+        // bound it: ten attempts at a configured 30s delay is 270s of blocked
+        // pipeline thread.
+        long totalBackoffMs = 0L;
 
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             // Each attempt reports its own outcome. Without this reset, a
@@ -488,11 +504,16 @@ class StreamingLegacyChatExecutor {
                 }
                 // No response at all — treat as retryable failure
                 if (attempt < maxAttempts) {
-                    LOGGER.warnf("Streaming timed out with empty response, retrying (attempt %d/%d)", attempt, maxAttempts);
-                    RetryConfiguration.backoff(attempt, retryConfig);
-                    continue;
+                    long slept = RetryConfiguration.backoff(attempt, retryConfig, totalBackoffMs);
+                    if (slept >= 0) {
+                        totalBackoffMs += slept;
+                        LOGGER.warnf("Streaming timed out with empty response, retrying (attempt %d/%d)", attempt, maxAttempts);
+                        continue;
+                    }
+                    LOGGER.warnf("Streaming timed out with empty response and the retry backoff budget is spent after %d attempt(s)",
+                            attempt);
                 }
-                LOGGER.errorf("Streaming timed out with empty response after %d attempts", maxAttempts);
+                LOGGER.errorf("Streaming timed out with empty response after %d attempt(s)", attempt);
                 return new StreamingResult("", metadata);
             }
 
@@ -507,15 +528,20 @@ class StreamingLegacyChatExecutor {
                 // Nothing salvageable (no content, or the caller wants errors
                 // propagated) — retry if possible
                 if (attempt < maxAttempts) {
-                    LOGGER.warnf("Streaming error with empty response, retrying (attempt %d/%d): %s",
-                            attempt, maxAttempts, errorRef.get().getMessage());
                     synchronized (streamLock) {
                         abandoned.set(true);
                     }
-                    RetryConfiguration.backoff(attempt, retryConfig);
-                    continue;
+                    long slept = RetryConfiguration.backoff(attempt, retryConfig, totalBackoffMs);
+                    if (slept >= 0) {
+                        totalBackoffMs += slept;
+                        LOGGER.warnf("Streaming error with empty response, retrying (attempt %d/%d): %s",
+                                attempt, maxAttempts, errorRef.get().getMessage());
+                        continue;
+                    }
+                    LOGGER.warnf("Streaming error with empty response and the retry backoff budget is spent after %d attempt(s): %s",
+                            attempt, errorRef.get().getMessage());
                 }
-                LOGGER.errorf("Streaming chat error after %d attempts: %s", maxAttempts, errorRef.get().getMessage());
+                LOGGER.errorf("Streaming chat error after %d attempt(s): %s", attempt, errorRef.get().getMessage());
                 throw new RuntimeException("Streaming chat failed", errorRef.get());
             }
 

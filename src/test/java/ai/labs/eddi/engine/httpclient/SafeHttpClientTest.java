@@ -14,6 +14,7 @@ import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -125,6 +126,73 @@ class SafeHttpClientTest {
         IOException ex = assertThrows(IOException.class,
                 () -> spy.send(request, HttpResponse.BodyHandlers.ofString()));
         assertTrue(ex.getMessage().contains("Too many redirects"), ex.getMessage());
+    }
+
+    /**
+     * A HEAD request must stay HEAD across every redirect code. RFC 9110 §15.4 only
+     * requires the POST→GET rewrite on 301/302/303; applying it to HEAD makes the
+     * second hop download the entire body of the target — the exact opposite of why
+     * a caller chose HEAD (an existence or size probe) — and made the effective
+     * method depend on which redirect code the server happened to answer with: 307
+     * kept HEAD, 302 did not.
+     */
+    @Test
+    @DisplayName("send() preserves HEAD across a 302 redirect")
+    void shouldPreserveHeadAcrossRedirect() throws Exception {
+        SafeHttpClient spy = Mockito.spy(client);
+        doNothing().when(spy).validateRedirectTarget(anyString());
+
+        AtomicReference<String> methodSeen = new AtomicReference<>();
+        server.createContext("/head-redirect", exchange -> {
+            exchange.getResponseHeaders().set("Location", "http://127.0.0.1:" + port + "/head-target");
+            exchange.sendResponseHeaders(302, -1);
+            exchange.close();
+        });
+        server.createContext("/head-target", exchange -> {
+            methodSeen.set(exchange.getRequestMethod());
+            exchange.sendResponseHeaders(200, -1);
+            exchange.close();
+        });
+        server.start();
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create("http://127.0.0.1:" + port + "/head-redirect"))
+                .method("HEAD", HttpRequest.BodyPublishers.noBody())
+                .build();
+
+        HttpResponse<Void> response = spy.send(request, HttpResponse.BodyHandlers.discarding());
+
+        assertEquals(200, response.statusCode());
+        assertEquals("HEAD", methodSeen.get(), "a redirected HEAD must not be downgraded to GET");
+    }
+
+    @Test
+    @DisplayName("send() still downgrades POST to GET on a 302 redirect")
+    void shouldStillDowngradePostToGetAcrossRedirect() throws Exception {
+        SafeHttpClient spy = Mockito.spy(client);
+        doNothing().when(spy).validateRedirectTarget(anyString());
+
+        AtomicReference<String> methodSeen = new AtomicReference<>();
+        server.createContext("/post-redirect", exchange -> {
+            exchange.getResponseHeaders().set("Location", "http://127.0.0.1:" + port + "/post-target");
+            exchange.sendResponseHeaders(302, -1);
+            exchange.close();
+        });
+        server.createContext("/post-target", exchange -> {
+            methodSeen.set(exchange.getRequestMethod());
+            exchange.sendResponseHeaders(200, -1);
+            exchange.close();
+        });
+        server.start();
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create("http://127.0.0.1:" + port + "/post-redirect"))
+                .POST(HttpRequest.BodyPublishers.ofString("payload"))
+                .build();
+
+        spy.send(request, HttpResponse.BodyHandlers.discarding());
+
+        assertEquals("GET", methodSeen.get(), "RFC 9110 §15.4 still rewrites POST to GET on 302");
     }
 
     @Test
@@ -252,6 +320,41 @@ class SafeHttpClientTest {
         assertEquals(200, response.statusCode());
         assertEquals("method=POST", response.body(),
                 "307 redirect should preserve POST method");
+    }
+
+    /**
+     * The end-to-end half of {@link SafeHttpClientRedirectMethodTest}: a redirected
+     * PUT must arrive at the target as a PUT, with its body. Rewriting it to GET
+     * hands the caller a 200 for a write that never happened.
+     */
+    @Test
+    @DisplayName("302 redirect preserves PUT method and body")
+    void shouldPreservePutAcrossA302Redirect() throws Exception {
+        SafeHttpClient spy = Mockito.spy(client);
+        doNothing().when(spy).validateRedirectTarget(anyString());
+
+        server.createContext("/put-here", exchange -> {
+            exchange.getResponseHeaders().set("Location", "http://127.0.0.1:" + port + "/put-final");
+            exchange.sendResponseHeaders(302, -1);
+            exchange.close();
+        });
+        server.createContext("/put-final", exchange -> {
+            String received = exchange.getRequestMethod() + ":" + new String(exchange.getRequestBody().readAllBytes());
+            byte[] body = received.getBytes();
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.start();
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create("http://127.0.0.1:" + port + "/put-here"))
+                .PUT(HttpRequest.BodyPublishers.ofString("payload"))
+                .build();
+
+        HttpResponse<String> response = spy.send(request, HttpResponse.BodyHandlers.ofString());
+        assertEquals(200, response.statusCode());
+        assertEquals("PUT:payload", response.body(), "a redirected PUT must not silently become a GET");
     }
 
     @Test

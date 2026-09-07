@@ -7,25 +7,59 @@ package ai.labs.eddi.configs.agents;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService.CapabilityMatch;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration.Capability;
+import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
+import ai.labs.eddi.datastore.IResourceStore;
+import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.quarkus.runtime.StartupEvent;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.event.Observes;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.lang.annotation.Annotation;
+import java.lang.reflect.Method;
+import java.net.URI;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
+import static ai.labs.eddi.utils.LogCaptureSupport.captureLogsOf;
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 class CapabilityRegistryServiceTest {
 
     private CapabilityRegistryService service;
 
+    /**
+     * The store arguments are only used by the startup seeding, which these tests
+     * do not exercise, so plain mocks suffice. They used to be {@code null}, which
+     * forced a null guard into {@code populateFromStore} for two
+     * constructor-injected CDI beans that can never be null in production —
+     * production code shaped by a test. {@code StartupSeeding} builds its own
+     * stubbed stores.
+     */
+    private static CapabilityRegistryService newService(MeterRegistry registry) {
+        var service = new CapabilityRegistryService(registry, mock(IAgentStore.class), mock(IDocumentDescriptorStore.class));
+        service.initMetrics();
+        return service;
+    }
+
     @BeforeEach
     void setUp() {
-        service = new CapabilityRegistryService(new SimpleMeterRegistry());
-        service.initMetrics();
+        service = newService(new SimpleMeterRegistry());
     }
 
     @Test
@@ -267,20 +301,24 @@ class CapabilityRegistryServiceTest {
     @Test
     void findBySkill_missMetricIncrementsOnNoResults() {
         var registry = new SimpleMeterRegistry();
-        var svc = new CapabilityRegistryService(registry);
-        svc.initMetrics();
+        var svc = newService(registry);
 
         svc.findBySkill("nonexistent-skill", "all");
 
-        double missCount = registry.counter("eddi.capability.miss.count", "skill", "nonexistent-skill").count();
-        assertEquals(1.0, missCount);
+        // Counted in aggregate, NOT tagged with the skill. This assertion used to read
+        // counter(name, "skill", "nonexistent-skill"), which pinned an unbounded meter
+        // cardinality: the skill string comes from HTTP query params, A2A discovery and
+        // an LLM-invoked tool, so every invented name minted a Meter for the lifetime
+        // of the process.
+        assertEquals(1.0, registry.counter("eddi.capability.miss.count").count());
+        assertTrue(registry.find("eddi.capability.miss.count").counters().stream()
+                .allMatch(c -> c.getId().getTag("skill") == null), "the miss counter must carry no per-skill tag");
     }
 
     @Test
     void findBySkill_strategyMetricIncrementsOnEachCall() {
         var registry = new SimpleMeterRegistry();
-        var svc = new CapabilityRegistryService(registry);
-        svc.initMetrics();
+        var svc = newService(registry);
 
         svc.findBySkill("anything", "highest_confidence");
         svc.findBySkill("anything", "highest_confidence");
@@ -290,11 +328,31 @@ class CapabilityRegistryServiceTest {
         assertEquals(1.0, registry.counter("eddi.capability.strategy.applied", "strategy", "round_robin").count());
     }
 
+    /**
+     * The {@code strategy} tag came straight from the caller — a query parameter on
+     * {@code GET /capabilities}, or whatever an LLM-invoked tool passed — so an
+     * unrecognised value minted a Meter that lives for the process, exactly the
+     * unbounded cardinality the untagged miss counter fixes on the other side.
+     * Folding onto the four the strategy switch understands bounds the tag set.
+     */
+    @Test
+    void findBySkill_unknownStrategyIsFoldedOntoABoundedTagSet() {
+        var registry = new SimpleMeterRegistry();
+        var svc = newService(registry);
+
+        svc.findBySkill("anything", "invented-by-a-model-42");
+        svc.findBySkill("anything", "another-invention");
+
+        assertEquals(2.0, registry.counter("eddi.capability.strategy.applied", "strategy", "other").count());
+        Set<String> tags = registry.find("eddi.capability.strategy.applied").counters().stream()
+                .map(counter -> counter.getId().getTag("strategy")).collect(Collectors.toSet());
+        assertEquals(Set.of("other"), tags, "an unrecognised strategy must not mint its own meter");
+    }
+
     @Test
     void findBySkill_nullStrategyDefaultsToAll() {
         var registry = new SimpleMeterRegistry();
-        var svc = new CapabilityRegistryService(registry);
-        svc.initMetrics();
+        var svc = newService(registry);
 
         svc.findBySkill("anything", null);
 
@@ -304,8 +362,7 @@ class CapabilityRegistryServiceTest {
     @Test
     void findBySkill_missMetricNotIncrementedWhenSkillExists() {
         var registry = new SimpleMeterRegistry();
-        var svc = new CapabilityRegistryService(registry);
-        svc.initMetrics();
+        var svc = newService(registry);
 
         var config = new AgentConfiguration();
         config.setCapabilities(List.of(new Capability("existing-skill", Map.of(), "high")));
@@ -366,5 +423,201 @@ class CapabilityRegistryServiceTest {
 
         var matches = service.findBySkillAndAttributes("skill-y", Map.of(), "all");
         assertEquals(1, matches.size());
+    }
+
+    /**
+     * Seeding at startup, moved here from {@code RestAgentStoreExpandedTest} along
+     * with the code: it was a {@code @PostConstruct} on {@code RestAgentStore}, an
+     * {@code @ApplicationScoped} JAX-RS bean ArC only instantiates on first use —
+     * so on a fresh node nothing ran it and the index stayed empty until an admin
+     * happened to open the Manager.
+     */
+    @Nested
+    @DisplayName("startup seeding")
+    class StartupSeeding {
+
+        private static final String AGENT_ID = "aabbccddeeff112233445566";
+
+        private DocumentDescriptor agentDescriptor() {
+            var descriptor = new DocumentDescriptor();
+            descriptor.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/" + AGENT_ID + "?version=1"));
+            return descriptor;
+        }
+
+        @Test
+        @DisplayName("registers agents that declare capabilities")
+        void registersCapabilities() throws Exception {
+            var agentStore = mock(IAgentStore.class);
+            var descriptorStore = mock(IDocumentDescriptorStore.class);
+            when(descriptorStore.readDescriptors("ai.labs.agent", null, 0, 0, false)).thenReturn(List.of(agentDescriptor()));
+
+            var config = new AgentConfiguration();
+            config.setCapabilities(List.of(new Capability("greeting", Map.of(), "medium"),
+                    new Capability("farewell", Map.of(), "medium")));
+            when(agentStore.read(AGENT_ID, 1)).thenReturn(config);
+
+            var svc = new CapabilityRegistryService(new SimpleMeterRegistry(), agentStore, descriptorStore);
+            svc.initMetrics();
+            svc.onStartup(null);
+
+            assertEquals(Set.of("greeting", "farewell"), svc.getAllSkills());
+            assertEquals(1, svc.findBySkill("greeting", "all").size());
+        }
+
+        @Test
+        @DisplayName("skips agents without capabilities")
+        void skipsNonCapableAgents() throws Exception {
+            var agentStore = mock(IAgentStore.class);
+            var descriptorStore = mock(IDocumentDescriptorStore.class);
+            when(descriptorStore.readDescriptors("ai.labs.agent", null, 0, 0, false)).thenReturn(List.of(agentDescriptor()));
+            when(agentStore.read(AGENT_ID, 1)).thenReturn(new AgentConfiguration());
+
+            var svc = new CapabilityRegistryService(new SimpleMeterRegistry(), agentStore, descriptorStore);
+            svc.initMetrics();
+            svc.onStartup(null);
+
+            assertTrue(svc.getAllSkills().isEmpty());
+        }
+
+        /**
+         * An empty {@code capabilities} array is what the Manager leaves behind when an
+         * author adds the block and then removes every entry. Registering it would put
+         * an agent id in the index under no skill at all — an entry no skill-keyed
+         * lookup can ever reach or clean up.
+         *
+         * <p>
+         * {@code getAllSkills().isEmpty()} alone cannot see the guard:
+         * {@code register()} on an empty list is itself a no-op, so the index looks
+         * identical with and without {@code && !config.getCapabilities().isEmpty()}.
+         * What the guard actually decides is whether this agent is <em>counted</em> as
+         * seeded — so the two observable consequences are asserted instead: the
+         * registry is never asked to register it, and the seeding does not report a
+         * populated registry. Drop the {@code isEmpty()} half of the guard and
+         * {@code registered} becomes 1, which logs "Capability registry populated: 1
+         * agent(s)" for an index that holds nothing.
+         * </p>
+         */
+        @Test
+        @DisplayName("skips an agent whose capabilities array is present but empty")
+        void skipsAgentWithEmptyCapabilities() throws Exception {
+            var agentStore = mock(IAgentStore.class);
+            var descriptorStore = mock(IDocumentDescriptorStore.class);
+            when(descriptorStore.readDescriptors("ai.labs.agent", null, 0, 0, false)).thenReturn(List.of(agentDescriptor()));
+
+            var config = new AgentConfiguration();
+            config.setCapabilities(List.of());
+            when(agentStore.read(AGENT_ID, 1)).thenReturn(config);
+
+            var svc = spy(new CapabilityRegistryService(new SimpleMeterRegistry(), agentStore, descriptorStore));
+            svc.initMetrics();
+
+            List<String> captured = captureLogsOf(CapabilityRegistryService.class, () -> svc.onStartup(null));
+
+            assertTrue(svc.getAllSkills().isEmpty());
+            verify(svc, never()).register(anyString(), any(AgentConfiguration.class));
+            assertTrue(captured.stream().noneMatch(value -> value.contains("Capability registry populated")),
+                    "an agent that was skipped must not be counted as seeded; captured: " + captured);
+        }
+
+        /**
+         * The complement of {@link #skipsAgentWithEmptyCapabilities}: an agent that
+         * DOES declare capabilities must be registered and counted, so the assertions
+         * above cannot be satisfied by a guard that rejects everything.
+         */
+        @Test
+        @DisplayName("an agent with capabilities is registered and counted as seeded")
+        void capableAgentIsRegisteredAndCounted() throws Exception {
+            var agentStore = mock(IAgentStore.class);
+            var descriptorStore = mock(IDocumentDescriptorStore.class);
+            when(descriptorStore.readDescriptors("ai.labs.agent", null, 0, 0, false)).thenReturn(List.of(agentDescriptor()));
+
+            var config = new AgentConfiguration();
+            config.setCapabilities(List.of(new Capability("greeting", Map.of(), "medium")));
+            when(agentStore.read(AGENT_ID, 1)).thenReturn(config);
+
+            var svc = spy(new CapabilityRegistryService(new SimpleMeterRegistry(), agentStore, descriptorStore));
+            svc.initMetrics();
+
+            List<String> captured = captureLogsOf(CapabilityRegistryService.class, () -> svc.onStartup(null));
+
+            verify(svc).register(AGENT_ID, config);
+            assertTrue(captured.stream().anyMatch(value -> value.contains("Capability registry populated")),
+                    "a seeded agent must be counted; captured: " + captured);
+        }
+
+        @Test
+        @DisplayName("one unreadable agent does not abort the seeding")
+        void individualAgentFailure() throws Exception {
+            var agentStore = mock(IAgentStore.class);
+            var descriptorStore = mock(IDocumentDescriptorStore.class);
+            when(descriptorStore.readDescriptors("ai.labs.agent", null, 0, 0, false)).thenReturn(List.of(agentDescriptor()));
+            when(agentStore.read(anyString(), any())).thenThrow(new IResourceStore.ResourceNotFoundException("not found"));
+
+            var svc = new CapabilityRegistryService(new SimpleMeterRegistry(), agentStore, descriptorStore);
+            svc.initMetrics();
+
+            assertDoesNotThrow(() -> svc.onStartup(null));
+            assertTrue(svc.getAllSkills().isEmpty());
+        }
+
+        @Test
+        @DisplayName("an unreachable store does not break startup")
+        void totalFailure() throws Exception {
+            var descriptorStore = mock(IDocumentDescriptorStore.class);
+            when(descriptorStore.readDescriptors("ai.labs.agent", null, 0, 0, false)).thenThrow(new RuntimeException("db error"));
+
+            var svc = new CapabilityRegistryService(new SimpleMeterRegistry(), mock(IAgentStore.class), descriptorStore);
+            svc.initMetrics();
+
+            assertDoesNotThrow(() -> svc.onStartup(null));
+            assertTrue(svc.getAllSkills().isEmpty(), "an unreachable store must leave the index empty, not half-built");
+        }
+
+        /**
+         * The other three tests call {@code onStartup} by hand, which proves what the
+         * seeding does but not that anything ever calls it — and "nothing calls it" is
+         * exactly the defect this change fixes. Nothing in the runnable unit suite
+         * boots ArC, so the wiring is asserted structurally instead: the bean is
+         * {@code @ApplicationScoped} and the method takes an {@code @Observes}
+         * {@code StartupEvent}, which is what makes ArC create the bean eagerly and
+         * fire it. (Whether the new IAgentStore/IDocumentDescriptorStore injection
+         * points resolve without a CDI cycle is still only provable at boot, i.e. in
+         * CI.)
+         */
+        @Test
+        @DisplayName("the seeding is wired as a StartupEvent observer on an @ApplicationScoped bean")
+        void seedingIsAStartupObserver() throws Exception {
+            assertTrue(CapabilityRegistryService.class.isAnnotationPresent(ApplicationScoped.class),
+                    "a StartupEvent observer only fires on a CDI bean");
+
+            Method onStartup = CapabilityRegistryService.class.getDeclaredMethod("onStartup", StartupEvent.class);
+            Annotation[] parameterAnnotations = onStartup.getParameterAnnotations()[0];
+            assertTrue(Stream.of(parameterAnnotations).anyMatch(a -> a.annotationType() == Observes.class),
+                    "without @Observes this is an ordinary method nothing calls, and the index stays empty on a fresh node");
+        }
+    }
+
+    /**
+     * CWE-117. The skill string reaches this lookup from GET /capabilities, from
+     * A2A discovery, from a templated {@code capabilityMatch} rule and from the
+     * LLM-invoked {@code FindAgentsByCapabilityTool} — all caller-controlled — and
+     * a newline in it forges a second log record that reads as the server's own.
+     * {@code LogSanitizer} is the sanitiser the rest of the codebase uses; this
+     * pins that this site uses it too.
+     */
+    @Test
+    @DisplayName("a miss logs the requested skill sanitized, so it cannot forge a log record")
+    void aMissedSkillIsLoggedSanitized() {
+        String poisonedSkill = "translation\nERROR [io.quarkus] forged log line";
+
+        List<String> captured = captureLogsOf(CapabilityRegistryService.class,
+                () -> assertTrue(service.findBySkill(poisonedSkill, "all").isEmpty()));
+
+        // lower-cased because the lookup normalises the skill before logging it; the
+        // point is the newline became '_' rather than a record boundary.
+        assertTrue(captured.stream().anyMatch(value -> value.contains("translation_error")),
+                "the miss must have been captured with the skill sanitized in place; captured: " + captured);
+        assertTrue(captured.stream().noneMatch(value -> value.contains("\n")),
+                "a newline reached the log, so a caller can forge log records; captured: " + captured);
     }
 }
