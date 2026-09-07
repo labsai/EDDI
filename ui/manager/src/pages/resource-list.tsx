@@ -24,6 +24,7 @@ import { useResourceDescriptors, useDeleteResource, useDuplicateResource } from 
 import { ResourceCard } from "@/components/resources/resource-card";
 import { CreateResourceDialog } from "@/components/resources/create-resource-dialog";
 import type { AgentDescriptor } from "@/lib/api/agents";
+import { accessFor } from "@/lib/access";
 import type { LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -90,9 +91,18 @@ export function ResourceListPage() {
   const Icon = ICON_MAP[rt.icon] ?? FileCode;
   const typeName = t(`${rt.labelKey}.name`);
 
+  /**
+   * Each row with its id, version and what this caller may do with it.
+   *
+   * `callerLevel` is stamped on every descriptor listing, not just the agent
+   * one — `RestVersionInfo.readDescriptors` is the shared base every per-store
+   * `/{store}/descriptors` endpoint inherits. Reading it only on the agents
+   * page, as the Manager did, meant a workflow or extension a colleague shared
+   * at VIEW still offered Duplicate and Delete, both of which 403.
+   */
   const enrichedItems = (items ?? []).map((item: AgentDescriptor) => {
     const { id, version } = parseResourceUri(item.resource);
-    return { ...item, id, version };
+    return { ...item, id, version, access: accessFor(item.callerLevel) };
   });
 
   function handleDelete(id: string, version: number) {
@@ -280,20 +290,28 @@ export function ResourceListPage() {
                       </td>
                       <td className="px-5 py-3 text-end">
                         <div className="inline-flex items-center gap-1">
-                          <button
-                            onClick={() => handleDuplicate(item.id, item.version)}
-                            className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
-                            title={t("common.duplicate", "Duplicate")}
-                          >
-                            <Copy className="h-4 w-4" />
-                          </button>
-                          <button
-                            onClick={() => handleDelete(item.id, item.version)}
-                            className="rounded-md p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
-                            title={t("common.delete")}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
+                          {/* Duplicate reads the whole configuration to copy
+                              it, so it needs VIEW; deleting is the owner's. */}
+                          {item.access.canView && (
+                            <button
+                              onClick={() => handleDuplicate(item.id, item.version)}
+                              className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
+                              title={t("common.duplicate", "Duplicate")}
+                              data-testid={`resource-duplicate-${item.id}`}
+                            >
+                              <Copy className="h-4 w-4" />
+                            </button>
+                          )}
+                          {item.access.canOwn && (
+                            <button
+                              onClick={() => handleDelete(item.id, item.version)}
+                              className="rounded-md p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                              title={t("common.delete")}
+                              data-testid={`resource-delete-${item.id}`}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>

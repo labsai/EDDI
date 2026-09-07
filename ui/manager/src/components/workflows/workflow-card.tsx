@@ -9,6 +9,7 @@ import {
 import { cn } from "@/lib/utils";
 import type { AgentDescriptor } from "@/lib/api/agents";
 import { useState } from "react";
+import { accessFor } from "@/lib/access";
 import { Link } from "react-router-dom";
 
 interface WorkflowCardProps {
@@ -20,6 +21,9 @@ interface WorkflowCardProps {
 export function WorkflowCard({ workflow, onDuplicate, onDelete }: WorkflowCardProps) {
   const { t } = useTranslation();
   const [menuOpen, setMenuOpen] = useState(false);
+  // Derived here rather than taken as a prop, so a caller cannot forget to
+  // pass it and silently get the unrestricted menu back.
+  const access = accessFor(workflow.callerLevel);
 
   const timeAgo = formatTimeAgo(workflow.lastModifiedOn);
 
@@ -37,46 +41,55 @@ export function WorkflowCard({ workflow, onDuplicate, onDelete }: WorkflowCardPr
           <Workflow className="h-5 w-5 text-primary" />
         </div>
 
-        {/* Context menu */}
-        <div className="relative">
-          <button
-            onClick={() => setMenuOpen(!menuOpen)}
-            className="rounded-md p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-secondary hover:text-foreground group-hover:opacity-100"
-            data-testid={`workflow-menu-${workflow.id}`}
-          >
-            <MoreVertical className="h-4 w-4" />
-          </button>
-          {menuOpen && (
-            <>
-              <div
-                className="fixed inset-0 z-40"
-                onClick={() => setMenuOpen(false)}
-              />
-              <div className="absolute inset-e-0 z-50 mt-1 w-44 rounded-lg border bg-popover py-1 shadow-lg">
-                <button
-                  onClick={() => {
-                    onDuplicate(workflow.id, workflow.version);
-                    setMenuOpen(false);
-                  }}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-sm text-popover-foreground hover:bg-secondary"
-                >
-                  <Copy className="h-4 w-4" />
-                  {t("common.duplicate", "Duplicate")}
-                </button>
-                <button
-                  onClick={() => {
-                    onDelete(workflow.id, workflow.version);
-                    setMenuOpen(false);
-                  }}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-sm text-destructive hover:bg-destructive/10"
-                >
-                  <Trash2 className="h-4 w-4" />
-                  {t("common.delete")}
-                </button>
-              </div>
-            </>
-          )}
-        </div>
+        {/* Context menu. Hidden outright when the caller may do neither of the
+            things in it — an empty menu is worse than no menu. */}
+        {(access.canView || access.canOwn) && (
+          <div className="relative">
+            <button
+              onClick={() => setMenuOpen(!menuOpen)}
+              className="rounded-md p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-secondary hover:text-foreground group-hover:opacity-100"
+              data-testid={`workflow-menu-${workflow.id}`}
+            >
+              <MoreVertical className="h-4 w-4" />
+            </button>
+            {menuOpen && (
+              <>
+                <div
+                  className="fixed inset-0 z-40"
+                  onClick={() => setMenuOpen(false)}
+                />
+                <div className="absolute inset-e-0 z-50 mt-1 w-44 rounded-lg border bg-popover py-1 shadow-lg">
+                  {access.canView && (
+                    <button
+                      onClick={() => {
+                        onDuplicate(workflow.id, workflow.version);
+                        setMenuOpen(false);
+                      }}
+                      className="flex w-full items-center gap-2 px-3 py-2 text-sm text-popover-foreground hover:bg-secondary"
+                      data-testid={`workflow-card-duplicate-${workflow.id}`}
+                    >
+                      <Copy className="h-4 w-4" />
+                      {t("common.duplicate", "Duplicate")}
+                    </button>
+                  )}
+                  {access.canOwn && (
+                    <button
+                      onClick={() => {
+                        onDelete(workflow.id, workflow.version);
+                        setMenuOpen(false);
+                      }}
+                      className="flex w-full items-center gap-2 px-3 py-2 text-sm text-destructive hover:bg-destructive/10"
+                      data-testid={`workflow-card-delete-${workflow.id}`}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      {t("common.delete")}
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Workflow info */}

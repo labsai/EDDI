@@ -1,6 +1,7 @@
 import { useState, useMemo, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Workflow, Search, Plus, ExternalLink, Trash2, Copy, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
+import { accessFor } from "@/lib/access";
 import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/api-client";
 import {
@@ -60,7 +61,13 @@ export function WorkflowsPage() {
   // Flatten infinite pages → group by name → sort
   const enrichedWorkflows = useMemo(() => {
     const flat = data?.pages.flat() ?? [];
-    const grouped = groupWorkflowsByName(flat);
+    // `access` is attached here rather than derived at each control, mirroring
+    // resource-list.tsx — two `accessFor` calls per row read as though the two
+    // controls were answering different questions.
+    const grouped = groupWorkflowsByName(flat).map((wf) => ({
+      ...wf,
+      access: accessFor(wf.callerLevel),
+    }));
     return [...grouped].sort((a, b) => {
       let cmp = 0;
       if (sortField === "name") cmp = (a.name ?? "").localeCompare(b.name ?? "");
@@ -278,20 +285,26 @@ export function WorkflowsPage() {
                       </td>
                       <td className="px-5 py-3 text-end">
                         <div className="inline-flex items-center gap-1">
-                          <button
-                            onClick={() => handleDuplicate(wf.id, wf.version)}
-                            className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
-                            title={t("common.duplicate", "Duplicate")}
-                          >
-                            <Copy className="h-4 w-4" />
-                          </button>
-                          <button
-                            onClick={() => handleDelete(wf.id, wf.version)}
-                            className="rounded-md p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
-                            title={t("common.delete")}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
+                          {wf.access.canView && (
+                            <button
+                              onClick={() => handleDuplicate(wf.id, wf.version)}
+                              className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
+                              title={t("common.duplicate", "Duplicate")}
+                              data-testid={`workflow-duplicate-${wf.id}`}
+                            >
+                              <Copy className="h-4 w-4" />
+                            </button>
+                          )}
+                          {wf.access.canOwn && (
+                            <button
+                              onClick={() => handleDelete(wf.id, wf.version)}
+                              className="rounded-md p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                              title={t("common.delete")}
+                              data-testid={`workflow-delete-${wf.id}`}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
