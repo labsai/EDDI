@@ -78,6 +78,22 @@
 #   accessed directly. (example: "foo.example.com,bar.example.com")
 #
 ###
+# Red Hat UBI 10 OpenJDK 25 runtime, pinned by digest for OpenSSF supply-chain
+# compliance. Ships the same JDK build as the UBI 9 image it replaced
+# (Red_Hat-25.0.4.1.1-1), so this is an OS-layer change only.
+#
+# Two operational consequences of RHEL 10, both deliberate:
+#
+#   1. Host CPU baseline. RHEL 10 raises the microarchitecture floor from
+#      x86-64-v2 to x86-64-v3 — its glibc declares
+#      GNU_PROPERTY_X86_ISA_1_NEEDED = v3, so on a host without AVX2/BMI2/FMA
+#      (pre-2013 Intel, pre-2015 AMD) the container refuses to start rather
+#      than misbehaving. Every current cloud instance type clears this.
+#   2. TLS. RHEL 10's crypto policy additionally disables the static-RSA
+#      TLS 1.2 suites, and Red Hat's OpenJDK inherits the policy through
+#      /etc/crypto-policies/back-ends/java.config. Endpoints that negotiate
+#      ECDHE — every current LLM provider — are unaffected; an endpoint
+#      offering only non-forward-secret suites will no longer connect.
 
 # --- Stage: docs ---
 # The four internal-only pages are pruned HERE, in a throwaway stage, so they
@@ -92,7 +108,7 @@
 # Same digest as the runtime stage below, deliberately: base-image-check.yml
 # parses the LAST FROM line, and its sed rewrites every line carrying the pin,
 # so the two stages move together.
-FROM registry.access.redhat.com/ubi9/openjdk-25-runtime:1.24@sha256:d5f7e0c5b6e8828820616c0d6aa0b395c4498513eabeaa2fdc82855c94831030 AS docs
+FROM registry.access.redhat.com/ubi10/openjdk-25-runtime:1.24@sha256:c49d36c03d0a9472935b9f318f709c4cf158afa2dc204099f1f463cfbf9d4626 AS docs
 # COPY writes as root, and the UBI runtime base's default USER is 185, which
 # could not then delete from /docs.
 USER root
@@ -103,7 +119,7 @@ RUN rm -f /docs/changelog.md \
       /docs/SUMMARY.md
 
 # --- Stage: runtime ---
-FROM registry.access.redhat.com/ubi9/openjdk-25-runtime:1.24@sha256:d5f7e0c5b6e8828820616c0d6aa0b395c4498513eabeaa2fdc82855c94831030
+FROM registry.access.redhat.com/ubi10/openjdk-25-runtime:1.24@sha256:c49d36c03d0a9472935b9f318f709c4cf158afa2dc204099f1f463cfbf9d4626
 
 ### Red Hat Container Certification — required labels
 # A sentinel default, so an un-parameterised build is obviously not a release.

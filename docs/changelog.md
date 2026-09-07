@@ -1192,6 +1192,244 @@ than the real one, so it required no change.
 
 ---
 
+## 🐧 chore(docker): move the production base image to UBI 10 (2026-09-06)
+
+**Repo:** EDDI (`chore/ubi10-base-image`)
+
+Companion to the UBI 9 digest bump on `fix/base-image-digest-and-check`, which is the immediate
+release unblock. This is the durable fix: `ubi9/openjdk-25-runtime` carries a standing CVE
+backlog that a digest bump only ever partially drains, and `ubi10/openjdk-25-runtime` is
+currently **clean at every severity**.
+
+| Base | CRITICAL/HIGH | MEDIUM/LOW | Layer size |
+|---|---|---|---|
+| `ubi9/openjdk-25-runtime:1.24` (newest digest) | 10 | 223 | 145.7 MB |
+| `ubi10/openjdk-25-runtime:1.24` | **0** | **0** | 127.0 MB |
+
+**The JDK does not change.** Both images ship Red Hat OpenJDK `25.0.4.1+1-LTS`
+(`Red_Hat-25.0.4.1.1-1`), so this is strictly an OS-layer move — no bytecode, JIT or GC
+behaviour differs. UID 185, the `run-java.sh` entrypoint, the `JBOSS_CONTAINER_*` module layout,
+`curl` (needed by `HEALTHCHECK`) and `microdnf` (needed by the stopgap escape hatch in
+`AGENTS.md`) are all present and identical. Only `JAVA_HOME` moves, from `/usr/lib/jvm/jre` to
+`/usr/lib/jvm/java-25-openjdk`, and nothing in this repo reads it.
+
+### Verified, not assumed
+
+Built the image, ran the CI image gate with its own flags (`--severity CRITICAL,HIGH
+--ignore-unfixed`) → zero findings, exit 0. Booted it against MongoDB: container `HEALTHCHECK`
+healthy, health `UP` on all four checks, `/openapi` 200, `/manage/` 200, all three security
+headers present, Red Hat certification labels and `/licenses` intact. Drove a two-turn
+rule-based conversation end to end — create ruleset → output set → workflow → agent → deploy →
+start → say — against a UBI 9 control on the same build; identical output and an identical set
+of startup warnings.
+
+### Two RHEL 10 constraints, both documented in the `FROM` block
+
+**1. Host CPU floor rises to x86-64-v3.** Verified by reading
+`GNU_PROPERTY_X86_ISA_1_NEEDED` out of each image's `libc.so.6`: UBI 9 declares
+`x86-64-v2`, UBI 10 declares `x86-64-v3`. So the host needs AVX2, BMI2 and FMA — Intel Haswell
+(2013) or AMD Excavator (2015) onward. Every current cloud instance type clears it; a pre-2013
+bare-metal host does not, and glibc refuses to start rather than failing later. `libjvm.so`
+carries no ISA note (HotSpot probes the CPU at run time), so glibc is the binding constraint.
+
+**2. Static-RSA TLS 1.2 suites are disabled.** RHEL 10's crypto policy adds
+`TLS_RSA_WITH_AES_{128,256}_{CBC,GCM}_*` to the disabled set, and Red Hat's OpenJDK inherits
+`/etc/crypto-policies/back-ends/java.config` — confirmed with
+`java -XshowSettings:security:properties`, where those suites appear in the JVM's
+`jdk.tls.disabledAlgorithms` on UBI 10 and not on UBI 9. Every current LLM provider negotiates
+ECDHE and is unaffected; TLS to the OpenAI, Anthropic and Google endpoints succeeds from inside
+the image. An on-prem endpoint offering only non-forward-secret suites would connect on UBI 9
+and fail on UBI 10.
+
+Both are stated in full in the `FROM` block of [`Dockerfile`](../src/main/docker/Dockerfile), so
+the next person to touch that line sees them without leaving the file, and summarized in
+[`docs/redhat-openshift.md`](redhat-openshift.md) for operators.
+
+### Red Hat support boundary
+
+A container supplies its own userspace, so the host only has to be new enough. Red Hat's
+[container compatibility matrix](https://access.redhat.com/support/policy/rhel-container-compatibility)
+lists a UBI 10 image on a RHEL 9 host as **Supported**, subject to the conditions that apply to
+any mismatched major pair: the workload runs unprivileged, does not interact directly with
+kernel-version-specific interfaces (`ioctl`, `/proc`, `/sys`, routing, iptables, nftables, eBPF),
+and the image's RHEL version stays within its supported lifecycle. EDDI meets these — UID 185,
+nothing below the JVM. The condition an operator has to plan for is the last one Red Hat states
+and the one a support ticket runs into: a reported issue may have to be reproduced in a fully
+compatible configuration — that is, on a RHEL 10 host — before it is investigated. RHEL 8 is the
+one host Red Hat marks unsupported for a UBI 10 image. `redhat-openshift.md` states all of this.
+
+*(An earlier draft of this entry claimed the RHEL 9 host combination was categorically outside
+Red Hat's policy. It is not; the matrix was checked and the claim corrected before merge.)*
+
+### `ContainerBaseIT` no longer restates the base image
+
+> **Superseded on merge by #736.** `main` reached the same conclusion first and went further:
+> `EddiImageDockerfile.forTestContext()` transforms the *whole* production Dockerfile for the
+> test build context, rather than parsing the `FROM` line and re-stating the remaining twenty
+> lines inline. That is strictly stronger — the inline copy this branch kept could still drift
+> in every respect except the base image — so the parser described below was dropped in the
+> merge rather than reconciled. `EddiImageDockerfileTest` now pins the relationship, and it uses
+> synthetic digests, so moving the production pin to UBI 10 required no change to it.
+>
+> The account below is kept because two of its findings outlived the code: static initialisers
+> run in textual order (a constant used by a container field must be declared above it, and only
+> a real container IT catches the violation), and container ITs *do* run on this machine. Both
+> are recorded in the Regression Notes.
+
+`ContainerBaseIT` builds its own inline Dockerfile that mirrored the production `FROM` — on
+UBI 9, and unpinned, so it was already a major version and a digest behind what shipped.
+Hard-coding UBI 10 there would only have reset the clock: the copy goes stale on the next digest
+bump without anything failing, and the container ITs quietly certify an OS layer nothing ships.
+It now parses the `FROM` line out of `src/main/docker/Dockerfile` at test time, which carries the
+digest pin along for free and makes drift impossible rather than merely discouraged.
+
+A later review round hardened that parser. The first version took the first whitespace-separated
+token after `FROM`, which is the image reference today but would be the **flag** the moment the
+file gains `FROM --platform=$BUILDPLATFORM …` for a multi-arch build. The ITs would then have
+built against a Dockerfile reading `FROM --platform=$BUILDPLATFORM` and failed confusingly rather
+than clearly. It now skips `--flag` tokens, and matches the instruction with a case-insensitive
+`^\s*FROM\s+` rather than `startsWith("FROM ")`, since Dockerfile keywords are case-insensitive
+and may be followed by a tab. Checked against thirteen shapes: both real Dockerfiles in the repo,
+`--platform` with and without a trailing `AS`, a lowercase keyword, a tab separator, a leading
+indent, a `# FROM` decoy comment, multi-stage last-wins, and the two malformed inputs that must
+throw.
+
+**The hardening broke the build first.** `FROM_INSTRUCTION` was declared below the `EDDI`
+container field, and static initialisers run in textual order — so that field's initialiser
+called into the parser while the pattern was still `null`, and all three container ITs died with
+`ExceptionInInitializerError` caused by a `NullPointerException`. Neither `test-compile` nor the
+standalone parsing harness could see it: one does not run static initialisers, the other does not
+reproduce this class's field order. Only the Integration Tests job did. The constant moved above
+the container fields, with a Javadoc saying why it must stay there. Verified by reproducing the
+mechanism in a two-class scratch file (declared-after throws, declared-before does not) and then
+by running `AgentUseCaseIT` locally end to end: 2 tests, 44 s, image built from the parsed
+`FROM` line, container healthy.
+
+That local run is itself worth noting, because a standing assumption said container ITs cannot
+run on this machine. They can. Had that been checked earlier, the null pattern would have been
+caught before the push rather than by CI.
+
+Worth recording how nearly that verification went wrong. The first harness reported the
+tab-separator case failing, which looked like a bug in the new regex. It was not: the harness had
+been written through a shell heredoc, which ate one backslash from `"\\s"`, and **Java 15 accepts
+`\s` in a string literal as an escape for a plain space** — so the corrupted harness compiled
+cleanly and silently tested `^ *FROM +` instead of `^\s*FROM\s+`. A compile error would have been
+kinder. The harness was rewritten to a file directly and its regex diffed against the real one
+before being trusted.
+
+### The check that could not have told us
+
+`base-image-check.yml`'s tag probe only walks `MAJOR.MINOR+1…+5` **within the pinned
+repository**, so `ubi10` was invisible to it no matter how long it existed — the job would have
+reported `1.24 is the latest tag` forever. Added a `Check for newer UBI major` step that derives
+the `ubiN` segment from the image path and probes `ubiN+1` and `ubiN+2` (trying the pinned tag,
+then `latest`, so a renamed tag scheme still registers), plus a matching issue notification whose
+body lists what to confirm before a major move: CPU baseline, crypto policy, JDK build, and
+`ContainerBaseIT`. Verified against the live registry — `ubi11` and `ubi12` are 404 today, and
+running the same logic against the old `ubi9` pin resolves to `ubi10`, which is exactly the miss
+it closes.
+
+### Review round
+
+Four findings from CodeRabbit and Copilot, all taken.
+
+**The RHEL 9 host claim was wrong** — the strongest reason to run a review. CodeRabbit disputed
+the "categorically outside Red Hat's policy" wording and it was right; the matrix says
+**Supported**. Corrected in both the doc and this entry rather than quietly reworded.
+
+*A second round then caught that the correction had left the page arguing with itself.* The
+opening bullet still said the image is "supported by Red Hat when run on RHEL or OpenShift" and
+the note below the platform table still said "any RHEL-based platform", while the new paragraph
+three lines further down said RHEL 8 is unsupported. An operator reading top-down would have
+been sent to RHEL 8 before ever reaching the caveat. Both broad claims are now bounded, the
+"runs anywhere with a container runtime" statement is explicitly separated from the *supported*
+configuration, and the platform table gained explicit RHEL 9 and RHEL 8 rows so the boundary is
+visible where support levels are actually looked up.
+
+**`ContainerBaseIT` should carry the digest, not just the tag** — raised by both bots. Taken
+further than asked: rather than restating the digest in a second place, the test now parses the
+production `FROM` line, so the class of drift the bots were pointing at cannot recur.
+
+**A hard-coded version series in operator guidance** (Copilot) — "6.3.x and earlier" would have
+gone stale immediately. The corrected paragraph names no version at all.
+
+**`actionlint` SC2001/SC2086/SC2129 on the new step** (CodeRabbit). Fixed: bash regex and
+parameter expansion instead of `echo | sed`, quoted `"$GITHUB_OUTPUT"`/`"$GITHUB_STEP_SUMMARY"`,
+grouped consecutive appends. Both new steps are now clean under
+`shellcheck --severity=style`, which the seven pre-existing steps in the file are not — those
+are left alone here rather than folded into a base-image change.
+
+Extracting the new step and running it against a stubbed `skopeo` was worth doing: the first
+harness reported "no newer major" for all three cases, which looked like a real bug in the
+rewritten parameter expansion. It was the harness — a Windows-style directory on `PATH` that
+Git Bash cannot resolve, so the stub was never found and every probe failed identically. The
+step itself is correct on all three paths (pinned on ubi9 finds ubi10, pinned on ubi10 finds
+nothing, a non-`ubiN` image exits early).
+
+### Merge with #736 and #737
+
+#736 landed on `main` while this branch was in review and changed three of the things it touches.
+
+**The move now applies to two `FROM` lines.** #736 split the image into a throwaway `docs` stage
+and the runtime stage, both carrying the pin, with a comment requiring them to move together —
+`base-image-check.yml` reads the last `FROM`, but its `sed` rewrites every line carrying the pin.
+Both stages are on UBI 10. Moving one would have published a UBI 9 layer and desynchronised the
+automation at the same time. The UBI 10 rationale block now sits above the stage comments rather
+than immediately above a single `FROM`, since it governs both.
+
+**The `ContainerBaseIT` parser was dropped**, superseded by #736's `EddiImageDockerfile` — see
+the note in that section above.
+
+**The Dependabot guard was reconciled in #737, not here.** That branch merged first and combined
+`main`'s `--app dependabot` filter with its own failure reporting; this merge inherits the
+combined version and adds only the newer-UBI-major probe, which is orthogonal — the tag scan
+walks `MAJOR.MINOR+1…+5` inside the pinned repository and so cannot see a new major at all.
+The one textual collision was the summary step, where `main` had quoted `"$GITHUB_STEP_SUMMARY"`
+for shellcheck and this branch had added an unquoted UBI-major line; the added line is now
+quoted. Verified the merged workflow parses as YAML and that all eight `run` blocks pass
+`bash -n`.
+
+**A whole-file `--ours` silently dropped an unrelated fix, and CI caught it.** Resolving the
+`FROM` collision with `git checkout --ours src/main/docker/Dockerfile` took *this branch's entire
+file*, not just its side of the conflicting hunk — discarding every non-conflicting change the
+other side carried. What went with it was #734's audit provisioning:
+
+```dockerfile
+RUN mkdir -p /opt/eddi/data &&       chown -R 185:0 /opt/eddi &&       chmod -R 775 /opt/eddi
+```
+
+That directory is the default `eddi.audit.dead-letter-path` parent. UID 185 cannot create a
+directory under `/opt` at run time, so without it every dead-letter write on the documented
+`docker run` quick start throws into a swallowed catch and the abandoned audit entries are gone
+outright rather than recoverable — the exact defect #734 had just fixed.
+
+`AuditDeadLetterImageProvisioningTest` failed on it in CI. It did not fail locally because the
+pre-push run was a hand-picked `-Dtest` list built around the files the change was *believed* to
+touch, and the whole point of this failure mode is that it touches files you did not intend.
+
+Fixed by rebuilding the file from `#737`'s and re-applying only the three intended edits, so the
+result is provably that branch's Dockerfile plus the UBI 10 move, rather than a patched-up copy
+whose provenance nobody can check. Then audited every file this branch differs from `#737` in,
+reading the **deleted** lines specifically: all remaining deletions are UBI 9 text replaced by
+UBI 10, plus one renumbered header comment. `ContainerBaseIT.java` is byte-identical to `main`'s.
+
+The general rule, worth stating because the conflict markers actively invite the mistake:
+`--ours` and `--theirs` operate on **files, not hunks**. They are only correct when one side's
+entire file is wanted, as it was for `ContainerBaseIT.java` here. Where a file has both a
+conflicting hunk and non-conflicting changes from the other side — which is the normal case —
+edit the markers, or rebuild from the other side and re-apply the intended delta.
+
+**`AGENTS.md`'s base-image bullet was corrected rather than merged.** It described
+`ContainerBaseIT` as parsing the `FROM` line, which stopped being true in this merge. It now
+names `EddiImageDockerfile.forTestContext()` and states the two-stage rule.
+
+**Files:** [`src/main/docker/Dockerfile`](../src/main/docker/Dockerfile),
+[`ContainerBaseIT.java`](../src/test/java/ai/labs/eddi/integration/ContainerBaseIT.java),
+[`.github/workflows/base-image-check.yml`](../.github/workflows/base-image-check.yml),
+[`AGENTS.md`](../AGENTS.md), [`docs/redhat-openshift.md`](redhat-openshift.md)
+
+---
+
 ## 🔀 fix(build): repair `main` while merging it into the v5 compatibility branch (2026-09-06)
 
 **Repo:** EDDI (`fix/review-legacy-compat`)
