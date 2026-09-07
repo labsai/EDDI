@@ -1389,6 +1389,36 @@ for shellcheck and this branch had added an unquoted UBI-major line; the added l
 quoted. Verified the merged workflow parses as YAML and that all eight `run` blocks pass
 `bash -n`.
 
+**A whole-file `--ours` silently dropped an unrelated fix, and CI caught it.** Resolving the
+`FROM` collision with `git checkout --ours src/main/docker/Dockerfile` took *this branch's entire
+file*, not just its side of the conflicting hunk — discarding every non-conflicting change the
+other side carried. What went with it was #734's audit provisioning:
+
+```dockerfile
+RUN mkdir -p /opt/eddi/data &&       chown -R 185:0 /opt/eddi &&       chmod -R 775 /opt/eddi
+```
+
+That directory is the default `eddi.audit.dead-letter-path` parent. UID 185 cannot create a
+directory under `/opt` at run time, so without it every dead-letter write on the documented
+`docker run` quick start throws into a swallowed catch and the abandoned audit entries are gone
+outright rather than recoverable — the exact defect #734 had just fixed.
+
+`AuditDeadLetterImageProvisioningTest` failed on it in CI. It did not fail locally because the
+pre-push run was a hand-picked `-Dtest` list built around the files the change was *believed* to
+touch, and the whole point of this failure mode is that it touches files you did not intend.
+
+Fixed by rebuilding the file from `#737`'s and re-applying only the three intended edits, so the
+result is provably that branch's Dockerfile plus the UBI 10 move, rather than a patched-up copy
+whose provenance nobody can check. Then audited every file this branch differs from `#737` in,
+reading the **deleted** lines specifically: all remaining deletions are UBI 9 text replaced by
+UBI 10, plus one renumbered header comment. `ContainerBaseIT.java` is byte-identical to `main`'s.
+
+The general rule, worth stating because the conflict markers actively invite the mistake:
+`--ours` and `--theirs` operate on **files, not hunks**. They are only correct when one side's
+entire file is wanted, as it was for `ContainerBaseIT.java` here. Where a file has both a
+conflicting hunk and non-conflicting changes from the other side — which is the normal case —
+edit the markers, or rebuild from the other side and re-apply the intended delta.
+
 **`AGENTS.md`'s base-image bullet was corrected rather than merged.** It described
 `ContainerBaseIT` as parsing the `FROM` line, which stopped being true in this merge. It now
 names `EddiImageDockerfile.forTestContext()` and states the two-stage rule.
