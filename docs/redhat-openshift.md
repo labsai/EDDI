@@ -4,22 +4,26 @@
 
 EDDI is built on and fully supports **Red Hat Enterprise Linux (RHEL)**. The production container image is based exclusively on Red Hat content:
 
-- **Base OS**: [Red Hat Universal Base Image 9 (UBI 9)](https://catalog.redhat.com/software/base-images) — a freely redistributable subset of RHEL 9, binary-compatible with RHEL 9 and supported by Red Hat when run on RHEL or OpenShift.
-- **Runtime**: OpenJDK 25 from the official Red Hat UBI 9 OpenJDK runtime image (`ubi9/openjdk-25-runtime`).
-- **Architecture**: `linux/amd64` (x86_64).
+- **Base OS**: [Red Hat Universal Base Image 10 (UBI 10)](https://catalog.redhat.com/software/base-images) — a freely redistributable subset of RHEL 10, binary-compatible with RHEL 10 and supported by Red Hat on OpenShift and on **RHEL 9 or newer** hosts. A RHEL 8 host is not supported for a UBI 10 image — see the host compatibility note below.
+- **Runtime**: OpenJDK 25 from the official Red Hat UBI 10 OpenJDK runtime image (`ubi10/openjdk-25-runtime`).
+- **Architecture**: `linux/amd64` (x86_64), **x86-64-v3 or newer**. RHEL 10 raises the microarchitecture floor, so the host CPU must support AVX2, BMI2 and FMA — Intel Haswell (2013) and AMD Excavator (2015) onward. Every current cloud instance type clears this; a pre-2013 bare-metal host does not, and the container refuses to start rather than failing later.
 - **Non-root execution**: Runs as UID `185` (the default `jboss` user from the UBI base image) — containers never run as root.
 
 EDDI is delivered as an OCI-compliant Docker container image and runs on any platform that supports OCI containers, including:
 
 | Platform                               | Support Level                                                                         |
 | -------------------------------------- | ------------------------------------------------------------------------------------- |
-| **Red Hat Enterprise Linux 9**         | ✅ Primary — UBI 9 base image, Red Hat-certified                                      |
+| **Red Hat Enterprise Linux 10**        | ✅ Primary — UBI 10 base image, Red Hat-certified                                     |
+| **Red Hat Enterprise Linux 9**         | ✅ Supported — mismatched majors, see the host compatibility note below               |
+| **Red Hat Enterprise Linux 8**         | ❌ Not supported for a UBI 10 image — pin an EDDI release built on UBI 9              |
 | **Red Hat OpenShift 4.12+**            | ✅ Certified — listed in the [Red Hat Ecosystem Catalog](https://catalog.redhat.com/) |
 | **Docker** (any Linux, macOS, Windows) | ✅ Full support — standard OCI container                                              |
 | **Kubernetes** (any distribution)      | ✅ Full support — standard OCI container                                              |
 | **Podman**                             | ✅ Full support — OCI-compliant runtime                                               |
 
-> **Note**: Because EDDI ships as a standard OCI container image built on Red Hat UBI 9, it is inherently compatible with RHEL 9 and any RHEL-based platform. No host-level OS dependencies are required beyond a container runtime.
+> **Note**: Because EDDI ships as a standard OCI container image built on Red Hat UBI 10, it runs on any host with a container runtime and an x86-64-v3 CPU — the image carries its own userspace. That is a statement about whether it *runs*, not about Red Hat support: for a supported RHEL deployment the host must also be RHEL 9 or newer, per the note below.
+
+> **Running on a RHEL 9 host**: supported. Red Hat's [container compatibility matrix](https://access.redhat.com/support/policy/rhel-container-compatibility) lists a UBI 10 image on a RHEL 9 host as **Supported** — a container supplies its own userspace, so the host only has to be new enough. Because the majors do not match, the usual conditions for a mismatched pair apply: the workload must run unprivileged, must not interact directly with kernel-version-specific interfaces (`ioctl`, `/proc`, `/sys`, routing, iptables, nftables, eBPF), and the image's RHEL version must stay within its supported lifecycle. EDDI satisfies these — it runs as UID `185` and touches nothing below the JVM. One support consequence is worth planning for: Red Hat may ask that a reported issue be reproduced in a fully compatible configuration, meaning on a RHEL 10 host, before it is investigated. A RHEL 8 host is the one combination Red Hat marks unsupported for a UBI 10 image.
 
 All EDDI releases are continuously validated against Red Hat certification requirements via automated [preflight checks](https://github.com/redhat-openshift-ecosystem/openshift-preflight) in CI/CD.
 
@@ -41,7 +45,7 @@ The EDDI container image is certified by Red Hat / IBM for use on OpenShift. Cer
 
 | Requirement            | Implementation                                                                                 |
 | ---------------------- | ---------------------------------------------------------------------------------------------- |
-| **Base image**         | `registry.access.redhat.com/ubi9/openjdk-25-runtime:1.24` (pinned by SHA256 digest)            |
+| **Base image**         | `registry.access.redhat.com/ubi10/openjdk-25-runtime:1.24` (pinned by SHA256 digest)           |
 | **Non-root execution** | Runs as UID `185` — the default `jboss` user                                                   |
 | **Licenses**           | Auto-generated `/licenses` directory containing `THIRD-PARTY.txt` and downloaded license texts |
 | **Required labels**    | `name`, `vendor`, `version`, `release`, `summary`, `description`                               |
@@ -153,7 +157,7 @@ The operator creates a route automatically. With the CR above, the route would b
 | Property            | Value                                                     |
 | ------------------- | --------------------------------------------------------- |
 | **Image**           | `docker.io/labsai/eddi`                                   |
-| **Base**            | `registry.access.redhat.com/ubi9/openjdk-25-runtime:1.24` |
+| **Base**            | `registry.access.redhat.com/ubi10/openjdk-25-runtime:1.24` |
 | **Digest pinning**  | SHA256 digest for supply-chain integrity (OpenSSF Silver) |
 | **User**            | `185` (non-root)                                          |
 | **Port**            | `7070`                                                    |
