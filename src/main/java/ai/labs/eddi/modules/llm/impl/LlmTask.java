@@ -919,21 +919,39 @@ public class LlmTask implements ILifecycleTask {
         }
 
         // 5. Refusal heuristic — configured prefixes, defaulting to the four that were
-        // hard-coded here. Locale.ROOT because the bare toLowerCase() mangles the
-        // dotted/dotless I on a Turkish-locale JVM, which would silently stop
-        // "I cannot" matching on exactly the deployments least likely to notice.
-        if (!isNullOrEmpty(responseContent)) {
-            String lower = responseContent.trim().toLowerCase(Locale.ROOT);
-            List<String> refusalPatterns = validation.getRefusalPatterns();
-            boolean refused = refusalPatterns != null && refusalPatterns.stream().filter(Objects::nonNull).map(p -> p.toLowerCase(Locale.ROOT))
-                    .anyMatch(lower::startsWith);
-            if (refused) {
-                responseContent = applyValidationAction(validation.getOnRefusal(), "refusal_detected",
-                        "LLM response appears to be a refusal", responseContent, task, currentStep);
-            }
+        // hard-coded here.
+        if (!isNullOrEmpty(responseContent) && looksLikeRefusal(responseContent, validation.getRefusalPatterns())) {
+            responseContent = applyValidationAction(validation.getOnRefusal(), "refusal_detected",
+                    "LLM response appears to be a refusal", responseContent, task, currentStep);
         }
 
         return responseContent;
+    }
+
+    /**
+     * Whether a completion opens with one of the configured refusal prefixes.
+     * <p>
+     * Blank patterns are dropped rather than matched.
+     * {@code "".startsWith(anything)} is true for every response, so one stray
+     * empty entry would apply {@code onRefusal} to every completion — and under
+     * {@code onRefusal: "error"}, fail every turn.
+     * <p>
+     * {@code Locale.ROOT} because the bare {@code toLowerCase()} mangles the
+     * dotted/dotless I on a Turkish-locale JVM, which would silently stop "I
+     * cannot" matching on exactly the deployments least likely to notice.
+     *
+     * @param responseContent
+     *            the model's completion; leading and trailing space is ignored
+     * @param patterns
+     *            the configured prefixes, or {@code null} to detect nothing
+     */
+    static boolean looksLikeRefusal(String responseContent, List<String> patterns) {
+        if (patterns == null || responseContent == null) {
+            return false;
+        }
+        String lower = responseContent.trim().toLowerCase(Locale.ROOT);
+        return patterns.stream().filter(Objects::nonNull).map(String::trim).filter(p -> !p.isEmpty()).map(p -> p.toLowerCase(Locale.ROOT))
+                .anyMatch(lower::startsWith);
     }
 
     /**

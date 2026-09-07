@@ -447,7 +447,7 @@ eddi_snippets_cache_misses_total            # Prompt-snippet cache misses
 eddi_counterweight_activation_count_total   # Counterweight activations; tag: level (normal|cautious|strict|unknown)
 eddi_counterweight_strict_downgraded_total  # strict downgraded because the model could not honour it
 eddi_identity_masking_applied_total         # Identity-masking passes applied
-eddi_guardrail_toolresult_count_total       # Tool results inspected by the tool-result guardrail; tag: outcome
+eddi_guardrail_toolresult_count_total       # Tool results inspected by the tool-result guardrail; tags: action, source (a null source reads as `unknown`)
 ```
 
 ### Agent Identity & Signing Metrics
@@ -562,9 +562,12 @@ eddi_dream_summarization_failed_total       # LLM summarization steps that faile
 eddi_dream_duration_seconds                 # Dream cycle duration (timer)
 ```
 
-A rising `eddi_dream_summarization_failed_total` with a flat
-`eddi_dream_cycles_failed_total` is the signature of missing credentials: stale pruning
-keeps working while every summarization step gets a provider 401. Set
+Read the two failure counters together. A summarization failure the service classifies as
+transient — a socket timeout, a connection refusal, a rate-limit message — is skipped and the
+cycle carries on, so `eddi_dream_summarization_failed_total` rises while
+`eddi_dream_cycles_failed_total` stays flat. Anything else, a provider 401 included, aborts
+consolidation for that cycle and increments **both**. So both counters rising together, with
+stale pruning still working, is the signature of missing credentials: set
 `userMemoryConfig.dream.parameters` — see [user-memory.md](user-memory.md).
 
 ### Conversation Summarization Metrics

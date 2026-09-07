@@ -36,6 +36,7 @@ public class ComplianceStartupChecks {
 
     public ComplianceStartupChecks(
             @ConfigProperty(name = "quarkus.http.ssl.certificate.files") Optional<List<String>> sslCertFiles,
+            @ConfigProperty(name = "quarkus.http.ssl.certificate.key-files") Optional<List<String>> sslKeyFiles,
             @ConfigProperty(name = "quarkus.http.ssl.certificate.key-store-file") Optional<String> sslKeyStoreFile,
             @ConfigProperty(name = "eddi.compliance.database-encryption-acknowledged",
                             defaultValue = "false") boolean dbEncryptionAcknowledged,
@@ -50,8 +51,12 @@ public class ComplianceStartupChecks {
         // direction: following the old banner and setting the singular key silenced
         // the warning while Quarkus ignored it, so the check reported satisfied on a
         // plaintext listener. Accept either the PEM pair or a keystore.
-        this.tlsConfigured = sslCertFiles.filter(files -> files.stream().anyMatch(f -> f != null && !f.isBlank())).isPresent()
-                || sslKeyStoreFile.filter(f -> !f.isBlank()).isPresent();
+        // A certificate without its key does not start a TLS listener, so it must not
+        // silence the warning either — that would be the same fail-open the singular
+        // key
+        // name produced. Quarkus pairs the two lists positionally, so their cardinality
+        // has to match as well as their presence.
+        this.tlsConfigured = pemPairIsComplete(sslCertFiles, sslKeyFiles) || sslKeyStoreFile.filter(f -> !f.isBlank()).isPresent();
         this.dbEncryptionAcknowledged = dbEncryptionAcknowledged;
         this.vaultMasterKey = vaultMasterKey.orElse("");
         this.auditEnabled = auditEnabled;
@@ -115,6 +120,25 @@ public class ComplianceStartupChecks {
                 +------------------------------------------------------------------+
 
                 """);
+    }
+
+    /**
+     * Whether {@code quarkus.http.ssl.certificate.files} and {@code …key-files}
+     * together describe a usable PEM configuration: both present, neither holding a
+     * blank entry, and the same number of entries in each, because Quarkus pairs
+     * them by position.
+     */
+    private static boolean pemPairIsComplete(Optional<List<String>> certFiles, Optional<List<String>> keyFiles) {
+        List<String> certs = certFiles.orElse(List.of());
+        List<String> keys = keyFiles.orElse(List.of());
+        if (certs.isEmpty() || certs.size() != keys.size()) {
+            return false;
+        }
+        return certs.stream().noneMatch(ComplianceStartupChecks::isBlankEntry) && keys.stream().noneMatch(ComplianceStartupChecks::isBlankEntry);
+    }
+
+    private static boolean isBlankEntry(String value) {
+        return value == null || value.isBlank();
     }
 
     private void checkTls() {

@@ -34,7 +34,16 @@ class ComplianceStartupChecksTest {
      */
     private static ComplianceStartupChecks checks(Optional<List<String>> certFiles, Optional<String> keyStoreFile, boolean dbAcknowledged,
                                                   Optional<String> vaultKey, boolean auditEnabled, boolean signingRequired) {
-        return new ComplianceStartupChecks(certFiles, keyStoreFile, dbAcknowledged, vaultKey, auditEnabled, signingRequired);
+        // A cert list with no explicit key list gets a matching one, so the existing
+        // callers keep meaning "TLS is configured".
+        Optional<List<String>> keyFiles = certFiles.map(certs -> certs.stream().map(c -> c + ".key").toList());
+        return checks(certFiles, keyFiles, keyStoreFile, dbAcknowledged, vaultKey, auditEnabled, signingRequired);
+    }
+
+    private static ComplianceStartupChecks checks(Optional<List<String>> certFiles, Optional<List<String>> keyFiles, Optional<String> keyStoreFile,
+                                                  boolean dbAcknowledged, Optional<String> vaultKey, boolean auditEnabled,
+                                                  boolean signingRequired) {
+        return new ComplianceStartupChecks(certFiles, keyFiles, keyStoreFile, dbAcknowledged, vaultKey, auditEnabled, signingRequired);
     }
 
     @Test
@@ -147,7 +156,7 @@ class ComplianceStartupChecksTest {
         @Test
         @DisplayName("a keystore counts as configured too")
         void keyStoreCountsAsConfigured() {
-            var checks = checks(Optional.empty(), Optional.of("/etc/tls/keystore.p12"), true, Optional.of("k"), true, false);
+            var checks = checks(Optional.empty(), Optional.empty(), Optional.of("/etc/tls/keystore.p12"), true, Optional.of("k"), true, false);
             assertTrue(tlsConfigured(checks), "a keystore is the other supported way to terminate TLS in Quarkus");
         }
 
@@ -170,6 +179,48 @@ class ComplianceStartupChecksTest {
                     "a blank path configures nothing");
             assertFalse(tlsConfigured(checks(Optional.empty(), Optional.of(" "), true, Optional.of("k"), true, false)),
                     "a blank keystore path configures nothing");
+        }
+
+        /**
+         * A certificate on its own does not start a TLS listener. Accepting it would be
+         * the same fail-open the singular property name produced: the check reports
+         * satisfied while the listener is still plaintext.
+         */
+        @Test
+        @DisplayName("a certificate without its key is not TLS")
+        void certificateWithoutKeyIsNotConfigured() {
+            var checks = checks(Optional.of(List.of("/etc/tls/cert.pem")), Optional.empty(), Optional.empty(), true, Optional.of("k"), true,
+                    false);
+            assertFalse(tlsConfigured(checks), "quarkus.http.ssl.certificate.files alone does not configure TLS");
+        }
+
+        /**
+         * Quarkus pairs the two lists by position, so two certificates and one key is a
+         * half-configured listener rather than a working one.
+         */
+        @Test
+        @DisplayName("mismatched certificate and key counts are not TLS")
+        void mismatchedCardinalityIsNotConfigured() {
+            var checks = checks(Optional.of(List.of("/etc/tls/a.pem", "/etc/tls/b.pem")), Optional.of(List.of("/etc/tls/a.key")),
+                    Optional.empty(), true, Optional.of("k"), true, false);
+            assertFalse(tlsConfigured(checks), "two certificates and one key do not pair up");
+        }
+
+        @Test
+        @DisplayName("a blank entry on either side is not TLS")
+        void blankEntryOnEitherSideIsNotConfigured() {
+            assertFalse(tlsConfigured(checks(Optional.of(List.of("  ")), Optional.of(List.of("/etc/tls/a.key")), Optional.empty(), true,
+                    Optional.of("k"), true, false)), "a blank certificate path configures nothing");
+            assertFalse(tlsConfigured(checks(Optional.of(List.of("/etc/tls/a.pem")), Optional.of(List.of("")), Optional.empty(), true,
+                    Optional.of("k"), true, false)), "a blank key path configures nothing");
+        }
+
+        @Test
+        @DisplayName("a matching pair is TLS")
+        void matchingPemPairIsConfigured() {
+            var checks = checks(Optional.of(List.of("/etc/tls/a.pem")), Optional.of(List.of("/etc/tls/a.key")), Optional.empty(), true,
+                    Optional.of("k"), true, false);
+            assertTrue(tlsConfigured(checks));
         }
 
         private boolean tlsConfigured(ComplianceStartupChecks checks) {

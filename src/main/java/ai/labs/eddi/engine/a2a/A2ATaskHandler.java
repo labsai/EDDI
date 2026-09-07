@@ -46,6 +46,9 @@ public class A2ATaskHandler {
     private static final Logger LOGGER = Logger.getLogger(A2ATaskHandler.class);
     private static final String CACHE_NAME = "a2aTaskMapping";
 
+    /** Last-resort turn budget when neither configured value is positive. */
+    static final int DEFAULT_TASK_TIMEOUT_SECONDS = 60;
+
     /**
      * Owner recorded for peers that arrive without an authenticated identity — the
      * case when {@code authorization.enabled=false}, where the JSON-RPC endpoint's
@@ -114,10 +117,15 @@ public class A2ATaskHandler {
         this.taskConversationCache = cacheFactory.getCache(CACHE_NAME);
         this.contextConversationCache = cacheFactory.getCache(CACHE_NAME + ":context");
         this.identity = identity;
-        int resolved = a2aTaskTimeoutSeconds.orElse(agentTimeoutSeconds);
-        // A non-positive budget would make Future.get return immediately and fail every
-        // peer request; fall back rather than ship a surface that can never answer.
-        this.taskTimeoutSeconds = resolved > 0 ? resolved : agentTimeoutSeconds;
+        // A non-positive budget makes Future.get return immediately and fails every
+        // peer
+        // request, so neither source may supply one.
+        // systemRuntime.agentTimeoutInSeconds
+        // carries no positive-value validation of its own, so falling back to it is not
+        // enough — a deployment that sets it to 0 would still land here.
+        int resolved = a2aTaskTimeoutSeconds.filter(seconds -> seconds > 0)
+                .orElseGet(() -> agentTimeoutSeconds > 0 ? agentTimeoutSeconds : DEFAULT_TASK_TIMEOUT_SECONDS);
+        this.taskTimeoutSeconds = resolved;
     }
 
     /**

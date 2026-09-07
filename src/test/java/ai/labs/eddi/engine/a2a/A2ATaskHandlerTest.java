@@ -536,6 +536,27 @@ class A2ATaskHandlerTest {
             assertEquals(120, configuredTimeoutOf(handlerWith(120, Optional.of(0))));
             assertEquals(120, configuredTimeoutOf(handlerWith(120, Optional.of(-5))));
         }
+
+        /**
+         * {@code systemRuntime.agentTimeoutInSeconds} carries no positive-value
+         * validation of its own, so falling back to it is not enough: a deployment that
+         * sets it to zero would hand {@code Future.get} a zero budget and time out
+         * every peer request the moment it arrives.
+         */
+        @Test
+        @DisplayName("a non-positive inherited timeout falls back too")
+        void nonPositiveInheritedTimeoutFallsBack() throws Exception {
+            for (int bad : new int[]{0, -1, Integer.MIN_VALUE}) {
+                assertEquals(A2ATaskHandler.DEFAULT_TASK_TIMEOUT_SECONDS, configuredTimeoutOf(handlerWith(bad, Optional.empty())),
+                        "an inherited budget of " + bad + " would fail every tasks/send immediately");
+            }
+        }
+
+        @Test
+        @DisplayName("a positive override still wins over a broken inherited value")
+        void overrideWinsOverABrokenInheritedValue() throws Exception {
+            assertEquals(45, configuredTimeoutOf(handlerWith(0, Optional.of(45))));
+        }
     }
 
     private static class MapCache<K, V> extends ConcurrentHashMap<K, V> implements ICache<K, V> {
