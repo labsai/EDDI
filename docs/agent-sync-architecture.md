@@ -36,8 +36,20 @@ Resources are matched from source to target using a deterministic, structural ap
 |---|---|---|
 | **Agent** | Direct (by `targetAgentId` parameter) | User explicitly selects the target |
 | **Workflows** | Position index (0-based) in agent's workflow list | Workflows have a defined order; position is stable |
-| **Extensions** | `WorkflowStep.type` URI (e.g., `ai.labs.llm`) | Each type appears at most once per workflow |
+| **Extensions** | Extension reference key — `<stepType>#<occurrence>/<path>`, e.g. `eddi://ai.labs.llm#0/config` | Position within the workflow is stable, and the occurrence ordinal keeps two steps of the same type apart |
 | **Snippets** | `PromptSnippet.name` (natural key) | Names are unique by convention |
+
+Extension keys all come from one scan (`WorkflowExtensions.scan`) that the export
+ZIP, a remote instance and the local target each use, which is what makes the two
+sides join. Two properties of that key matter:
+
+- **The URI is read from the step's `config` map, not its `extensions` map.**
+  `config.uri` is where the engine itself looks; `extensions` carries nested
+  things such as the parser's `dictionaries` list, whose entries have a
+  `config.uri` of their own and are scanned as well.
+- **A step type may repeat.** A workflow with a pre-LLM and a post-LLM
+  `eddi://ai.labs.httpcalls` step keeps an entry for each, told apart by the
+  `#<occurrence>` ordinal, instead of collapsing onto one.
 
 ### Why Not Match by ID?
 

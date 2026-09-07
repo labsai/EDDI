@@ -94,7 +94,7 @@ class RestExportServiceBranchTest {
                 dictionaryStore, ruleSetStore, apiCallsStore, llmStore,
                 propertySetterStore, outputStore, mcpCallsStore, ragStore,
                 snippetStore, jsonSerialization, zipArchive, secretScrubber,
-                scheduleStore, mock(ResourceAccessGuard.class));
+                scheduleStore, mock(ResourceAccessGuard.class), mock(BackupMetrics.class));
     }
 
     // =========================================================
@@ -406,21 +406,21 @@ class RestExportServiceBranchTest {
         @DisplayName("agentId with .. throws BadRequestException")
         void agentIdPathTraversal() {
             assertThrows(BadRequestException.class,
-                    () -> exportService.exportAgent("../etc", 1, null));
+                    () -> exportService.exportAgent("../etc", 1, null, null, null));
         }
 
         @Test
         @DisplayName("null agentId throws BadRequestException")
         void nullAgentId() {
             assertThrows(BadRequestException.class,
-                    () -> exportService.exportAgent(null, 1, null));
+                    () -> exportService.exportAgent(null, 1, null, null, null));
         }
 
         @Test
         @DisplayName("agentId with slash throws BadRequestException")
         void agentIdWithSlash() {
             assertThrows(BadRequestException.class,
-                    () -> exportService.exportAgent("agent/id", 1, null));
+                    () -> exportService.exportAgent("agent/id", 1, null, null, null));
         }
     }
 
