@@ -82,6 +82,7 @@ class BuildQualityGatesTest {
     private static final Path AGENTS_MD = Path.of("AGENTS.md");
     private static final Path BASE_IMAGE_WORKFLOW = Path.of(".github", "workflows", "base-image-check.yml");
     private static final Path DEPENDABOT = Path.of(".github", "dependabot.yml");
+    private static final Path PRE_PUSH_HOOK = Path.of(".githooks", "pre-push");
 
     /**
      * The one Dockerfile base-image-check.yml is responsible for keeping current.
@@ -748,6 +749,56 @@ class BuildQualityGatesTest {
                 "these files must be mode 100755 in the git tree — fix with `git update-index --chmod=+x <path>`."
                         + " A 0644 hook is ignored by git with a hint that scrolls past in push output, so the guard"
                         + " fails silently for exactly the people who opted into it");
+    }
+
+    /**
+     * The other half of the executable-bit fix: arming a guard also arms its bugs.
+     * git hands a pre-push hook the pushed-to remote as {@code $1} — a configured
+     * name ({@code origin}, the {@code upstream} of AGENTS.md §2 rule 3's fork
+     * layout, a second maintainer remote) or a bare URL when pushing to one — and
+     * the shallow-clone recovery fetch named {@code origin} literally while
+     * referencing neither {@code $1} nor {@code $2}. On any other remote it
+     * therefore queried the wrong repository, the retry missed exactly as the first
+     * check did, and a legitimate fast-forward push was refused with a "your local
+     * branch has diverged" message that was not true. Latent for as long as the
+     * hook was committed 0644 and skipped outright;
+     * {@link #executableBitsAreRecordedInGit} is what makes it reachable.
+     * <p>
+     * Graded from both ends, so re-hardcoding the remote under a different spelling
+     * fails too: every {@code git fetch} in the hook has to name the captured
+     * {@code "$remote"} and none may name a remote literally. An empty fetch list
+     * fails as well — the recovery this grades would then be gone rather than
+     * fixed.
+     */
+    @Test
+    @DisplayName("the pre-push hook's recovery fetch queries the remote git passed it")
+    void prePushHookFetchesFromThePushedToRemote() throws Exception {
+        String hook = read(PRE_PUSH_HOOK);
+
+        assertTrue(hook.contains("remote=\"$1\""),
+                PRE_PUSH_HOOK + " must capture the remote git passes as $1. Without it the hook has no idea which"
+                        + " repository is being pushed to, and the only remaining way to write the recovery fetch is"
+                        + " to guess one.");
+
+        List<String> fetches = hook.lines()
+                .map(String::strip)
+                .filter(line -> line.startsWith("git fetch"))
+                .toList();
+
+        assertFalse(fetches.isEmpty(),
+                PRE_PUSH_HOOK + " no longer fetches anything, so this assertion grades nothing. The fetch exists to"
+                        + " rescue a truncated-history clone, where the remote commit is simply absent locally and"
+                        + " every push then reads as a non-fast-forward — restore it rather than deleting this.");
+
+        List<String> offenders = fetches.stream()
+                .filter(line -> !line.contains("\"$remote\"") || line.contains(" origin"))
+                .toList();
+
+        assertEquals(List.of(), offenders,
+                "the recovery fetch must use \"$remote\" — the name (or URL) git handed the hook — and never a"
+                        + " hardcoded one. Fetching origin while the push goes to upstream, or to a second maintainer"
+                        + " remote, asks a different repository for the commit, so the retry fails the same way the"
+                        + " first check did and the hook blocks a push that was a clean fast-forward.");
     }
 
     /**

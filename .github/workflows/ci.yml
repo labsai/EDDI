@@ -84,6 +84,12 @@ jobs:
               # nothing having evaluated it.
               - 'README.md'
               - 'AGENTS.md'
+              # Same shape one file along: BuildQualityGatesTest grades both the
+              # pre-push hook's recorded 100755 mode and the remote its recovery
+              # fetch queries. .githooks/** is in `scripts` as well, but that job
+              # only lints shell — it cannot run the unit test that owns the
+              # hook's logic, so a hook-only PR would change it ungraded.
+              - '.githooks/**'
             # The installers are the README's headline `curl | bash` path and were
             # in NO filter at all, so a PR touching only them skipped the whole
             # pipeline — and a skipped required check still satisfies branch
