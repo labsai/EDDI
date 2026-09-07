@@ -3011,7 +3011,11 @@ class DeploymentManifestsTest {
                             + "needs.detect-changes.outputs." + filter + " simply reads as the empty string in "
                             + "every job that gates on it, and each of those is then skipped on every run");
 
-            assertTrue(forcedOnATag.contains("echo \"" + filter + "=true\" >> $GITHUB_OUTPUT"),
+            // Deliberately not matching the redirection target: whether it is written
+            // $GITHUB_OUTPUT or "$GITHUB_OUTPUT" is a shell-quoting question, and
+            // BuildQualityGatesTest#githubEnvironmentFileRedirectionsAreQuoted owns it.
+            // Pinning it here too made this assertion fail when that one was satisfied.
+            assertTrue(forcedOnATag.contains("echo \"" + filter + "=true\""),
                     CI + "'s Resolve step does not force `" + filter + "=true` INSIDE the refs/tags/* branch. "
                             + "\"Check paths\" is skipped for tags, so steps.filter.outputs." + filter + " is "
                             + "empty there — a filter missing from that branch gates its jobs OFF for the "
