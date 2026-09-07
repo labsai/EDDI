@@ -46,12 +46,12 @@ The [README "Maven Command Reference"](README.md#maven-command-reference) is the
 | Command | What it does |
 | ------- | ------------ |
 | `./mvnw compile quarkus:dev` | Start dev mode with live reload — app on port **7070**, Dev UI at `/q/dev` |
-| `./mvnw compile` | Compile only (fast feedback) — run before every commit per §2 rule 6 |
+| `./mvnw compile` | Compile only (fast feedback) — run before every commit per §2 rule 6. It is also where the style gates fire: Checkstyle's import rules and `formatter:validate` are both bound to the `validate` phase, which `compile` runs through, so an unused import or an unformatted file **fails the build here** rather than being silently rewritten. Fix with `./mvnw formatter:format` (formatting) or by deleting the import (Checkstyle) |
 | `./mvnw test` | Unit tests (excludes `*IT.java`); JaCoCo report at `target/site/jacoco/index.html` |
 | `./mvnw test -Dtest=ClassName` | Run a single test class |
 | `./mvnw verify` | Compile + unit tests + package. **Integration tests do NOT run** — `skipITs` defaults to `true` |
 | `./mvnw verify -DskipITs=false` | Full build **including** integration tests — requires Docker. The command CI runs |
-| `./mvnw validate` · `./mvnw formatter:format` | Checkstyle check · auto-format with the project Eclipse formatter |
+| `./mvnw validate` · `./mvnw formatter:format` | The two blocking style gates — Checkstyle (`UnusedImports`/`RedundantImport` are `severity="error"`; `FileLength`/`LineLength` stay advisory) and `formatter:validate`, which **reports** drift and never edits your files · auto-format with the project Eclipse formatter, i.e. the fix for a `formatter:validate` failure |
 
 > **Sandbox caveat:** integration tests (`*IT.java`) and any test that binds a loopback/HTTP socket need Docker and frequently cannot run in sandboxed agent environments — CI verifies those. Locally, rely on `./mvnw test` (unit tests) and treat a green CI run as the source of truth for the rest.
 
@@ -91,7 +91,7 @@ The [README "Maven Command Reference"](README.md#maven-command-reference) is the
    - Stage files individually: `git add path/to/file1 path/to/file2`
    - Run `git status` before committing — if any staged file is not part of your task, unstage it
    - Run `git log --stat -1` after committing to confirm the commit only contains your files
-6. **Each commit must build**: Run `./mvnw compile` (or `./mvnw test` for backend) before committing. Never commit broken code.
+6. **Each commit must build**: Run `./mvnw compile` (or `./mvnw test` for backend) before committing. Never commit broken code. `compile` passes through the `validate` phase, so it also enforces the two style gates — an unused import fails Checkstyle and an unformatted file fails `formatter:validate`. Neither rewrites your sources: run `./mvnw formatter:format` to fix formatting, and delete the import Checkstyle names. (The formatter used to run its `format` goal on every build, which edited tracked files behind your back and put them in `git status` next to your real work — the reason rule 5 forbids `git add .`.)
 7. **Verify factual claims against authoritative sources**: When writing documentation about the project's technology stack, dependencies, or CI configuration, **always verify against the canonical source** (`pom.xml` for dependencies, `ci.yml` for CI behavior, `Dockerfile` for container config). **Never infer from codebase grep results** — migration code, comments about "previous implementations," and backward-compatibility references describe what the project *used to* use, not what it currently uses. If a term appears 40 times in the codebase but zero times in `pom.xml`, the project does not use it.
 8. **Update the changelog immediately before committing**: Edit [`docs/changelog.md`](docs/changelog.md) and include it in the commit that contains the changes being documented. The changelog must land on the **same branch** as the work it documents — never on a different branch after the fact.
    - **Add the entry directly below the `---` that closes the header**, above the most recent existing entry. Never append to a file under `docs/changelog/` — those are archives, and nothing reads them for current context.
@@ -606,7 +606,7 @@ When implementing a new feature, provide:
 
 - **Always reference types and annotations by their simple name with a top-level `import`** — never inline a fully-qualified name (e.g. write `@Inject IAttachmentStore store;` with the imports, not `@jakarta.inject.Inject ai.labs.eddi.engine.attachments.IAttachmentStore store;`). FQNs in field declarations, method signatures, annotations, and generics hurt readability and are a common review comment.
 - The **only** acceptable inline FQN is disambiguating two classes that share a simple name and are both used in the same file — and even then, prefer restructuring so only one is imported.
-- Don't leave unused imports behind after a refactor; run `./mvnw formatter:format` and `./mvnw validate` (Checkstyle) before committing.
+- Don't leave unused imports behind after a refactor; run `./mvnw formatter:format` and `./mvnw validate` (Checkstyle) before committing. Both are enforced, not advisory: `UnusedImports` and `RedundantImport` carry `severity="error"` in `checkstyle.xml` and the plugin fails on them, and `formatter:validate` fails on unformatted sources instead of rewriting them — so any `./mvnw compile`, `test` or `verify` will stop on either. **Mind the scopes, they differ:** `formatter:validate` grades `src/main/java` *and* `src/test/java`, but the Checkstyle gate sets `includeTestSourceDirectory=false`, so its import rules grade **`src/main/java` only** — an unused import in a test still compiles and still merges. Keep test imports clean by hand; the flag stays off until the 163 pre-existing violations in `src/test/java` are cleared, and `BuildQualityGatesTest` fails if the flag and this sentence ever disagree.
 
 #### Production-Scale Thinking
 

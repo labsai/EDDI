@@ -1,6 +1,7 @@
 package ai.labs.eddi.engine.audit;
 
 import ai.labs.eddi.engine.audit.model.AuditEntry;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -19,6 +20,7 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -1606,6 +1608,202 @@ class AuditLedgerServiceTest {
 
         AuditEntry pseudonymised = stored.withUserId(AuditHmac.pseudonymFor("user1"));
         assertEquals(AuditVerificationStatus.VALID, service.verifyEntry(pseudonymised));
+    }
+
+    /**
+     * The test factory used to pass the bare relative
+     * {@code "eddi-audit-deadletter.jsonl"}, which resolves against the process CWD
+     * — the repository root under Maven — so any dropped batch in any unit test
+     * wrote a file into the source tree. {@code mvn clean} does not remove it, so
+     * {@code .gitignore} carried an entry to hide it instead. The CDI constructor
+     * has always defaulted to an absolute path; only the test path was relative.
+     * <p>
+     * The uniqueness assertion is the other half. A single fixed name under
+     * {@code java.io.tmpdir} trades one file per checkout for one file per
+     * <em>machine</em>, so two runs on the same host — two git worktrees, or two CI
+     * executors sharing {@code /tmp} — would append to the same sink.
+     */
+    @Test
+    @DisplayName("the test dead-letter sink is absolute, outside the source tree and unique per JVM")
+    void testDeadLetterPathIsOutsideTheSourceTree() {
+        Path path = Path.of(AuditLedgerService.defaultTestDeadLetterPath());
+
+        assertTrue(path.isAbsolute(),
+                "a relative dead-letter path resolves against the CWD, which is the project root: " + path);
+        assertFalse(path.startsWith(Path.of("").toAbsolutePath()),
+                "the test dead-letter sink must not be written inside the project tree: " + path);
+        assertTrue(path.getFileName().toString().contains(String.valueOf(ProcessHandle.current().pid())),
+                "the test dead-letter sink must be unique per JVM, or two concurrent test runs on one host append"
+                        + " to the same file: " + path);
+    }
+
+    /**
+     * {@code java.io.tmpdir} is an ordinary writable system property, not a
+     * guarantee. Set it to a relative value — or an empty one — and
+     * {@code Path.of(tmpdir, name)} silently produces a path that resolves against
+     * the process working directory, which under Maven is the repository root: the
+     * source-tree artifact this branch deleted, recreated by a JVM flag rather than
+     * by a code change. It has to fail loudly instead.
+     * <p>
+     * Absoluteness is not the property that matters, though — being outside the
+     * project is. An absolute {@code java.io.tmpdir} pointing at the project
+     * directory itself, or at a directory below it, passes {@code isAbsolute()} and
+     * lands the sink right back in the source tree, so those are graded here too.
+     * The last case is the control: a sibling that merely shares a textual prefix
+     * with the project directory is outside it and must still be accepted, or the
+     * rejection would be a string comparison masquerading as a containment check.
+     */
+    @Test
+    @DisplayName("a java.io.tmpdir that is relative, or inside the project, is rejected")
+    void temporaryDirectoryOutsideTheProjectIsRequired() {
+        String original = System.getProperty("java.io.tmpdir");
+        Path projectDirectory = Path.of("").toAbsolutePath().normalize();
+        try {
+            for (String relative : List.of("tmp", "", "./tmp")) {
+                System.setProperty("java.io.tmpdir", relative);
+                var thrown = assertThrows(IllegalStateException.class, AuditLedgerService::defaultTestDeadLetterPath,
+                        "java.io.tmpdir='" + relative + "' is relative, so the sink would land under the process CWD"
+                                + " — the repository root under Maven — instead of the temp directory");
+                assertTrue(thrown.getMessage().contains("java.io.tmpdir"),
+                        "the failure must name the property an operator has to fix: " + thrown.getMessage());
+            }
+
+            for (Path inTree : List.of(projectDirectory, projectDirectory.resolve("target"),
+                    projectDirectory.resolve("src").resolve("tmp"))) {
+                System.setProperty("java.io.tmpdir", inTree.toString());
+                var thrown = assertThrows(IllegalStateException.class, AuditLedgerService::defaultTestDeadLetterPath,
+                        "java.io.tmpdir='" + inTree + "' is absolute but inside the project directory ("
+                                + projectDirectory + "), so the sink lands in the source tree exactly as a relative"
+                                + " value would — isAbsolute() alone does not decide this");
+                assertTrue(thrown.getMessage().contains("java.io.tmpdir")
+                        && thrown.getMessage().contains(inTree.toString()),
+                        "the failure must name both the property and the offending value: " + thrown.getMessage());
+            }
+
+            Path sibling = projectDirectory.resolveSibling(projectDirectory.getFileName() + "-tmp");
+            System.setProperty("java.io.tmpdir", sibling.toString());
+            assertTrue(Path.of(AuditLedgerService.defaultTestDeadLetterPath()).startsWith(sibling),
+                    "'" + sibling + "' shares a textual prefix with the project directory but is not inside it, so it"
+                            + " is a legitimate temp directory. Rejecting it would mean the containment check is a"
+                            + " string startsWith rather than a path one");
+        } finally {
+            if (original == null) {
+                System.clearProperty("java.io.tmpdir");
+            } else {
+                System.setProperty("java.io.tmpdir", original);
+            }
+        }
+    }
+
+    /**
+     * The sink {@link #testDeadLetterPathIsOutsideTheSourceTree} grades is the sink
+     * the factory actually wires in — asserted end to end, by making the store fail
+     * until the batch is abandoned and then looking for the file.
+     * <p>
+     * That test reads {@code defaultTestDeadLetterPath()} directly, so it says
+     * nothing about whether {@code createForTesting} still calls it. Put the old
+     * relative {@code "eddi-audit-deadletter.jsonl"} literal back in the factory
+     * and it stays green while every unit run drops a file into the repository root
+     * again — the precise regression this branch removed the {@code .gitignore}
+     * entry for.
+     * <p>
+     * The source-tree half is a before/after comparison rather than "the file does
+     * not exist". {@code eddi-audit-deadletter.jsonl} was generated and gitignored
+     * for years, so an existing checkout can easily still have one lying in the
+     * repository root — and a bare existence assertion would then fail on a tree
+     * that is entirely correct, while saying nothing about what THIS invocation
+     * wrote. What has to hold is that this call left it untouched.
+     */
+    @Test
+    @DisplayName("the default test factory dead-letters outside the source tree, not into the repository root")
+    void defaultTestFactoryWritesItsDeadLettersOutsideTheSourceTree() throws IOException {
+        Path sink = Path.of(AuditLedgerService.defaultTestDeadLetterPath());
+        Path repositoryRootSink = Path.of("").toAbsolutePath().resolve("eddi-audit-deadletter.jsonl");
+        boolean rootSinkExisted = Files.exists(repositoryRootSink);
+        long rootSinkSize = rootSinkExisted ? Files.size(repositoryRootSink) : -1L;
+        Files.deleteIfExists(sink);
+
+        var svc = AuditLedgerService.createForTesting(auditStore, true, 60, null, meterRegistry, 10);
+        svc.init();
+        // storeIsDown, not appendBatch alone: main added a per-entry retry pass that
+        // runs before the dead-letter drop, so a mock whose appendEntry still
+        // succeeds stores the entries individually and nothing ever reaches the sink.
+        storeIsDown();
+
+        svc.submit(entry("id-1", "conv-default-sink-probe", "agent-1"));
+        svc.flush(); // failure 1 — re-queued
+        svc.flush(); // failure 2 — re-queued
+        svc.flush(); // failure 3 — abandoned to the dead-letter sink
+
+        try {
+            String sourceTreeMessage = "createForTesting dead-lettered into the source tree at " + repositoryRootSink
+                    + ". A relative dead-letter path resolves against the process CWD, which under Maven is the"
+                    + " repository root; mvn clean does not remove the file, which is why .gitignore used to hide"
+                    + " it. It must go through defaultTestDeadLetterPath().";
+            assertEquals(rootSinkExisted, Files.exists(repositoryRootSink), sourceTreeMessage);
+            if (rootSinkExisted) {
+                assertEquals(rootSinkSize, Files.size(repositoryRootSink), sourceTreeMessage
+                        + " (a pre-existing file from an earlier checkout grew during this test, so this run"
+                        + " appended to it)");
+            }
+            assertTrue(Files.isRegularFile(sink),
+                    "nothing was written to " + sink + ", so the factory is no longer wiring"
+                            + " defaultTestDeadLetterPath() into the service");
+            assertEquals(List.of("conv-default-sink-probe"), deadLetteredConversations(sink),
+                    "the abandoned batch must be the one line in the sink");
+        } finally {
+            Files.deleteIfExists(sink);
+        }
+    }
+
+    /**
+     * The overload that lets a caller name the sink has to honour it. Nothing else
+     * passes a path — every other test takes the default — so a factory that
+     * accepted the argument and then handed the constructor
+     * {@code defaultTestDeadLetterPath()} anyway would look correct everywhere
+     * except in a test that reads its own dead letters back, where it would
+     * silently read another test's.
+     */
+    @Test
+    @DisplayName("a dead-lettered batch is written to the sink the factory was given")
+    void deadLetteredBatchLandsAtTheCallerSuppliedPath(@TempDir Path tempDir) throws IOException {
+        Path sink = tempDir.resolve("nested").resolve("audit-dead-letters.jsonl");
+        Files.createDirectories(sink.getParent());
+        // Other tests in this class dead-letter through the default sink, and the
+        // JVM is shared, so clear it first: "the default was not written" has to
+        // mean this test did not write it.
+        Path defaultSink = Path.of(AuditLedgerService.defaultTestDeadLetterPath());
+        Files.deleteIfExists(defaultSink);
+
+        var svc = AuditLedgerService.createForTesting(auditStore, true, 60, null, meterRegistry, 10, sink.toString());
+        svc.init();
+        // storeIsDown, not appendBatch alone: main added a per-entry retry pass that
+        // runs before the dead-letter drop, so a mock whose appendEntry still
+        // succeeds stores the entries individually and nothing ever reaches the sink.
+        storeIsDown();
+
+        svc.submit(entry("id-1", "conv-configured-sink-probe", "agent-1"));
+        svc.flush();
+        svc.flush();
+        svc.flush();
+
+        assertTrue(Files.isRegularFile(sink),
+                "the batch was not dead-lettered to the path the factory was given (" + sink + "), so the"
+                        + " deadLetterPath argument is being ignored");
+        assertEquals(List.of("conv-configured-sink-probe"), deadLetteredConversations(sink),
+                "the sink must hold exactly the abandoned batch");
+        assertFalse(Files.exists(defaultSink),
+                "a caller-supplied sink must replace the default, not be written alongside it");
+    }
+
+    /** The {@code conversationId} of each record in a dead-letter JSONL file. */
+    private static List<String> deadLetteredConversations(Path sink) throws IOException {
+        var mapper = new ObjectMapper();
+        List<String> conversations = new ArrayList<>();
+        for (String line : Files.readAllLines(sink)) {
+            conversations.add(mapper.readTree(line).get("conversationId").asText());
+        }
+        return conversations;
     }
 
     // ==================== shutdown budget (finding r1) ====================

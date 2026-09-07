@@ -284,18 +284,70 @@ public class AuditLedgerService {
     static AuditLedgerService createForTesting(IAuditStore auditStore, boolean enabled, int flushIntervalSeconds, String masterKeyConfig,
                                                MeterRegistry meterRegistry, int maxQueueSize) {
         return createForTesting(auditStore, enabled, flushIntervalSeconds, masterKeyConfig, meterRegistry, maxQueueSize,
-                "eddi-audit-deadletter.jsonl");
+                defaultTestDeadLetterPath());
     }
 
     /**
-     * Factory method for unit testing with an explicit dead-letter path — so a test
-     * can point the sink at a temporary location instead of the working directory,
-     * and assert what {@link #checkDeadLetterSinkReachable()} makes of it.
+     * As above, with the dead-letter sink chosen by the caller — for a test that
+     * wants to read the file back, and so has to own where it lives.
      */
     static AuditLedgerService createForTesting(IAuditStore auditStore, boolean enabled, int flushIntervalSeconds, String masterKeyConfig,
                                                MeterRegistry meterRegistry, int maxQueueSize, String deadLetterPath) {
         return new AuditLedgerService(auditStore, enabled, flushIntervalSeconds, Optional.ofNullable(masterKeyConfig), deadLetterPath,
                 false, "default", maxQueueSize, true, 500, meterRegistry, null, null, new ObjectMapper());
+    }
+
+    /**
+     * Where {@link #createForTesting} drops batches it could not persist. Absolute
+     * and under the JVM's temp directory: it used to be the bare relative
+     * {@code "eddi-audit-deadletter.jsonl"}, which resolves against the process CWD
+     * — the repository root during a test run — so unit tests wrote a file into the
+     * source tree that {@code mvn clean} could not remove and {@code .gitignore}
+     * had to hide. The CDI constructor above defaults to an absolute
+     * {@code /opt/eddi/data/...}; this matches that shape.
+     * <p>
+     * The process id is in the name, and computed rather than stored in a constant,
+     * because a single fixed filename under {@code java.io.tmpdir} is one file per
+     * <em>machine</em>: two test runs on the same host — two git worktrees, or two
+     * CI executors sharing {@code /tmp} — would append to each other's sink. No
+     * test reads it back today, so that is a latent fixture collision rather than a
+     * live flake, which is exactly when it is cheap to close.
+     * <p>
+     * {@code java.io.tmpdir} is validated rather than trusted: it is an ordinary
+     * writable system property, and a relative value (or an empty one, which
+     * {@code Path.of} turns into the empty path) resolves against the process CWD —
+     * the repository root under Maven. That is the precise state this method exists
+     * to prevent, so it fails loudly instead of quietly recreating the source-tree
+     * artifact.
+     * <p>
+     * Absoluteness alone is not enough. {@code -Djava.io.tmpdir=/…/EDDI} is
+     * absolute and would be accepted, and the sink would land in the source tree
+     * again — the artifact removed here, reachable through a JVM flag rather than a
+     * code change. So an absolute temp directory that <em>is</em> the project
+     * directory, or sits under it, is rejected too. The project directory is the
+     * process working directory: Surefire and Failsafe run the JVM in the module
+     * basedir, which for this single-module build is the repository root, and it is
+     * the same directory a relative path would have resolved against — so the two
+     * checks reject exactly one location, named two ways. The comparison is
+     * {@link Path#startsWith(Path)} on normalised paths, which matches whole name
+     * elements: a sibling temp directory that merely shares a textual prefix with
+     * the project ({@code /build/eddi-tmp} beside {@code /build/eddi}) is not
+     * inside it and stays allowed.
+     */
+    static String defaultTestDeadLetterPath() {
+        Path temporaryDirectory = Path.of(System.getProperty("java.io.tmpdir", ""));
+        if (!temporaryDirectory.isAbsolute()) {
+            throw new IllegalStateException("java.io.tmpdir must be an absolute path, but is '" + temporaryDirectory
+                    + "'. A relative temp directory resolves against the process working directory — the repository"
+                    + " root under Maven — so the test dead-letter sink would be written back into the source tree.");
+        }
+        Path projectDirectory = Path.of("").toAbsolutePath().normalize();
+        if (temporaryDirectory.normalize().startsWith(projectDirectory)) {
+            throw new IllegalStateException("java.io.tmpdir must be outside the project directory, but is '"
+                    + temporaryDirectory + "', which is '" + projectDirectory + "' or below it. The test dead-letter"
+                    + " sink would be written into the source tree, where mvn clean does not remove it.");
+        }
+        return temporaryDirectory.resolve("eddi-audit-deadletter-" + ProcessHandle.current().pid() + ".jsonl").toString();
     }
 
     @PostConstruct
