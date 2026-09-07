@@ -1045,9 +1045,13 @@ the next person to touch that line sees them without leaving the file, and summa
 A container supplies its own userspace, so the host only has to be new enough. Red Hat's
 [container compatibility matrix](https://access.redhat.com/support/policy/rhel-container-compatibility)
 lists a UBI 10 image on a RHEL 9 host as **Supported**, subject to the conditions that apply to
-any mismatched major pair: the workload runs unprivileged and does not depend directly on host
-kernel interfaces. EDDI meets both — UID 185, nothing below the JVM. RHEL 8 is the one host
-Red Hat marks unsupported for a UBI 10 image. `redhat-openshift.md` states this.
+any mismatched major pair: the workload runs unprivileged, does not interact directly with
+kernel-version-specific interfaces (`ioctl`, `/proc`, `/sys`, routing, iptables, nftables, eBPF),
+and the image's RHEL version stays within its supported lifecycle. EDDI meets these — UID 185,
+nothing below the JVM. The condition an operator has to plan for is the last one Red Hat states
+and the one a support ticket runs into: a reported issue may have to be reproduced in a fully
+compatible configuration — that is, on a RHEL 10 host — before it is investigated. RHEL 8 is the
+one host Red Hat marks unsupported for a UBI 10 image. `redhat-openshift.md` states all of this.
 
 *(An earlier draft of this entry claimed the RHEL 9 host combination was categorically outside
 Red Hat's policy. It is not; the matrix was checked and the claim corrected before merge.)*
