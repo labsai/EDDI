@@ -51,16 +51,16 @@ jobs:
             exit 1
           fi
 
-          echo "image=${IMAGE}" >> $GITHUB_OUTPUT
-          echo "tag=${TAG}" >> $GITHUB_OUTPUT
-          echo "digest=${DIGEST}" >> $GITHUB_OUTPUT
+          echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
 
-          echo "### 📌 Pinned Base Image" >> $GITHUB_STEP_SUMMARY
-          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Image | \`${IMAGE}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Tag | \`${TAG}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Digest | \`${DIGEST}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "### 📌 Pinned Base Image" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Field | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Image | \`${IMAGE}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Tag | \`${TAG}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Digest | \`${DIGEST}\` |" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Fetch remote digest
         id: remote
@@ -81,19 +81,19 @@ jobs:
             exit 1
           fi
 
-          echo "digest=${REMOTE_DIGEST}" >> $GITHUB_OUTPUT
+          echo "digest=${REMOTE_DIGEST}" >> "$GITHUB_OUTPUT"
 
           if [ "$REMOTE_DIGEST" = "$PINNED" ]; then
-            echo "changed=false" >> $GITHUB_OUTPUT
-            echo "### ✅ Digest Current" >> $GITHUB_STEP_SUMMARY
-            echo "Remote digest matches pinned digest — no update needed." >> $GITHUB_STEP_SUMMARY
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "### ✅ Digest Current" >> "$GITHUB_STEP_SUMMARY"
+            echo "Remote digest matches pinned digest — no update needed." >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "changed=true" >> $GITHUB_OUTPUT
-            echo "### 🔄 New Digest Available" >> $GITHUB_STEP_SUMMARY
-            echo "| | Digest |" >> $GITHUB_STEP_SUMMARY
-            echo "|---|---|" >> $GITHUB_STEP_SUMMARY
-            echo "| Pinned | \`${PINNED}\` |" >> $GITHUB_STEP_SUMMARY
-            echo "| Remote | \`${REMOTE_DIGEST}\` |" >> $GITHUB_STEP_SUMMARY
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "### 🔄 New Digest Available" >> "$GITHUB_STEP_SUMMARY"
+            echo "| | Digest |" >> "$GITHUB_STEP_SUMMARY"
+            echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Pinned | \`${PINNED}\` |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Remote | \`${REMOTE_DIGEST}\` |" >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Check for newer tag
@@ -106,7 +106,7 @@ jobs:
           MINOR=$(echo "$TAG" | cut -d. -f2)
 
           # Scan a window of +1 through +5 to catch skipped minor versions
-          echo "### 🔍 Newer Tag Check" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔍 Newer Tag Check" >> "$GITHUB_STEP_SUMMARY"
           NEWEST=""
           for OFFSET in 1 2 3 4 5; do
             CANDIDATE="${MAJOR}.$((MINOR + OFFSET))"
@@ -116,12 +116,12 @@ jobs:
           done
 
           if [ -n "$NEWEST" ]; then
-            echo "tag=${NEWEST}" >> $GITHUB_OUTPUT
-            echo "exists=true" >> $GITHUB_OUTPUT
-            echo "⬆️ **\`${NEWEST}\` is available** — consider upgrading from \`${TAG}\`." >> $GITHUB_STEP_SUMMARY
+            echo "tag=${NEWEST}" >> "$GITHUB_OUTPUT"
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "⬆️ **\`${NEWEST}\` is available** — consider upgrading from \`${TAG}\`." >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "exists=false" >> $GITHUB_OUTPUT
-            echo "\`${TAG}\` is the latest tag (checked up to \`${MAJOR}.$((MINOR + 5))\`)." >> $GITHUB_STEP_SUMMARY
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "\`${TAG}\` is the latest tag (checked up to \`${MAJOR}.$((MINOR + 5))\`)." >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Trivy scan on base image
@@ -161,7 +161,7 @@ jobs:
             # the case where nothing had changed at all, so the only signal was a
             # ::warning:: buried in the step log.
             echo "::error::Digest changed but the sed replacement produced no diff - check the FROM line format in ${DOCKERFILE}"
-            echo "outcome=noop" >> $GITHUB_OUTPUT
+            echo "outcome=noop" >> "$GITHUB_OUTPUT"
             exit 1
           fi
 
@@ -176,8 +176,14 @@ jobs:
           # digest PR this job exists to raise, for as long as it stayed open.
           # Ask each candidate which files it actually touches instead of
           # inferring it from the branch name.
+          #
+          # `--app dependabot`, not `--author 'app/dependabot'`: --author is the
+          # user filter and does not reliably match an App-authored PR, so the
+          # candidate list could come back empty and the skip below never fire —
+          # which is a duplicate digest PR, the exact outcome this block exists
+          # to prevent. --app is the documented App filter (gh >= 2.28).
           DEPENDABOT_PR=""
-          for candidate in $(gh pr list --author 'app/dependabot' --state open \
+          for candidate in $(gh pr list --app dependabot --state open \
             --json number,headRefName -q '.[] | select(.headRefName | startswith("dependabot/docker/")) | .number' 2>/dev/null || echo ""); do
             if gh pr view "$candidate" --json files -q '.files[].path' 2>/dev/null | grep -Fxq "$DOCKERFILE"; then
               DEPENDABOT_PR="$candidate"
@@ -186,8 +192,8 @@ jobs:
           done
           if [ -n "$DEPENDABOT_PR" ]; then
             echo "Dependabot PR #${DEPENDABOT_PR} already covers ${DOCKERFILE} — skipping"
-            echo "### ℹ️ Dependabot PR #${DEPENDABOT_PR} already open for Docker digest" >> $GITHUB_STEP_SUMMARY
-            echo "outcome=dependabot" >> $GITHUB_OUTPUT
+            echo "### ℹ️ Dependabot PR #${DEPENDABOT_PR} already open for Docker digest" >> "$GITHUB_STEP_SUMMARY"
+            echo "outcome=dependabot" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -206,8 +212,8 @@ jobs:
             # Use a broad digest pattern so sed works regardless of what digest the branch currently has
             sed -i "s|${IMAGE}:${TAG}@sha256:[a-f0-9]*|${IMAGE}:${TAG}@${NEW_DIGEST}|" "$DOCKERFILE"
             if git diff --quiet "$DOCKERFILE"; then
-              echo "### ✅ PR #${EXISTING} already has the latest digest" >> $GITHUB_STEP_SUMMARY
-              echo "outcome=current" >> $GITHUB_OUTPUT
+              echo "### ✅ PR #${EXISTING} already has the latest digest" >> "$GITHUB_STEP_SUMMARY"
+              echo "outcome=current" >> "$GITHUB_OUTPUT"
             else
               git add "$DOCKERFILE"
               git commit -m "chore(docker): update base image digest"
@@ -228,8 +234,8 @@ jobs:
 
           > Auto-generated by \`base-image-check.yml\`."
 
-              echo "### ✅ Updated existing PR #${EXISTING}" >> $GITHUB_STEP_SUMMARY
-              echo "outcome=updated" >> $GITHUB_OUTPUT
+              echo "### ✅ Updated existing PR #${EXISTING}" >> "$GITHUB_STEP_SUMMARY"
+              echo "outcome=updated" >> "$GITHUB_OUTPUT"
             fi
           else
             # No open PR — safe to delete stale remote branch (nothing to auto-close)
@@ -256,8 +262,8 @@ jobs:
 
           > Auto-generated by \`base-image-check.yml\`.")
 
-            echo "### ✅ Created ${PR_URL}" >> $GITHUB_STEP_SUMMARY
-            echo "outcome=created" >> $GITHUB_OUTPUT
+            echo "### ✅ Created ${PR_URL}" >> "$GITHUB_STEP_SUMMARY"
+            echo "outcome=created" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Notify about newer tag
@@ -300,19 +306,19 @@ jobs:
       - name: Summary
         if: always()
         run: |
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "---" >> $GITHUB_STEP_SUMMARY
-          echo "### 📋 Result" >> $GITHUB_STEP_SUMMARY
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "---" >> "$GITHUB_STEP_SUMMARY"
+          echo "### 📋 Result" >> "$GITHUB_STEP_SUMMARY"
 
           OUTCOME="${{ steps.pr.outputs.outcome }}"
           case "$OUTCOME" in
-            created)    echo "- 🔄 Digest changed — PR created" >> $GITHUB_STEP_SUMMARY ;;
-            updated)    echo "- 🔄 Digest changed — existing PR updated" >> $GITHUB_STEP_SUMMARY ;;
-            current)    echo "- ✅ Digest changed but PR already has latest" >> $GITHUB_STEP_SUMMARY ;;
-            dependabot) echo "- ℹ️ Digest changed — Dependabot PR already open" >> $GITHUB_STEP_SUMMARY ;;
-            noop)       echo "- ❌ Digest changed but the Dockerfile could NOT be updated — check the FROM line format" >> $GITHUB_STEP_SUMMARY ;;
-            *)          echo "- ✅ Digest current — no action needed" >> $GITHUB_STEP_SUMMARY ;;
+            created)    echo "- 🔄 Digest changed — PR created" >> "$GITHUB_STEP_SUMMARY" ;;
+            updated)    echo "- 🔄 Digest changed — existing PR updated" >> "$GITHUB_STEP_SUMMARY" ;;
+            current)    echo "- ✅ Digest changed but PR already has latest" >> "$GITHUB_STEP_SUMMARY" ;;
+            dependabot) echo "- ℹ️ Digest changed — Dependabot PR already open" >> "$GITHUB_STEP_SUMMARY" ;;
+            noop)       echo "- ❌ Digest changed but the Dockerfile could NOT be updated — check the FROM line format" >> "$GITHUB_STEP_SUMMARY" ;;
+            *)          echo "- ✅ Digest current — no action needed" >> "$GITHUB_STEP_SUMMARY" ;;
           esac
 
-          [ "${{ steps.newer.outputs.exists }}" = "true" ] && echo "- ⬆️ Newer tag \`${{ steps.newer.outputs.tag }}\` detected" >> $GITHUB_STEP_SUMMARY
-          echo "- 🔍 Trivy scan completed" >> $GITHUB_STEP_SUMMARY
+          [ "${{ steps.newer.outputs.exists }}" = "true" ] && echo "- ⬆️ Newer tag \`${{ steps.newer.outputs.tag }}\` detected" >> "$GITHUB_STEP_SUMMARY"
+          echo "- 🔍 Trivy scan completed" >> "$GITHUB_STEP_SUMMARY"

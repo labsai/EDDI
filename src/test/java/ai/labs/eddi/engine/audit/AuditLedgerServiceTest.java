@@ -1644,11 +1644,20 @@ class AuditLedgerServiceTest {
      * the process working directory, which under Maven is the repository root: the
      * source-tree artifact this branch deleted, recreated by a JVM flag rather than
      * by a code change. It has to fail loudly instead.
+     * <p>
+     * Absoluteness is not the property that matters, though — being outside the
+     * project is. An absolute {@code java.io.tmpdir} pointing at the project
+     * directory itself, or at a directory below it, passes {@code isAbsolute()} and
+     * lands the sink right back in the source tree, so those are graded here too.
+     * The last case is the control: a sibling that merely shares a textual prefix
+     * with the project directory is outside it and must still be accepted, or the
+     * rejection would be a string comparison masquerading as a containment check.
      */
     @Test
-    @DisplayName("a relative java.io.tmpdir is rejected rather than resolved against the working directory")
-    void relativeTempDirectoryIsRejected() {
+    @DisplayName("a java.io.tmpdir that is relative, or inside the project, is rejected")
+    void temporaryDirectoryOutsideTheProjectIsRequired() {
         String original = System.getProperty("java.io.tmpdir");
+        Path projectDirectory = Path.of("").toAbsolutePath().normalize();
         try {
             for (String relative : List.of("tmp", "", "./tmp")) {
                 System.setProperty("java.io.tmpdir", relative);
@@ -1658,6 +1667,25 @@ class AuditLedgerServiceTest {
                 assertTrue(thrown.getMessage().contains("java.io.tmpdir"),
                         "the failure must name the property an operator has to fix: " + thrown.getMessage());
             }
+
+            for (Path inTree : List.of(projectDirectory, projectDirectory.resolve("target"),
+                    projectDirectory.resolve("src").resolve("tmp"))) {
+                System.setProperty("java.io.tmpdir", inTree.toString());
+                var thrown = assertThrows(IllegalStateException.class, AuditLedgerService::defaultTestDeadLetterPath,
+                        "java.io.tmpdir='" + inTree + "' is absolute but inside the project directory ("
+                                + projectDirectory + "), so the sink lands in the source tree exactly as a relative"
+                                + " value would — isAbsolute() alone does not decide this");
+                assertTrue(thrown.getMessage().contains("java.io.tmpdir")
+                        && thrown.getMessage().contains(inTree.toString()),
+                        "the failure must name both the property and the offending value: " + thrown.getMessage());
+            }
+
+            Path sibling = projectDirectory.resolveSibling(projectDirectory.getFileName() + "-tmp");
+            System.setProperty("java.io.tmpdir", sibling.toString());
+            assertTrue(Path.of(AuditLedgerService.defaultTestDeadLetterPath()).startsWith(sibling),
+                    "'" + sibling + "' shares a textual prefix with the project directory but is not inside it, so it"
+                            + " is a legitimate temp directory. Rejecting it would mean the containment check is a"
+                            + " string startsWith rather than a path one");
         } finally {
             if (original == null) {
                 System.clearProperty("java.io.tmpdir");

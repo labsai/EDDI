@@ -49,6 +49,37 @@ bottom of this file and are never archived.
 
 ---
 
+## 🧷 fix(build): a gate test that passed with its guard deleted (2026-09-07)
+
+**Repo:** EDDI (`fix/review-quality-gates`)
+
+Four review comments, two of them the kind this whole review exists to catch.
+
+**A gate test was green with the thing it guards removed.** `dependabotSkipBlock()` falls back to
+returning the rest of the workflow when the guard is absent, and that text still contains both
+`--json files` and `"$DOCKERFILE"` — so both assertions passed against a workflow with no
+de-duplication at all. Confirmed empirically before fixing: guard physically deleted, old
+assertions, `Tests run: 20, Failures: 0`. The test now tracks whether the loop found the guard and
+asserts it afterwards, and fails with the guard gone.
+
+**`defaultTestDeadLetterPath()` still accepted the source tree.** It checked only
+`Path.isAbsolute()`, so a `java.io.tmpdir` pointing at the repository root or a child was allowed
+and the sink landed back in the tree — the artifact this branch removed, reachable through a JVM
+flag instead of a code change. It now also rejects a temp directory inside the project directory,
+naming the property and the value. Containment uses `Path.startsWith`, which matches whole name
+elements, so a sibling that merely shares a textual prefix is still accepted; that control case is
+asserted so a regression to string comparison fails.
+
+**Dependabot PRs were selected with the wrong filter.** `gh pr list --author 'app/dependabot'` is
+the user filter and is not guaranteed to return App-authored PRs. An empty result is silent here —
+the skip never fires and the job raises a digest PR duplicating Dependabot's. Now `--app dependabot`.
+
+**Unquoted redirections.** 83 of them, into `$GITHUB_STEP_SUMMARY`, `$GITHUB_OUTPUT`, `$GITHUB_ENV`
+and `$GITHUB_PATH` across three workflows, all quoted — and a new test sweeps every workflow so the
+count cannot creep back.
+
+---
+
 ## 🪝 fix(githooks): fetch from the remote being pushed to (2026-09-07)
 
 **Repo:** EDDI (`fix/review-quality-gates`)

@@ -319,6 +319,20 @@ public class AuditLedgerService {
      * the repository root under Maven. That is the precise state this method exists
      * to prevent, so it fails loudly instead of quietly recreating the source-tree
      * artifact.
+     * <p>
+     * Absoluteness alone is not enough. {@code -Djava.io.tmpdir=/…/EDDI} is
+     * absolute and would be accepted, and the sink would land in the source tree
+     * again — the artifact removed here, reachable through a JVM flag rather than a
+     * code change. So an absolute temp directory that <em>is</em> the project
+     * directory, or sits under it, is rejected too. The project directory is the
+     * process working directory: Surefire and Failsafe run the JVM in the module
+     * basedir, which for this single-module build is the repository root, and it is
+     * the same directory a relative path would have resolved against — so the two
+     * checks reject exactly one location, named two ways. The comparison is
+     * {@link Path#startsWith(Path)} on normalised paths, which matches whole name
+     * elements: a sibling temp directory that merely shares a textual prefix with
+     * the project ({@code /build/eddi-tmp} beside {@code /build/eddi}) is not
+     * inside it and stays allowed.
      */
     static String defaultTestDeadLetterPath() {
         Path temporaryDirectory = Path.of(System.getProperty("java.io.tmpdir", ""));
@@ -326,6 +340,12 @@ public class AuditLedgerService {
             throw new IllegalStateException("java.io.tmpdir must be an absolute path, but is '" + temporaryDirectory
                     + "'. A relative temp directory resolves against the process working directory — the repository"
                     + " root under Maven — so the test dead-letter sink would be written back into the source tree.");
+        }
+        Path projectDirectory = Path.of("").toAbsolutePath().normalize();
+        if (temporaryDirectory.normalize().startsWith(projectDirectory)) {
+            throw new IllegalStateException("java.io.tmpdir must be outside the project directory, but is '"
+                    + temporaryDirectory + "', which is '" + projectDirectory + "' or below it. The test dead-letter"
+                    + " sink would be written into the source tree, where mvn clean does not remove it.");
         }
         return temporaryDirectory.resolve("eddi-audit-deadletter-" + ProcessHandle.current().pid() + ".jsonl").toString();
     }

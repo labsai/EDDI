@@ -81,6 +81,7 @@ class BuildQualityGatesTest {
     private static final Path CI_WORKFLOW = Path.of(".github", "workflows", "ci.yml");
     private static final Path AGENTS_MD = Path.of("AGENTS.md");
     private static final Path BASE_IMAGE_WORKFLOW = Path.of(".github", "workflows", "base-image-check.yml");
+    private static final Path WORKFLOWS = Path.of(".github", "workflows");
     private static final Path DEPENDABOT = Path.of(".github", "dependabot.yml");
     private static final Path PRE_PUSH_HOOK = Path.of(".githooks", "pre-push");
 
@@ -96,6 +97,15 @@ class BuildQualityGatesTest {
      * {@code jackson-dataformat-yaml}.
      */
     private static final Pattern JACKSON_DATAFORMAT_IMPORT = Pattern.compile("import\\s+com\\.fasterxml\\.jackson\\.dataformat\\.([a-z0-9]+)\\.");
+
+    /**
+     * A redirection into one of the runner-supplied environment files that does not
+     * quote the path — {@code >> $GITHUB_STEP_SUMMARY} rather than
+     * {@code >> "$GITHUB_STEP_SUMMARY"}. The quoted form cannot match: the
+     * {@code $} is preceded by a double quote there, not by the redirection
+     * operator and optional whitespace this looks for.
+     */
+    private static final Pattern UNQUOTED_GITHUB_FILE_REDIRECTION = Pattern.compile(">>?\\s*\\$GITHUB_(?:STEP_SUMMARY|OUTPUT|ENV|PATH)\\b");
 
     /**
      * The flag that decides whether the coverage gate runs at all. Since the gate
@@ -877,6 +887,46 @@ class BuildQualityGatesTest {
                 "the skip must compare those changed files against $DOCKERFILE (" + PRODUCTION_DOCKERFILE_DIRECTORY
                         + "/Dockerfile); fetching the file list and not matching on it decides nothing. Block was:\n"
                         + skipBlock);
+        assertTrue(skipBlock.contains("--app dependabot"),
+                "the candidate listing must select Dependabot's PRs with `gh pr list --app dependabot`, the App"
+                        + " filter. `--author app/dependabot` is the user filter and is not guaranteed to return"
+                        + " App-authored PRs; an empty candidate list is silent here — the skip simply never fires"
+                        + " and the job raises a digest PR duplicating Dependabot's. Block was:\n" + skipBlock);
+    }
+
+    /**
+     * {@code echo … >> $GITHUB_STEP_SUMMARY} is an unquoted expansion in a
+     * redirection — shellcheck SC2086, which actionlint reports for every workflow
+     * in this repository. The runner's own paths are space-free today, so nothing
+     * has broken; that is exactly why 83 of these accumulated, and a linter with 83
+     * standing diagnostics is a linter nobody reads the 84th line of. This branch
+     * arms the build's gates, so the workflows get held to the same bar: quote them
+     * once, and keep them quoted.
+     */
+    @Test
+    @DisplayName("every GitHub environment-file redirection in the workflows quotes the path")
+    void githubEnvironmentFileRedirectionsAreQuoted() throws Exception {
+        List<Path> workflows;
+        try (Stream<Path> paths = Files.list(WORKFLOWS)) {
+            workflows = paths.filter(path -> path.getFileName().toString().endsWith(".yml")).sorted().toList();
+        }
+        assertFalse(workflows.isEmpty(),
+                "found no workflow under " + WORKFLOWS.toAbsolutePath() + ", so this sweep grades nothing —"
+                        + " teach it where the workflows moved rather than leaving it vacuous");
+
+        List<String> unquoted = new ArrayList<>();
+        for (Path workflow : workflows) {
+            List<String> lines = read(workflow).lines().toList();
+            for (int i = 0; i < lines.size(); i++) {
+                if (UNQUOTED_GITHUB_FILE_REDIRECTION.matcher(lines.get(i)).find()) {
+                    unquoted.add(workflow + ":" + (i + 1) + "  " + lines.get(i).strip());
+                }
+            }
+        }
+
+        assertEquals(List.of(), unquoted,
+                "these redirections expand a runner-supplied path unquoted (shellcheck SC2086, via actionlint)."
+                        + " Write >> \"$GITHUB_STEP_SUMMARY\", not >> $GITHUB_STEP_SUMMARY");
     }
 
     /**
@@ -918,13 +968,23 @@ class BuildQualityGatesTest {
         assertTrue(start >= 0, BASE_IMAGE_WORKFLOW + " no longer sets DEPENDABOT_PR, so the skip this test grades"
                 + " is gone — remove the test deliberately or restore the guard, do not leave it passing vacuously");
 
+        boolean guarded = false;
         StringBuilder block = new StringBuilder();
         for (int i = start; i < lines.size(); i++) {
             block.append(lines.get(i)).append('\n');
             if (lines.get(i).strip().startsWith("if [ -n \"$DEPENDABOT_PR\" ]")) {
+                guarded = true;
                 break;
             }
         }
+        // Without this the extraction degrades into "everything from DEPENDABOT_PR=
+        // to end of file" when the guard is deleted, and the rest of the workflow
+        // still contains both `--json files` and `"$DOCKERFILE"` further down — so
+        // the caller's assertions would go on passing while the skip they grade no
+        // longer exists. A sweep that cannot find its end marker has to say so.
+        assertTrue(guarded, BASE_IMAGE_WORKFLOW + " sets DEPENDABOT_PR but nothing guards on it any more:"
+                + " no `if [ -n \"$DEPENDABOT_PR\" ]` follows the assignment, so the de-duplication decides"
+                + " nothing and the digest PR is raised on top of Dependabot's");
         return block.toString();
     }
 
