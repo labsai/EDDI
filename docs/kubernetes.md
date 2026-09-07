@@ -18,19 +18,36 @@ Deploy EDDI + MongoDB with one command:
 kubectl apply -f https://raw.githubusercontent.com/labsai/EDDI/main/k8s/quickstart.yaml
 ```
 
-Then generate and store a vault master key:
+The EDDI pod now waits in `ContainerCreating` — it mounts the `eddi-secrets`
+Secret, which no manifest creates. That is deliberate: a Secret shipped in the
+manifest would be re-applied on every `kubectl apply` and would overwrite your
+vault master key, making everything already encrypted with it undecryptable.
+Generate and store the key, and the pod starts by itself:
 
 ```bash
-# Generate the secret. EDDI reads its secrets from a mounted properties FILE
-# rather than environment variables, so the Secret holds exactly one key:
-# "application-secrets.properties".
-kubectl delete secret eddi-secrets -n eddi --ignore-not-found
 set -euo pipefail
 
+# EDDI reads its secrets from a mounted properties FILE rather than environment
+# variables, so the Secret holds exactly one key:
+# "application-secrets.properties".
+#
 # mktemp gives an unpredictable name created 0600, so it cannot be pre-created
 # or symlinked by another local user.
 secrets_file=$(mktemp "${TMPDIR:-/tmp}/eddi-secrets.XXXXXX")
 trap 'shred -u "$secrets_file" 2>/dev/null || rm -f "$secrets_file"' EXIT
+
+# Fail closed. This block mints a NEW key every time it runs, so re-running it
+# over a live eddi-secrets — after a failed later step, or in a second session
+# — would leave everything already encrypted under the old key permanently
+# undecryptable. Checked before the key is generated, and `kubectl create`
+# below is deliberately NOT piped through `--dry-run=client | kubectl apply`,
+# which would replace the Secret silently and exit 0.
+if kubectl get secret eddi-secrets --namespace=eddi >/dev/null 2>&1; then
+  echo "eddi-secrets already exists — this would install a NEW master key and" >&2
+  echo "make everything encrypted under the current one unrecoverable." >&2
+  echo "To rotate deliberately: bash k8s/create-secrets.sh --force" >&2
+  exit 1
+fi
 
 key=$(openssl rand -base64 24)
 [ -n "$key" ] || { echo "vault key generation failed" >&2; exit 1; }
@@ -42,8 +59,8 @@ kubectl create secret generic eddi-secrets \
   --namespace=eddi \
   --from-file=application-secrets.properties="$secrets_file"
 
-# Restart EDDI to pick up the key
-kubectl rollout restart deployment/eddi -n eddi
+# Only needed if EDDI was already running with a different key
+# kubectl rollout restart deployment/eddi -n eddi
 
 # Access EDDI
 kubectl port-forward svc/eddi 7070:7070 -n eddi
@@ -52,6 +69,9 @@ kubectl port-forward svc/eddi 7070:7070 -n eddi
 Open [http://localhost:7070](http://localhost:7070).
 
 ### Option B: Using the helper script
+
+The Secret must exist **before** the first apply — `kubectl apply -k` never
+creates or reconciles it, so the pod cannot mount it otherwise:
 
 ```bash
 # Clone the repo
@@ -64,11 +84,22 @@ bash k8s/create-secrets.sh
 kubectl apply -k k8s/overlays/mongodb/
 ```
 
-PowerShell:
+PowerShell — **PowerShell 7 (`pwsh`)**, not the Windows PowerShell 5.1 that
+`powershell.exe` starts. The script declares `#Requires -Version 7` and refuses
+to run under 5.1, whose .NET Framework has no `RandomNumberGenerator.Fill` to
+generate a key with. [Install
+it](https://learn.microsoft.com/powershell/scripting/install/installing-powershell-on-windows)
+or use `winget install Microsoft.PowerShell`.
+
 ```powershell
-.\k8s\create-secrets.ps1
+pwsh -File .\k8s\create-secrets.ps1
 kubectl apply -k k8s\overlays\mongodb\
 ```
+
+The script generates a **new** master key, so it stops if `eddi-secrets` already
+exists rather than replacing what is there — re-running it would leave every
+secret encrypted under the old key unrecoverable. Pass `--force` (`-Force` in
+PowerShell) only when you mean to rotate.
 
 ### Option C: Helm
 
@@ -91,20 +122,26 @@ EDDI provides modular overlays (Kustomize) and Helm values for different deploym
 
 ### Optional Components
 
-The component overlays (auth, nats, monitoring, etc.) are designed to be **composed** with a database overlay. They do not include the base EDDI manifests on their own.
+Everything under `k8s/overlays/` except `mongodb/` and `postgres/` is a kustomize
+**Component**. Components have no resource set of their own — `kubectl apply -k`
+on one does not work by design — and are composed with a database overlay.
 
 | Component | Description | Helm Values |
 |---|---|---|
-| **Keycloak Auth** | OIDC authentication | `--set keycloak.enabled=true --set eddi.oidc.enabled=true` |
-| **NATS JetStream** | Durable, ordered messaging | `--set nats.enabled=true --set eddi.messagingType=nats` |
-| **Manager UI** | Configuration dashboard | `--set manager.enabled=true` |
+| **Keycloak Auth** | OIDC authentication — ⚠️ Kustomize needs the `keycloak-admin` Secret created first, see [Authentication](#authentication-keycloak) | `--set keycloak.enabled=true --set eddi.oidc.enabled=true --set eddi.oidc.publicUrl=http://localhost:8080 --set keycloak.adminPassword=…` |
+| **NATS JetStream** | Durable, ordered messaging | ⚠️ needs an image built with `-Dquarkus.profile=nats` — see [Durable Messaging](#durable-messaging-production) |
 | **Monitoring** | Prometheus + Grafana | — (Kustomize only: `k8s/overlays/monitoring/`) |
 | **Ingress** | External HTTPS access | `--set ingress.enabled=true --set ingress.hosts[0].host=eddi.example.com` |
 | **Production** | PDB, NetworkPolicy | `--set podDisruptionBudget.enabled=true --set networkPolicy.enabled=true` |
 
+> **Manager UI**: there is nothing to enable. EDDI serves it from its own
+> Service at `/manage`.
+
 ### Composing Kustomize Overlays
 
-Kustomize takes **one directory** as input. To combine components, create a `kustomization.yaml` that references multiple overlays:
+Kustomize takes **one directory** as input. Combine the pieces with a
+`kustomization.yaml` that lists the standalone overlay under `resources:` and the
+components under `components:`:
 
 ```yaml
 # my-deployment/kustomization.yaml
@@ -112,24 +149,37 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: eddi
 resources:
-  - ../k8s/overlays/mongodb                    # Base + MongoDB
-  - ../k8s/overlays/auth/keycloak-deployment.yaml  # Keycloak
-  - ../k8s/overlays/manager/manager-deployment.yaml # Manager UI
-patches:
-  - target: { kind: ConfigMap, name: eddi-config }
-    patch: |
-      - op: replace
-        path: /data/QUARKUS_OIDC_TENANT_ENABLED
-        value: "true"
+  - ../k8s/overlays/mongodb        # standalone: base + MongoDB
+components:
+  - ../k8s/overlays/auth           # Keycloak, realm import, OIDC ConfigMap keys
+  - ../k8s/overlays/monitoring     # Prometheus + Grafana
 ```
+
+Two rules decide whether this works:
+
+- `resources:` may name a **directory** outside your root — kustomize builds it as
+  its own kustomization root — but never a loose **file** outside your root. That
+  is a hard `file ... is not in or below ...` error.
+- A component's patches are applied into **your** resource set, so they reach
+  `eddi-config` and the `eddi` Deployment. The same patches inside a
+  `kind: Kustomization` referenced under `resources:` are built in isolation
+  first, match nothing, and are dropped — with no error and exit code 0.
 
 Ready-made examples are provided in `k8s/examples/`:
 
 ```bash
-# MongoDB + Auth + Monitoring + Manager
+# Create the vault Secret once, before the first apply
+bash k8s/create-secrets.sh
+
+# This example includes the auth component, which has no default admin
+# password — create its Secret too, or Keycloak never starts
+kubectl create secret generic keycloak-admin -n eddi \
+  --from-literal=password="$(openssl rand -base64 24)"
+
+# MongoDB + Keycloak auth + Monitoring
 kubectl apply -k k8s/examples/mongodb-full/
 
-# PostgreSQL + NATS + Production hardening
+# PostgreSQL + Production hardening (PDB, NetworkPolicy, resource limits)
 kubectl apply -k k8s/examples/postgres-ha/
 ```
 
@@ -148,7 +198,7 @@ kubectl apply -k k8s/examples/postgres-ha/
                │
     ┌──────────▼──────────┐    ┌─────────────┐
     │  EDDI Deployment     │───▶│  MongoDB    │
-    │  (labsai/eddi:latest) │    │ StatefulSet │
+    │  (labsai/eddi:6.3.0) │    │ StatefulSet │
     │                      │    └─────────────┘
     │  replicas: 1         │    ┌─────────────┐
     │  (single-writer)     │───▶│ PostgreSQL  │
@@ -183,6 +233,16 @@ Three ways to manage it:
    secrets_file=$(mktemp "${TMPDIR:-/tmp}/eddi-secrets.XXXXXX")
    trap 'shred -u "$secrets_file" 2>/dev/null || rm -f "$secrets_file"' EXIT
 
+   # Fail closed on a key that already exists. This mints a NEW one, so
+   # replacing a live eddi-secrets makes everything encrypted under the current
+   # key permanently undecryptable. `kubectl create` is deliberately not piped
+   # through `--dry-run=client | kubectl apply`: that would replace it silently
+   # and exit 0. Rotate with `bash k8s/create-secrets.sh --force` instead.
+   if kubectl get secret eddi-secrets --namespace=eddi >/dev/null 2>&1; then
+     echo "eddi-secrets already exists — refusing to install a new master key." >&2
+     exit 1
+   fi
+
    # Fail closed: an empty key would create a Secret that silently leaves the
    # vault inert and secrets in plaintext.
    key=$(openssl rand -base64 24)
@@ -197,6 +257,141 @@ Three ways to manage it:
    ```
 
 3. **External secrets** (production): Use [External Secrets Operator](https://external-secrets.io/) to sync from AWS Secrets Manager, HashiCorp Vault, Azure Key Vault, etc.
+
+> **No manifest ever writes this Secret.** `k8s/base/eddi-secret.yaml.example` is
+> a commented template that kustomize does not include, and `k8s/quickstart.yaml`
+> ships no Secret at all. A reconciled Secret would replace a live vault master
+> key with a placeholder on the next apply, and every secret encrypted under the
+> old key would be permanently undecryptable.
+
+### Authentication (Keycloak)
+
+Both delivery paths ship the `eddi` realm and import it into Keycloak on **first
+boot** — `k8s/overlays/auth/eddi-realm.json` for Kustomize,
+`helm/eddi/files/eddi-realm.json` for Helm. Both are cluster-calibrated copies of
+`keycloak/eddi-realm.json`, which is calibrated for docker-compose: it allows
+redirects to `localhost` only and names a login theme that only the compose file
+mounts.
+
+Realm import is **one-shot**. It seeds an empty database and is skipped once the
+realm exists, so later edits to the JSON do not reach a running Keycloak — change
+those in the admin console. Keycloak keeps that database on a PVC, so a restart
+no longer wipes it.
+
+#### No credential in this component has a default
+
+Neither delivery path ships a password for the Keycloak superuser or for the
+privileged EDDI account. Both used to, and both were reachable: the `keycloak`
+Service is a `ClusterIP`, so `admin`/`admin` and `eddi`/`eddi` were a guessable
+master-realm superuser and a guessable full EDDI administrator for anything
+running in the cluster — "development component" is a property of the manifests,
+not of the network they are applied to.
+
+**1. Create the Keycloak admin Secret before the first apply (Kustomize only —
+the pod does not start without it):**
+
+```bash
+kubectl create secret generic keycloak-admin -n eddi \
+  --from-literal=password="$(openssl rand -base64 24)"
+```
+
+`keycloak-statefulset.yaml` reads `KC_BOOTSTRAP_ADMIN_PASSWORD` from it through
+`secretKeyRef` with no default, so a missing Secret fails closed — the pod stays
+in `CreateContainerConfigError` with `secret "keycloak-admin" not found` rather
+than coming up with a known password. Helm asks for the same value as
+`keycloak.adminPassword`, which `required` refuses to default.
+
+**2. Give the `eddi` account a password after the first boot.** The realm seeds
+it with the `eddi-admin` and `eddi-editor` roles and **no credential**, so it
+cannot be logged into until you set one: admin console → *Users* → `eddi` →
+*Credentials* → *Set password*. Or grant those two realm roles to an account you
+create yourself and leave `eddi` unused. The unprivileged fixtures
+(`viewer`/`viewer`, `user`/`user`) still log straight in.
+
+#### TLS
+
+The realm ships `"sslRequired": "external"`, Keycloak's own default: HTTPS is
+required for requests from outside the local network, and loopback and private
+addresses are still served over HTTP. The documented quick start —
+`kubectl port-forward svc/keycloak 8080:8080`, browser on `http://localhost:8080`
+— arrives at the pod as `127.0.0.1` and is unaffected, and so is EDDI's
+in-cluster backchannel to `http://keycloak:8080` from an RFC 1918 pod address.
+Exposing Keycloak on a public hostname now requires TLS in front of it, with the
+proxy forwarding the HTTPS scheme (`X-Forwarded-Proto`) so Keycloak sees it.
+
+> On a cluster whose pod CIDR is outside RFC 1918 — `100.64.0.0/10` on some
+> managed offerings — Keycloak does not count the backchannel as local and will
+> demand HTTPS for it. Terminate TLS in front of Keycloak, or set the realm's
+> `sslRequired` back to `none` on that cluster deliberately.
+
+Four settings have to change together, and none of them can be derived — but
+they carry **two different URLs**. Behind an Ingress those are two different
+hosts, because the Ingress fronts EDDI and not Keycloak.
+
+**Three name the browser-facing URL of Keycloak** (the IdP, e.g.
+`https://auth.example.com`):
+
+| Setting | Kustomize | Helm |
+|---|---|---|
+| Keycloak's own hostname (what it stamps as the token issuer) | `KC_HOSTNAME` in `keycloak-statefulset.yaml` | `eddi.oidc.publicUrl` |
+| URL handed to the Manager SPA | `EDDI_KEYCLOAK_PUBLIC_URL` patch | `eddi.oidc.publicUrl` |
+| Issuer EDDI validates tokens against | `QUARKUS_OIDC_TOKEN_ISSUER` patch | derived from `eddi.oidc.publicUrl` |
+
+**One names the browser-facing origin of EDDI** — where the Manager SPA is
+served, i.e. `ingress.hosts[0].host` (e.g. `https://eddi.example.com`), *not*
+the Keycloak host:
+
+| Setting | Kustomize | Helm |
+|---|---|---|
+| Realm `redirectUris` / `webOrigins` of the `eddi-frontend` client | edit `eddi-realm.json` (placeholder `https://eddi.example.com/*`) | `keycloak.publicOrigin` |
+
+The Manager redirects back to where it is itself served, so the realm has to
+list **that** origin. Putting the Keycloak host into `redirectUris` is the
+common way to get `Invalid parameter: redirect_uri`; so is omitting your host
+altogether. The shipped defaults cover
+`kubectl port-forward svc/keycloak 8080:8080`, where both URLs happen to be
+`localhost` and the distinction does not bite.
+
+#### Upgrading an existing Keycloak install
+
+> ⚠️ **Kustomize: delete the old Deployment before applying this version.**
+>
+> ```bash
+> kubectl delete deployment keycloak -n eddi
+> ```
+>
+> Keycloak used to be a `Deployment` named `keycloak`; it is now a `StatefulSet`
+> under the **same name and the same pod labels**. `kubectl apply -k` never
+> prunes, so on an existing install the old Deployment's ReplicaSet keeps
+> running and **both** pods match the one `keycloak` Service selector — one with
+> the imported `eddi` realm, one without. Requests round-robin between them, so
+> `/realms/eddi` 404s on roughly half of them and logins fail intermittently,
+> with nothing in `kubectl get` to explain it. Run the delete before the first
+> apply, or immediately after if you have already applied.
+>
+> Helm needs no manual step: `helm upgrade` removes resources that left the
+> release. The Deployment→StatefulSet change still replaces the pod, and because
+> the old Deployment had no volume there is no Keycloak state to carry over —
+> the new pod imports the realm into an empty database, and anything configured
+> by hand in the old admin console is gone. Export it first if you need it.
+
+> ⚠️ **Kustomize: restart EDDI after applying the auth component.**
+>
+> ```bash
+> kubectl rollout restart deployment/eddi -n eddi
+> ```
+>
+> The component patches `eddi-config` and nothing else, and the EDDI Deployment
+> reads that ConfigMap through `envFrom`. Environment variables are fixed at
+> container start, so `kubectl apply -k` updates the ConfigMap while the running
+> pod keeps `QUARKUS_OIDC_TENANT_ENABLED: "false"` and the three
+> `ALLOW_UNAUTHENTICATED` escape hatches it booted with. Every object reports as
+> applied and the install stays **unauthenticated** — the exact state the
+> previously ineffective overlay left behind — until the pod is replaced.
+>
+> Helm does this on its own: the pod template carries `checksum/config` and
+> `checksum/secret` annotations, so a ConfigMap or Secret change alters the
+> Deployment spec and `helm upgrade` rolls the pod.
 
 ### Pod Security
 
@@ -230,16 +425,30 @@ shipped manifest pins `replicas: 1`. NATS JetStream is a durable ordering and
 dead-lettering primitive, not a scale-out enabler: the Callable still executes in
 the JVM that published it. Scale **vertically** via `eddi.resources`.
 
-**Kustomize:**
+> ⚠️ **NATS needs a purpose-built image.** `NatsConversationCoordinator` is gated
+> on `@IfBuildProfile("nats")` — a *build-time* switch — and the published
+> `labsai/eddi` image is built without it. No Java code reads
+> `eddi.messaging.type` at runtime either, so setting it does not swap the
+> coordinator: you get a JetStream StatefulSet with a PVC that EDDI never
+> connects to, and in-memory queues anyway. The Helm chart now refuses to render
+> `eddi.messagingType` other than `in-memory` unless you also set
+> `nats.buildProfileImage=true` to confirm you built the image yourself with
+> `-Dquarkus.profile=nats`; the Kustomize component carries the same warning.
+
+**Kustomize** — production hardening with PostgreSQL (still one replica):
 ```bash
-# Use the ready-made HA example (PostgreSQL + NATS, still one replica)
 kubectl apply -k k8s/examples/postgres-ha/
 ```
 
-**Helm:**
+Add NATS on top only with a `-Dquarkus.profile=nats` image, by listing
+`- ../../overlays/nats` under that example's `components:`.
+
+**Helm** — with an image you built with `-Dquarkus.profile=nats`:
 ```bash
 helm install eddi ./helm/eddi \
+  --set eddi.image.repository=your-registry/eddi-nats \
   --set nats.enabled=true \
+  --set nats.buildProfileImage=true \
   --set eddi.messagingType=nats \
   --namespace eddi --create-namespace
 ```
@@ -255,16 +464,18 @@ annotations:
   prometheus.io/path: "/q/metrics"
 ```
 
-Deploy the monitoring stack with Kustomize. The Helm chart does **not** ship
-Prometheus or Grafana templates yet, so `monitoring.*` values render nothing:
+Deploy the monitoring stack with Kustomize. The Helm chart ships **no**
+Prometheus or Grafana templates and no longer offers `monitoring.*` values — they
+used to exist and render nothing, which read as success:
 
 ```bash
 # Kustomize (with MongoDB + Auth + Monitoring)
 kubectl apply -k k8s/examples/mongodb-full/
 
-# Or the monitoring component on its own overlay: k8s/overlays/monitoring/
+# Or list `- ../../overlays/monitoring` under `components:` in your own
+# kustomization (it is a Component; `kubectl apply -k` on it directly fails)
 
-# Access Grafana
+# Access Grafana — the Prometheus datasource is provisioned for you
 kubectl port-forward svc/grafana 3000:3000 -n eddi
 # Open http://localhost:3000 (admin/admin)
 ```
@@ -288,14 +499,14 @@ k8s/
 │   ├── mongodb/             # MongoDB backend (standalone)
 │   ├── postgres/            # PostgreSQL backend (standalone)
 │   ├── nats/                # NATS JetStream (component)
-│   ├── auth/                # Keycloak authentication (component)
+│   ├── auth/                # Keycloak + realm import (component)
 │   ├── monitoring/          # Prometheus + Grafana (component)
-│   ├── manager/             # Manager UI (component)
 │   ├── ingress/             # Ingress resource (component)
-│   └── production/          # HPA, PDB, NetworkPolicy (component)
+│   └── production/          # PDB, NetworkPolicy, resource limits (component;
+│                            #   eddi-hpa.yaml is an intentionally disabled template)
 ├── examples/
-│   ├── mongodb-full/        # MongoDB + Auth + Monitoring + Manager
-│   └── postgres-ha/         # PostgreSQL + NATS + Production
+│   ├── mongodb-full/        # MongoDB + Auth + Monitoring
+│   └── postgres-ha/         # PostgreSQL + Production hardening
 ├── create-secrets.sh        # Vault key generator (bash)
 ├── create-secrets.ps1       # Vault key generator (PowerShell)
 └── quickstart.yaml          # All-in-one manifest
@@ -304,12 +515,41 @@ helm/
 └── eddi/                    # Helm chart
     ├── Chart.yaml
     ├── values.yaml
+    ├── files/               # eddi-realm.json, imported by Keycloak on first boot
     └── templates/
 ```
 
-> **Note**: Overlays marked **(standalone)** include the base and can be applied directly with `kubectl apply -k`. Overlays marked **(component)** must be composed with a standalone overlay — see [Composing Kustomize Overlays](#composing-kustomize-overlays).
+> **Note**: Overlays marked **(standalone)** include the base and can be applied directly with `kubectl apply -k`. Overlays marked **(component)** are `kind: Component` — they have no resource set of their own, so `kubectl apply -k` on one fails by design; list them under `components:` in a kustomization that includes a standalone overlay. See [Composing Kustomize Overlays](#composing-kustomize-overlays).
+
+> **Note**: `k8s/base/eddi-secret.yaml.example` is a template, not a resource. The
+> `eddi-secrets` Secret is created out-of-band (`bash k8s/create-secrets.sh`) so
+> that no re-apply can overwrite a live vault master key.
 
 ## Troubleshooting
+
+### EDDI pod stuck in ContainerCreating
+
+This is the most likely first-run symptom. `kubectl describe pod` shows:
+
+```
+MountVolume.SetUp failed for volume "secrets" :
+  secret "eddi-secrets" not found
+```
+
+No shipped manifest creates `eddi-secrets` — a reconciled Secret would overwrite
+a live vault master key on the next `kubectl apply`. Create it out-of-band and
+the pod starts on its own, with no restart needed:
+
+```bash
+bash k8s/create-secrets.sh            # PowerShell: pwsh -File .\k8s\create-secrets.ps1
+kubectl get pods -n eddi -w
+```
+
+If `create-secrets` refuses because `eddi-secrets` already exists, that is the
+guard against replacing a live key — the Secret is there and the mount failure
+is something else (wrong namespace, or the key inside it is not named
+`application-secrets.properties`). Check with
+`kubectl get secret eddi-secrets -n eddi -o jsonpath='{.data}'`.
 
 ### EDDI pod stuck in CrashLoopBackOff
 
@@ -333,11 +573,21 @@ kubectl exec -n eddi deployment/eddi -- curl -s localhost:7070/q/health/ready
 
 ### Vault key issues
 
-If you see "vault master key not set" warnings, create the secret:
+On a fresh install a missing key can no longer produce a running pod — the
+Deployment mounts `eddi-secrets` and the pod stays in `ContainerCreating` until
+the Secret exists (see above). "vault master key not set" therefore means the
+Secret exists but its `application-secrets.properties` payload has an empty or
+absent `eddi.vault.master-key` — for example a Secret created by hand from the
+old `k8s/base/eddi-secret.yaml` template. Replace it and restart:
+
 ```bash
-bash k8s/create-secrets.sh
+bash k8s/create-secrets.sh --force    # PowerShell: pwsh -File .\k8s\create-secrets.ps1 -Force
 kubectl rollout restart deployment/eddi -n eddi
 ```
+
+⚠️ `--force` installs a **new** key. Anything already encrypted under the old
+one becomes unrecoverable, so use it only when there is nothing to lose — which
+is exactly the case when the key was empty.
 
 ### PVC stuck in Pending
 

@@ -3,7 +3,6 @@
   "enabled": true,
   "displayName": "EDDI",
   "displayNameHtml": "EDDI",
-  "loginTheme": "eddi",
   "internationalizationEnabled": true,
   "supportedLocales": [
     "ar",
@@ -138,7 +137,8 @@
       "directAccessGrantsEnabled": true,
       "redirectUris": [
         "http://localhost:*",
-        "https://localhost:*"
+        "https://localhost:*",
+        "https://eddi.example.com/*"
       ],
       "webOrigins": [
         "+",
@@ -148,7 +148,8 @@
         "https://localhost:7071",
         "https://localhost:7443",
         "http://localhost:3000",
-        "http://localhost:5173"
+        "http://localhost:5173",
+        "https://eddi.example.com"
       ],
       "attributes": {
         "post.logout.redirect.uris": "+"

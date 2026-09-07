@@ -36,6 +36,7 @@ jobs:
     outputs:
       code: ${{ steps.result.outputs.code }}
       scripts: ${{ steps.result.outputs.scripts }}
+      operator_docs: ${{ steps.result.outputs.operator_docs }}
     steps:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -94,12 +95,33 @@ jobs:
             # in NO filter at all, so a PR touching only them skipped the whole
             # pipeline — and a skipped required check still satisfies branch
             # protection. They do not need the Java build, just the shell lint.
+            # k8s/create-secrets.{sh,ps1} are in this filter for the same
+            # reason: they are now the ONLY way to get a vault master key into a
+            # cluster, so a syntax error in one is an install that cannot start.
             scripts:
               - 'install.sh'
               - 'install.ps1'
               - 'scripts/**'
               - '.githooks/**'
               - 'mvnw*'
+              - 'k8s/*.sh'
+              - 'k8s/*.ps1'
+            # DeploymentManifestsTest asserts things ABOUT these three documents:
+            # that kubernetes.md and README route every `kubectl apply -k`
+            # through create-secrets.sh, name ContainerCreating as the symptom,
+            # and do not advertise the mutable image tag, and that security.md
+            # names the Keycloak client id the SPA actually asks for. The `code`
+            # filter excludes docs/** and README, so those guards could not run
+            # on the change that broke them: a docs-only edit skipped
+            # build-and-test entirely, and a skipped required check still
+            # satisfies branch protection. EVERY document the suite reads belongs
+            # here — one left out is an assertion the file it reads cannot
+            # trigger. They need the Java test job, not the Docker/publish half
+            # of the pipeline.
+            operator_docs:
+              - 'docs/kubernetes.md'
+              - 'README.md'
+              - 'docs/security.md'
 
       - name: Resolve
         id: result
@@ -113,9 +135,11 @@ jobs:
           if [[ "$GITHUB_REF" == refs/tags/* ]]; then
             echo "code=true" >> "$GITHUB_OUTPUT"
             echo "scripts=true" >> "$GITHUB_OUTPUT"
+            echo "operator_docs=true" >> "$GITHUB_OUTPUT"
           else
             echo "code=${{ steps.filter.outputs.code }}" >> "$GITHUB_OUTPUT"
             echo "scripts=${{ steps.filter.outputs.scripts }}" >> "$GITHUB_OUTPUT"
+            echo "operator_docs=${{ steps.filter.outputs.operator_docs }}" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Log result
@@ -166,8 +190,13 @@ jobs:
       - name: Bash syntax check
         # Catches the class of error that makes `curl | bash` fail at the worst
         # possible moment — on a user's machine, halfway through an install.
+        #
+        # k8s/*.sh is in here because create-secrets.sh is now the ONLY way to
+        # get a vault master key into a cluster (no manifest ships the Secret),
+        # and its refuse-to-clobber guard was pinned by nothing but a string
+        # assertion in DeploymentManifestsTest.
         run: |
-          for f in install.sh .githooks/*; do
+          for f in install.sh .githooks/* k8s/*.sh; do
             [ -f "$f" ] || continue
             head -n1 "$f" | grep -qE '^#!.*(bash|sh)' || continue
             echo "checking $f"
@@ -177,6 +206,11 @@ jobs:
       - name: ShellCheck
         # Uses the shellcheck preinstalled on ubuntu-latest rather than a
         # third-party action, so there is no extra supply-chain edge to pin.
+        #
+        # Scoped to install.sh deliberately: it is the `curl | bash` path. The
+        # k8s scripts get the syntax parse above; widening shellcheck to them is
+        # a separate change, because it has to be run once and its findings
+        # fixed before it can be a gate.
         run: |
           shellcheck --version
           shellcheck --severity=warning --shell=bash install.sh
@@ -186,10 +220,18 @@ jobs:
         run: |
           # Parse-only: never dot-source or run the installer in CI.
           # Covers scripts/ too — preflight-local.ps1 is a contributor-facing
-          # script and was as unchecked as the installers were.
+          # script and was as unchecked as the installers were — and k8s/, whose
+          # create-secrets.ps1 is the only way to install a vault master key on
+          # Windows.
+          #
+          # This runs under `pwsh` (PowerShell 7) only, so it says nothing about
+          # Windows PowerShell 5.1, where native-command redirection and parts of
+          # .NET Core are simply absent. create-secrets.ps1 declares
+          # `#Requires -Version 7` for that reason rather than relying on this
+          # step to notice; ParseFile does not evaluate #Requires either way.
           $ErrorActionPreference = 'Stop'
           $failed = $false
-          Get-ChildItem -Path ./install.ps1, ./scripts -Filter *.ps1 -Recurse -ErrorAction SilentlyContinue |
+          Get-ChildItem -Path ./install.ps1, ./scripts, ./k8s -Filter *.ps1 -Recurse -ErrorAction SilentlyContinue |
             ForEach-Object {
               $errors = $null
               [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$null, [ref]$errors) | Out-Null
@@ -213,6 +255,7 @@ jobs:
           }
           $targets = @('./install.ps1')
           if (Test-Path ./scripts) { $targets += './scripts' }
+          if (Test-Path ./k8s) { $targets += './k8s' }
           # -Path takes ONE string, not an array — passing @(...) fails with
           # "Cannot convert 'System.Object[]' to the type 'System.String'".
           $found = @()
@@ -222,12 +265,249 @@ jobs:
           $found | Format-Table -AutoSize | Out-String | Write-Host
           if ($found | Where-Object { $_.Severity -eq 'Error' }) { exit 1 }
 
+  # ─── Job 0c: Deployment Manifests ───────────────────────────────
+  #
+  # Nothing in the build had ever rendered k8s/ or helm/, so a manifest could be
+  # broken for as long as nobody tried to deploy it — and both shipped
+  # k8s/examples/ kustomizations had never built at all, while being printed in
+  # docs/kubernetes.md as ready-made recipes. DeploymentManifestsTest covers what
+  # a plain unit build can reach; this job is the part that needs the real tools.
+  manifest-lint:
+    name: Deployment Manifests
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.code == 'true'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Render every kustomization
+        # A `resources:` entry naming a file outside the root is a hard error; a
+        # patch that matches nothing exits 0. This step catches the first class,
+        # DeploymentManifestsTest the second.
+        run: |
+          set -euo pipefail
+          kubectl version --client=true
+          status=0
+          while IFS= read -r kfile; do
+            dir=$(dirname "$kfile")
+            # Components are not applyable roots by design — they have no
+            # resource set of their own and are consumed under `components:`.
+            if grep -qE '^kind:[[:space:]]*Component[[:space:]]*$' "$kfile"; then
+              echo "skip (Component): $dir"
+              continue
+            fi
+            echo "--- kubectl kustomize $dir"
+            if ! kubectl kustomize "$dir" > /dev/null; then
+              echo "::error file=$kfile::kustomization does not build"
+              status=1
+            fi
+          done < <(find k8s -name kustomization.yaml | sort)
+          exit $status
+
+      - name: Render every Component through a parent
+        # The sweep above SKIPS every Component, because a component is not an
+        # applyable root. That left the components themselves unrendered: the
+        # shipped examples happen to consume auth, monitoring and production, but
+        # nothing consumes ingress or nats, so a syntax or composition error in
+        # those two passed CI untouched.
+        #
+        # Each component is composed here exactly the way docs/kubernetes.md
+        # tells operators to compose one — a database overlay under `resources:`,
+        # the component under `components:` — in a throwaway parent inside k8s/
+        # so the relative paths resolve. Built after the sweep, so `find` never
+        # sees these.
+        run: |
+          set -euo pipefail
+          status=0
+          while IFS= read -r kfile; do
+            grep -qE '^kind:[[:space:]]*Component[[:space:]]*$' "$kfile" || continue
+            component=$(dirname "$kfile")
+            parent="k8s/.ci-render-$(basename "$component")"
+            mkdir -p "$parent"
+            cat > "$parent/kustomization.yaml" <<EOF
+          apiVersion: kustomize.config.k8s.io/v1beta1
+          kind: Kustomization
+          resources:
+            - ../overlays/mongodb
+          components:
+            - ../${component#k8s/}
+          EOF
+            echo "--- kubectl kustomize $parent (component: $component)"
+            if ! kubectl kustomize "$parent" > /dev/null; then
+              echo "::error file=$kfile::component does not build when composed with a base"
+              status=1
+            fi
+            rm -rf "$parent"
+          done < <(find k8s -name kustomization.yaml | sort)
+          exit $status
+
+      - name: Render the Helm chart
+        # Uses the helm preinstalled on ubuntu-latest, matching the shell-lint
+        # job's reasoning about shellcheck: no extra supply-chain edge to pin.
+        run: |
+          set -euo pipefail
+          helm version
+          key=ci-placeholder-vault-key
+
+          helm lint helm/eddi --set eddi.vaultMasterKey=$key
+
+          echo "--- default: MongoDB, no auth"
+          helm template eddi helm/eddi --set eddi.vaultMasterKey=$key > /dev/null
+
+          echo "--- PostgreSQL + in-chart Keycloak"
+          helm template eddi helm/eddi \
+            --set eddi.vaultMasterKey=$key \
+            --set eddi.datastoreType=postgres \
+            --set mongodb.enabled=false \
+            --set postgres.enabled=true \
+            --set postgres.password=ci-placeholder-pg \
+            --set eddi.oidc.enabled=true \
+            --set eddi.oidc.publicUrl=http://localhost:8080 \
+            --set keycloak.enabled=true \
+            --set keycloak.adminPassword=ci-placeholder-kc > /dev/null
+
+          echo "--- external datastore + bring-your-own IdP"
+          helm template eddi helm/eddi \
+            --set eddi.vaultMasterKey=$key \
+            --set mongodb.enabled=false \
+            --set postgres.enabled=false \
+            --set eddi.datastore.externalConnectionString=mongodb://db.example.com:27017/eddi \
+            --set eddi.oidc.enabled=true \
+            --set eddi.oidc.authServerUrl=https://idp.example.com/realms/eddi \
+            --set eddi.oidc.publicUrl=https://idp.example.com > /dev/null
+
+          # The external-PostgreSQL shape had no credentials path at all: it
+          # rendered, NOTES printed "PostgreSQL (external)", and the pod died on
+          # "password authentication failed" with the only workaround being a
+          # password in the ConfigMap. Rendered here, and asserted below to be
+          # REFUSED when the credentials are missing.
+          echo "--- external PostgreSQL"
+          helm template eddi helm/eddi \
+            --set eddi.vaultMasterKey=$key \
+            --set mongodb.enabled=false \
+            --set postgres.enabled=false \
+            --set eddi.datastoreType=postgres \
+            --set eddi.datastore.externalJdbcUrl=jdbc:postgresql://db.example.com:5432/eddi \
+            --set eddi.datastore.externalJdbcUsername=eddi \
+            --set eddi.datastore.externalJdbcPassword=ci-placeholder-pg > /dev/null
+
+          # Null-valued renders. A values file with a bare `externalJdbcUrl:` —
+          # what an operator gets by copying values.yaml and clearing the
+          # placeholder — is YAML null, not "". Every guard above tests these
+          # values for emptiness, and Sprig's toString turns nil into the
+          # literal, TRUTHY string "<nil>": written that way the datastore-type
+          # guard refused this exact stock MongoDB install, naming a PostgreSQL
+          # that appears nowhere in the values. Rendered rather than grepped for,
+          # because the assertion that caught nothing was a grep.
+          echo "--- null-valued optional datastore/messaging values still render"
+          helm template eddi helm/eddi \
+            --set eddi.vaultMasterKey=$key \
+            --set eddi.datastore.externalJdbcUrl=null \
+            --set eddi.datastore.externalConnectionString=null \
+            --set eddi.messagingType=null > /dev/null
+
+      - name: The chart's guards still fire
+        # Every one of these used to render happily and hand the operator a
+        # deployment that could not work. A guard that stops firing is invisible,
+        # so each is asserted to FAIL.
+        run: |
+          set -euo pipefail
+          key=ci-placeholder-vault-key
+          expect_failure() {
+            local what="$1"; shift
+            if helm template eddi helm/eddi "$@" > /dev/null 2>&1; then
+              echo "::error::'$what' rendered successfully — its guard no longer fires"
+              exit 1
+            fi
+            echo "ok: '$what' is refused"
+          }
+          expect_failure "no datastore configured at all" \
+            --set eddi.vaultMasterKey=$key --set mongodb.enabled=false --set postgres.enabled=false
+          expect_failure "messagingType=nats on a stock image" \
+            --set eddi.vaultMasterKey=$key --set eddi.messagingType=nats
+          expect_failure "OIDC enabled without a browser-facing publicUrl" \
+            --set eddi.vaultMasterKey=$key --set eddi.oidc.enabled=true \
+            --set eddi.oidc.authServerUrl=https://idp.example.com/realms/eddi
+          expect_failure "OIDC with neither an in-chart Keycloak nor an authServerUrl" \
+            --set eddi.vaultMasterKey=$key --set eddi.oidc.enabled=true \
+            --set eddi.oidc.publicUrl=https://idp.example.com
+          expect_failure "external PostgreSQL with no credentials" \
+            --set eddi.vaultMasterKey=$key --set mongodb.enabled=false --set postgres.enabled=false \
+            --set eddi.datastoreType=postgres \
+            --set eddi.datastore.externalJdbcUrl=jdbc:postgresql://db.example.com:5432/eddi
+          expect_failure "a datastore type that disagrees with the datastore configured" \
+            --set eddi.vaultMasterKey=$key --set mongodb.enabled=false --set postgres.enabled=false \
+            --set eddi.datastore.externalJdbcUrl=jdbc:postgresql://db.example.com:5432/eddi \
+            --set eddi.datastore.externalJdbcUsername=eddi \
+            --set eddi.datastore.externalJdbcPassword=ci-placeholder-pg
+          # Mixed case. EDDI compares EDDI_DATASTORE_TYPE exactly — isPostgres()
+          # is `"postgres".equals(datastoreType)` — so a guard that lowercased
+          # the declared type before comparing was case-INSENSITIVE against a
+          # case-SENSITIVE reader: this shape passed it, rendered
+          # EDDI_DATASTORE_TYPE "Postgres", matched neither Java branch and
+          # booted the MongoDB store against mongodb://mongodb:27017/eddi. Every
+          # other case here spells the type the way the chart's own docs do, so
+          # only this one can see that.
+          expect_failure "a mixed-case datastore type EDDI would not match" \
+            --set eddi.vaultMasterKey=$key --set eddi.datastoreType=Postgres \
+            --set mongodb.enabled=false --set postgres.enabled=true \
+            --set postgres.password=ci-placeholder-pg
+          # mongodb.enabled defaults to TRUE, so this is what an operator gets by
+          # turning PostgreSQL on and nothing else. It rendered a wasted MongoDB
+          # StatefulSet; once the type guards existed it was refused by both of
+          # them at once, each demanding the value the other rejected. Named for
+          # the real cause instead.
+          expect_failure "both in-chart datastores enabled at once" \
+            --set eddi.vaultMasterKey=$key --set eddi.datastoreType=postgres \
+            --set postgres.enabled=true --set postgres.password=ci-placeholder-pg
+          expect_failure "messagingType=nats with no NATS deployed" \
+            --set eddi.vaultMasterKey=$key --set eddi.messagingType=nats \
+            --set nats.buildProfileImage=true --set nats.enabled=false
+          expect_failure "NATS deployed for in-memory messaging" \
+            --set eddi.vaultMasterKey=$key --set nats.enabled=true
+          # A NULL publicUrl, not the empty-string default. The guard is a
+          # truthiness test, and `toString nil` is the truthy literal "<nil>":
+          # written that way this rendered with exit 0, handing the Manager SPA
+          # "<nil>" as its Keycloak authority and pinning the issuer to
+          # "<nil>/realms/eddi". The empty-string case above cannot see that.
+          expect_failure "OIDC with an explicitly null publicUrl" \
+            --set eddi.vaultMasterKey=$key --set eddi.oidc.enabled=true \
+            --set keycloak.enabled=true --set keycloak.adminPassword=ci-placeholder-kc \
+            --set eddi.oidc.publicUrl=null
+          # Two datastores of one kind. The in-chart URL is a ConfigMap env var
+          # (ordinal 300) and the external URI a line in the mounted properties
+          # file (ordinal 400), so the external one silently won while NOTES.txt
+          # reported "in-chart" — a stale value in an upgraded values file
+          # changed which database EDDI talked to, with no render error.
+          expect_failure "an in-chart MongoDB alongside an external one" \
+            --set eddi.vaultMasterKey=$key \
+            --set eddi.datastore.externalConnectionString=mongodb://db.example.com:27017/eddi
+          expect_failure "an in-chart PostgreSQL alongside an external one" \
+            --set eddi.vaultMasterKey=$key --set eddi.datastoreType=postgres \
+            --set mongodb.enabled=false --set postgres.enabled=true \
+            --set postgres.password=ci-placeholder-pg \
+            --set eddi.datastore.externalJdbcUrl=jdbc:postgresql://db.example.com:5432/eddi
+
   # ─── Job 1: Build & Test ────────────────────────────────────────
   build-and-test:
     name: Build & Test
     runs-on: ubuntu-latest
     needs: detect-changes
-    if: needs.detect-changes.outputs.code == 'true'
+    # operator_docs as well as code. DeploymentManifestsTest asserts things about
+    # docs/kubernetes.md and README.md — that they route `kubectl apply -k`
+    # through create-secrets.sh, name ContainerCreating, and do not advertise the
+    # mutable tag — and neither file is in the `code` filter, so the one change
+    # those guards could not see was a change to the files they guard.
+    #
+    # Nothing downstream widens with it: integration-test and trivy-scan still
+    # gate on `code` alone, and docker `needs` all three, so a docs-only change
+    # runs the tests and publishes nothing. sbom and preflight-check carry the
+    # same `code` condition explicitly for that reason. (codeql has no condition
+    # at all — it is deliberately unconditional for OpenSSF Scorecard; see its
+    # own header.)
+    if: needs.detect-changes.outputs.code == 'true' || needs.detect-changes.outputs.operator_docs == 'true'
 
     steps:
       - name: Checkout
@@ -596,8 +876,11 @@ jobs:
   sbom:
     name: Generate SBOM
     runs-on: ubuntu-latest
-    needs: build-and-test
-    if: github.event_name == 'push'
+    # The `code` condition is explicit rather than inherited: build-and-test also
+    # runs for an operator-docs-only change now, and an SBOM of unchanged code is
+    # noise.
+    needs: [detect-changes, build-and-test]
+    if: github.event_name == 'push' && needs.detect-changes.outputs.code == 'true'
     steps:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -1098,8 +1381,11 @@ jobs:
   preflight-check:
     name: Preflight Dry-Run (PR)
     runs-on: ubuntu-latest
-    needs: build-and-test
-    if: github.event_name == 'pull_request'
+    # Explicit `code`, for the same reason as sbom: build-and-test now also runs
+    # on an operator-docs-only PR, and a container preflight there builds an
+    # image nothing changed.
+    needs: [detect-changes, build-and-test]
+    if: github.event_name == 'pull_request' && needs.detect-changes.outputs.code == 'true'
 
     steps:
       - name: Checkout

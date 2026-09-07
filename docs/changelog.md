@@ -195,6 +195,168 @@ locally. CI is the authority for those.
 **Reviewer note.** This branch changes the local build contract: `./mvnw compile` now fails
 on unformatted or badly-imported sources instead of quietly rewriting them. AGENTS.md is
 updated to say so, because the previous wording described the old behaviour.
+## 🔐 fix(deploy): no credential in the auth component has a default any more (2026-09-07)
+
+**Repo:** EDDI (`fix/review-deploy`)
+
+Three review comments on the development auth overlay, all of them fair.
+
+**The shipped realm allowed cleartext for everything.** `sslRequired: "none"` let Keycloak serve the
+login form, the authorization code and the token endpoint over plain HTTP to any caller. It is now
+`"external"` in all three realm copies — Keycloak exempts local addresses, so every documented path
+still works: the quick start uses `kubectl port-forward` (arrives as `127.0.0.1`), compose sees the
+bridge gateway, and EDDI's backchannel runs pod-to-pod on RFC 1918. The one case where `external`
+would bite, a pod CIDR outside RFC 1918 such as `100.64.0.0/10`, is documented with the
+`X-Forwarded-Proto` requirement rather than left to be discovered.
+
+**The secret generator printed a key it had not installed.** Under any `-WhatIf` run the PowerShell
+script reached the key box, because the report block sat outside the `ShouldProcess` gate — telling
+an operator a master key was installed when nothing was, and printing a secret that exists nowhere.
+It now tracks whether the create actually happened. The bash twin has no dry-run mode and so no
+equivalent path; that invariant is now written down next to its key box, and the new test sweeps
+both scripts so the two cannot drift.
+
+**The component shipped a guessable full administrator.** `admin/admin` plus a privileged
+`eddi/eddi` account, on a workload fronted by a ClusterIP every pod in the namespace can reach. The
+"development only" framing is real but does not cover that, and `"temporary": true` is not a
+mitigation — Keycloak 26 drops the required action on realm import, which this repo had already
+recorded. `KC_BOOTSTRAP_ADMIN_PASSWORD` now comes from an operator-created Secret with no default,
+so the component fails closed with `secret "keycloak-admin" not found`; and the privileged `eddi`
+fixture ships with no credential at all, keeping its roles so recovery is one console action rather
+than recreating a user, two roles and a group. The unprivileged fixtures are untouched, so the demo
+login still works.
+
+Each change is pinned by a relational assertion rather than a literal: the realm must require TLS
+for external clients, a generator may print a key only if it issued the create, no shipped manifest
+may carry a usable default privileged password, and the Secret name in the YAML must appear in the
+`kubectl create secret` command the docs give.
+
+---
+
+## 🧭 fix(ci): build on every operator document the manifest suite asserts about (2026-09-07)
+
+**Repo:** EDDI (`fix/review-deploy`)
+
+A review comment asked that no operator-facing document this suite pins can be edited without
+`build-and-test` running. The `operator_docs` filter covered `docs/kubernetes.md` and `README.md`,
+but `docsNameTheRealClientId` also reads `docs/security.md` and asserts it names `eddi-frontend`
+rather than the stale `eddi-manager` — and that file matched neither filter. This branch changed
+`docs/security.md` itself, so a revert of it would have sailed past the only test that guards it.
+
+Closed at the mechanism rather than in prose: the filter now covers what the suite actually reads.
+
+---
+
+## ☸️ fix(deploy): stop the secret generator deleting on the normal path, pin config to its pods (2026-09-06)
+
+**Repo:** EDDI (`fix/review-deploy`)
+
+Fifth review round on this branch. Five comments, all behavioural, all fixed and each proven by
+reverting the change and watching a named test fail.
+
+**The secret generator deleted before it created, on every run.** `kubectl delete secret
+eddi-secrets --ignore-not-found` ran unconditionally, so the window between delete and create
+existed even when the operator had asked for nothing destructive. A pod starting in that window
+came up without its vault key. The delete now lives inside the `--force` branch in both
+`create-secrets.sh` and `create-secrets.ps1`; the normal path relies on `kubectl create` refusing
+with `AlreadyExists` and reports that nothing was changed.
+
+**The test suite had pinned the race as a requirement.** Two normal-path tests asserted the
+scripts "must keep the delete-then-create it does once past the guard" — so fixing the scripts
+alone would have turned them red, and leaving them would have blocked the fix forever. This is the
+failure mode this review keeps finding: a test that guards the bug rather than the contract. Both
+now assert the delete is reachable only under `--force`.
+
+**A config change did not restart the pods that read it.** The Deployment pod template gained
+`checksum/config` and `checksum/secret` annotations hashing the rendered `configmap.yaml` and
+`secret.yaml`, so `helm upgrade` rolls pods when their configuration actually changed. Without it
+`envFrom` kept serving the old values until something unrelated caused a restart — the same
+trap the Keycloak upgrade note now documents, with `kubectl rollout restart deployment/eddi`.
+
+**Files:** `k8s/create-secrets.sh`, `k8s/create-secrets.ps1`,
+`helm/eddi/templates/deployment.yaml`, `k8s/overlays/auth/kustomization.yaml`,
+`docs/kubernetes.md`, `src/test/java/ai/labs/eddi/deploy/DeploymentManifestsTest.java`
+
+---
+
+## 🔎 test(deploy): assert manifest relationships, not the presence of strings (2026-09-04)
+
+**Repo:** EDDI (`fix/review-deploy`)
+
+Follow-up on the same branch, from three independent review rounds over the deployment fixes.
+
+The manifest suite was asserting that literals exist. A test for the Keycloak security context
+checked only that `runAsNonRoot: true` and `runAsUser: 1000` appear somewhere in the file after
+comment-stripping, which a commented-out or wrongly-nested block satisfies. Assertions now
+resolve the YAML and check the value on the container that actually runs.
+
+The CI path-filter test asserted that a forced-true exists for tagged releases, but that
+contract is **positional** — the `echo "<filter>=true"` has to sit inside the
+`if [[ "$GITHUB_REF" == refs/tags/* ]]` branch to mean anything. It now checks placement.
+
+The secret-generator ordering test was strengthened to assert the guard precedes the
+destructive delete *and* that an `exit 1` sits between them, so a guard that only warns fails.
+
+Two justifications were withdrawn after the reviewer disproved them: the secret scripts were
+filed as needing a live cluster, when their fail-closed classification is plain text parsing;
+and the Helm chart version claim was pinned to the break it documents by asserting `manager`,
+`monitoring` and `namespace` really are absent from `values.yaml`, so the major bump cannot
+become a different lie.
+
+**Coverage note.** Diff coverage of Java changed lines is 100%, but that figure is the
+intersection of the tool with an almost-empty `src/main` diff — this branch is 38 non-Java
+files. The manifests are covered by the structural suite instead, which is stated plainly
+rather than presented as a coverage result.
+
+---
+
+## ☸️ fix(deploy): repair Keycloak realm substitution and the secret generator, add a manifest regression suite (2026-09-04)
+
+**Repo:** EDDI (`fix/review-deploy`)
+
+From the whole-repository code review. The shipped Kubernetes and Helm assets failed
+*silently at deploy time* rather than loudly at render time.
+
+**Applying the documented quick start destroyed the vault master key.** `k8s/base` shipped
+`eddi-secret.yaml` as a live resource, so every `kubectl apply -k` re-applied the
+placeholder committed to this repository over whatever key was installed. On a first
+install the operator silently ran with a published key; on any later apply the real key was
+overwritten and everything sealed with it became undecryptable. The manifest is now
+`eddi-secret.yaml.example` and is not applied; `create-secrets.sh` refuses to clobber an
+existing secret unless asked.
+
+**Both shipped `k8s/examples/` kustomizations failed to build at all** — verified by running
+`kubectl kustomize`, which exits non-zero because an overlay reaches a file outside its own
+root. Composing overlays the way their own headers instruct also silently discarded their
+ConfigMap patches, so a NATS deployment came up still set to in-memory messaging.
+
+**Keycloak never became ready and never had a realm.** The probes targeted a port serving
+no health endpoint, so the pod stayed NotReady forever and its Service got no endpoints; and
+the deployment never imported the realm, so OIDC discovery resolved against a realm that did
+not exist. Keycloak also ran `start-dev` with no persistent volume, so every restart wiped
+realms, clients and users — it is now a StatefulSet with a volume.
+
+**The Helm realm substitution matched nothing.** The chart replaced the literal
+`https://eddi.example.com`, but both shipped realm copies advertised a *different*
+placeholder host, so `helm` exited 0 and login died with `Invalid parameter: redirect_uri`.
+
+### Regression coverage
+
+Deployment assets were the one area with almost no automated coverage, which is why these
+shipped. This branch adds `DeploymentManifestsTest` — a structural suite that asserts
+*relationships* rather than presence: that the realm placeholder the chart substitutes is
+the one the realm files actually carry; that the token issuer is derived from the same
+public URL on both the Helm and Kustomize paths; that the realm volume resolves to a
+ConfigMap the overlay genuinely generates; and that the secret generator checks before it
+deletes.
+
+A new CI `manifest-lint` job renders every kustomization and lints the chart, so a manifest
+that does not build fails the pipeline instead of a deployment. It is deliberately a PR gate
+and not a release blocker, for the same reason `shell-lint` is: a manifest typo should not
+hold up a security patch.
+
+The six tests were proven by mutating all six inputs at once and confirming exactly six
+failures with no collateral.
 ## 🧾 fix(gdpr): name the conversations an export lost, and stop a cache miss disowning a delete (2026-09-07)
 
 **Repo:** EDDI (`fix/review-audit-gdpr`)
