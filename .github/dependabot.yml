@@ -49,6 +49,37 @@ updates:
     commit-message:
       prefix: "chore(docker)"
 
+  # MCP bridge sidecar base image digest.
+  # mcp-sidecar/Dockerfile is digest-pinned and built by
+  # docker-compose.mcp-sidecar.yml, but sat in no ecosystem at all, so it aged
+  # silently while the published image's base was watched twice over (here and
+  # by base-image-check.yml).
+  - package-ecosystem: docker
+    directory: /mcp-sidecar
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+      - security
+    commit-message:
+      prefix: "chore(docker)"
+
+  # KNOWN GAP — the ten third-party images pinned across docker-compose*.yml
+  # (mongo, postgres, keycloak, nats, ollama, chroma, prometheus, grafana,
+  # jaeger, curl) are in NO ecosystem here. The `docker` ecosystem only reads
+  # Dockerfiles, so the images every user actually runs alongside EDDI are
+  # updated when a human remembers, while the published image's own base is
+  # watched twice over (above, and weekly by base-image-check.yml).
+  #
+  # Closing it means either a `docker-compose` ecosystem entry or teaching
+  # base-image-check.yml's skopeo digest comparison to iterate the `image:`
+  # lines in docker-compose*.yml. Left open deliberately rather than guessed at:
+  # an unrecognised package-ecosystem invalidates this WHOLE file, which would
+  # silently stop the Maven and base-image updates above — a worse outcome than
+  # the gap it would close.
+
   # ClusterFuzzLite base image digest
   - package-ecosystem: docker
     directory: /.clusterfuzzlite

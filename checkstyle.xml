@@ -33,7 +33,7 @@
     <!-- Line length: 150 (realistic for Java with generics/annotations) -->
     <module name="LineLength">
         <property name="max" value="150"/>
-        <property name="ignorePattern" value="^package.*|^import.*|a]href|http://|https://|ftp://"/>
+        <property name="ignorePattern" value="^package.*|^import.*|a href|href|http://|https://|ftp://"/>
     </module>
 
     <module name="FileTabCharacter">
@@ -54,9 +54,17 @@
             <property name="format" value="^[a-zA-Z][a-zA-Z0-9_]*$"/>
         </module>
 
-        <!-- Import checks -->
-        <module name="RedundantImport"/>
-        <module name="UnusedImports"/>
+        <!-- Import checks. severity="error" promotes these above the Checker's
+             default "warning", which is what makes them BLOCKING: the pom sets
+             violationSeverity=error, so only rules marked here can fail a build.
+             AGENTS.md §4.7 makes them mandatory ("Don't leave unused imports behind
+             after a refactor"); everything else in this file stays advisory. -->
+        <module name="RedundantImport">
+            <property name="severity" value="error"/>
+        </module>
+        <module name="UnusedImports">
+            <property name="severity" value="error"/>
+        </module>
 
         <!-- Whitespace — only critical ones -->
         <module name="GenericWhitespace"/>
