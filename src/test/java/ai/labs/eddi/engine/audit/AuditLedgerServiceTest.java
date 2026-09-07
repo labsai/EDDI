@@ -20,6 +20,7 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -1696,7 +1697,10 @@ class AuditLedgerServiceTest {
 
         var svc = AuditLedgerService.createForTesting(auditStore, true, 60, null, meterRegistry, 10);
         svc.init();
-        doThrow(new RuntimeException("store down")).when(auditStore).appendBatch(anyList());
+        // storeIsDown, not appendBatch alone: main added a per-entry retry pass that
+        // runs before the dead-letter drop, so a mock whose appendEntry still
+        // succeeds stores the entries individually and nothing ever reaches the sink.
+        storeIsDown();
 
         svc.submit(entry("id-1", "conv-default-sink-probe", "agent-1"));
         svc.flush(); // failure 1 — re-queued
@@ -1745,7 +1749,10 @@ class AuditLedgerServiceTest {
 
         var svc = AuditLedgerService.createForTesting(auditStore, true, 60, null, meterRegistry, 10, sink.toString());
         svc.init();
-        doThrow(new RuntimeException("store down")).when(auditStore).appendBatch(anyList());
+        // storeIsDown, not appendBatch alone: main added a per-entry retry pass that
+        // runs before the dead-letter drop, so a mock whose appendEntry still
+        // succeeds stores the entries individually and nothing ever reaches the sink.
+        storeIsDown();
 
         svc.submit(entry("id-1", "conv-configured-sink-probe", "agent-1"));
         svc.flush();
@@ -1769,6 +1776,8 @@ class AuditLedgerServiceTest {
             conversations.add(mapper.readTree(line).get("conversationId").asText());
         }
         return conversations;
+    }
+
     // ==================== shutdown budget (finding r1) ====================
 
     /**
