@@ -49,6 +49,28 @@ bottom of this file and are never archived.
 
 ---
 
+## 🔁 test(backup): reach the rollback path without a multi-agent archive (2026-09-07)
+
+**Repo:** EDDI (`fix/review-backup-sync`)
+
+Merging main brought in two import-rollback tests from #733 that build an archive with **two** agent
+files, land the first and fail the second. This branch independently forbids that: `singleAgentFileIn`
+rejects a multi-agent archive, because an operator who approved importing one agent was getting
+several, with the `Location` header pointing at whichever file happened to be enumerated last.
+
+Both are right, and as written they cannot both hold. The guard stays; the tests were reshaped to
+reach the same rollback through a single-agent archive whose **schedule write** fails. That is the
+first step after the Agent is created and registered, which the production comment at the call site
+already says is deliberate: schedules carry the id of the agent they fire, so they are written after
+the Agent but before descriptor bookkeeping, "so a failure there still rolls them back".
+
+Every assertion survives in substance — the Agent is registered, its row is deleted, and it is taken
+back out of the capability index; and for the second test, a registry that throws on `unregister`
+still must not abandon the workflow delete that follows it. Proven by deleting `unregisterCapabilities`
+from the rollback: `Wanted but not invoked: capabilityRegistryService.unregister(...)`.
+
+---
+
 ## 🔑 fix(backup): a reordered config list could hand one endpoint another's credential (2026-09-07)
 
 **Repo:** EDDI (`fix/review-backup-sync`)
