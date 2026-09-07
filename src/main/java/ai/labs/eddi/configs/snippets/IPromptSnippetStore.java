@@ -12,7 +12,7 @@ import java.util.List;
 /**
  * Persistence store for reusable prompt-snippet documents.
  * {@code PromptSnippetService} reads them into the LLM template data map so
- * system prompts can pull in {@code {snippets.name}} fragments at task
+ * system prompts can pull in {@code {snippets.<name>}} fragments at task
  * execution time.
  *
  * @since 6.0.0

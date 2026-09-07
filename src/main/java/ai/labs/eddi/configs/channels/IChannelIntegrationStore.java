@@ -9,9 +9,11 @@ import ai.labs.eddi.datastore.IResourceStore;
 
 /**
  * Persistence store for channel integration configurations (Slack and similar
- * platforms). {@code ChannelTargetRouter} and the REST channel API load these
- * to route incoming events onto agents or groups, independently of
- * {@code AgentConfiguration}.
+ * platforms). The REST channel API manages them; {@code ChannelTargetRouter}
+ * loads them to route incoming events onto agents or groups. They replace the
+ * legacy {@code ChannelConnector} entries on {@code AgentConfiguration}: where
+ * an integration here covers a channel type and id, the legacy entries for that
+ * pair are ignored.
  *
  * @since 6.1.0
  */
