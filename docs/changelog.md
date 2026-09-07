@@ -1156,6 +1156,37 @@ Kept separate so the digest bump can land immediately and unblock releases.
 repository**, so it cannot surface a UBI 10 image no matter how long one exists. Left as-is;
 widening it belongs with the decision above.
 
+### Merge with #736 — two guards for the same bug, combined
+
+#736 landed on `main` first and had independently fixed the same Dependabot false match, so the
+merge was a conflict between two working implementations rather than a text collision. Neither
+was strictly better, and each carried something the other lacked.
+
+`main` asked `gh pr list --app dependabot`; this branch asked `--author 'app/dependabot'`.
+`--app` is right: `--author` is the *user* filter and does not reliably match an App-authored
+PR, so the candidate list can come back empty, the skip never fires, and the job opens a
+duplicate — the mirror image of the bug being fixed. `main`'s reasoning about
+`dependabot.yml` watching three directories (`/src/main/docker`, `/mcp-sidecar`,
+`/.clusterfuzzlite`) is also the more complete statement of why the branch prefix was never
+sufficient; the demo image was only the instance that happened to bite.
+
+This branch, in turn, surfaces `gh` failures instead of swallowing them. `main` wrapped both
+lookups in `2>/dev/null || echo ""`, which restores the original failure mode in a new place:
+an unreadable candidate silently becomes "not a match", and nothing says so. The three
+follow-up commits here exist for exactly that.
+
+Resolved by taking `--app dependabot` and `main`'s reasoning into this branch's structure, so
+the guard both queries correctly and reports when it could not. Verified the merged workflow
+parses as YAML and that all six `run` blocks pass `bash -n`.
+
+**The digest now applies to two `FROM` lines.** #736 split the image into a throwaway `docs`
+stage plus the runtime stage, both carrying the pin. Its own comment requires the two to move
+together — `base-image-check.yml` parses the last `FROM` and its `sed` rewrites every line
+carrying the pin — so bumping one would leave the vulnerable base in the published image and
+silently desynchronise the automation. Both moved. `EddiImageDockerfileTest` (also new in
+#736) pins the integration image to the production file and uses synthetic digests rather
+than the real one, so it required no change.
+
 **Files:** [`src/main/docker/Dockerfile`](../src/main/docker/Dockerfile),
 [`.github/workflows/base-image-check.yml`](../.github/workflows/base-image-check.yml)
 
