@@ -83,8 +83,36 @@ jobs:
       # ── Fetch current metrics ───────────────────────────────
       - name: Fetch Docker Hub pulls
         id: docker
+        env:
+          PREV_PULLS: ${{ steps.prev.outputs.docker_pulls }}
         run: |
-          PULLS=$(curl -sf https://hub.docker.com/v2/repositories/labsai/eddi/ | jq '.pull_count')
+          set -uo pipefail
+          # `curl -sf` prints nothing and exits non-zero on an HTTP error, and jq
+          # over empty input prints nothing, so without pipefail this step used to
+          # SUCCEED with an empty `pulls=` output. That empty value then reached
+          # the GA4 and Umami payloads as `"docker_pulls": ,` - invalid JSON, two
+          # junk POSTs - and `jq --argjson docker_pulls ""`, which aborts "Build
+          # metrics snapshot" before "Save metrics cache", so the baseline was not
+          # rolled forward either. Meanwhile "Compute deltas" evaluated
+          # `$(( - 300000 ))` and reported a phantom milestone. Docker Hub's
+          # unauthenticated endpoint is polled 96 times a day by this cron, so a
+          # blip is routine rather than exceptional.
+          #
+          # Carrying the previous value forward is the same shape as the traffic
+          # step above, and it keeps the delta at 0 instead of inventing one. The
+          # digits-only guard is the one "Persist metrics history" already gets
+          # right: jq prints the literal `null` for a missing field, which is
+          # non-empty, so an emptiness check alone would let it through.
+          PULLS=$(curl -sf https://hub.docker.com/v2/repositories/labsai/eddi/ | jq -r '.pull_count // empty')
+          case "${PULLS:-}" in
+            ''|*[!0-9]*)
+              echo "::warning::Docker Hub returned no usable pull_count - carrying the previous value forward"
+              PULLS="${PREV_PULLS:-0}"
+              ;;
+          esac
+          case "${PULLS:-}" in
+            ''|*[!0-9]*) PULLS=0 ;;
+          esac
           echo "pulls=$PULLS" >> "$GITHUB_OUTPUT"
           echo "Docker pulls: $PULLS"
 

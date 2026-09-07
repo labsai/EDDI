@@ -4,22 +4,29 @@ maven = "3.9.12"
 "npm:chromadb" = "3.4.3"
 
 [tasks.dev]
-depends = ["clean"]
 run = "mvn compile quarkus:dev"
 description = "Start dev mode with live reload (port 7070)"
 
 [tasks.compile]
-depends = ["clean"]
 run = "mvn compile"
 description = "Compile sources only (fast feedback)"
 
 [tasks.test]
 run = "mvn verify"
-description = "Compile + unit tests + integration tests (requires Docker)"
+description = "Compile + unit tests + package (ITs skipped - use `mise run test-it`)"
+
+[tasks.test-it]
+run = "mvn verify -DskipITs=false"
+description = "Compile + unit tests + integration tests + the 90/80 coverage gate (requires Docker)"
+
+[tasks.clean-compile]
+depends = ["clean"]
+run = "mvn compile"
+description = "Clean build, then compile"
 
 [tasks.validate]
 run = "mvn validate"
-description = "Run Checkstyle code style checks"
+description = "Blocking Checkstyle import rules + the formatter check (fix formatting with `mise run format`)"
 
 [tasks.format]
 run = "mvn formatter:format"
