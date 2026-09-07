@@ -11,6 +11,7 @@ import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
 import com.mongodb.MongoClientSettings;
+import com.mongodb.ReadPreference;
 import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
@@ -56,6 +57,13 @@ class MongoScheduleStoreTest {
 
         when(database.getCollection("eddi_schedules")).thenReturn(scheduleCollection);
         when(database.getCollection("eddi_schedule_fire_logs")).thenReturn(fireLogCollection);
+
+        // The store keeps a primary-read view of the schedule collection for the two
+        // reads the erasure guarantee rests on. Every test here runs against a single
+        // logical node, so the two views are the same mock and existing stubs on
+        // scheduleCollection keep applying to both. That they are DISTINCT views on a
+        // replica set is what logFire_probesTheScheduleOnThePrimary pins.
+        when(scheduleCollection.withReadPreference(any(ReadPreference.class))).thenReturn(scheduleCollection);
 
         stubFireLogCascadeDefaults();
 
@@ -1074,6 +1082,127 @@ class MongoScheduleStoreTest {
 
         verify(fireLogCollection).insertOne(any(Document.class));
         verify(fireLogCollection, never()).deleteOne(any(Bson.class));
+    }
+
+    /**
+     * The post-insert probe has to be answered by the PRIMARY, or the ordering
+     * argument the whole guarantee rests on is not true.
+     * <p>
+     * {@code PersistenceModule} builds the client with
+     * {@code ReadPreference.nearest()}, applied AFTER the connection string, so an
+     * unqualified read from this collection can be served by a secondary that has
+     * not yet replicated the delete. The probe would then see a schedule that is
+     * already gone on the primary, skip the compensating delete, and leave a fire
+     * log carrying the erased user's conversationId behind with nothing left to
+     * find it by — a GDPR erasure reporting success over data it did not remove.
+     * The Javadoc asserted the primary read; only the deployment happening to be a
+     * standalone {@code mongod} made it so.
+     * <p>
+     * Modelled here as two distinct views of one collection that disagree: the
+     * default (nearest) view still holds the schedule, the primary view knows it is
+     * gone. The compensation must fire, which it can only do by reading the latter.
+     */
+    @Test
+    @DisplayName("logFire — probes the schedule on the PRIMARY, not on a lagging replica")
+    void logFire_probesTheScheduleOnThePrimary() throws Exception {
+        MongoDatabase database = mock(MongoDatabase.class);
+        MongoCollection<Document> nearestView = mock(MongoCollection.class);
+        MongoCollection<Document> primaryView = mock(MongoCollection.class);
+        MongoCollection<Document> fireLogs = mock(MongoCollection.class);
+
+        when(database.getCollection("eddi_schedules")).thenReturn(nearestView);
+        when(database.getCollection("eddi_schedule_fire_logs")).thenReturn(fireLogs);
+        when(nearestView.withReadPreference(ReadPreference.primary())).thenReturn(primaryView);
+
+        // The secondary is behind: it still reports the just-erased schedule.
+        FindIterable<Document> stale = mock(FindIterable.class);
+        when(stale.projection(any())).thenReturn(stale);
+        when(stale.first()).thenReturn(new Document("_id", "sched-erased"));
+        when(nearestView.find(any(Bson.class))).thenReturn(stale);
+
+        // The primary has committed the delete.
+        FindIterable<Document> current = mock(FindIterable.class);
+        when(current.projection(any())).thenReturn(current);
+        when(current.first()).thenReturn(null);
+        when(primaryView.find(any(Bson.class))).thenReturn(current);
+
+        when(fireLogs.deleteOne(any(Bson.class))).thenReturn(mock(DeleteResult.class));
+        when(jsonSerialization.serialize(any())).thenReturn("{}");
+        when(jsonSerialization.deserialize(anyString(), eq(Document.class))).thenReturn(new Document());
+
+        var replicaSetStore = new MongoScheduleStore(database, jsonSerialization, documentBuilder, 100);
+        replicaSetStore.logFire(new ScheduleFireLog("log-late", "sched-erased", "fire-1",
+                Instant.now(), Instant.now(), Instant.now(), "COMPLETED", "inst-1", "conv-erased", null, 1, 0.5));
+
+        verify(primaryView).find(any(Bson.class));
+        verify(nearestView, never()).find(any(Bson.class));
+        verify(fireLogs).deleteOne(any(Bson.class));
+    }
+
+    /**
+     * Same reasoning for the delete side. The ids resolved here are the input to
+     * BOTH cascade passes, so a stale secondary omitting a schedule that the
+     * primary's {@code deleteMany} then removes strands that schedule's fire logs
+     * permanently — no later pass ever knows to look for them.
+     */
+    @Test
+    @DisplayName("cascade — resolves the schedule ids on the PRIMARY, not on a lagging replica")
+    void cascade_resolvesScheduleIdsOnThePrimary() throws Exception {
+        MongoDatabase database = mock(MongoDatabase.class);
+        MongoCollection<Document> nearestView = mock(MongoCollection.class);
+        MongoCollection<Document> primaryView = mock(MongoCollection.class);
+        MongoCollection<Document> fireLogs = mock(MongoCollection.class);
+
+        when(database.getCollection("eddi_schedules")).thenReturn(nearestView);
+        when(database.getCollection("eddi_schedule_fire_logs")).thenReturn(fireLogs);
+        when(nearestView.withReadPreference(ReadPreference.primary())).thenReturn(primaryView);
+
+        // The secondary has not replicated the newest schedule of this user yet.
+        // Built before the when(...), never inside it: findingIds() stubs mocks of its
+        // own, and Mockito reads that as an unfinished stubbing of the outer call.
+        FindIterable<Document> staleIds = findingIds();
+        FindIterable<Document> currentIds = findingIds("sched-fresh");
+        when(nearestView.find(any(Bson.class))).thenReturn(staleIds);
+        when(primaryView.find(any(Bson.class))).thenReturn(currentIds);
+
+        DeleteResult deleted = mock(DeleteResult.class);
+        when(deleted.getDeletedCount()).thenReturn(1L);
+        when(nearestView.deleteMany(any(Bson.class))).thenReturn(deleted);
+        when(fireLogs.deleteMany(any(Bson.class))).thenReturn(mock(DeleteResult.class));
+
+        var replicaSetStore = new MongoScheduleStore(database, jsonSerialization, documentBuilder, 100);
+        replicaSetStore.deleteSchedulesByUserId("user-erased");
+
+        verify(primaryView).find(any(Bson.class));
+        verify(nearestView, never()).find(any(Bson.class));
+
+        // Both cascade passes must have seen the id the secondary was missing.
+        ArgumentCaptor<Bson> logFilters = ArgumentCaptor.forClass(Bson.class);
+        verify(fireLogs, times(2)).deleteMany(logFilters.capture());
+        for (Bson filter : logFilters.getAllValues()) {
+            assertTrue(filterJson(filter).contains("sched-fresh"),
+                    "a schedule missing from the id resolution is stranded in both passes: " + filterJson(filter));
+        }
+    }
+
+    /** A {@code find(...).projection(...)} that iterates the given schedule ids. */
+    private static FindIterable<Document> findingIds(String... ids) {
+        List<Document> docs = Arrays.stream(ids).map(id -> new Document("_id", id)).toList();
+        // Built before the when(...) for the same reason as at the call site.
+        MongoCursor<Document> cursor = cursorOver(docs);
+        FindIterable<Document> iterable = mock(FindIterable.class);
+        when(iterable.projection(any())).thenReturn(iterable);
+        when(iterable.iterator()).thenReturn(cursor);
+        return iterable;
+    }
+
+    /** A one-shot cursor over {@code docs}; Mockito's default is an empty one. */
+    private static MongoCursor<Document> cursorOver(List<Document> docs) {
+        MongoCursor<Document> cursor = mock(MongoCursor.class);
+        var it = docs.iterator();
+        when(cursor.hasNext()).thenAnswer(inv -> it.hasNext());
+        when(cursor.next()).thenAnswer(inv -> it.next());
+        return cursor;
     }
 
     /**

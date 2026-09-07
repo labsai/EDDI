@@ -12,6 +12,7 @@ import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import com.mongodb.ReadPreference;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.IndexOptions;
@@ -83,6 +84,25 @@ public class MongoScheduleStore implements IScheduleStore {
     private static final String PERSISTENT_CONVERSATION_ID = "persistentConversationId";
 
     private final MongoCollection<Document> scheduleCollection;
+    /**
+     * The same collection, read from the PRIMARY, for the two reads the erasure
+     * guarantee rests on: {@link #logFire}'s post-insert existence probe and
+     * {@link #deleteFireLogsOfSchedulesMatching}'s id resolution.
+     * <p>
+     * Everything else may read wherever it is cheapest — the client is built with
+     * {@code ReadPreference.nearest()} ({@code PersistenceModule}), and a stale
+     * schedule list merely delays a fire, which the CAS claim already tolerates.
+     * These two cannot tolerate it. Both reason about a delete that has just
+     * committed on the primary, so a lagging secondary answers with the world as it
+     * was BEFORE the erasure: the probe sees a schedule that is gone and keeps an
+     * orphaned fire log carrying the erased user's conversationId, and the id
+     * resolution omits a schedule the primary's {@code deleteMany} then removes,
+     * leaving that schedule's logs out of both cascade passes. Reading the primary
+     * is what makes the ordering argument on {@link #logFire} true; without it that
+     * argument holds only on a standalone {@code mongod}, which is why nothing ever
+     * failed.
+     */
+    private final MongoCollection<Document> schedulePrimaryReadCollection;
     private final MongoCollection<Document> fireLogCollection;
     private final IDocumentBuilder documentBuilder;
     private final IJsonSerialization jsonSerialization;
@@ -102,6 +122,7 @@ public class MongoScheduleStore implements IScheduleStore {
         this.documentBuilder = documentBuilder;
         this.pollBatchSize = pollBatchSize > 0 ? pollBatchSize : 100;
         this.scheduleCollection = database.getCollection(COLLECTION_SCHEDULES);
+        this.schedulePrimaryReadCollection = this.scheduleCollection.withReadPreference(ReadPreference.primary());
         this.fireLogCollection = database.getCollection(COLLECTION_FIRE_LOGS);
 
         // Indexes for efficient polling
@@ -603,14 +624,21 @@ public class MongoScheduleStore implements IScheduleStore {
      * delete's three steps D1 (delete logs), D2 (delete schedules), D3 (sweep logs)
      * against this method's W1 (insert), W2 (re-read schedule), W3 (compensate):
      * <ul>
-     * <li>D2 lands before W2 — W2 reads from the primary, sees no schedule, and W3
-     * removes the log.</li>
+     * <li>D2 lands before W2 — W2 sees no schedule, and W3 removes the log.</li>
      * <li>D2 lands after W2 — W1's document already exists, so D1 (if still to run)
      * or D3 removes it.</li>
      * </ul>
      * There is no ordering in which the log both survives and its schedule is gone.
      * The compensating delete is safe by construction: it fires only when the
      * schedule is absent, which is precisely when the log is an orphan.
+     * <p>
+     * That argument holds only if W2 observes D2, so W2 goes through
+     * {@link #schedulePrimaryReadCollection} and asks for the primary EXPLICITLY.
+     * It is not enough that the delete used {@code WriteConcern.MAJORITY}: the
+     * client is built with {@code ReadPreference.nearest()}, applied after the
+     * connection string, so an unqualified read here could be answered by a lagging
+     * secondary that still holds the just-deleted schedule — W3 would not fire, and
+     * the log would survive its schedule carrying the erased user's conversationId.
      * <p>
      * A failure of the compensating delete is reported rather than swallowed — the
      * schedule is gone by then, so the caller has to be able to tell a written log
@@ -624,7 +652,7 @@ public class MongoScheduleStore implements IScheduleStore {
             doc.put(ID, fireLog.id());
             writeFireLogInstants(doc, fireLog);
             fireLogCollection.insertOne(doc);
-            if (scheduleCollection.find(eq(ID, fireLog.scheduleId())).projection(new Document(ID, 1)).first() == null) {
+            if (schedulePrimaryReadCollection.find(eq(ID, fireLog.scheduleId())).projection(new Document(ID, 1)).first() == null) {
                 fireLogCollection.deleteOne(eq(ID, fireLog.id()));
                 LOGGER.debugf("Dropped fire log for schedule %s: the schedule was deleted while it was firing",
                         sanitize(fireLog.scheduleId()));
@@ -730,13 +758,19 @@ public class MongoScheduleStore implements IScheduleStore {
      * again if it has gone. The two passes here remain the belt-and-braces for logs
      * already written before the delete — including by a replica that had not yet
      * observed it.
+     * <p>
+     * The id resolution reads the PRIMARY ({@link #schedulePrimaryReadCollection}).
+     * The ids are not just this pass's input, they are also the sweep's — so a
+     * lagging secondary omitting a schedule the caller's {@code deleteMany} then
+     * removes on the primary would drop that schedule out of BOTH cascade passes
+     * and strand its logs permanently.
      *
      * @return the ids of the matched schedules, for the post-delete sweep
      */
     private List<String> deleteFireLogsOfSchedulesMatching(Bson filter) throws IResourceStore.ResourceStoreException {
         try {
             List<String> ids = new ArrayList<>();
-            for (var doc : scheduleCollection.find(filter).projection(new Document(ID, 1))) {
+            for (var doc : schedulePrimaryReadCollection.find(filter).projection(new Document(ID, 1))) {
                 Object id = doc.get(ID);
                 if (id != null) {
                     ids.add(id.toString());

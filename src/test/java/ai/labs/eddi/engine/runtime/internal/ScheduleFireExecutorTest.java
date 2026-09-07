@@ -159,6 +159,45 @@ class ScheduleFireExecutorTest {
     }
 
     /**
+     * The case the handler-based skip detection above cannot see.
+     * <p>
+     * {@code ConversationService.say} fast-fails a conversation that is ALREADY
+     * persisted {@code AWAITING_HUMAN} by throwing
+     * {@code ConversationAwaitingApprovalException} BEFORE the response handler is
+     * wired, so {@code onSkipped} is never called on this road. The handler branch
+     * only covers the race where the pause commits after this say loaded the
+     * memory; for a {@code conversationStrategy=persistent} heartbeat sitting on an
+     * open approval, the throw is the STEADY state and every single fire takes it.
+     * <p>
+     * Caught by the broad {@code catch (Exception e)} it was recorded FAILED, which
+     * incremented failCount, applied backoff and dead-lettered the schedule — the
+     * exact regression SKIPPED exists to prevent, and the opposite of what
+     * {@code docs/scheduling.md} promises operators.
+     */
+    @Test
+    void fire_sayRejectsThePausedConversation_isRecordedSkippedNotFailed() throws Exception {
+        var schedule = makeCronSchedule("sched-paused-throw", "persistent");
+        schedule.setPersistentConversationId("conv-paused");
+
+        doThrow(new IConversationService.ConversationAwaitingApprovalException(
+                "Conversation is awaiting human approval")).when(conversationService)
+                .say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+
+        ScheduleFireLog result = executor.fire(schedule, "instance-1", 1);
+
+        assertEquals(FireStatus.SKIPPED.name(), result.status(),
+                "a conversation paused on an approval rejected the input — nothing ran, but nothing broke");
+        assertNotEquals(FireStatus.FAILED.name(), result.status(),
+                "recorded FAILED it enters the retry/backoff machine and dead-letters the heartbeat");
+        assertNotNull(result.errorMessage(), "a skipped fire must say why");
+        assertTrue(result.errorMessage().contains("skipped"), "the reason must name the skip: " + result.errorMessage());
+
+        ArgumentCaptor<ScheduleFireLog> logged = ArgumentCaptor.forClass(ScheduleFireLog.class);
+        verify(scheduleStore).logFire(logged.capture());
+        assertEquals(FireStatus.SKIPPED.name(), logged.getValue().status());
+    }
+
+    /**
      * A turn cut short mid-pipeline did not do the schedule's work either, so it
      * belongs with ERROR rather than with success. Only ERROR used to be rejected.
      */

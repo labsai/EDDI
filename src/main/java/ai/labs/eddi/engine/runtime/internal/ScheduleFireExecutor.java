@@ -247,6 +247,23 @@ public class ScheduleFireExecutor {
                         schedule.getId(), schedule.getTriggerType(), schedule.getAgentId(), conversationId);
             }
 
+        } catch (IConversationService.ConversationAwaitingApprovalException e) {
+            // The SAME outcome as the onSkipped branch above, reached by the other
+            // road. ConversationService.say fast-fails a conversation that is ALREADY
+            // persisted AWAITING_HUMAN by throwing this before the response handler is
+            // ever wired, so the handler-based skip detection cannot see it — that
+            // branch only fires for the race where the pause commits after this say
+            // loaded the memory. For a conversationStrategy=persistent heartbeat whose
+            // conversation sits paused on an approval, the throw is the steady state
+            // and every fire took it: recorded FAILED by the broad catch below, it
+            // incremented failCount, applied backoff and dead-lettered the schedule
+            // outright — the precise regression SKIPPED was introduced to prevent, and
+            // the guarantee docs/scheduling.md makes to operators.
+            status = ScheduleConfiguration.FireStatus.SKIPPED.name();
+            errorMessage = "Turn skipped without consuming the input — conversation was in state "
+                    + ConversationState.AWAITING_HUMAN;
+            LOGGER.warnf("[SCHEDULE] Fire of schedule '%s' (id=%s) was skipped: conversation %s is awaiting a human "
+                    + "approval, so the scheduled input was never processed", schedule.getName(), schedule.getId(), conversationId);
         } catch (Exception e) {
             // B2: latch.await() above CLEARS the interrupt flag when it throws
             // InterruptedException, and this broad catch would otherwise swallow the

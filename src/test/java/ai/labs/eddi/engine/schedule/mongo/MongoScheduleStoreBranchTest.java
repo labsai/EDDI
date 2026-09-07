@@ -9,6 +9,7 @@ import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
+import com.mongodb.ReadPreference;
 import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
@@ -53,6 +54,12 @@ class MongoScheduleStoreBranchTest {
 
         doReturn(scheduleCollection).when(database).getCollection("eddi_schedules");
         doReturn(fireLogCollection).when(database).getCollection("eddi_schedule_fire_logs");
+
+        // The store keeps a primary-read view of the schedule collection for the two
+        // reads the erasure guarantee rests on. One logical node here, so the two
+        // views are the same mock and the stubs below apply to both; that they are
+        // distinct on a replica set is pinned in MongoScheduleStoreTest.
+        doReturn(scheduleCollection).when(scheduleCollection).withReadPreference(any(ReadPreference.class));
 
         // Every delete path now cascades to the schedule's fire logs (they are
         // unreachable once the schedule row is gone, and each carries a
