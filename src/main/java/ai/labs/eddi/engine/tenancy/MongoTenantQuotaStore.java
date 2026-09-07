@@ -4,10 +4,13 @@
  */
 package ai.labs.eddi.engine.tenancy;
 
+import static ai.labs.eddi.engine.tenancy.ITenantQuotaStore.accountingUnavailable;
+
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.engine.tenancy.model.TenantQuota;
 import ai.labs.eddi.engine.tenancy.model.UsageSnapshot;
 import ai.labs.eddi.utils.LogSanitizer;
+import com.mongodb.MongoException;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Filters;
@@ -110,7 +113,7 @@ public class MongoTenantQuotaStore implements ITenantQuotaStore {
         // InMemoryTenantQuotaStore).
         // Uses $setOnInsert so an existing quota is never overwritten, even under
         // races.
-        quotas.findOneAndUpdate(
+        Document existing = quotas.findOneAndUpdate(
                 Filters.eq("tenantId", defaultTenantId),
                 Updates.combine(
                         Updates.setOnInsert("tenantId", defaultTenantId),
@@ -122,6 +125,14 @@ public class MongoTenantQuotaStore implements ITenantQuotaStore {
                 new FindOneAndUpdateOptions().upsert(true));
         LOGGER.infof("Ensured default tenant quota exists: tenantId=%s, enabled=%s, maxConv=%d, maxAgents=%d, maxApi=%d, maxCost=%.2f",
                 defaultTenantId, enabled, maxConvPerDay, maxAgents, maxApiCalls, maxCost);
+        // findOneAndUpdate returns the document as it was BEFORE the upsert, so a
+        // non-null result means the row already existed and $setOnInsert did
+        // nothing. See TenantQuotaBootstrapCheck for why an operator has to be told
+        // rather than silently overridden.
+        if (existing != null) {
+            TenantQuotaBootstrapCheck.warnIfStoredQuotaDiffersFromConfig(toQuota(existing),
+                    new TenantQuota(defaultTenantId, maxConvPerDay, maxAgents, maxApiCalls, maxCost, enabled));
+        }
     }
 
     /**
@@ -174,10 +185,33 @@ public class MongoTenantQuotaStore implements ITenantQuotaStore {
 
     // ─── Quota Configuration ───
 
+    /**
+     * Fails closed and <em>honestly</em> on a driver error, exactly like the three
+     * mutators below.
+     * <p>
+     * This is the first store call every gate in {@code TenantQuotaService} makes,
+     * so on a real outage it is the one that throws — the mutators are never
+     * reached. Left unwrapped, a {@code MongoTimeoutException} travelled through
+     * {@code TenantQuotaService} (which does not catch) into
+     * {@code ConversationService}'s generic handler and out as an opaque 500, with
+     * no tick on {@code eddi.tenant.quota.unavailable} and nothing on the dashboard
+     * panel that promises it. Wrapping only the write half therefore covered just
+     * the partial outage where reads succeed and writes fail.
+     * <p>
+     * A {@code null} return cannot carry the outage: it already means "no quota
+     * configured for this tenant", which the service treats as unlimited. Hence the
+     * exception — see {@link QuotaAccountingUnavailableException}.
+     */
     @Override
     public TenantQuota getQuota(String tenantId) {
-        Document doc = quotas.find(Filters.eq("tenantId", tenantId)).first();
-        return doc != null ? toQuota(doc) : null;
+        try {
+            Document doc = quotas.find(Filters.eq("tenantId", tenantId)).first();
+            return doc != null ? toQuota(doc) : null;
+        } catch (MongoException e) {
+            LOGGER.errorf("Failed to read quota for tenant '%s': %s",
+                    LogSanitizer.sanitize(tenantId), LogSanitizer.sanitize(e.getMessage()));
+            throw new QuotaAccountingUnavailableException(ACCOUNTING_UNAVAILABLE, e);
+        }
     }
 
     @Override
@@ -230,8 +264,35 @@ public class MongoTenantQuotaStore implements ITenantQuotaStore {
     // the consequence is at worst a single false denial per window transition,
     // never over- or under-counting. Not a data corruption risk.
 
+    /**
+     * The three mutators below each wrap their body rather than letting a
+     * {@link MongoException} escape.
+     * <p>
+     * An escaping driver exception is not a quota answer at all: it travelled
+     * through {@code TenantQuotaService.acquireConversationSlot} (which does not
+     * catch) into {@code ConversationService}'s generic handler and out as a 500
+     * with a stack trace, while the same outage on PostgreSQL produced 503
+     * {@code quota_accounting_unavailable}, a {@code Retry-After} and a tick on
+     * {@code eddi.tenant.quota.unavailable}. Since {@code eddi.datastore.type}
+     * defaults to mongodb, the documented behaviour applied to neither the default
+     * deployment nor its dashboard panel.
+     * <p>
+     * Failing closed is unchanged — the request is still refused. Only its
+     * <em>description</em> changes, from "the server broke" to "quota accounting is
+     * down".
+     */
     @Override
     public QuotaCheckResult tryIncrementConversations(String tenantId, int limit) {
+        try {
+            return incrementConversationsWithinLimit(tenantId, limit);
+        } catch (MongoException e) {
+            LOGGER.errorf("Failed to increment conversations for tenant '%s': %s",
+                    LogSanitizer.sanitize(tenantId), LogSanitizer.sanitize(e.getMessage()));
+            return accountingUnavailable();
+        }
+    }
+
+    private QuotaCheckResult incrementConversationsWithinLimit(String tenantId, int limit) {
         if (limit < 0) {
             return QuotaCheckResult.OK;
         }
@@ -251,8 +312,19 @@ public class MongoTenantQuotaStore implements ITenantQuotaStore {
         return QuotaCheckResult.denied("Daily conversation limit reached (" + limit + ")");
     }
 
+    /** See {@link #tryIncrementConversations} for why the body is wrapped. */
     @Override
     public QuotaCheckResult tryIncrementApiCalls(String tenantId, int limit) {
+        try {
+            return incrementApiCallsWithinLimit(tenantId, limit);
+        } catch (MongoException e) {
+            LOGGER.errorf("Failed to increment API calls for tenant '%s': %s",
+                    LogSanitizer.sanitize(tenantId), LogSanitizer.sanitize(e.getMessage()));
+            return accountingUnavailable();
+        }
+    }
+
+    private QuotaCheckResult incrementApiCallsWithinLimit(String tenantId, int limit) {
         if (limit < 0) {
             return QuotaCheckResult.OK;
         }
@@ -272,8 +344,31 @@ public class MongoTenantQuotaStore implements ITenantQuotaStore {
         return QuotaCheckResult.denied("API rate limit reached (" + limit + "/min)");
     }
 
+    /**
+     * See {@link #tryIncrementConversations} for why the body is wrapped. Cost
+     * accounting fails closed for the same reason the PostgreSQL store does: a
+     * budget that cannot be read must not be treated as a budget with room left.
+     * <p>
+     * The refusal carries {@link ITenantQuotaStore#ACCOUNTING_UNAVAILABLE} like
+     * every other outage path. It used to carry a wording of its own, which reached
+     * the client verbatim — {@code ConversationService} puts {@code reason()} into
+     * the {@code QuotaAccountingUnavailableException} the 503 body is built from —
+     * so one outage produced two different {@code message} strings depending on
+     * which gate happened to fail first. That is precisely the parity
+     * {@code ACCOUNTING_UNAVAILABLE} was extracted to hold.
+     */
     @Override
     public QuotaCheckResult tryAddCost(String tenantId, double cost, double limit) {
+        try {
+            return addCostWithinBudget(tenantId, cost, limit);
+        } catch (MongoException e) {
+            LOGGER.errorf("Failed to add cost for tenant '%s': %s",
+                    LogSanitizer.sanitize(tenantId), LogSanitizer.sanitize(e.getMessage()));
+            return ITenantQuotaStore.accountingUnavailable();
+        }
+    }
+
+    private QuotaCheckResult addCostWithinBudget(String tenantId, double cost, double limit) {
         String monthKey = YearMonth.now(clock.withZone(ZoneOffset.UTC)).toString();
 
         // Fast path: the document already carries the current month.
@@ -426,21 +521,43 @@ public class MongoTenantQuotaStore implements ITenantQuotaStore {
                 doc.getBoolean("enabled", false));
     }
 
+    /**
+     * Map a stored usage document to a snapshot, zeroing every counter whose window
+     * has already expired.
+     * <p>
+     * {@link ITenantQuotaStore#getUsage} documents that the snapshot "reflects
+     * current-window values only", and enforcement does roll the windows — but this
+     * read did not, so the dashboard showed yesterday's {@code conversationsToday}
+     * and the last active minute's {@code apiCallsThisMinute} until the next
+     * increment happened to roll them. An operator saw a tenant "at its daily
+     * limit" the morning after while the very next request would have been allowed.
+     * The predicate is the same one {@code rollWindowIfExpired} uses, so read and
+     * enforcement agree; the stored document is left untouched, because a read must
+     * not write.
+     */
     private UsageSnapshot toSnapshot(String tenantId, Document doc) {
+        Instant now = clock.instant();
+        Instant currentMinuteStart = now.truncatedTo(ChronoUnit.MINUTES);
+        Instant currentDayStart = now.truncatedTo(ChronoUnit.DAYS);
+        YearMonth currentMonth = YearMonth.now(clock.withZone(ZoneOffset.UTC));
+
         Instant minuteStart = doc.getLong("minuteStart") != null
                 ? Instant.ofEpochMilli(doc.getLong("minuteStart"))
-                : clock.instant();
+                : now;
         Instant dayStart = doc.getLong("dayStart") != null
                 ? Instant.ofEpochMilli(doc.getLong("dayStart"))
-                : clock.instant();
+                : now;
         YearMonth costMonth = doc.getString("costMonth") != null
                 ? YearMonth.parse(doc.getString("costMonth"))
-                : YearMonth.now(clock.withZone(ZoneOffset.UTC));
-        return new UsageSnapshot(
-                tenantId,
-                doc.getInteger("conversationsToday", 0),
-                doc.getInteger("apiCallsThisMinute", 0),
-                doc.getDouble("monthlyCostUsd") != null ? doc.getDouble("monthlyCostUsd") : 0.0,
+                : currentMonth;
+
+        int conversationsToday = dayStart.isBefore(currentDayStart) ? 0 : doc.getInteger("conversationsToday", 0);
+        int apiCallsThisMinute = minuteStart.isBefore(currentMinuteStart) ? 0 : doc.getInteger("apiCallsThisMinute", 0);
+        double monthlyCost = costMonth.equals(currentMonth) && doc.getDouble("monthlyCostUsd") != null
+                ? doc.getDouble("monthlyCostUsd")
+                : 0.0;
+
+        return new UsageSnapshot(tenantId, conversationsToday, apiCallsThisMinute, monthlyCost,
                 minuteStart, dayStart, costMonth);
     }
 }

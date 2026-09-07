@@ -62,4 +62,41 @@ class CronDescriberTest {
         String desc = CronDescriber.describe("0 10 * * 0,6");
         assertTrue(desc.contains("weekends") || desc.contains("Saturday"));
     }
+
+    /**
+     * Standard cron accepts 7 as Sunday, and {@code CronParser.validate} does too,
+     * so a schedule with "0 9 * * 7" is validated and stored successfully. The
+     * describer parsed day-of-week as 0..6 and threw
+     * {@code IllegalArgumentException} on it — and
+     * {@code RestScheduleStore.enrichCronDescription} runs on every create AND
+     * every read, so the client got a 400 for a schedule that had in fact been
+     * created, and every later GET of it returned 400 too.
+     */
+    @Test
+    void describe_dayOfWeekSeven_isSundayNotAnError() {
+        String desc = CronDescriber.describe("0 9 * * 7");
+
+        assertFalse(desc.startsWith("Invalid"), "day-of-week 7 is valid cron for Sunday: " + desc);
+        assertTrue(desc.contains("Sunday"), desc);
+    }
+
+    @Test
+    void describe_dayOfWeekSevenAndZero_namesSundayOnce() {
+        String desc = CronDescriber.describe("0 9 * * 0,7");
+
+        assertTrue(desc.contains("Sunday"), desc);
+        assertEquals(desc.indexOf("Sunday"), desc.lastIndexOf("Sunday"),
+                "7 must normalise onto 0 rather than describing Sunday twice: " + desc);
+    }
+
+    /**
+     * A description is presentation only and is recomputed on every read, so
+     * anything this helper cannot parse must degrade to a string rather than turn a
+     * GET of a stored schedule into an error.
+     */
+    @Test
+    void describe_unparseableField_degradesToAStringInsteadOfThrowing() {
+        String desc = assertDoesNotThrow(() -> CronDescriber.describe("0 9 * * 99"));
+        assertTrue(desc.startsWith("Invalid cron expression"), desc);
+    }
 }

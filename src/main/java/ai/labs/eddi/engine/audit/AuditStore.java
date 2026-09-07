@@ -5,9 +5,13 @@
 package ai.labs.eddi.engine.audit;
 
 import ai.labs.eddi.engine.audit.model.AuditEntry;
+import com.mongodb.MongoBulkWriteException;
+import com.mongodb.MongoWriteException;
+import com.mongodb.bulk.BulkWriteError;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Indexes;
+import com.mongodb.client.model.InsertManyOptions;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -65,6 +69,9 @@ public class AuditStore implements IAuditStore {
     private static final String F_AGENT_SIGNATURE = "agentSignature";
     private static final String F_SEQUENCE = "sequence";
 
+    /** MongoDB's {@code E11000 duplicate key} error code. */
+    private static final int DUPLICATE_KEY_ERROR = 11000;
+
     private final MongoCollection<Document> collection;
 
     @Inject
@@ -75,13 +82,61 @@ public class AuditStore implements IAuditStore {
         collection.createIndex(Indexes.ascending(F_CONVERSATION_ID));
         collection.createIndex(Indexes.ascending(F_AGENT_ID, F_AGENT_VERSION));
         collection.createIndex(Indexes.descending(F_TIMESTAMP));
+        // GDPR export (getEntriesByUserId) and erasure (pseudonymizeByUserId) both
+        // select on userId. audit_ledger is the largest, append-only, never-pruned
+        // collection in the system and both operations are legally deadline-bound,
+        // so without this they are full collection scans — and updateMany holds a
+        // write lock for the duration.
+        collection.createIndex(Indexes.ascending(F_USER_ID));
+        // Per-conversation reads sort by timestamp descending; the compound index
+        // serves the filter and the sort together, so large conversations stop
+        // hitting MongoDB's in-memory sort limit. It also backs maxSequence.
+        collection.createIndex(Indexes.compoundIndex(Indexes.ascending(F_CONVERSATION_ID), Indexes.descending(F_TIMESTAMP)));
+        collection.createIndex(Indexes.compoundIndex(Indexes.ascending(F_CONVERSATION_ID), Indexes.descending(F_SEQUENCE)));
     }
 
+    /**
+     * Insert one entry, treating "already stored" as success — see
+     * {@link #appendBatch} for why the retry path needs that.
+     */
     @Override
     public void appendEntry(AuditEntry entry) {
-        collection.insertOne(toDocument(entry));
+        try {
+            collection.insertOne(toDocument(entry));
+        } catch (MongoWriteException e) {
+            if (e.getError().getCode() != DUPLICATE_KEY_ERROR) {
+                throw e;
+            }
+        }
     }
 
+    /**
+     * Insert a batch, unordered and duplicate-tolerant.
+     * <p>
+     * Unordered so one rejected document does not stop the ones behind it — an
+     * ordered {@code insertMany} persists the prefix and abandons the rest, which
+     * combined with the ledger's whole-batch retry meant a single bad entry
+     * discarded three flush windows of unrelated conversations' records.
+     * Duplicate-key errors are ignored for the same reason the PostgreSQL insert
+     * carries {@code ON CONFLICT (id) DO NOTHING}: a retry of a partially-applied
+     * batch must be able to re-offer the documents that already landed. Every other
+     * write error is still raised, so a genuinely broken store is not hidden.
+     * <p>
+     * <strong>A write-concern error is not a duplicate.</strong>
+     * {@code MongoBulkWriteException} is also how the driver reports a failure of
+     * the write concern itself — a {@code w=majority} acknowledgement timing out
+     * during a replica-set election, say — and in that shape
+     * {@link MongoBulkWriteException#getWriteErrors()} is <em>empty</em> while
+     * {@link MongoBulkWriteException#getWriteConcernError()} is set. Filtering only
+     * the per-document errors therefore returned normally for a batch whose
+     * durability was never confirmed: {@code AuditLedgerService} cleared its
+     * in-flight batch, reset its failure counter and left the chain counters past
+     * positions a rollback could still erase — no retry, no dead-letter record, no
+     * dropped-counter increment, and {@code /auditstore/verify} reporting the
+     * conversation {@code BROKEN} later on. The production connection string sets
+     * {@code w=majority}, so this is the ordinary failover shape rather than an
+     * exotic one.
+     */
     @Override
     public void appendBatch(List<AuditEntry> entries) {
         if (entries == null || entries.isEmpty())
@@ -92,7 +147,19 @@ public class AuditStore implements IAuditStore {
             documents.add(toDocument(entry));
         }
 
-        collection.insertMany(documents);
+        try {
+            collection.insertMany(documents, new InsertManyOptions().ordered(false));
+        } catch (MongoBulkWriteException e) {
+            if (e.getWriteConcernError() != null) {
+                throw e;
+            }
+            List<BulkWriteError> fatal = e.getWriteErrors().stream()
+                    .filter(error -> error.getCode() != DUPLICATE_KEY_ERROR)
+                    .toList();
+            if (!fatal.isEmpty()) {
+                throw e;
+            }
+        }
     }
 
     @Override
@@ -119,6 +186,16 @@ public class AuditStore implements IAuditStore {
     public List<AuditEntry> getEntriesByUserId(String userId, int skip, int limit) {
         Document filter = new Document(F_USER_ID, userId);
         return query(filter, skip, limit);
+    }
+
+    @Override
+    public long maxSequence(String conversationId) {
+        Document highest = collection.find(new Document(F_CONVERSATION_ID, conversationId))
+                .sort(new Document(F_SEQUENCE, -1))
+                .projection(new Document(F_SEQUENCE, 1))
+                .limit(1)
+                .first();
+        return highest == null ? AuditEntry.UNSEQUENCED : readSequence(highest);
     }
     // ==================== Private Helpers ====================
 

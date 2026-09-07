@@ -1,5 +1,6 @@
 package ai.labs.eddi.utils;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
@@ -10,9 +11,22 @@ import java.util.regex.Pattern;
  * Replaces explicit OGNL calls (Ognl.getValue/Ognl.setValue) to eliminate the
  * security surface from arbitrary method invocation.
  * <p>
- * Supports: - Dot-path navigation: "a.b.c" - Array index access:
- * "items[0].name" - Simple arithmetic on final value: "properties.count+1" -
- * String concatenation: "properties.first+' '+properties.last"
+ * Supports:
+ * <ul>
+ * <li>Dot-path navigation: {@code a.b.c}</li>
+ * <li>Array index access: {@code items[0].name}</li>
+ * <li>Simple arithmetic on the final value: {@code properties.count+1}</li>
+ * <li>{@code +} and {@code -} over any number of operands, evaluated strictly
+ * left to right, so {@code properties.count-1-1} is
+ * {@code (count - 1) - 1}</li>
+ * <li>Single-quoted string literals, which may themselves contain {@code +} or
+ * {@code -}: {@code properties.first+' - '+properties.last}. An operator inside
+ * quotes is part of the literal, never a separator</li>
+ * </ul>
+ * An expression that cannot be resolved yields {@code null} — including a
+ * subtraction whose operands are not both numbers, which is how an absent
+ * hyphenated key ({@code properties.my-key}) used to resolve to the value of a
+ * shorter path that did exist.
  * <p>
  * Does NOT support method invocation, static class access, or object
  * instantiation.
@@ -21,10 +35,6 @@ public class PathNavigator {
 
     // Matches a path segment with optional array index, e.g. "items[0]" or "name"
     private static final Pattern SEGMENT_PATTERN = Pattern.compile("([^.\\[]+)(?:\\[(-?\\d+)])?");
-
-    // Matches arithmetic/concat at end of path: "path.to.value+1" or
-    // "path.to.value+otherPath"
-    private static final Pattern ARITHMETIC_PATTERN = Pattern.compile("^(.+?)([+\\-])(.+)$");
 
     /**
      * Navigate a dot-separated path through a Map/List structure and return the
@@ -48,26 +58,158 @@ public class PathNavigator {
             return result;
         }
 
-        // If plain navigation returned null, check for arithmetic/concatenation
-        Matcher arithmeticMatcher = ARITHMETIC_PATTERN.matcher(path);
-        if (arithmeticMatcher.matches()) {
-            String leftPath = arithmeticMatcher.group(1).trim();
-            String operator = arithmeticMatcher.group(2);
-            String rightOperand = arithmeticMatcher.group(3).trim();
+        // If plain navigation returned null, treat it as an arithmetic/concat
+        // expression.
+        return evaluateExpression(path, root);
+    }
 
-            Object leftValue = navigatePath(leftPath, root);
-            if (leftValue != null) {
-                // Try to resolve right operand as a path first, then as a literal
-                Object rightValue = navigatePath(rightOperand, root);
-                if (rightValue == null) {
-                    rightValue = parseLiteral(rightOperand);
-                }
+    /** One operand's half-open range in the source expression. */
+    private record Operand(int start, int end) {
+    }
 
-                return applyOperator(leftValue, operator, rightValue);
+    /**
+     * Split an expression on its TOP-LEVEL {@code +} and {@code -} — the ones
+     * outside single quotes — into operand ranges plus the operators between them.
+     * <p>
+     * Splitting with a regex before recognising quotes is what made
+     * {@code properties.first+'-'+properties.last} evaluate to {@code John}: the
+     * remainder {@code '-'+properties.last} was split again at the hyphen INSIDE
+     * the literal, and every branch below it then failed, leaving an empty string
+     * to concatenate. A separator character in a literal is ordinary —
+     * {@code ' - '} is the most obvious way to join a first and last name — so
+     * quotes have to be respected before any splitting happens, not after.
+     * <p>
+     * An unterminated quote simply swallows the rest of the expression into one
+     * operand, which {@link #parseLiteral} answers with null rather than handing
+     * the raw text back. That null is dropped, not propagated: {@code +} then
+     * concatenates it as the empty string, so {@code properties.first+'oops} is
+     * {@code "John"} — the broken literal disappears instead of becoming
+     * {@code "John'oops"} (see
+     * {@code shouldDropAnUnterminatedStringLiteralInsteadOfConcatenatingItRaw}). A
+     * {@code -} with a non-numeric right operand yields null, as it does for any
+     * other unresolvable operand.
+     * <p>
+     * A {@code +}/{@code -} with nothing but whitespace before it is the SIGN of
+     * the operand that follows, not a separator: {@code count+-1} is
+     * {@code count + (-1)}. Splitting there produced an EMPTY operand, which
+     * {@link #parseLiteral} answers with null and {@link #applyOperator}
+     * concatenates as {@code ""} — so a signed literal stopped resolving altogether
+     * ({@code count+-1} → null) and, worse, the folded string then made a dangling
+     * operator resolve to a plausible-looking value ({@code count+} →
+     * {@code "10"}). Signs belong to their operand.
+     *
+     * @param operators
+     *            out-parameter, filled with the operator between operand i and
+     *            operand i+1
+     */
+    private static List<Operand> tokenize(String expression, List<String> operators) {
+        List<Operand> operands = new ArrayList<>();
+        boolean insideLiteral = false;
+        int start = 0;
+        for (int i = 0; i < expression.length(); i++) {
+            char c = expression.charAt(i);
+            if (c == '\'') {
+                insideLiteral = !insideLiteral;
+            } else if (!insideLiteral && (c == '+' || c == '-') && !isBlank(expression, start, i)) {
+                operands.add(new Operand(start, i));
+                operators.add(String.valueOf(c));
+                start = i + 1;
+            }
+        }
+        operands.add(new Operand(start, expression.length()));
+        return operands;
+    }
+
+    /** Whether {@code expression[from..to)} is empty or whitespace only. */
+    private static boolean isBlank(String expression, int from, int to) {
+        for (int i = from; i < to; i++) {
+            if (!Character.isWhitespace(expression.charAt(i))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Fold a tokenised expression from left to right.
+     * <p>
+     * The previous implementation re-applied its split pattern to the RIGHT-hand
+     * remainder, which made the whole thing right-associative: {@code count-1-1}
+     * evaluated as {@code count-(1-1)} and answered 10 where the Javadoc promised
+     * 8. Folding a token list instead gives the documented left-to-right order.
+     * <p>
+     * Operands are resolved GREEDILY — the longest run of remaining tokens that
+     * navigates as a path wins — because a path segment may itself contain a
+     * hyphen. {@code properties.a+properties.my-key} must resolve
+     * {@code properties.my-key} as one key when that key exists, and only fall back
+     * to {@code properties.my} minus the literal {@code key} when it does not.
+     * <p>
+     * Two deliberate refusals. The LEFT operand must be a real path: an
+     * unresolvable one means "not found", not "a bare string literal". And a fold
+     * step that yields null ends the whole expression as null rather than carrying
+     * on — {@link #applyOperator} answers a null left operand with the RIGHT one,
+     * which is how a failed subtraction used to disguise itself as a plausible
+     * value.
+     * <p>
+     * A blank operand is a malformed expression, never a value. With signs now
+     * attached to their operand ({@link #tokenize}), the only way one can survive
+     * is a dangling operator — {@code properties.count+} — and answering that with
+     * the left operand folded into a string is exactly the "plausible-looking value
+     * instead of not-found" this class exists to refuse.
+     */
+    private static Object evaluateExpression(String expression, Object root) {
+        List<String> operators = new ArrayList<>();
+        List<Operand> operands = tokenize(expression, operators);
+        if (operators.isEmpty()) {
+            return null; // no operator: plain navigation already answered
+        }
+        for (Operand operand : operands) {
+            if (isBlank(expression, operand.start(), operand.end())) {
+                return null;
             }
         }
 
-        return null;
+        Object result = null;
+        int index = 0;
+        for (int end = operands.size() - 1; end >= 0; end--) {
+            Object value = navigatePath(join(expression, operands, 0, end), root);
+            if (value != null) {
+                result = value;
+                index = end + 1;
+                break;
+            }
+        }
+        if (result == null) {
+            return null;
+        }
+
+        while (index < operands.size()) {
+            String operator = operators.get(index - 1);
+            Object right = null;
+            int end = index;
+            for (int candidate = operands.size() - 1; candidate >= index; candidate--) {
+                Object value = navigatePath(join(expression, operands, index, candidate), root);
+                if (value != null) {
+                    right = value;
+                    end = candidate;
+                    break;
+                }
+            }
+            if (right == null) {
+                right = parseLiteral(join(expression, operands, index, index));
+            }
+            result = applyOperator(result, operator, right);
+            if (result == null) {
+                return null;
+            }
+            index = end + 1;
+        }
+        return result;
+    }
+
+    /** The source text of operands {@code from..to}, operators included. */
+    private static String join(String expression, List<Operand> operands, int from, int to) {
+        return expression.substring(operands.get(from).start(), operands.get(to).end()).trim();
     }
 
     /**
@@ -204,7 +346,16 @@ public class PathNavigator {
             return leftStr + rightStr;
         }
 
-        return left;
+        // Subtraction whose operands are not both numbers is not an expression at all
+        // — and answering with the left operand made a MISSING key resolve to the
+        // value of a shorter one. "properties.my-key", with no such key but a
+        // "properties.my" present, split into left=10 / op='-' / right="key" and
+        // returned 10. Hyphenated keys are ordinary in EDDI's template data, and the
+        // callers (MatchingUtilities, PropertySetterTask, SizeMatcher) read null as
+        // "not found" and any non-null as a match — so an absent key could make a rule
+        // fire, or pull a neighbouring value into a property, with no error and no log
+        // line. Null is the honest answer.
+        return null;
     }
 
     private static Object parseLiteral(String value) {
@@ -213,8 +364,12 @@ public class PathNavigator {
         }
 
         // String literal: 'some text'
-        if (value.startsWith("'") && value.endsWith("'") && value.length() >= 2) {
-            return value.substring(1, value.length() - 1);
+        if (value.startsWith("'")) {
+            // An opening quote with no closing quote is a malformed literal. It used to
+            // fall through every branch below and be returned as raw text, which is how
+            // a broken expression turned into a plausible-looking value instead of a
+            // "not found".
+            return value.length() >= 2 && value.endsWith("'") ? value.substring(1, value.length() - 1) : null;
         }
 
         // Integer

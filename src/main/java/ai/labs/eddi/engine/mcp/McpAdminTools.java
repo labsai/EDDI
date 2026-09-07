@@ -33,8 +33,9 @@ import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IRestAgentAdministration;
+import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
-import ai.labs.eddi.engine.tenancy.QuotaExceededException;
+import ai.labs.eddi.engine.tenancy.QuotaRefusal;
 import ai.labs.eddi.engine.runtime.internal.CronDescriber;
 import ai.labs.eddi.engine.runtime.internal.CronParser;
 import ai.labs.eddi.engine.runtime.internal.ScheduleFireExecutor;
@@ -158,13 +159,18 @@ public class McpAdminTools {
             }
 
             return resultJson("deployed", result);
-        } catch (QuotaExceededException e) {
-            // Return the quota reason rather than the generic message: an MCP client
-            // (and the model driving it) cannot self-correct from "check server logs"
-            // and will retry the deploy in a loop.
-            LOGGER.warn("MCP deploy_agent denied by quota for Agent " + agentId + ": " + e.getMessage());
-            return errorJson(e.getMessage());
         } catch (Exception e) {
+            // Match the QuotaRefusal marker rather than one concrete class: the
+            // accounting-outage refusal is a sibling of QuotaExceededException, not a
+            // subclass, so a catch naming only the latter drops a store outage into
+            // the generic branch below.
+            if (e instanceof QuotaRefusal) {
+                // Return the quota reason rather than the generic message: an MCP client
+                // (and the model driving it) cannot self-correct from "check server logs"
+                // and will retry the deploy in a loop.
+                LOGGER.warn("MCP deploy_agent refused by quota layer for Agent " + agentId + ": " + e.getMessage());
+                return errorJson(e.getMessage());
+            }
             LOGGER.error("MCP deploy_agent failed for Agent " + agentId, e);
             return errorJson("Failed to deploy agent. Check server logs for details.");
         }
@@ -1158,7 +1164,54 @@ public class McpAdminTools {
             return errorJson("scheduleId is required");
         try {
             var schedule = scheduleStore.readSchedule(scheduleId);
-            ScheduleFireLog fireLog = scheduleFireExecutor.fire(schedule, schedulePollerService.getInstanceId(), 1);
+            // A HITL approval timeout fires the configured AUTO_APPROVE/AUTO_REJECT/
+            // ABORT decision with a system actor and no owner/admin/approver check, so
+            // REST refuses to fire one for EVERYONE. This tool must refuse too, or it
+            // is simply the same bypass with a different front door.
+            if (HitlSchedules.isHitlTimeout(schedule.getMetadata())) {
+                return errorJson("This schedule is a human-in-the-loop approval timeout and cannot be fired manually. "
+                        + "Resolve the pending approval via the conversation's resume or cancel endpoint.");
+            }
+            // Claim it on the poller's own terms first, and release the claim in the
+            // finally. Firing unclaimed raced the poller — with
+            // conversationStrategy=persistent both pushed a turn into the SAME
+            // conversation — and skipping recordManualFireOutcome meant the fire never
+            // reached the retry/backoff/one-shot state machine at all: a failure here
+            // did not increment failCount, and a success did not re-arm the schedule.
+            if (!schedulePollerService.claimForManualFire(schedule)) {
+                return errorJson("Schedule " + scheduleId + " is not in a claimable state (fireStatus="
+                        + schedule.getFireStatus() + "); it may be firing already, dead-lettered, or still in retry backoff.");
+            }
+            ScheduleFireLog fireLog = null;
+            try {
+                // The attempt this actually is, not a constant 1 — a manual retry of a
+                // schedule on its third failure logged as "attempt 1" and hid the history.
+                fireLog = scheduleFireExecutor.fire(schedule, schedulePollerService.getInstanceId(), schedule.getFailCount() + 1);
+            } finally {
+                // Always release the claim, whatever happened: a manual fire that left
+                // the row CLAIMED would block the poller until the lease expired. A null
+                // fireLog (the executor threw) is recorded as a failure, which is what it
+                // is.
+                //
+                // Park the interrupt across that write, exactly as
+                // RestScheduleStore.fireNow and SchedulePollerService.fireClaimedSchedule
+                // do. ScheduleFireExecutor re-asserts a consumed interrupt before
+                // returning, so on the interrupted path (shutdown, a cancelled tool
+                // invocation) this block would otherwise run with the flag set — and the
+                // synchronous Mongo driver throws MongoInterruptedException on connection
+                // checkout. recordManualFireOutcome swallows that, so the claim would
+                // never be released and failCount never incremented, leaving the schedule
+                // CLAIMED until its lease expires. The flag is re-asserted immediately
+                // afterwards so the cancellation signal still reaches the caller.
+                boolean wasInterrupted = Thread.interrupted();
+                try {
+                    schedulePollerService.recordManualFireOutcome(schedule, fireLog);
+                } finally {
+                    if (wasInterrupted) {
+                        Thread.currentThread().interrupt();
+                    }
+                }
+            }
 
             var result = new LinkedHashMap<String, Object>();
             result.put("scheduleId", scheduleId);
