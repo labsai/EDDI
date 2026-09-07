@@ -770,10 +770,19 @@ public class AgentConfiguration {
             return summarizeTargetEntries;
         }
 
+        /**
+         * Plain assignment — the {@code >= 1} rule is enforced on the WRITE path, by
+         * {@code AgentStore.create}/{@code update}, not here.
+         * <p>
+         * Jackson calls this setter on every MongoDB read, ZIP import and instance
+         * sync, so throwing from it made any agent already stored with
+         * {@code summarizeTargetEntries: 0} — legal when it was written — permanently
+         * unreadable: not deployable, not exportable, and not even repairable by PUT,
+         * because the read happens first. See {@code AbstractResourceStore.validate}:
+         * "a document already in the database must keep loading even if the rules
+         * tightened".
+         */
         public void setSummarizeTargetEntries(int summarizeTargetEntries) {
-            if (summarizeTargetEntries < 1) {
-                throw new IllegalArgumentException("summarizeTargetEntries must be >= 1");
-            }
             this.summarizeTargetEntries = summarizeTargetEntries;
         }
 

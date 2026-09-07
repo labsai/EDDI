@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.caching;
 
+import ai.labs.eddi.engine.gdpr.GdprComplianceService;
+import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -317,5 +319,55 @@ class CacheFactoryTest {
             assertDoesNotThrow(() -> factory.getCache("channel-thread-locks", Duration.ofHours(24)));
             assertDoesNotThrow(() -> factory.getCache("nonce-replay-protection", Duration.ofMillis(390_000)));
         }
+    }
+
+    /**
+     * Finding r9. Both caches were added without an entry in
+     * {@code CacheFactory.CACHE_SIZES}, so they fell back to the 1,000 default. The
+     * restriction cache is keyed by userId — the same shape as "userConversations",
+     * which is sized 10,000 for exactly this reason — so a deployment with a few
+     * thousand concurrently active users thrashes it precisely under load, and
+     * Caffeine's W-TinyLFU admission then rejects the newly inserted key rather
+     * than an old one. Nothing logs it, because a cache miss is not an error: the
+     * per-turn store round trip on the hottest path in the system would simply come
+     * back.
+     */
+    @Test
+    @DisplayName("the per-user restriction cache is sized for active users, not left on the 1,000 default")
+    void perUserCachesAreNotLeftOnTheDefaultSize() {
+        // Asked for by the NAME THE SERVICE ACTUALLY USES, not by a matching literal.
+        // With both sides written out by hand, renaming the constant left this test
+        // green while the cache it names silently fell back to DEFAULT_MAX_SIZE —
+        // which is the very defect the sizing entries were added for, and a cache
+        // miss logs nothing.
+        assertEquals(10_000L,
+                CacheFactory.maximumSizeFor(GdprComplianceService.RESTRICTION_CACHE_NAME, Duration.ofSeconds(30)),
+                "a userId-keyed cache on the 1,000 default reinstates the per-turn store read under load");
+        assertEquals(CacheFactory.maximumSizeFor("userConversations", null),
+                CacheFactory.maximumSizeFor(GdprComplianceService.RESTRICTION_CACHE_NAME, Duration.ofSeconds(30)),
+                "same keyspace shape as userConversations, so the same size");
+        // The tenant cache is deliberately sized AT the default, so the number alone
+        // proves nothing — delete its CACHE_SIZES entry and an assertEquals(1_000L)
+        // stays green while the sizing silently reverts to inheritance, which is the
+        // regression these entries exist to prevent. Assert the entry, then the value.
+        assertTrue(CacheFactory.hasExplicitSize(TenantQuotaService.QUOTA_CACHE_NAME),
+                "the tenant cache must carry its own entry — at the default value, its sizing is otherwise unrecorded");
+        assertEquals(1_000L, CacheFactory.maximumSizeFor(TenantQuotaService.QUOTA_CACHE_NAME, Duration.ofSeconds(5)),
+                "tenants are few, so the recorded size is deliberately the same number as the default");
+    }
+
+    /**
+     * The binding above only bites if these names are genuinely the ones the
+     * services request their caches under — assert that too, so the constants
+     * cannot drift apart from {@code CacheFactory.CACHE_SIZES} in either direction.
+     */
+    @Test
+    @DisplayName("the sized entries are keyed on the names the services actually request")
+    void sizedEntriesUseTheServicesOwnCacheNames() {
+        assertNotEquals(CacheFactory.maximumSizeFor(GdprComplianceService.RESTRICTION_CACHE_NAME, Duration.ofSeconds(30)),
+                CacheFactory.maximumSizeFor("a-name-nothing-sizes", Duration.ofSeconds(30)),
+                "the restriction cache must have its own entry, not the default");
+        assertEquals("gdprProcessingRestrictions", GdprComplianceService.RESTRICTION_CACHE_NAME);
+        assertEquals("tenantQuotas", TenantQuotaService.QUOTA_CACHE_NAME);
     }
 }

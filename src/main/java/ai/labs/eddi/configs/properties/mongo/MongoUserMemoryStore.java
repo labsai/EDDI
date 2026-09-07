@@ -28,6 +28,7 @@ import org.jboss.logging.Logger;
 import java.time.Instant;
 import java.util.*;
 import java.util.regex.Pattern;
+import ai.labs.eddi.engine.audit.AuditHmac;
 
 import static com.mongodb.client.model.Filters.*;
 import static com.mongodb.client.model.Sorts.descending;
@@ -371,7 +372,11 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
     public void deleteAllForUser(String userId) throws IResourceStore.ResourceStoreException {
         RuntimeUtilities.checkNotNull(userId, FIELD_USER_ID);
         DeleteResult result = memoriesCollection.deleteMany(eq(FIELD_USER_ID, userId));
-        LOGGER.infof("[MEMORY] GDPR delete-all for user '%s': %d entries removed", userId, result.getDeletedCount());
+        // The pseudonym, not the identifier - see PostgresUserMemoryStore for the
+        // reasoning. Both stores must agree, or an operator reading one log and not
+        // the other draws a different conclusion about what was erased.
+        LOGGER.infof("[MEMORY] GDPR delete-all for user '%s': %d entries removed",
+                AuditHmac.pseudonymFor(userId), result.getDeletedCount());
     }
 
     @Override

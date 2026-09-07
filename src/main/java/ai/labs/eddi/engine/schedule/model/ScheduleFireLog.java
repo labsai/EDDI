@@ -25,7 +25,10 @@ import java.time.Instant;
  * @param completedAt
  *            when execution completed (null if failed)
  * @param status
- *            COMPLETED | FAILED | DEAD_LETTERED
+ *            COMPLETED | FAILED | SKIPPED | DEAD_LETTERED. SKIPPED means the
+ *            coordinator dropped the turn without consuming the input (the
+ *            conversation was busy or awaiting a human): logged and counted,
+ *            but never fed to the retry/dead-letter machine
  * @param instanceId
  *            which cluster instance executed
  * @param conversationId
@@ -35,7 +38,13 @@ import java.time.Instant;
  * @param attemptNumber
  *            which retry attempt (1-based)
  * @param cost
- *            LLM cost of this fire
+ *            spend attributed to this fire, in USD. What it counts depends on
+ *            the fire path, and the two are NOT the same quantity: a
+ *            conversation fire reports the {@code ToolCostTracker} delta for
+ *            the turn — <em>tool</em> spend only, so a schedule whose agent
+ *            calls the LLM without tools reports {@code 0.0} — while the Dream
+ *            consolidation fast-path reports its own estimated LLM cost.
+ *            Compare like with like before drawing conclusions from a fire log.
  * @author ginccc
  * @since 6.0.0
  */

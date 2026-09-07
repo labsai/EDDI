@@ -120,6 +120,38 @@ curl -X POST "http://localhost:7070/backup/import/sync?sourceUrl=https://source-
   -H "X-Source-Authorization: Bearer <token>"
 ```
 
+### Response codes
+
+Every execute endpoint answers with one of three **2xx** statuses. A client must branch on
+the status code — checking `response.ok` alone reports a half-applied sync as a success:
+
+| Status | Meaning |
+|--------|---------|
+| `200 OK` | Source and target already agree. Nothing was written, no version was burned. |
+| `201 Created` | Everything landed and something was written. |
+| `207 Multi-Status` | **Partially applied** — `failures[]` in the body names every resource that could not be written. |
+
+The body of a single sync is an `UpgradeResult`:
+
+```json
+{
+  "agentUri": "eddi://ai.labs.agent/agentstore/agents/local-agent-id?version=8",
+  "agentUpdated": true,
+  "updated": 3,
+  "created": 0,
+  "skipped": 5,
+  "failures": [
+    { "sourceId": "…", "resourceType": "langchain", "name": "GPT Config", "reason": "…" }
+  ]
+}
+```
+
+`/backup/import/sync/batch` answers a JSON array of `BatchSyncResult`
+(`sourceAgentId`, `targetAgentId`, `result`, `error`) — one entry per request, in request
+order, whether it succeeded or not. It answers `500` only when *every* agent failed, and
+`207` when some did. A batch **preview** row that failed carries `sourceAgentName: null`
+and an `error` field rather than encoding the failure into the agent's name.
+
 ### 5. Execute Batch Sync
 
 Sync multiple agents in one call. The request body is a JSON array of `SyncRequest` objects:
@@ -194,8 +226,9 @@ Agent Sync uses **structural matching** — not ID matching — to pair source a
 
 - **In-place upgrade:** Target resource IDs are preserved. URI references, deployments, and triggers continue to work
 - **Version increments:** Each updated resource gets a new version (history preserved)
-- **Secret scrubbing:** API keys and vault references are **never** transferred. The target instance uses its own secrets
-- **SSRF protection:** The remote URL is validated (HTTPS required in production, private IPs blocked)
+- **Secret scrubbing:** API keys and vault references are **never** transferred. The target instance uses its own secrets — and a value the source scrubbed is put back from the target's own configuration before anything is compared or written, so a credential neither leaks nor gets overwritten with a placeholder, and a config that differs *only* by the placeholder still counts as unchanged
+- **SSRF protection:** The remote URL is validated (HTTPS required in production, private IPs blocked), and redirects are never followed — a 3xx from the source surfaces as a failed read rather than re-sending the bearer token elsewhere
+- **New extensions are refused, not orphaned:** an extension the target workflow has no step for cannot be referenced once written, so it is reported in `failures[]` instead of being created as an unreferenced resource. Add the step to the target workflow (or import the source workflow as a new one) and sync again
 
 ## Upgrade Strategy (ZIP Import)
 
@@ -227,7 +260,14 @@ curl -X POST "http://localhost:7070/backup/export/agent-id/preview?agentVersion=
 curl -X POST "http://localhost:7070/backup/export/agent-id?agentVersion=1&selectedResources=res1,res2,res3"
 ```
 
-The preview returns a resource tree with selectability flags. Agent and workflow skeletons are always included — you can deselect individual extensions, behavior rules, or prompt snippets.
+The preview returns a resource tree with selectability flags. Agent and workflow skeletons are always included — you can deselect individual extensions, behavior rules, prompt snippets or scheduled triggers.
+
+Snippets and schedules have their own parameters (`selectedSnippets`, `selectedSchedules`).
+Deselecting an extension **keeps the workflow step that referenced it** — the archive states
+what the source deployment actually runs, and the importer decides what to do with a reference
+it cannot satisfy: `merge` answers it from the target's own copy, `create` drops the step and
+logs a warning. See [Import/Export an Agent → Selecting What to Export](import-export-an-agent.md#selecting-what-to-export)
+for the three-state semantics of each parameter and for the archive retention window.
 
 ## See Also
 

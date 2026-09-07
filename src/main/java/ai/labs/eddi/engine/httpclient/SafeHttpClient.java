@@ -194,8 +194,18 @@ public class SafeHttpClient {
 
         LOGGER.debugf("Following redirect %d/%d: %s → %s", redirectCount, MAX_REDIRECTS, request.uri(), resolvedUri);
 
-        // Build redirect request — preserve method for 307/308 per RFC 7538
-        boolean methodPreserved = (statusCode == 307 || statusCode == 308) && !"GET".equals(request.method());
+        // Build the redirect request. RFC 9110 sanctions exactly one method rewrite,
+        // and it is narrower than "everything becomes GET":
+        // • 307/308 (§15.4.8/§15.4.9): method AND body preserved, always.
+        // • 303 See Other (§15.4.4): rewrite to GET — that is what the code means.
+        // • 301/302 (§15.4.2/§15.4.3): only the historical POST→GET rewrite is
+        // permitted. PUT, PATCH and DELETE keep their method and body, or a
+        // redirected write silently becomes a read: the caller is told the write
+        // succeeded (200 from the GET) while nothing was written, and a DELETE
+        // that "worked" leaves the resource in place.
+        // • HEAD survives every one of them (an existence or size probe must not
+        // turn into a full body download).
+        boolean methodPreserved = methodSurvivesRedirect(request.method(), statusCode);
         HttpRequest.Builder builder = HttpRequest.newBuilder()
                 .uri(resolvedUri)
                 .timeout(request.timeout().orElse(DEFAULT_REQUEST_TIMEOUT));
@@ -205,17 +215,42 @@ public class SafeHttpClient {
         copyHeaders(request, builder, sameOrigin, methodPreserved);
 
         if (methodPreserved) {
-            // 307/308: preserve original HTTP method and body
             builder.method(request.method(),
                     request.bodyPublisher().orElse(HttpRequest.BodyPublishers.noBody()));
+        } else if ("HEAD".equals(request.method())) {
+            builder.method("HEAD", HttpRequest.BodyPublishers.noBody());
         } else {
-            // 301/302/303: always downgrade to GET per RFC 7231
             builder.GET();
         }
 
         HttpRequest redirectRequest = builder.build();
 
         return sendWithRedirects(redirectRequest, bodyHandler, redirectCount, startTime);
+    }
+
+    /**
+     * Whether this request's method (and its body) carries across a redirect of
+     * this status code — see the rules quoted at the call site.
+     * <p>
+     * GET and HEAD answer {@code false} because they have no body to carry and are
+     * rebuilt explicitly by the caller; every other method answers whether the
+     * status code leaves it alone.
+     * <p>
+     * Package-private so the rule can be pinned per method/code pair without a
+     * server on every combination.
+     */
+    static boolean methodSurvivesRedirect(String method, int statusCode) {
+        if ("GET".equals(method) || "HEAD".equals(method)) {
+            return false;
+        }
+        if (statusCode == 307 || statusCode == 308) {
+            return true;
+        }
+        if (statusCode == 303) {
+            return false;
+        }
+        // 301/302: POST is the only method the historical rewrite covers.
+        return !"POST".equals(method);
     }
 
     /**

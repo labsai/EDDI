@@ -18,6 +18,8 @@ import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.engine.model.Deployment;
+import ai.labs.eddi.engine.tenancy.QuotaAccountingUnavailableException;
+import ai.labs.eddi.engine.tenancy.QuotaExceededException;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -1062,7 +1064,45 @@ class AgentSetupServiceTest {
 
             var result = deployService.deployAndWait(Deployment.Environment.test, "agent1", 1);
             assertEquals(false, result.get("deployed"));
-            assertNotNull(result.get("deployError"));
+            assertEquals("Deployment failed. Check server logs for details.", result.get("deployError"),
+                    "an unrecognised failure must not leak its own message into the setup result");
+        }
+
+        /**
+         * {@code agentAdmin} is the CDI bean here, not an HTTP proxy, so no exception
+         * mapper runs and the quota reason would otherwise be replaced by "check the
+         * logs" — leaving an agent designer, or a model creating a sub-agent, with
+         * nothing to act on.
+         */
+        @Test
+        @DisplayName("an over-quota refusal surfaces its actionable reason verbatim")
+        void deployQuotaExceeded_surfacesTheReason() {
+            when(agentAdmin.deployAgent(any(), anyString(), anyInt(), anyBoolean(), anyBoolean()))
+                    .thenThrow(new QuotaExceededException("Agent limit reached (5); undeploy an agent first"));
+
+            var result = deployService.deployAndWait(Deployment.Environment.test, "agent1", 1);
+
+            assertEquals(false, result.get("deployed"));
+            assertEquals("Agent limit reached (5); undeploy an agent first", result.get("deployError"));
+        }
+
+        /**
+         * The {@code QuotaRefusal} marker regression: the accounting-outage refusal is
+         * a <em>sibling</em> of {@code QuotaExceededException} (it had to extend
+         * {@code RejectedExecutionException}), so a {@code catch} naming only the
+         * latter dropped a quota-store outage into the generic branch.
+         */
+        @Test
+        @DisplayName("a quota-store outage surfaces its reason too, not the generic message")
+        void deployQuotaAccountingUnavailable_surfacesTheReason() {
+            when(agentAdmin.deployAgent(any(), anyString(), anyInt(), anyBoolean(), anyBoolean()))
+                    .thenThrow(new QuotaAccountingUnavailableException(
+                            "Quota accounting unavailable — denying request for safety"));
+
+            var result = deployService.deployAndWait(Deployment.Environment.test, "agent1", 1);
+
+            assertEquals(false, result.get("deployed"));
+            assertEquals("Quota accounting unavailable — denying request for safety", result.get("deployError"));
         }
     }
 

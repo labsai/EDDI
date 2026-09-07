@@ -40,4 +40,21 @@ class CollectionUtilitiesTest {
         CollectionUtilities.addAllWithoutDuplicates(collection, List.of());
         assertEquals(List.of("a"), collection);
     }
+
+    /**
+     * The parameters were named {@code (collection, addTo)} while the body added
+     * INTO the first from the second. Renaming them to (target, source) documents
+     * what actually happens; this pins the direction so a future "fix" to the body
+     * cannot quietly reverse it.
+     */
+    @Test
+    void addAllWithoutDuplicates_addsIntoTheFirstArgumentAndLeavesTheSecondAlone() {
+        List<String> target = new ArrayList<>(List.of("a"));
+        List<String> source = List.of("b");
+
+        CollectionUtilities.addAllWithoutDuplicates(target, source);
+
+        assertEquals(List.of("a", "b"), target);
+        assertEquals(List.of("b"), source, "the source must not be mutated");
+    }
 }
