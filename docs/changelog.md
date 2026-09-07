@@ -97,8 +97,16 @@ Proven by mutation. Removing the `oneTimeAt` row, dropping the templating step, 
 extension and restoring the wrong MongoDB property each fail with the missing name in the message.
 The test also caught three errors in this very commit's edits before it was run deliberately.
 
-**Files:** `AGENTS.md`, `README.md`, seven pages under `docs/`, two new pages, five under
-`planning/`, and `src/test/java/ai/labs/eddi/docs/DocumentationAccuracyTest.java`.
+**Files:** `AGENTS.md`, `README.md`; under `docs/` — `SUMMARY.md`, `behavior-rules.md`,
+`configuration-reference.md`, `creating-your-first-agent/creating-your-first-agent.md`,
+`creating-your-first-agent/creating-your-first-agent-1.md`,
+`deployment-management-of-agents.md`, `docker.md`, `langchain.md`,
+`monitoring/monitoring-guide.md`, `output-templating.md`, `putting-it-all-together.md`,
+`rag.md`, `release-versioning.md`, `scheduling.md`, `user-memory.md`, plus the two new pages
+`coordinator-admin.md` and `tenant-quotas.md`; under `planning/` — `conversation-cancel-plan.md`,
+`hitl-tool-approval-plan.md`, `mcp-hitl-surface-plan.md`,
+`multimodal-attachments-completion-plan.md`, `observability-and-pipeline-plan.md`; and
+`src/test/java/ai/labs/eddi/docs/DocumentationAccuracyTest.java`.
 
 **Next:** slices 2-6 of the same backlog — config keys, API consistency, and 63 test-quality
 findings.

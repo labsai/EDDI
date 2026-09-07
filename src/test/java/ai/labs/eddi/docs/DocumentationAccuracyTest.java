@@ -124,6 +124,24 @@ class DocumentationAccuracyTest {
     }
 
     /**
+     * The text of one Markdown section: from the heading that starts with
+     * {@code headingPrefix} up to the next heading at the same level.
+     * <p>
+     * Scoping matters more than it looks. Searching a whole file lets an unrelated
+     * paragraph — an example, a changelog line, a prose mention — satisfy an
+     * assertion after the reference table it is really about has lost the field.
+     * The test would then pass while the reader following the table still cannot
+     * find what they need, which is the exact failure mode this class exists to
+     * catch.
+     */
+    private static String section(String markdown, String headingPrefix, String nextHeadingPrefix) {
+        int start = markdown.indexOf(headingPrefix);
+        assertTrue(start >= 0, "expected a section starting with \"" + headingPrefix + "\"; the document has been restructured");
+        int end = markdown.indexOf(nextHeadingPrefix, start + headingPrefix.length());
+        return end > 0 ? markdown.substring(start, end) : markdown.substring(start);
+    }
+
+    /**
      * Collects the {@code ID = "..."} string constants declared in a source
      * directory.
      */
@@ -210,7 +228,9 @@ class DocumentationAccuracyTest {
     @Test
     @DisplayName("AGENTS.md's ZIP section names every backup file extension")
     void everyBackupExtensionIsDocumented() {
-        String agents = read("AGENTS.md");
+        // §5.5 only: the URI table further down names some of the same types, and would
+        // otherwise satisfy this check for an extension the ZIP block no longer lists.
+        String agents = section(read("AGENTS.md"), "### 5.5 ZIP Structure for Agent Import", "### 5.6 ");
         String backup = read("src/main/java/ai/labs/eddi/backup/impl/AbstractBackupService.java");
         Matcher m = Pattern.compile("String\\s+\\w+_EXT\\s*=\\s*\"([^\"]+)\"").matcher(backup);
         Set<String> missing = new TreeSet<>();
@@ -286,8 +306,11 @@ class DocumentationAccuracyTest {
         String agentConfig = read("src/main/java/ai/labs/eddi/configs/agents/model/AgentConfiguration.java");
         assertTrue(agentConfig.contains("private Map<String, String> parameters"),
                 "DreamConfig no longer declares parameters");
-        assertTrue(read("docs/user-memory.md").contains("`parameters`"),
-                "user-memory.md's Dream table does not document the parameters field");
+        // The reference table only. The example config above it also sets parameters,
+        // and a reader working from the table — the normal way to discover a field —
+        // would not see it there.
+        String dreamTable = section(read("docs/user-memory.md"), "### Dream Configuration", "\\n## ");
+        assertTrue(dreamTable.contains("`parameters`"), "the Dream Configuration table in user-memory.md has no row for parameters");
         assertTrue(read("docs/scheduling.md").contains("\"parameters\""),
                 "scheduling.md's Dream example does not set parameters");
     }
@@ -451,8 +474,11 @@ class DocumentationAccuracyTest {
         for (String rel : shipped) {
             String text = read(rel);
             String head = text.substring(0, Math.min(text.length(), 1200));
-            assertTrue(head.contains("Status:"),
-                    rel + " has no status marker in its opening block, so it reads as available work");
+            // "Status:" alone also accepts "Status: Planned", which is effectively what
+            // these files said before. What has to hold is that a reader scanning
+            // planning/ for available work can tell at a glance that this one is done.
+            assertTrue(head.contains("Status: IMPLEMENTED") || head.contains("Status: ALL FOUR ITEMS SHIPPED"),
+                    rel + " does not declare a shipped status in its opening block, so it still reads as available work");
             assertFalse(text.contains("implement this plan task-by-task"),
                     rel + " still instructs an agent to implement a shipped subsystem");
         }

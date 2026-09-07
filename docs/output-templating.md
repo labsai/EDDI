@@ -189,7 +189,7 @@ If you are upgrading from EDDI v5, template syntax is automatically migrated:
 
 Rather than deploying an agent to find out what a template resolves to, resolve it directly:
 
-```
+```http
 POST /administration/preview/template
 ```
 

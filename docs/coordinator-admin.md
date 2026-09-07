@@ -4,14 +4,16 @@ The conversation coordinator serialises work per conversation. A turn that fails
 is **dead-lettered**: kept with its payload and error rather than dropped, so an operator can look
 at it and decide whether to replay or discard it.
 
-`eddi_nats_dead_letter_count_total` is the metric that tells you it happened — see
-[Metrics & Monitoring](metrics.md). This page is the API that lets you do something about it.
+The meter `eddi_nats_dead_letter_count` tells you it happened. Micrometer's Prometheus
+exposition appends `_total` to a counter, so the series you query is
+`eddi_nats_dead_letter_count_total` — see [Metrics & Monitoring](metrics.md). This page is the
+API that lets you do something about it.
 
 All operations sit under `/administration/coordinator` and require the `eddi-admin` role.
 
 ## Status
 
-```
+```http
 GET /administration/coordinator/status
 ```
 
@@ -33,7 +35,7 @@ only under NATS.
 
 ## Listing dead letters
 
-```
+```http
 GET /administration/coordinator/dead-letters
 ```
 
@@ -59,7 +61,7 @@ entry out before anyone looks at it.
 
 ## Replaying one entry
 
-```
+```http
 POST /administration/coordinator/dead-letters/{entryId}/replay
 ```
 
@@ -70,7 +72,7 @@ diagnosing.
 
 ## Discarding
 
-```
+```http
 DELETE /administration/coordinator/dead-letters/{entryId}     → 204, or 404
 DELETE /administration/coordinator/dead-letters               → 200, count purged
 ```
@@ -79,7 +81,7 @@ Both are permanent. The bulk form returns the number of entries it removed.
 
 ## Live tail
 
-```
+```http
 GET /administration/coordinator/stream        (text/event-stream)
 ```
 

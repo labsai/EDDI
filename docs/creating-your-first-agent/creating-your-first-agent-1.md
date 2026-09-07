@@ -422,7 +422,7 @@ Now we will align the just created `LifecycleTasks` in the `Workflow`. Make a **
 | ---------------------------- | ---------------------------------------------------- | -------- |
 | workflowSteps                | `Array` of `WorkflowStep`                            | True     |
 | WorkflowStep.type            | possible values, see table below "`Extension Types`" |          |
-| WorkflowStep.extensions      | `Array` of `Object`                                  | False    |
+| WorkflowStep.extensions      | `Object` (a map of extension name to value)          | False    |
 | WorkflowStep.config          | `Config` object, but can be empty.                   | True     |
 
 `workflowExtensions` is still accepted as a v5 alias. No other spelling is: writes go through a

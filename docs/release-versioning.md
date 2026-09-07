@@ -219,7 +219,7 @@ job that runs the JaCoCo 90/80 coverage gate.
 | **trivy-scan** | Same | Filesystem CVE scan, `exit-code 1`; blocks `docker` | ~2-3 min |
 | **gitleaks** | Same | Secret scanning; blocks `docker` | ~1 min |
 | **sbom** | Same | CycloneDX SBOM; does not block `docker` | ~2 min |
-| **docker** | Push to `main` or a tag matching `[0-9]*` | `[skip docker]` to skip (ignored on tags). Needs build-and-test, integration-test, trivy-scan, codeql and gitleaks | ~3-4 min |
+| **docker** | Push to `main` or a tag matching `[0-9]*` | `[skip docker]` to skip (ignored on tags). Needs detect-changes, build-and-test, integration-test, trivy-scan, codeql and gitleaks | ~3-4 min |
 | **smoke-test** | After `docker` succeeds | Same as docker | ~1-2 min |
 | **preflight-check** | Pull requests only | Always on PRs | ~5-7 min |
 

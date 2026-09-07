@@ -383,8 +383,12 @@ anything.
 
 | Config       | Type   | Description                                                                       |
 | ------------ | ------ | --------------------------------------------------------------------------------- |
-| `when`       | string | Required. Matched against the current deployment environment                       |
-| `tagMatches` | string | Optional. When set, the agent's tags (from context) must also contain this value   |
+| `when`       | string | Optional. Matched against the current deployment environment; skipped when absent or blank |
+| `tagMatches` | string | Optional. When set, the agent's tags (from context) must also contain this value           |
+
+Both are optional and both are checked when set, so a rule carrying only `tagMatches` matches on
+the tag alone in every environment. A rule with neither matches everywhere, which is rarely what
+anyone means — set at least one.
 
 The environment is read from the system property `eddi.deployment.env`, falling back to the
 environment variable `EDDI_DEPLOYMENT_ENV` and then to `development`. Prefer this over passing an
