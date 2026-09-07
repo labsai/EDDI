@@ -3281,7 +3281,24 @@
     "title": "गोपनीयता और अनुपालन",
     "userId": "उपयोगकर्ता ID",
     "userIdPlaceholder": "उपयोगकर्ता ID दर्ज करें...",
-    "userLookup": "उपयोगकर्ता खोज"
+    "userLookup": "उपयोगकर्ता खोज",
+    "exportIncomplete": "डाउनलोड हो गया, लेकिन यह बंडल पूर्ण नहीं है — इसे अनुच्छेद 15/20 के पूर्ण किए गए अनुरोध के रूप में न भेजें।",
+    "exportIncompleteTitle": "अपूर्ण निर्यात बंडल",
+    "exportIncompleteBody": "यह बंडल उस सब को कवर नहीं करता जो EDDI इस उपयोगकर्ता के बारे में रखता है। इसे अनुच्छेद 15/20 के पूर्ण किए गए अनुरोध के रूप में नहीं सौंपा जाना चाहिए।",
+    "omittedCategories": "निर्यात नहीं किया गया",
+    "resultsPartialTitle": "मिटाना अपूर्ण",
+    "resultsPartialBody": "इस उपयोगकर्ता का कुछ डेटा अब भी मौजूद हो सकता है। जब तक ये चरण सफल न हों, मिटाने को पूर्ण न बताएं।",
+    "conversationMappingsDeleted": "मैपिंग हटाई गईं",
+    "attachmentsDeleted": "अनुलग्नक हटाए गए",
+    "journalEntriesDeleted": "जर्नल प्रविष्टियाँ हटाई गईं",
+    "checkpointsDeleted": "चेकपॉइंट हटाए गए",
+    "groupConversationsDeleted": "समूह वार्तालाप हटाए गए",
+    "sharedArtifactsDeleted": "साझा आर्टिफ़ैक्ट हटाए गए",
+    "schedulesDeleted": "शेड्यूल हटाए गए",
+    "conversationsTruncated_one": "वार्तालापों की सीमा लगी — उपयोगकर्ता के कुल {{count}} हैं।",
+    "conversationsTruncated_other": "वार्तालापों की सीमा लगी — उपयोगकर्ता के कुल {{count}} हैं।",
+    "failedConversations_one": "{{count}} वार्तालाप पढ़ा नहीं जा सका और बंडल में अनुपस्थित है।",
+    "failedConversations_other": "{{count}} वार्तालाप पढ़े नहीं जा सके और बंडल में अनुपस्थित हैं।"
   },
   "mockBanner": {
     "message": "डेमो मोड — नमूना डेटा प्रदर्शित हो रहा है। वास्तविक डेटा के लिए एक EDDI बैकएंड कनेक्ट करें।"

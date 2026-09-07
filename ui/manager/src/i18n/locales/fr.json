@@ -3310,7 +3310,26 @@
     "title": "Confidentialité et conformité",
     "userId": "ID utilisateur",
     "userIdPlaceholder": "Saisir l'ID utilisateur...",
-    "userLookup": "Recherche d'utilisateur"
+    "userLookup": "Recherche d'utilisateur",
+    "exportIncomplete": "Téléchargé, mais ce paquet n’est PAS complet — ne l’envoyez pas comme une demande Art. 15/20 satisfaite.",
+    "exportIncompleteTitle": "Paquet d’export incomplet",
+    "exportIncompleteBody": "Ce paquet ne couvre pas tout ce qu’EDDI conserve sur cet utilisateur. Il ne doit pas être remis comme une demande Art. 15/20 satisfaite.",
+    "omittedCategories": "Non exporté",
+    "resultsPartialTitle": "Effacement incomplet",
+    "resultsPartialBody": "Une partie des données de cet utilisateur peut encore exister. Ne déclarez pas l’effacement satisfait tant que ces étapes n’ont pas abouti.",
+    "conversationMappingsDeleted": "Correspondances supprimées",
+    "attachmentsDeleted": "Pièces jointes supprimées",
+    "journalEntriesDeleted": "Entrées de journal supprimées",
+    "checkpointsDeleted": "Points de contrôle supprimés",
+    "groupConversationsDeleted": "Conversations de groupe supprimées",
+    "sharedArtifactsDeleted": "Artefacts partagés supprimés",
+    "schedulesDeleted": "Planifications supprimées",
+    "conversationsTruncated_one": "Les conversations ont été plafonnées — l’utilisateur en a {{count}} au total.",
+    "conversationsTruncated_other": "Les conversations ont été plafonnées — l’utilisateur en a {{count}} au total.",
+    "failedConversations_one": "{{count}} conversation n’a pas pu être lue et est absente du paquet.",
+    "failedConversations_other": "{{count}} conversations n’ont pas pu être lues et sont absentes du paquet.",
+    "conversationsTruncated_many": "Les conversations ont été plafonnées — l’utilisateur en a {{count}} au total.",
+    "failedConversations_many": "{{count}} conversations n’ont pas pu être lues et sont absentes du paquet."
   },
   "mockBanner": {
     "message": "Mode démo — Affichage de données d'exemple. Connectez un backend EDDI pour des données réelles."

@@ -3281,7 +3281,24 @@
     "title": "Datenschutz & Compliance",
     "userId": "Nutzer-ID",
     "userIdPlaceholder": "Nutzer-ID eingeben…",
-    "userLookup": "Nutzer-Suche"
+    "userLookup": "Nutzer-Suche",
+    "exportIncomplete": "Heruntergeladen, aber dieses Paket ist NICHT vollständig — senden Sie es nicht als erfüllten Art.-15/20-Antrag.",
+    "exportIncompleteTitle": "Unvollständiges Exportpaket",
+    "exportIncompleteBody": "Dieses Paket deckt nicht alles ab, was EDDI über diesen Nutzer gespeichert hat. Es darf nicht als erfüllter Art.-15/20-Antrag herausgegeben werden.",
+    "omittedCategories": "Nicht exportiert",
+    "resultsPartialTitle": "Löschung unvollständig",
+    "resultsPartialBody": "Ein Teil der Daten dieses Nutzers existiert möglicherweise noch. Melden Sie die Löschung erst als erfüllt, wenn diese Schritte erfolgreich sind.",
+    "conversationMappingsDeleted": "Zuordnungen gelöscht",
+    "attachmentsDeleted": "Anhänge gelöscht",
+    "journalEntriesDeleted": "Journaleinträge gelöscht",
+    "checkpointsDeleted": "Prüfpunkte gelöscht",
+    "groupConversationsDeleted": "Gruppengespräche gelöscht",
+    "sharedArtifactsDeleted": "Geteilte Artefakte gelöscht",
+    "schedulesDeleted": "Zeitpläne gelöscht",
+    "conversationsTruncated_one": "Gespräche wurden begrenzt — der Nutzer hat insgesamt {{count}}.",
+    "conversationsTruncated_other": "Gespräche wurden begrenzt — der Nutzer hat insgesamt {{count}}.",
+    "failedConversations_one": "{{count}} Gespräch konnte nicht gelesen werden und fehlt im Paket.",
+    "failedConversations_other": "{{count}} Gespräche konnten nicht gelesen werden und fehlen im Paket."
   },
   "mockBanner": {
     "message": "Demo-Modus — Es werden Beispieldaten angezeigt. Verbinden Sie ein EDDI-Backend für echte Daten."

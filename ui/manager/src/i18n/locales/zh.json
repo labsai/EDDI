@@ -3281,7 +3281,24 @@
     "title": "隐私与合规",
     "userId": "用户 ID",
     "userIdPlaceholder": "输入用户 ID…",
-    "userLookup": "用户查找"
+    "userLookup": "用户查找",
+    "exportIncomplete": "已下载，但此数据包并不完整 — 请勿将其作为已履行的第 15/20 条请求发送。",
+    "exportIncompleteTitle": "导出数据包不完整",
+    "exportIncompleteBody": "此数据包未涵盖 EDDI 保存的该用户全部数据，不得作为已履行的第 15/20 条请求交付。",
+    "omittedCategories": "未导出",
+    "resultsPartialTitle": "擦除不完整",
+    "resultsPartialBody": "该用户的部分数据可能仍然存在。在这些步骤成功之前，请勿报告擦除已完成。",
+    "conversationMappingsDeleted": "已删除映射",
+    "attachmentsDeleted": "已删除附件",
+    "journalEntriesDeleted": "已删除日志条目",
+    "checkpointsDeleted": "已删除检查点",
+    "groupConversationsDeleted": "已删除群组会话",
+    "sharedArtifactsDeleted": "已删除共享工件",
+    "schedulesDeleted": "已删除计划任务",
+    "conversationsTruncated_other": "会话已被截断 — 该用户共有 {{count}} 个。",
+    "failedConversations_other": "有 {{count}} 个会话无法读取，未包含在数据包中。",
+    "conversationsTruncated_one": "会话已被截断 — 该用户共有 {{count}} 个。",
+    "failedConversations_one": "有 {{count}} 个会话无法读取，未包含在数据包中。"
   },
   "mockBanner": {
     "message": "演示模式——显示示例数据。连接 EDDI 后端以获取真实数据。"

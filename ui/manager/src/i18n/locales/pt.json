@@ -3310,7 +3310,26 @@
     "title": "Privacidade e conformidade",
     "userId": "ID do usuário",
     "userIdPlaceholder": "Insira o ID do usuário...",
-    "userLookup": "Pesquisa de usuário"
+    "userLookup": "Pesquisa de usuário",
+    "exportIncomplete": "Transferido, mas este pacote NÃO está completo — não o envie como um pedido do art. 15.º/20.º satisfeito.",
+    "exportIncompleteTitle": "Pacote de exportação incompleto",
+    "exportIncompleteBody": "Este pacote não cobre tudo o que o EDDI guarda sobre este utilizador. Não deve ser entregue como um pedido do art. 15.º/20.º satisfeito.",
+    "omittedCategories": "Não exportado",
+    "resultsPartialTitle": "Apagamento incompleto",
+    "resultsPartialBody": "Parte dos dados deste utilizador pode ainda existir. Não comunique o apagamento como satisfeito enquanto estes passos não tiverem êxito.",
+    "conversationMappingsDeleted": "Mapeamentos eliminados",
+    "attachmentsDeleted": "Anexos eliminados",
+    "journalEntriesDeleted": "Entradas de diário eliminadas",
+    "checkpointsDeleted": "Pontos de controlo eliminados",
+    "groupConversationsDeleted": "Conversas de grupo eliminadas",
+    "sharedArtifactsDeleted": "Artefactos partilhados eliminados",
+    "schedulesDeleted": "Agendamentos eliminados",
+    "conversationsTruncated_one": "As conversas foram limitadas — o utilizador tem {{count}} no total.",
+    "conversationsTruncated_other": "As conversas foram limitadas — o utilizador tem {{count}} no total.",
+    "failedConversations_one": "{{count}} conversa não pôde ser lida e está ausente do pacote.",
+    "failedConversations_other": "{{count}} conversas não puderam ser lidas e estão ausentes do pacote.",
+    "conversationsTruncated_many": "As conversas foram limitadas — o utilizador tem {{count}} no total.",
+    "failedConversations_many": "{{count}} conversas não puderam ser lidas e estão ausentes do pacote."
   },
   "mockBanner": {
     "message": "Modo de demonstração — Exibindo dados de exemplo. Conecte um backend EDDI para dados reais."

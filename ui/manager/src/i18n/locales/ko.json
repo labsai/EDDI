@@ -3281,7 +3281,24 @@
     "title": "개인정보 보호 및 규정 준수",
     "userId": "사용자 ID",
     "userIdPlaceholder": "사용자 ID 입력...",
-    "userLookup": "사용자 조회"
+    "userLookup": "사용자 조회",
+    "exportIncomplete": "다운로드했지만 이 번들은 완전하지 않습니다 — 제15조/제20조 요청이 이행된 것으로 보내지 마세요.",
+    "exportIncompleteTitle": "불완전한 내보내기 번들",
+    "exportIncompleteBody": "이 번들은 EDDI가 이 사용자에 대해 보관하는 모든 것을 포함하지 않습니다. 제15조/제20조 요청이 이행된 것으로 전달해서는 안 됩니다.",
+    "omittedCategories": "내보내지 않음",
+    "resultsPartialTitle": "삭제 미완료",
+    "resultsPartialBody": "이 사용자의 데이터 일부가 아직 남아 있을 수 있습니다. 아래 단계가 성공할 때까지 삭제가 이행되었다고 보고하지 마세요.",
+    "conversationMappingsDeleted": "매핑 삭제됨",
+    "attachmentsDeleted": "첨부파일 삭제됨",
+    "journalEntriesDeleted": "저널 항목 삭제됨",
+    "checkpointsDeleted": "체크포인트 삭제됨",
+    "groupConversationsDeleted": "그룹 대화 삭제됨",
+    "sharedArtifactsDeleted": "공유 아티팩트 삭제됨",
+    "schedulesDeleted": "일정 삭제됨",
+    "conversationsTruncated_other": "대화가 상한에 걸렸습니다 — 이 사용자는 총 {{count}}개를 가지고 있습니다.",
+    "failedConversations_other": "{{count}}개의 대화를 읽을 수 없어 번들에 포함되지 않았습니다.",
+    "conversationsTruncated_one": "대화가 상한에 걸렸습니다 — 이 사용자는 총 {{count}}개를 가지고 있습니다.",
+    "failedConversations_one": "{{count}}개의 대화를 읽을 수 없어 번들에 포함되지 않았습니다."
   },
   "mockBanner": {
     "message": "데모 모드 — 샘플 데이터를 표시합니다. 실제 데이터를 보려면 EDDI 백엔드에 연결하세요."

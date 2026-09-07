@@ -3281,7 +3281,24 @@
     "title": "プライバシーとコンプライアンス",
     "userId": "ユーザー ID",
     "userIdPlaceholder": "ユーザー ID を入力...",
-    "userLookup": "ユーザー検索"
+    "userLookup": "ユーザー検索",
+    "exportIncomplete": "ダウンロードしましたが、このバンドルは完全ではありません — 第15条/第20条の請求に対する完全な回答として送付しないでください。",
+    "exportIncompleteTitle": "不完全なエクスポートバンドル",
+    "exportIncompleteBody": "このバンドルは、EDDI がこのユーザーについて保持しているすべてを網羅していません。第15条/第20条の請求を満たしたものとして引き渡さないでください。",
+    "omittedCategories": "エクスポート対象外",
+    "resultsPartialTitle": "消去が不完全です",
+    "resultsPartialBody": "このユーザーのデータの一部がまだ残っている可能性があります。以下の手順が成功するまで、消去が完了したと報告しないでください。",
+    "conversationMappingsDeleted": "マッピング削除数",
+    "attachmentsDeleted": "添付ファイル削除数",
+    "journalEntriesDeleted": "ジャーナル項目削除数",
+    "checkpointsDeleted": "チェックポイント削除数",
+    "groupConversationsDeleted": "グループ会話削除数",
+    "sharedArtifactsDeleted": "共有成果物削除数",
+    "schedulesDeleted": "スケジュール削除数",
+    "conversationsTruncated_other": "会話は上限で打ち切られました — このユーザーの総数は {{count}} 件です。",
+    "failedConversations_other": "{{count}} 件の会話を読み取れず、バンドルに含まれていません。",
+    "conversationsTruncated_one": "会話は上限で打ち切られました — このユーザーの総数は {{count}} 件です。",
+    "failedConversations_one": "{{count}} 件の会話を読み取れず、バンドルに含まれていません。"
   },
   "mockBanner": {
     "message": "デモモード — サンプルデータを表示しています。実際のデータには EDDI バックエンドを接続してください。"

@@ -4750,13 +4750,28 @@ export const scheduleHandlers = [
 
 export const gdprHandlers = [
   // Art. 17 — Delete user data (cascade)
+  // A clean cascade: 200, every counter reported, nothing failed.
+  //
+  // `logsPseudonymized` is the name EDDI has always used. The fixture said
+  // `logEntriesPseudonymized`, matching the page's typo rather than the
+  // backend, which is why the blank tile survived every test.
   http.delete("*/admin/gdpr/:userId", ({ params }) => {
     return HttpResponse.json({
       userId: params.userId as string,
       memoriesDeleted: 14,
       conversationsDeleted: 7,
+      conversationMappingsDeleted: 2,
+      logsPseudonymized: 89,
       auditEntriesPseudonymized: 23,
-      logEntriesPseudonymized: 89,
+      attachmentsDeleted: 4,
+      journalEntriesDeleted: 1,
+      checkpointsDeleted: 0,
+      groupConversationsDeleted: 3,
+      sharedArtifactsDeleted: 0,
+      schedulesDeleted: 1,
+      failedSteps: [],
+      complete: true,
+      completedAt: new Date().toISOString(),
     });
   }),
 
@@ -4773,7 +4788,18 @@ export const gdprHandlers = [
         { id: "conv-2", agentId: "agent2", state: "IN_PROGRESS", steps: 3, created: new Date(Date.now() - 3600000).toISOString() },
       ],
       managedConversations: [],
-    });
+      auditEntries: [],
+      attachments: [],
+      totalConversations: 2,
+      conversationsTruncated: false,
+      failedConversationIds: [],
+      // 207, not 200, and `complete: false` — which is what EDDI answers on
+      // EVERY export today, because four personal-data categories it erases as
+      // this user's data have no exporter yet. A fixture that answered 200
+      // would test a response the backend cannot currently produce.
+      omittedCategories: ["groupConversations", "sharedArtifacts", "schedules", "journalEntries"],
+      complete: false,
+    }, { status: 207 });
   }),
 
   // Art. 18 — Restrict processing

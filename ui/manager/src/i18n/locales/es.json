@@ -3310,7 +3310,26 @@
     "title": "Privacidad y cumplimiento",
     "userId": "ID de usuario",
     "userIdPlaceholder": "Introduzca el ID de usuario...",
-    "userLookup": "Búsqueda de usuario"
+    "userLookup": "Búsqueda de usuario",
+    "exportIncomplete": "Descargado, pero este paquete NO está completo — no lo envíe como una solicitud del art. 15/20 satisfecha.",
+    "exportIncompleteTitle": "Paquete de exportación incompleto",
+    "exportIncompleteBody": "Este paquete no cubre todo lo que EDDI almacena sobre este usuario. No debe entregarse como una solicitud del art. 15/20 satisfecha.",
+    "omittedCategories": "No exportado",
+    "resultsPartialTitle": "Supresión incompleta",
+    "resultsPartialBody": "Parte de los datos de este usuario puede seguir existiendo. No informe de la supresión como satisfecha hasta que estos pasos tengan éxito.",
+    "conversationMappingsDeleted": "Asignaciones eliminadas",
+    "attachmentsDeleted": "Adjuntos eliminados",
+    "journalEntriesDeleted": "Entradas de diario eliminadas",
+    "checkpointsDeleted": "Puntos de control eliminados",
+    "groupConversationsDeleted": "Conversaciones de grupo eliminadas",
+    "sharedArtifactsDeleted": "Artefactos compartidos eliminados",
+    "schedulesDeleted": "Programaciones eliminadas",
+    "conversationsTruncated_one": "Las conversaciones se limitaron — el usuario tiene {{count}} en total.",
+    "conversationsTruncated_other": "Las conversaciones se limitaron — el usuario tiene {{count}} en total.",
+    "failedConversations_one": "No se pudo leer {{count}} conversación y falta en el paquete.",
+    "failedConversations_other": "No se pudieron leer {{count}} conversaciones y faltan en el paquete.",
+    "conversationsTruncated_many": "Las conversaciones se limitaron — el usuario tiene {{count}} en total.",
+    "failedConversations_many": "No se pudieron leer {{count}} conversaciones y faltan en el paquete."
   },
   "mockBanner": {
     "message": "Modo demo — Se muestran datos de ejemplo. Conecte un backend de EDDI para ver datos reales."

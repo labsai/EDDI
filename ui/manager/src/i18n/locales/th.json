@@ -3281,7 +3281,24 @@
     "title": "ความเป็นส่วนตัวและการปฏิบัติตามข้อกำหนด",
     "userId": "รหัสผู้ใช้",
     "userIdPlaceholder": "ป้อนรหัสผู้ใช้...",
-    "userLookup": "ค้นหาผู้ใช้"
+    "userLookup": "ค้นหาผู้ใช้",
+    "exportIncomplete": "ดาวน์โหลดแล้ว แต่ชุดข้อมูลนี้ไม่สมบูรณ์ — อย่าส่งเป็นคำขอตามมาตรา 15/20 ที่ดำเนินการเสร็จสิ้น",
+    "exportIncompleteTitle": "ชุดข้อมูลส่งออกไม่สมบูรณ์",
+    "exportIncompleteBody": "ชุดข้อมูลนี้ไม่ครอบคลุมทุกอย่างที่ EDDI เก็บไว้เกี่ยวกับผู้ใช้รายนี้ ห้ามส่งมอบเป็นคำขอตามมาตรา 15/20 ที่ดำเนินการเสร็จสิ้น",
+    "omittedCategories": "ไม่ได้ส่งออก",
+    "resultsPartialTitle": "การลบไม่สมบูรณ์",
+    "resultsPartialBody": "ข้อมูลบางส่วนของผู้ใช้รายนี้อาจยังคงอยู่ อย่ารายงานว่าการลบเสร็จสิ้นจนกว่าขั้นตอนเหล่านี้จะสำเร็จ",
+    "conversationMappingsDeleted": "ลบการจับคู่แล้ว",
+    "attachmentsDeleted": "ลบไฟล์แนบแล้ว",
+    "journalEntriesDeleted": "ลบรายการบันทึกแล้ว",
+    "checkpointsDeleted": "ลบจุดตรวจแล้ว",
+    "groupConversationsDeleted": "ลบการสนทนากลุ่มแล้ว",
+    "sharedArtifactsDeleted": "ลบอาร์ติแฟกต์ที่แชร์แล้ว",
+    "schedulesDeleted": "ลบกำหนดการแล้ว",
+    "conversationsTruncated_other": "การสนทนาถูกจำกัด — ผู้ใช้มีทั้งหมด {{count}} รายการ",
+    "failedConversations_other": "ไม่สามารถอ่านการสนทนา {{count}} รายการ และไม่อยู่ในชุดข้อมูล",
+    "conversationsTruncated_one": "การสนทนาถูกจำกัด — ผู้ใช้มีทั้งหมด {{count}} รายการ",
+    "failedConversations_one": "ไม่สามารถอ่านการสนทนา {{count}} รายการ และไม่อยู่ในชุดข้อมูล"
   },
   "mockBanner": {
     "message": "โหมดสาธิต — กำลังแสดงข้อมูลตัวอย่าง เชื่อมต่อแบ็กเอนด์ EDDI เพื่อดูข้อมูลจริง"

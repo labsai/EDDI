@@ -3321,7 +3321,24 @@
     "title": "Privacy & Compliance",
     "userId": "User ID",
     "userIdPlaceholder": "Enter user ID...",
-    "userLookup": "User Lookup"
+    "userLookup": "User Lookup",
+    "exportIncomplete": "Downloaded, but this bundle is NOT complete — do not send it as a fulfilled Art. 15/20 request.",
+    "exportIncompleteTitle": "Incomplete export bundle",
+    "exportIncompleteBody": "This bundle does not cover everything EDDI holds on this user. It must not be handed over as a fulfilled Art. 15/20 request.",
+    "omittedCategories": "Not exported",
+    "resultsPartialTitle": "Erasure Incomplete",
+    "resultsPartialBody": "Some of this user's data may still exist. Do not report the erasure as fulfilled until these steps succeed.",
+    "conversationMappingsDeleted": "Mappings Deleted",
+    "attachmentsDeleted": "Attachments Deleted",
+    "journalEntriesDeleted": "Journal Entries Deleted",
+    "checkpointsDeleted": "Checkpoints Deleted",
+    "groupConversationsDeleted": "Group Conversations Deleted",
+    "sharedArtifactsDeleted": "Shared Artifacts Deleted",
+    "schedulesDeleted": "Schedules Deleted",
+    "conversationsTruncated_one": "Conversations were capped — the user has {{count}} in total.",
+    "conversationsTruncated_other": "Conversations were capped — the user has {{count}} in total.",
+    "failedConversations_one": "{{count}} conversation could not be read and is absent from the bundle.",
+    "failedConversations_other": "{{count}} conversations could not be read and are absent from the bundle."
   },
   "mockBanner": {
     "message": "Demo Mode — Displaying sample data. Connect an EDDI backend for real data."
