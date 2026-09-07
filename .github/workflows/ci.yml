@@ -65,17 +65,22 @@ jobs:
               - '.githooks/**'
               - 'k8s/*.sh'
               - 'k8s/*.ps1'
-            # DeploymentManifestsTest asserts things ABOUT these two documents —
-            # that they route every `kubectl apply -k` through create-secrets.sh,
-            # name ContainerCreating as the symptom, and do not advertise the
-            # mutable image tag. The `code` filter excludes docs/** and README, so
-            # those guards could not run on the change that broke them: a
-            # docs-only edit skipped build-and-test entirely, and a skipped
-            # required check still satisfies branch protection. They need the Java
-            # test job, not the Docker/publish half of the pipeline.
+            # DeploymentManifestsTest asserts things ABOUT these three documents:
+            # that kubernetes.md and README route every `kubectl apply -k`
+            # through create-secrets.sh, name ContainerCreating as the symptom,
+            # and do not advertise the mutable image tag, and that security.md
+            # names the Keycloak client id the SPA actually asks for. The `code`
+            # filter excludes docs/** and README, so those guards could not run
+            # on the change that broke them: a docs-only edit skipped
+            # build-and-test entirely, and a skipped required check still
+            # satisfies branch protection. EVERY document the suite reads belongs
+            # here — one left out is an assertion the file it reads cannot
+            # trigger. They need the Java test job, not the Docker/publish half
+            # of the pipeline.
             operator_docs:
               - 'docs/kubernetes.md'
               - 'README.md'
+              - 'docs/security.md'
 
       - name: Resolve
         id: result

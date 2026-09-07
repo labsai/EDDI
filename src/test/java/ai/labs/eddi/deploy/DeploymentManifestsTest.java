@@ -109,6 +109,18 @@ class DeploymentManifestsTest {
 
     private static final Path K8S_DOC = Path.of("docs", "kubernetes.md");
     private static final Path README = Path.of("README.md");
+    private static final Path SECURITY_DOC = Path.of("docs", "security.md");
+
+    /**
+     * Every document this suite makes an assertion about, and therefore every
+     * document ci.yml's {@code operator_docs} path filter has to list —
+     * build-and-test is what runs these guards, and an assertion the file it reads
+     * cannot trigger is not a guard. Kept as one list so a fourth guarded document
+     * is added here rather than remembered separately by
+     * {@link #ciRunsTheTestsOnOperatorDocChanges()}, which is how docs/security.md
+     * came to be asserted about but never filtered on.
+     */
+    private static final List<Path> CI_FILTERED_DOCS = List.of(K8S_DOC, README, SECURITY_DOC);
 
     /**
      * Every operator-facing copy of the same Kubernetes instructions.
@@ -1556,7 +1568,7 @@ class DeploymentManifestsTest {
         @Test
         @DisplayName("docs name the client id the code actually asks for")
         void docsNameTheRealClientId() throws IOException {
-            String security = read(Path.of("docs", "security.md"));
+            String security = read(SECURITY_DOC);
             assertFalse(security.contains("`eddi-manager`"),
                     "docs/security.md names a client id that neither the realm nor RestManagerResource uses; "
                             + "an operator provisioning Keycloak from it gets invalid_client at login");
@@ -2597,9 +2609,12 @@ class DeploymentManifestsTest {
         assertTrue(filters.contains("operator_docs:"),
                 CI + " needs a path filter covering the operator-facing docs; the `code` filter deliberately "
                         + "excludes docs/** and README.md, so nothing triggers the suite that guards them");
-        for (String doc : List.of("docs/kubernetes.md", "README.md")) {
-            assertTrue(filters.contains("'" + doc + "'"),
-                    CI + "'s operator_docs filter must list " + doc + " — DeploymentManifestsTest asserts "
+        for (Path doc : CI_FILTERED_DOCS) {
+            // The filter spells paths with forward slashes; Path.toString() does not on
+            // Windows.
+            String path = doc.toString().replace('\\', '/');
+            assertTrue(filters.contains("'" + path + "'"),
+                    CI + "'s operator_docs filter must list " + path + " — DeploymentManifestsTest asserts "
                             + "its contents, and an assertion that cannot be triggered by the file it reads "
                             + "is not a guard");
         }
