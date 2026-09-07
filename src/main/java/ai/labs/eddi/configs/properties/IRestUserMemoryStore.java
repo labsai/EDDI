@@ -7,6 +7,7 @@ package ai.labs.eddi.configs.properties;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import jakarta.annotation.security.RolesAllowed;
 import org.eclipse.microprofile.openapi.annotations.Operation;
+import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 import jakarta.ws.rs.*;
@@ -30,6 +31,7 @@ public interface IRestUserMemoryStore {
     @Path("/{userId}")
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(summary = "Get all memories for a user", description = "Returns all structured memory entries for the given user.")
+    @APIResponse(responseCode = "200", description = "Memory entries for the user.")
     List<UserMemoryEntry> getAllMemories(@PathParam("userId") String userId);
 
     @GET
@@ -37,6 +39,7 @@ public interface IRestUserMemoryStore {
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(summary = "Get visible memories for an agent", description = "Returns memories visible to a specific agent, "
             + "considering self/group/global visibility.")
+    @APIResponse(responseCode = "200", description = "Memory entries visible to the requested agent.")
     List<UserMemoryEntry> getVisibleMemories(@PathParam("userId") String userId, @QueryParam("agentId") String agentId,
                                              @QueryParam("groupId") List<String> groupIds, @QueryParam("order")
                                              @DefaultValue("most_recent") String recallOrder,
@@ -47,40 +50,54 @@ public interface IRestUserMemoryStore {
     @Path("/{userId}/search")
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(summary = "Search user memories", description = "Filter memories by key or value content.")
+    @APIResponse(responseCode = "200", description = "Memory entries matching the search query.")
+    @APIResponse(responseCode = "403", description = "Caller is not allowed to access the requested user's memories.")
+    @APIResponse(responseCode = "500", description = "Memory search failed due to an internal storage error.")
     List<UserMemoryEntry> searchMemories(@PathParam("userId") String userId, @QueryParam("q") String query);
 
     @GET
     @Path("/{userId}/category/{category}")
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(summary = "Get memories by category", description = "Returns memories filtered by category (preference, fact, context).")
+    @APIResponse(responseCode = "200", description = "Memory entries in the requested category.")
+    @APIResponse(responseCode = "403", description = "Caller is not allowed to access the requested user's memories.")
+    @APIResponse(responseCode = "500", description = "Category lookup failed due to an internal storage error.")
     List<UserMemoryEntry> getMemoriesByCategory(@PathParam("userId") String userId, @PathParam("category") String category);
 
     @GET
     @Path("/{userId}/key/{key}")
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(summary = "Get a specific memory by key", description = "Returns a single memory entry by its key name.")
+    @APIResponse(responseCode = "200", description = "The requested memory entry.")
+    @APIResponse(responseCode = "404", description = "No memory exists for the requested key.")
     Response getMemoryByKey(@PathParam("userId") String userId, @PathParam("key") String key);
 
     @PUT
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(summary = "Upsert a memory entry", description = "Insert or update a memory entry. Upsert key depends on visibility.")
+    @APIResponse(responseCode = "200", description = "Memory entry created or updated successfully.")
+    @APIResponse(responseCode = "400", description = "Request body or required memory fields are invalid.")
     Response upsertMemory(UserMemoryEntry entry);
 
     @DELETE
     @Path("/entry/{entryId}")
     @Operation(summary = "Delete a specific memory entry")
+    @APIResponse(responseCode = "204", description = "Memory entry deleted successfully.")
+    @APIResponse(responseCode = "404", description = "Memory entry not found.")
     Response deleteMemory(@PathParam("entryId") String entryId);
 
     @DELETE
     @Path("/{userId}")
     @Operation(summary = "Delete all memories for a user (GDPR)", description = "Permanently removes all memory entries for a user. "
             + "Intended for GDPR right-to-erasure requests.")
+    @APIResponse(responseCode = "204", description = "All memories for the user were deleted.")
     Response deleteAllForUser(@PathParam("userId") String userId);
 
     @GET
     @Path("/{userId}/count")
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(summary = "Count memory entries for a user")
+    @APIResponse(responseCode = "200", description = "Memory count for the user.")
     Response countMemories(@PathParam("userId") String userId);
 }
