@@ -13,7 +13,7 @@ import {
   Link2Off,
 } from "lucide-react";
 import { useOrphanScan, usePurgeOrphans } from "@/hooks/use-orphans";
-import type { OrphanInfo } from "@/lib/api/orphans";
+import { isScanComplete, type OrphanInfo } from "@/lib/api/orphans";
 import { getExtensionTypeConfig } from "@/lib/api/extensions";
 
 /** Extract resource ID from a URI like eddi://ai.labs.rules/rulestore/rulesets/abc123?version=1 */
@@ -231,6 +231,36 @@ export function OrphansPage() {
       {/* Results */}
       {report && (
         <div className="space-y-4">
+          {/* An incomplete reference scan makes MORE resources look
+              unreferenced, never fewer, so the list below is a set of false
+              positives rather than a shorter true one. EDDI refuses to purge on
+              one; saying so here is the difference between understanding why
+              and clicking Purge into an unexpected 409. */}
+          {!isScanComplete(report) && (
+            <div
+              className="flex items-start gap-3 rounded-xl border border-destructive/30 bg-destructive/5 p-4"
+              data-testid="orphans-scan-incomplete"
+            >
+              <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
+              <div className="space-y-1">
+                <p className="text-sm font-medium text-destructive">
+                  {t("orphans.scanIncomplete", "This scan did not finish")}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {t(
+                    "orphans.scanIncompleteBody",
+                    "Resources that are still in use may be listed as orphans. Purging is blocked until a scan completes.",
+                  )}
+                </p>
+                {report.scanWarning && (
+                  <p className="text-xs font-mono text-foreground" data-testid="orphans-scan-warning">
+                    {report.scanWarning}
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Summary card */}
           <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
             <div className="flex items-center justify-between">
@@ -261,7 +291,7 @@ export function OrphansPage() {
 
               <div className="flex items-center gap-2">
                 {/* Select all / Delete selected */}
-                {report.totalOrphans > 0 && (
+                {report.totalOrphans > 0 && isScanComplete(report) && (
                   <>
                     <button
                       onClick={selectAll}

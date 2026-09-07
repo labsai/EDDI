@@ -737,7 +737,12 @@
     "loadConversationFailed": "无法加载此对话：{{error}}",
     "multilineHint": "Enter 发送 · Shift+Enter 换行",
     "multilineHintCtrlEnter": "Ctrl+Enter 发送 · Enter 换行",
-    "toolRefused": "已拒绝"
+    "toolRefused": "已拒绝",
+    "errorConversationNotFound": "该会话已不存在。请开始新的会话以继续。",
+    "errorConversationEnded": "该会话已结束。",
+    "errorAgentNotReady": "该智能体尚未部署到所选环境。",
+    "errorAgentMismatch": "该会话属于该智能体的另一个版本。",
+    "errorQuotaUnavailable": "当前无法检查使用限额，请稍后重试。"
   },
   "resources": {
     "backToWorkflow": "返回工作流",
@@ -1803,7 +1808,8 @@
       "weekdays": "工作日 09:00",
       "weeklyMonday": "每周（周一 00:00）",
       "monthly": "每月（1 日 00:00）"
-    }
+    },
+    "totalCappedHint": "服务器返回了完整的一页，因此实际计划任务可能多于此处显示的数量。"
   },
   "cascadeTrace": {
     "title": "模型级联",
@@ -3299,7 +3305,9 @@
     "softDeleted": "已删除",
     "title": "孤立项检测",
     "found_other": "找到 {{count}} 个孤立项",
-    "found_one": "找到 {{count}} 个孤立项"
+    "found_one": "找到 {{count}} 个孤立项",
+    "scanIncomplete": "本次扫描未完成",
+    "scanIncompleteBody": "仍在使用中的资源可能被列为孤立资源。在扫描完整完成之前，清除操作已被禁用。"
   },
   "quotas": {
     "apiCallsMinute": "API 调用 / 分钟",

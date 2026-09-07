@@ -764,7 +764,12 @@
     "copy": "Copy",
     "emptyConversation": "This conversation has no messages yet.",
     "loadConversationFailed": "Couldn't load this conversation: {{error}}",
-    "toolRefused": "Refused"
+    "toolRefused": "Refused",
+    "errorConversationNotFound": "This conversation no longer exists. Start a new one to continue.",
+    "errorConversationEnded": "This conversation has ended.",
+    "errorAgentNotReady": "This agent is not deployed to the selected environment yet.",
+    "errorAgentMismatch": "This conversation belongs to a different version of the agent.",
+    "errorQuotaUnavailable": "Usage limits could not be checked right now. Try again in a moment."
   },
   "commandPalette": {
     "placeholder": "Search pages, agents, actions…",
@@ -1883,7 +1888,8 @@
       "weekdays": "Weekdays at 09:00",
       "weeklyMonday": "Weekly (Mon 00:00)",
       "monthly": "Monthly (1st, 00:00)"
-    }
+    },
+    "totalCappedHint": "The server returned a full page, so there may be more schedules than this."
   },
   "cascadeTrace": {
     "title": "Model Cascade",
@@ -3339,7 +3345,9 @@
     "softDeleted": "Deleted",
     "title": "Orphan Detection",
     "found_one": "{{count}} orphan found",
-    "found_other": "{{count}} orphans found"
+    "found_other": "{{count}} orphans found",
+    "scanIncomplete": "This scan did not finish",
+    "scanIncompleteBody": "Resources that are still in use may be listed as orphans. Purging is blocked until a scan completes."
   },
   "quotas": {
     "apiCallsMinute": "API Calls / Minute",

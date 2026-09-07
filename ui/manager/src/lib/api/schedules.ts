@@ -640,11 +640,51 @@ export function listTimeZones(): string[] {
 
 const BASE = "/schedulestore/schedules";
 
+/**
+ * The largest page EDDI will serve. Asking for more is not an error — the
+ * backend clamps — but asking for exactly this is how a single call sees as
+ * much as one call can.
+ */
+export const SCHEDULE_PAGE_MAX = 1000;
+
+/**
+ * List schedules, newest first.
+ *
+ * Paged since EDDI 6.4: `limit` defaults to 500 server-side and is capped at
+ * 1000. Sending no parameters, as this used to, meant a deployment holding more
+ * than 500 schedules silently lost the surplus — and HITL approval timeouts,
+ * per-user schedules and team cadences are all created programmatically, so
+ * passing 500 is not unusual. The rows beyond the cut could not be disabled or
+ * deleted through the list at all, because they were never in it.
+ *
+ * `hasMore` is EDDI's own rule, stated in its javadoc: a response holding
+ * exactly `limit` entries may be truncated, and the only way to find out is to
+ * ask for the next page.
+ */
 export async function getSchedules(
-  agentId?: string
+  agentId?: string,
+  limit = SCHEDULE_PAGE_MAX,
+  offset = 0,
 ): Promise<ScheduleConfiguration[]> {
-  const query = agentId ? `?agentId=${encodeURIComponent(agentId)}` : "";
-  return api.get<ScheduleConfiguration[]>(`${BASE}${query}`);
+  const params = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+  });
+  if (agentId) params.set("agentId", agentId);
+  return api.get<ScheduleConfiguration[]>(`${BASE}?${params.toString()}`);
+}
+
+/**
+ * Whether a page of this size may have more behind it.
+ *
+ * A short page is definitively the end; a full one is not definitively
+ * anything, which is why this answers "may" rather than "does".
+ */
+export function mayHaveMoreSchedules(
+  page: ScheduleConfiguration[],
+  limit = SCHEDULE_PAGE_MAX,
+): boolean {
+  return page.length >= limit;
 }
 
 export async function getSchedule(

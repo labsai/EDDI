@@ -3292,6 +3292,11 @@ export const coordinatorHandlers = [
 const ORPHAN_REPORT_MOCK = {
   totalOrphans: 5,
   deletedCount: 0,
+  // A scan that finished, which is what makes the list actionable. EDDI refuses
+  // to purge when this is false, so a fixture omitting it would leave the
+  // page's incomplete-scan branch untested against the real shape.
+  scanComplete: true,
+  scanWarning: null,
   orphans: [
     {
       resourceUri: "eddi://ai.labs.workflow/workflowstore/workflows/orphan1?version=1",

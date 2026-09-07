@@ -1,4 +1,6 @@
 import { useRef } from "react";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { create } from "zustand";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { Environment } from "@/lib/constants";
@@ -368,6 +370,10 @@ export function useStartConversation() {
  *  Supports secret mode: masks user message and sends secretInput context. */
 export function useSendMessage() {
   const store = useChatStore;
+  // Threaded into the stream handler rather than reached for through the i18n
+  // singleton: every other non-component translator in this repo takes a
+  // `TFunction`, and importing the singleton here would be the only exception.
+  const { t } = useTranslation();
   // Tracks the optimistic user message added by the in-flight send, so onError
   // can remove it on a 409 (the backend never consumed it — leaving it visible
   // would misleadingly look like the message was sent and received).
@@ -471,7 +477,7 @@ export function useSendMessage() {
 
         try {
           for await (const event of events) {
-            const isDone = handleSSEEvent(event, store);
+            const isDone = handleSSEEvent(event, store, t);
             if (isDone) {
               // Stream is logically complete — abort the fetch so the
               // reader.read() promise resolves immediately and the
@@ -623,7 +629,57 @@ export function useSendMessage() {
  * Returns `true` when the stream is logically complete ("done" or "error")
  * so the caller can break out of the for-await loop.
  */
-function handleSSEEvent(event: SSEEvent, store: typeof useChatStore): boolean {
+/**
+ * A sentence for a stream error EDDI classified, or null to keep its own text.
+ *
+ * `buildKnownConditionOrOpaqueErrorEvent` exists on the backend to turn the
+ * conditions the streaming endpoint rejects synchronously into machine-readable
+ * codes; its non-streaming twin answers a status for the same conditions.
+ * `conversation_not_found` is the newest of them — the twin gained a 404 where
+ * it used to answer 500 — and without a case here it reached the user as a raw
+ * backend sentence naming an id they cannot act on.
+ *
+ * Deliberately not exhaustive over every code the backend may grow: an
+ * unrecognised one falls back to the message it came with, which is more useful
+ * than a generic apology.
+ */
+export function translateStreamError(
+  code: string | undefined,
+  t: TFunction,
+): string | null {
+  switch (code) {
+    case "conversation_not_found":
+      return t(
+        "chat.errorConversationNotFound",
+        "This conversation no longer exists. Start a new one to continue.",
+      );
+    case "conversation_ended":
+      return t("chat.errorConversationEnded", "This conversation has ended.");
+    case "agent_not_ready":
+      return t(
+        "chat.errorAgentNotReady",
+        "This agent is not deployed to the selected environment yet.",
+      );
+    case "agent_mismatch":
+      return t(
+        "chat.errorAgentMismatch",
+        "This conversation belongs to a different version of the agent.",
+      );
+    case "quota_accounting_unavailable":
+      return t(
+        "chat.errorQuotaUnavailable",
+        "Usage limits could not be checked right now. Try again in a moment.",
+      );
+    default:
+      return null;
+  }
+}
+
+function handleSSEEvent(
+  event: SSEEvent,
+  store: typeof useChatStore,
+  t: TFunction,
+): boolean {
   const debug = useDebugStore.getState();
 
   switch (event.type) {
@@ -697,14 +753,22 @@ function handleSSEEvent(event: SSEEvent, store: typeof useChatStore): boolean {
       return true;
     }
     case "error": {
-      // Backend sends `{"message":"..."}`; show the message, not the raw JSON.
+      // Backend sends `{"message":"...","code":"..."}`; show the message, not
+      // the raw JSON.
       let message = event.data;
+      let code: string | undefined;
       try {
         const parsed = JSON.parse(event.data);
         if (parsed && typeof parsed.message === "string") message = parsed.message;
+        if (parsed && typeof parsed.code === "string") code = parsed.code;
       } catch {
         // non-JSON payload — fall back to the raw text
       }
+      // A known code gets a sentence in the reader's language that says what to
+      // do next. The backend message is kept as the fallback rather than
+      // discarded: an unrecognised code is still worth showing, and its text is
+      // the only thing that explains it.
+      message = translateStreamError(code, t) ?? message;
       store.getState().appendToLastAgentMessage(`\n\n⚠️ Error: ${message}`);
       store.getState().finishStreaming();
       debug.finalizeTurn();

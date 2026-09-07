@@ -777,7 +777,12 @@
     "loadConversationFailed": "تعذّر تحميل هذه المحادثة: {{error}}",
     "multilineHint": "Enter للإرسال · Shift+Enter لسطر جديد",
     "multilineHintCtrlEnter": "Ctrl+Enter للإرسال · Enter لسطر جديد",
-    "toolRefused": "مرفوض"
+    "toolRefused": "مرفوض",
+    "errorConversationNotFound": "لم تعد هذه المحادثة موجودة. ابدأ محادثة جديدة للمتابعة.",
+    "errorConversationEnded": "انتهت هذه المحادثة.",
+    "errorAgentNotReady": "لم يُنشر هذا الوكيل بعد في البيئة المحددة.",
+    "errorAgentMismatch": "تنتمي هذه المحادثة إلى إصدار آخر من الوكيل.",
+    "errorQuotaUnavailable": "تعذّر التحقق من حدود الاستخدام في الوقت الحالي. أعد المحاولة بعد قليل."
   },
   "resources": {
     "backToWorkflow": "العودة إلى مسار العمل",
@@ -1891,7 +1896,8 @@
       "weekdays": "أيام الأسبوع في 09:00",
       "weeklyMonday": "أسبوعياً (الإثنين 00:00)",
       "monthly": "شهرياً (اليوم 1، 00:00)"
-    }
+    },
+    "totalCappedHint": "أعاد الخادم صفحة كاملة، لذا قد يكون هناك جداول زمنية أكثر مما هو معروض."
   },
   "cascadeTrace": {
     "title": "تسلسل النماذج",
@@ -3419,7 +3425,9 @@
     "found_one": "تم العثور على {{count}} يتيم",
     "found_two": "تم العثور على {{count}} يتيم",
     "found_zero": "تم العثور على {{count}} يتيم",
-    "found_other": "تم العثور على {{count}} يتيم"
+    "found_other": "تم العثور على {{count}} يتيم",
+    "scanIncomplete": "لم يكتمل هذا الفحص",
+    "scanIncompleteBody": "قد تظهر موارد لا تزال قيد الاستخدام على أنها يتيمة. التطهير معطَّل حتى يكتمل فحص كامل."
   },
   "quotas": {
     "apiCallsMinute": "استدعاءات API / دقيقة",

@@ -737,7 +737,12 @@
     "loadConversationFailed": "यह वार्तालाप लोड नहीं हो सका: {{error}}",
     "multilineHint": "भेजने के लिए Enter · नई पंक्ति के लिए Shift+Enter",
     "multilineHintCtrlEnter": "भेजने के लिए Ctrl+Enter · नई पंक्ति के लिए Enter",
-    "toolRefused": "अस्वीकृत"
+    "toolRefused": "अस्वीकृत",
+    "errorConversationNotFound": "यह वार्तालाप अब मौजूद नहीं है। जारी रखने के लिए नया प्रारंभ करें।",
+    "errorConversationEnded": "यह वार्तालाप समाप्त हो चुका है।",
+    "errorAgentNotReady": "यह एजेंट चयनित परिवेश में अभी तैनात नहीं है।",
+    "errorAgentMismatch": "यह वार्तालाप एजेंट के किसी अन्य संस्करण से संबंधित है।",
+    "errorQuotaUnavailable": "अभी उपयोग सीमाएँ जाँची नहीं जा सकीं। कुछ देर बाद पुनः प्रयास करें।"
   },
   "resources": {
     "backToWorkflow": "Workflow पर वापस जाएं",
@@ -1803,7 +1808,8 @@
       "weekdays": "कार्यदिवसों में 09:00 बजे",
       "weeklyMonday": "साप्ताहिक (सोम 00:00)",
       "monthly": "मासिक (1 तारीख, 00:00)"
-    }
+    },
+    "totalCappedHint": "सर्वर ने पूरा एक पृष्ठ लौटाया, इसलिए यहाँ दिखाए गए से अधिक शेड्यूल हो सकते हैं।"
   },
   "cascadeTrace": {
     "title": "मॉडल कैस्केड",
@@ -3299,7 +3305,9 @@
     "softDeleted": "हटाया गया",
     "title": "अनाथ पहचान",
     "found_one": "{{count}} अनाथ मिले",
-    "found_other": "{{count}} अनाथ मिले"
+    "found_other": "{{count}} अनाथ मिले",
+    "scanIncomplete": "यह स्कैन पूरा नहीं हुआ",
+    "scanIncompleteBody": "अब भी उपयोग में आ रहे संसाधन अनाथ के रूप में सूचीबद्ध हो सकते हैं। स्कैन पूरा होने तक शुद्धिकरण अवरुद्ध है।"
   },
   "quotas": {
     "apiCallsMinute": "API कॉल / मिनट",

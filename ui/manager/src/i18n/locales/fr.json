@@ -747,7 +747,12 @@
     "loadConversationFailed": "Impossible de charger cette conversation : {{error}}",
     "multilineHint": "Entrée pour envoyer · Maj+Entrée pour une nouvelle ligne",
     "multilineHintCtrlEnter": "Ctrl+Entrée pour envoyer · Entrée pour une nouvelle ligne",
-    "toolRefused": "Refusé"
+    "toolRefused": "Refusé",
+    "errorConversationNotFound": "Cette conversation n’existe plus. Démarrez-en une nouvelle pour continuer.",
+    "errorConversationEnded": "Cette conversation est terminée.",
+    "errorAgentNotReady": "Cet agent n’est pas encore déployé dans l’environnement sélectionné.",
+    "errorAgentMismatch": "Cette conversation appartient à une autre version de l’agent.",
+    "errorQuotaUnavailable": "Les limites d’utilisation n’ont pas pu être vérifiées pour l’instant. Réessayez dans un moment."
   },
   "resources": {
     "backToWorkflow": "Retour au workflow",
@@ -1825,7 +1830,8 @@
       "weekdays": "En semaine à 09h00",
       "weeklyMonday": "Chaque semaine (lun 00h00)",
       "monthly": "Chaque mois (le 1er, 00h00)"
-    }
+    },
+    "totalCappedHint": "Le serveur a renvoyé une page complète : il peut donc y avoir plus de planifications que celles-ci."
   },
   "cascadeTrace": {
     "title": "Cascade de modèles",
@@ -3329,7 +3335,9 @@
     "title": "Détection des orphelins",
     "found_many": "{{count}} orphelins trouvés",
     "found_one": "{{count}} orphelin trouvé",
-    "found_other": "{{count}} orphelins trouvés"
+    "found_other": "{{count}} orphelins trouvés",
+    "scanIncomplete": "Cette analyse ne s’est pas terminée",
+    "scanIncompleteBody": "Des ressources encore utilisées peuvent apparaître comme orphelines. La purge est bloquée tant qu’une analyse n’aboutit pas."
   },
   "quotas": {
     "apiCallsMinute": "Appels API / minute",

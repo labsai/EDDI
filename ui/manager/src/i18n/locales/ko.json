@@ -737,7 +737,12 @@
     "loadConversationFailed": "이 대화를 불러올 수 없습니다: {{error}}",
     "multilineHint": "Enter로 보내기 · Shift+Enter로 줄바꿈",
     "multilineHintCtrlEnter": "Ctrl+Enter로 보내기 · Enter로 줄바꿈",
-    "toolRefused": "거부됨"
+    "toolRefused": "거부됨",
+    "errorConversationNotFound": "이 대화는 더 이상 존재하지 않습니다. 계속하려면 새 대화를 시작하세요.",
+    "errorConversationEnded": "이 대화는 종료되었습니다.",
+    "errorAgentNotReady": "이 에이전트는 선택한 환경에 아직 배포되지 않았습니다.",
+    "errorAgentMismatch": "이 대화는 에이전트의 다른 버전에 속해 있습니다.",
+    "errorQuotaUnavailable": "지금은 사용 한도를 확인할 수 없습니다. 잠시 후 다시 시도하세요."
   },
   "resources": {
     "backToWorkflow": "워크플로로 돌아가기",
@@ -1803,7 +1808,8 @@
       "weekdays": "평일 09:00",
       "weeklyMonday": "매주 (월 00:00)",
       "monthly": "매월 (1일 00:00)"
-    }
+    },
+    "totalCappedHint": "서버가 한 페이지를 가득 채워 반환했으므로 여기에 표시된 것보다 일정이 더 많을 수 있습니다."
   },
   "cascadeTrace": {
     "title": "모델 캐스케이드",
@@ -3299,7 +3305,9 @@
     "softDeleted": "삭제됨",
     "title": "고아 항목 감지",
     "found_other": "{{count}}개의 고아 항목을 찾았습니다",
-    "found_one": "{{count}}개의 고아 항목을 찾았습니다"
+    "found_one": "{{count}}개의 고아 항목을 찾았습니다",
+    "scanIncomplete": "이 스캔이 완료되지 않았습니다",
+    "scanIncompleteBody": "아직 사용 중인 리소스가 고아로 표시될 수 있습니다. 스캔이 완료될 때까지 정리가 차단됩니다."
   },
   "quotas": {
     "apiCallsMinute": "API 호출 / 분",

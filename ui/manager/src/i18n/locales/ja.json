@@ -737,7 +737,12 @@
     "loadConversationFailed": "この会話を読み込めませんでした: {{error}}",
     "multilineHint": "Enterで送信 · Shift+Enterで改行",
     "multilineHintCtrlEnter": "Ctrl+Enterで送信 · Enterで改行",
-    "toolRefused": "拒否されました"
+    "toolRefused": "拒否されました",
+    "errorConversationNotFound": "この会話は存在しません。続けるには新しい会話を開始してください。",
+    "errorConversationEnded": "この会話は終了しています。",
+    "errorAgentNotReady": "このエージェントは選択した環境にまだデプロイされていません。",
+    "errorAgentMismatch": "この会話はエージェントの別のバージョンに属しています。",
+    "errorQuotaUnavailable": "現在、利用上限を確認できませんでした。しばらくしてからもう一度お試しください。"
   },
   "resources": {
     "backToWorkflow": "ワークフローに戻る",
@@ -1803,7 +1808,8 @@
       "weekdays": "平日 09:00",
       "weeklyMonday": "毎週（月 00:00）",
       "monthly": "毎月（1 日 00:00）"
-    }
+    },
+    "totalCappedHint": "サーバーが 1 ページ分すべてを返したため、ここに表示されている以上のスケジュールが存在する可能性があります。"
   },
   "cascadeTrace": {
     "title": "モデルカスケード",
@@ -3299,7 +3305,9 @@
     "softDeleted": "削除済み",
     "title": "孤立検出",
     "found_other": "{{count}} 件の孤立項目が見つかりました",
-    "found_one": "{{count}} 件の孤立項目が見つかりました"
+    "found_one": "{{count}} 件の孤立項目が見つかりました",
+    "scanIncomplete": "このスキャンは完了しませんでした",
+    "scanIncompleteBody": "まだ使用中のリソースが孤立として表示される場合があります。スキャンが完了するまで、削除は無効化されます。"
   },
   "quotas": {
     "apiCallsMinute": "API 呼び出し / 分",

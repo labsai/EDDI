@@ -737,7 +737,12 @@
     "loadConversationFailed": "Konversation konnte nicht geladen werden: {{error}}",
     "multilineHint": "Enter zum Senden · Shift+Enter für eine neue Zeile",
     "multilineHintCtrlEnter": "Strg+Enter zum Senden · Enter für eine neue Zeile",
-    "toolRefused": "Abgelehnt"
+    "toolRefused": "Abgelehnt",
+    "errorConversationNotFound": "Dieses Gespräch existiert nicht mehr. Starten Sie ein neues, um fortzufahren.",
+    "errorConversationEnded": "Dieses Gespräch ist beendet.",
+    "errorAgentNotReady": "Dieser Agent ist in der gewählten Umgebung noch nicht bereitgestellt.",
+    "errorAgentMismatch": "Dieses Gespräch gehört zu einer anderen Version des Agenten.",
+    "errorQuotaUnavailable": "Die Nutzungsgrenzen konnten gerade nicht geprüft werden. Versuchen Sie es gleich erneut."
   },
   "resources": {
     "backToWorkflow": "Zurück zum Workflow",
@@ -1803,7 +1808,8 @@
       "weekdays": "Wochentags um 09:00",
       "weeklyMonday": "Wöchentlich (Mo 00:00)",
       "monthly": "Monatlich (1., 00:00)"
-    }
+    },
+    "totalCappedHint": "Der Server hat eine volle Seite zurückgegeben, es kann also mehr Zeitpläne geben als hier angezeigt."
   },
   "cascadeTrace": {
     "title": "Modellkaskade",
@@ -3299,7 +3305,9 @@
     "softDeleted": "Gelöscht",
     "title": "Verwaiste Ressourcen",
     "found_one": "{{count}} verwaiste Ressource gefunden",
-    "found_other": "{{count}} verwaiste Ressourcen gefunden"
+    "found_other": "{{count}} verwaiste Ressourcen gefunden",
+    "scanIncomplete": "Dieser Scan wurde nicht abgeschlossen",
+    "scanIncompleteBody": "Ressourcen, die noch verwendet werden, können als verwaist aufgeführt sein. Das Bereinigen ist gesperrt, bis ein Scan vollständig durchläuft."
   },
   "quotas": {
     "apiCallsMinute": "API-Aufrufe / Minute",

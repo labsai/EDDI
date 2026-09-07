@@ -42,6 +42,7 @@ import {
 import {
   fireLogDurationMs,
   parseInstant,
+  mayHaveMoreSchedules,
   formatInstantInZone,
   formatDateInZone,
   describeCron,
@@ -1300,6 +1301,22 @@ export function SchedulesPage() {
             </div>
             <p className="mt-2 text-2xl font-bold tabular-nums text-foreground">
               {total}
+              {/* A full page may be truncated — that is EDDI's own rule, and
+                  the only way to find out is to ask for the next one. Showing a
+                  bare count under a capped listing states a total the server
+                  never claimed. */}
+              {mayHaveMoreSchedules(schedules ?? []) && (
+                <span
+                  className="ms-1 align-top text-base font-normal text-muted-foreground"
+                  title={t(
+                    "schedules.totalCappedHint",
+                    "The server returned a full page, so there may be more schedules than this.",
+                  )}
+                  data-testid="schedules-total-capped"
+                >
+                  +
+                </span>
+              )}
             </p>
           </div>
 

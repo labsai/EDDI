@@ -329,3 +329,83 @@ describe("OrphansPage", () => {
     expect(screen.queryByTestId("purge-button")).not.toBeInTheDocument();
   });
 });
+
+/**
+ * An incomplete reference scan makes MORE resources look unreferenced, never
+ * fewer, so the list it produces is a set of false positives rather than a
+ * shorter true one. EDDI refuses to purge on one — 409 `incomplete_scan` — so
+ * the page's job is to say why before the operator reaches for the button.
+ */
+describe("OrphansPage — incomplete scan", () => {
+  /** Serve one scan result and run a scan. */
+  async function scanReturning(body: Record<string, unknown>) {
+    server.use(
+      http.get("*/administration/orphans", () => HttpResponse.json(body)),
+    );
+    renderOrphans();
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("scan-button"));
+  }
+
+  const partial = {
+    totalOrphans: 2,
+    deletedCount: 0,
+    scanComplete: false,
+    scanWarning: "reverse lookup failed for eddi://ai.labs.workflow",
+    orphans: [
+      {
+        resourceUri: "eddi://ai.labs.output/outputstore/outputsets/o1?version=1",
+        type: "eddi://ai.labs.output",
+        name: "Maybe orphaned",
+        deleted: false,
+      },
+    ],
+  };
+
+  it("warns and names the cause when the scan did not finish", async () => {
+    await scanReturning(partial);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("orphans-scan-incomplete")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("orphans-scan-warning")).toHaveTextContent(
+      "reverse lookup failed",
+    );
+  });
+
+  it("withholds the purge control while the scan is incomplete", async () => {
+    // The list still renders — it is worth reading, just not worth acting on.
+    await scanReturning(partial);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("orphans-scan-incomplete")).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("purge-button")).not.toBeInTheDocument();
+  });
+
+  it("says nothing and offers the purge when the scan finished", async () => {
+    // The other direction: a warning shown unconditionally would satisfy the
+    // tests above while blocking every ordinary purge.
+    await scanReturning({ ...partial, scanComplete: true, scanWarning: null });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("purge-button")).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("orphans-scan-incomplete")).not.toBeInTheDocument();
+  });
+
+  it("treats a report with no flag at all as complete", async () => {
+    // An EDDI predating the field. Reading absence as incomplete would block
+    // purging on every existing deployment.
+    await scanReturning({
+      totalOrphans: partial.totalOrphans,
+      deletedCount: partial.deletedCount,
+      orphans: partial.orphans,
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("purge-button")).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("orphans-scan-incomplete")).not.toBeInTheDocument();
+  });
+});

@@ -747,7 +747,12 @@
     "loadConversationFailed": "No se pudo cargar esta conversación: {{error}}",
     "multilineHint": "Enter para enviar · Shift+Enter para nueva línea",
     "multilineHintCtrlEnter": "Ctrl+Enter para enviar · Enter para nueva línea",
-    "toolRefused": "Rechazado"
+    "toolRefused": "Rechazado",
+    "errorConversationNotFound": "Esta conversación ya no existe. Inicie una nueva para continuar.",
+    "errorConversationEnded": "Esta conversación ha terminado.",
+    "errorAgentNotReady": "Este agente aún no está desplegado en el entorno seleccionado.",
+    "errorAgentMismatch": "Esta conversación pertenece a otra versión del agente.",
+    "errorQuotaUnavailable": "No se pudieron comprobar los límites de uso en este momento. Inténtelo de nuevo en un momento."
   },
   "resources": {
     "backToWorkflow": "Volver al workflow",
@@ -1825,7 +1830,8 @@
       "weekdays": "Días laborables a las 09:00",
       "weeklyMonday": "Semanal (lun 00:00)",
       "monthly": "Mensual (día 1, 00:00)"
-    }
+    },
+    "totalCappedHint": "El servidor devolvió una página completa, así que puede haber más programaciones de las mostradas."
   },
   "cascadeTrace": {
     "title": "Cascada de modelos",
@@ -3329,7 +3335,9 @@
     "title": "Detección de huérfanos",
     "found_many": "{{count}} huérfanos encontrados",
     "found_one": "{{count}} huérfano encontrado",
-    "found_other": "{{count}} huérfanos encontrados"
+    "found_other": "{{count}} huérfanos encontrados",
+    "scanIncomplete": "Este análisis no finalizó",
+    "scanIncompleteBody": "Puede que aparezcan como huérfanos recursos que siguen en uso. La purga está bloqueada hasta que un análisis se complete."
   },
   "quotas": {
     "apiCallsMinute": "Llamadas API / minuto",
