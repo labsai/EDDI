@@ -16,7 +16,8 @@ curl -X DELETE https://your-eddi-instance/admin/gdpr/{userId} \
   -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
 ```
 
-The response includes per-store counts:
+The response carries a count for every store the cascade touches, plus whether
+the cascade actually finished:
 ```json
 {
   "userId": "user-123",
@@ -25,11 +26,42 @@ The response includes per-store counts:
   "conversationMappingsDeleted": 3,
   "logsPseudonymized": 42,
   "auditEntriesPseudonymized": 156,
+  "attachmentsDeleted": 4,
+  "journalEntriesDeleted": 2,
+  "checkpointsDeleted": 9,
+  "groupConversationsDeleted": 1,
+  "sharedArtifactsDeleted": 0,
+  "schedulesDeleted": 0,
+  "failedSteps": [],
+  "complete": true,
   "completedAt": "2026-04-02T15:30:00Z"
 }
 ```
 
-**Via MCP:** Use the `delete_user_data` tool with `confirmation="CONFIRM"`.
+> **Check `complete` before filing the request as fulfilled.** The cascade
+> deliberately continues past a failing store, so the categories after it are
+> still erased — which is exactly why `conversationsDeleted: 0` on its own cannot
+> be read as "this user had no conversations". When any step throws, the endpoint
+> answers **207 Multi-Status**, `complete` is `false`, and `failedSteps` names the
+> steps that did not run. Some of the user's data is still there: re-run the
+> erasure and do not report it to the data subject as done. A cascade in which
+> every step succeeded answers **200** with an empty `failedSteps`.
+>
+> The step names are `userMemories`, `restrictionCache`, `conversationIdLookup`,
+> `attachments`, `hitlToolJournal`, `conversationDescriptors`,
+> `conversationCheckpoints`, `conversations`, `conversationMappingIntents`,
+> `conversationMappings`, `conversationMappingCache`, `groupConversations`,
+> `sharedArtifacts`, `schedules`, `databaseLogs` and `auditLedger`, and they name
+> the stores in the list below plus the two cache evictions and the two lookups
+> the cascade needs to reach them. `conversationIdLookup` is the worst one to
+> see: the id resolution the per-conversation sweeps depend on failed, so those
+> sweeps ran over nothing and their zero counts mean "not attempted", not
+> "nothing to do".
+
+**Via MCP:** Use the `delete_user_data` tool with `confirmation="CONFIRM"`. It
+reports the same outcome: `status` is `"completed"` only when every step
+succeeded and `"partially_completed"` otherwise, alongside the same `complete`
+and `failedSteps`.
 
 **What happens:**
 1. User memories — **permanently deleted**
@@ -62,18 +94,37 @@ The export includes all user data in a structured, machine-readable JSON format:
   the binaries themselves are not inlined and must be fetched via the attachment
   download API
 
-> **Check `conversationsTruncated` before handing the bundle to the data subject.**
-> Conversation snapshots are capped per request (1,000), because each one is a full
-> document load assembled in memory on the request thread. When the cap bites, the
-> endpoint answers **206 Partial Content** and the payload carries
-> `conversationsTruncated: true` alongside `totalConversations` — the number the
-> user actually has. A bundle in that state is **not** a complete Art. 15 / Art. 20
-> response; the omitted conversations are still retrievable individually through the
-> conversation API. A 200 with `conversationsTruncated: false` is the complete
-> bundle. (The audit-record cap of 10,000 is still reported in the server log only.)
+> **Check `complete` before handing the bundle to the data subject.** The endpoint
+> answers **200** only when the bundle covers everything EDDI holds on the user,
+> and **207 Multi-Status** otherwise. Three things can make it incomplete, and each
+> is named in the payload:
+>
+> - `omittedCategories` — personal-data categories this exporter does not reach.
+>   **Today this list is never empty**: group conversation transcripts, shared
+>   artifacts, schedules and HITL journal entries are erased by the Art. 17
+>   cascade as this user's personal data but are not yet exportable. So the export
+>   endpoint currently answers **207 on every request** and `complete` is always
+>   `false`. It becomes 200 when those four exporters land.
+> - `conversationsTruncated` — the per-request conversation cap (1,000) bit,
+>   because each snapshot is a full document load assembled in memory on the
+>   request thread. `totalConversations` says how many the user actually has, and
+>   the omitted ones remain retrievable individually through the conversation API.
+> - `failedConversationIds` — conversations the exporter could not load at all,
+>   listed by id, and therefore absent from `conversations`. Retry the export or
+>   fetch those ids individually.
+>
+> A bundle with `complete: false` is **not** a complete Art. 15 / Art. 20
+> response — do not file the request as fulfilled on it. (The audit-record cap of
+> 10,000 is still reported in the server log only.)
+>
+> 207 rather than 206 Partial Content, which earlier releases sent: 206 is a range
+> status and RFC 9110 requires a `Content-Range` alongside it, which this endpoint
+> neither reads nor produces. Any client still branching on 206 needs updating.
 
-**Via MCP:** Use the `export_user_data` tool. It reports the same two fields; an
-agent acting on its answer must not report a truncated bundle as fulfilled.
+**Via MCP:** Use the `export_user_data` tool. It reports the same fields in the
+payload — `complete`, `omittedCategories`, `conversationsTruncated`,
+`totalConversations` and `failedConversationIds` — and an agent acting on its
+answer must not report an incomplete bundle as fulfilled.
 
 ### 3. Right to Restriction of Processing (GDPR Art. 18 / LGPD Art. 18)
 

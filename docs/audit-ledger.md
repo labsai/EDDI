@@ -209,8 +209,24 @@ The asymmetry is deliberate. A re-queued entry has already consumed its chain po
 ### MongoDB (default)
 
 - Collection: `audit_ledger`
-- Indexes: `conversationId`, `(agentId, agentVersion)`, `timestamp` (descending)
-- Operations: `insertOne`, `insertMany` only — no update or delete
+- Indexes: `conversationId`, `(agentId, agentVersion)`, `timestamp` (descending), `userId`, `(conversationId asc, timestamp desc)`, `(conversationId asc, sequence desc)`
+- Operations: `insertOne` and `insertMany`, plus one exception — `pseudonymizeByUserId` issues an `updateMany` that overwrites `userId` under GDPR Art. 17(3)(e). Nothing else mutates a stored entry, and nothing ever deletes one. The mutation is HMAC-preserving for v3 rows (the signature covers the identity *token*, which is the same for an identifier and its pseudonym)
+
+#### Building the MongoDB indexes ahead of a deploy
+
+The last three of those indexes are new in this release: `userId` backs the GDPR export and erasure scans, and the two compound ones serve the per-conversation read's filter and sort together (which is what stops large conversations hitting MongoDB's in-memory sort limit) and back `maxSequence`.
+
+`AuditStore`'s constructor issues all six `createIndex` calls synchronously, so on an existing multi-million-document `audit_ledger` the thread that first builds the bean blocks until the new ones are built. The collection stays readable and writable while they build — MongoDB 4.2+ takes the exclusive lock only briefly at the start and end — but the first request that touches the ledger after a deploy waits it out.
+
+To take that wait out of the deploy, build them first:
+
+```javascript
+db.audit_ledger.createIndex({ userId: 1 });
+db.audit_ledger.createIndex({ conversationId: 1, timestamp: -1 });
+db.audit_ledger.createIndex({ conversationId: 1, sequence: -1 });
+```
+
+`createIndex` is idempotent for an identical key pattern, so the startup calls then find the indexes already present and return immediately.
 
 ### PostgreSQL
 

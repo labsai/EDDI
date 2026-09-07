@@ -14,9 +14,11 @@ import org.junit.jupiter.api.Test;
 
 import org.mockito.ArgumentCaptor;
 
+import java.lang.reflect.RecordComponent;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeSet;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -142,6 +144,42 @@ class McpGdprToolsTest {
         assertEquals(9L, body.get("groupConversationsDeleted"));
         assertEquals(10L, body.get("sharedArtifactsDeleted"));
         assertEquals(11L, body.get("schedulesDeleted"));
+    }
+
+    /**
+     * The MCP payload is hand-built, one {@code put} per component, while REST
+     * returns the record itself. A component added to {@link GdprDeletionResult}
+     * therefore appears in the REST JSON and silently does not appear here — the
+     * same erasure reported in two shapes, which is precisely the defect
+     * {@code complete} was added to fix, one component later. The six counters this
+     * PR restored were missing for exactly that reason.
+     * <p>
+     * Compared as key sets, not value by value: the point is that nothing can be
+     * added to the record without this test noticing, which a per-field assertion
+     * cannot do.
+     */
+    @Test
+    void deleteUserData_mcpPayloadCarriesEveryKeyTheRestBodyDoes() throws Exception {
+        var full = new GdprDeletionResult("user-1", 1, 2, 3, 4, 5,
+                6, 7, 8, 9, 10, 11, List.of(), Instant.EPOCH);
+        when(gdprService.deleteUserData("user-1")).thenReturn(full);
+
+        // Sorted, so a mismatch reads as a diff rather than two shuffled lists.
+        var expected = new TreeSet<String>();
+        for (RecordComponent component : GdprDeletionResult.class.getRecordComponents()) {
+            expected.add(component.getName());
+        }
+        // Derived rather than a component, and on the REST body too — @JsonProperty
+        // on GdprDeletionResult.complete() is what puts it there.
+        expected.add("complete");
+        // MCP-only: the human-readable verdict REST expresses as 200 vs 207.
+        expected.add("status");
+
+        tools.deleteUserData("user-1", "CONFIRM");
+
+        assertEquals(expected, new TreeSet<>(capturedResponseBody().keySet()),
+                "the MCP and REST surfaces must report the same erasure in the same shape; a key here and "
+                        + "not there is a client reading null from one of them");
     }
 
     /** The map the tool handed to the serializer, i.e. the response it produced. */

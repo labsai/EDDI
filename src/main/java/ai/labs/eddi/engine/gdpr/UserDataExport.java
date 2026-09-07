@@ -43,6 +43,15 @@ import java.util.Map;
  *            cap is stated in the payload and not only in the server log. It is
  *            <em>one</em> of the reasons a bundle can be incomplete — see
  *            {@link #complete()} for the whole answer.
+ * @param failedConversationIds
+ *            conversations the exporter could not load, so they are
+ *            <strong>absent</strong> from {@code conversations}. Kept separate
+ *            from {@code conversationsTruncated}, which stays the per-request
+ *            cap's own signal: a snapshot that failed to load used to be logged
+ *            at WARN and dropped while every completeness marker in the payload
+ *            still said the bundle was whole, so a DPO handed the data subject
+ *            an Art. 15 answer the code knew was short. Counts against
+ *            {@link #complete()}.
  *
  * @author ginccc
  * @since 6.0.0
@@ -56,7 +65,25 @@ public record UserDataExport(
         List<AuditExportEntry> auditEntries,
         List<AttachmentExportEntry> attachments,
         int totalConversations,
-        boolean conversationsTruncated) {
+        boolean conversationsTruncated,
+        List<String> failedConversationIds) {
+
+    public UserDataExport {
+        failedConversationIds = failedConversationIds == null ? List.of() : List.copyOf(failedConversationIds);
+    }
+
+    /**
+     * Backward-compatible constructor for the shape that predates the
+     * failed-conversation list — every conversation the bundle carries is one that
+     * loaded.
+     */
+    public UserDataExport(String userId, Instant exportedAt, List<UserMemoryEntry> memories,
+            List<ConversationExportEntry> conversations, List<UserConversation> managedConversations,
+            List<AuditExportEntry> auditEntries, List<AttachmentExportEntry> attachments,
+            int totalConversations, boolean conversationsTruncated) {
+        this(userId, exportedAt, memories, conversations, managedConversations, auditEntries, attachments,
+                totalConversations, conversationsTruncated, List.of());
+    }
 
     /**
      * Backward-compatible constructor without attachment metadata.
@@ -119,10 +146,16 @@ public record UserDataExport(
      * answering an Art. 15/20 request needs the honest answer, so the omitted
      * categories count against completeness exactly as the cap does. False until
      * those four stores are exportable.
+     * <p>
+     * {@link #failedConversationIds()} counts too, and for the same reason: a
+     * conversation the exporter could not load is missing from the bundle whether
+     * the cap or a failed read is why. That third term is masked today by the
+     * omitted categories always being non-empty — it becomes the load-bearing one
+     * the moment those four exporters land.
      */
     @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     public boolean complete() {
-        return !conversationsTruncated && omittedCategories().isEmpty();
+        return !conversationsTruncated && failedConversationIds.isEmpty() && omittedCategories().isEmpty();
     }
 
     /**

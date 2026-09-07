@@ -34,6 +34,7 @@ import jakarta.enterprise.inject.Instance;
 import java.time.Instant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -1370,6 +1371,55 @@ class GdprComplianceServiceTest {
     }
 
     /**
+     * A snapshot that fails to load is a conversation missing from the bundle, and
+     * it used to go missing silently: logged at WARN, dropped, and every
+     * completeness marker in the payload still saying the bundle was whole. Well
+     * inside the cap, so {@code conversationsTruncated} — the only signal there was
+     * — stayed false, and the DPO handed the data subject an Art. 15 answer the
+     * code knew was short.
+     * <p>
+     * The cap keeps its own marker: the two are different omissions and a caller
+     * chasing 998 of 1,000 needs to know which happened.
+     */
+    @Test
+    void exportUserData_namesTheConversationsItCouldNotLoad() throws Exception {
+        var snapshot = new ConversationMemorySnapshot();
+        snapshot.setAgentId("agent-1");
+        snapshot.setAgentVersion(1);
+        snapshot.setConversationState(ConversationState.READY);
+
+        when(userMemoryStore.getAllEntries(USER_ID)).thenReturn(List.of());
+        when(conversationMemoryStore.getConversationIdsByUserId(USER_ID))
+                .thenReturn(List.of("conv-1", "conv-2", "conv-3"));
+        when(conversationMemoryStore.loadConversationMemorySnapshot("conv-1")).thenReturn(snapshot);
+        when(conversationMemoryStore.loadConversationMemorySnapshot("conv-2"))
+                .thenThrow(new RuntimeException("GridFS chunk missing"));
+        // Absent rather than throwing: the id came from the same store moments ago,
+        // so the document was removed between the two reads and the conversation is
+        // just as missing from the bundle.
+        when(conversationMemoryStore.loadConversationMemorySnapshot("conv-3")).thenReturn(null);
+        when(userConversationStore.getAllForUser(USER_ID)).thenReturn(List.of());
+        when(auditStore.getEntriesByUserId(eq(USER_ID), anyInt(), anyInt())).thenReturn(List.of());
+
+        UserDataExport export = service.exportUserData(USER_ID);
+
+        assertEquals(1, export.conversations().size(), "the conversations that did load are still exported");
+        assertEquals(List.of("conv-2", "conv-3"), export.failedConversationIds(),
+                "a bundle that lost conversations has to name them, or nobody can tell it is short");
+        assertFalse(export.conversationsTruncated(),
+                "the cap did not bite — overloading its marker would make the two omissions indistinguishable");
+        assertEquals(3, export.totalConversations());
+
+        // The ledger entry is the evidence this export happened; "1 of 3 exported"
+        // with nothing to explain the other two is a discrepancy nobody can account
+        // for afterwards.
+        ArgumentCaptor<AuditEntry> entryCaptor = ArgumentCaptor.forClass(AuditEntry.class);
+        verify(auditLedgerService).submit(entryCaptor.capture());
+        assertEquals(2, entryCaptor.getValue().output().get("conversationsFailed"),
+                "the compliance record has to say how many conversations the bundle lost");
+    }
+
+    /**
      * Finding r7. The read path is not atomic with {@code restrictProcessing}: T1
      * reads "not restricted" from the store, T2 (an admin applying an Art. 18
      * restriction) writes the row and publishes {@code true}, and T1 then
@@ -1597,6 +1647,53 @@ class GdprComplianceServiceTest {
 
         assertFalse(result.complete());
         assertTrue(result.failedSteps().contains("conversationMappingCache"), result.failedSteps().toString());
+    }
+
+    /**
+     * The Art. 18 restriction eviction is its own step, not part of the memory
+     * delete.
+     * <p>
+     * It used to sit inside the memory step's try, between the delete and the
+     * assignment that records how many entries it removed. An eviction that threw
+     * there therefore reported {@code memoriesDeleted=0} and named
+     * {@code userMemories} as the failed step — for a delete that had already
+     * succeeded. The DPO re-runs an erasure whose memory half was done and cannot
+     * tell from the response that the only thing left undone is a cache.
+     */
+    @Test
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    void deleteUserData_aFailedRestrictionEvictionDoesNotDisownTheMemoriesItDeleted() throws Exception {
+        ICache<String, Boolean> restrictionCache = mock(ICache.class);
+        doThrow(new IllegalStateException("cache closed")).when(restrictionCache).remove(anyString());
+        var failingCacheFactory = mock(CacheFactory.class);
+        when(failingCacheFactory.getCache(anyString())).thenReturn(mock(ICache.class));
+        when(failingCacheFactory.getCache(anyString(), any())).thenReturn((ICache) restrictionCache);
+
+        when(userMemoryStore.countEntries(USER_ID)).thenReturn(42L);
+        when(conversationMemoryStore.deleteConversationsByUserId(USER_ID)).thenReturn(0L);
+        when(userConversationStore.deleteAllForUser(USER_ID)).thenReturn(0L);
+        when(databaseLogs.pseudonymizeByUserId(eq(USER_ID), anyString())).thenReturn(0L);
+        when(auditStore.pseudonymizeByUserId(eq(USER_ID), anyString())).thenReturn(0L);
+
+        var serviceWithFailingCache = new GdprComplianceService(
+                userMemoryStore, conversationMemoryStore,
+                userConversationStore, databaseLogs, auditStore,
+                auditLedgerService, attachmentStorageInstance, hitlToolJournalStore,
+                conversationDescriptorStore, checkpointStore,
+                groupConversationStoreInstance, sharedArtifactStoreInstance, scheduleStore,
+                failingCacheFactory, 30L);
+
+        GdprDeletionResult result = serviceWithFailingCache.deleteUserData(USER_ID);
+
+        verify(userMemoryStore).deleteAllForUser(USER_ID);
+        assertEquals(42, result.memoriesDeleted(),
+                "the delete succeeded, so the response must not report zero memories erased");
+        assertFalse(result.failedSteps().contains("userMemories"),
+                "the memory store did not fail; naming it sends the DPO to re-run a step that ran: "
+                        + result.failedSteps());
+        assertTrue(result.failedSteps().contains("restrictionCache"),
+                "a stale 'restricted' verdict left in the cache is still a failure, and has to be named as "
+                        + "its own: " + result.failedSteps());
     }
 
     /**

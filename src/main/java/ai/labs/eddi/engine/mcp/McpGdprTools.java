@@ -123,8 +123,9 @@ public class McpGdprTools {
             + "'complete'=false means the bundle is INCOMPLETE and must NOT be handed to the "
             + "data subject as a complete Art. 15 bundle: 'omittedCategories' names the "
             + "personal-data categories this exporter does not reach (always non-empty today), "
-            + "and 'conversationsTruncated'=true means the per-request conversation cap bit, "
-            + "with 'totalConversations' saying how many the user has.")
+            + "'conversationsTruncated'=true means the per-request conversation cap bit, "
+            + "with 'totalConversations' saying how many the user has, and "
+            + "'failedConversationIds' names conversations that could not be loaded at all.")
     public String exportUserData(
                                  @ToolArg(description = "User ID to export (required)") String userId) {
         requireRole(identity, authEnabled, "eddi-admin");
@@ -147,6 +148,11 @@ public class McpGdprTools {
             map.put("omittedCategories", export.omittedCategories());
             map.put("totalConversations", export.totalConversations());
             map.put("conversationsTruncated", export.conversationsTruncated());
+            // The third reason a bundle can be short, alongside the cap and the
+            // omitted categories: conversations the exporter could not load at all.
+            // Left out here, an agent reading complete=false with
+            // conversationsTruncated=false has nothing to say why.
+            map.put("failedConversationIds", export.failedConversationIds());
             map.put("managedConversationsCount",
                     export.managedConversations().size());
             map.put("memories", export.memories());

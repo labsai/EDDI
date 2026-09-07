@@ -278,9 +278,6 @@ public class GdprComplianceService {
         try {
             long countedMemories = userMemoryStore.countEntries(userId);
             userMemoryStore.deleteAllForUser(userId);
-            // The restriction flag lives in the same store and has just been deleted
-            // with everything else, so a cached "restricted" verdict is now wrong.
-            forgetRestriction(userId);
             // Assigned only once the delete returned: assigning before it made the
             // response claim N memories deleted when the delete had thrown and zero
             // were.
@@ -289,6 +286,21 @@ public class GdprComplianceService {
                     memoriesDeleted, pseudonym);
         } catch (Exception e) {
             recordFailure(failedSteps, "userMemories", e, pseudonym);
+        }
+
+        // 1b. Drop any cached Art. 18 restriction verdict. The flag lives in the
+        // store the step above has just emptied, so a cached "restricted" verdict is
+        // now wrong.
+        //
+        // Its own try, and its own step name, for the reason step 5b below has one:
+        // folded into the try above, an eviction that threw after the delete had
+        // succeeded left memoriesDeleted at 0 and named "userMemories" as the failed
+        // step — the response reporting an erasure that did happen as one that did
+        // not, and sending a DPO to re-run a cascade whose memory half was done.
+        try {
+            forgetRestriction(userId);
+        } catch (Exception e) {
+            recordFailure(failedSteps, "restrictionCache", e, pseudonym);
         }
 
         // 2. Delete attachments for all user conversations
@@ -608,6 +620,14 @@ public class GdprComplianceService {
             LOGGER.warnf("[GDPR] User has %d conversations; exporting the first %d and marking the bundle truncated [%s]",
                     totalConversations, CONVERSATION_EXPORT_LIMIT, pseudonym);
         }
+        // A snapshot this loop cannot load is a conversation missing from the bundle,
+        // and it used to be missing silently: logged at WARN and dropped, while
+        // conversationsTruncated — the only completeness signal — stayed false. A DPO
+        // handed the data subject an Art. 15 bundle the code knew was short. The ids
+        // are collected so the bundle can name what it lost, and they count against
+        // UserDataExport.complete() the same way the cap does; conversationsTruncated
+        // stays the cap's own signal and is not overloaded with this.
+        var failedConversationIds = new ArrayList<String>();
         for (var convId : conversationIds.subList(0, exportable)) {
             try {
                 var snapshot = conversationMemoryStore
@@ -619,8 +639,17 @@ public class GdprComplianceService {
                             snapshot.getAgentVersion(),
                             snapshot.getConversationState(),
                             snapshot.getConversationOutputs()));
+                } else {
+                    // The id came from this same store moments ago, so an absent
+                    // document is a conversation lost between the two reads, not an
+                    // empty one — indistinguishable from a load failure to the reader
+                    // of the bundle, and reported as such.
+                    failedConversationIds.add(convId);
+                    LOGGER.warnf("[GDPR] Conversation %s vanished between id lookup and export [%s]",
+                            convId, pseudonym);
                 }
             } catch (Exception e) {
+                failedConversationIds.add(convId);
                 LOGGER.warnf("[GDPR] Skipping conversation %s during export: %s",
                         convId, e.getMessage());
             }
@@ -673,23 +702,30 @@ public class GdprComplianceService {
         }
 
         LOGGER.infof("[GDPR] Export complete [%s]: memories=%d, "
-                + "conversations=%d of %d, truncated=%s, managedConversations=%d, auditEntries=%d, attachments=%d",
+                + "conversations=%d of %d, truncated=%s, failedConversations=%d, managedConversations=%d, "
+                + "auditEntries=%d, attachments=%d",
                 pseudonym, memories.size(), conversations.size(), totalConversations, conversationsTruncated,
-                managedConversations.size(), auditExportEntries.size(), attachmentEntries.size());
+                failedConversationIds.size(), managedConversations.size(), auditExportEntries.size(),
+                attachmentEntries.size());
 
-        // Write compliance event to immutable audit ledger
+        // Write compliance event to immutable audit ledger.
+        // conversationsFailed is part of the record because the ledger entry is the
+        // evidence that this export happened: an entry saying 998 of 1,000 were
+        // exported with nothing to explain the two is a discrepancy nobody can
+        // account for after the fact.
         submitComplianceAuditEntry("GDPR_EXPORT", pseudonym, Map.of(
                 "memoriesExported", memories.size(),
                 "conversationsExported", conversations.size(),
                 "totalConversations", totalConversations,
                 "conversationsTruncated", conversationsTruncated,
+                "conversationsFailed", failedConversationIds.size(),
                 "managedConversationsExported", managedConversations.size(),
                 "auditEntriesExported", auditExportEntries.size(),
                 "attachmentsExported", attachmentEntries.size()));
 
         return new UserDataExport(userId, Instant.now(), memories,
                 conversations, managedConversations, auditExportEntries, attachmentEntries,
-                totalConversations, conversationsTruncated);
+                totalConversations, conversationsTruncated, failedConversationIds);
     }
 
     // === Right to Restriction of Processing (GDPR Art. 18) ===

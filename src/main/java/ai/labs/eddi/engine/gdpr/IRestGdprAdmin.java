@@ -96,15 +96,18 @@ public interface IRestGdprAdmin {
                        + "does delete them — see the interface javadoc. "
                        + "Responds 200 only when the bundle covers everything, and 207 Multi-Status "
                        + "otherwise: 'complete' says which, 'omittedCategories' names the categories "
-                       + "this exporter does not reach, and 'conversationsTruncated' with "
-                       + "'totalConversations' report the per-request conversation cap. Because those "
+                       + "this exporter does not reach, 'conversationsTruncated' with "
+                       + "'totalConversations' report the per-request conversation cap, and "
+                       + "'failedConversationIds' names conversations that could not be loaded at all "
+                       + "and are therefore absent from the bundle. Because those "
                        + "four categories are always omitted today, the answer is currently always 207 "
                        + "— the export must NOT be handed to the data subject as a complete Art. 15/20 "
                        + "bundle while 'complete' is false.")
     @APIResponse(responseCode = "200", description = "Complete export bundle — every category covered, nothing truncated",
                  content = @Content(schema = @Schema(implementation = UserDataExport.class)))
     @APIResponse(responseCode = "207",
-                 description = "Incomplete bundle — see 'complete', 'omittedCategories' and 'conversationsTruncated'",
+                 description = "Incomplete bundle — see 'complete', 'omittedCategories', "
+                         + "'conversationsTruncated' and 'failedConversationIds'",
                  content = @Content(schema = @Schema(implementation = UserDataExport.class)))
     Response exportUserData(
                             @PathParam("userId")

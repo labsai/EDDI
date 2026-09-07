@@ -718,7 +718,12 @@ class PostgresUserMemoryStoreUnitTest {
                     "the raw userId reached an erasure log line, so the log now holds the identifier the "
                             + "erasure existed to remove; offending value: " + value);
         }
-        assertTrue(captured.stream().anyMatch(value -> value.contains(AuditHmac.GDPR_PSEUDONYM_PREFIX)),
+        // The whole value, not merely the prefix. A prefix match proves only that
+        // something pseudonym-shaped was logged: a digest taken over a sanitised or
+        // truncated userId would satisfy it while failing the contract this
+        // assertion states, because it would not equal what the erasure cascade
+        // writes into the audit ledger and the two could not be correlated.
+        assertTrue(captured.stream().anyMatch(value -> value.contains(AuditHmac.pseudonymFor(poisoned))),
                 "the erasure log must carry the same pseudonym the cascade writes into the audit ledger, so "
                         + "an operator can still correlate the two; captured: " + captured);
         for (String value : captured) {
