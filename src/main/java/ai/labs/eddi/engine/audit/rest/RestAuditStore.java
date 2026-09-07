@@ -53,14 +53,38 @@ public class RestAuditStore implements IRestAuditStore {
         this.auditLedgerService = auditLedgerService;
     }
 
+    /**
+     * Page size used when a read endpoint is given no usable {@code limit}. Small
+     * on purpose: an audit entry carries full prompts and responses.
+     */
+    static final int DEFAULT_READ_LIMIT = 100;
+
+    /** Hard ceiling on one page of audit entries, whatever the caller asks for. */
+    static final int MAX_READ_LIMIT = 1_000;
+
     @Override
     public List<AuditEntry> getAuditTrail(String conversationId, int skip, int limit) {
-        return auditStore.getEntries(conversationId, skip, limit);
+        return auditStore.getEntries(conversationId, clampSkip(skip), clampReadLimit(limit));
     }
 
     @Override
     public List<AuditEntry> getAuditTrailByAgent(String agentId, Integer agentVersion, int skip, int limit) {
-        return auditStore.getEntriesByAgent(agentId, agentVersion, skip, limit);
+        return auditStore.getEntriesByAgent(agentId, agentVersion, clampSkip(skip), clampReadLimit(limit));
+    }
+
+    /**
+     * Bound a read page the way {@link #clampLimit} bounds a verification sweep.
+     * <p>
+     * The read endpoints used to pass the query parameter through untouched, and
+     * the two backends disagree about what an out-of-range value means: MongoDB
+     * treats {@code limit <= 0} as "no limit" and materialises every audit entry
+     * ever written for the scope — millions of rows with full prompts — into one
+     * response on the request thread, while PostgreSQL rejects a negative
+     * {@code LIMIT} or {@code OFFSET} with a 500. Same request, different failure,
+     * neither of them what the caller meant.
+     */
+    private static int clampReadLimit(int limit) {
+        return limit < 1 ? DEFAULT_READ_LIMIT : Math.min(limit, MAX_READ_LIMIT);
     }
 
     @Override

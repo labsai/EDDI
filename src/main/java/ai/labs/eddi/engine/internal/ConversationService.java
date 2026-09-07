@@ -16,6 +16,8 @@ import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.events.HitlResumeCompletedEvent;
 import ai.labs.eddi.engine.gdpr.GdprComplianceService;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictedException;
+import ai.labs.eddi.engine.gdpr.ProcessingRestrictionUnavailableException;
+import ai.labs.eddi.engine.tenancy.QuotaAccountingUnavailableException;
 import ai.labs.eddi.engine.tenancy.QuotaExceededException;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
@@ -360,7 +362,13 @@ public class ConversationService implements IConversationService {
             // (avoids burning quota on GDPR-restricted or agent-not-ready failures)
             QuotaCheckResult quotaCheck = tenantQuotaService.acquireConversationSlot();
             if (!quotaCheck.allowed()) {
-                throw new QuotaExceededException(quotaCheck.reason());
+                throw quotaCheck.accountingUnavailable()
+                        // A store that could not answer is a 503, not a 429: the
+                        // tenant is not over anything, and a client that backs off
+                        // for a minute on the strength of a Retry-After is reacting
+                        // to the wrong signal.
+                        ? new QuotaAccountingUnavailableException(quotaCheck.reason())
+                        : new QuotaExceededException(quotaCheck.reason());
             }
 
             // Decided here, at the only moment it CAN be decided: this is still the
@@ -587,7 +595,13 @@ public class ConversationService implements IConversationService {
             // agent-not-ready failures)
             QuotaCheckResult quotaCheck = tenantQuotaService.acquireApiCallSlot();
             if (!quotaCheck.allowed()) {
-                throw new QuotaExceededException(quotaCheck.reason());
+                throw quotaCheck.accountingUnavailable()
+                        // A store that could not answer is a 503, not a 429: the
+                        // tenant is not over anything, and a client that backs off
+                        // for a minute on the strength of a Retry-After is reacting
+                        // to the wrong signal.
+                        ? new QuotaAccountingUnavailableException(quotaCheck.reason())
+                        : new QuotaExceededException(quotaCheck.reason());
             }
 
             admittedTurn = new ProcessingTurn(processingConversationCount);
@@ -654,8 +668,22 @@ public class ConversationService implements IConversationService {
                     withResolutionPrincipal(conversationMemory, executeConversation), notifySkipped, processingTurn);
 
             conversationCoordinator.submitInOrder(conversationId, processUserInput);
-        } catch (ProcessingRestrictedException | QuotaExceededException | ConversationAwaitingApprovalException e) {
-            releaseTurn(admittedTurn); // all three are thrown before the turn is admitted
+        } catch (ProcessingRestrictedException | ProcessingRestrictionUnavailableException | QuotaExceededException
+                | QuotaAccountingUnavailableException | ConversationAwaitingApprovalException e) {
+            // All five are thrown before the turn is admitted, and none is an internal
+            // fault of this class: the generic handler below logs a full ERROR stack
+            // trace, which for the restriction-unavailable case meant every turn of
+            // every user wrote two of them (here and again in RestAgentEngine) for the
+            // duration of a store failover. The REST layer reports each one with its
+            // own status.
+            //
+            // QuotaAccountingUnavailableException is listed even though it extends
+            // RejectedExecutionException: it is thrown two lines after the
+            // QuotaExceededException it replaces on the same denial, so leaving it out
+            // put exactly the log flood this multi-catch removes back on the
+            // quota-store outage path — one ERROR stack trace per turn, on top of
+            // TenantQuotaService.recordDenial's own.
+            releaseTurn(admittedTurn);
             throw e;
         } catch (AgentMismatchException | AgentNotReadyException | ConversationEndedException e) {
             releaseTurn(admittedTurn);
@@ -724,7 +752,13 @@ public class ConversationService implements IConversationService {
             // agent-not-ready failures)
             QuotaCheckResult quotaCheck = tenantQuotaService.acquireApiCallSlot();
             if (!quotaCheck.allowed()) {
-                throw new QuotaExceededException(quotaCheck.reason());
+                throw quotaCheck.accountingUnavailable()
+                        // A store that could not answer is a 503, not a 429: the
+                        // tenant is not over anything, and a client that backs off
+                        // for a minute on the strength of a Retry-After is reacting
+                        // to the wrong signal.
+                        ? new QuotaAccountingUnavailableException(quotaCheck.reason())
+                        : new QuotaExceededException(quotaCheck.reason());
             }
 
             admittedTurn = new ProcessingTurn(processingConversationCount);
@@ -830,8 +864,22 @@ public class ConversationService implements IConversationService {
                     withResolutionPrincipal(conversationMemory, executeConversation), notifySkipped, processingTurn);
 
             conversationCoordinator.submitInOrder(conversationId, processUserInput);
-        } catch (ProcessingRestrictedException | QuotaExceededException | ConversationAwaitingApprovalException e) {
-            releaseTurn(admittedTurn); // all three are thrown before the turn is admitted
+        } catch (ProcessingRestrictedException | ProcessingRestrictionUnavailableException | QuotaExceededException
+                | QuotaAccountingUnavailableException | ConversationAwaitingApprovalException e) {
+            // All five are thrown before the turn is admitted, and none is an internal
+            // fault of this class: the generic handler below logs a full ERROR stack
+            // trace, which for the restriction-unavailable case meant every turn of
+            // every user wrote two of them (here and again in RestAgentEngine) for the
+            // duration of a store failover. The REST layer reports each one with its
+            // own status.
+            //
+            // QuotaAccountingUnavailableException is listed even though it extends
+            // RejectedExecutionException: it is thrown two lines after the
+            // QuotaExceededException it replaces on the same denial, so leaving it out
+            // put exactly the log flood this multi-catch removes back on the
+            // quota-store outage path — one ERROR stack trace per turn, on top of
+            // TenantQuotaService.recordDenial's own.
+            releaseTurn(admittedTurn);
             throw e;
         } catch (AgentMismatchException | AgentNotReadyException | ConversationEndedException e) {
             releaseTurn(admittedTurn);

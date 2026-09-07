@@ -21,7 +21,20 @@ public class CharacterUtilities {
         specialCharacters.put('”', '"');
     }
 
+    /**
+     * True when every character is a digit — and therefore false for null and for
+     * the empty string, which contain no digits at all.
+     * <p>
+     * The loop alone answered {@code true} for {@code ""}, so
+     * {@code IntegerDictionary.lookupTerm("")} minted an {@code integer("")}
+     * expression out of nothing. {@code WordSplitter.notNumeric} leaned on that
+     * quirk to skip its own first iteration and has been given an explicit index
+     * guard instead.
+     */
     public static boolean isStringInteger(String lookup) {
+        if (lookup == null || lookup.isEmpty()) {
+            return false;
+        }
         for (int i = 0; i < lookup.length(); i++)
             if (!Character.isDigit(lookup.charAt(i))) {
                 return false;
