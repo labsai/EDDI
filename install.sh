@@ -140,8 +140,17 @@ port_in_use() {
   local port="$1"
 
   if command -v ss &>/dev/null; then
-    # Use space/end-of-line anchor to avoid matching port 70 when checking 7070
-    ss -tln 2>/dev/null | grep -qE ":${port}( |$)" && return 0
+    # Captured rather than piped into grep, for the same reason as the lsof
+    # branch below: `grep -q` exits on its first match, which can SIGPIPE ss
+    # while it is still writing. Under `set -o pipefail` that makes the whole
+    # pipeline non-zero even though the port WAS found -- so a busy port would
+    # read as free, and this branch does not fall through to another probe.
+    # The window is real on a host with enough listening sockets to overflow
+    # the 64 KiB pipe buffer, and the match can come long before the last row.
+    local ss_out=""
+    ss_out=$(ss -tln 2>/dev/null) || true
+    # Space/end-of-line anchor avoids matching port 70 when checking 7070
+    grep -qE ":${port}( |$)" <<<"$ss_out" && return 0
     return 1
   fi
 
@@ -419,8 +428,11 @@ for arg in "$@"; do
       echo "  EDDI_DIR            Install directory (default: ~/.eddi)"
       echo "  EDDI_VERSION        Image tag to pull (default: latest)"
       echo ""
-      echo "  Every port above is resolved before the containers start: kept"
-      echo "  when free, moved to the next free port when something holds it."
+      echo "  Every port is resolved before the containers start. A port left"
+      echo "  at its default is kept when free and moved to the next free port"
+      echo "  when something holds it. A port you pin here -- or with"
+      echo "  --mongo-port= -- is never moved: if it is busy the install stops"
+      echo "  and says so, rather than starting somewhere you did not ask for."
       exit 0
       ;;
   esac

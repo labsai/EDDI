@@ -297,6 +297,26 @@ publish, and moving `postgres` to a loopback binding) are moot: the replacement 
 the `POSTGRES_PORT` line this branch added to `.env.example` is removed with it — it pointed at a file
 that no longer exists.
 
+**Second review round (CodeRabbit).** Two more findings, both valid.
+
+*The `ss` branch had the same SIGPIPE hazard I had just fixed one branch below.* Fixing it for `lsof`
+and leaving `ss` piped into `grep -q` was inconsistent, and the consequence is the worse direction:
+`grep -q` exits on its first match, ss takes SIGPIPE while still writing, `set -o pipefail` makes the
+pipeline non-zero, and a port that **is** in use reads as free — straight into the raw docker bind
+error this whole branch exists to prevent. It needs a host with enough listening sockets to overflow
+the 64 KiB pipe buffer, which is exactly the kind of machine that has a port conflict. Now captured
+before matching, like the lsof branch. Proved with a stub `ss` that emits the matching row first and
+then 330 KB of filler: the piped form reports the busy port as free, the captured form does not.
+Re-checked against a real `ss` (debian + iproute2) with a live listener, including the anchor case
+where port 99 must not match a listener on 9999.
+
+*Both installers documented the opposite of what a pinned port does.* `install.sh --help` closed its
+list of port variables with "kept when free, moved to the next free port when something holds it",
+and `install.ps1`'s `.NOTES` said the same — but every entry in that list is an **explicit** request,
+and an explicit request that is busy fails by design rather than moving. A user who pinned
+`KEYCLOAK_PORT` was promised a silent remap and got an abort. Both texts now separate the two paths,
+as does the `-MongoPort` parameter help.
+
 **Files:** `install.sh`, `install.ps1`, `docs/changelog.md`
 
 ---

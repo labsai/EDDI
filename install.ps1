@@ -36,13 +36,16 @@
 
 .PARAMETER MongoPort
     Host port the MongoDB container publishes (default: 27017, or MONGO_PORT env
-    var). Only used with -Database mongodb. If the default is taken by another
-    process, the installer picks the next free port automatically.
+    var). Only used with -Database mongodb. Left unset, the installer moves off
+    27017 automatically when another process holds it. Set explicitly, the port
+    is never moved -- a busy one stops the install instead.
 
 .NOTES
-    The optional overlays publish host ports too. Each is resolved the same way
-    -- kept if free, moved to the next free port if not -- and can be pinned
-    through an environment variable:
+    The optional overlays publish host ports too, and each is resolved the same
+    way: left at its default it is kept when free and moved to the next free
+    port when something holds it. Pinned through the environment variable below
+    it is never moved -- if it is busy the install stops and says so, rather
+    than starting somewhere you did not ask for.
 
       -WithAuth        KEYCLOAK_PORT    (8180)
       -WithMonitoring  GRAFANA_PORT     (3000)
