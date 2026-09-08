@@ -361,6 +361,15 @@ public class SlackEventHandler {
         // at top level would read as the bot joining the conversation, and every
         // reply would be a new root nobody can follow.
         String threadTs = firstNonBlank((String) event.get("thread_ts"), (String) event.get("ts"));
+        // Lock the thread to this observer, as the mention path does for its own
+        // target. Without it a human replying inside the observer's own thread
+        // resolves through the addressed path and reaches the channel's DEFAULT
+        // target — so answering the watcher would get you a different agent.
+        // Replies in that thread are addressed to it and route as ordinary
+        // conversation, which is why they do not spend the observe allowance.
+        if (threadTs != null) {
+            channelTargetRouter.lockThreadTarget("slack", channelId, threadTs, target);
+        }
         var integration = channelTargetRouter.integrationFor("slack", channelId);
         ResolvedTarget resolved = new ResolvedTarget(target, text, integration, null, null);
         String message = text != null ? text : "";

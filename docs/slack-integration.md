@@ -292,6 +292,11 @@ Notes and current limits:
   answers. If that one is throttled the message is dropped rather than passed
   to the next — otherwise a second watcher would answer precisely *because* the
   first was rate-limited.
+- **Replying to an observer continues with that observer.** Its reply opens a
+  thread, and that thread is locked to it — otherwise answering the watcher
+  would reach the channel's default target instead. Messages in that thread are
+  addressed to it, so they route as ordinary conversation and do not spend the
+  observe allowance.
 - Bot messages are filtered before any of this, so two observers in one channel
   cannot answer each other.
 - Omitting `observeConfig` on an observer stores the defaults above rather than
