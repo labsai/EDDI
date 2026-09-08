@@ -60,7 +60,8 @@ Enable advanced memory features (LLM tools, Dream consolidation, guardrails, rec
       "summarizeTargetEntries": 2,
       "summarizeGroupBy": "category",
       "preserveAgentProvenance": false,
-      "maxCostPerRun": 0.50
+      "maxCostPerRun": 0.50,
+      "parameters": { "apiKey": "${vault:anthropic-api-key}" }
     }
   }
 }
@@ -117,6 +118,9 @@ Attaching the memory tools is a three-way conjunction across the two configurati
 | `crossAgentMaintenance` | `boolean` | `false` | By default a dream cycle only touches memories the **firing agent** wrote (`sourceAgentId`). Set `true` to let it maintain the user's whole memory set across agents — otherwise agent A's retention setting would delete agent B's memories, and A's model endpoint would see B's private text. |
 | `llmProvider` | `String` | `"anthropic"` | LLM provider for dream operations |
 | `llmModel` | `String` | `"claude-sonnet-4-6"` | Model for dream operations |
+| `parameters` | `Map<String,String>` | `{}` | Model parameters for the consolidation LLM — `apiKey`, `baseUrl`, `temperature`, … — passed to the model registry exactly like an LLM task's `parameters` block, so `${vault:…}` and `${vars:…}` resolve. **Required when `summarizeInteractions` is `true`**: a background dream cycle has no parent LLM task to inherit credentials from, so without it every summarization step fails with a provider 401 while stale pruning keeps working. |
+| `schedule` | `String` | `"0 3 * * *"` | Cron expression the dream schedule should use |
+| `contradictionResolution` | `String` | `"keep_newest"` | Reserved. The current detector counts and logs contradictions without resolving them. |
 
 ## LLM Tools
 

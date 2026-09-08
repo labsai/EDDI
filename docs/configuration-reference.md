@@ -33,9 +33,9 @@ eddi.tools.websearch.google.api-key →  EDDI_TOOLS_WEBSEARCH_GOOGLE_API_KEY
 > **Getting this wrong fails silently.** An unrecognised environment variable is
 > not an error — the property simply keeps its default and the service starts
 > normally. `EDDI_VAULT_MASTERKEY` (dash deleted rather than replaced) leaves
-> `eddi.vault.master-key` empty, which means the vault is inactive and
-> `scope: "secret"` properties fall back to plaintext. Nothing in the startup log
-> mentions the variable you set.
+> `eddi.vault.master-key` empty, which means the vault is inactive, and a
+> `scope: "secret"` property setter then fails the whole turn. Nothing in the
+> startup log mentions the variable you set.
 >
 > To check what actually bound, read the value back from the Dev UI at `/q/dev`,
 > or compare against the spellings already used in `docker-compose.yml`,
@@ -162,7 +162,7 @@ Full guide: [secrets-vault.md](secrets-vault.md).
 
 | Property | Default | Description |
 |---|---|---|
-| `eddi.vault.master-key` | *(empty)* | KEK source. **Empty means the vault is inactive** and `scope: "secret"` properties fall back to plaintext with an ERROR log |
+| `eddi.vault.master-key` | *(empty)* | KEK source. **Empty means the vault is inactive.** A `scope: "secret"` property setter then scrubs the plaintext, logs an ERROR and **fails the turn** with a `LifecycleException` naming `EDDI_VAULT_MASTER_KEY` — it never persists the value. (`AgentSetupService`'s own `vaultApiKey` path is the exception and still degrades; see [secrets-vault.md](secrets-vault.md).) |
 | `eddi.vault.grant-enforcement` | `enforce` | `off`, `warn` or `enforce`. An unrecognised value fails startup rather than silently disabling the check |
 | `eddi.vault.cache-ttl-minutes` | `5` | Resolved-secret cache lifetime |
 | `eddi.vault.cache-max-size` | `1000` | Resolved-secret cache entries |

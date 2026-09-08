@@ -1,5 +1,10 @@
 # Observability & Pipeline Architecture Plan
 
+> **Status: ALL FOUR ITEMS SHIPPED.** Kept as the design record. OpenTelemetry tracing,
+> the LlmTask decomposition, the coordinator queue bound with its gauges, and the Grafana
+> dashboards are all in the tree — see [`docs/monitoring/monitoring-guide.md`](../docs/monitoring/monitoring-guide.md)
+> for what was delivered. Do not pick items from this file up as available work.
+>
 > **Context:** These are larger architectural improvements deferred from the v6.0.2 security sprint. They span the pipeline engine, coordinator, and observability infrastructure.
 
 ## Prerequisite Reading
@@ -12,7 +17,7 @@
 
 ## 1. OpenTelemetry Tracing 🟡 MEDIUM
 
-**Why:** EDDI has Micrometer metrics but no distributed tracing. For production debugging, each conversation turn should produce a trace showing: request → parse → behavior rules → actions → task execution → response.
+**Why (historical):** at the time of writing, EDDI had Micrometer metrics but no distributed tracing. The goal was that each conversation turn should produce a trace showing: request → parse → behavior rules → actions → task execution → response. It now does — `LifecycleManager` emits an `eddi.pipeline.task` span per task.
 
 **What to do:**
 
@@ -112,7 +117,7 @@ LlmTask.execute()
 
 ## 3. ConversationCoordinator Hardening 🟢 LOW
 
-**Why:** `InMemoryConversationCoordinator` uses unbounded `ConcurrentHashMap<String, BlockingQueue>` keyed by conversationId. Active conversations are cleaned up, but abandoned conversations (client disconnects mid-turn) may leak entries.
+**Why (historical):** at the time of writing, `InMemoryConversationCoordinator` used an unbounded `ConcurrentHashMap<String, BlockingQueue>` keyed by conversationId. Active conversations were cleaned up, but abandoned ones (client disconnects mid-turn) could leak entries. It is now bounded by `eddi.coordinator.max-active-conversations` and gauged.
 
 **What to do:**
 
@@ -128,7 +133,7 @@ LlmTask.execute()
 
 ## 4. Metrics Dashboard 🟢 LOW
 
-**Why:** EDDI has 20+ Micrometer metrics but no dashboard to visualize them.
+**Why (historical):** at the time of writing, EDDI had 20+ Micrometer metrics and no dashboard. Three now ship under `docs/monitoring/`, and `MetricsDashboardCoverageTest` fails the build when a registered meter has no panel.
 
 **What to do:**
 

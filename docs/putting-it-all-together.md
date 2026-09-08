@@ -486,7 +486,11 @@ curl -X POST "http://localhost:7070/agents/CONV_ID" \
   "conversationOutputs": [
     {
       "output": [
-        "Great! I found 5 available rooms in Paris. Here are your options:"
+        {
+          "type": "text",
+          "text": "Great! I found 5 available rooms in Paris. Here are your options:",
+          "delay": 0
+        }
       ],
       "quickReplies": [
         { "value": "Deluxe Suite", "expressions": "property(room_id(101))" },
@@ -528,7 +532,11 @@ curl -X POST "http://localhost:7070/agents/CONV_ID" \
   "conversationOutputs": [
     {
       "output": [
-        "🎉 Booking confirmed! Your booking ID is BK-12345. Total price: $450. We've sent a confirmation email. Have a great stay!"
+        {
+          "type": "text",
+          "text": "🎉 Booking confirmed! Your booking ID is BK-12345. Total price: $450. We've sent a confirmation email. Have a great stay!",
+          "delay": 0
+        }
       ]
     }
   ]

@@ -1,6 +1,9 @@
 # MCP HITL Surface — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Status: IMPLEMENTED.** Shipped as `McpHitlTools` and the shared `HitlAccessGuard`.
+> Kept as the design record — user-facing documentation is [`docs/hitl.md`](../docs/hitl.md).
+> **Do not execute the task list below.** The checkbox syntax has been
+> stripped so the steps read as the record of a design, not as an open work queue.
 
 **Goal:** Expose EDDI's Human-in-the-Loop (HITL) approval operations over the MCP server so an external MCP client can list, read, resume/approve, and cancel human-approval gates for both regular (1:1) and group conversations — at full parity with the existing REST endpoints, without ever granting an LLM the authority to approve its own gate.
 
@@ -92,7 +95,7 @@ Gives every HITL tool a machine-readable error shape so a programmatic MCP clien
 **Interfaces:**
 - Produces: `static String McpToolUtils.errorJson(String message, String errorCode, Map<String,String> details)` — returns `{"error":"...","errorCode":"...","details":{...}}`, always valid JSON, never throws.
 
-- [ ] **Step 1: Write the failing test**
+- **Step 1: Write the failing test**
 
 Create `src/test/java/ai/labs/eddi/engine/mcp/McpToolUtilsErrorJsonTest.java`:
 
@@ -131,12 +134,12 @@ class McpToolUtilsErrorJsonTest {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- **Step 2: Run test to verify it fails**
 
 Run: `./mvnw test -Dtest=McpToolUtilsErrorJsonTest`
 Expected: FAIL (compilation error — `errorJson(String,String,Map)` not defined).
 
-- [ ] **Step 3: Add the overload**
+- **Step 3: Add the overload**
 
 In `McpToolUtils.java`, add (keep the existing single-arg `errorJson` untouched; add `import java.util.Map;`):
 
@@ -168,12 +171,12 @@ static String errorJson(String message, String errorCode, java.util.Map<String, 
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- **Step 4: Run test to verify it passes**
 
 Run: `./mvnw test -Dtest=McpToolUtilsErrorJsonTest`
 Expected: PASS (3 tests).
 
-- [ ] **Step 5: Commit**
+- **Step 5: Commit**
 
 ```bash
 git add src/main/java/ai/labs/eddi/engine/mcp/McpToolUtils.java src/test/java/ai/labs/eddi/engine/mcp/McpToolUtilsErrorJsonTest.java
@@ -197,11 +200,11 @@ Extract the HITL ownership composition and the owner-scoped pending-approvals de
   - `String requireConversationHitlAccess(String conversationId)` — returns owner userId (or `null` if the descriptor is absent and caller is admin/approver); throws `io.quarkus.security.ForbiddenException` on denial.
   - `List<PendingApprovalSummary> listScopedPendingApprovals(int limit) throws ResourceStoreException`.
 
-- [ ] **Step 1: Read the source being extracted**
+- **Step 1: Read the source being extracted**
 
 Read `RestAgentEngine.java:397–419` (`listPendingApprovals`) and `:438–466` (`validateConversationOwnership`) and note the exact injected field names/types for `ownershipValidator`, the descriptor store, `conversationService`, and `identity`. Reproduce those exact types in the guard.
 
-- [ ] **Step 2: Write the failing test**
+- **Step 2: Write the failing test**
 
 Create `src/test/java/ai/labs/eddi/engine/hitl/HitlAccessGuardTest.java`. Use the descriptor-store type you found in Step 1 (shown here as `IConversationDescriptorStore` — replace with the actual type). Mock all deps:
 
@@ -282,12 +285,12 @@ class HitlAccessGuardTest {
 
 Fill in the descriptor-store mock and the `requireConversationHitlAccess` arrange-block using the exact descriptor read (`descriptorStore.readDescriptor("conv-1", 0)` returning a descriptor with a `getUserId()`), mirroring `RestAgentEngine.java:440–442`.
 
-- [ ] **Step 3: Run test to verify it fails**
+- **Step 3: Run test to verify it fails**
 
 Run: `./mvnw test -Dtest=HitlAccessGuardTest`
 Expected: FAIL (compilation error — `HitlAccessGuard` does not exist).
 
-- [ ] **Step 4: Create the guard**
+- **Step 4: Create the guard**
 
 Create `src/main/java/ai/labs/eddi/engine/hitl/HitlAccessGuard.java`. Port `RestAgentEngine.listPendingApprovals` (`397–419`) into `listScopedPendingApprovals`, and the `hitlOperation=true` body of `validateConversationOwnership` (`438–466`) into `requireConversationHitlAccess`. Replace `IConversationDescriptorStore`/field names with the actual types from Step 1:
 
@@ -378,7 +381,7 @@ public class HitlAccessGuard {
 
 Match the actual descriptor store import/type and the `sanitize(...)`/logging idiom used in `RestAgentEngine` if you prefer.
 
-- [ ] **Step 5: Refactor `RestAgentEngine` to delegate**
+- **Step 5: Refactor `RestAgentEngine` to delegate**
 
 In `RestAgentEngine.java`: inject `HitlAccessGuard hitlAccessGuard` (add to the constructor). Change the top of `validateConversationOwnership` (`438`) so the HITL branch delegates:
 
@@ -405,7 +408,7 @@ public List<PendingApprovalSummary> listPendingApprovals(Integer limit) {
 }
 ```
 
-- [ ] **Step 6: Run guard test + REST regression**
+- **Step 6: Run guard test + REST regression**
 
 Run: `./mvnw test -Dtest=HitlAccessGuardTest`
 Expected: PASS.
@@ -414,7 +417,7 @@ Run the existing regular-surface HITL REST test unchanged (find its name: `grep 
 Run: `./mvnw test -Dtest=RestAgentEngineHitlTest`
 Expected: PASS (behavior unchanged after extraction). If this test is a `@QuarkusTest` that cannot boot locally, note it and rely on CI (Task 9) — do not weaken it.
 
-- [ ] **Step 7: Compile & commit**
+- **Step 7: Compile & commit**
 
 Run: `./mvnw compile`
 Expected: BUILD SUCCESS.
@@ -441,11 +444,11 @@ Symmetric to Task 2 for the group surface. This closes the owner-scope leak risk
   - `void requireGroupConversationHitlAccess(String groupId, String groupConversationId)` — throws `ForbiddenException` / `NotFoundException` as the REST method does.
   - `List<PendingApprovalSummary> listScopedGroupPendingApprovals(String groupId, int limit) throws ResourceStoreException` — `groupId=null` → cross-group inbox.
 
-- [ ] **Step 1: Read the group source**
+- **Step 1: Read the group source**
 
 Read `RestGroupConversation.java:~363–412` (`validateGroupConversationOwnership`) and `512–548` (group listing scoping). Note the group descriptor store field/type and how it derives the owner userId, and confirm the scoping mirrors the regular one (admin/approver → all; else own; anonymous → none).
 
-- [ ] **Step 2: Write the failing tests (extend `HitlAccessGuardTest`)**
+- **Step 2: Write the failing tests (extend `HitlAccessGuardTest`)**
 
 Add to `HitlAccessGuardTest`:
 
@@ -473,20 +476,20 @@ void listScopedGroupPendingApprovals_ownerFilteredToOwn() throws Exception {
 
 Add `groupConversationService = mock(IGroupConversationService.class)` to `setup()` and pass it to the (now widened) guard constructor.
 
-- [ ] **Step 3: Run to verify failure**
+- **Step 3: Run to verify failure**
 
 Run: `./mvnw test -Dtest=HitlAccessGuardTest`
 Expected: FAIL (compilation — group methods/constructor arg not present).
 
-- [ ] **Step 4: Add the group methods to the guard**
+- **Step 4: Add the group methods to the guard**
 
 Widen the `HitlAccessGuard` constructor to also inject `IGroupConversationService` and the group descriptor store. Add `requireGroupConversationHitlAccess` (port the `hitlOperation=true` branch of `validateGroupConversationOwnership`) and `listScopedGroupPendingApprovals` (port `RestGroupConversation.java:512–548`, calling `groupConversationService.listGroupPendingApprovals(groupId, limit)` then applying the same admin/approver-vs-own filter). Keep the regular methods from Task 2 unchanged.
 
-- [ ] **Step 5: Refactor `RestGroupConversation` to delegate**
+- **Step 5: Refactor `RestGroupConversation` to delegate**
 
 Inject `HitlAccessGuard`. Route the `hitlOperation=true` branch of `validateGroupConversationOwnership` to `hitlAccessGuard.requireGroupConversationHitlAccess(groupId, gcId)`, and route the group listing methods (`512–524`, `532–548`) through `hitlAccessGuard.listScopedGroupPendingApprovals(...)`. Leave any non-HITL group ownership path untouched.
 
-- [ ] **Step 6: Run guard test + group regression**
+- **Step 6: Run guard test + group regression**
 
 Run: `./mvnw test -Dtest=HitlAccessGuardTest`
 Expected: PASS.
@@ -495,7 +498,7 @@ Run the existing group HITL REST test unchanged (find it: `grep -rli "group" src
 Run: `./mvnw test -Dtest=RestGroupConversationHitlTest`
 Expected: PASS (or CI-only if `@QuarkusTest`; note and defer to Task 9).
 
-- [ ] **Step 7: Compile & commit**
+- **Step 7: Compile & commit**
 
 Run: `./mvnw compile`
 
@@ -511,7 +514,7 @@ git commit -m "refactor(hitl): extract group HITL ownership + scoped listing int
 **Files:**
 - Modify: `src/main/resources/application.properties`
 
-- [ ] **Step 1: Add the property**
+- **Step 1: Add the property**
 
 Append (near other `eddi.*` / MCP properties):
 
@@ -521,12 +524,12 @@ Append (near other `eddi.*` / MCP properties):
 eddi.mcp.hitl.mutations.enabled=true
 ```
 
-- [ ] **Step 2: Compile**
+- **Step 2: Compile**
 
 Run: `./mvnw compile`
 Expected: BUILD SUCCESS.
 
-- [ ] **Step 3: Commit**
+- **Step 3: Commit**
 
 ```bash
 git add src/main/resources/application.properties
@@ -552,7 +555,7 @@ Four tools: `list_pending_approvals`, `get_approval_status`, `resume_conversatio
   - `String cancelConversation(String conversationId)`
   - helper `String principalWithMcpPrefix()` → `"mcp:" + name` or `"mcp:anonymous"`.
 
-- [ ] **Step 1: Write the failing test**
+- **Step 1: Write the failing test**
 
 Create `src/test/java/ai/labs/eddi/engine/mcp/McpHitlToolsTest.java`:
 
@@ -680,12 +683,12 @@ class McpHitlToolsTest {
 
 If `HitlDecision` lacks `getDecidedBy()`, add it (trivial getter) in Task 5 Step 2 so the test can assert attribution.
 
-- [ ] **Step 2: Run to verify failure**
+- **Step 2: Run to verify failure**
 
 Run: `./mvnw test -Dtest=McpHitlToolsTest`
 Expected: FAIL (compilation — `McpHitlTools` not defined).
 
-- [ ] **Step 3: Implement `McpHitlTools` (regular tools)**
+- **Step 3: Implement `McpHitlTools` (regular tools)**
 
 Create `src/main/java/ai/labs/eddi/engine/mcp/McpHitlTools.java`. Model annotations/imports on `McpConversationTools` (confirm the exact `@Tool`/`@ToolArg`/`@Blocking` import packages there). Use inline `meterRegistry.counter(...).increment()` (no `@PostConstruct` needed):
 
@@ -920,12 +923,12 @@ public class McpHitlTools {
 
 Adapt `new HitlDecision(); setVerdict/setNote` to `HitlDecision`'s actual API, and the `snapshot.getHitl*` getters to their real names (read `ConversationMemorySnapshot` + `RestAgentEngine.getApprovalStatus:378–384`). Ensure `HitlDecision` exposes `getDecidedBy()`/`getVerdict()` for the test.
 
-- [ ] **Step 4: Run tests to verify they pass**
+- **Step 4: Run tests to verify they pass**
 
 Run: `./mvnw test -Dtest=McpHitlToolsTest`
 Expected: PASS (all regular-tool tests).
 
-- [ ] **Step 5: Compile & commit**
+- **Step 5: Compile & commit**
 
 Run: `./mvnw compile`
 
@@ -950,7 +953,7 @@ Five tools: `list_group_pending_approvals`, `list_all_group_pending_approvals`, 
 - Consumes: `HitlAccessGuard.requireGroupConversationHitlAccess`, `HitlAccessGuard.listScopedGroupPendingApprovals`, `IGroupConversationService.resumeDiscussion/cancelDiscussion`, `GroupApprovalRequest`, `IJsonSerialization.deserialize` (confirm the method name).
 - Produces: `String listGroupPendingApprovals(String groupId, String limit)`, `String listAllGroupPendingApprovals(String limit)`, `String getGroupApprovalStatus(String groupId, String conversationId, String detail)`, `String approveGroupPhase(String groupId, String conversationId, String verdict, String note, String taskApprovalsJson)`, `String cancelGroupDiscussion(String groupId, String conversationId)`.
 
-- [ ] **Step 1: Write the failing tests (extend `McpHitlToolsTest`)**
+- **Step 1: Write the failing tests (extend `McpHitlToolsTest`)**
 
 ```java
 @Test
@@ -993,12 +996,12 @@ void cancelGroup_happyPath_delegates() throws Exception {
 }
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- **Step 2: Run to verify failure**
 
 Run: `./mvnw test -Dtest=McpHitlToolsTest`
 Expected: FAIL (group tool methods not defined).
 
-- [ ] **Step 3: Implement the group tools**
+- **Step 3: Implement the group tools**
 
 Add to `McpHitlTools`. `approve_group_phase` parses `taskApprovals` from a JSON-object string, mirrors the regular resume validation, delegates to `resumeDiscussion(conversationId, request, null)`, and serializes the returned `GroupConversation`:
 
@@ -1152,12 +1155,12 @@ public String cancelGroupDiscussion(
 
 Fill in the `get_group_approval_status` summary map from the exact getters in `RestGroupConversation.java:302–347`. Confirm `GroupApprovalRequest`'s constructor/setters and `IJsonSerialization.deserialize`'s signature.
 
-- [ ] **Step 4: Run tests to verify they pass**
+- **Step 4: Run tests to verify they pass**
 
 Run: `./mvnw test -Dtest=McpHitlToolsTest`
 Expected: PASS (regular + group tests).
 
-- [ ] **Step 5: Compile & commit**
+- **Step 5: Compile & commit**
 
 Run: `./mvnw compile`
 
@@ -1176,18 +1179,18 @@ So an LLM MCP client that receives a paused signal knows which tool to call to c
 - Modify: the method that builds the `PAUSED_FOR_APPROVAL` JSON (`pausedForApprovalJson`, likely in `McpConversationTools.java` or `McpToolUtils.java` — locate with grep).
 - Test: the existing test covering that payload (e.g. `McpConversationToolsHitlTest`).
 
-- [ ] **Step 1: Locate the payload builder**
+- **Step 1: Locate the payload builder**
 
 Run: `grep -rn "PAUSED_FOR_APPROVAL\|pausedForApproval" src/main/java`
 Note the method and the JSON fields it emits (state, conversationId, agentId, reason).
 
-- [ ] **Step 2: Update the existing test to expect the hint**
+- **Step 2: Update the existing test to expect the hint**
 
 In the test that asserts the paused payload, add an assertion that the JSON now contains `"suggestNextTool":"resume_conversation"`. Run it to confirm it FAILS first:
 Run: `./mvnw test -Dtest=McpConversationToolsHitlTest`
 Expected: FAIL on the new assertion. (If this is a `@QuarkusTest` not runnable locally, add the assertion and defer verification to CI — Task 9.)
 
-- [ ] **Step 3: Add the field**
+- **Step 3: Add the field**
 
 `McpConversationTools` has **two** `pausedForApprovalJson` overloads (≈lines 602 and 629); both build a `Map`/`result` and `put("status", "PAUSED_FOR_APPROVAL")`. Add to **both**:
 
@@ -1197,12 +1200,12 @@ result.put("suggestNextTool", "resume_conversation");
 
 Neither overload currently emits `pauseType` (the tool-approval plan will add that separately) — so only add the `suggestNextTool` key; do not touch or assume any other field. `resume_conversation` is the correct next tool for both RULE and TOOL_CALL pauses (both resolve via the single-verdict resume).
 
-- [ ] **Step 4: Run the test**
+- **Step 4: Run the test**
 
 Run: `./mvnw test -Dtest=McpConversationToolsHitlTest`
 Expected: PASS (or CI-only).
 
-- [ ] **Step 5: Commit**
+- **Step 5: Commit**
 
 ```bash
 git add <the payload-builder file> <the test file>
@@ -1217,23 +1220,23 @@ git commit -m "feat(mcp): name resume_conversation in PAUSED_FOR_APPROVAL payloa
 - Modify: `docs/hitl.md`, `docs/mcp-server.md`, `docs/changelog.md`
 - Optional: `AGENTS.md` (add an "MCP Tool Class Checklist" note)
 
-- [ ] **Step 1: `docs/hitl.md` — add an "MCP Surface" section**
+- **Step 1: `docs/hitl.md` — add an "MCP Surface" section**
 
 Document the 9 tools (name + one-line description), that they mirror the REST endpoints, that mutating tools require the same owner/admin/approver authority and honor `eddi.mcp.hitl.mutations.enabled`, that MCP decisions are attributed `mcp:<principal>`, that there is no streaming variant (`approve_group_phase` blocks and returns the resumed discussion), and the structured error codes (`NOT_FOUND | WRONG_STATE | FORBIDDEN | DISABLED | BAD_REQUEST`). Note that the regular tools resolve **both** `RULE` and `TOOL_CALL` pauses (both are `AWAITING_HUMAN`, both resolved by a single verdict); `get_approval_status` reports `pauseType`, and for a `TOOL_CALL` pause the pending tool-call batch is visible via `detail=full`.
 
-- [ ] **Step 2: `docs/mcp-server.md` — add a "HITL Tools (9)" category**
+- **Step 2: `docs/mcp-server.md` — add a "HITL Tools (9)" category**
 
 List all 9 tools with descriptions matching `docs/hitl.md`, so they are discoverable in the tool catalog.
 
-- [ ] **Step 3: `docs/changelog.md` — add an entry**
+- **Step 3: `docs/changelog.md` — add an entry**
 
 Add a dated entry (repo: EDDI, branch: `feat/hitl-framework`) summarizing: new `McpHitlTools` (9 tools), the shared `HitlAccessGuard` extraction (regular + group), the `eddi.mcp.hitl.mutations.enabled` kill-switch, `mcp:`-prefixed decision attribution, and the `PAUSED_FOR_APPROVAL` `suggestNextTool` hint. Note design decisions: human authority preserved; delegate to services not REST; mirror REST auth + kill-switch; no streaming/agent-approver.
 
-- [ ] **Step 4: (Optional) `AGENTS.md` — MCP tool class checklist**
+- **Step 4: (Optional) `AGENTS.md` — MCP tool class checklist**
 
 Under §4.3, add a short note that an MCP tool class needs only `@ApplicationScoped` + constructor-injected deps + `@Tool`/`@ToolArg` methods returning JSON strings + `@Blocking` on I/O + Mockito unit tests — NOT the `ILifecycleTask` artifacts (Configuration POJO, Store, REST, ExtensionDescriptor). Reference `McpConversationTools`/`McpHitlTools` as examples.
 
-- [ ] **Step 5: Commit**
+- **Step 5: Commit**
 
 ```bash
 git add docs/hitl.md docs/mcp-server.md docs/changelog.md AGENTS.md
@@ -1248,22 +1251,22 @@ git commit -m "docs(mcp): document MCP HITL surface (tools, kill-switch, auth, e
 
 **Files:** none (verification only).
 
-- [ ] **Step 1: Full compile**
+- **Step 1: Full compile**
 
 Run: `./mvnw compile`
 Expected: BUILD SUCCESS.
 
-- [ ] **Step 2: Run the full locally-runnable test suite (Mockito unit tests)**
+- **Step 2: Run the full locally-runnable test suite (Mockito unit tests)**
 
 Run: `./mvnw test -Dtest='McpToolUtilsErrorJsonTest,HitlAccessGuardTest,McpHitlToolsTest'`
 Expected: PASS, 0 failures.
 
-- [ ] **Step 3: Run the broader HITL/MCP regression (whatever runs locally)**
+- **Step 3: Run the broader HITL/MCP regression (whatever runs locally)**
 
 Run: `./mvnw test -Dtest='*Hitl*,*McpHitl*'`
 Expected: PASS for all non-`@QuarkusTest` tests. Any `@QuarkusTest` / integration tests that cannot boot locally are expected to be verified in CI — record which were skipped locally; do not delete or weaken them.
 
-- [ ] **Step 4: Push and let CI run the full suite**
+- **Step 4: Push and let CI run the full suite**
 
 CI (`.github/workflows/ci.yml`) runs the complete suite including `@QuarkusTest` and integration tests. Push the branch and confirm CI is green before requesting review. (Get explicit approval before pushing.)
 
@@ -1272,7 +1275,7 @@ git status          # confirm only intended files are committed across Tasks 1-8
 git log --oneline -9
 ```
 
-- [ ] **Step 5: Final self-check against the design**
+- **Step 5: Final self-check against the design**
 
 Confirm: 9 tools present; all mutating tools honor the kill-switch; `decidedBy`/`cancelledBy` are `mcp:`-prefixed and never taken from args; group listings are owner-scoped via the guard; REST HITL regression tests unchanged and green in CI; docs + changelog landed on `feat/hitl-framework`.
 

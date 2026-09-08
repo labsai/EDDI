@@ -420,7 +420,7 @@ EDDI implements open standards — not proprietary APIs:
 - 🐳 **One-Command Install** — Interactive wizard sets up EDDI + database via Docker
 - ☸️ **Kubernetes / OpenShift** — Kustomize overlays, Helm charts, PDB, NetworkPolicy (no HPA: EDDI is single-writer per conversation, so both delivery paths pin one replica)
 - 📊 **Prometheus & Grafana** — 50+ Micrometer metrics at `/q/metrics` (tools, vault, memory, scheduling, conversations). Pre-built [Grafana dashboard](docs/monitoring/eddi-grafana-dashboard.json) included
-- 🔭 **OpenTelemetry Tracing** — Per-task distributed traces via OTLP (Jaeger, Tempo, Datadog). Every pipeline task emits spans with `task.id`, `task.type`, `conversation.id`, and `agent.id`
+- 🔭 **OpenTelemetry Tracing** — Per-task distributed traces via OTLP (Jaeger, Tempo, Datadog). Every pipeline task emits a span named `eddi.pipeline.task` carrying `eddi.task.id`, `eddi.task.type`, `eddi.task.index`, `eddi.conversation.id` and `eddi.agent.id`. The equivalent *metric* tags are un-prefixed (`task.id`, `task.type`)
 - 🩺 **Health Checks** — Liveness & readiness probes at `/q/health/live` and `/q/health/ready`
 - 🔄 **NATS JetStream** — Async event bus for distributed processing
 - 🛟 **Error Handling & Recovery** — Automatic retry with exponential backoff, MCP circuit breakers (3 failures / 60s cooldown), LLM response validation (`onEmpty` / `onTruncation` / `onRefusal`), streaming timeout retry, and admin endpoint to reset stuck conversations
@@ -575,7 +575,8 @@ target/site/jacoco/index.html
 | Property                                    | Default                     | Description                                    |
 | ------------------------------------------- | --------------------------- | ---------------------------------------------- |
 | `-Dquarkus.http.port=<port>`                | `7070`                      | Override the HTTP port                         |
-| `-Dquarkus.mongodb.connection-string=<uri>` | `mongodb://localhost:27017` | MongoDB connection                             |
+| `-Dmongodb.connectionString=<uri>`          | dev: `mongodb://localhost:27017/eddi`  | MongoDB connection, read by `PersistenceModule`. `quarkus.mongodb.connection-string` is a different key that only the health check reads |
+| `-Dmongodb.database=<name>`                 | `eddi`                      | MongoDB database name                          |
 | `-Dquarkus.profile=<profile>`               | `dev`                       | Active Quarkus profile (`dev`, `test`, `prod`) |
 | `-DskipTests`                               | `false`                     | Skip all tests                                 |
 | `-DskipITs`                                 | `true`                      | Skip integration tests only                    |

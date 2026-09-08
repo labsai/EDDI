@@ -49,6 +49,70 @@ bottom of this file and are never archived.
 
 ---
 
+## 📘 docs: correct 23 false claims and pin them with a guard test (2026-09-07)
+
+**Repo:** EDDI (`docs/review-quickwins-docs`)
+
+The first slice of the code-review quick-win backlog (`planning/code-review-backlog/`). Twenty-three
+findings, all of them documentation that said something the code does not do. Markdown compiles to
+nothing, so none of them were visible to any check in the build and several had been wrong for more
+than one release.
+
+**The ones that cost a reader real time.** `AGENTS.md` and `configuration-reference.md` said a
+`scope: "secret"` property degrades to plaintext without a vault key; it fails the whole turn
+closed. The README named `quarkus.mongodb.connection-string` as the connection knob — a real
+Quarkus key that only the extension's health check reads, so pointing it at another host reports
+the new host as UP while every read and write still goes to the old one. Both first-agent tutorials
+named the workflow field `packageextensions`, which the strict write boundary rejects with a 400,
+and documented a Facebook channel connector that does not exist. The README documented span
+attributes without the `eddi.` prefix the code emits, so a trace filter on `task.id` matches nothing
+and reads as "tracing is not emitting".
+
+**The ones that hid a shipped feature.** `behavior-rules.md` presented eight of the twelve
+registered condition types as the complete list; `deploymentContext` was documented nowhere at all.
+`AGENTS.md`'s ZIP section listed seven of twelve backup file extensions, so the most common case —
+an agent with a regular dictionary — could not be built from the file that tells you how to build
+one, and its workflow step table omitted the templating step the same section calls mandatory.
+Six shipped LLM task fields were documented nowhere, including the rolling conversation summary;
+`scheduling.md` omitted `oneTimeAt` and `metadata`; `user-memory.md` omitted `dream.parameters`,
+without which every summarization step fails with a provider 401 while stale pruning keeps working.
+
+**Three admin surfaces gained their first documentation:** tenant quotas, coordinator dead letters
+and template preview. New pages `docs/tenant-quotas.md` and `docs/coordinator-admin.md`, a section
+in `docs/output-templating.md`, all linked from `SUMMARY.md`.
+
+**Five plans in `planning/` described shipped subsystems as unbuilt.** Two went further and
+instructed an agent to implement them task-by-task, with 107 unchecked boxes between them, against
+a spec whose class names all resolve to files that already exist. Those two now carry a status
+marker, the directive is gone, and the checkbox syntax is stripped rather than ticked — stripping
+does not assert that every sub-step shipped, which ticking would.
+
+**Decision — guard the claims, not the wording.** `DocumentationAccuracyTest` asserts that the docs
+mention what the code declares: every condition `ID`, every `*_EXT` backup constant, the schedule
+fields the validator enforces, the LLM task fields the model declares. A new condition type is then
+a failing test naming the missing type, not a reference table that quietly goes stale. Fixed
+expected strings would have needed editing on every rename and would have guarded nothing.
+
+Proven by mutation. Removing the `oneTimeAt` row, dropping the templating step, deleting a backup
+extension and restoring the wrong MongoDB property each fail with the missing name in the message.
+The test also caught three errors in this very commit's edits before it was run deliberately.
+
+**Files:** `AGENTS.md`, `README.md`; under `docs/` — `SUMMARY.md`, `behavior-rules.md`,
+`configuration-reference.md`, `creating-your-first-agent/creating-your-first-agent.md`,
+`creating-your-first-agent/creating-your-first-agent-1.md`,
+`deployment-management-of-agents.md`, `docker.md`, `langchain.md`,
+`monitoring/monitoring-guide.md`, `output-templating.md`, `putting-it-all-together.md`,
+`rag.md`, `release-versioning.md`, `scheduling.md`, `user-memory.md`, plus the two new pages
+`coordinator-admin.md` and `tenant-quotas.md`; under `planning/` — `conversation-cancel-plan.md`,
+`hitl-tool-approval-plan.md`, `mcp-hitl-surface-plan.md`,
+`multimodal-attachments-completion-plan.md`, `observability-and-pipeline-plan.md`; and
+`src/test/java/ai/labs/eddi/docs/DocumentationAccuracyTest.java`.
+
+**Next:** slices 2-6 of the same backlog — config keys, API consistency, and 63 test-quality
+findings.
+
+---
+
 ## 🏷️ fix(ci): a release tag could execute on the runner (2026-09-07)
 
 **Repo:** EDDI (`fix/review-quality-gates`)
