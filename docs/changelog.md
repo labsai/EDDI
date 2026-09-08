@@ -37,7 +37,7 @@ which neither a reader nor an agent's context window could usefully hold.
 
 | Period | Entries | Size |
 |---|---|---|
-| [August 2026](changelog/2026-08.md) | 187 | 720 KB |
+| [August 2026](changelog/2026-08.md) | 190 | 731 KB |
 | [July 2026](changelog/2026-07.md) | 147 | 648 KB |
 | [June 2026](changelog/2026-06.md) | 26 | 67 KB |
 | [May 2026](changelog/2026-05.md) | 34 | 76 KB |
@@ -223,6 +223,103 @@ locally. CI is the authority for those.
 **Reviewer note.** This branch changes the local build contract: `./mvnw compile` now fails
 on unformatted or badly-imported sources instead of quietly rewriting them. AGENTS.md is
 updated to say so, because the previous wording described the old behaviour.
+## 🔌 fix(install): close the PR #714 review — a busybox probe that read every port as free (2026-09-07)
+
+**Repo:** EDDI (`fix/installer-mongodb-port-conflict`)
+
+Four findings from the Copilot review of [#714](https://github.com/labsai/EDDI/pull/714): two inline,
+two the review filed as "suppressed comments" in its body (no thread, so nothing to answer in place).
+All four were real. Also merged `origin/main`, which the PR had drifted behind far enough to go
+`CONFLICTING` — and per the repo's own experience a conflicting PR never runs `ci.yml` at all, so the
+merge is what puts this branch back under CI.
+
+**1. `port_in_use` had over-corrected into the opposite bug (`install.sh`).** The previous entry
+below fixed busybox lsof reading every port as *taken* by requiring `LISTEN` in the output. But the
+probe was an `elif` chain: on Alpine-class systems the lsof branch is entered, finds no `LISTEN` in
+busybox's file dump, and the `nc` / `/dev/tcp` branches are never reached — so every port now read as
+*free*, and the raw docker bind error came back. A missing marker is not evidence. The chain is now:
+`ss` short-circuits (its absence of a match really is proof); a **positive** lsof match is trusted, a
+negative one falls through to a connect probe that behaves identically on every implementation.
+Verified in a real `alpine:3.20` container with a live listener — busy port detected, free port still
+free — and mutation-checked by restoring the `elif` chain, which fails the busy case.
+
+While there: the lsof output is captured instead of piped into `grep -q`. `grep -q` exits on first
+match and can SIGPIPE the producer, which `set -o pipefail` then reports as a failed pipeline even
+though the port *was* found.
+
+**2. The PowerShell installer validated every port variable up front (`install.ps1`).** A stale
+`GRAFANA_PORT=abc` in the environment aborted a plain install that never starts Grafana, and `-Full`
+rejected a bad `-MongoPort` before switching the database to PostgreSQL. The Bash installer has
+always validated inside `resolve_published_port`, i.e. only for components that are actually enabled.
+The eager loop is gone; `Resolve-PublishedPort` now validates its own argument. `-MongoPort` also
+gains a `$MongoPortRequested` capture, matching the six overlay ports and keeping the resolved value
+from overwriting the request.
+
+**3 + 4. The Compose project name was derived two ways that Compose does not use (both scripts).**
+`compose_project_name` / `Get-ComposeProjectName` decide whether a listener is *our* container (reuse
+the port) or a foreign one (remap, or fail an explicit request). Both ignored `COMPOSE_PROJECT_NAME`,
+and both assumed the project directory is `EDDI_DIR` — but Compose derives it from the directory of
+the **first** `-f` file, which under `--local` / `-Local` is the repo checkout. Confirmed against
+docker compose 29.7.2: first `-f` in `RepoCheckout/` yields project `repocheckout`, first `-f` in
+`.eddi/` yields `eddi`, and `COMPOSE_PROJECT_NAME` overrides both. Both functions now follow the same
+three rules.
+
+**Design decision.** Detection was fixed by falling through rather than by sniffing for busybox
+(`lsof -v`, `--help`, applet name). Busybox ignores its argv here, so every sniff is a guess about
+which not-real-lsof this is; "trust a positive, verify a negative" needs no such guess and is correct
+for any implementation, present or future.
+
+**Verification.** `alpine:3.20` behavioural harness plus its mutation check; `bash:3.2.57` harness
+for `compose_project_name` (7 cases, `set -u` safe); shellcheck at CI's exact invocation
+(`--severity=warning --shell=bash`) clean; `install.ps1` parses and passes a 9-case harness under
+**both** pwsh 7.6.5 and Windows PowerShell 5.1; five end-to-end `-WhatIf` runs of the real installer
+covering the stale-variable case, its negative control, `-Full` with a bad `-MongoPort`, and explicit
+`-MongoPort` accepted and rejected. PSScriptAnalyzer: **7 findings, 0 Error — now genuinely identical to
+`main`'s baseline.** The PR description had claimed that already and it was not true: the branch was
+adding 7 `PSAvoidUsingPositionalParameters` warnings, one per `Resolve-PublishedPort` call site, for
+14. Those call sites now pass named parameters.
+
+**Codacy is still red and it is not those seven.** It reports `7 new issues (0 max.)` — the same
+count before the branch's fixes, after them, and after the positional-parameter change, so the
+matching number was a coincidence. Ruled out from outside: PSScriptAnalyzer is byte-identical to
+`main` at every severity including `Information`, and shellcheck with no severity filter at all
+(Codacy's default, not CI's `--severity=warning`) reports a single `SC2129` note on a pre-existing
+line. The check publishes no annotations, an empty summary and no text — its title even reads "of at
+least  severity" with the severity name missing — so the issue list exists only inside the Codacy
+dashboard, which needs an account to read. **Open:** someone with Codacy access has to open
+[the PR page](https://app.codacy.com/gh/labsai/EDDI/pull-requests/714) and say what the seven are.
+
+**Superseded on merge.** `main` (#736) deleted `docker-compose.postgres.yml` outright — it was a
+drifted near-duplicate that could not work as the overlay the README documented, and its role is now
+`docker-compose.postgres-only.yml`. This branch's two fixes to that file (the doubled `7070:7070`
+publish, and moving `postgres` to a loopback binding) are moot: the replacement already interpolates
+`${EDDI_PORT:-7070}` once and publishes no database port at all. The merge takes the deletion, and
+the `POSTGRES_PORT` line this branch added to `.env.example` is removed with it — it pointed at a file
+that no longer exists.
+
+**Second review round (CodeRabbit).** Two more findings, both valid.
+
+*The `ss` branch had the same SIGPIPE hazard I had just fixed one branch below.* Fixing it for `lsof`
+and leaving `ss` piped into `grep -q` was inconsistent, and the consequence is the worse direction:
+`grep -q` exits on its first match, ss takes SIGPIPE while still writing, `set -o pipefail` makes the
+pipeline non-zero, and a port that **is** in use reads as free — straight into the raw docker bind
+error this whole branch exists to prevent. It needs a host with enough listening sockets to overflow
+the 64 KiB pipe buffer, which is exactly the kind of machine that has a port conflict. Now captured
+before matching, like the lsof branch. Proved with a stub `ss` that emits the matching row first and
+then 330 KB of filler: the piped form reports the busy port as free, the captured form does not.
+Re-checked against a real `ss` (debian + iproute2) with a live listener, including the anchor case
+where port 99 must not match a listener on 9999.
+
+*Both installers documented the opposite of what a pinned port does.* `install.sh --help` closed its
+list of port variables with "kept when free, moved to the next free port when something holds it",
+and `install.ps1`'s `.NOTES` said the same — but every entry in that list is an **explicit** request,
+and an explicit request that is busy fails by design rather than moving. A user who pinned
+`KEYCLOAK_PORT` was promised a silent remap and got an abort. Both texts now separate the two paths,
+as does the `-MongoPort` parameter help.
+
+**Files:** `install.sh`, `install.ps1`, `docs/changelog.md`
+
+---
 
 ## 🔐 fix(deploy): no credential in the auth component has a default any more (2026-09-07)
 
