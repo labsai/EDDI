@@ -448,9 +448,12 @@ public class SlackEventHandler {
      * back to {@link #BOT_MENTION_PATTERN}, which is anchored and so only sees a
      * leading mention. That is the same test the thread-reply branch uses and is
      * deliberately left alone: `stripBotMention` depends on it being prefix-only.
-     * The fallback errs towards observing, which risks the double reply this guard
-     * exists to prevent; it applies only when Slack tells us nothing about who was
-     * authorized.
+     * It errs the other way from the exact test: a leading mention of ANY user
+     * reads as a bot mention, so an observer stays silent on "@alice can you check
+     * this?" until the envelope carries a bot authorization again. Staying quiet is
+     * the safer miss — the alternative is answering a sentence `app_mention` is
+     * also answering — and it applies only when Slack tells us nothing about who
+     * was authorized.
      */
     private static boolean mentionsThisBot(String text, String botUserId) {
         if (text == null || text.isBlank()) {
