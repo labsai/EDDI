@@ -283,50 +283,31 @@ public class ObserveGate {
     /**
      * Add spend to today's window without consuming another reply.
      *
-     * Split from {@link #recordResponse} because the two are known at different
-     * moments: the reply is committed before the turn runs, and what it cost only
-     * exists after. Folding them into one call would mean either counting the reply
-     * late — letting a burst through while the first turn is still running — or
-     * charging a cost nobody has measured yet.
+     * Separate from booking the reply because the two are known at different
+     * moments: {@link #reserve} commits the reply before the turn runs, and what it
+     * cost only exists after. One call doing both would mean either counting the
+     * reply late — letting a burst through while the first turn is still running —
+     * or charging a cost nobody has measured yet.
+     * <p>
+     * The cache is a {@link java.util.concurrent.ConcurrentMap}, so this is a CAS
+     * rather than a read-then-write: two turns finishing together on this node
+     * would otherwise each write a window derived from the same stale read, and one
+     * turn's spend would go unrecorded. It says nothing about other nodes -- each
+     * keeps its own counters, as the class javadoc explains.
      */
     public void addCost(String channelType, String platformChannelId, ChannelTarget target,
                         double costUsd) {
-        if (!Double.isFinite(costUsd) || costUsd <= 0) {
-            return;
-        }
-        mutate(channelType, platformChannelId, target, "add cost",
-                (window, nowEpochSeconds) -> new ObserveWindow(window.dayEpoch(), window.responses(),
-                        window.costUsd() + costUsd, window.lastResponseEpochSeconds()));
-    }
-
-    /** How a mutation derives the next window from today's. */
-    @FunctionalInterface
-    private interface WindowUpdate {
-        ObserveWindow apply(ObserveWindow today, long nowEpochSeconds);
-    }
-
-    /**
-     * Compare-and-set today's window.
-     *
-     * The cache is a {@link java.util.concurrent.ConcurrentMap}, so the update has
-     * to be a CAS rather than a read-then-write: two events for the same channel on
-     * this node's request threads would otherwise each write a window derived from
-     * the same stale read, and one reply would go unrecorded. This says nothing
-     * about other nodes — each keeps its own counters, as the class javadoc
-     * explains.
-     */
-    private void mutate(String channelType, String platformChannelId, ChannelTarget target,
-                        String what, WindowUpdate update) {
-        if (target == null) {
+        if (target == null || !Double.isFinite(costUsd) || costUsd <= 0) {
             return;
         }
         String key = key(channelType, platformChannelId, target);
-        long nowEpochSeconds = clock.instant().getEpochSecond();
         long today = dayOf(clock.instant());
 
         for (int attempt = 0; attempt < CAS_ATTEMPTS; attempt++) {
             ObserveWindow current = windows.get(key);
-            ObserveWindow next = update.apply(todayFrom(current, today), nowEpochSeconds);
+            ObserveWindow window = todayFrom(current, today);
+            ObserveWindow next = new ObserveWindow(window.dayEpoch(), window.responses(),
+                    window.costUsd() + costUsd, window.lastResponseEpochSeconds());
             if (store(key, current, next)) {
                 return;
             }
@@ -334,8 +315,8 @@ public class ObserveGate {
         // Losing the race this many times means heavy contention on one observer in
         // one channel, which the cooldown is supposed to make impossible. Log it
         // rather than spin: the next message re-reads the window either way.
-        LOGGER.warnf("[OBSERVE] Could not %s for target '%s' after %d attempts",
-                what, target.getName(), CAS_ATTEMPTS);
+        LOGGER.warnf("[OBSERVE] Could not add cost for target '%s' after %d attempts",
+                target.getName(), CAS_ATTEMPTS);
     }
 
     // ─── Internals ─────────────────────────────────────────────────────────────
