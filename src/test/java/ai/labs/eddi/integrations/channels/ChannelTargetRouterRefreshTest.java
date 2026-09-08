@@ -1143,19 +1143,31 @@ class ChannelTargetRouterRefreshTest {
         }
 
         @Test
-        @DisplayName("an observer is not reachable as a trigger match or as the default")
-        void observerIsNotAddressable() throws Exception {
+        @DisplayName("an unmatched mention goes to the plain default, not to an observer")
+        void observerIsNotTheDefault() throws Exception {
             var config = setupNewStyleConfig(CHANNEL_ID, "xoxb-token", "secret");
             var observer = target("watch", true);
             observer.setTriggers(List.of("watch"));
             config.setTargets(List.of(target("plain", false), observer));
             config.setDefaultTargetName("plain");
 
-            // A trigger on an observer still routes, because triggers are the
-            // addressed path and this target happens to carry one — what must NOT
-            // happen is an observer becoming the default for an unmatched mention.
             var resolved = router.resolveFromIntegration(config, "hello there");
             assertEquals("plain", resolved.target().getName());
+        }
+
+        @Test
+        @DisplayName("an observer named as the default resolves to nothing, not to itself")
+        void observerNamedAsDefaultIsRefused() throws Exception {
+            // The store refuses to save this pairing, so it can only arrive from a
+            // document written straight to the datastore. Resolving it would make
+            // one target answer both addressed and unaddressed messages, with the
+            // observer's cooldown and caps applying to only half of what it said.
+            var config = setupNewStyleConfig(CHANNEL_ID, "xoxb-token", "secret");
+            var observer = target("watch", true);
+            config.setTargets(List.of(observer));
+            config.setDefaultTargetName("watch");
+
+            assertNull(router.resolveFromIntegration(config, "hello there"));
         }
 
         private ChannelTarget target(String name, boolean observing) {

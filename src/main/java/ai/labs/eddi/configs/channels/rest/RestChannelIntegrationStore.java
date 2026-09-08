@@ -292,6 +292,17 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
                 if (target.getObserveConfig() == null) {
                     target.setObserveConfig(new ObserveConfig());
                 }
+                // An observer watches traffic it was not part of. Naming it the
+                // default makes it the answer to "the bot was mentioned and no
+                // trigger matched" as well, so one target would answer both
+                // addressed and unaddressed messages under different limits —
+                // and the observer's cooldown and caps would not apply to half
+                // of what it said.
+                if (target.getName().equalsIgnoreCase(config.getDefaultTargetName())) {
+                    throw new BadRequestException(
+                            "Target '" + target.getName()
+                                    + "': an observeMode target cannot also be the default target.");
+                }
             }
             if (target.getObserveConfig() != null) {
                 var oc = target.getObserveConfig();

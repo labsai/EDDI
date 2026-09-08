@@ -465,6 +465,17 @@ public class ChannelTargetRouter {
         return null;
     }
 
+    /**
+     * The target an addressed message falls back to when no trigger matched.
+     * <p>
+     * Observers are excluded. An observer watches traffic it was not part of, so
+     * making it the answer to "the user mentioned the bot and named no trigger"
+     * inverts what it is for — and would let the same target answer both addressed
+     * and unaddressed messages, each under a different set of limits.
+     * {@code RestChannelIntegrationStore} refuses to store that pairing, so this
+     * only fires for a document written straight to the datastore, past the REST
+     * validation.
+     */
     private ChannelTarget findDefaultTarget(ChannelIntegrationConfiguration integration) {
         String defaultName = integration.getDefaultTargetName();
         if (defaultName == null || integration.getTargets() == null)
@@ -472,6 +483,7 @@ public class ChannelTargetRouter {
         return integration.getTargets().stream()
                 .filter(t -> t.getName() != null
                         && t.getName().equalsIgnoreCase(defaultName))
+                .filter(t -> !t.isObserveMode())
                 .findFirst()
                 .orElse(null);
     }

@@ -274,6 +274,10 @@ match is reported as `NO_TRIGGER`, never as throttled.
 
 Notes and current limits:
 
+- **An observer cannot also be the channel's `defaultTargetName`.** The default
+  is what an unmatched *mention* falls back to; an observer answers traffic it
+  was never addressed in. One target doing both would answer half its messages
+  outside its own cooldown and caps, so the pairing is refused at save time.
 - **`AGENT` targets only.** `maxCostPerDay` is measured against the per-turn
   cost the engine attributes to a 1:1 conversation; there is no equivalent for
   a group discussion, so a `GROUP` observer is rejected at save time rather

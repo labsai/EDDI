@@ -291,20 +291,40 @@ class RestChannelIntegrationStoreValidationTest {
     @DisplayName("Observe mode validation")
     class ObserveModeValidation {
 
-        private ChannelTarget observer() {
+        /**
+         * The channel's ordinary default target, which the fixture names.
+         *
+         * Every observer test needs one: an observer may not itself be the default, so
+         * a config whose only target is an observer is invalid for a reason unrelated
+         * to what these tests are checking.
+         */
+        private ChannelTarget plainDefault() {
             var target = new ChannelTarget();
             target.setName("support");
             target.setTargetId("agent-abc");
             target.setType(ChannelTarget.TargetType.AGENT);
-            target.setTriggers(List.of("support"));
+            return target;
+        }
+
+        private ChannelTarget observer() {
+            var target = new ChannelTarget();
+            target.setName("incident-watch");
+            target.setTargetId("agent-watch");
+            target.setType(ChannelTarget.TargetType.AGENT);
+            target.setTriggers(List.of("incident"));
             target.setObserveMode(true);
             return target;
+        }
+
+        /** The fixture's default target plus this observer. */
+        private void useObserver(ChannelTarget observer) {
+            config.setTargets(List.of(plainDefault(), observer));
         }
 
         @Test
         @DisplayName("observeMode=true on an AGENT target → passes")
         void observeModeAccepted() {
-            config.setTargets(List.of(observer()));
+            useObserver(observer());
             assertDoesNotThrow(() -> store.validateConfiguration(config));
         }
 
@@ -315,7 +335,7 @@ class RestChannelIntegrationStoreValidationTest {
             // caps, which is the one shape an observer must never be stored in.
             var target = observer();
             target.setObserveConfig(null);
-            config.setTargets(List.of(target));
+            useObserver(target);
 
             store.validateConfiguration(config);
 
@@ -334,11 +354,35 @@ class RestChannelIntegrationStoreValidationTest {
             // unenforceable.
             var target = observer();
             target.setType(ChannelTarget.TargetType.GROUP);
-            config.setTargets(List.of(target));
+            useObserver(target);
 
             var ex = assertThrows(BadRequestException.class,
                     () -> store.validateConfiguration(config));
             assertTrue(ex.getMessage().contains("AGENT"));
+        }
+
+        @Test
+        @DisplayName("an observer named as the default target → BadRequest")
+        void observerCannotBeDefaultTarget() {
+            // An observer watches traffic it was not part of; making it the
+            // default also makes it the answer to an unmatched mention, so one
+            // target would answer both addressed and unaddressed messages with
+            // the observer's limits applying to only half of what it says.
+            var target = observer();
+            config.setTargets(List.of(target));
+            config.setDefaultTargetName(target.getName());
+
+            var ex = assertThrows(BadRequestException.class,
+                    () -> store.validateConfiguration(config));
+            assertTrue(ex.getMessage().contains("default target"));
+        }
+
+        @Test
+        @DisplayName("an observer alongside a separate default target → passes")
+        void observerBesideADefaultIsFine() {
+            useObserver(observer());
+            config.setDefaultTargetName("support");
+            assertDoesNotThrow(() -> store.validateConfiguration(config));
         }
 
         @Test
@@ -352,7 +396,7 @@ class RestChannelIntegrationStoreValidationTest {
                 var oc = new ObserveConfig();
                 mutate.accept(oc);
                 target.setObserveConfig(oc);
-                config.setTargets(List.of(target));
+                useObserver(target);
 
                 assertThrows(BadRequestException.class, () -> store.validateConfiguration(config));
             }
@@ -367,7 +411,7 @@ class RestChannelIntegrationStoreValidationTest {
             oc.setMaxCostPerDay(0);
             oc.setCooldownSeconds(0);
             target.setObserveConfig(oc);
-            config.setTargets(List.of(target));
+            useObserver(target);
 
             assertDoesNotThrow(() -> store.validateConfiguration(config));
         }
@@ -379,23 +423,21 @@ class RestChannelIntegrationStoreValidationTest {
             var oc = new ObserveConfig();
             oc.setTriggerKeywords(List.of("incident", " "));
             target.setObserveConfig(oc);
-            config.setTargets(List.of(target));
+            useObserver(target);
             assertThrows(BadRequestException.class, () -> store.validateConfiguration(config));
 
             var other = observer();
             var otherConfig = new ObserveConfig();
             otherConfig.setTriggerMimeTypes(List.of(""));
             other.setObserveConfig(otherConfig);
-            config.setTargets(List.of(other));
+            useObserver(other);
             assertThrows(BadRequestException.class, () -> store.validateConfiguration(config));
         }
 
         @Test
         @DisplayName("observeMode=false → passes")
         void observeModeFalse() {
-            var target = new ChannelTarget();
-            target.setName("support");
-            target.setTargetId("agent-abc");
+            var target = plainDefault();
             target.setTriggers(List.of("support"));
             target.setObserveMode(false);
             config.setTargets(List.of(target));
