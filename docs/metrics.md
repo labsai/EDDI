@@ -565,10 +565,16 @@ eddi_dream_duration_seconds                 # Dream cycle duration (timer)
 Read the two failure counters together. A summarization failure the service classifies as
 transient — a socket timeout, a connection refusal, a rate-limit message — is skipped and the
 cycle carries on, so `eddi_dream_summarization_failed_total` rises while
-`eddi_dream_cycles_failed_total` stays flat. Anything else, a provider 401 included, aborts
-consolidation for that cycle and increments **both**. So both counters rising together, with
-stale pruning still working, is the signature of missing credentials: set
-`userMemoryConfig.dream.parameters` — see [user-memory.md](user-memory.md).
+`eddi_dream_cycles_failed_total` stays flat. **Every** other failure aborts consolidation for
+that cycle and increments both.
+
+So both counters rising together narrows the cause to a non-transient one; it does not identify
+it. Missing credentials are the common case — a provider 401 lands here, and stale pruning keeps
+working, so the cycle looks partly healthy — but so does a bad model name, a rejected request or
+a provider outage that does not present as a timeout. Confirm from the ERROR line the cycle
+logs: it names the provider, the model and the configured parameter *keys*, which is enough to
+tell a missing `apiKey` from a wrong `llmModel` without exposing the value. If credentials are
+the cause, set `userMemoryConfig.dream.parameters` — see [user-memory.md](user-memory.md).
 
 ### Conversation Summarization Metrics
 
