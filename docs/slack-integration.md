@@ -234,6 +234,65 @@ Triggers are case-insensitive. The text after the colon becomes the message sent
 
 Type `@EDDI help` to see available trigger keywords for the channel.
 
+### Observe Mode (passive watching)
+
+Everything above needs the bot to be addressed: a top-level channel message
+with no `@EDDI` is ignored. An **observer** is the one exception. Set
+`observeMode` on a target and it also sees plain channel traffic, and answers
+in a thread under the message it reacted to.
+
+```json
+{
+  "name": "incident-watch",
+  "type": "AGENT",
+  "targetId": "<agentId>",
+  "observeMode": true,
+  "observeConfig": {
+    "triggerKeywords": ["incident", "outage", "sev1"],
+    "triggerMimeTypes": ["application/pdf"],
+    "cooldownSeconds": 60,
+    "maxDailyResponses": 50,
+    "maxCostPerDay": 5.0
+  }
+}
+```
+
+Every reply passes four gates, in this order:
+
+1. **Trigger** — a keyword appears anywhere in the message (case-insensitive
+   substring), or the message carries a file of a listed MIME type. Leave both
+   lists empty and the observer watches *everything* in the channel, which is
+   what the rest of this list exists to make survivable.
+2. **Cooldown** — `cooldownSeconds` since this observer last replied in this
+   channel. Not reset at midnight: it is a spam guard, not a daily allowance.
+3. **Daily count** — `maxDailyResponses` per UTC day.
+4. **Daily cost** — `maxCostPerDay` per UTC day.
+
+The order matters when reading
+`eddi_channel_observe_decisions_total{reason=...}`: an observer that did not
+match is reported as `NO_TRIGGER`, never as throttled.
+
+Notes and current limits:
+
+- **`AGENT` targets only.** `maxCostPerDay` is measured against the per-turn
+  cost the engine attributes to a 1:1 conversation; there is no equivalent for
+  a group discussion, so a `GROUP` observer is rejected at save time rather
+  than run with its primary control unenforceable.
+- **Cost means tool spend.** `ToolCostTracker` is the engine's only cost
+  tracker and it accumulates `@Tool` executions, so an observer that only talks
+  to an LLM accrues `$0.00` and is bounded by `maxDailyResponses`. Same
+  quantity, and the same caveat, as the cost a scheduled fire logs.
+- **The allowance is spent on commit, not on success.** A turn that fails still
+  used a reply, so a failing observer cannot retry all day.
+- **Several observers in one channel**: the first one whose triggers match
+  answers. If that one is throttled the message is dropped rather than passed
+  to the next — otherwise a second watcher would answer precisely *because* the
+  first was rate-limited.
+- Bot messages are filtered before any of this, so two observers in one channel
+  cannot answer each other.
+- Omitting `observeConfig` on an observer stores the defaults above rather than
+  leaving it uncapped.
+
 ### Multi-Agent Group Discussions
 
 When a trigger keyword routes to a GROUP target, a multi-agent panel discussion starts. All configured agents in the group participate in a live discussion streamed to Slack.

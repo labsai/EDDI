@@ -505,7 +505,14 @@ eddi_openai_requests_total                  # OpenAI-compatible API requests; ta
 eddi_openai_request_duration_seconds        # Request latency (timer)
 eddi_openai_conversations_created_total     # Conversations created via the /v1 adapter
 eddi_caller_identity_resolution_total       # Caller-identity resolutions; tags: outcome, reference
+eddi_channel_observe_decisions_total        # Observe-mode reply decisions; tags: reason, type
 ```
+
+`eddi_channel_observe_decisions_total` is one sample per message an observer
+saw, tagged with the gate that settled it: `MATCHED` (it replied), `NO_TRIGGER`
+(the message was not for it), or `COOLDOWN` / `DAILY_RESPONSE_CAP` /
+`DAILY_COST_CAP` (it wanted to and was stopped). A rising throttle share with a
+flat `MATCHED` share is an observer whose triggers are too broad for its budget.
 
 ### Backup, Export & Sync Metrics
 

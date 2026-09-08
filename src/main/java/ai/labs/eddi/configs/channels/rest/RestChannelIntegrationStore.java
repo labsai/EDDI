@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.channels.IChannelIntegrationStore;
 import ai.labs.eddi.configs.channels.IRestChannelIntegrationStore;
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.channels.model.ChannelTarget;
+import ai.labs.eddi.configs.channels.model.ObserveConfig;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
@@ -272,20 +273,35 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
                 throw new BadRequestException(
                         "Target '" + target.getName() + "' must have a targetId.");
             }
-            // Observe mode is schema-ready but not yet implemented
             if (target.isObserveMode()) {
-                throw new BadRequestException(
-                        "Target '" + target.getName()
-                                + "': observeMode is not yet implemented. "
-                                + "Set observeMode to false or omit it.");
+                // An observer answers channel traffic it was never addressed in, and
+                // the guard against that becoming expensive is a per-turn cost the
+                // engine can only attribute to a 1:1 conversation. A GROUP observer
+                // would start a whole multi-agent discussion off unaddressed chatter
+                // with its dollar ceiling unenforceable — refuse it here rather than
+                // ship a control that silently does not apply.
+                if (target.getType() != ChannelTarget.TargetType.AGENT) {
+                    throw new BadRequestException(
+                            "Target '" + target.getName()
+                                    + "': observeMode is only supported for AGENT targets.");
+                }
+                // Defaulted rather than rejected: `observeMode: true` with no config
+                // would mean no cooldown and no caps, which is the one shape an
+                // observer must never be saved in. The defaults are the documented
+                // ones on ObserveConfig.
+                if (target.getObserveConfig() == null) {
+                    target.setObserveConfig(new ObserveConfig());
+                }
             }
-            // Future-proofing: validate ObserveConfig bounds even while rejected
             if (target.getObserveConfig() != null) {
                 var oc = target.getObserveConfig();
                 if (oc.getCooldownSeconds() < 0) {
                     throw new BadRequestException(
                             "Target '" + target.getName() + "': cooldownSeconds must be >= 0.");
                 }
+                // Zero is a valid, meaningful setting on both caps — an observer
+                // that is configured but deliberately silent — so only a negative
+                // value is a mistake.
                 if (oc.getMaxDailyResponses() < 0) {
                     throw new BadRequestException(
                             "Target '" + target.getName() + "': maxDailyResponses must be >= 0.");
@@ -293,6 +309,20 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
                 if (oc.getMaxCostPerDay() < 0) {
                     throw new BadRequestException(
                             "Target '" + target.getName() + "': maxCostPerDay must be >= 0.");
+                }
+                for (String keyword : oc.getTriggerKeywords() == null ? List.<String>of() : oc.getTriggerKeywords()) {
+                    if (keyword == null || keyword.isBlank()) {
+                        throw new BadRequestException(
+                                "Target '" + target.getName()
+                                        + "': observeConfig.triggerKeywords contains a null or blank keyword.");
+                    }
+                }
+                for (String mimeType : oc.getTriggerMimeTypes() == null ? List.<String>of() : oc.getTriggerMimeTypes()) {
+                    if (mimeType == null || mimeType.isBlank()) {
+                        throw new BadRequestException(
+                                "Target '" + target.getName()
+                                        + "': observeConfig.triggerMimeTypes contains a null or blank type.");
+                    }
                 }
             }
             if (target.getTriggers() != null) {

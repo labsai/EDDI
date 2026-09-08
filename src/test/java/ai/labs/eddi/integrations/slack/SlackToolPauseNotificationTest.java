@@ -20,6 +20,8 @@ import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.integrations.channels.ChannelTargetRouter;
+import ai.labs.eddi.integrations.channels.ObserveGate;
+import ai.labs.eddi.modules.llm.tools.ToolCostTracker;
 import ai.labs.eddi.integrations.channels.ChannelTargetRouter.ResolvedTarget;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -347,6 +349,8 @@ class SlackToolPauseNotificationTest {
         when(cacheFactory.getCache(anyString(), any(Duration.class))).thenReturn(new FakeCache<>());
         return new SlackEventHandler(
                 mock(ChannelTargetRouter.class),
+                mock(ObserveGate.class),
+                mock(ToolCostTracker.class),
                 slackApi,
                 mock(IConversationService.class),
                 mock(IGroupConversationService.class),

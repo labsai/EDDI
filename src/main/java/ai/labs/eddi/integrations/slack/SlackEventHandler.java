@@ -17,6 +17,8 @@ import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
 import ai.labs.eddi.integrations.channels.ChannelTargetRouter;
+import ai.labs.eddi.integrations.channels.ObserveGate;
+import ai.labs.eddi.modules.llm.tools.ToolCostTracker;
 import ai.labs.eddi.integrations.channels.ChannelTargetRouter.ResolvedTarget;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
@@ -88,6 +90,8 @@ public class SlackEventHandler {
     private static final SimpleConversationMemorySnapshot SKIPPED_NOT_ACTIVE = new SimpleConversationMemorySnapshot();
 
     private final ChannelTargetRouter channelTargetRouter;
+    private final ObserveGate observeGate;
+    private final ToolCostTracker toolCostTracker;
     private final SlackWebApiClient slackApi;
     private final IConversationService conversationService;
     private final IGroupConversationService groupConversationService;
@@ -123,12 +127,16 @@ public class SlackEventHandler {
 
     @Inject
     public SlackEventHandler(ChannelTargetRouter channelTargetRouter,
+            ObserveGate observeGate,
+            ToolCostTracker toolCostTracker,
             SlackWebApiClient slackApi,
             IConversationService conversationService,
             IGroupConversationService groupConversationService,
             IUserConversationStore userConversationStore,
             ICacheFactory cacheFactory) {
         this.channelTargetRouter = channelTargetRouter;
+        this.observeGate = observeGate;
+        this.toolCostTracker = toolCostTracker;
         this.slackApi = slackApi;
         this.conversationService = conversationService;
         this.groupConversationService = groupConversationService;
@@ -221,7 +229,13 @@ public class SlackEventHandler {
         // - Thread replies without @mention → process here (thread continuity)
         if ("message".equals(eventType)) {
             if (eventThreadTs == null && !isDirectMessage) {
-                // Top-level channel message — only app_mention should handle these
+                // Top-level channel message. Only app_mention answers these — unless
+                // an observer is configured for the channel, which is the one case
+                // where the bot may speak without being addressed. A channel with no
+                // observers behaves exactly as it did before observe mode existed.
+                if (handleObservedMessage(event, eventChannel)) {
+                    return;
+                }
                 LOGGER.debugf("[SLACK] Ignoring top-level message event (use @mention)");
                 return;
             }
@@ -298,11 +312,148 @@ public class SlackEventHandler {
     }
 
     /**
-     * Handle a standard 1:1 agent conversation routed via ChannelTargetRouter.
+     * Give a passive observer the chance to answer a message it was not addressed
+     * in.
+     *
+     * Ordinary routing never reaches an unmentioned top-level channel message. An
+     * observer does, so what "the user @mentioned the bot" would normally imply has
+     * to be checked explicitly here. The bot's own messages are filtered for every
+     * event before this point, which is what stops two observers in one channel
+     * answering each other forever.
+     *
+     * @return {@code true} when an observer took the message, so the caller stops
      */
-    private void handleAgentConversation(ResolvedTarget resolved, String channelId,
-                                         String userId, String threadTs, String originalText,
-                                         String botToken)
+    private boolean handleObservedMessage(Map<String, Object> event, String channelId) {
+        if (channelId == null) {
+            return false;
+        }
+        List<ChannelTarget> candidates = channelTargetRouter.observeCandidates("slack", channelId);
+        if (candidates.isEmpty()) {
+            return false;
+        }
+
+        String text = (String) event.get("text");
+        String userId = (String) event.get("user");
+        if (userId == null) {
+            return false;
+        }
+        // Files are how an observer watching for, say, PDFs is meant to fire, so a
+        // message that is only an upload still counts even with empty text.
+        List<String> mimeTypes = attachedMimeTypes(event);
+        if ((text == null || text.isBlank()) && mimeTypes.isEmpty()) {
+            return false;
+        }
+
+        var match = observeGate.select("slack", channelId, candidates, text, mimeTypes);
+        if (match.isEmpty()) {
+            return false;
+        }
+        ChannelTarget target = match.get().target();
+
+        String botToken = channelTargetRouter.getBotToken("slack", channelId);
+        if (botToken == null || botToken.isBlank()) {
+            LOGGER.warnf("[OBSERVE] No bot token for channel %s — observer '%s' cannot reply",
+                    sanitize(channelId), sanitize(target.getName()));
+            return false;
+        }
+
+        // An observer answers in a thread under the message it reacted to. Replying
+        // at top level would read as the bot joining the conversation, and every
+        // reply would be a new root nobody can follow.
+        String threadTs = firstNonBlank((String) event.get("thread_ts"), (String) event.get("ts"));
+        var integration = channelTargetRouter.integrationFor("slack", channelId);
+        ResolvedTarget resolved = new ResolvedTarget(target, text, integration, null, null);
+        String message = text != null ? text : "";
+
+        // The allowance is consumed the moment the observer commits, not when the
+        // answer lands: a turn that fails still used it, and charging only on
+        // success would let a failing observer retry all day. The spend is added
+        // once the turn settles and the figure exists.
+        observeGate.recordResponse("slack", channelId, target, 0.0);
+
+        LOGGER.infof("[OBSERVE] Target '%s' answering an unaddressed message in channel %s",
+                sanitize(target.getName()), sanitize(channelId));
+
+        executorService.submit(() -> {
+            String conversationId = null;
+            double costBefore = 0.0;
+            try {
+                conversationId = observedConversationId(resolved, channelId, userId, threadTs);
+                costBefore = conversationCost(conversationId);
+                sendAndDeliver(resolved, conversationId, target.getTargetId(), channelId, threadTs,
+                        message, botToken);
+            } catch (Exception e) {
+                LOGGER.errorf(e, "[OBSERVE] Target '%s' failed to answer in channel %s",
+                        sanitize(target.getName()), sanitize(channelId));
+            } finally {
+                if (conversationId != null) {
+                    double spent = conversationCost(conversationId) - costBefore;
+                    if (spent > 0) {
+                        observeGate.addCost("slack", channelId, target, spent);
+                    }
+                }
+            }
+        });
+        return true;
+    }
+
+    /**
+     * MIME types of the files on a Slack message.
+     *
+     * Slack puts them on {@code files[].mimetype}; an entry shaped any other way is
+     * skipped rather than guessed at.
+     */
+    private static List<String> attachedMimeTypes(Map<String, Object> event) {
+        if (!(event.get("files") instanceof List<?> list) || list.isEmpty()) {
+            return List.of();
+        }
+        List<String> types = new ArrayList<>();
+        for (Object file : list) {
+            if (file instanceof Map<?, ?> map && map.get("mimetype") instanceof String mimeType
+                    && !mimeType.isBlank()) {
+                types.add(mimeType);
+            }
+        }
+        return types;
+    }
+
+    private static String firstNonBlank(String first, String second) {
+        return first != null && !first.isBlank() ? first : second;
+    }
+
+    /**
+     * Tool spend accumulated on a conversation so far, or {@code 0.0} when nothing
+     * has been tracked for it.
+     *
+     * Tool spend, not total spend: {@code ToolCostTracker} is the engine's only
+     * cost tracker and it accumulates {@code @Tool} executions alone, so an
+     * observer that only talks to an LLM reads 0.0 and is bounded by its daily
+     * response count instead. Same quantity, and the same caveat, as the cost a
+     * scheduled fire logs. Never throws — an observer must not fail because its
+     * accounting did.
+     */
+    private double conversationCost(String conversationId) {
+        if (conversationId == null) {
+            return 0.0;
+        }
+        try {
+            var metrics = toolCostTracker.getConversationCosts(conversationId);
+            return metrics != null ? metrics.getTotalCost() : 0.0;
+        } catch (RuntimeException e) {
+            LOGGER.debugf(e, "[OBSERVE] Could not read tool cost for conversation %s", conversationId);
+            return 0.0;
+        }
+    }
+
+    /**
+     * Handle a standard 1:1 agent conversation routed via ChannelTargetRouter.
+     *
+     * @return the conversation the turn ran on, so an observed turn can price
+     *         itself against the tool-cost delta across it
+     */
+    private String handleAgentConversation(ResolvedTarget resolved, String channelId,
+                                           String userId, String threadTs, String originalText,
+                                           String botToken)
             throws Exception {
         String agentId = resolved.target().getTargetId();
         String threadKey = threadTs != null ? threadTs : "main";
@@ -319,6 +470,21 @@ public class SlackEventHandler {
 
         String conversationId = getOrCreateConversation(agentId, userId, intent);
         sendAndDeliver(resolved, conversationId, agentId, channelId, threadTs, message, botToken);
+        return conversationId;
+    }
+
+    /**
+     * The conversation an observed turn will run on — the same intent key an
+     * addressed turn would use, so an observer and a mention in the same channel
+     * and thread share one conversation rather than talking past each other.
+     */
+    private String observedConversationId(ResolvedTarget resolved, String channelId, String userId,
+                                          String threadTs)
+            throws Exception {
+        String agentId = resolved.target().getTargetId();
+        String threadKey = threadTs != null ? threadTs : "main";
+        String intent = "channel:slack:" + channelId + ":" + agentId + ":" + threadKey;
+        return getOrCreateConversation(agentId, userId, intent);
     }
 
     /**

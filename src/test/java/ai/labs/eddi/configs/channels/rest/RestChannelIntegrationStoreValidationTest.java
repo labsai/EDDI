@@ -8,6 +8,7 @@ import static org.mockito.Mockito.mock;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.channels.model.ChannelTarget;
+import ai.labs.eddi.configs.channels.model.ObserveConfig;
 import jakarta.ws.rs.BadRequestException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -16,13 +17,14 @@ import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Unit tests for {@link RestChannelIntegrationStore#validateConfiguration}.
  * Covers all validation rules: name, channelType, targets, defaultTarget,
- * trigger uniqueness, null/blank triggers, and observeMode rejection.
+ * trigger uniqueness, null/blank triggers, and observe-mode configuration.
  */
 class RestChannelIntegrationStoreValidationTest {
 
@@ -289,19 +291,103 @@ class RestChannelIntegrationStoreValidationTest {
     @DisplayName("Observe mode validation")
     class ObserveModeValidation {
 
-        @Test
-        @DisplayName("observeMode=true → BadRequest (not yet implemented)")
-        void observeModeRejected() {
+        private ChannelTarget observer() {
             var target = new ChannelTarget();
             target.setName("support");
             target.setTargetId("agent-abc");
+            target.setType(ChannelTarget.TargetType.AGENT);
             target.setTriggers(List.of("support"));
             target.setObserveMode(true);
+            return target;
+        }
+
+        @Test
+        @DisplayName("observeMode=true on an AGENT target → passes")
+        void observeModeAccepted() {
+            config.setTargets(List.of(observer()));
+            assertDoesNotThrow(() -> store.validateConfiguration(config));
+        }
+
+        @Test
+        @DisplayName("observeMode=true with no config → defaulted, never saved unguarded")
+        void observeConfigDefaulted() {
+            // `observeMode: true` with a null config would mean no cooldown and no
+            // caps, which is the one shape an observer must never be stored in.
+            var target = observer();
+            target.setObserveConfig(null);
+            config.setTargets(List.of(target));
+
+            store.validateConfiguration(config);
+
+            assertNotNull(target.getObserveConfig());
+            assertTrue(target.getObserveConfig().getCooldownSeconds() > 0);
+            assertTrue(target.getObserveConfig().getMaxDailyResponses() > 0);
+            assertTrue(target.getObserveConfig().getMaxCostPerDay() > 0);
+        }
+
+        @Test
+        @DisplayName("observeMode=true on a GROUP target → BadRequest")
+        void observeModeGroupRejected() {
+            // An observer's dollar ceiling is measured against a per-turn cost the
+            // engine can attribute to a 1:1 conversation and not to a group
+            // discussion, so a GROUP observer would run with its primary control
+            // unenforceable.
+            var target = observer();
+            target.setType(ChannelTarget.TargetType.GROUP);
             config.setTargets(List.of(target));
 
             var ex = assertThrows(BadRequestException.class,
                     () -> store.validateConfiguration(config));
-            assertTrue(ex.getMessage().contains("observeMode"));
+            assertTrue(ex.getMessage().contains("AGENT"));
+        }
+
+        @Test
+        @DisplayName("negative cooldown / caps → BadRequest")
+        void negativeBoundsRejected() {
+            for (var mutate : List.<Consumer<ObserveConfig>>of(
+                    oc -> oc.setCooldownSeconds(-1),
+                    oc -> oc.setMaxDailyResponses(-1),
+                    oc -> oc.setMaxCostPerDay(-0.01))) {
+                var target = observer();
+                var oc = new ObserveConfig();
+                mutate.accept(oc);
+                target.setObserveConfig(oc);
+                config.setTargets(List.of(target));
+
+                assertThrows(BadRequestException.class, () -> store.validateConfiguration(config));
+            }
+        }
+
+        @Test
+        @DisplayName("zero caps → passes (a configured but deliberately silent observer)")
+        void zeroCapsAllowed() {
+            var target = observer();
+            var oc = new ObserveConfig();
+            oc.setMaxDailyResponses(0);
+            oc.setMaxCostPerDay(0);
+            oc.setCooldownSeconds(0);
+            target.setObserveConfig(oc);
+            config.setTargets(List.of(target));
+
+            assertDoesNotThrow(() -> store.validateConfiguration(config));
+        }
+
+        @Test
+        @DisplayName("blank trigger keyword or MIME type → BadRequest")
+        void blankObserveTriggersRejected() {
+            var target = observer();
+            var oc = new ObserveConfig();
+            oc.setTriggerKeywords(List.of("incident", " "));
+            target.setObserveConfig(oc);
+            config.setTargets(List.of(target));
+            assertThrows(BadRequestException.class, () -> store.validateConfiguration(config));
+
+            var other = observer();
+            var otherConfig = new ObserveConfig();
+            otherConfig.setTriggerMimeTypes(List.of(""));
+            other.setObserveConfig(otherConfig);
+            config.setTargets(List.of(other));
+            assertThrows(BadRequestException.class, () -> store.validateConfiguration(config));
         }
 
         @Test
@@ -315,6 +401,8 @@ class RestChannelIntegrationStoreValidationTest {
             config.setTargets(List.of(target));
 
             assertDoesNotThrow(() -> store.validateConfiguration(config));
+            // A non-observer is not given a config it has no use for.
+            assertNull(target.getObserveConfig());
         }
     }
 

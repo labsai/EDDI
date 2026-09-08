@@ -332,6 +332,43 @@ public class ChannelTargetRouter {
     }
 
     /**
+     * The observe-mode targets configured for this channel, in configuration order.
+     *
+     * Deliberately separate from {@link #resolveTarget}, which answers "who was
+     * this message addressed to". An observer is addressed to nobody: it watches
+     * traffic it was not part of, so it must never be reachable as a trigger match
+     * or as the default target for a mention, and a channel with no observers must
+     * keep behaving exactly as it did before this existed. Whether any of these
+     * should actually answer is {@code ObserveGate}'s decision, not the router's.
+     *
+     * Legacy {@code ChannelConnector} entries have no observe configuration and so
+     * never appear here.
+     *
+     * @return the observers for this channel, or an empty list — never null
+     */
+    public List<ChannelTarget> observeCandidates(String channelType, String platformChannelId) {
+        refreshIfNeeded();
+        String normalizedType = channelType != null ? channelType.toLowerCase(Locale.ROOT) : "";
+        ChannelIntegrationConfiguration integration = integrationMap.get(normalizedType + ":" + platformChannelId);
+        if (integration == null || integration.getTargets() == null) {
+            return List.of();
+        }
+        return integration.getTargets().stream()
+                .filter(ChannelTarget::isObserveMode)
+                .toList();
+    }
+
+    /**
+     * The integration serving this channel, for a caller that already holds a
+     * target from {@link #observeCandidates} and needs its credentials.
+     */
+    public ChannelIntegrationConfiguration integrationFor(String channelType, String platformChannelId) {
+        refreshIfNeeded();
+        String normalizedType = channelType != null ? channelType.toLowerCase(Locale.ROOT) : "";
+        return integrationMap.get(normalizedType + ":" + platformChannelId);
+    }
+
+    /**
      * Get the bot token for a channel, checking new-style integrations first, then
      * legacy. Returns {@code null} if no token is configured for this channel.
      */

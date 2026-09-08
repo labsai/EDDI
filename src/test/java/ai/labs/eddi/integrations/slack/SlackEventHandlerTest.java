@@ -12,6 +12,8 @@ import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.integrations.channels.ChannelTargetRouter;
+import ai.labs.eddi.integrations.channels.ObserveGate;
+import ai.labs.eddi.modules.llm.tools.ToolCostTracker;
 import ai.labs.eddi.integrations.channels.ChannelTargetRouter.ResolvedTarget;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -307,6 +309,8 @@ class SlackEventHandlerTest {
         doReturn(new FakeCache<>()).when(cacheFactory).getCache(anyString(), any(Duration.class));
         return new SlackEventHandler(
                 mock(ChannelTargetRouter.class),
+                mock(ObserveGate.class),
+                mock(ToolCostTracker.class),
                 slackApi,
                 mock(IConversationService.class),
                 mock(IGroupConversationService.class),
