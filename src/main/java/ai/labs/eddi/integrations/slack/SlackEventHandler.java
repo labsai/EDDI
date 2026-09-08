@@ -171,10 +171,6 @@ public class SlackEventHandler {
      * @param event
      *            the parsed event JSON as a Map
      */
-    public void handleEventAsync(String eventId, Map<String, Object> event) {
-        handleEventAsync(eventId, event, null);
-    }
-
     /**
      * @param botUserId
      *            this app's own Slack user id, from the event envelope, or
