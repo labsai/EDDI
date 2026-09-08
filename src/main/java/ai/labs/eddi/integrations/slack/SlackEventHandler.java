@@ -33,7 +33,6 @@ import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.TimeUnit;
-import java.util.OptionalDouble;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -72,6 +71,14 @@ public class SlackEventHandler {
 
     /** Pattern to strip bot mention: {@code <@U0123BOTID> actual message} */
     private static final Pattern BOT_MENTION_PATTERN = Pattern.compile("^<@[A-Z0-9]+>\\s*");
+
+    /**
+     * Any user mention, anywhere in the text, in either of the two forms Slack
+     * writes. Used only when the event envelope named no bot authorization, so this
+     * app's own user id is unknown and every mention has to be treated as possibly
+     * its own — see {@code mentionsThisBot}.
+     */
+    private static final Pattern ANY_MENTION_PATTERN = Pattern.compile("<@[A-Z0-9]+(\\|[^>]*)?>");
 
     /** Maximum Slack message length (safe limit under 4000). */
     private static final int MAX_SLACK_MESSAGE_LENGTH = 3900;
@@ -333,7 +340,45 @@ public class SlackEventHandler {
      */
     private boolean handleObservedMessage(Map<String, Object> event, String channelId,
                                           String botUserId) {
+        try {
+            return observeMessage(event, channelId, botUserId);
+        } catch (RuntimeException e) {
+            // Selection runs synchronously inside handleEvent, whose catch posts
+            // a user-visible apology into the channel. Nobody addressed the bot
+            // here, so that apology would be the bot speaking uninvited about its
+            // own internals. Fall through to the ordinary "ignore" instead.
+            LOGGER.errorf(e, "[OBSERVE] Selection failed in channel %s", sanitize(channelId));
+            return false;
+        }
+    }
+
+    /**
+     * The Slack message subtypes an observer may act on.
+     * <p>
+     * An absent subtype is an ordinary message and {@code file_share} is how a MIME
+     * trigger is meant to fire. Everything else carried by this event is the
+     * channel describing itself — joins, leaves, topic and name changes, pins --
+     * and an observer watching all traffic would answer "@someone has joined the
+     * channel" with an LLM turn, a thread, and a reply off its daily allowance. The
+     * bot-message filter upstream does not cover these: they carry a human
+     * {@code user} and no {@code bot_id}.
+     */
+    private static final Set<String> OBSERVABLE_SUBTYPES = Set.of("file_share");
+
+    /** @see #OBSERVABLE_SUBTYPES */
+    static boolean isObservableSubtype(String subtype) {
+        return subtype == null || OBSERVABLE_SUBTYPES.contains(subtype);
+    }
+
+    private boolean observeMessage(Map<String, Object> event, String channelId,
+                                   String botUserId) {
         if (channelId == null) {
+            return false;
+        }
+        String subtype = (String) event.get("subtype");
+        if (!isObservableSubtype(subtype)) {
+            LOGGER.debugf("[OBSERVE] Ignoring subtype %s in channel %s",
+                    sanitize(subtype), sanitize(channelId));
             return false;
         }
         List<ChannelTarget> candidates = channelTargetRouter.observeCandidates("slack", channelId);
@@ -383,15 +428,6 @@ public class SlackEventHandler {
         // at top level would read as the bot joining the conversation, and every
         // reply would be a new root nobody can follow.
         String threadTs = firstNonBlank((String) event.get("thread_ts"), (String) event.get("ts"));
-        // Lock the thread to this observer, as the mention path does for its own
-        // target. Without it a human replying inside the observer's own thread
-        // resolves through the addressed path and reaches the channel's DEFAULT
-        // target — so answering the watcher would get you a different agent.
-        // Replies in that thread are addressed to it and route as ordinary
-        // conversation, which is why they do not spend the observe allowance.
-        if (threadTs != null) {
-            channelTargetRouter.lockThreadTarget("slack", channelId, threadTs, target);
-        }
         var integration = channelTargetRouter.integrationFor("slack", channelId);
         ResolvedTarget resolved = new ResolvedTarget(target, text, integration, null, null);
         String message = text != null ? text : "";
@@ -414,6 +450,16 @@ public class SlackEventHandler {
                 costBefore = conversationCost(conversationId);
                 sendAndDeliver(resolved, conversationId, target.getTargetId(), channelId, threadTs,
                         message, botToken);
+                // Locked only now, once the observer has actually spoken. The
+                // lock exists so a human replying under the observer's answer
+                // reaches the observer rather than the channel's DEFAULT target.
+                // Taken before the turn, a failure that posted nothing still left
+                // the thread bound: for the 24h the lock lives, a colleague
+                // replying there with an explicit `architect:` trigger would have
+                // been silently routed to an observer that never said anything.
+                if (threadTs != null) {
+                    channelTargetRouter.lockThreadTarget("slack", channelId, threadTs, target);
+                }
             } catch (Exception e) {
                 LOGGER.errorf(e, "[OBSERVE] Target '%s' failed to answer in channel %s",
                         sanitize(target.getName()), sanitize(channelId));
@@ -445,24 +491,27 @@ public class SlackEventHandler {
      * recognised, while a mention of somebody else is not.
      *
      * Without it — an envelope shape that carries no bot authorization — it falls
-     * back to {@link #BOT_MENTION_PATTERN}, which is anchored and so only sees a
-     * leading mention. That is the same test the thread-reply branch uses and is
-     * deliberately left alone: `stripBotMention` depends on it being prefix-only.
-     * It errs the other way from the exact test: a leading mention of ANY user
-     * reads as a bot mention, so an observer stays silent on "@alice can you check
-     * this?" until the envelope carries a bot authorization again. Staying quiet is
-     * the safer miss — the alternative is answering a sentence `app_mention` is
-     * also answering — and it applies only when Slack tells us nothing about who
-     * was authorized.
+     * back to {@link #ANY_MENTION_PATTERN}: any mention of anyone, anywhere, is
+     * treated as possibly this bot's. That errs towards silence in one direction
+     * only. An observer stays quiet on "@alice can you check this?", which is a
+     * miss; the alternative is answering a sentence `app_mention` is answering too,
+     * which is the bot replying twice. The anchored {@link #BOT_MENTION_PATTERN}
+     * used to serve here and could do neither: being anchored it missed a trailing
+     * mention entirely, and produced exactly that double reply. It is still the
+     * thread-reply branch's test, where `stripBotMention` depends on it being
+     * prefix-only.
      */
-    private static boolean mentionsThisBot(String text, String botUserId) {
+    static boolean mentionsThisBot(String text, String botUserId) {
         if (text == null || text.isBlank()) {
             return false;
         }
         if (botUserId == null || botUserId.isBlank()) {
-            return BOT_MENTION_PATTERN.matcher(text).find();
+            return ANY_MENTION_PATTERN.matcher(text).find();
         }
-        return text.contains("<@" + botUserId + ">");
+        // Slack writes a mention as `<@U123>` and, where the client had a label
+        // to hand, as `<@U123|eddi>`. Matching only the first form let the
+        // labelled variant through as "not addressed to us".
+        return text.contains("<@" + botUserId + ">") || text.contains("<@" + botUserId + "|");
     }
 
     /**
@@ -471,7 +520,7 @@ public class SlackEventHandler {
      * Slack puts them on {@code files[].mimetype}; an entry shaped any other way is
      * skipped rather than guessed at.
      */
-    private static List<String> attachedMimeTypes(Map<String, Object> event) {
+    static List<String> attachedMimeTypes(Map<String, Object> event) {
         if (!(event.get("files") instanceof List<?> list) || list.isEmpty()) {
             return List.of();
         }
@@ -517,13 +566,10 @@ public class SlackEventHandler {
 
     /**
      * Handle a standard 1:1 agent conversation routed via ChannelTargetRouter.
-     *
-     * @return the conversation the turn ran on, so an observed turn can price
-     *         itself against the tool-cost delta across it
      */
-    private String handleAgentConversation(ResolvedTarget resolved, String channelId,
-                                           String userId, String threadTs, String originalText,
-                                           String botToken)
+    private void handleAgentConversation(ResolvedTarget resolved, String channelId,
+                                         String userId, String threadTs, String originalText,
+                                         String botToken)
             throws Exception {
         String agentId = resolved.target().getTargetId();
         String threadKey = threadTs != null ? threadTs : "main";
@@ -540,7 +586,6 @@ public class SlackEventHandler {
 
         String conversationId = getOrCreateConversation(agentId, userId, intent);
         sendAndDeliver(resolved, conversationId, agentId, channelId, threadTs, message, botToken);
-        return conversationId;
     }
 
     /**
@@ -970,6 +1015,7 @@ public class SlackEventHandler {
             if (winner != null && winner.getConversationId() != null) {
                 LOGGER.debugf("Lost the create race for %s/%s — using the stored conversation",
                         sanitize(intent), sanitize(slackUserId));
+                endOrphanedConversation(result.conversationId());
                 return winner.getConversationId();
             }
             // The mapping existed a moment ago and cannot be read now. Ours is
@@ -979,6 +1025,27 @@ public class SlackEventHandler {
         }
 
         return result.conversationId();
+    }
+
+    /**
+     * Close the conversation this caller created before discovering it had lost the
+     * mapping race.
+     * <p>
+     * Nothing points at it: the stored mapping names the winner, so this one would
+     * sit in Mongo as a live conversation nobody can reach, counted by every query
+     * that looks for open conversations. Ending it is best-effort — the caller
+     * already has a usable conversation, so a failure here must not turn a
+     * recovered race into a failed turn.
+     */
+    private void endOrphanedConversation(String conversationId) {
+        if (conversationId == null) {
+            return;
+        }
+        try {
+            conversationService.endConversation(conversationId, "system:lost-create-race");
+        } catch (RuntimeException e) {
+            LOGGER.warnf(e, "Could not end the orphaned conversation %s", sanitize(conversationId));
+        }
     }
 
     /**

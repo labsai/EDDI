@@ -91,8 +91,14 @@ class ObserveGateTest {
         });
         ICache mockCache = mock(ICache.class);
         when(mockCache.get(any())).thenAnswer(inv -> {
+            // Captured BEFORE the barrier, deliberately. Held first, the barrier
+            // releases both threads but does not pin what either of them read:
+            // one could finish its whole reservation before the other's `get`
+            // ran, and a read-then-book implementation would then grant exactly
+            // one too and pass. Measured at 4 runs in 40.
+            Object value = cacheMap.get(inv.getArgument(0));
             readBarrier.get().run();
-            return cacheMap.get(inv.getArgument(0));
+            return value;
         });
         when(mockCache.putIfAbsent(anyString(), any(), anyLong(), any(TimeUnit.class)))
                 .thenAnswer(inv -> cacheMap.putIfAbsent(inv.getArgument(0), inv.getArgument(1)));
@@ -121,8 +127,15 @@ class ObserveGateTest {
         return new ObserveConfig();
     }
 
-    private ObserveGate.Verdict evaluate(ChannelTarget target, String text) {
-        return gate.evaluate("slack", CHANNEL, target, text, List.of());
+    /**
+     * Drives the production decision path. {@code reserve} BOOKS the reply it
+     * grants, so a granted call here is also the reply the next assertion is
+     * limited by — which is the point: the rate-limit tests used to drive a
+     * read-only `evaluate` plus a separate `recordResponse`, and a regression
+     * confined to the reservation loop left every one of them green.
+     */
+    private ObserveGate.Verdict reserve(ChannelTarget target, String text) {
+        return gate.reserve("slack", CHANNEL, target, text, List.of());
     }
 
     // ─── Triggers ──────────────────────────────────────────────────────────────
@@ -138,9 +151,9 @@ class ObserveGateTest {
             config.setTriggerKeywords(List.of("incident"));
             var target = observer("ops", config);
 
-            assertTrue(evaluate(target, "we have an INCIDENT in prod").respond());
+            assertTrue(reserve(target, "we have an INCIDENT in prod").respond());
             assertEquals(ObserveGate.Reason.NO_TRIGGER,
-                    evaluate(target, "lunch plans?").reason());
+                    reserve(target, "lunch plans?").reason());
         }
 
         @Test
@@ -148,7 +161,7 @@ class ObserveGateTest {
         void watchesEverythingWhenUnconfigured() {
             // Documented on the model, and the reason the cooldown and both caps
             // are not optional.
-            assertTrue(evaluate(observer("all", config()), "anything at all").respond());
+            assertTrue(reserve(observer("all", config()), "anything at all").respond());
         }
 
         @Test
@@ -156,12 +169,14 @@ class ObserveGateTest {
         void mimeTypeMatches() {
             var config = config();
             config.setTriggerMimeTypes(List.of("application/pdf"));
+            // Reserving books a reply, and these are two calls against one target.
+            config.setCooldownSeconds(0);
             var target = observer("docs", config);
 
-            assertTrue(gate.evaluate("slack", CHANNEL, target, "", List.of("application/pdf; charset=binary"))
+            assertTrue(gate.reserve("slack", CHANNEL, target, "", List.of("application/pdf; charset=binary"))
                     .respond());
             assertEquals(ObserveGate.Reason.NO_TRIGGER,
-                    gate.evaluate("slack", CHANNEL, target, "", List.of("image/png")).reason());
+                    gate.reserve("slack", CHANNEL, target, "", List.of("image/png")).reason());
         }
 
         @Test
@@ -170,12 +185,13 @@ class ObserveGateTest {
             var config = config();
             config.setTriggerKeywords(List.of("review"));
             config.setTriggerMimeTypes(List.of("application/pdf"));
+            config.setCooldownSeconds(0);
             var target = observer("docs", config);
 
-            assertTrue(evaluate(target, "please review this").respond());
-            assertTrue(gate.evaluate("slack", CHANNEL, target, "here", List.of("application/pdf"))
+            assertTrue(reserve(target, "please review this").respond());
+            assertTrue(gate.reserve("slack", CHANNEL, target, "here", List.of("application/pdf"))
                     .respond());
-            assertFalse(gate.evaluate("slack", CHANNEL, target, "here", List.of("image/png"))
+            assertFalse(gate.reserve("slack", CHANNEL, target, "here", List.of("image/png"))
                     .respond());
         }
 
@@ -184,7 +200,7 @@ class ObserveGateTest {
         void nonObserverNeverMatches() {
             var target = observer("ops", config());
             target.setObserveMode(false);
-            assertEquals(ObserveGate.Reason.NOT_OBSERVING, evaluate(target, "anything").reason());
+            assertEquals(ObserveGate.Reason.NOT_OBSERVING, reserve(target, "anything").reason());
         }
     }
 
@@ -201,14 +217,13 @@ class ObserveGateTest {
             config.setCooldownSeconds(60);
             var target = observer("ops", config);
 
-            assertTrue(evaluate(target, "one").respond());
-            gate.recordResponse("slack", CHANNEL, target, 0.0);
+            assertTrue(reserve(target, "one").respond());
 
             clock.advance(Duration.ofSeconds(59));
-            assertEquals(ObserveGate.Reason.COOLDOWN, evaluate(target, "two").reason());
+            assertEquals(ObserveGate.Reason.COOLDOWN, reserve(target, "two").reason());
 
             clock.advance(Duration.ofSeconds(2));
-            assertTrue(evaluate(target, "three").respond());
+            assertTrue(reserve(target, "three").respond());
         }
 
         @Test
@@ -220,10 +235,9 @@ class ObserveGateTest {
             var target = observer("ops", config);
 
             for (int i = 0; i < 2; i++) {
-                assertTrue(evaluate(target, "msg").respond());
-                gate.recordResponse("slack", CHANNEL, target, 0.0);
+                assertTrue(reserve(target, "msg").respond());
             }
-            assertEquals(ObserveGate.Reason.DAILY_RESPONSE_CAP, evaluate(target, "msg").reason());
+            assertEquals(ObserveGate.Reason.DAILY_RESPONSE_CAP, reserve(target, "msg").reason());
         }
 
         @Test
@@ -234,12 +248,12 @@ class ObserveGateTest {
             config.setMaxCostPerDay(1.0);
             var target = observer("ops", config);
 
-            gate.recordResponse("slack", CHANNEL, target, 0.0);
+            assertTrue(reserve(target, "first").respond());
             gate.addCost("slack", CHANNEL, target, 0.75);
-            assertTrue(evaluate(target, "still under").respond());
+            assertTrue(reserve(target, "still under").respond());
 
             gate.addCost("slack", CHANNEL, target, 0.30);
-            assertEquals(ObserveGate.Reason.DAILY_COST_CAP, evaluate(target, "over").reason());
+            assertEquals(ObserveGate.Reason.DAILY_COST_CAP, reserve(target, "over").reason());
         }
 
         @Test
@@ -250,14 +264,14 @@ class ObserveGateTest {
             config.setMaxDailyResponses(1);
             var target = observer("ops", config);
 
-            assertTrue(evaluate(target, "one").respond());
-            gate.recordResponse("slack", CHANNEL, target, 5.0);
-            assertFalse(evaluate(target, "two").respond());
+            assertTrue(reserve(target, "one").respond());
+            gate.addCost("slack", CHANNEL, target, 5.0);
+            assertFalse(reserve(target, "two").respond());
 
             // Just past midnight UTC, 12 hours later: the day is new, but the
             // cooldown was set 12 hours ago and has genuinely elapsed.
             clock.advance(Duration.ofHours(12).plusMinutes(1));
-            assertTrue(evaluate(target, "next day").respond());
+            assertTrue(reserve(target, "next day").respond());
         }
 
         @Test
@@ -269,11 +283,10 @@ class ObserveGateTest {
 
             // 23:59:30 UTC, then thirty seconds later — a new day, same minute.
             clock.advance(Duration.ofHours(11).plusMinutes(59).plusSeconds(30));
-            assertTrue(evaluate(target, "late").respond());
-            gate.recordResponse("slack", CHANNEL, target, 0.0);
+            assertTrue(reserve(target, "late").respond());
 
             clock.advance(Duration.ofSeconds(31));
-            assertEquals(ObserveGate.Reason.COOLDOWN, evaluate(target, "just after midnight").reason());
+            assertEquals(ObserveGate.Reason.COOLDOWN, reserve(target, "just after midnight").reason());
         }
 
         @Test
@@ -283,9 +296,9 @@ class ObserveGateTest {
             config.setCooldownSeconds(3600);
             var target = observer("ops", config);
 
-            gate.recordResponse("slack", CHANNEL, target, 0.0);
-            assertEquals(ObserveGate.Reason.COOLDOWN, evaluate(target, "here").reason());
-            assertTrue(gate.evaluate("slack", "C999", target, "elsewhere", List.of()).respond());
+            assertTrue(reserve(target, "here first").respond());
+            assertEquals(ObserveGate.Reason.COOLDOWN, reserve(target, "here").reason());
+            assertTrue(gate.reserve("slack", "C999", target, "elsewhere", List.of()).respond());
         }
 
         @Test
@@ -298,19 +311,18 @@ class ObserveGateTest {
             config.setTriggerKeywords(List.of("incident"));
             var target = observer("ops", config);
 
-            gate.recordResponse("slack", CHANNEL, target, 0.0);
-            assertEquals(ObserveGate.Reason.NO_TRIGGER, evaluate(target, "lunch?").reason());
+            assertTrue(reserve(target, "an incident").respond());
+            assertEquals(ObserveGate.Reason.NO_TRIGGER, reserve(target, "lunch?").reason());
         }
 
         @Test
         @DisplayName("an observer saved without a config still gets the defaults")
         void missingConfigStillGuarded() {
             var target = observer("ops", null);
-            assertTrue(evaluate(target, "one").respond());
-            gate.recordResponse("slack", CHANNEL, target, 0.0);
+            assertTrue(reserve(target, "one").respond());
             // The ObserveConfig default cooldown is 60s, so this is inside it.
             clock.advance(Duration.ofSeconds(5));
-            assertEquals(ObserveGate.Reason.COOLDOWN, evaluate(target, "two").reason());
+            assertEquals(ObserveGate.Reason.COOLDOWN, reserve(target, "two").reason());
         }
     }
 
@@ -361,7 +373,7 @@ class ObserveGateTest {
             second.setTriggerKeywords(List.of("deploy"));
 
             var a = observer("a", first);
-            gate.recordResponse("slack", CHANNEL, a, 0.0);
+            assertTrue(gate.reserve("slack", CHANNEL, a, "deploy now", List.of()).respond());
 
             var match = gate.select("slack", CHANNEL, List.of(a, observer("b", second)),
                     "deploy now", List.of());
@@ -371,8 +383,8 @@ class ObserveGateTest {
         @Test
         @DisplayName("selecting books the reply, so a second message sees it")
         void selectReserves() {
-            // `evaluate` reads without booking; `select` has to book, or two
-            // messages arriving together are both told there is room for one more.
+            // `select` has to book what it grants, or two messages arriving
+            // together are both told there is room for one more.
             var config = config();
             config.setCooldownSeconds(3600);
             var target = observer("ops", config);
@@ -450,32 +462,32 @@ class ObserveGateTest {
             config.setMaxDailyResponses(2);
             var target = observer("ops", config);
 
-            gate.recordResponse("slack", CHANNEL, target, 0.0);
+            assertTrue(reserve(target, "first").respond());
             gate.addCost("slack", CHANNEL, target, 0.1);
             gate.addCost("slack", CHANNEL, target, 0.1);
 
-            assertTrue(evaluate(target, "second reply still available").respond());
+            assertTrue(reserve(target, "second reply still available").respond());
         }
 
         @Test
         @DisplayName("a nonsense cost is ignored rather than poisoning the window")
         void ignoresNonFiniteCost() {
             var target = observer("ops", config());
-            gate.recordResponse("slack", CHANNEL, target, Double.NaN);
+            assertTrue(reserve(target, "first").respond());
+            gate.addCost("slack", CHANNEL, target, Double.NaN);
             gate.addCost("slack", CHANNEL, target, Double.POSITIVE_INFINITY);
             gate.addCost("slack", CHANNEL, target, -5.0);
 
             clock.advance(Duration.ofHours(1));
-            assertTrue(evaluate(target, "budget intact").respond());
+            assertTrue(reserve(target, "budget intact").respond());
         }
 
         @Test
         @DisplayName("recording against a null target is a no-op, not a crash")
         void nullTargetIsSafe() {
-            assertDoesNotThrow(() -> gate.recordResponse("slack", CHANNEL, null, 1.0));
             assertDoesNotThrow(() -> gate.addCost("slack", CHANNEL, null, 1.0));
             assertEquals(ObserveGate.Reason.NOT_OBSERVING,
-                    gate.evaluate("slack", CHANNEL, null, "x", List.of()).reason());
+                    gate.reserve("slack", CHANNEL, null, "x", List.of()).reason());
         }
     }
 }

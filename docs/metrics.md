@@ -510,8 +510,10 @@ eddi_channel_observe_decisions_total        # Observe-mode reply decisions; tags
 
 `eddi_channel_observe_decisions_total` is one sample per message an observer
 saw. `reason` is the gate that settled it: `MATCHED` (it replied), `NO_TRIGGER`
-(the message was not for it), or `COOLDOWN` / `DAILY_RESPONSE_CAP` /
-`DAILY_COST_CAP` (it wanted to and was stopped). `type` is the observer's
+(the message was not for it), `COOLDOWN` / `DAILY_RESPONSE_CAP` /
+`DAILY_COST_CAP` (it wanted to and was stopped), or `CONTENTION` (it could not
+book the reply because concurrent events kept winning the compare-and-set --
+a load signal, not a configuration one). `type` is the observer's
 target type — `AGENT` today, since observe mode is refused on anything else —
 not the channel platform. A rising throttle share with a flat `MATCHED` share is
 an observer whose triggers are too broad for its budget.

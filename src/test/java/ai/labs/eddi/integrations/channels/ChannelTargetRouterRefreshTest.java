@@ -1156,6 +1156,28 @@ class ChannelTargetRouterRefreshTest {
         }
 
         @Test
+        @DisplayName("an observer is not reachable through its own trigger keyword")
+        void observerIsNotReachableByTrigger() throws Exception {
+            // `observerIsNotTheDefault` covers the no-colon case only. Reaching an
+            // observer by trigger ran its agent on the addressed path, where none
+            // of the cooldown, the daily count or the cost ceiling applies — and
+            // it is repeatable, because nothing books anything there.
+            var config = setupNewStyleConfig(CHANNEL_ID, "xoxb-token", "secret");
+            var observer = target("watch", true);
+            observer.setTriggers(List.of("watch"));
+            var plain = target("plain", false);
+            config.setTargets(List.of(plain, observer));
+            config.setDefaultTargetName("plain");
+
+            var resolved = router.resolveFromIntegration(config, "watch: hello");
+
+            assertEquals("plain", resolved.target().getName());
+            // Not stripped: the keyword was never a trigger, so the default target
+            // gets the sentence as typed.
+            assertEquals("watch: hello", resolved.strippedMessage());
+        }
+
+        @Test
         @DisplayName("an observer named as the default resolves to nothing, not to itself")
         void observerNamedAsDefaultIsRefused() throws Exception {
             // The store refuses to save this pairing, so it can only arrive from a

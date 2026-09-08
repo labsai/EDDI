@@ -443,6 +443,18 @@ public class ChannelTargetRouter {
             var targets = integration.getTargets();
             if (targets != null) {
                 for (ChannelTarget target : targets) {
+                    // Observers are excluded here for the same reason
+                    // `findDefaultTarget` excludes them: an observer watches
+                    // traffic it was not part of, under a cooldown and daily caps
+                    // that the addressed path does not apply. Its `triggers` are
+                    // an addressed-routing field it has no use for — keyword and
+                    // MIME matching for an observer live in `ObserveConfig` — so
+                    // one left set made the observer reachable as
+                    // `architect: ...`, running its agent with no limits at all,
+                    // as often as anyone cared to type it.
+                    if (target.isObserveMode()) {
+                        continue;
+                    }
                     if (target.getTriggers() != null) {
                         for (String trigger : target.getTriggers()) {
                             if (trigger != null && trigger.toLowerCase(Locale.ROOT).trim().equals(candidateTrigger)) {

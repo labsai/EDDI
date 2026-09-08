@@ -53,13 +53,21 @@ import java.util.concurrent.TimeUnit;
  * The caller supplies the number, so a future source of total spend needs no
  * change here.
  *
- * <h2>Windows are best-effort</h2> Counters live in the shared cache, which is
- * where every other piece of channel state lives. On a multi-node deployment
- * they are shared; if the cache drops an entry the window restarts, and an
+ * <h2>Every limit here is PER NODE</h2> Counters live in {@code ICacheFactory},
+ * whose only implementation is an in-process Caffeine cache; nothing is shared
+ * between replicas. A deployment of N nodes behind a load balancer therefore
+ * permits N times each cap: N times {@code maxDailyResponses}, N times {@code
+ * maxCostPerDay}, and N replies inside one cooldown, one per node. The caps are
+ * a true ceiling only on a single-node deployment.
+ * <p>
+ * Said outright rather than implied, because an operator reading {@code
+ * maxCostPerDay} will otherwise budget for one node's worth of spend. Making it
+ * deployment-wide needs a shared conditional increment — a Mongo {@code
+ * findOneAndUpdate} against the window document — not a bigger cache.
+ * <p>
+ * Eviction has the same shape: a dropped entry restarts the window and the
  * observer gets a fresh allowance. That is the right failure direction for a
- * spam guard whose hard stop is a dollar ceiling on top of a cooldown — losing
- * the window costs at most one extra reply per node, while failing closed would
- * silence an observer over a cache eviction.
+ * spam guard — failing closed would silence an observer over a cache eviction.
  *
  * @since 6.4.0
  */
@@ -110,7 +118,14 @@ public class ObserveGate {
         /** The observer has used its replies for the day. */
         DAILY_RESPONSE_CAP,
         /** The observer has used its budget for the day. */
-        DAILY_COST_CAP
+        DAILY_COST_CAP,
+        /**
+         * The reservation lost its compare-and-set on every attempt, so no reply could
+         * be booked. Separate from {@link #COOLDOWN} deliberately: reported as a
+         * cooldown, contention would read on the decisions metric as "replied too
+         * recently", pointing an operator at a configuration answer to a load problem.
+         */
+        CONTENTION
     }
 
     /** The verdict for one observer against one message. */
@@ -186,22 +201,26 @@ public class ObserveGate {
      * Decide AND book in one compare-and-set, so two messages arriving together
      * cannot both be told there is room for one more.
      * <p>
-     * {@link #evaluate} answers the same question without booking anything, and two
-     * callers racing on it would both be told yes: the read and the increment were
-     * separate steps, and the CAS in {@link #mutate} only stopped one increment
-     * overwriting the other, not both being permitted. Here the limits are
-     * re-checked inside the loop against the window the write will actually
-     * replace, so exactly one caller wins the last slot.
+     * Reading and booking as separate steps would tell two racing callers yes: the
+     * CAS in {@link #mutate} stops one increment overwriting the other, not both
+     * being permitted. Here the limits are re-checked inside the loop against the
+     * window the write will actually replace, so exactly one caller wins the last
+     * slot.
      * <p>
-     * The dollar ceiling is still approximate, and unavoidably so: a turn's cost
-     * exists only once it has run, so spend already in flight is not yet booked
-     * against the day. It can therefore be exceeded by the cost of the turns
-     * running at the moment it is crossed — bounded in practice by the cooldown,
-     * and absolutely by the daily response cap, which this method now enforces
-     * exactly.
+     * The dollar ceiling is approximate, and unavoidably so, in two directions. A
+     * turn's cost exists only once it has run, so spend already in flight is not
+     * yet booked against the day; the ceiling can be exceeded by the cost of the
+     * turns running at the moment it is crossed. And a turn that pauses for
+     * approval is priced when it pauses, so whatever the approved half then spends
+     * is never charged at all. The daily response cap is the bound this method
+     * enforces exactly.
+     * <p>
+     * Package-private rather than public: {@link #select} is the only production
+     * entry point, and the rate-limit tests drive this method so that a regression
+     * inside the loop cannot pass them.
      */
-    private Verdict reserve(String channelType, String platformChannelId, ChannelTarget target,
-                            String messageText, List<String> mimeTypes) {
+    Verdict reserve(String channelType, String platformChannelId, ChannelTarget target,
+                    String messageText, List<String> mimeTypes) {
         if (target == null || !target.isObserveMode()) {
             return Verdict.no(Reason.NOT_OBSERVING);
         }
@@ -233,7 +252,7 @@ public class ObserveGate {
         // the alternative is replying without having booked it.
         LOGGER.warnf("[OBSERVE] Could not reserve a reply for target '%s' after %d attempts",
                 target.getName(), CAS_ATTEMPTS);
-        return record(target, Verdict.no(Reason.COOLDOWN));
+        return record(target, Verdict.no(Reason.CONTENTION));
     }
 
     /** The first limit this window trips, or {@code null} when none do. */
@@ -259,42 +278,6 @@ public class ObserveGate {
      */
     private static ObserveConfig configOf(ChannelTarget target) {
         return target.getObserveConfig() != null ? target.getObserveConfig() : new ObserveConfig();
-    }
-
-    /**
-     * Whether this one observer should answer this message, and why — without
-     * booking anything. {@link #select} reserves instead; this is the read-only
-     * view, for inspection and for tests that assert a decision in isolation.
-     */
-    public Verdict evaluate(String channelType, String platformChannelId, ChannelTarget target,
-                            String messageText, List<String> mimeTypes) {
-        if (target == null || !target.isObserveMode()) {
-            return Verdict.no(Reason.NOT_OBSERVING);
-        }
-        ObserveConfig config = configOf(target);
-        if (!triggersMatch(config, messageText, mimeTypes)) {
-            return record(target, Verdict.no(Reason.NO_TRIGGER));
-        }
-        Instant now = clock.instant();
-        ObserveWindow window = todayFrom(windows.get(key(channelType, platformChannelId, target)),
-                dayOf(now));
-        Verdict blocked = limitVerdict(window, config, now);
-        return record(target, blocked != null ? blocked : Verdict.YES);
-    }
-
-    /**
-     * Book a reply against the observer's window.
-     * <p>
-     * {@link #select} already books what it reserves, so a caller driving the gate
-     * through it does not call this. It remains for a caller recording a reply the
-     * gate did not decide, and for tests seeding a window.
-     */
-    public void recordResponse(String channelType, String platformChannelId, ChannelTarget target,
-                               double costUsd) {
-        double charge = Double.isFinite(costUsd) && costUsd > 0 ? costUsd : 0.0;
-        mutate(channelType, platformChannelId, target, "record a response",
-                (window, nowEpochSeconds) -> new ObserveWindow(window.dayEpoch(),
-                        window.responses() + 1, window.costUsd() + charge, nowEpochSeconds));
     }
 
     /**
@@ -326,9 +309,11 @@ public class ObserveGate {
      * Compare-and-set today's window.
      *
      * The cache is a {@link java.util.concurrent.ConcurrentMap}, so the update has
-     * to be a CAS rather than a read-then-write: two nodes observing the same
-     * channel would otherwise each write a window derived from the same stale read,
-     * and one reply would go unrecorded.
+     * to be a CAS rather than a read-then-write: two events for the same channel on
+     * this node's request threads would otherwise each write a window derived from
+     * the same stale read, and one reply would go unrecorded. This says nothing
+     * about other nodes — each keeps its own counters, as the class javadoc
+     * explains.
      */
     private void mutate(String channelType, String platformChannelId, ChannelTarget target,
                         String what, WindowUpdate update) {

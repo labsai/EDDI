@@ -15,6 +15,8 @@ import ai.labs.eddi.integrations.channels.ChannelTargetRouter;
 import ai.labs.eddi.integrations.channels.ObserveGate;
 import ai.labs.eddi.modules.llm.tools.ToolCostTracker;
 import ai.labs.eddi.integrations.channels.ChannelTargetRouter.ResolvedTarget;
+import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -22,6 +24,7 @@ import org.junit.jupiter.params.provider.CsvSource;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -414,5 +417,89 @@ class SlackEventHandlerTest {
         sb.append("---\n");
         sb.append("User follow-up question: ").append(userMessage);
         return sb.toString();
+    }
+
+    // ─── The observe path ───
+
+    /**
+     * These three decide whether an observer speaks at all, and none of them was
+     * covered: the branch's own tests only added constructor mocks. The whole point
+     * of an observer is that nobody asked it to talk, so every one of these is the
+     * difference between a useful watcher and a bot that interrupts.
+     */
+    @Nested
+    @DisplayName("observe path")
+    class ObservePath {
+
+        @Test
+        @DisplayName("channel system messages are not observed")
+        void systemSubtypesAreIgnored() {
+            // These arrive as ordinary `message` events with a human `user` and no
+            // `bot_id`, so the bot-message filter upstream does not catch them.
+            // Observed, the bot answers "@someone has joined the channel" with a
+            // thread, an LLM turn, and a reply off its daily allowance.
+            for (String subtype : new String[]{"channel_join", "channel_leave", "channel_topic",
+                    "channel_purpose", "channel_name", "pinned_item", "me_message",
+                    "message_changed", "thread_broadcast"}) {
+                assertFalse(SlackEventHandler.isObservableSubtype(subtype), subtype);
+            }
+        }
+
+        @Test
+        @DisplayName("a plain message and a file upload are observed")
+        void ordinaryMessagesAreObserved() {
+            // `file_share` is how a MIME trigger is meant to fire at all.
+            assertTrue(SlackEventHandler.isObservableSubtype(null));
+            assertTrue(SlackEventHandler.isObservableSubtype("file_share"));
+        }
+
+        @Test
+        @DisplayName("a bot mention anywhere in the text is recognised, labelled or not")
+        void mentionIsFoundAnywhere() {
+            // Slack delivers a channel mention twice, as `message` and as
+            // `app_mention`. `app_mention` is the copy that routes, so an observer
+            // that fails to spot the mention answers a sentence that is already
+            // being answered — two replies, from two different agents.
+            assertTrue(SlackEventHandler.mentionsThisBot("<@U0BOT> hello", "U0BOT"));
+            assertTrue(SlackEventHandler.mentionsThisBot("thanks <@UALICE> — <@U0BOT> look?", "U0BOT"));
+            assertTrue(SlackEventHandler.mentionsThisBot("hi <@U0BOT|eddi> there", "U0BOT"));
+            assertFalse(SlackEventHandler.mentionsThisBot("<@UALICE> can you check?", "U0BOT"));
+            assertFalse(SlackEventHandler.mentionsThisBot("no mentions here", "U0BOT"));
+        }
+
+        @Test
+        @DisplayName("with no known bot id, any mention suppresses observing")
+        void unknownBotIdSuppressesOnAnyMention() {
+            // An org-wide install can deliver an envelope with no `is_bot`
+            // authorization, so the app's own id is unknown. Erring towards
+            // silence is a missed reply; erring the other way is a duplicate one.
+            assertTrue(SlackEventHandler.mentionsThisBot("thanks <@UALICE> — <@U0BOT> look?", null));
+            assertTrue(SlackEventHandler.mentionsThisBot("<@UALICE> can you check?", ""));
+            assertFalse(SlackEventHandler.mentionsThisBot("no mentions here", null));
+            assertFalse(SlackEventHandler.mentionsThisBot("", null));
+        }
+
+        @Test
+        @DisplayName("attached MIME types are collected, and malformed entries skipped")
+        void mimeTypesAreCollected() {
+            Map<String, Object> event = new HashMap<>();
+            event.put("files", List.of(
+                    Map.of("mimetype", "application/pdf"),
+                    Map.of("name", "no-mimetype.txt"),
+                    Map.of("mimetype", "  "),
+                    Map.of("mimetype", "image/png")));
+
+            assertEquals(List.of("application/pdf", "image/png"),
+                    SlackEventHandler.attachedMimeTypes(event));
+        }
+
+        @Test
+        @DisplayName("no files means no MIME types, not a crash")
+        void noFilesIsEmpty() {
+            assertEquals(List.of(), SlackEventHandler.attachedMimeTypes(new HashMap<>()));
+            Map<String, Object> notAList = new HashMap<>();
+            notAList.put("files", "nonsense");
+            assertEquals(List.of(), SlackEventHandler.attachedMimeTypes(notAList));
+        }
     }
 }

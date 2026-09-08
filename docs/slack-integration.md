@@ -286,10 +286,20 @@ Notes and current limits:
   tracker and it accumulates `@Tool` executions, so an observer that only talks
   to an LLM accrues `$0.00` and is bounded by `maxDailyResponses`. Same
   quantity, and the same caveat, as the cost a scheduled fire logs.
+- **Every limit is per node.** The counters live in the engine's in-process
+  Caffeine cache, which is not shared between replicas. Three replicas behind a
+  load balancer therefore allow three times `maxDailyResponses`, three times
+  `maxCostPerDay`, and three replies inside one cooldown — one per node. Size
+  the numbers per node, or run observers on a single replica if the ceiling has
+  to be exact for the deployment.
 - **The allowance is spent on commit, not on success.** A turn that fails still
   used a reply, so a failing observer cannot retry all day. The reply is booked
   in the same compare-and-set that grants it, so two messages arriving together
-  cannot both be told there is room for one more.
+  on one node cannot both be told there is room for one more.
+- **System messages are not observed.** Joins, leaves, topic and name changes
+  and pins arrive as ordinary `message` events with a human author. An observer
+  acts only on a plain message or a `file_share`, so it does not answer "@someone
+  has joined the channel".
 - **A message that mentions the bot is not observed.** With both
   `message.channels` and `app_mention` subscribed, a channel mention arrives as
   two events, in no guaranteed order. `app_mention` is the one that routes — by
@@ -298,15 +308,17 @@ Notes and current limits:
   envelope's `authorizations`, so a mention anywhere in the text is recognised
   and a mention of somebody else is not.
 
-  An envelope carrying no bot authorization falls back to detecting a leading
-  `<@…>`, which cannot tell the bot from anyone else. That fallback is
-  deliberately conservative: a message opening with a mention of any user is
+  An envelope carrying no bot authorization falls back to treating *any* `<@…>`
+  anywhere in the text as possibly the bot's, because it cannot tell the bot
+  from anyone else. That errs one way only: a message mentioning any user is
   left unobserved. It suppresses some observer replies rather than risking a
   duplicate one.
 - **The dollar ceiling is approximate by nature.** A turn's cost exists only
-  once it has run, so spend already in flight is not yet booked against the day.
-  The ceiling can be exceeded by the cost of the turns running when it is
-  crossed; `maxDailyResponses` is the bound that is exact.
+  once it has run, so spend already in flight is not yet booked against the day,
+  and the ceiling can be exceeded by the cost of the turns running when it is
+  crossed. A turn that pauses for approval is priced when it pauses, so what the
+  approved half spends is never charged. `maxDailyResponses` is the bound that is
+  exact — per node.
 - **Several observers in one channel**: the first one whose triggers match
   answers. If that one is throttled the message is dropped rather than passed
   to the next — otherwise a second watcher would answer precisely *because* the
