@@ -111,12 +111,12 @@ EDDI adds manual spans in `LifecycleManager` for each pipeline task:
 
 ```text
 Trace: POST /agentstore/agents/{agentId}/conversations/{convId}
-  └── eddi.pipeline.task [task.id=ai.labs.behavior, task.type=behavior_rules]
-  └── eddi.pipeline.task [task.id=ai.labs.property, task.type=properties]
-  └── eddi.pipeline.task [task.id=ai.labs.llm, task.type=langchain]
+  └── eddi.pipeline.task [eddi.task.id=ai.labs.behavior, eddi.task.type=behavior_rules]
+  └── eddi.pipeline.task [eddi.task.id=ai.labs.property, eddi.task.type=properties]
+  └── eddi.pipeline.task [eddi.task.id=ai.labs.llm, eddi.task.type=langchain]
       └── HTTP POST https://api.openai.com/v1/chat/completions (auto)
       └── MongoDB find conversations (auto)
-  └── eddi.pipeline.task [task.id=ai.labs.output, task.type=output]
+  └── eddi.pipeline.task [eddi.task.id=ai.labs.output, eddi.task.type=output]
 ```
 
 **Span attributes:**

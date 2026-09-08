@@ -41,6 +41,9 @@ A **Schedule** defines when and how often an agent fires:
 | `CRON` | Wall-clock aligned cron expression | `new` | `0 2 * * *` (daily at 2am) |
 | `HEARTBEAT` | Fixed-interval, drift-proof | `persistent` | Every 300 seconds |
 
+A `CRON` schedule carrying `oneTimeAt` instead of `cronExpression` fires **once** at that instant
+rather than recurring. Exactly one of the two is required.
+
 ### Conversation Strategies
 
 | Strategy | Behavior | Use When |
@@ -124,6 +127,8 @@ Heartbeats are **drift-proof** — the next fire is the time this fire was *due*
 | `environment` | string | `production` | Deployment environment |
 | `enabled` | boolean | `true` | Whether the schedule is active |
 | `maxCostPerFire` | double | `-1` (unlimited) | Dollar ceiling per fire |
+| `oneTimeAt` | string | — | ISO-8601 instant for a single fire. Mutually exclusive with `cronExpression`; exactly one of the two is required for a `CRON` trigger |
+| `metadata` | object | — | Free-form markers read by the fire executor. `{"dreamType": "dream_consolidation"}` dispatches the fire to the Dream service — see [Scheduling a Dream Cycle](user-memory.md#scheduling-a-dream-cycle) |
 
 ### Managing Schedules
 
@@ -214,6 +219,7 @@ Dream consolidation is configured in the agent configuration:
         "preserveAgentProvenance": false,
         "llmProvider": "anthropic",
         "llmModel": "claude-sonnet-4-6",
+        "parameters": { "apiKey": "${vault:anthropic-api-key}" },
         "maxCostPerRun": 0.50,
         "batchSize": 50,
         "maxUsersPerRun": 1000

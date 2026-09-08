@@ -223,7 +223,7 @@ public class TaskForceEngine {
             }
 
             // Build planning input with member info
-            String planTemplate = DiscussionStylePresets.defaultTemplate(PhaseType.PLAN);
+            String planTemplate = DiscussionStylePresets.templateFor(phase, PhaseType.PLAN);
             Map<String, Object> data = new LinkedHashMap<>();
             data.put("question", question);
             data.put("displayName", planner.displayName());
@@ -742,7 +742,7 @@ public class TaskForceEngine {
         }
 
         // Build verification input
-        String verifyTemplate = DiscussionStylePresets.defaultTemplate(PhaseType.VERIFY);
+        String verifyTemplate = DiscussionStylePresets.templateFor(phase, PhaseType.VERIFY);
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("question", question);
         data.put("displayName", verifier.displayName());
@@ -790,7 +790,7 @@ public class TaskForceEngine {
      * configured context scope.
      */
     public String buildTaskExecutionInput(TaskItem task, String question, DiscussionPhase phase, GroupConversation gc) {
-        String template = DiscussionStylePresets.defaultTemplate(PhaseType.EXECUTE);
+        String template = DiscussionStylePresets.templateFor(phase, PhaseType.EXECUTE);
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("question", question);
         data.put("taskSubject", task.subject());

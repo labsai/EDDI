@@ -13,6 +13,7 @@ import ai.labs.eddi.engine.model.InputData;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.util.*;
@@ -44,7 +45,9 @@ public class A2ATaskHandler {
 
     private static final Logger LOGGER = Logger.getLogger(A2ATaskHandler.class);
     private static final String CACHE_NAME = "a2aTaskMapping";
-    private static final int TASK_TIMEOUT_SECONDS = 60;
+
+    /** Last-resort turn budget when neither configured value is positive. */
+    static final int DEFAULT_TASK_TIMEOUT_SECONDS = 60;
 
     /**
      * Owner recorded for peers that arrive without an authenticated identity — the
@@ -65,6 +68,19 @@ public class A2ATaskHandler {
      * caller-independent identity available on this surface.
      */
     private final SecurityIdentity identity;
+
+    /**
+     * How long a peer's {@code tasks/send} may wait for the turn.
+     * <p>
+     * Defaults to {@code systemRuntime.agentTimeoutInSeconds}, the same budget the
+     * REST surface gives a turn, because an operator who raised that has already
+     * decided how long a turn may legitimately take. This was a hard-coded 60
+     * seconds, so an agent with a tool loop or a model cascade timed out on the A2A
+     * surface only: the peer got "Internal error" while the conversation carried on
+     * running server-side. {@code eddi.a2a.task-timeout-seconds} overrides it for a
+     * deployment whose peers cannot wait that long.
+     */
+    private final int taskTimeoutSeconds;
 
     /**
      * Reads an optional string parameter, treating a missing key, an explicit JSON
@@ -93,12 +109,23 @@ public class A2ATaskHandler {
 
     @Inject
     public A2ATaskHandler(IConversationService conversationService, ICacheFactory cacheFactory, SecurityIdentity identity,
-            AgentCardService agentCardService) {
+            AgentCardService agentCardService,
+            @ConfigProperty(name = "systemRuntime.agentTimeoutInSeconds", defaultValue = "60") int agentTimeoutSeconds,
+            @ConfigProperty(name = "eddi.a2a.task-timeout-seconds") Optional<Integer> a2aTaskTimeoutSeconds) {
         this.agentCardService = agentCardService;
         this.conversationService = conversationService;
         this.taskConversationCache = cacheFactory.getCache(CACHE_NAME);
         this.contextConversationCache = cacheFactory.getCache(CACHE_NAME + ":context");
         this.identity = identity;
+        // A non-positive budget makes Future.get return immediately and fails every
+        // peer
+        // request, so neither source may supply one.
+        // systemRuntime.agentTimeoutInSeconds
+        // carries no positive-value validation of its own, so falling back to it is not
+        // enough — a deployment that sets it to 0 would still land here.
+        int resolved = a2aTaskTimeoutSeconds.filter(seconds -> seconds > 0)
+                .orElseGet(() -> agentTimeoutSeconds > 0 ? agentTimeoutSeconds : DEFAULT_TASK_TIMEOUT_SECONDS);
+        this.taskTimeoutSeconds = resolved;
     }
 
     /**
@@ -160,7 +187,7 @@ public class A2ATaskHandler {
             responseFuture.complete(response);
         });
 
-        String response = responseFuture.get(TASK_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        String response = responseFuture.get(taskTimeoutSeconds, TimeUnit.SECONDS);
 
         // Build A2A response
         List<Part> responseParts = List.of(Part.textPart(response));

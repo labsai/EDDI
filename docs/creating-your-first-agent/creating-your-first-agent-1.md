@@ -420,10 +420,13 @@ Now we will align the just created `LifecycleTasks` in the `Workflow`. Make a **
 
 | Name                         | Description                                          | Required |
 | ---------------------------- | ---------------------------------------------------- | -------- |
-| packageextensions            | `Array` of `WorkflowExtension`                       |          |
-| WorkflowExtension.type       | possible values, see table below "`Extension Types`" |          |
-| WorkflowExtension.extensions | `Array` of `Object`                                  | False    |
-| WorkflowExtension.config     | `Config` object, but can be empty.                   | True     |
+| workflowSteps                | `Array` of `WorkflowStep`                            | True     |
+| WorkflowStep.type            | possible values, see table below "`Extension Types`" |          |
+| WorkflowStep.extensions      | `Object` (a map of extension name to value)          | False    |
+| WorkflowStep.config          | `Config` object, but can be empty.                   | True     |
+
+`workflowExtensions` is still accepted as a v5 alias. No other spelling is: writes go through a
+strict parser that rejects an unknown top-level key with a `400`.
 
 Extension Types
 
@@ -531,8 +534,7 @@ Make a **`POST`** to **`/agentstore/agents`** with a JSON like this:
 {
 "packages": [
 "eddi://ai.labs.workflow/workflowstore/workflows/<UNIQUE_WORKFLOW_ID>?version=<WORKFLOW_VERSION>"
-],
-"channels": []
+]
 }
 ```
 
@@ -541,9 +543,10 @@ Make a **`POST`** to **`/agentstore/agents`** with a JSON like this:
 | Name           | Description                                                                                                                                           |
 | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | packages       | `Array` of `String`, references to `Workflows`                                                                                                        |
-| channels       | `Array` of `Channel`,                                                                                                                                 |
-| Channel.type   | `String`, e.g. `"eddi://ai.labs.channel.facebook"`                                                                                                    |
-| Channel.config | `Config` Object. For "Facebook" this object has the params "`appSecret`" (`String`), "`verificationToken`" (`String`), "`pageAccessToken`" (`String`) |
+
+Channel delivery is configured separately — see [Slack Integration](../slack-integration.md).
+The embedded `channels` field on the agent is deprecated since 6.1.0 and is auto-migrated to
+standalone channel documents at startup. There is no Facebook connector.
 
 b. You should again get a return code of **`201`** with a `URI` in the `location` header referencing the newly created agent :
 

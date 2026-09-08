@@ -33,9 +33,9 @@ eddi.tools.websearch.google.api-key →  EDDI_TOOLS_WEBSEARCH_GOOGLE_API_KEY
 > **Getting this wrong fails silently.** An unrecognised environment variable is
 > not an error — the property simply keeps its default and the service starts
 > normally. `EDDI_VAULT_MASTERKEY` (dash deleted rather than replaced) leaves
-> `eddi.vault.master-key` empty, which means the vault is inactive and
-> `scope: "secret"` properties fall back to plaintext. Nothing in the startup log
-> mentions the variable you set.
+> `eddi.vault.master-key` empty, which means the vault is inactive, and a
+> `scope: "secret"` property setter then fails the whole turn. Nothing in the
+> startup log mentions the variable you set.
 >
 > To check what actually bound, read the value back from the Dev UI at `/q/dev`,
 > or compare against the spellings already used in `docker-compose.yml`,
@@ -162,7 +162,7 @@ Full guide: [secrets-vault.md](secrets-vault.md).
 
 | Property | Default | Description |
 |---|---|---|
-| `eddi.vault.master-key` | *(empty)* | KEK source. **Empty means the vault is inactive** and `scope: "secret"` properties fall back to plaintext with an ERROR log |
+| `eddi.vault.master-key` | *(empty)* | KEK source. **Empty means the vault is inactive.** A `scope: "secret"` property setter then scrubs the plaintext, logs an ERROR and **fails the turn** with a `LifecycleException` naming `EDDI_VAULT_MASTER_KEY` — it never persists the value. (`AgentSetupService`'s own `vaultApiKey` path is the exception and still degrades; see [secrets-vault.md](secrets-vault.md).) |
 | `eddi.vault.grant-enforcement` | `enforce` | `off`, `warn` or `enforce`. An unrecognised value fails startup rather than silently disabling the check |
 | `eddi.vault.cache-ttl-minutes` | `5` | Resolved-secret cache lifetime |
 | `eddi.vault.cache-max-size` | `1000` | Resolved-secret cache entries |
@@ -193,6 +193,16 @@ property** — the ledger is append-only by design; see
 | `eddi.audit.agent-signing-enabled` | `true` | Sign agent configurations for provenance |
 | `eddi.audit.verify.recover-legacy` | `true` | Accept pre-HMAC rows during chain verification |
 | `eddi.audit.verify.recover-legacy-max-rows` | `500` | Cap on how many such rows are tolerated |
+
+---
+
+## GDPR / CCPA
+
+Full guide: [gdpr-compliance.md](gdpr-compliance.md).
+
+| Property | Default | Description |
+|---|---|---|
+| `eddi.gdpr.restriction-cache-ttl-seconds` | `0` | How long an Art. 18 restriction verdict may be reused without re-reading the store. **`0` — the default — switches the cache off**, so every check reads the store. The cache is node-local with no cross-node invalidation, so a cached "not restricted" on one node keeps a restricted user being processed for the length of the TTL after another node applies the restriction, and keeps answering from cache through a store outage instead of failing closed. Raise it only on a single-node deployment or one with conversation affinity |
 
 ---
 
@@ -291,6 +301,18 @@ Full guide: [import-export-an-agent.md](import-export-an-agent.md).
 | `eddi.a2a.tool-description.max-chars` | `1024` | Truncation cap on peer tool descriptions |
 | `eddi.a2a.signing.nonce.max-age-ms` | `300000` (5 min) | Replay window for signed requests |
 | `eddi.a2a.signing.nonce.clock-skew-ms` | `30000` | Tolerated clock difference between peers |
+| `eddi.a2a.task-timeout-seconds` | `systemRuntime.agentTimeoutInSeconds` | How long a peer's `tasks/send` may wait for the turn. Inherits the REST surface's budget, because an operator who raised that has already decided how long a turn may take |
+
+### Slack
+
+Full guide: [slack-integration.md](slack-integration.md).
+
+| Property | Default | Description |
+|---|---|---|
+| `eddi.slack.request-timeout-seconds` | `60` | How long a single agent turn may take before Slack is told it timed out. A turn that legitimately runs longer — a multi-step tool call, a slow provider, a cascade escalation — needs this raised, and answers with a timeout-specific notice naming the limit rather than a generic error |
+| `eddi.slack.group-completion-timeout-seconds` | `300` | How long a whole group discussion may take before follow-up routing gives up |
+| `eddi.slack.api-max-retries` | `3` | Attempts, including the first, for a Slack Web API call |
+| `eddi.slack.api-retry-base-ms` | `500` | Base delay for the exponential backoff between those attempts |
 
 ### OpenAI-compatible API
 

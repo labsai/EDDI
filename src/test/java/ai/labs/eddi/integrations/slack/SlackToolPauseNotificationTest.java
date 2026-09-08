@@ -355,7 +355,9 @@ class SlackToolPauseNotificationTest {
                 mock(IConversationService.class),
                 mock(IGroupConversationService.class),
                 mock(IUserConversationStore.class),
-                cacheFactory);
+                cacheFactory,
+                new SlackConfig(SlackConfig.DEFAULT_REQUEST_TIMEOUT_SECONDS, SlackConfig.DEFAULT_GROUP_COMPLETION_TIMEOUT_SECONDS,
+                        SlackConfig.DEFAULT_API_MAX_RETRIES, SlackConfig.DEFAULT_API_RETRY_BASE_MS));
     }
 
     private static ResolvedTarget resolvedWithApprovalChannel() {

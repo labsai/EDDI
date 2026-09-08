@@ -4485,7 +4485,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`guardrail_toolresult_count_total` by `action` — what the guardrail did to the result.",
+          "description": "`eddi_guardrail_toolresult_count_total` by `action` — what the guardrail did to the result.",
           "gridPos": {
             "h": 7,
             "w": 8,
@@ -4495,7 +4495,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (action) (rate(guardrail_toolresult_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (action) (rate(eddi_guardrail_toolresult_count_total{job=~\"$job\"}[$__rate_interval]))",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -4571,7 +4571,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (source) (rate(guardrail_toolresult_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (source) (rate(eddi_guardrail_toolresult_count_total{job=~\"$job\"}[$__rate_interval]))",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -7008,7 +7008,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`dream_*_total` — the DreamService consolidation pass.",
+          "description": "`eddi_dream_*_total` — the DreamService consolidation pass.",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -7018,7 +7018,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(rate(dream_users_processed_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_dream_users_processed_total{job=~\"$job\"}[$__rate_interval]))",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -7029,7 +7029,7 @@
             },
             {
               "refId": "B",
-              "expr": "sum(rate(dream_entries_summarized_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_dream_entries_summarized_total{job=~\"$job\"}[$__rate_interval]))",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -7040,7 +7040,7 @@
             },
             {
               "refId": "C",
-              "expr": "sum(rate(dream_entries_pruned_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_dream_entries_pruned_total{job=~\"$job\"}[$__rate_interval]))",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -7116,7 +7116,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(rate(dream_cycles_failed_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_dream_cycles_failed_total{job=~\"$job\"}[$__rate_interval]))",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -7127,7 +7127,7 @@
             },
             {
               "refId": "B",
-              "expr": "sum(rate(dream_summarization_failed_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_dream_summarization_failed_total{job=~\"$job\"}[$__rate_interval]))",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -7193,7 +7193,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`dream_contradictions_found_total` — conflicting memory entries detected.",
+          "description": "`eddi_dream_contradictions_found_total` — conflicting memory entries detected.",
           "gridPos": {
             "h": 7,
             "w": 8,
@@ -7203,7 +7203,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(rate(dream_contradictions_found_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_dream_contradictions_found_total{job=~\"$job\"}[$__rate_interval]))",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -7277,7 +7277,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(rate(dream_duration_seconds_sum{job=~\"$job\"}[$__rate_interval]))\n  / clamp_min(sum(rate(dream_duration_seconds_count{job=~\"$job\"}[$__rate_interval])), 1e-9)",
+              "expr": "sum(rate(eddi_dream_duration_seconds_sum{job=~\"$job\"}[$__rate_interval]))\n  / clamp_min(sum(rate(eddi_dream_duration_seconds_count{job=~\"$job\"}[$__rate_interval])), 1e-9)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -7288,7 +7288,7 @@
             },
             {
               "refId": "B",
-              "expr": "max(dream_duration_seconds_max{job=~\"$job\"})",
+              "expr": "max(eddi_dream_duration_seconds_max{job=~\"$job\"})",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -7363,7 +7363,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(rate(summarization_duration_seconds_sum{job=~\"$job\"}[$__rate_interval]))\n  / clamp_min(sum(rate(summarization_duration_seconds_count{job=~\"$job\"}[$__rate_interval])), 1e-9)",
+              "expr": "sum(rate(eddi_summarization_duration_seconds_sum{job=~\"$job\"}[$__rate_interval]))\n  / clamp_min(sum(rate(eddi_summarization_duration_seconds_count{job=~\"$job\"}[$__rate_interval])), 1e-9)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -7374,7 +7374,7 @@
             },
             {
               "refId": "B",
-              "expr": "max(summarization_duration_seconds_max{job=~\"$job\"})",
+              "expr": "max(eddi_summarization_duration_seconds_max{job=~\"$job\"})",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -7440,7 +7440,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`summarization_calls_total` / `summarization_errors_total` — the shared summarizer used by both Dream and conversation windowing.",
+          "description": "`eddi_summarization_calls_total` / `eddi_summarization_errors_total` — the shared summarizer used by both Dream and conversation windowing.",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -7450,7 +7450,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(rate(summarization_calls_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_summarization_calls_total{job=~\"$job\"}[$__rate_interval]))",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -7461,7 +7461,7 @@
             },
             {
               "refId": "B",
-              "expr": "sum(rate(summarization_errors_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_summarization_errors_total{job=~\"$job\"}[$__rate_interval]))",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -8873,7 +8873,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`connection_resolve_count_total`",
+          "description": "`eddi_connection_resolve_count_total`",
           "gridPos": {
             "h": 7,
             "w": 8,
@@ -8883,7 +8883,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (outcome) (rate(connection_resolve_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (outcome) (rate(eddi_connection_resolve_count_total{job=~\"$job\"}[$__rate_interval]))",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -8958,7 +8958,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (binding) (rate(connection_resolve_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (binding) (rate(eddi_connection_resolve_count_total{job=~\"$job\"}[$__rate_interval]))",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -9024,7 +9024,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`connection_resolve_time_seconds`. The tag key is `authType` in source and stays camelCase in Prometheus — only dots become underscores.",
+          "description": "`eddi_connection_resolve_time_seconds`. The tag key is `authType` in source and stays camelCase in Prometheus — only dots become underscores.",
           "gridPos": {
             "h": 7,
             "w": 8,
@@ -9034,7 +9034,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (binding, authType) (rate(connection_resolve_time_seconds_sum{job=~\"$job\"}[$__rate_interval]))\n  / clamp_min(sum by (binding, authType) (rate(connection_resolve_time_seconds_count{job=~\"$job\"}[$__rate_interval])), 1e-9)",
+              "expr": "sum by (binding, authType) (rate(eddi_connection_resolve_time_seconds_sum{job=~\"$job\"}[$__rate_interval]))\n  / clamp_min(sum by (binding, authType) (rate(eddi_connection_resolve_time_seconds_count{job=~\"$job\"}[$__rate_interval])), 1e-9)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -9100,7 +9100,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`connection_grant_missing_count_total` — a binding asked for a grant that is not configured. This is a config gap, not a runtime error.",
+          "description": "`eddi_connection_grant_missing_count_total` — a binding asked for a grant that is not configured. This is a config gap, not a runtime error.",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -9110,7 +9110,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (binding) (rate(connection_grant_missing_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (binding) (rate(eddi_connection_grant_missing_count_total{job=~\"$job\"}[$__rate_interval]))",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"

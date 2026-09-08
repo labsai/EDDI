@@ -80,6 +80,13 @@ Each `Behavior Rule` has a list of `conditions`, that, depending on the `conditi
 - [Dependency](behavior-rules.md#dependency)
 - [Action Matcher](behavior-rules.md#action-matcher)
 - [Dynamic Value Matcher](behavior-rules.md#dynamic-value-matcher)
+- [Size Matcher](behavior-rules.md#size-matcher)
+- [Deployment Context](behavior-rules.md#deployment-context)
+- [Capability Match](capability-match-guide.md) — type `capabilityMatch`, matches on the agent's declared capabilities
+- [Content Type Matcher](attachments-guide.md) — type `contentTypeMatcher`, matches on an attachment's media type
+
+All twelve registered condition types are listed above. The registry is the `ID` constant on each
+class under `modules/rules/impl/conditions`; check against that if this list ever looks short.
 
 ### General Structure
 
@@ -355,6 +362,38 @@ The example above matches whenever the API call stored between 1 and 10 result e
 | Any other value           | The length of its textual representation                               |
 
 If `min`, `max` and `equal` are all `-1`, the condition reports `NOT_EXECUTED` — it neither succeeds nor fails, and a wrapping `negation` propagates that state instead of inverting it.
+
+### Deployment Context
+
+This condition matches on the deployment environment the instance is running in, so one agent
+configuration can behave differently in production and in test without the client having to send
+anything.
+
+```json
+(...)
+{
+  "type": "deploymentContext",
+  "configs": {
+    "when": "production",
+    "tagMatches": "high-risk"
+  }
+}
+(...)
+```
+
+| Config       | Type   | Description                                                                       |
+| ------------ | ------ | --------------------------------------------------------------------------------- |
+| `when`       | string | Optional. Matched against the current deployment environment; skipped when absent or blank |
+| `tagMatches` | string | Optional. When set, the agent's tags (from context) must also contain this value           |
+
+Both are optional and both are checked when set, so a rule carrying only `tagMatches` matches on
+the tag alone in every environment. A rule with neither matches everywhere, which is rarely what
+anyone means — set at least one.
+
+The environment is read from the system property `eddi.deployment.env`, falling back to the
+environment variable `EDDI_DEPLOYMENT_ENV` and then to `development`. Prefer this over passing an
+`env` context variable from the client and matching it with `contextmatcher`: a client that forgets
+the variable makes a production agent behave like a test one, silently.
 
 ## The Behavior Rule API Endpoints
 

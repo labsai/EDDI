@@ -532,7 +532,7 @@ class ConnectionResolverTest {
 
         assertThrows(ConnectionException.class, () -> resolver.resolve("${connection:gone}", ALLOWED_TARGET, null));
 
-        var counter = meterRegistry.find("connection.resolve.count").tag("outcome", "not_found").counter();
+        var counter = meterRegistry.find("eddi.connection.resolve.count").tag("outcome", "not_found").counter();
         assertTrue(counter != null && counter.count() == 1,
                 "a deleted or misspelled connection fails every turn; a flat dashboard makes that invisible");
     }

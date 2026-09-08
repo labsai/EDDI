@@ -32,7 +32,6 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.*;
-import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -67,7 +66,6 @@ import java.util.regex.Pattern;
 public class SlackEventHandler {
 
     private static final Logger LOGGER = Logger.getLogger(SlackEventHandler.class);
-    private static final int CONVERSATION_TIMEOUT_SECONDS = 60;
 
     /** Pattern to strip bot mention: {@code <@U0123BOTID> actual message} */
     private static final Pattern BOT_MENTION_PATTERN = Pattern.compile("^<@[A-Z0-9]+>\\s*");
@@ -107,9 +105,12 @@ public class SlackEventHandler {
     private final ICache<String, Boolean> eventDedup;
     private final ExecutorService executorService;
 
-    /** Max retries for Slack API calls with exponential backoff. */
-    private static final int SLACK_API_MAX_RETRIES = 3;
-    private static final long SLACK_API_RETRY_BASE_MS = 500;
+    /**
+     * Timeouts and the API retry budget. These were compile-time constants, so an
+     * agent whose turn legitimately ran past sixty seconds always failed on Slack
+     * and worked over {@code /v1}, with no way to tune it short of a rebuild.
+     */
+    private final SlackConfig slackConfig;
 
     /**
      * Tracks active group discussion listeners keyed by Slack message ts. Used to
@@ -141,7 +142,8 @@ public class SlackEventHandler {
             IConversationService conversationService,
             IGroupConversationService groupConversationService,
             IUserConversationStore userConversationStore,
-            ICacheFactory cacheFactory) {
+            ICacheFactory cacheFactory,
+            SlackConfig slackConfig) {
         this.channelTargetRouter = channelTargetRouter;
         this.observeGate = observeGate;
         this.toolCostTracker = toolCostTracker;
@@ -149,6 +151,7 @@ public class SlackEventHandler {
         this.conversationService = conversationService;
         this.groupConversationService = groupConversationService;
         this.userConversationStore = userConversationStore;
+        this.slackConfig = slackConfig;
         this.eventDedup = cacheFactory.getCache("slack-event-dedup", Duration.ofMinutes(10));
         this.activeGroupListeners = cacheFactory.getCache("slack-group-listeners", Duration.ofHours(2));
         this.approvalNotified = cacheFactory.getCache("slack-hitl-approval-notified", Duration.ofHours(24));
@@ -199,20 +202,43 @@ public class SlackEventHandler {
             } catch (Exception e) {
                 LOGGER.errorf(e, "Error handling Slack event %s", sanitize(eventId));
 
-                // Best-effort error response to user (never leak internal details)
+                // Best-effort error response to user (never leak internal details).
+                // A timeout gets its own notice: the generic line reads as "the agent
+                // broke" when what actually happened is that the turn is still running
+                // and Slack stopped waiting, which is an operator-tunable limit rather
+                // than a fault. Naming the property is the difference between a support
+                // ticket and a one-line config change.
                 String channelId = (String) event.get("channel");
                 String threadTs = getThreadTs(event);
                 if (channelId != null) {
+                    boolean timedOut = hasCause(e, TimeoutException.class);
+                    String notice = timedOut
+                            ? "⏳ That took longer than " + slackConfig.getRequestTimeoutSeconds()
+                                    + " seconds, so I stopped waiting. The agent may still be working — "
+                                    + "ask again in a moment, or raise eddi.slack.request-timeout-seconds."
+                            : "⚠️ Sorry, I encountered an error processing your message. Please try again.";
                     try {
-                        postMessage(channelId, threadTs,
-                                "⚠️ Sorry, I encountered an error processing your message. Please try again.",
-                                null);
+                        postMessage(channelId, threadTs, notice, null);
                     } catch (Exception ignored) {
                         // Can't post error — nothing more we can do
                     }
                 }
             }
         });
+    }
+
+    /**
+     * Whether {@code type} appears anywhere in the throwable's cause chain.
+     * {@code sendAndWait}'s {@link TimeoutException} is wrapped by the layers
+     * between it and the handler, so a top-level {@code instanceof} would miss it.
+     */
+    private static boolean hasCause(Throwable t, Class<? extends Throwable> type) {
+        for (Throwable c = t; c != null; c = c.getCause() == c ? null : c.getCause()) {
+            if (type.isInstance(c)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void handleEvent(Map<String, Object> event, String botUserId) throws Exception {
@@ -877,9 +903,14 @@ public class SlackEventHandler {
      */
     private void registerAgentThreadMappings(SlackGroupDiscussionListener listener) {
         // Wait for the group discussion to complete via the listener's latch
-        boolean completed = listener.awaitCompletion(300, TimeUnit.SECONDS);
+        int groupTimeout = slackConfig.getGroupCompletionTimeoutSeconds();
+        boolean completed = listener.awaitCompletion(groupTimeout, TimeUnit.SECONDS);
         if (!completed) {
-            LOGGER.warnf("Group discussion did not complete within timeout — follow-up routing may be incomplete");
+            // Name the limit: without it the operator cannot tell a hung discussion from
+            // one that simply needed longer than
+            // eddi.slack.group-completion-timeout-seconds.
+            LOGGER.warnf("Group discussion did not complete within %ds (eddi.slack.group-completion-timeout-seconds) "
+                    + "— follow-up routing may be incomplete", groupTimeout);
         }
 
         // Register all agent message ts → listener for follow-up detection
@@ -1094,7 +1125,7 @@ public class SlackEventHandler {
                     }
                 });
 
-        return responseFuture.get(CONVERSATION_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        return responseFuture.get(slackConfig.getRequestTimeoutSeconds(), TimeUnit.SECONDS);
     }
 
     /**
@@ -1154,15 +1185,16 @@ public class SlackEventHandler {
 
         String auth = "Bearer " + resolvedToken;
 
-        for (int attempt = 1; attempt <= SLACK_API_MAX_RETRIES; attempt++) {
+        int maxRetries = slackConfig.getApiMaxRetries();
+        for (int attempt = 1; attempt <= maxRetries; attempt++) {
             try {
                 slackApi.postMessage(auth, channelId, threadTs, text);
                 return;
             } catch (SlackDeliveryException e) {
-                if (attempt < SLACK_API_MAX_RETRIES) {
-                    long backoff = SLACK_API_RETRY_BASE_MS * (1L << (attempt - 1));
+                if (attempt < maxRetries) {
+                    long backoff = slackConfig.getApiRetryBaseMs() * (1L << (attempt - 1));
                     LOGGER.warnf("Slack API call failed (attempt %d/%d), retrying in %dms: %s",
-                            attempt, SLACK_API_MAX_RETRIES, backoff, e.getMessage());
+                            attempt, maxRetries, backoff, e.getMessage());
                     try {
                         Thread.sleep(backoff);
                     } catch (InterruptedException ie) {
@@ -1172,7 +1204,7 @@ public class SlackEventHandler {
                 } else {
                     LOGGER.errorf("SLACK_DELIVERY_FAILED | channel=%s | threadTs=%s | textLength=%d | attempts=%d | error=%s",
                             sanitize(channelId), sanitize(threadTs), text != null ? text.length() : 0,
-                            SLACK_API_MAX_RETRIES, e.getMessage());
+                            maxRetries, e.getMessage());
                 }
             }
         }
