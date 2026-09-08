@@ -509,10 +509,12 @@ eddi_channel_observe_decisions_total        # Observe-mode reply decisions; tags
 ```
 
 `eddi_channel_observe_decisions_total` is one sample per message an observer
-saw, tagged with the gate that settled it: `MATCHED` (it replied), `NO_TRIGGER`
+saw. `reason` is the gate that settled it: `MATCHED` (it replied), `NO_TRIGGER`
 (the message was not for it), or `COOLDOWN` / `DAILY_RESPONSE_CAP` /
-`DAILY_COST_CAP` (it wanted to and was stopped). A rising throttle share with a
-flat `MATCHED` share is an observer whose triggers are too broad for its budget.
+`DAILY_COST_CAP` (it wanted to and was stopped). `type` is the observer's
+target type — `AGENT` today, since observe mode is refused on anything else —
+not the channel platform. A rising throttle share with a flat `MATCHED` share is
+an observer whose triggers are too broad for its budget.
 
 ### Backup, Export & Sync Metrics
 

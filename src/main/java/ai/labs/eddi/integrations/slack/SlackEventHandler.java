@@ -33,6 +33,7 @@ import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.TimeUnit;
+import java.util.OptionalDouble;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -337,6 +338,19 @@ public class SlackEventHandler {
         if (userId == null) {
             return false;
         }
+        // Slack delivers a channel mention TWICE: once as `message` and once as
+        // `app_mention`. `app_mention` is the one that routes, so observing the
+        // `message` copy would answer the same sentence a second time, possibly
+        // from a different target. The same leading-mention test the thread-reply
+        // branch above uses, for the same reason — and with the same limitation,
+        // that a mention buried mid-sentence is not detected. The bot's own user
+        // id is not available anywhere in this integration, so neither check can
+        // do better today.
+        if (text != null && BOT_MENTION_PATTERN.matcher(text).find()) {
+            LOGGER.debugf("[OBSERVE] Skipping a mention in channel %s — app_mention answers it",
+                    sanitize(channelId));
+            return false;
+        }
         // Files are how an observer watching for, say, PDFs is meant to fire, so a
         // message that is only an upload still counts even with empty text.
         List<String> mimeTypes = attachedMimeTypes(event);
@@ -374,18 +388,19 @@ public class SlackEventHandler {
         ResolvedTarget resolved = new ResolvedTarget(target, text, integration, null, null);
         String message = text != null ? text : "";
 
-        // The allowance is consumed the moment the observer commits, not when the
-        // answer lands: a turn that fails still used it, and charging only on
-        // success would let a failing observer retry all day. The spend is added
-        // once the turn settles and the figure exists.
-        observeGate.recordResponse("slack", channelId, target, 0.0);
+        // No `recordResponse` here: `select` already booked the reply in the
+        // same compare-and-set that granted it, which is what stops two events
+        // arriving together from both being told there is room for one more.
+        // The allowance is therefore spent at the moment the observer commits —
+        // a turn that fails still used it, so a failing observer cannot retry
+        // all day — and the spend is added below, once the figure exists.
 
         LOGGER.infof("[OBSERVE] Target '%s' answering an unaddressed message in channel %s",
                 sanitize(target.getName()), sanitize(channelId));
 
         executorService.submit(() -> {
             String conversationId = null;
-            double costBefore = 0.0;
+            OptionalDouble costBefore = OptionalDouble.empty();
             try {
                 conversationId = observedConversationId(resolved, channelId, userId, threadTs);
                 costBefore = conversationCost(conversationId);
@@ -395,11 +410,19 @@ public class SlackEventHandler {
                 LOGGER.errorf(e, "[OBSERVE] Target '%s' failed to answer in channel %s",
                         sanitize(target.getName()), sanitize(channelId));
             } finally {
-                if (conversationId != null) {
-                    double spent = conversationCost(conversationId) - costBefore;
+                // Both reads or neither. A baseline that failed and a total that
+                // did not would make the delta the conversation's ENTIRE history
+                // of tool spend, charged to this one turn — which would retire
+                // the observer's daily budget on its first reply.
+                OptionalDouble costAfter = conversationCost(conversationId);
+                if (costBefore.isPresent() && costAfter.isPresent()) {
+                    double spent = costAfter.getAsDouble() - costBefore.getAsDouble();
                     if (spent > 0) {
                         observeGate.addCost("slack", channelId, target, spent);
                     }
+                } else if (conversationId != null) {
+                    LOGGER.debugf("[OBSERVE] Cost for conversation %s is unknown — not charged",
+                            sanitize(conversationId));
                 }
             }
         });
@@ -441,16 +464,18 @@ public class SlackEventHandler {
      * scheduled fire logs. Never throws — an observer must not fail because its
      * accounting did.
      */
-    private double conversationCost(String conversationId) {
+    private OptionalDouble conversationCost(String conversationId) {
         if (conversationId == null) {
-            return 0.0;
+            return OptionalDouble.empty();
         }
         try {
             var metrics = toolCostTracker.getConversationCosts(conversationId);
-            return metrics != null ? metrics.getTotalCost() : 0.0;
+            // No metrics yet is a real zero — a conversation that has called no
+            // priced tool. Only a throw is "unknown".
+            return OptionalDouble.of(metrics != null ? metrics.getTotalCost() : 0.0);
         } catch (RuntimeException e) {
             LOGGER.debugf(e, "[OBSERVE] Could not read tool cost for conversation %s", conversationId);
-            return 0.0;
+            return OptionalDouble.empty();
         }
     }
 
@@ -899,7 +924,22 @@ public class SlackEventHandler {
         try {
             userConversationStore.createUserConversation(mapping);
         } catch (IResourceStore.ResourceAlreadyExistsException e) {
-            LOGGER.debugf("Race condition: conversation mapping already exists for %s/%s", sanitize(intent), sanitize(slackUserId));
+            // Someone else created the mapping between the read above and this
+            // write. Returning our own id would leave the two callers talking to
+            // two different conversations about the same thread — previously
+            // rare, and reachable now that an observer runs asynchronously
+            // alongside the mention and thread-reply paths. The stored mapping
+            // is the winner; ours is an orphan.
+            UserConversation winner = userConversationStore.readUserConversation(intent, slackUserId);
+            if (winner != null && winner.getConversationId() != null) {
+                LOGGER.debugf("Lost the create race for %s/%s — using the stored conversation",
+                        sanitize(intent), sanitize(slackUserId));
+                return winner.getConversationId();
+            }
+            // The mapping existed a moment ago and cannot be read now. Ours is
+            // the only conversation we can name, so use it rather than fail.
+            LOGGER.warnf("Create conflict for %s/%s but no stored mapping could be read",
+                    sanitize(intent), sanitize(slackUserId));
         }
 
         return result.conversationId();

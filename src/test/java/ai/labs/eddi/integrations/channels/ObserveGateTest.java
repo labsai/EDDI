@@ -19,8 +19,12 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -41,6 +45,13 @@ class ObserveGateTest {
     private static final Instant T0 = Instant.parse("2026-06-01T12:00:00Z");
 
     private final ConcurrentHashMap<String, Object> cacheMap = new ConcurrentHashMap<>();
+    /**
+     * Run inside every cache read. Empty by default; the concurrency test uses it
+     * to hold two threads inside their read until both have taken one, which is the
+     * interleaving a read-then-book implementation loses to.
+     */
+    private final AtomicReference<Runnable> readBarrier = new AtomicReference<>(() -> {
+    });
     private MutableClock clock;
     private ObserveGate gate;
 
@@ -76,8 +87,13 @@ class ObserveGateTest {
     @BeforeEach
     void setUp() {
         cacheMap.clear();
+        readBarrier.set(() -> {
+        });
         ICache mockCache = mock(ICache.class);
-        when(mockCache.get(any())).thenAnswer(inv -> cacheMap.get(inv.getArgument(0)));
+        when(mockCache.get(any())).thenAnswer(inv -> {
+            readBarrier.get().run();
+            return cacheMap.get(inv.getArgument(0));
+        });
         when(mockCache.putIfAbsent(anyString(), any(), anyLong(), any(TimeUnit.class)))
                 .thenAnswer(inv -> cacheMap.putIfAbsent(inv.getArgument(0), inv.getArgument(1)));
         when(mockCache.replace(anyString(), any(), any(), anyLong(), any(TimeUnit.class)))
@@ -350,6 +366,64 @@ class ObserveGateTest {
             var match = gate.select("slack", CHANNEL, List.of(a, observer("b", second)),
                     "deploy now", List.of());
             assertTrue(match.isEmpty());
+        }
+
+        @Test
+        @DisplayName("selecting books the reply, so a second message sees it")
+        void selectReserves() {
+            // `evaluate` reads without booking; `select` has to book, or two
+            // messages arriving together are both told there is room for one more.
+            var config = config();
+            config.setCooldownSeconds(3600);
+            var target = observer("ops", config);
+
+            assertTrue(gate.select("slack", CHANNEL, List.of(target), "one", List.of()).isPresent());
+            assertTrue(gate.select("slack", CHANNEL, List.of(target), "two", List.of()).isEmpty());
+        }
+
+        @Test
+        @DisplayName("of two selections that read the same window, only one is granted")
+        void concurrentSelectionsCannotBothWin() throws Exception {
+            // The race is read-then-book: two callers read "0 replies used" and
+            // both conclude there is room. Left to chance it almost never
+            // reproduces — the cache double serializes each individual call — so
+            // the interleaving is forced: both threads are held inside their
+            // first cache read until the other has read too, which is exactly
+            // the window the reservation has to close.
+            var config = config();
+            config.setCooldownSeconds(0);
+            config.setMaxDailyResponses(1);
+            var target = observer("ops", config);
+
+            var bothHaveRead = new CyclicBarrier(2);
+            var firstReads = new AtomicInteger();
+            readBarrier.set(() -> {
+                if (firstReads.getAndIncrement() < 2) {
+                    try {
+                        bothHaveRead.await(5, TimeUnit.SECONDS);
+                    } catch (Exception e) {
+                        throw new IllegalStateException(e);
+                    }
+                }
+            });
+
+            var granted = new AtomicInteger();
+            var threads = new ArrayList<Thread>();
+            for (int i = 0; i < 2; i++) {
+                Thread thread = new Thread(() -> {
+                    if (gate.select("slack", CHANNEL, List.of(target), "go", List.of()).isPresent()) {
+                        granted.incrementAndGet();
+                    }
+                });
+                threads.add(thread);
+                thread.start();
+            }
+            for (Thread thread : threads) {
+                thread.join(10_000);
+            }
+
+            assertEquals(1, granted.get(),
+                    "both callers read the same window, so exactly one may be granted the only slot");
         }
 
         @Test

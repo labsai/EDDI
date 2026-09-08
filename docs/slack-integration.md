@@ -287,7 +287,18 @@ Notes and current limits:
   to an LLM accrues `$0.00` and is bounded by `maxDailyResponses`. Same
   quantity, and the same caveat, as the cost a scheduled fire logs.
 - **The allowance is spent on commit, not on success.** A turn that fails still
-  used a reply, so a failing observer cannot retry all day.
+  used a reply, so a failing observer cannot retry all day. The reply is booked
+  in the same compare-and-set that grants it, so two messages arriving together
+  cannot both be told there is room for one more.
+- **A message that mentions the bot is not observed.** Slack delivers a channel
+  mention twice, as `message` and as `app_mention`; the second is the one that
+  routes, so observing the first would answer the same sentence again. Detected
+  by a leading `<@…>`, the same test the thread-reply path uses — a mention
+  buried mid-sentence is not caught.
+- **The dollar ceiling is approximate by nature.** A turn's cost exists only
+  once it has run, so spend already in flight is not yet booked against the day.
+  The ceiling can be exceeded by the cost of the turns running when it is
+  crossed; `maxDailyResponses` is the bound that is exact.
 - **Several observers in one channel**: the first one whose triggers match
   answers. If that one is throttled the message is dropped rather than passed
   to the next — otherwise a second watcher would answer precisely *because* the

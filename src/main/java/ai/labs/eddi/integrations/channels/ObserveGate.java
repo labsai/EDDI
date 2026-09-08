@@ -168,7 +168,7 @@ public class ObserveGate {
             return Optional.empty();
         }
         for (ChannelTarget candidate : candidates) {
-            Verdict verdict = evaluate(channelType, platformChannelId, candidate, messageText, mimeTypes);
+            Verdict verdict = reserve(channelType, platformChannelId, candidate, messageText, mimeTypes);
             if (verdict.respond()) {
                 return Optional.of(new Match(candidate, verdict));
             }
@@ -182,49 +182,112 @@ public class ObserveGate {
         return Optional.empty();
     }
 
-    /** Whether this one observer should answer this message, and why. */
+    /**
+     * Decide AND book in one compare-and-set, so two messages arriving together
+     * cannot both be told there is room for one more.
+     * <p>
+     * {@link #evaluate} answers the same question without booking anything, and two
+     * callers racing on it would both be told yes: the read and the increment were
+     * separate steps, and the CAS in {@link #mutate} only stopped one increment
+     * overwriting the other, not both being permitted. Here the limits are
+     * re-checked inside the loop against the window the write will actually
+     * replace, so exactly one caller wins the last slot.
+     * <p>
+     * The dollar ceiling is still approximate, and unavoidably so: a turn's cost
+     * exists only once it has run, so spend already in flight is not yet booked
+     * against the day. It can therefore be exceeded by the cost of the turns
+     * running at the moment it is crossed — bounded in practice by the cooldown,
+     * and absolutely by the daily response cap, which this method now enforces
+     * exactly.
+     */
+    private Verdict reserve(String channelType, String platformChannelId, ChannelTarget target,
+                            String messageText, List<String> mimeTypes) {
+        if (target == null || !target.isObserveMode()) {
+            return Verdict.no(Reason.NOT_OBSERVING);
+        }
+        ObserveConfig config = configOf(target);
+        if (!triggersMatch(config, messageText, mimeTypes)) {
+            return record(target, Verdict.no(Reason.NO_TRIGGER));
+        }
+
+        String key = key(channelType, platformChannelId, target);
+        Instant now = clock.instant();
+        long today = dayOf(now);
+
+        for (int attempt = 0; attempt < CAS_ATTEMPTS; attempt++) {
+            ObserveWindow current = windows.get(key);
+            ObserveWindow window = todayFrom(current, today);
+
+            Verdict blocked = limitVerdict(window, config, now);
+            if (blocked != null) {
+                return record(target, blocked);
+            }
+
+            ObserveWindow next = new ObserveWindow(today, window.responses() + 1, window.costUsd(),
+                    now.getEpochSecond());
+            if (store(key, current, next)) {
+                return record(target, Verdict.YES);
+            }
+        }
+        // Another event won this slot every time. Refusing is the safe answer:
+        // the alternative is replying without having booked it.
+        LOGGER.warnf("[OBSERVE] Could not reserve a reply for target '%s' after %d attempts",
+                target.getName(), CAS_ATTEMPTS);
+        return record(target, Verdict.no(Reason.COOLDOWN));
+    }
+
+    /** The first limit this window trips, or {@code null} when none do. */
+    private static Verdict limitVerdict(ObserveWindow window, ObserveConfig config, Instant now) {
+        long sinceLast = now.getEpochSecond() - window.lastResponseEpochSeconds();
+        if (window.lastResponseEpochSeconds() > 0 && sinceLast < config.getCooldownSeconds()) {
+            return Verdict.no(Reason.COOLDOWN);
+        }
+        if (window.responses() >= config.getMaxDailyResponses()) {
+            return Verdict.no(Reason.DAILY_RESPONSE_CAP);
+        }
+        // `>=` rather than `>`: a budget already spent buys nothing more.
+        if (window.costUsd() >= config.getMaxCostPerDay()) {
+            return Verdict.no(Reason.DAILY_COST_CAP);
+        }
+        return null;
+    }
+
+    /**
+     * An observer saved without a config still gets the defaults, so its cooldown
+     * and caps are never silently absent. The store defaults this on write; this is
+     * the belt for a document written before that did.
+     */
+    private static ObserveConfig configOf(ChannelTarget target) {
+        return target.getObserveConfig() != null ? target.getObserveConfig() : new ObserveConfig();
+    }
+
+    /**
+     * Whether this one observer should answer this message, and why — without
+     * booking anything. {@link #select} reserves instead; this is the read-only
+     * view, for inspection and for tests that assert a decision in isolation.
+     */
     public Verdict evaluate(String channelType, String platformChannelId, ChannelTarget target,
                             String messageText, List<String> mimeTypes) {
         if (target == null || !target.isObserveMode()) {
             return Verdict.no(Reason.NOT_OBSERVING);
         }
-        // An observer saved without a config still gets the defaults, so its
-        // cooldown and caps are never silently absent. The store defaults this on
-        // write; this is the belt for a document written before that did.
-        ObserveConfig config = target.getObserveConfig() != null
-                ? target.getObserveConfig()
-                : new ObserveConfig();
-
+        ObserveConfig config = configOf(target);
         if (!triggersMatch(config, messageText, mimeTypes)) {
             return record(target, Verdict.no(Reason.NO_TRIGGER));
         }
-
         Instant now = clock.instant();
-        ObserveWindow window = currentWindow(key(channelType, platformChannelId, target), now);
-
-        long sinceLast = now.getEpochSecond() - window.lastResponseEpochSeconds();
-        if (window.lastResponseEpochSeconds() > 0 && sinceLast < config.getCooldownSeconds()) {
-            return record(target, Verdict.no(Reason.COOLDOWN));
-        }
-        if (window.responses() >= config.getMaxDailyResponses()) {
-            return record(target, Verdict.no(Reason.DAILY_RESPONSE_CAP));
-        }
-        // `>=` rather than `>`: a budget already spent buys nothing more. Checked
-        // before the turn runs, so the ceiling can be overshot by at most the cost
-        // of the reply that crossed it — there is no way to price a turn in advance.
-        if (window.costUsd() >= config.getMaxCostPerDay()) {
-            return record(target, Verdict.no(Reason.DAILY_COST_CAP));
-        }
-        return record(target, Verdict.YES);
+        ObserveWindow window = todayFrom(windows.get(key(channelType, platformChannelId, target)),
+                dayOf(now));
+        Verdict blocked = limitVerdict(window, config, now);
+        return record(target, blocked != null ? blocked : Verdict.YES);
     }
 
     /**
      * Book a reply against the observer's window.
      * <p>
-     * Called after the turn, with what it actually cost, so a turn that failed
-     * before producing anything is not charged. The count is incremented either
-     * way: a reply that was attempted consumed the observer's allowance whether or
-     * not it landed, which is what stops a failing observer retrying all day.
+     * {@link #select} already books what it reserves, so a caller driving the gate
+     * through it does not call this. It remains for a caller recording a reply the
+     * gate did not decide, and for tests seeding a window.
      */
     public void recordResponse(String channelType, String platformChannelId, ChannelTarget target,
                                double costUsd) {
@@ -278,18 +341,8 @@ public class ObserveGate {
 
         for (int attempt = 0; attempt < CAS_ATTEMPTS; attempt++) {
             ObserveWindow current = windows.get(key);
-            ObserveWindow base = (current == null || current.dayEpoch() != today)
-                    // A new day keeps the last-response time: the cooldown is a spam
-                    // guard, not a daily allowance, and resetting it at midnight
-                    // would license an immediate second reply.
-                    ? ObserveWindow.empty(today, current != null ? current.lastResponseEpochSeconds() : 0L)
-                    : current;
-            ObserveWindow next = update.apply(base, nowEpochSeconds);
-
-            boolean stored = current == null
-                    ? windows.putIfAbsent(key, next, WINDOW_TTL.toSeconds(), TimeUnit.SECONDS) == null
-                    : windows.replace(key, current, next, WINDOW_TTL.toSeconds(), TimeUnit.SECONDS);
-            if (stored) {
+            ObserveWindow next = update.apply(todayFrom(current, today), nowEpochSeconds);
+            if (store(key, current, next)) {
                 return;
             }
         }
@@ -347,10 +400,14 @@ public class ObserveGate {
         return false;
     }
 
-    /** The window for today, treating a stale day as an empty one. */
-    private ObserveWindow currentWindow(String key, Instant now) {
-        long today = dayOf(now);
-        ObserveWindow stored = windows.get(key);
+    /**
+     * Today's window, treating a stored one from another day as empty.
+     *
+     * The last-response time survives the rollover: the cooldown is a spam guard,
+     * not a daily allowance, and resetting it at midnight would license an
+     * immediate second reply.
+     */
+    private static ObserveWindow todayFrom(ObserveWindow stored, long today) {
         if (stored == null) {
             return ObserveWindow.empty(today, 0L);
         }
@@ -358,6 +415,13 @@ public class ObserveGate {
             return ObserveWindow.empty(today, stored.lastResponseEpochSeconds());
         }
         return stored;
+    }
+
+    /** One compare-and-set against the cache, absent-aware. */
+    private boolean store(String key, ObserveWindow expected, ObserveWindow next) {
+        return expected == null
+                ? windows.putIfAbsent(key, next, WINDOW_TTL.toSeconds(), TimeUnit.SECONDS) == null
+                : windows.replace(key, expected, next, WINDOW_TTL.toSeconds(), TimeUnit.SECONDS);
     }
 
     private static long dayOf(Instant now) {
