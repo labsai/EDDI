@@ -25,7 +25,6 @@ import java.util.Optional;
  * Structured entry methods operate on the full {@code usermemories} collection
  * with visibility, categories, and agent scoping.
  *
- * @author ginccc
  * @since 6.0.0
  */
 public interface IUserMemoryStore {

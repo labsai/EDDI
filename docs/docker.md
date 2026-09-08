@@ -5,18 +5,17 @@
 ### Without Authentication (default)
 
 ```bash
-docker-compose up
+docker compose up
 ```
 
 This starts EDDI on port `7070` and MongoDB. No login required.
 
 ### With Keycloak Authentication
 
-The EDDI-Manager repo provides a full-stack docker-compose with Keycloak:
+This repository ships a Keycloak overlay. Layer it on the base stack:
 
 ```bash
-# From the EDDI-Manager repo
-docker compose -f docker-compose.keycloak.yml up
+docker compose -f docker-compose.yml -f docker-compose.auth.yml up
 ```
 
 This starts:

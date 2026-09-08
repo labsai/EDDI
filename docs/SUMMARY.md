@@ -64,6 +64,7 @@
 - [Secrets Vault](secrets-vault.md)
 - [Global Variables](global-variables.md)
 - [Audit Ledger](audit-ledger.md)
+- [Tenant Quotas](tenant-quotas.md)
 - [GDPR / CCPA Compliance](gdpr-compliance.md)
 - [HIPAA Compliance](hipaa-compliance.md)
 - [Business Associate Agreement (BAA) Template](templates/baa-template.md)
@@ -86,6 +87,7 @@
 - [Metrics & Monitoring](metrics.md)
 - [Monitoring & Tracing Guide](monitoring/monitoring-guide.md)
 - [Log Administration](log-administration.md)
+- [Coordinator & Dead Letters](coordinator-admin.md)
 
 ## Reference
 

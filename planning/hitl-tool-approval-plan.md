@@ -1,6 +1,11 @@
 # Tool-Level HITL Approval Gating — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Status: IMPLEMENTED.** Shipped as `ToolApprovalsConfig`, `ToolApprovalRules`,
+> `ToolApprovalRequiredException`, `TaskToolApprovalsResolver`, `ChatTranscriptCodec` and
+> `pauseOrigin=TOOL_CALL`. Kept as the design record — user-facing documentation is
+> [`docs/hitl.md`](../docs/hitl.md).
+> **Do not execute the task list below.** The checkbox syntax has been
+> stripped so the steps read as the record of a design, not as an open work queue.
 
 **Goal:** Pause a conversation for human approval when the LLM invokes a *gated tool* (any source: built-in `@Tool`, MCP, A2A, httpcall, dynamic-agent, memory, recall), configured via allow/disallow pattern lists — co-existing with the behavior-rule `PAUSE_CONVERSATION` mechanism and reusing all its machinery (state model, `/resume`, timeout policies, audit, Slack, crash recovery). Also fixes the remaining HITL-critique findings (structured pauseDetails, per-call verdicts, approve-with-amendments, save-time lints).
 
@@ -121,7 +126,7 @@ The entire resume design depends on `ChatMessageSerializer.messagesToJson()` / `
 **Interfaces:**
 - Produces: `ChatTranscriptCodec.serialize(List<ChatMessage> messages, int maxBytes)` → `CodecResult(String json, boolean omitted)`; `ChatTranscriptCodec.deserialize(String json)` → `List<ChatMessage>` (throws `TranscriptCodecException` on failure — callers fall back).
 
-- [ ] **Step 1: Write the failing test**
+- **Step 1: Write the failing test**
 
 ```java
 /*
@@ -220,12 +225,12 @@ class ChatTranscriptCodecTest {
 
 Note: the size constant lives on `PendingToolCallBatch` (created in Task 4). For THIS task it is inlined as the `private static final int TRANSCRIPT_MAX_BYTES_DEFAULT` field shown above. Task 4 Step 4 deletes that field and adds `import static ai.labs.eddi.engine.memory.model.PendingToolCallBatch.TRANSCRIPT_MAX_BYTES_DEFAULT;`. There is no separate `…Limits` class — the constants live directly on `PendingToolCallBatch`.
 
-- [ ] **Step 2: Run the test to verify it fails**
+- **Step 2: Run the test to verify it fails**
 
 Run: `./mvnw test -Dtest=ChatTranscriptCodecTest -q`
 Expected: COMPILATION ERROR — `ChatTranscriptCodec` does not exist.
 
-- [ ] **Step 3: Implement `ChatTranscriptCodec`**
+- **Step 3: Implement `ChatTranscriptCodec`**
 
 ```java
 /*
@@ -298,12 +303,12 @@ public class ChatTranscriptCodec {
 }
 ```
 
-- [ ] **Step 4: Run the tests**
+- **Step 4: Run the tests**
 
 Run: `./mvnw test -Dtest=ChatTranscriptCodecTest -q`
 Expected: PASS (5 tests). **If `roundTrip_preservesToolExecutionRequests_idsNamesArgs` or the multimodal test fails with the real langchain4j 1.17.0 codec (e.g. a content type has no mixin), STOP — report exactly which message shape fails and wait for a design decision before continuing.** Do not silently work around it.
 
-- [ ] **Step 5: Also add a provider-shape smoke test for the resume message sequence**
+- **Step 5: Also add a provider-shape smoke test for the resume message sequence**
 
 Append to `ChatTranscriptCodecTest`:
 
@@ -328,7 +333,7 @@ Append to `ChatTranscriptCodecTest`:
 
 Run: `./mvnw test -Dtest=ChatTranscriptCodecTest -q` — Expected: PASS (6 tests).
 
-- [ ] **Step 6: Commit**
+- **Step 6: Commit**
 
 ```bash
 git add src/main/java/ai/labs/eddi/engine/hitl/tools/ChatTranscriptCodec.java src/test/java/ai/labs/eddi/engine/hitl/tools/ChatTranscriptCodecTest.java
@@ -394,7 +399,7 @@ public class ToolApprovalsConfig {
 }
 ```
 
-- [ ] **Step 1: Write the failing tests**
+- **Step 1: Write the failing tests**
 
 `ToolApprovalPatternsTest`:
 
@@ -515,9 +520,9 @@ class ToolApprovalGateTest {
 }
 ```
 
-- [ ] **Step 2: Run to verify failure** — `./mvnw test -Dtest='ToolApprovalPatternsTest,ToolApprovalGateTest' -q` → COMPILATION ERROR.
+- **Step 2: Run to verify failure** — `./mvnw test -Dtest='ToolApprovalPatternsTest,ToolApprovalGateTest' -q` → COMPILATION ERROR.
 
-- [ ] **Step 3: Implement**
+- **Step 3: Implement**
 
 `ToolApprovalPatterns`:
 
@@ -680,9 +685,9 @@ Also create `ToolApprovalsConfig` exactly as specified in the Interfaces block a
 
 Performance note: `classify` compiles per call. Acceptable for v1 (a handful of patterns, tool batches ≤ ~10); if the executor wants, cache `List<CompiledPattern>` keyed by the config object identity inside `ToolApprovalGate` — NOT static state.
 
-- [ ] **Step 4: Run** — `./mvnw test -Dtest='ToolApprovalPatternsTest,ToolApprovalGateTest' -q` → PASS (10 tests).
+- **Step 4: Run** — `./mvnw test -Dtest='ToolApprovalPatternsTest,ToolApprovalGateTest' -q` → PASS (10 tests).
 
-- [ ] **Step 5: Commit**
+- **Step 5: Commit**
 
 ```bash
 git add src/main/java/ai/labs/eddi/engine/hitl/tools/ToolApprovalPatterns.java src/main/java/ai/labs/eddi/engine/hitl/tools/ToolApprovalGate.java src/main/java/ai/labs/eddi/configs/hitl/model/ToolApprovalsConfig.java src/test/java/ai/labs/eddi/engine/hitl/tools/ToolApprovalPatternsTest.java src/test/java/ai/labs/eddi/engine/hitl/tools/ToolApprovalGateTest.java
@@ -721,13 +726,13 @@ git commit -m "feat(hitl): tool approval pattern engine and batch gate classifie
 | `pauseReason`/`pendingMessage` > 500 chars | 400 (mirror the existing pauseReason length rule) |
 | `toolApprovals.timeoutPolicy` absent AND outer `hitlConfig.timeoutPolicy == AUTO_APPROVE` | **WARNING** (not 400): `"agent-level AUTO_APPROVE does not apply to tool approvals; tool pauses will WAIT_INDEFINITELY unless toolApprovals.timeoutPolicy is set explicitly"` |
 
-- [ ] **Step 1:** Read `HitlConfigValidation.java` and `HitlConfigValidationWiringTest.java` fully. Note the exception type, message prefixing style, and exactly where `AgentStore` invokes it.
-- [ ] **Step 2:** Write the failing test `HitlConfigValidationToolApprovalsTest` — one `@Test` per table row above, each building a `ToolApprovalsConfig`, calling `validateToolApprovals`, and asserting the thrown message contains the quoted phrase (use the real exception type discovered in Step 1). Plus one happy-path test: a full valid config passes.
-- [ ] **Step 3:** Run: `./mvnw test -Dtest=HitlConfigValidationToolApprovalsTest -q` → COMPILATION ERROR / failures.
-- [ ] **Step 4:** Implement: add the `toolApprovals` field + getter/setter to `AgentConfiguration.HitlConfig` (after `pauseReason`, keeping the null-safe-setter style of `timeoutPolicy`); add the same to `LlmConfiguration.Task`; implement `validateToolApprovals` in `HitlConfigValidation` per the table; call it from the existing agent-store validation path (where the outer hitlConfig is validated) and add the equivalent invocation to the LLM store create/update path found in Step 1's grep.
-- [ ] **Step 5:** Run: `./mvnw test -Dtest='HitlConfigValidationToolApprovalsTest,HitlConfigValidationTest,HitlConfigValidationWiringTest' -q` → PASS, including all pre-existing tests.
-- [ ] **Step 6:** ZIP import: confirm `RestImportService` funnels agent configs through the same store create/update path (it does for the outer hitlConfig per docs/hitl.md:83) — if the LLM configs imported via ZIP bypass the LlmStore validation seam, add the `validateToolApprovals` call to the import path too, with a test.
-- [ ] **Step 7: Commit**
+- **Step 1:** Read `HitlConfigValidation.java` and `HitlConfigValidationWiringTest.java` fully. Note the exception type, message prefixing style, and exactly where `AgentStore` invokes it.
+- **Step 2:** Write the failing test `HitlConfigValidationToolApprovalsTest` — one `@Test` per table row above, each building a `ToolApprovalsConfig`, calling `validateToolApprovals`, and asserting the thrown message contains the quoted phrase (use the real exception type discovered in Step 1). Plus one happy-path test: a full valid config passes.
+- **Step 3:** Run: `./mvnw test -Dtest=HitlConfigValidationToolApprovalsTest -q` → COMPILATION ERROR / failures.
+- **Step 4:** Implement: add the `toolApprovals` field + getter/setter to `AgentConfiguration.HitlConfig` (after `pauseReason`, keeping the null-safe-setter style of `timeoutPolicy`); add the same to `LlmConfiguration.Task`; implement `validateToolApprovals` in `HitlConfigValidation` per the table; call it from the existing agent-store validation path (where the outer hitlConfig is validated) and add the equivalent invocation to the LLM store create/update path found in Step 1's grep.
+- **Step 5:** Run: `./mvnw test -Dtest='HitlConfigValidationToolApprovalsTest,HitlConfigValidationTest,HitlConfigValidationWiringTest' -q` → PASS, including all pre-existing tests.
+- **Step 6:** ZIP import: confirm `RestImportService` funnels agent configs through the same store create/update path (it does for the outer hitlConfig per docs/hitl.md:83) — if the LLM configs imported via ZIP bypass the LlmStore validation seam, add the `validateToolApprovals` call to the import path too, with a test.
+- **Step 7: Commit**
 
 ```bash
 git add src/main/java/ai/labs/eddi/configs/agents/model/AgentConfiguration.java src/main/java/ai/labs/eddi/modules/llm/model/LlmConfiguration.java src/main/java/ai/labs/eddi/configs/hitl/HitlConfigValidation.java src/test/java/ai/labs/eddi/configs/hitl/HitlConfigValidationToolApprovalsTest.java
@@ -810,12 +815,12 @@ public enum PauseOrigin { RULE, TOOL_CALL }
 
 with a new 4-arg constructor `(String pausedWorkflowId, int pausedAbsoluteTaskIndex, String pauseReason, PauseOrigin origin)`; the existing 3-arg constructor delegates with `PauseOrigin.RULE` — zero call-site changes.
 
-- [ ] **Step 1: Write the failing test** — `PendingToolCallBatchSnapshotTest`: build a `ConversationMemorySnapshot`, set `hitlPauseType="TOOL_CALL"` and a fully-populated batch (2 calls, one `argsTruncated`), serialize with the same `ObjectMapper` configuration the Mongo store uses (find it: `grep -rn "ObjectMapper" src/main/java/ai/labs/eddi/engine/memory/ src/main/java/ai/labs/eddi/datastore/serialization/` and reuse `IJsonSerialization` if that is the snapshot path), deserialize, assert field-for-field equality. Second test: deserializing a snapshot JSON **without** the new fields yields `null` pauseType and `null` batch (backward compat). Third test: `new ConversationPauseException("wf", 3, "r")` has `getPauseOrigin() == RULE`.
-- [ ] **Step 2:** Run → COMPILATION ERROR.
-- [ ] **Step 3:** Implement all model changes. In the snapshot conversion code, copy `hitlPauseType` and `hitlPendingToolCalls` in BOTH directions everywhere the existing six bookmark fields are copied (there are at least two directions: memory→snapshot on store, snapshot→memory on load — `grep "setHitlPausedWorkflowId"` finds every site). Do NOT copy `hitlResumeDecision`.
-- [ ] **Step 4:** Update `ChatTranscriptCodecTest` from Task 1 to import `PendingToolCallBatch.TRANSCRIPT_MAX_BYTES_DEFAULT` and delete its inlined constant.
-- [ ] **Step 5:** Run: `./mvnw test -Dtest='PendingToolCallBatchSnapshotTest,ChatTranscriptCodecTest,ConversationStateHitlTest' -q` → PASS. The locally-runnable round-trip check is `PendingToolCallBatchSnapshotTest` (pure Jackson). **`MongoConversationMemoryStoreTest` / `PostgresConversationMemoryStoreTest` are `@Testcontainers` ITs (need Docker) — do NOT run them locally; they run in CI.** The new nullable fields must not break them — CI will confirm.
-- [ ] **Step 6: Commit** — `feat(hitl): pause-type discriminator and pending tool-call batch on conversation memory`
+- **Step 1: Write the failing test** — `PendingToolCallBatchSnapshotTest`: build a `ConversationMemorySnapshot`, set `hitlPauseType="TOOL_CALL"` and a fully-populated batch (2 calls, one `argsTruncated`), serialize with the same `ObjectMapper` configuration the Mongo store uses (find it: `grep -rn "ObjectMapper" src/main/java/ai/labs/eddi/engine/memory/ src/main/java/ai/labs/eddi/datastore/serialization/` and reuse `IJsonSerialization` if that is the snapshot path), deserialize, assert field-for-field equality. Second test: deserializing a snapshot JSON **without** the new fields yields `null` pauseType and `null` batch (backward compat). Third test: `new ConversationPauseException("wf", 3, "r")` has `getPauseOrigin() == RULE`.
+- **Step 2:** Run → COMPILATION ERROR.
+- **Step 3:** Implement all model changes. In the snapshot conversion code, copy `hitlPauseType` and `hitlPendingToolCalls` in BOTH directions everywhere the existing six bookmark fields are copied (there are at least two directions: memory→snapshot on store, snapshot→memory on load — `grep "setHitlPausedWorkflowId"` finds every site). Do NOT copy `hitlResumeDecision`.
+- **Step 4:** Update `ChatTranscriptCodecTest` from Task 1 to import `PendingToolCallBatch.TRANSCRIPT_MAX_BYTES_DEFAULT` and delete its inlined constant.
+- **Step 5:** Run: `./mvnw test -Dtest='PendingToolCallBatchSnapshotTest,ChatTranscriptCodecTest,ConversationStateHitlTest' -q` → PASS. The locally-runnable round-trip check is `PendingToolCallBatchSnapshotTest` (pure Jackson). **`MongoConversationMemoryStoreTest` / `PostgresConversationMemoryStoreTest` are `@Testcontainers` ITs (need Docker) — do NOT run them locally; they run in CI.** The new nullable fields must not break them — CI will confirm.
+- **Step 6: Commit** — `feat(hitl): pause-type discriminator and pending tool-call batch on conversation memory`
 
 ---
 
@@ -840,14 +845,14 @@ This is the heart of the feature's first half. After this task, a gated tool cal
 
 **Sub-steps:**
 
-- [ ] **Step 1: Effective config resolution.** In `LlmTask.executeTask`, resolve `ToolApprovalsConfig effectiveToolApprovals = task.getToolApprovals() != null ? task.getToolApprovals() : memory.getAgentToolApprovalsConfig()`. The agent-level config reaches memory via a **transient, non-snapshotted carrier** on `IConversationMemory`/`ConversationMemory` — `getAgentToolApprovalsConfig()`/`setAgentToolApprovalsConfig(ToolApprovalsConfig)` — added in this task, **exactly mirroring the proven `userMemoryConfig` precedent** (`ConversationMemory.java:45` transient field, :200 getter, :205 setter; set in `Conversation.init` :92 from `propertiesHandler`). ⚠️ **Do NOT claim `Conversation` has the `AgentConfiguration` — it does not** (its ctor takes only `executableWorkflows`, memory, `IPropertiesHandler`, renderer). Pick one carrier wiring:
+- **Step 1: Effective config resolution.** In `LlmTask.executeTask`, resolve `ToolApprovalsConfig effectiveToolApprovals = task.getToolApprovals() != null ? task.getToolApprovals() : memory.getAgentToolApprovalsConfig()`. The agent-level config reaches memory via a **transient, non-snapshotted carrier** on `IConversationMemory`/`ConversationMemory` — `getAgentToolApprovalsConfig()`/`setAgentToolApprovalsConfig(ToolApprovalsConfig)` — added in this task, **exactly mirroring the proven `userMemoryConfig` precedent** (`ConversationMemory.java:45` transient field, :200 getter, :205 setter; set in `Conversation.init` :92 from `propertiesHandler`). ⚠️ **Do NOT claim `Conversation` has the `AgentConfiguration` — it does not** (its ctor takes only `executableWorkflows`, memory, `IPropertiesHandler`, renderer). Pick one carrier wiring:
   - **(a) service-side (recommended, least surface):** in `ConversationService`, wherever the pinned agent config is already read for a turn (the same `readAgentConfigPinned()` that `populateHitlTimeoutBookmark` uses at :1542), call `memory.setAgentToolApprovalsConfig(agentCfg.getHitlConfig() != null ? agentCfg.getHitlConfig().getToolApprovals() : null)` at conversation start / say-time so it is present before `LlmTask` runs; OR
   - **(b) properties-handler route:** extend `IPropertiesHandler` with a `getToolApprovalsConfig()` accessor and populate it in `ConversationService.createPropertiesHandler` (4 call sites: :218, :427, :584, :1243), then set it in `Conversation.init` alongside `setUserMemoryConfig` — this is the exact shape the `userMemoryConfig` carrier already uses (`AgentStoreClientLibrary.java:55-56` copies `userMemoryConfig` off `AgentConfiguration`; do the same for `toolApprovals`).
 
   Feature flag: also check `eddi.hitl.tool.enabled` (`@ConfigProperty`, default `true`, injected into `LlmTask`) — when false, effective config is `null` (gate inert; rolling-upgrade control).
   Pass `effectiveToolApprovals` into `agentOrchestrator.executeIfToolsEnabled(...)` as a new parameter (both call sites: `LlmTask:415` cascade-disabled branch and `:433` standard branch; also thread through `CascadingModelExecutor.execute` → its internal `executeIfToolsEnabled` call).
-- [ ] **Step 2: Build `toolSources` during registration.** In `executeWithTools`, alongside every `toolExecutors.put(...)`: built-in loop (:236-242) → `"builtin"`; httpcall merge (:254-257) → `"http"`; mcpcall merge (:260-263) → `"mcp"`; A2A merge (:266-269) → `"a2a"`; and inside `collectEnabledTools`' registration of UserMemoryTool → `"memory"`, ConversationRecallTool → `"recall"`, dynamic tools (createSubAgent/converseWithAgent/findAgentsByCapability/teardownAgent) → `"dynamic"`. (If those latter registrations happen via the same `@Tool`-reflection loop, tag by tool-name membership instead: after the loop, overwrite sources for the known dynamic/memory/recall names. MCP-server tools configured on the task (`McpServerConfig`) also → `"mcp"`.) Missing entries are tolerated — the gate falls back to bare-name matching (fail-safe, tested in Task 2).
-- [ ] **Step 3: Gate hook.** In `executeWithTools`, immediately after `if (aiMessage.hasToolExecutionRequests()) {` (:350), insert the batch classification:
+- **Step 2: Build `toolSources` during registration.** In `executeWithTools`, alongside every `toolExecutors.put(...)`: built-in loop (:236-242) → `"builtin"`; httpcall merge (:254-257) → `"http"`; mcpcall merge (:260-263) → `"mcp"`; A2A merge (:266-269) → `"a2a"`; and inside `collectEnabledTools`' registration of UserMemoryTool → `"memory"`, ConversationRecallTool → `"recall"`, dynamic tools (createSubAgent/converseWithAgent/findAgentsByCapability/teardownAgent) → `"dynamic"`. (If those latter registrations happen via the same `@Tool`-reflection loop, tag by tool-name membership instead: after the loop, overwrite sources for the known dynamic/memory/recall names. MCP-server tools configured on the task (`McpServerConfig`) also → `"mcp"`.) Missing entries are tolerated — the gate falls back to bare-name matching (fail-safe, tested in Task 2).
+- **Step 3: Gate hook.** In `executeWithTools`, immediately after `if (aiMessage.hasToolExecutionRequests()) {` (:350), insert the batch classification:
 
 ```java
 if (aiMessage.hasToolExecutionRequests()) {
@@ -887,7 +892,7 @@ if (aiMessage.hasToolExecutionRequests()) {
 `buildPauseReason`: `cfg.getPauseReason()` with `{toolNames}` replaced by the comma-joined gated names, falling back to `"Tool call requires approval: " + names`. Redact + cap at 500 chars.
 `clearedCallIds`: a `Set<String>` parameter of `executeWithTools`, empty for live turns (Task 9 passes approved ids on resume).
 
-- [ ] **Step 4: Signal plumbing — the three swallow-traps.**
+- **Step 4: Signal plumbing — the three swallow-traps.**
   1. `AgentExecutionHelper.executeWithRetry` — at the very top of `catch (Exception e)` (line 53): `if (e instanceof ai.labs.eddi.engine.hitl.tools.ToolApprovalRequiredException tare) { throw tare; }` (unchecked → compiles without signature change).
   2. `CascadingModelExecutor` — same guard at the top of `catch (Exception e)` (line ~196). The `ExecutionException` unwrap at :253-259 already rethrows the cause, which then reaches :196.
   3. `LifecycleManager.executeTaskRange` — at the top of `catch (LifecycleException | RuntimeException e)` (line 342), BEFORE strict-write failure handling and error counters:
@@ -907,7 +912,7 @@ if (aiMessage.hasToolExecutionRequests()) {
 
 Also audit every other `catch (Exception` / `catch (RuntimeException` / `catch (Throwable` between the gate throw-site and `LifecycleManager` and add the same one-line guard where reachable: run `grep -n "catch (Exception\|catch (RuntimeException\|catch (Throwable" src/main/java/ai/labs/eddi/modules/llm/impl/AgentOrchestrator.java src/main/java/ai/labs/eddi/modules/llm/impl/LlmTask.java src/main/java/ai/labs/eddi/modules/llm/impl/CascadingModelExecutor.java src/main/java/ai/labs/eddi/modules/llm/impl/AgentExecutionHelper.java` and inspect each hit: guards are needed ONLY where the catch encloses the tool loop or a call chain that reaches it (e.g. NOT the RAG catches at LlmTask:251/264 — they run pre-loop). Document each decision in a code comment at the catch site you modify.
 
-- [ ] **Step 5: Pause commit.** `Conversation.pauseConversation` (:451-457) gains:
+- **Step 5: Pause commit.** `Conversation.pauseConversation` (:451-457) gains:
 
 ```java
 private void pauseConversation(ConversationPauseException e) {
@@ -938,9 +943,9 @@ private void pauseConversation(ConversationPauseException e) {
 
 (Mirror the exact `Data`/output pattern of the REJECTED path at :493-496.) The RULE branch above calls `clearToolPauseState()` (defined in Task 4) to defensively null any stray tool batch. **Do NOT change `clearHitlBookmark()`'s contract** — it keeps clearing only the six bookmark fields (Task 4 contract). Add the new `clearToolPauseState()` method to `Conversation` in this task.
 
-- [ ] **Step 6: Stale-batch hygiene.** At the start of each turn (find where `startNextStep`/say-path turn setup runs in `Conversation`), clear any leftover `hitlPendingToolCalls`/`hitlPauseType` when state is not AWAITING_HUMAN (defends against a crash that persisted a batch without the pause committing, and against future code paths that error after the gate trips). One line + WARN log when a stale batch is actually cleared.
-- [ ] **Step 7: pauseReason override scope.** In `ConversationService.populateHitlTimeoutBookmark` (:1534-1556): apply the agent-level `hitlConfig.pauseReason` override **only when** `snapshot.hitlPauseType` is null/`RULE` — a TOOL_CALL pause keeps its tool-specific reason (with tool names) built at gate time.
-- [ ] **Step 8: Tests.**
+- **Step 6: Stale-batch hygiene.** At the start of each turn (find where `startNextStep`/say-path turn setup runs in `Conversation`), clear any leftover `hitlPendingToolCalls`/`hitlPauseType` when state is not AWAITING_HUMAN (defends against a crash that persisted a batch without the pause committing, and against future code paths that error after the gate trips). One line + WARN log when a stale batch is actually cleared.
+- **Step 7: pauseReason override scope.** In `ConversationService.populateHitlTimeoutBookmark` (:1534-1556): apply the agent-level `hitlConfig.pauseReason` override **only when** `snapshot.hitlPauseType` is null/`RULE` — a TOOL_CALL pause keeps its tool-specific reason (with tool names) built at gate time.
+- **Step 8: Tests.**
   `AgentOrchestratorToolPauseTest` (Mockito; mock `ChatModel` returning an `AiMessage` with two tool requests, one matching `requireApproval`):
   - gated call never reaches its executor; ungated call in the same batch executes exactly once (verify mock executor invocations)
   - thrown `ToolApprovalRequiredException` carries a batch with: correct callIds/names/sources/gateReason, serialized transcript containing the AiMessage, `executedUngatedCallNames` listing the ungated call, correct `llmTaskId`
@@ -950,8 +955,8 @@ private void pauseConversation(ConversationPauseException e) {
   `LifecycleManagerToolPauseTest`:
   - a task throwing `ToolApprovalRequiredException` → `ConversationPauseException` with `PauseOrigin.TOOL_CALL` and absolute index `indexOffset + i`; error counter NOT incremented; strict-write rollback NOT invoked
   - `AgentExecutionHelper.executeWithRetry(() -> { throw new ToolApprovalRequiredException(...); }, task, "x")` rethrows the SAME instance, no retry sleep, no LifecycleException wrap
-- [ ] **Step 9:** Run: `./mvnw test -Dtest='AgentOrchestratorToolPauseTest,LifecycleManagerToolPauseTest,LifecycleManagerHitlTest,ConversationHitlTest' -q` → PASS including the pre-existing HITL suites.
-- [ ] **Step 10:** `./mvnw compile -q` then commit: `feat(hitl): tool-approval gate pauses the LLM loop via the conversation pause machinery`
+- **Step 9:** Run: `./mvnw test -Dtest='AgentOrchestratorToolPauseTest,LifecycleManagerToolPauseTest,LifecycleManagerHitlTest,ConversationHitlTest' -q` → PASS including the pre-existing HITL suites.
+- **Step 10:** `./mvnw compile -q` then commit: `feat(hitl): tool-approval gate pauses the LLM loop via the conversation pause machinery`
 
 ---
 
@@ -997,9 +1002,9 @@ public interface IHitlToolJournalStore {
 
 Mongo impl: collection `hitltoolexecutionjournal`; unique compound index `(conversationId, pauseEpoch, callId)`; TTL index on `executedAt` with `eddi.hitl.tool.journal-retention` (default 30 days); `tryClaim` = insert with `status=EXECUTING`, return false on duplicate-key (`MongoWriteException`/`DuplicateKeyException` — catch and return false, don't leak it); `markExecuted` = update set status/result/executedAt. **Result cap 32 KB.** Follow the existing store pattern exactly: **create the indexes in the `@Inject` constructor** (mirror `AgentTriggerStore.java:50` for the unique index, or `MongoScheduleStore.java:98-113` for named `IndexOptions` + TTL — **no store in this repo uses `@PostConstruct` for index creation**); use the same Mongo client injection idiom (`MongoDatabase`/`MongoCollection` via CDI, as those stores do).
 
-- [ ] **Step 1:** Write failing test (use the same test harness the existing Mongo store tests use — check `MongoConversationMemoryStoreTest` for whether it uses an embedded/fake Mongo or is mock-based; mirror it): claim → find returns EXECUTING; markExecuted → find returns EXECUTED with result; second `tryClaim` same key → false; same callId different pauseEpoch → true (independent claim).
-- [ ] **Step 2:** Run → fails. **Step 3:** Implement. **Step 4:** Run → PASS.
-- [ ] **Step 5:** Commit: `feat(hitl): write-ahead journal for approved tool executions`
+- **Step 1:** Write failing test (use the same test harness the existing Mongo store tests use — check `MongoConversationMemoryStoreTest` for whether it uses an embedded/fake Mongo or is mock-based; mirror it): claim → find returns EXECUTING; markExecuted → find returns EXECUTED with result; second `tryClaim` same key → false; same callId different pauseEpoch → true (independent claim).
+- **Step 2:** Run → fails. **Step 3:** Implement. **Step 4:** Run → PASS.
+- **Step 5:** Commit: `feat(hitl): write-ahead journal for approved tool executions`
 
 ---
 
@@ -1051,9 +1056,9 @@ public class ToolCallDecision {
 
 Semantics: calls not listed in `toolDecisions` inherit the top-level verdict. NOTE: the pre-CAS read needs the snapshot — `resumeConversation` already loads state pre-CAS (:1154-1157); load the snapshot's pauseType/batch for validation the same way the 409-state-hint body does (read the existing code first; reuse its snapshot access, do not add a second load if one exists).
 
-- [ ] **Step 1:** Failing test — one `@Test` per table row (Mockito on the store returning a snapshot with a TOOL_CALL batch of two pending calls), asserting 400-mapped exception type + message fragment AND that the CAS/state was never touched (verify no `compareAndSetState` interaction). Plus: valid mixed body passes validation.
-- [ ] **Step 2:** Run → fails. **Step 3:** Implement. **Step 4:** Run + `./mvnw test -Dtest='ConversationServiceResumeTest,ConversationServiceHitlTest' -q` → all PASS (existing bodies unaffected).
-- [ ] **Step 5:** Commit: `feat(hitl): per-tool-call verdicts and amended arguments on the resume decision`
+- **Step 1:** Failing test — one `@Test` per table row (Mockito on the store returning a snapshot with a TOOL_CALL batch of two pending calls), asserting 400-mapped exception type + message fragment AND that the CAS/state was never touched (verify no `compareAndSetState` interaction). Plus: valid mixed body passes validation.
+- **Step 2:** Run → fails. **Step 3:** Implement. **Step 4:** Run + `./mvnw test -Dtest='ConversationServiceResumeTest,ConversationServiceHitlTest' -q` → all PASS (existing bodies unaffected).
+- **Step 5:** Commit: `feat(hitl): per-tool-call verdicts and amended arguments on the resume decision`
 
 ---
 
@@ -1126,9 +1131,9 @@ public void execute(IConversationMemory memory, Object component) throws Lifecyc
 4. Store the result EXACTLY like the normal path stores it (raw response data `:484-485`, trace `:518-521`, output `:527-535`, `prePostUtils.runPostResponse` `:537` — postResponse DOES run: it reacts to the final response, which only now exists). Then `memory.clearToolPauseState()` (nulls batch + resume decision + pauseType).
 5. **Multi-task note:** tasks in `llmConfig.tasks()` before `batch.llmTaskIndex` already ran pre-pause (their step data is committed); tasks after it never ran. After `executeResume` returns the resumed task's result, iterate the remaining matching tasks (`index > batch.llmTaskIndex`) through the NORMAL `executeTask` path so the turn completes fully. Implement by restructuring the task loop: in resume mode, skip tasks with index < batch index, resume at ==, normal-execute >.
 
-- [ ] **Step 1:** Failing tests. `ConversationToolResumeTest` (Mockito on workflows/lifecycle manager): TOOL_CALL pause + APPROVED → `executeLifecycleFromIndex` called with the SAME index (not +1); RULE pause (null pauseType) → +1 unchanged (backward compat); TOOL_CALL + REJECTED → NO short-circuit, same-index re-entry, hitlDecision outputs still written; legacy snapshot without pauseType behaves as RULE. LlmTask side (`LlmTaskResumeModeTest`): resume mode skips RAG/preRequest (verify zero interactions on their mocks), consumes the batch via `resumeToolLoop` (mock orchestrator), stores result + runs postResponse, clears tool-pause state; index/id mismatch → config-drift degradation (public output stored, batch cleared, orchestrator never called); tasks after the resumed index run normally.
-- [ ] **Step 2:** Run → fails. **Step 3:** Implement. **Step 4:** Run new + `ConversationServiceResumeTest` + `ConversationHitlTest` + `RestAgentEngineHitlTest` → all PASS.
-- [ ] **Step 5:** Commit: `feat(hitl): same-index re-entry into LlmTask for tool-call pauses`
+- **Step 1:** Failing tests. `ConversationToolResumeTest` (Mockito on workflows/lifecycle manager): TOOL_CALL pause + APPROVED → `executeLifecycleFromIndex` called with the SAME index (not +1); RULE pause (null pauseType) → +1 unchanged (backward compat); TOOL_CALL + REJECTED → NO short-circuit, same-index re-entry, hitlDecision outputs still written; legacy snapshot without pauseType behaves as RULE. LlmTask side (`LlmTaskResumeModeTest`): resume mode skips RAG/preRequest (verify zero interactions on their mocks), consumes the batch via `resumeToolLoop` (mock orchestrator), stores result + runs postResponse, clears tool-pause state; index/id mismatch → config-drift degradation (public output stored, batch cleared, orchestrator never called); tasks after the resumed index run normally.
+- **Step 2:** Run → fails. **Step 3:** Implement. **Step 4:** Run new + `ConversationServiceResumeTest` + `ConversationHitlTest` + `RestAgentEngineHitlTest` → all PASS.
+- **Step 5:** Commit: `feat(hitl): same-index re-entry into LlmTask for tool-call pauses`
 
 ---
 
@@ -1180,7 +1185,7 @@ The riskiest task. Everything here lives in `AgentOrchestrator` so it shares `ex
 4. **Continue the loop.** Enter the same iteration loop as `executeWithTools` starting at `i = batch.getIterationIndex() + 1` up to the task's `maxToolIterations` (budget continuity — the pause does not launder fresh iterations), with `clearedCallIds` = the approved callIds, gate ACTIVE for new calls (a new gated batch throws `ToolApprovalRequiredException` again → re-pause; `pauseCountThisTurn` carries from `batch.getPauseCountThisTurn()`, `autoApproveCount` per Task 10). Merge `batch.getTraceSoFar()` + new trace entries into the returned `ExecutionResult`. Wrap the loop in `AgentExecutionHelper.executeWithRetry` exactly like the live path (the rethrow guard from Task 5 lets re-pauses escape).
 5. Return `new ExecutionResult(finalText, mergedTrace)`.
 
-- [ ] **Step 1:** Failing tests (mock ChatModel scripted per scenario; mock journal store; mock executors):
+- **Step 1:** Failing tests (mock ChatModel scripted per scenario; mock journal store; mock executors):
   - approve-all: both tools execute once, journal claim+markExecuted per call, results appended by callId, model called again, final text returned, trace merged
   - reject-all: NO executor invocation, rejection envelopes contain the note, model produces final text (verify the messages list passed to the final `chat()` contains the envelopes)
   - mixed + amendment: approved call executes with amended args; envelope has `argsAmendedByReviewer:true`; rejected call gets note
@@ -1189,8 +1194,8 @@ The riskiest task. Everything here lives in `AgentOrchestrator` so it shares `ex
   - transcript codec failure → fallback rebuild path: history builder invoked, reconstructed AiMessage carries the batch's callIds, gated approved call still executes
   - re-pause: model's next response contains a NEW gated call → `ToolApprovalRequiredException` with a fresh pauseEpoch and `pauseCountThisTurn = old + 1`
   - iteration budget: `batch.iterationIndex = maxToolIterations - 1` → after verdicts, loop makes at most one more model call
-- [ ] **Step 2:** Run → fails. **Step 3:** Implement (extraction refactor first, then resumeToolLoop; run `AgentOrchestratorToolPauseTest` after the extraction to prove the live path is unbroken). **Step 4:** All orchestrator tests PASS.
-- [ ] **Step 5:** Commit: `feat(hitl): journal-protected resume of gated tool calls with transcript replay`
+- **Step 2:** Run → fails. **Step 3:** Implement (extraction refactor first, then resumeToolLoop; run `AgentOrchestratorToolPauseTest` after the extraction to prove the live path is unbroken). **Step 4:** All orchestrator tests PASS.
+- **Step 5:** Commit: `feat(hitl): journal-protected resume of gated tool calls with transcript replay`
 
 ---
 
@@ -1213,9 +1218,9 @@ The riskiest task. Everything here lives in `AgentOrchestrator` so it shares `ex
    **Audit per guard:** every guard activation writes an audit-ledger entry, not just a metric — `hitl.tool.pause_cap` (from Task 5's cap branch — thread the audit collector so the DENIED path can audit), `hitl.tool.auto_approve_cap`, and `hitl.tool.no_progress`. Each entry records the guard name, the fingerprint (for no-progress), and `decidedBy`. This satisfies the "audit per guard" requirement literally.
 5. **Audit detail extension** in `auditHitlDecision` (:1390-1413): when TOOL_CALL, add `pauseType`, and a `toolDecisions` summary list `[{callId, verdict, amended:bool, toolName}]` + per-call SHA-256 `argsDigest` (never raw args in the ledger).
 
-- [ ] **Step 1:** Failing tests: inherited AUTO_APPROVE demoted to WAIT_INDEFINITELY (no schedule armed); explicit tool-level AUTO_APPROVE honored (schedule armed, timeout fires → resume path invoked with system:timeout); identical-fingerprint re-pause after system approval with default policy → new pause has WAIT_INDEFINITELY + audit entry; AUTO_REJECT no-progress → reject-all resume; human decision resets the counter; audit detail contains argsDigest not raw args.
-- [ ] **Step 2:** Run → fails. **Step 3:** Implement. **Step 4:** Run + full existing HITL service suites (`ConversationServiceHitlTest`, `ConversationServiceSayHitlTest`, `ConversationServiceResumeTest`) → PASS.
-- [ ] **Step 5:** Commit: `feat(hitl): tool-pause timeout policy scoping and no-progress guards`
+- **Step 1:** Failing tests: inherited AUTO_APPROVE demoted to WAIT_INDEFINITELY (no schedule armed); explicit tool-level AUTO_APPROVE honored (schedule armed, timeout fires → resume path invoked with system:timeout); identical-fingerprint re-pause after system approval with default policy → new pause has WAIT_INDEFINITELY + audit entry; AUTO_REJECT no-progress → reject-all resume; human decision resets the counter; audit detail contains argsDigest not raw args.
+- **Step 2:** Run → fails. **Step 3:** Implement. **Step 4:** Run + full existing HITL service suites (`ConversationServiceHitlTest`, `ConversationServiceSayHitlTest`, `ConversationServiceResumeTest`) → PASS.
+- **Step 5:** Commit: `feat(hitl): tool-pause timeout policy scoping and no-progress guards`
 
 ---
 
@@ -1235,9 +1240,9 @@ The riskiest task. Everything here lives in `AgentOrchestrator` so it shares `ex
 - `PendingApprovalSummary` gains `pauseType` (String) and `toolNames` (List<String> — names only, no args) so inbox lists can badge tool pauses. Populate in **`ConversationMemoryStore.collectPendingSummaries()` :242-246** (the 6-arg ctor + `setApprovalTimeout` site — add the two new fields there).
 - The `detail=full` authz behavior is untouched (approver-only-while-paused already implemented).
 
-- [ ] **Step 1:** Failing tests: TOOL_CALL snapshot → pauseDetails carries redacted args only (assert the raw `argumentsRaw` value does NOT appear anywhere in the response), executedUngatedCalls present; **an `EXECUTING` journal entry for a callId → that callId appears in `outcomeUnknown`** (mock `IHitlToolJournalStore.find` returning EXECUTING); no journal entries → `outcomeUnknown` empty; RULE snapshot → type RULE with actions list; legacy snapshot (null pauseType) → type RULE; pending-approvals entries carry pauseType + toolNames.
-- [ ] **Step 2-4:** Red → implement → green (+ `RestConversationStoreTest`, `RestAgentEngineHitlTest` still PASS).
-- [ ] **Step 5:** Commit: `feat(hitl): structured pauseDetails for tool and rule pauses`
+- **Step 1:** Failing tests: TOOL_CALL snapshot → pauseDetails carries redacted args only (assert the raw `argumentsRaw` value does NOT appear anywhere in the response), executedUngatedCalls present; **an `EXECUTING` journal entry for a callId → that callId appears in `outcomeUnknown`** (mock `IHitlToolJournalStore.find` returning EXECUTING); no journal entries → `outcomeUnknown` empty; RULE snapshot → type RULE with actions list; legacy snapshot (null pauseType) → type RULE; pending-approvals entries carry pauseType + toolNames.
+- **Step 2-4:** Red → implement → green (+ `RestConversationStoreTest`, `RestAgentEngineHitlTest` still PASS).
+- **Step 5:** Commit: `feat(hitl): structured pauseDetails for tool and rule pauses`
 
 ---
 
@@ -1253,7 +1258,7 @@ The riskiest task. Everything here lives in `AgentOrchestrator` so it shares `ex
 - The existing state+bookmark-driven notification flow (`notifyApprovers`, `loadHitlBookmark` retry) requires NO dispatch changes — verify with a test that a TOOL_CALL pause triggers the notification exactly like a RULE pause.
 - Continuation push: `HitlResumeCompletedEvent` observers already post the resumed output; the tool-resume path produces normal output (Task 8/9) → works unchanged; add one test asserting the resumed final text reaches the thread-post call.
 
-- [ ] Steps: failing test → implement → green (`SlackInteractivityHandlerTest` untouched and passing). Commit: `feat(hitl): tool-pause detail blocks in Slack approval messages`
+- Steps: failing test → implement → green (`SlackInteractivityHandlerTest` untouched and passing). Commit: `feat(hitl): tool-pause detail blocks in Slack approval messages`
 
 ---
 
@@ -1269,7 +1274,7 @@ The riskiest task. Everything here lives in `AgentOrchestrator` so it shares `ex
 2. **Group members:** when a member conversation tool-pauses during a group turn (the group's `executeAgentTurn` awaits the member future and observes the pause), the group auto-resolves it with `HitlDecision(REJECTED, decidedBy="system:group", note="tool approval is not available during group discussions in this version")` — routed through the NORMAL resume path (so the member's LLM receives rejection tool-results, Task 9, and produces a coherent tool-less answer that becomes its turn contribution when the resume completes synchronously; if the resume cannot complete within the member-turn budget, fall back to the existing member-pause handling: turn recorded SKIPPED + `member_pause_skipped` SSE + audited auto-cancel). Read the existing member-pause auto-cancel code first (`grep -rn "member_pause_skipped\|system:group" src/main/java`) and extend it minimally: the DIFFERENCE for tool pauses is the graceful system-rejection attempt before falling back to cancel. Metric: reuse `eddi_group_member_pause_skipped_count`.
 3. `inGroupTurns` config: v1 only supports `REJECT` (above). `INBOX` was already rejected at save time (Task 3).
 
-- [ ] Steps: failing tests → implement → green (all existing group HITL tests still pass: `GroupConversationServiceHitlTest`). Commit: `feat(hitl): tool-pause parity for delegated conversations and group-member policy`
+- Steps: failing tests → implement → green (all existing group HITL tests still pass: `GroupConversationServiceHitlTest`). Commit: `feat(hitl): tool-pause parity for delegated conversations and group-member policy`
 
 ---
 
@@ -1289,7 +1294,7 @@ The riskiest task. Everything here lives in `AgentOrchestrator` so it shares `ex
 
 **Also (review follow-up — real-codec round-trip):** the Task 4 unit test `PendingToolCallBatchSnapshotTest` only proves the POJOs are bean-shaped via a plain Jackson `ObjectMapper`. Add a **Testcontainers** round-trip in `MongoConversationMemoryStoreTest` (CI-only) that stores a `ConversationMemorySnapshot` with `hitlPauseType="TOOL_CALL"` and a fully-populated `PendingToolCallBatch` (incl. `traceSoFar` with a nested `Map<String,Object>` and two calls) via `store.storeConversationMemorySnapshot`, loads it back, and asserts every batch field survives — this exercises the real `JacksonCodec` (BSON-backed) path the unit test cannot. Mirror it for Postgres (JSONB) if that store's test harness exists.
 
-- [ ] Steps: tests → (minimal) fixes → green. Commit: `test(hitl): crash-recovery, retention and undeploy coverage for tool pauses`
+- Steps: tests → (minimal) fixes → green. Commit: `test(hitl): crash-recovery, retention and undeploy coverage for tool pauses`
 
 ---
 
@@ -1304,7 +1309,7 @@ The riskiest task. Everything here lives in `AgentOrchestrator` so it shares `ex
 1. **Near-miss lint (rules save):** for every action name in a saved ruleset, if it is a case-variant or Levenshtein-distance ≤ 2 of a reserved action (`PAUSE_CONVERSATION`, `STOP_CONVERSATION`, `CONVERSATION_START`, `CONVERSATION_END`) **and not exactly equal** → WARN log + warnings entry (non-fatal; a legitimate action may legally resemble the name). Reuse `ToolApprovalPatterns.levenshtein` (make it public or move to a shared util — executor's choice, keep it in one place).
 2. **Nothing-can-pause lint (deployment):** when a deployed agent has `hitlConfig` set (any field) AND no referenced ruleset emits `PAUSE_CONVERSATION` AND `hitlConfig.toolApprovals.requireApproval` is empty/absent → WARN log `"agent <id>: hitlConfig is configured but nothing in this agent can trigger a pause"` (+ deployment-descriptor warning if the deployment response supports warnings — inspect first, WARN-log-only is acceptable).
 
-- [ ] Steps: failing tests (exact-match not flagged; `PAUSE_CONVERSATON` flagged; `pause_conversation` flagged; unrelated names not flagged; deployment warn fires only in the configured-but-inert case) → implement → green. Commit: `feat(hitl): save-time lint for reserved-action near-misses and inert hitlConfig`
+- Steps: failing tests (exact-match not flagged; `PAUSE_CONVERSATON` flagged; `pause_conversation` flagged; unrelated names not flagged; deployment warn fires only in the configured-but-inert case) → implement → green. Commit: `feat(hitl): save-time lint for reserved-action near-misses and inert hitlConfig`
 
 ---
 
@@ -1316,7 +1321,7 @@ The riskiest task. Everything here lives in `AgentOrchestrator` so it shares `ex
 
 **Scenarios (as far as the harness allows):** gated call pauses (409 on say, approval-status shows pauseDetails) → approve via REST → turn completes with tool executed once → journal has EXECUTED entry; reject-all → graceful answer, no execution; toolDecisions validation 400s end-to-end.
 
-- [ ] Write ITs; run `./mvnw compile -q` and the full local unit suite `./mvnw test -q` (NOT the ITs — CI-only). Fix any regression. Commit: `test(hitl): tool-pause integration tests (CI)`
+- Write ITs; run `./mvnw compile -q` and the full local unit suite `./mvnw test -q` (NOT the ITs — CI-only). Fix any regression. Commit: `test(hitl): tool-pause integration tests (CI)`
 
 ---
 
@@ -1328,7 +1333,7 @@ The riskiest task. Everything here lives in `AgentOrchestrator` so it shares `ex
 - Modify: `docs/changelog.md` — full entry per repo conventions (date, branch `feat/hitl-framework`, files + reasoning, the 5 product decisions from the decision record, what's next).
 - Modify: `planning/hitl-framework-plan.md` — flip "Tool-level HITL: Deferred" to "Implemented — see planning/hitl-tool-approval-plan.md".
 
-- [ ] Write docs; commit together with nothing else: `docs(hitl): tool-level approval gating reference and upgrade notes`
+- Write docs; commit together with nothing else: `docs(hitl): tool-level approval gating reference and upgrade notes`
 
 ---
 
