@@ -180,7 +180,7 @@ public class ToolResultGuardrail {
         if (meterRegistry == null) {
             return;
         }
-        meterRegistry.counter("guardrail.toolresult.count", "action", action, "source", source == null ? "unknown" : source).increment();
+        meterRegistry.counter("eddi.guardrail.toolresult.count", "action", action, "source", source == null ? "unknown" : source).increment();
     }
 
     /** Strips CR/LF so a remote-supplied name cannot forge extra log lines. */

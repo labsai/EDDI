@@ -196,6 +196,16 @@ property** — the ledger is append-only by design; see
 
 ---
 
+## GDPR / CCPA
+
+Full guide: [gdpr-compliance.md](gdpr-compliance.md).
+
+| Property | Default | Description |
+|---|---|---|
+| `eddi.gdpr.restriction-cache-ttl-seconds` | `0` | How long an Art. 18 restriction verdict may be reused without re-reading the store. **`0` — the default — switches the cache off**, so every check reads the store. The cache is node-local with no cross-node invalidation, so a cached "not restricted" on one node keeps a restricted user being processed for the length of the TTL after another node applies the restriction, and keeps answering from cache through a store outage instead of failing closed. Raise it only on a single-node deployment or one with conversation affinity |
+
+---
+
 ## Human-in-the-Loop
 
 Full guide: [hitl.md](hitl.md).
@@ -291,6 +301,18 @@ Full guide: [import-export-an-agent.md](import-export-an-agent.md).
 | `eddi.a2a.tool-description.max-chars` | `1024` | Truncation cap on peer tool descriptions |
 | `eddi.a2a.signing.nonce.max-age-ms` | `300000` (5 min) | Replay window for signed requests |
 | `eddi.a2a.signing.nonce.clock-skew-ms` | `30000` | Tolerated clock difference between peers |
+| `eddi.a2a.task-timeout-seconds` | `systemRuntime.agentTimeoutInSeconds` | How long a peer's `tasks/send` may wait for the turn. Inherits the REST surface's budget, because an operator who raised that has already decided how long a turn may take |
+
+### Slack
+
+Full guide: [slack-integration.md](slack-integration.md).
+
+| Property | Default | Description |
+|---|---|---|
+| `eddi.slack.request-timeout-seconds` | `60` | How long a single agent turn may take before Slack is told it timed out. A turn that legitimately runs longer — a multi-step tool call, a slow provider, a cascade escalation — needs this raised, and answers with a timeout-specific notice naming the limit rather than a generic error |
+| `eddi.slack.group-completion-timeout-seconds` | `300` | How long a whole group discussion may take before follow-up routing gives up |
+| `eddi.slack.api-max-retries` | `3` | Attempts, including the first, for a Slack Web API call |
+| `eddi.slack.api-retry-base-ms` | `500` | Base delay for the exponential backoff between those attempts |
 
 ### OpenAI-compatible API
 

@@ -303,8 +303,20 @@ class ConversationExtendedTest {
             verify(store).getVisibleEntries("u1", "a1", List.of(), "oldest_first", 50);
         }
 
+        /**
+         * No config and an empty config must recall the same number of entries.
+         * <p>
+         * They did not. {@code Conversation} held its own
+         * {@code DEFAULT_MAX_RECALL_ENTRIES = 1000} for the absent-config case while
+         * {@code UserMemoryConfig.maxRecallEntries} defaults to 50, so adding a
+         * {@code userMemoryConfig} block for an unrelated reason — to set
+         * {@code defaultVisibility}, say — cut recall twentyfold in a diff that never
+         * mentions {@code maxRecallEntries}. Nothing above DEBUG said so, and templates
+         * for the dropped keys render empty rather than failing. This test used to pin
+         * the 1000 side of that divergence; it now pins the agreement.
+         */
         @Test
-        @DisplayName("init uses default recall settings when no UserMemoryConfig")
+        @DisplayName("init recalls the same depth with no UserMemoryConfig as with an empty one")
         void initUsesDefaultRecallSettings() throws Exception {
             var store = mock(IUserMemoryStore.class);
             when(propertiesHandler.getUserMemoryStore()).thenReturn(store);
@@ -312,13 +324,16 @@ class ConversationExtendedTest {
             when(memory.getAgentId()).thenReturn("a1");
             when(memory.getUserMemoryConfig()).thenReturn(null);
 
-            when(store.getVisibleEntries("u1", "a1", List.of(), "most_recent", 1000))
+            var defaults = new AgentConfiguration.UserMemoryConfig();
+            when(store.getVisibleEntries("u1", "a1", List.of(), defaults.getRecallOrder(), defaults.getMaxRecallEntries()))
                     .thenReturn(List.of());
 
             var conv = createConversation();
             conv.init(new HashMap<>());
 
-            verify(store).getVisibleEntries("u1", "a1", List.of(), "most_recent", 1000);
+            // Asserted against the config's own defaults rather than a literal, so the
+            // two cannot drift apart again without this failing.
+            verify(store).getVisibleEntries("u1", "a1", List.of(), defaults.getRecallOrder(), defaults.getMaxRecallEntries());
         }
 
         @Test

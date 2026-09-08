@@ -73,6 +73,25 @@ class ConfigurationReferenceCoverageTest {
     private static final Pattern EXPRESSION = Pattern.compile("\\$\\{(eddi\\.[\\w.\\-]+):");
 
     /**
+     * A property name held in a {@code String} constant, e.g.
+     * {@code static final String MODE_PROPERTY = "eddi.hitl.tool.task-approvals.mode";}.
+     * <p>
+     * Group 1 is the constant's name, group 2 the property. Both are needed: the
+     * declaration alone is not evidence of anything — this codebase also holds
+     * {@code eddi.}-prefixed constants that are name <em>prefixes</em> and JAX-RS
+     * request-context keys, neither of which is configuration. So a match only
+     * counts when the same file also uses that constant where a property name goes,
+     * which {@link #CONFIG_USE} checks.
+     */
+    private static final Pattern CONSTANT = Pattern.compile("static final String (\\w+)\\s*=\\s*\"(eddi\\.[\\w.\\-]+)\"");
+
+    /**
+     * A constant being used as a property name: injected, looked up, or read
+     * through {@code getConfig()}. {@code %s} is the constant's identifier.
+     */
+    private static final String CONFIG_USE = "(?:@ConfigProperty\\(\\s*name\\s*=\\s*|getOptionalValue\\(\\s*|getValue\\(\\s*)%s\\b";
+
+    /**
      * Any {@code `eddi.…`} code span in the reference — how every property is
      * written there.
      */
@@ -87,6 +106,26 @@ class ConfigurationReferenceCoverageTest {
      * reference table where it reads as something to configure.
      */
     private static final Set<String> ALLOWED_WITHOUT_CODE = Set.of();
+
+    /**
+     * Documented keys that {@code application.properties} declares but no Java
+     * source reads.
+     * <p>
+     * A key here is not automatically wrong — a build-time or profile-selected knob
+     * legitimately has no {@code @ConfigProperty} — but it has to be argued for
+     * rather than merely typed, which is the difference this set exists to make.
+     * {@link #referenceInventsNothing()} used to accept every such key silently,
+     * because declaring one counted as proof that something read it.
+     * <p>
+     * Each entry needs a line saying who consumes it. An entry with no such line is
+     * a defect waiting to be found, not an exemption.
+     */
+    private static final Set<String> DECLARED_BUT_UNREAD = Set.of(
+            // Selects the messaging implementation at build time via @IfBuildProfile,
+            // so no runtime injection point reads the value itself.
+            "eddi.messaging.type",
+            // Consumed by the NATS extension's own configuration, not by EDDI code.
+            "eddi.nats.ack-wait-seconds");
 
     @Test
     @DisplayName("every eddi.* property the code reads is in the configuration reference")
@@ -113,13 +152,13 @@ class ConfigurationReferenceCoverageTest {
     @DisplayName("the configuration reference names no property the code does not read")
     void referenceInventsNothing() {
         Path root = repoRoot();
-        var declared = collectProperties(root).keySet();
+        var readByJava = propertiesReadByJava(root).keySet();
 
         var invented = new TreeSet<String>();
         Matcher m = REFERENCED.matcher(read(root.resolve(REFERENCE)));
         while (m.find()) {
             String name = m.group(1);
-            if (!declared.contains(name) && !ALLOWED_WITHOUT_CODE.contains(name)) {
+            if (!readByJava.contains(name) && !ALLOWED_WITHOUT_CODE.contains(name) && !DECLARED_BUT_UNREAD.contains(name)) {
                 invented.add(name);
             }
         }
@@ -202,7 +241,14 @@ class ConfigurationReferenceCoverageTest {
      */
     private static final Set<String> COUNTER_EXAMPLES = Set.of("EDDI_VAULT_MASTERKEY", "EDDI_AUDIT_RETENTIONDAYS");
 
-    /** Property name → a short note on where the code reads it. */
+    /**
+     * Property name → a short note on where the code reads it, for every property
+     * this deployment knows about: declared in {@code application.properties},
+     * injected, looked up, or interpolated in an expression.
+     * <p>
+     * Used by {@link #referenceIsExhaustive()}, where a declared-but-unread key
+     * still needs documenting.
+     */
     private static TreeMap<String, String> collectProperties(Path root) {
         var found = new TreeMap<String, String>();
 
@@ -210,19 +256,55 @@ class ConfigurationReferenceCoverageTest {
         while (declared.find()) {
             found.putIfAbsent(declared.group(1), "application.properties");
         }
+        found.putAll(propertiesReadByJava(root));
 
+        assertTrue(found.size() > 80,
+                "expected to find the project's configuration properties; found only " + found.size()
+                        + ". The extraction patterns have probably drifted from how properties are read.");
+        return found;
+    }
+
+    /**
+     * Property name → the source file that reads it, counting <em>only</em> Java:
+     * {@code @ConfigProperty}, a {@code getOptionalValue} lookup, or a
+     * {@code ${...}} expression.
+     * <p>
+     * Keeping this separate from {@link #collectProperties} is the whole point.
+     * {@link #referenceInventsNothing()} used to compare against that method, which
+     * seeds itself from {@code application.properties} first — so writing a key in
+     * the properties file was itself treated as proof that something reads it. A
+     * documented key no Java source touches therefore passed the very assertion
+     * whose failure message describes that situation: "nothing reads them, so
+     * setting one is a silent no-op". Two real defects sat in that gap.
+     */
+    private static TreeMap<String, String> propertiesReadByJava(Path root) {
+        var found = new TreeMap<String, String>();
         for (Path file : javaSources(root.resolve(Path.of("src", "main", "java")))) {
             String body = read(file);
             String relative = root.relativize(file).toString().replace('\\', '/');
             record(INJECTED.matcher(body), found, relative);
             record(LOOKED_UP.matcher(body), found, relative);
             record(EXPRESSION.matcher(body), found, relative);
+            recordConstants(body, found, relative);
         }
-
-        assertTrue(found.size() > 80,
-                "expected to find the project's configuration properties; found only " + found.size()
-                        + ". The extraction patterns have probably drifted from how properties are read.");
         return found;
+    }
+
+    /**
+     * Records a property named by a constant, but only when that constant is
+     * actually handed to the config API somewhere in the same file. Without the
+     * second half, a name prefix or a request-context key would be
+     * indistinguishable from a configuration property.
+     */
+    private static void recordConstants(String body, TreeMap<String, String> into, String source) {
+        Matcher m = CONSTANT.matcher(body);
+        while (m.find()) {
+            String identifier = m.group(1);
+            String property = m.group(2);
+            if (Pattern.compile(String.format(CONFIG_USE, Pattern.quote(identifier))).matcher(body).find()) {
+                into.putIfAbsent(property, source);
+            }
+        }
     }
 
     private static void record(Matcher matcher, TreeMap<String, String> into, String source) {

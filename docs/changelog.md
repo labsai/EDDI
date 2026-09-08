@@ -49,6 +49,77 @@ bottom of this file and are never archived.
 
 ---
 
+## ⚙️ fix(config): fifteen configuration defects, from scheduler units to a nine-megabyte orphan (2026-09-07)
+
+**Repo:** EDDI (`fix/review-quickwins-config`)
+
+Slice 2 of the code-review quick-win backlog (`planning/code-review-backlog/`). Fifteen findings
+whose common shape is a knob that does not do what it says.
+
+**Two were live defects.** `@Scheduled(delay = N)` is measured in **minutes**, and two jobs were
+written as though it were seconds: the deployment check started ten minutes after boot rather than
+ten seconds, and the daily maintenance job — which undeploys superseded agent versions and ends
+idle conversations — first ran five hours in, so a pod restarted more often than that never ran it
+at all. Both now use `delayed = "10s"` / `"5m"`, which carries its unit, plus
+`ConcurrentExecution.SKIP`. Separately, the properties migration renamed the legacy collection into
+a backup even when entries had failed to migrate; because `collectionExists` is then false, that
+made the migration a permanent no-op, so a transient error on three of four hundred users stranded
+those users' long-term properties in the backup collection. The rename is now conditional on a
+clean run, and the loop is idempotent so the next boot retries.
+
+**Two settings could not fire at all.** `quarkus.mcp-server.http.root-path` is not a key the MCP
+extension knows — the namespace is `quarkus.mcp.server.*` — so changing it moved nothing while the
+auth rule kept guarding the old path. And `ComplianceStartupChecks` read
+`quarkus.http.ssl.certificate.file`, singular; the real keys are plural, so the TLS warning fired
+for operators who had configured TLS correctly and — worse — following the banner's own advice
+silenced it while Quarkus ignored the key, leaving the check reporting satisfied on a plaintext
+listener.
+
+**Three defaults disagreed with themselves.** `Conversation` held its own
+`DEFAULT_MAX_RECALL_ENTRIES = 1000` for the absent-config case while `UserMemoryConfig` defaults to
+50, so adding a `userMemoryConfig` block for an unrelated reason cut long-term recall twentyfold in
+a diff that never mentions the field. `WorkspaceSettings` validated an operator's value in a lazily
+created bean, so a typo booted green and threw a 500 on the first guarded request — and on every
+request after it. `TaskForceEngine` ignored the designer's `inputTemplate` at all three of its
+phases, which is the whole TASK_FORCE style, so the phase-template mechanism was inert end to end
+for that style.
+
+**Four things were hard-coded that the neighbouring surface treats as configuration.** The A2A turn
+timeout, the Slack turn timeout and retry budget, and the LLM refusal heuristic — four English
+prefixes, so a German- or Japanese-language agent's `onRefusal` guardrail could never fire while
+the prefixes over-matched a legitimate "I cannot confirm that from the data provided". All are now
+configurable, defaulting to exactly the constants they replace. Slack also answers a timeout with a
+notice naming the limit rather than a generic error.
+
+**And two were dead weight.** 9.3 MB of orphaned Manager build output — a complete second Vite
+build, 19 files that only imported each other — shipped in every jar and image. The immutable
+one-year cache header matched an un-hashed script loaded by the landing page every visitor hits
+first, so a fix to it would have gone unseen for up to a year with no revalidation request even
+sent.
+
+**Decision — fail safe on a value that would disable a surface.** A zero or negative Slack timeout,
+or a retry budget below one, is ignored in favour of the shipped default. Honouring it would take
+the channel down on a typo, and an operator who meant to disable Slack has a better way to say so.
+
+**Decision — de-anchor the metrics guard rather than exempt the meters.** Fourteen meters across
+Dream, connection resolution, summarization and guardrails dropped the `eddi` prefix, and
+`MetricsDashboardCoverageTest`'s regexes required it — so the guard that exists to make an unwatched
+meter impossible could not see them, which is how they came to be absent from the metrics reference
+on a green build. They are renamed, the dashboard follows, and the anchor is gone so the next
+unprefixed meter fails rather than hides. The same shape applies to
+`ConfigurationReferenceCoverageTest`: it treated a declaration in `application.properties` as proof
+the code reads a key, so a documented-but-unwired key passed the very assertion whose failure
+message describes that situation. Split in two, it immediately surfaced a real one —
+`eddi.gdpr.restriction-cache-ttl-seconds`, injected and undocumented.
+
+**Files:** eleven production classes, one new (`SlackConfig`), `application.properties`, the
+metrics dashboard, six pages under `docs/`, and eight test classes — three new
+(`StaticAssetCachingTest`, `ScheduledDelayUnitsTest`, `WorkspaceSettingsTest`, `SlackConfigTest`).
+
+**Next:** slice 3 — API consistency across the REST surface.
+
+---
+
 ## 📘 docs: correct 23 false claims and pin them with a guard test (2026-09-07)
 
 **Repo:** EDDI (`docs/review-quickwins-docs`)

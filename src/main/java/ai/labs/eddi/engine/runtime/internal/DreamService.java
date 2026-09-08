@@ -141,13 +141,13 @@ public class DreamService {
 
     @PostConstruct
     void initMetrics() {
-        usersProcessedCounter = meterRegistry.counter("dream.users.processed");
-        entriesPrunedCounter = meterRegistry.counter("dream.entries.pruned");
-        contradictionsFoundCounter = meterRegistry.counter("dream.contradictions.found");
-        entriesSummarizedCounter = meterRegistry.counter("dream.entries.summarized");
-        cyclesFailedCounter = meterRegistry.counter("dream.cycles.failed");
-        summarizationFailedCounter = meterRegistry.counter("dream.summarization.failed");
-        dreamDurationTimer = meterRegistry.timer("dream.duration");
+        usersProcessedCounter = meterRegistry.counter("eddi.dream.users.processed");
+        entriesPrunedCounter = meterRegistry.counter("eddi.dream.entries.pruned");
+        contradictionsFoundCounter = meterRegistry.counter("eddi.dream.contradictions.found");
+        entriesSummarizedCounter = meterRegistry.counter("eddi.dream.entries.summarized");
+        cyclesFailedCounter = meterRegistry.counter("eddi.dream.cycles.failed");
+        summarizationFailedCounter = meterRegistry.counter("eddi.dream.summarization.failed");
+        dreamDurationTimer = meterRegistry.timer("eddi.dream.duration");
     }
 
     /**

@@ -57,9 +57,9 @@ public class SummarizationService {
 
     @PostConstruct
     void initMetrics() {
-        callCounter = meterRegistry.counter("summarization.calls");
-        errorCounter = meterRegistry.counter("summarization.errors");
-        durationTimer = meterRegistry.timer("summarization.duration");
+        callCounter = meterRegistry.counter("eddi.summarization.calls");
+        errorCounter = meterRegistry.counter("eddi.summarization.errors");
+        durationTimer = meterRegistry.timer("eddi.summarization.duration");
     }
 
     /**

@@ -51,7 +51,7 @@ class SummarizationServiceTest {
 
         // Then
         assertEquals("Concise summary of the conversation", result);
-        assertEquals(1.0, meterRegistry.counter("summarization.calls").count());
+        assertEquals(1.0, meterRegistry.counter("eddi.summarization.calls").count());
     }
 
     @Test
@@ -112,7 +112,7 @@ class SummarizationServiceTest {
         // Then
         assertEquals("", result);
         // Metrics should still record the duration (finally block)
-        assertTrue(meterRegistry.timer("summarization.duration").count() > 0);
+        assertTrue(meterRegistry.timer("eddi.summarization.duration").count() > 0);
     }
 
     @Test
@@ -143,8 +143,8 @@ class SummarizationServiceTest {
                 () -> service.summarizeWithUsage("text", "instructions", "anthropic", "model"));
 
         // Metrics should still record the error and duration
-        assertEquals(1.0, meterRegistry.counter("summarization.errors").count());
-        assertTrue(meterRegistry.timer("summarization.duration").count() > 0);
+        assertEquals(1.0, meterRegistry.counter("eddi.summarization.errors").count());
+        assertTrue(meterRegistry.timer("eddi.summarization.duration").count() > 0);
     }
 
     @Test
@@ -182,6 +182,6 @@ class SummarizationServiceTest {
 
         // The cause should be the original checked exception
         assertInstanceOf(ChatModelRegistry.UnsupportedLlmTaskException.class, ex.getCause());
-        assertEquals(1.0, meterRegistry.counter("summarization.errors").count());
+        assertEquals(1.0, meterRegistry.counter("eddi.summarization.errors").count());
     }
 }
