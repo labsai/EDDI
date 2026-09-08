@@ -292,9 +292,11 @@ Notes and current limits:
   cannot both be told there is room for one more.
 - **A message that mentions the bot is not observed.** Slack delivers a channel
   mention twice, as `message` and as `app_mention`; the second is the one that
-  routes, so observing the first would answer the same sentence again. Detected
-  by a leading `<@…>`, the same test the thread-reply path uses — a mention
-  buried mid-sentence is not caught.
+  routes, so observing the first would answer the same sentence again. The
+  bot's own user id comes from the event envelope's `authorizations`, so a
+  mention anywhere in the text is recognised and a mention of somebody else is
+  not. An envelope carrying no bot authorization falls back to detecting a
+  leading `<@…>`.
 - **The dollar ceiling is approximate by nature.** A turn's cost exists only
   once it has run, so spend already in flight is not yet booked against the day.
   The ceiling can be exceeded by the cost of the turns running when it is

@@ -22,6 +22,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -125,7 +126,7 @@ public class RestSlackWebhook {
                     LOGGER.debugf("Slack event received: type=%s, event_id=%s", sanitize(eventType), sanitize(eventId));
 
                     // Delegate to handler (async — returns immediately)
-                    eventHandler.handleEventAsync(eventId, event);
+                    eventHandler.handleEventAsync(eventId, event, botUserId(payload));
                 }
             }
 
@@ -233,4 +234,32 @@ public class RestSlackWebhook {
         }
         return null;
     }
+    /**
+     * This app's own Slack user id, from the event envelope.
+     *
+     * Slack puts it on {@code authorizations[].user_id} for the entry whose
+     * {@code is_bot} is true, on every {@code event_callback}. Taking it from here
+     * rather than calling {@code auth.test} means no extra request, no cache to
+     * invalidate on reinstall, and a value that is correct per workspace in a
+     * multi-workspace install.
+     *
+     * {@code null} when the envelope does not carry one — an older payload shape,
+     * or a user-token authorization. Callers must degrade rather than depend on it.
+     */
+    private static String botUserId(Map<String, Object> payload) {
+        Object authorizations = payload.get("authorizations");
+        if (!(authorizations instanceof List<?> list)) {
+            return null;
+        }
+        for (Object entry : list) {
+            if (entry instanceof Map<?, ?> auth
+                    && Boolean.TRUE.equals(auth.get("is_bot"))
+                    && auth.get("user_id") instanceof String userId
+                    && !userId.isBlank()) {
+                return userId;
+            }
+        }
+        return null;
+    }
+
 }

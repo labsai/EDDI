@@ -172,6 +172,17 @@ public class SlackEventHandler {
      *            the parsed event JSON as a Map
      */
     public void handleEventAsync(String eventId, Map<String, Object> event) {
+        handleEventAsync(eventId, event, null);
+    }
+
+    /**
+     * @param botUserId
+     *            this app's own Slack user id, from the event envelope, or
+     *            {@code null} when it did not carry one. Used only to tell a
+     *            message addressed to this bot from one that merely mentions
+     *            somebody — see {@code handleObservedMessage}.
+     */
+    public void handleEventAsync(String eventId, Map<String, Object> event, String botUserId) {
         // De-duplicate: Slack retries events up to 3 times
         if (eventDedup.get(eventId) != null) {
             LOGGER.debugf("Duplicate Slack event %s — skipping", sanitize(eventId));
@@ -181,7 +192,7 @@ public class SlackEventHandler {
 
         executorService.submit(() -> {
             try {
-                handleEvent(event);
+                handleEvent(event, botUserId);
             } catch (Exception e) {
                 LOGGER.errorf(e, "Error handling Slack event %s", sanitize(eventId));
 
@@ -201,7 +212,7 @@ public class SlackEventHandler {
         });
     }
 
-    private void handleEvent(Map<String, Object> event) throws Exception {
+    private void handleEvent(Map<String, Object> event, String botUserId) throws Exception {
         String eventType = (String) event.get("type");
         String eventSubtype = (String) event.get("subtype");
         String eventChannel = (String) event.get("channel");
@@ -234,7 +245,7 @@ public class SlackEventHandler {
                 // an observer is configured for the channel, which is the one case
                 // where the bot may speak without being addressed. A channel with no
                 // observers behaves exactly as it did before observe mode existed.
-                if (handleObservedMessage(event, eventChannel)) {
+                if (handleObservedMessage(event, eventChannel, botUserId)) {
                     return;
                 }
                 LOGGER.debugf("[SLACK] Ignoring top-level message event (use @mention)");
@@ -324,7 +335,8 @@ public class SlackEventHandler {
      *
      * @return {@code true} when an observer took the message, so the caller stops
      */
-    private boolean handleObservedMessage(Map<String, Object> event, String channelId) {
+    private boolean handleObservedMessage(Map<String, Object> event, String channelId,
+                                          String botUserId) {
         if (channelId == null) {
             return false;
         }
@@ -341,12 +353,8 @@ public class SlackEventHandler {
         // Slack delivers a channel mention TWICE: once as `message` and once as
         // `app_mention`. `app_mention` is the one that routes, so observing the
         // `message` copy would answer the same sentence a second time, possibly
-        // from a different target. The same leading-mention test the thread-reply
-        // branch above uses, for the same reason — and with the same limitation,
-        // that a mention buried mid-sentence is not detected. The bot's own user
-        // id is not available anywhere in this integration, so neither check can
-        // do better today.
-        if (text != null && BOT_MENTION_PATTERN.matcher(text).find()) {
+        // from a different target.
+        if (mentionsThisBot(text, botUserId)) {
             LOGGER.debugf("[OBSERVE] Skipping a mention in channel %s — app_mention answers it",
                     sanitize(channelId));
             return false;
@@ -358,18 +366,22 @@ public class SlackEventHandler {
             return false;
         }
 
+        // Before `select`, not after: selection now books the reply in the same
+        // compare-and-set that grants it, so discovering the channel has no
+        // credentials afterwards would burn a reply — and the cooldown — on a
+        // message the bot was never able to answer.
+        String botToken = channelTargetRouter.getBotToken("slack", channelId);
+        if (botToken == null || botToken.isBlank()) {
+            LOGGER.warnf("[OBSERVE] No bot token for channel %s — observers cannot reply",
+                    sanitize(channelId));
+            return false;
+        }
+
         var match = observeGate.select("slack", channelId, candidates, text, mimeTypes);
         if (match.isEmpty()) {
             return false;
         }
         ChannelTarget target = match.get().target();
-
-        String botToken = channelTargetRouter.getBotToken("slack", channelId);
-        if (botToken == null || botToken.isBlank()) {
-            LOGGER.warnf("[OBSERVE] No bot token for channel %s — observer '%s' cannot reply",
-                    sanitize(channelId), sanitize(target.getName()));
-            return false;
-        }
 
         // An observer answers in a thread under the message it reacted to. Replying
         // at top level would read as the bot joining the conversation, and every
@@ -427,6 +439,31 @@ public class SlackEventHandler {
             }
         });
         return true;
+    }
+
+    /**
+     * Whether this message is addressed to THIS bot, anywhere in its text.
+     *
+     * With the envelope's bot user id this is exact: `<@U123>` matched anywhere, so
+     * a mention after other text ("thanks @alice — @eddi can you look?") is
+     * recognised, while a mention of somebody else is not.
+     *
+     * Without it — an envelope shape that carries no bot authorization — it falls
+     * back to {@link #BOT_MENTION_PATTERN}, which is anchored and so only sees a
+     * leading mention. That is the same test the thread-reply branch uses and is
+     * deliberately left alone: `stripBotMention` depends on it being prefix-only.
+     * The fallback errs towards observing, which risks the double reply this guard
+     * exists to prevent; it applies only when Slack tells us nothing about who was
+     * authorized.
+     */
+    private static boolean mentionsThisBot(String text, String botUserId) {
+        if (text == null || text.isBlank()) {
+            return false;
+        }
+        if (botUserId == null || botUserId.isBlank()) {
+            return BOT_MENTION_PATTERN.matcher(text).find();
+        }
+        return text.contains("<@" + botUserId + ">");
     }
 
     /**
