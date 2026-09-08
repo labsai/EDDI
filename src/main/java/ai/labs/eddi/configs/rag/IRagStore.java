@@ -8,7 +8,10 @@ import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.datastore.IResourceStore;
 
 /**
- * Store interface for RAG (Knowledge Base) configurations.
+ * Persistence store for RAG knowledge-base configurations (embedding provider,
+ * vector store, and default retrieval). {@code ResourceClientLibrary} and the
+ * LLM task load these at execution time; the REST RAG API exposes CRUD and
+ * ingestion.
  */
 public interface IRagStore extends IResourceStore<RagConfiguration> {
 }
