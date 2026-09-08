@@ -20,9 +20,13 @@ via the semantic Tailwind color names below — NOT raw hex.
 | `muted` / `muted-foreground` | subtle surface + secondary text |
 | `border`, `input` | hairline borders, field borders |
 | `destructive` / `destructive-foreground` | danger red |
+| `warning` / `warning-foreground` | caution amber + text on it |
 
 Use them as `bg-primary`, `text-primary-foreground`, `text-muted-foreground`,
-`border-border`, `bg-card`, `text-destructive`, etc. Common scales also apply:
+`border-border`, `bg-card`, `text-destructive`, etc. A caution surface is
+`border-warning/30 bg-warning/5` with `text-warning` on the icon and heading — do not
+reach for a raw `amber-*` class, and do not use `destructive` for something that is
+not dangerous. Common scales also apply:
 spacing (`p-5`, `gap-2`), radius
 (`rounded-lg`, `rounded-xl`), text (`text-sm`, `font-medium`), flex/grid.
 Dark mode: add the `dark` class to a root ancestor — tokens flip automatically.
@@ -32,7 +36,7 @@ but not all (e.g. `BackLink` only takes `to`/`label`) — check each component's
 
 ## Variant props (don't restyle — use the prop)
 
-- **Button** — `variant`: `primary` | `secondary` | `destructive` | `outline` | `ghost` | `link`; `size`: `sm` | `md` | `lg` | `icon`. Put a lucide icon as a child for an icon+label button.
+- **Button** — `variant`: `primary` | `secondary` | `destructive` | `warning` | `outline` | `ghost` | `link`; `size`: `sm` | `md` | `lg` | `icon`. Put a lucide icon as a child for an icon+label button.
 - **Badge** — `variant`: `default` | `secondary` | `success` | `warning` | `destructive` | `outline`.
 - **Card** — compose `Card` > `CardHeader` (`CardTitle`, `CardDescription`) + `CardContent` + `CardFooter`.
 

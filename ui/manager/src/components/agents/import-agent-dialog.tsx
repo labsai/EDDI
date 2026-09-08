@@ -435,10 +435,10 @@ export function ImportAgentDialog({ open, onClose, onSuccess }: ImportAgentDialo
 
               {schedulesSkipped !== null && (
                 <div
-                  className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3"
+                  className="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/5 p-3"
                   data-testid="import-schedules-skipped"
                 >
-                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
                   <p className="text-xs text-foreground">
                     {t("importDialog.schedulesSkipped", {
                       count: schedulesSkipped,

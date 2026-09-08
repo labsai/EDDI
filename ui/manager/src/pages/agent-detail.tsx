@@ -35,6 +35,7 @@ import { cn, formatRelativeTime } from "@/lib/utils";
 import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/api-client";
 import { AlertDialog } from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
 import {
   useAgent,
   useDeploymentStatus,
@@ -503,17 +504,19 @@ export function AgentDetailPage() {
 
       {/* Non-latest version warning */}
       {isNotLatest && (
-        <div className="flex items-center gap-3 rounded-lg border border-amber-400/30 bg-amber-50 px-4 py-3 dark:bg-amber-900/15 dark:border-amber-700/30" data-testid="non-latest-warning">
-          <Info className="h-5 w-5 text-amber-600 dark:text-amber-400 shrink-0" />
-          <p className="flex-1 text-sm text-amber-800 dark:text-amber-300">
+        <div className="flex items-center gap-3 rounded-lg border border-warning/30 bg-warning/5 px-4 py-3" data-testid="non-latest-warning">
+          <Info className="h-5 w-5 text-warning shrink-0" />
+          <p className="flex-1 text-sm text-foreground">
             {t("agentDetail.viewingOldVersion", "You are viewing version {{current}}. Latest is version {{latest}}.", { current: resolvedVersion, latest: latestVersion })}
           </p>
-          <button
+          <Button
+            variant="warning"
+            size="sm"
             onClick={() => handleVersionChange(latestVersion)}
-            className="rounded-md bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700 transition-colors shrink-0"
+            className="shrink-0"
           >
             {t("agentDetail.switchToLatest", "Switch to latest")}
-          </button>
+          </Button>
         </div>
       )}
 

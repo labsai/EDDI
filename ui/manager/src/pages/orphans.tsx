@@ -270,8 +270,8 @@ export function OrphansPage() {
                     <CheckCircle className="h-5 w-5 text-green-500" />
                   </div>
                 ) : (
-                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-500/10">
-                    <AlertTriangle className="h-5 w-5 text-amber-500" />
+                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-warning/10">
+                    <AlertTriangle className="h-5 w-5 text-warning" />
                   </div>
                 )}
                 <div>

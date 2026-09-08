@@ -17,6 +17,15 @@
   --color-accent-foreground: #0c0a09;
   --color-destructive: #dc2626;
   --color-destructive-foreground: #ffffff;
+  /* Warning — amber has been the app's caution colour since the start; this
+     gives it a name. Light mode uses amber-800, not the brand's amber-500: the
+     token is overwhelmingly read as text, and #f59e0b is only ~2.1:1 on white.
+     amber-800 rather than amber-700 because the token tints its own background
+     (`bg-warning/10 text-warning`), and amber-700 lands at 4.38:1 there — under
+     AA. amber-800 holds >=5.6:1 at every alpha the app ships. Same trade the
+     sidebar accent makes below, one step further. */
+  --color-warning: #92400e;
+  --color-warning-foreground: #ffffff;
   --color-muted: #f5f5f4;
   --color-muted-foreground: #78716c;
 
@@ -58,6 +67,10 @@
   --color-secondary-foreground: #fafaf9;
   --color-muted: #27272a;
   --color-muted-foreground: #a1a1aa;
+  /* Bright amber-400 reads at ~11:1 on the dark surfaces; its foreground goes
+     near-black, matching the brand accent pair. */
+  --color-warning: #fbbf24;
+  --color-warning-foreground: #0c0a09;
   --color-sidebar: #09090b;
   --color-sidebar-foreground: #d4d4d8;
   --color-sidebar-border: #18181b;

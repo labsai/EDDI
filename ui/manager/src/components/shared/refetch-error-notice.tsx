@@ -30,11 +30,11 @@ export function RefetchErrorNotice({
       role="status"
       data-testid="refetch-error-notice"
       className={cn(
-        "flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs",
+        "flex items-center gap-2 rounded-lg border border-warning/30 bg-warning/5 px-3 py-2 text-xs",
         className,
       )}
     >
-      <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+      <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-warning" />
       <span className="flex-1 text-muted-foreground">
         {message ??
           t(
@@ -45,7 +45,7 @@ export function RefetchErrorNotice({
       <button
         type="button"
         onClick={onRetry}
-        className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-medium text-amber-500 transition-colors hover:bg-amber-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-medium text-warning transition-colors hover:bg-warning/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         <RefreshCw className="h-3 w-3" />
         {t("common.retry", "Retry")}

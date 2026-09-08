@@ -239,7 +239,30 @@ The previews are type-checked by `tsconfig.design-sync.json` (wired into `tsc -b
 `npm run typecheck` already catches a preview that passes a prop the component does not
 take.
 
+## `--color-warning` and the same tree-shaking trap
+
+`@theme` gained `--color-warning` / `--color-warning-foreground` (amber-800 in light,
+amber-400 in dark) so the app's caution surfaces stop hard-coding `amber-*`. Both tokens
+reach `:root` in `compiled.css`, but only because of specific scanned call sites:
+
+| Token | Kept alive by |
+|---|---|
+| `--color-warning` | `ui/badge.tsx` (`bg-warning/15 text-warning`), `ui/alert-dialog.tsx`, `ui/unsaved-changes-dialog.tsx`, `shared/refetch-error-notice.tsx` |
+| `--color-warning-foreground` | **`ui/button.tsx`'s `warning` variant, and nothing else** |
+
+The second row is the `--color-sidebar-accent-foreground` situation again: no synced
+component pairs a solid `bg-warning` with its foreground except the Button variant, so
+refactoring that one `cva` string away silently drops the token from the bundle. Verify
+with the same command shape as the sidebar check:
+
+```bash
+node .design-sync/build-css.mjs
+grep -o -- '--color-warning[a-z-]*:' .design-sync/.cache/compiled.css | sort -u
+```
+
 ## Re-sync risks / watch-list
+- **`ui/button.tsx`'s `warning` variant is the sole call site for `--color-warning-foreground`.**
+  See the section above — removing it drops the token from `compiled.css` without any error.
 - **`cfg.dtsPropsFor` is hand-maintained and nothing verifies it against the source.** It
   is the highest-value thing in the config (see the section above) and the easiest to let
   rot — a prop renamed in `src/` leaves the design agent coding against the old name.

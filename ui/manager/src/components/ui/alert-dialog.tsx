@@ -35,9 +35,9 @@ export function AlertDialog({
   confirmDisabled = false,
 }: AlertDialogProps) {
   const iconColor =
-    variant === "destructive" ? "text-destructive" : "text-amber-500";
+    variant === "destructive" ? "text-destructive" : "text-warning";
   const iconBg =
-    variant === "destructive" ? "bg-destructive/10" : "bg-amber-500/10";
+    variant === "destructive" ? "bg-destructive/10" : "bg-warning/10";
 
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
@@ -78,7 +78,7 @@ export function AlertDialog({
               {cancelLabel}
             </Button>
             <Button
-              variant={variant === "destructive" ? "destructive" : "primary"}
+              variant={variant === "destructive" ? "destructive" : "warning"}
               className="flex-1"
               onClick={() => {
                 onConfirm();

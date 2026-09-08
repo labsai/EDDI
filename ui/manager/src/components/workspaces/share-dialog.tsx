@@ -413,7 +413,7 @@ function TransferOwnership({
   }, [input, confirmed, resourceId, onBusy, onTransferred, t]);
 
   return (
-    <section className="space-y-2 rounded-md border border-amber-500/30 bg-amber-500/5 p-3" data-testid="transfer-ownership">
+    <section className="space-y-2 rounded-md border border-warning/30 bg-warning/5 p-3" data-testid="transfer-ownership">
       <h3 className="text-sm font-medium">
         {t("workspaces.transfer.title", "Transfer ownership")}
       </h3>
@@ -566,7 +566,7 @@ function CascadeSummary({ result, action }: { result: ShareResult; action: Share
       </p>
       {skipped.length > 0 && (
         <div className="space-y-1">
-          <p className="text-sm text-amber-700 dark:text-amber-400">
+          <p className="text-sm text-warning">
             {t("workspaces.share.cascadeSkipped", "{{count}} resource left unchanged — you do not own it", {
               count: skipped.length,
             })}

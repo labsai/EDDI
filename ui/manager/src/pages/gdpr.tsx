@@ -145,9 +145,9 @@ export function GdprPage() {
       </div>
 
       {/* Info Banner */}
-      <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4 space-y-2">
+      <div className="rounded-xl border border-warning/20 bg-warning/5 p-4 space-y-2">
         <div className="flex items-start gap-2">
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
           <div className="space-y-1 text-xs text-foreground">
             <p className="font-semibold">
               {t("gdpr.legalNotice", "Data Protection Notice")}
@@ -229,7 +229,7 @@ export function GdprPage() {
       {/* Processing Restriction (Art. 18) */}
       <div className="rounded-xl border border-border bg-card p-6 space-y-4" data-testid="gdpr-restriction-section">
         <h2 className="flex items-center gap-2 text-base font-semibold text-foreground">
-          <Ban className="h-4 w-4 text-amber-500" />
+          <Ban className="h-4 w-4 text-warning" />
           {t("gdpr.restrictionTitle", "Processing Restriction (Art. 18)")}
         </h2>
         <p className="text-xs text-muted-foreground leading-relaxed">
@@ -257,7 +257,7 @@ export function GdprPage() {
                   {t("gdpr.statusUnknown", "Status unavailable")}
                 </span>
               ) : isRestricted ? (
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/10 px-3 py-1 text-xs font-semibold text-amber-600 dark:text-amber-400" data-testid="restriction-badge-restricted">
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-warning/10 px-3 py-1 text-xs font-semibold text-warning" data-testid="restriction-badge-restricted">
                   <Ban className="h-3 w-3" />
                   {t("gdpr.statusRestricted", "Processing Restricted")}
                 </span>
@@ -309,10 +309,10 @@ export function GdprPage() {
           may act on it. */}
       {exportSummary && !exportSummary.complete && (
         <div
-          className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-6 space-y-3"
+          className="rounded-xl border border-warning/30 bg-warning/5 p-6 space-y-3"
           data-testid="gdpr-export-incomplete"
         >
-          <h3 className="flex items-center gap-2 text-sm font-semibold text-amber-600 dark:text-amber-400">
+          <h3 className="flex items-center gap-2 text-sm font-semibold text-warning">
             <AlertTriangle className="h-4 w-4" />
             {t("gdpr.exportIncompleteTitle", "Incomplete export bundle")}
           </h3>
