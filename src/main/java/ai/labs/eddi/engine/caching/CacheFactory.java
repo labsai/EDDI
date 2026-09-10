@@ -52,6 +52,15 @@ public class CacheFactory implements ICacheFactory {
             // hottest path in the system would simply come back. One Boolean per user.
             Map.entry("gdprProcessingRestrictions", 10_000L),
 
+            // Keyed by "type:channelId:targetName", so occupancy is channels times
+            // observers — a live population, not a fixed set. At the 1_000 default
+            // an eviction is not a miss that simply reloads: a dropped window
+            // restarts the daily allowance AND clears the cooldown, because a window
+            // rebuilt from nothing has lastResponseEpochSeconds == 0 and ObserveGate
+            // skips the cooldown check entirely for that. Evicting under load is
+            // therefore the one moment an observer would be least rate-limited.
+            Map.entry("channel-observe-windows", 10_000L),
+
             // Keyed by tenantId, and tenants are few even in multi-tenant deployments.
             // Listed rather than left to the default so the sizing sits on record next
             // to the per-user caches above.

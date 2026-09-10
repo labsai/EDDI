@@ -1091,4 +1091,115 @@ class ChannelTargetRouterRefreshTest {
             return putIfAbsent(key, value);
         }
     }
+
+    // ==================== observeCandidates ====================
+
+    /**
+     * Observers are deliberately reachable only through their own accessor:
+     * {@code resolveTarget} answers "who was this addressed to", and an observer is
+     * addressed to nobody.
+     */
+    @Nested
+    @DisplayName("observeCandidates Tests")
+    class ObserveCandidatesTests {
+
+        @Test
+        @DisplayName("returns the observe-mode targets, in configuration order")
+        void returnsObserversInOrder() throws Exception {
+            var config = setupNewStyleConfig(CHANNEL_ID, "xoxb-token", "secret");
+            config.setTargets(List.of(
+                    target("plain", false),
+                    target("watch-a", true),
+                    target("watch-b", true)));
+
+            var observers = router.observeCandidates("slack", CHANNEL_ID);
+
+            assertEquals(List.of("watch-a", "watch-b"),
+                    observers.stream().map(ChannelTarget::getName).toList());
+        }
+
+        @Test
+        @DisplayName("an unknown channel yields an empty list, never null")
+        void unknownChannelIsEmpty() {
+            assertTrue(router.observeCandidates("slack", "C-nope").isEmpty());
+        }
+
+        @Test
+        @DisplayName("a channel with no observers yields an empty list")
+        void noObserversIsEmpty() throws Exception {
+            // The whole point: a channel that never configured one must behave
+            // exactly as it did before observe mode existed.
+            setupNewStyleConfig(CHANNEL_ID, "xoxb-token", "secret");
+            assertTrue(router.observeCandidates("slack", CHANNEL_ID).isEmpty());
+        }
+
+        @Test
+        @DisplayName("the channel type is matched case-insensitively, as elsewhere")
+        void channelTypeIsCaseInsensitive() throws Exception {
+            var config = setupNewStyleConfig(CHANNEL_ID, "xoxb-token", "secret");
+            config.setTargets(List.of(target("watch", true)));
+
+            assertEquals(1, router.observeCandidates("SLACK", CHANNEL_ID).size());
+        }
+
+        @Test
+        @DisplayName("an unmatched mention goes to the plain default, not to an observer")
+        void observerIsNotTheDefault() throws Exception {
+            var config = setupNewStyleConfig(CHANNEL_ID, "xoxb-token", "secret");
+            var observer = target("watch", true);
+            observer.setTriggers(List.of("watch"));
+            config.setTargets(List.of(target("plain", false), observer));
+            config.setDefaultTargetName("plain");
+
+            var resolved = router.resolveFromIntegration(config, "hello there");
+            assertEquals("plain", resolved.target().getName());
+        }
+
+        @Test
+        @DisplayName("an observer is not reachable through its own trigger keyword")
+        void observerIsNotReachableByTrigger() throws Exception {
+            // `observerIsNotTheDefault` covers the no-colon case only. Reaching an
+            // observer by trigger ran its agent on the addressed path, where none
+            // of the cooldown, the daily count or the cost ceiling applies — and
+            // it is repeatable, because nothing books anything there.
+            var config = setupNewStyleConfig(CHANNEL_ID, "xoxb-token", "secret");
+            var observer = target("watch", true);
+            observer.setTriggers(List.of("watch"));
+            var plain = target("plain", false);
+            config.setTargets(List.of(plain, observer));
+            config.setDefaultTargetName("plain");
+
+            var resolved = router.resolveFromIntegration(config, "watch: hello");
+
+            assertEquals("plain", resolved.target().getName());
+            // Not stripped: the keyword was never a trigger, so the default target
+            // gets the sentence as typed.
+            assertEquals("watch: hello", resolved.strippedMessage());
+        }
+
+        @Test
+        @DisplayName("an observer named as the default resolves to nothing, not to itself")
+        void observerNamedAsDefaultIsRefused() throws Exception {
+            // The store refuses to save this pairing, so it can only arrive from a
+            // document written straight to the datastore. Resolving it would make
+            // one target answer both addressed and unaddressed messages, with the
+            // observer's cooldown and caps applying to only half of what it said.
+            var config = setupNewStyleConfig(CHANNEL_ID, "xoxb-token", "secret");
+            var observer = target("watch", true);
+            config.setTargets(List.of(observer));
+            config.setDefaultTargetName("watch");
+
+            assertNull(router.resolveFromIntegration(config, "hello there"));
+        }
+
+        private ChannelTarget target(String name, boolean observing) {
+            var target = new ChannelTarget();
+            target.setName(name);
+            target.setType(ChannelTarget.TargetType.AGENT);
+            target.setTargetId("agent-" + name);
+            target.setObserveMode(observing);
+            return target;
+        }
+    }
+
 }
