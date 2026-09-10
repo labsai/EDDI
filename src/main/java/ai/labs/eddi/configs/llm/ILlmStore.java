@@ -8,7 +8,10 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 
 /**
- * @author ginccc
+ * Store for LLM configurations, i.e. the provider and model settings behind an
+ * agent's language tasks. Versioned like every other configuration resource and
+ * mostly read through the generic configuration client when an agent is
+ * deployed or edited.
  */
 public interface ILlmStore extends IResourceStore<LlmConfiguration> {
 }

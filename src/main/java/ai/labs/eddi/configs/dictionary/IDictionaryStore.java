@@ -10,7 +10,10 @@ import ai.labs.eddi.datastore.IResourceStore;
 import java.util.List;
 
 /**
- * @author ginccc
+ * Store for dictionary configurations, the word, regex and phrase lists an
+ * agent's parser and rules expand while matching input. readExpressions()
+ * returns the expressions of a given version and is what the expression listing
+ * endpoints call to fill their results.
  */
 public interface IDictionaryStore extends IResourceStore<DictionaryConfiguration> {
     DictionaryConfiguration read(String id, Integer version, String filter, String order, Integer index, Integer limit)
