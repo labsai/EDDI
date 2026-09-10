@@ -68,7 +68,8 @@ Log in to Grafana with `admin` / `admin`, then open **Dashboards → EDDI** — 
 `Persistent Memory — Dream & Summarization` ·
 `Integrations — MCP, A2A Identity, OpenAI-compatible API` ·
 `Capability Registry & Connections` · `Secrets Vault` · `Tenancy, Quotas & Audit` ·
-`Platform Operator` · `NATS JetStream` · `Runtime context (Quarkus / JVM built-ins)`
+`Platform Operator` · `NATS JetStream` · `Backup — Export, Import & Sync` ·
+`Runtime context (Quarkus / JVM built-ins)`
 
 ---
 
@@ -263,16 +264,34 @@ eddi_team_cadence_claims_reclaimed_total    # Stale claims reclaimed after claim
 eddi_schedule_poll_count_total              # Poll cycles
 eddi_schedule_fire_count_total              # Schedules fired
 eddi_schedule_fire_failed_total             # Fire failures
+eddi_schedule_fire_skipped_total            # Fires the coordinator dropped without running the turn
 eddi_schedule_claim_conflict_total          # Claim conflicts (multi-instance)
 eddi_schedule_fire_deadlettered_total       # Dead-lettered schedules
 eddi_schedule_fire_duration_seconds         # Fire latency (timer)
+eddi_schedule_firelog_pruned_total          # Fire-log rows removed by the retention sweep
 ```
+
+`eddi_schedule_fire_skipped_total` is neither a success nor a failure. The
+coordinator dropped the turn without consuming the input — the conversation was
+already IN_PROGRESS or AWAITING_HUMAN — so the schedule is re-armed at its next
+cadence with `failCount` untouched, and it will never dead-letter on skips
+alone. A skip rate that stays high is therefore the one scheduling problem the
+failure and dead-letter counters cannot show you: a
+`conversationStrategy=persistent` heartbeat aimed at a conversation that is
+never free (a human is chatting in it, or it is parked on a HITL approval) has
+its message dropped every single cycle while every other metric stays green.
+
+`eddi_schedule_firelog_pruned_total` counts rows, not sweeps. Flat while the
+fire-log table keeps growing means either retention is switched off
+(`eddi.schedule.fire-log-retention=0`) or the sweep is throwing — the poller
+logs that failure at ERROR.
 
 ### Tenant Quota Metrics
 
 ```text
 eddi_tenant_quota_allowed_total             # Slot acquisitions granted (untagged)
 eddi_tenant_quota_denied_total{tenant,type} # Quota denials, always tagged
+eddi_tenant_quota_unavailable_total{tenant,type} # Refusals caused by the quota store failing, not by a limit
 eddi_tenant_usage_conversations_total       # Conversation usage (per tenant)
 eddi_tenant_usage_api_calls_total           # API call usage (per tenant)
 eddi_tenant_usage_cost_total                # Cost usage (per tenant)
@@ -300,6 +319,27 @@ sum(rate(eddi_tenant_quota_denied_total[5m]))
 `eddi_tenant_quota_allowed_total` counts **slot acquisitions only**. The read-only
 gates (`checkAgentQuota`, `checkCostBudget`) deliberately do not touch it, so
 `allowed / (allowed + denied)` is not a true accept rate.
+
+`eddi_tenant_quota_unavailable_total` is the *other* reason a request is refused:
+the quota store could not answer at all — a driver failure in whichever store is
+configured (a `MongoException` in `MongoTenantQuotaStore`, which is the default
+backend, or a `SQLException` in `PostgresTenantQuotaStore`) — so the turn is
+denied for safety without any limit having been reached. It covers **both** store
+calls a gate makes: reading the tenant's configuration and incrementing the
+counter. The read runs first, so on a full outage it is the one that fails —
+which is why a failing read used to exit as an opaque `500` on MongoDB and to
+bypass enforcement silently on PostgreSQL, while only a partial outage (reads up,
+writes down) ever reached the counter. It used to be counted on `eddi_tenant_quota_denied_total`
+and answered `429` with `Retry-After: 60`, so a database outage looked exactly
+like a tenant burning through its allowance on the very graph you would use to
+decide whether to raise a limit. It now answers `503`
+(`quota_accounting_unavailable`) and carries the same `tenant` / `type` tags, so
+the two can sit side by side:
+
+```promql
+# Infrastructure, not allowance
+sum(rate(eddi_tenant_quota_unavailable_total[5m])) by (tenant)
+```
 
 ### Coordinator Metrics
 
@@ -407,6 +447,7 @@ eddi_snippets_cache_misses_total            # Prompt-snippet cache misses
 eddi_counterweight_activation_count_total   # Counterweight activations; tag: level (normal|cautious|strict|unknown)
 eddi_counterweight_strict_downgraded_total  # strict downgraded because the model could not honour it
 eddi_identity_masking_applied_total         # Identity-masking passes applied
+eddi_guardrail_toolresult_count_total       # Tool results inspected by the tool-result guardrail; tags: action, source (a null source reads as `unknown`)
 ```
 
 ### Agent Identity & Signing Metrics
@@ -465,7 +506,41 @@ eddi_openai_requests_total                  # OpenAI-compatible API requests; ta
 eddi_openai_request_duration_seconds        # Request latency (timer)
 eddi_openai_conversations_created_total     # Conversations created via the /v1 adapter
 eddi_caller_identity_resolution_total       # Caller-identity resolutions; tags: outcome, reference
+eddi_channel_observe_decisions_total        # Observe-mode reply decisions; tags: reason, type
 ```
+
+`eddi_channel_observe_decisions_total` is one sample per message an observer
+saw. `reason` is the gate that settled it: `MATCHED` (it replied), `NO_TRIGGER`
+(the message was not for it), `COOLDOWN` / `DAILY_RESPONSE_CAP` /
+`DAILY_COST_CAP` (it wanted to and was stopped), or `CONTENTION` (it could not
+book the reply because concurrent events kept winning the compare-and-set --
+a load signal, not a configuration one). `type` is the observer's
+target type — `AGENT` today, since observe mode is refused on anything else —
+not the channel platform. A rising throttle share with a flat `MATCHED` share is
+an observer whose triggers are too broad for its budget.
+
+### Backup, Export & Sync Metrics
+
+```text
+eddi_backup_export_count_total                    # Agent exports attempted
+eddi_backup_export_failure_count_total            # Exports that failed
+eddi_backup_import_count_total                    # Archive imports attempted
+eddi_backup_import_failure_count_total            # Imports that failed
+eddi_backup_upgrade_count_total                   # Upgrade/sync runs attempted (ZIP upgrade, /sync, /sync/batch)
+eddi_backup_upgrade_failure_count_total           # Upgrade/sync runs that failed outright
+eddi_backup_upgrade_resource_updated_count_total  # Resources updated in place by a sync
+eddi_backup_upgrade_resource_created_count_total  # Resources created in the target by a sync
+eddi_backup_upgrade_resource_skipped_count_total  # Matched resources whose content was already identical
+eddi_backup_upgrade_resource_failure_count_total  # Resources a sync could not process (the 207 body lists them)
+```
+
+> The four `resource` counters explain a successful no-op. An all-skipped run is
+> answered with `200 OK`: source and target already agree, nothing was written and
+> no agent version was burned. (`201 Created` means something *was* written,
+> `207 Multi-Status` that part of it failed — see `IRestImportService`.) A
+> `created` line where `updated` is expected means the matcher is not joining
+> source and target extensions and every sync is duplicating the configuration
+> tree.
 
 ### Session & Listing Metrics
 
@@ -478,6 +553,54 @@ eddi_conversations_listing_owner_scan_exhausted_total  # Conversation listing ga
 
 ```text
 eddi_audit_entries_dropped_total            # Audit entries dropped (compliance-critical)
+eddi_audit_sequence_collisions_total        # Chain positions allocated by another replica
+```
+
+`eddi_audit_sequence_collisions_total` is non-zero only on a multi-replica deployment
+without conversation affinity, where two nodes allocate the same per-conversation chain
+positions and `/auditstore/verify` then grades those conversations `BROKEN`. See
+[Chain sequences and multi-replica deployments](audit-ledger.md#chain-sequences-and-multi-replica-deployments).
+
+### Dream (Background Memory Consolidation) Metrics
+
+```text
+eddi_dream_users_processed_total            # Users a dream cycle worked through
+eddi_dream_entries_pruned_total             # Stale memory entries removed
+eddi_dream_entries_summarized_total         # Entries folded into a consolidation
+eddi_dream_contradictions_found_total       # Same-key/different-value pairs flagged
+eddi_dream_cycles_failed_total              # Dream cycles that aborted
+eddi_dream_summarization_failed_total       # LLM summarization steps that failed
+eddi_dream_duration_seconds                 # Dream cycle duration (timer)
+```
+
+Read the two failure counters together. A summarization failure the service classifies as
+transient — a socket timeout, a connection refusal, a rate-limit message — is skipped and the
+cycle carries on, so `eddi_dream_summarization_failed_total` rises while
+`eddi_dream_cycles_failed_total` stays flat. **Every** other failure aborts consolidation for
+that cycle and increments both.
+
+So both counters rising together narrows the cause to a non-transient one; it does not identify
+it. Missing credentials are the common case — a provider 401 lands here, and stale pruning keeps
+working, so the cycle looks partly healthy — but so does a bad model name, a rejected request or
+a provider outage that does not present as a timeout. Confirm from the ERROR line the cycle
+logs: it names the provider, the model and the configured parameter *keys*, which is enough to
+tell a missing `apiKey` from a wrong `llmModel` without exposing the value. If credentials are
+the cause, set `userMemoryConfig.dream.parameters` — see [user-memory.md](user-memory.md).
+
+### Conversation Summarization Metrics
+
+```text
+eddi_summarization_calls_total              # Rolling-summary generations attempted
+eddi_summarization_errors_total             # Rolling-summary generations that failed
+eddi_summarization_duration_seconds         # Summarization duration (timer)
+```
+
+### Connection Resolution Metrics
+
+```text
+eddi_connection_resolve_count_total         # Connection resolutions; tags: authType, binding, outcome
+eddi_connection_resolve_time_seconds        # Connection resolution duration (timer); tags: authType, binding
+eddi_connection_grant_missing_count_total   # Resolutions refused for a missing grant; tag: binding
 ```
 
 ### Deployed Agents
@@ -565,6 +688,13 @@ groups:
           severity: critical
         annotations:
           summary: "Audit entries are being dropped — compliance risk"
+
+      - alert: AuditSequenceCollisions
+        expr: eddi_audit_sequence_collisions_total > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "Audit chain positions are being allocated by more than one replica — enable conversation affinity"
 
       # Warning
       - alert: HighToolFailureRate

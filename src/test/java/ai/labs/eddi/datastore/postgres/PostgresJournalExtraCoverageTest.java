@@ -42,6 +42,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import io.quarkus.security.ForbiddenException;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -241,7 +242,7 @@ class PostgresJournalExtraCoverageTest {
             when(groupConversationService.readGroupConversation("gc1"))
                     .thenThrow(new RuntimeException("store down"));
 
-            assertThrows(io.quarkus.security.ForbiddenException.class,
+            assertThrows(ForbiddenException.class,
                     () -> guard.requireGroupConversationHitlAccess("g1", "gc1"));
         }
 

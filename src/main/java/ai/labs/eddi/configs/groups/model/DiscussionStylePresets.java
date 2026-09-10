@@ -396,6 +396,27 @@ public final class DiscussionStylePresets {
         return DEFAULT_TEMPLATES.getOrDefault(type, TEMPLATE_OPINION_INDEPENDENT);
     }
 
+    /**
+     * The template a phase should actually run with: the designer's
+     * {@code inputTemplate} when they wrote one, the style preset otherwise.
+     * <p>
+     * This exists so no engine can reach for {@link #defaultTemplate(PhaseType)}
+     * directly and bypass the override. TaskForceEngine did, at all three of its
+     * phases — PLAN, EXECUTE and VERIFY — which is the whole TASK_FORCE style, so
+     * for that style the phase-template mechanism was inert end to end. Nothing
+     * rejected the override at save time either, and the preset produces plausible
+     * output, so the only symptom was a transcript in the wrong language or the
+     * wrong format with no error anywhere.
+     *
+     * @param phase
+     *            the phase being run; its {@code inputTemplate} wins when non-null
+     * @param type
+     *            the phase type whose preset to fall back to
+     */
+    public static String templateFor(DiscussionPhase phase, PhaseType type) {
+        return phase != null && phase.inputTemplate() != null ? phase.inputTemplate() : defaultTemplate(type);
+    }
+
     // ------------------------------------------------------------------
     // Style → Phases expansion
     // ------------------------------------------------------------------

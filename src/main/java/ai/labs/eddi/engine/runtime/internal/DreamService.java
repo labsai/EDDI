@@ -94,8 +94,13 @@ public class DreamService {
      * Placeholder identity the schedule surface assigns when no {@code userId} is
      * supplied. Dream must never run under it: it is not a real user, so every
      * cycle would silently consolidate an empty memory set.
+     * <p>
+     * Public because it is the single source of truth for the literal: the fire
+     * executor defaults a schedule's identity to it and the REST surface exempts it
+     * from ownership checks, and three copies of the same string were drifting
+     * apart.
      */
-    static final String SCHEDULER_PLACEHOLDER_USER_ID = "system:scheduler";
+    public static final String SCHEDULER_PLACEHOLDER_USER_ID = "system:scheduler";
 
     /**
      * Max key length for consolidated entries (matches UserMemoryConfig.Guardrails
@@ -136,13 +141,13 @@ public class DreamService {
 
     @PostConstruct
     void initMetrics() {
-        usersProcessedCounter = meterRegistry.counter("dream.users.processed");
-        entriesPrunedCounter = meterRegistry.counter("dream.entries.pruned");
-        contradictionsFoundCounter = meterRegistry.counter("dream.contradictions.found");
-        entriesSummarizedCounter = meterRegistry.counter("dream.entries.summarized");
-        cyclesFailedCounter = meterRegistry.counter("dream.cycles.failed");
-        summarizationFailedCounter = meterRegistry.counter("dream.summarization.failed");
-        dreamDurationTimer = meterRegistry.timer("dream.duration");
+        usersProcessedCounter = meterRegistry.counter("eddi.dream.users.processed");
+        entriesPrunedCounter = meterRegistry.counter("eddi.dream.entries.pruned");
+        contradictionsFoundCounter = meterRegistry.counter("eddi.dream.contradictions.found");
+        entriesSummarizedCounter = meterRegistry.counter("eddi.dream.entries.summarized");
+        cyclesFailedCounter = meterRegistry.counter("eddi.dream.cycles.failed");
+        summarizationFailedCounter = meterRegistry.counter("eddi.dream.summarization.failed");
+        dreamDurationTimer = meterRegistry.timer("eddi.dream.duration");
     }
 
     /**

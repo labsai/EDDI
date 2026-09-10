@@ -4,20 +4,30 @@
  */
 package ai.labs.eddi.integration;
 
+import ai.labs.eddi.engine.runtime.BaseRuntime;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLMapper;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
 import io.restassured.http.ContentType;
+import jakarta.inject.Inject;
 import org.junit.jupiter.api.*;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.*;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -28,6 +38,26 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @TestProfile(IntegrationTestProfile.class)
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 public class InfrastructureIT {
+
+    /**
+     * The release version now reaches the running application only by resolution:
+     * {@code systemRuntime.projectVersion=${quarkus.application.version}} in
+     * application.properties, expanded by SmallRye Config at startup and injected
+     * here through {@code @ConfigProperty}. Nothing about that is visible to a file
+     * sweep, and a failure is a startup error inside a container.
+     */
+    @Inject
+    BaseRuntime baseRuntime;
+
+    /**
+     * {@code <version>x.y.z</version>} — the first one in the pom is the project's.
+     */
+    private static String pomVersion() throws IOException {
+        Matcher matcher = Pattern.compile("<version>([^<]+)</version>")
+                .matcher(Files.readString(Path.of("pom.xml"), StandardCharsets.UTF_8));
+        assertTrue(matcher.find(), "no <version> element in pom.xml");
+        return matcher.group(1);
+    }
 
     // ==================== Health Probes ====================
 
@@ -72,7 +102,81 @@ public class InfrastructureIT {
                 .statusCode(200);
     }
 
+    // ==================== Release version ====================
+
+    /**
+     * U3. {@code systemRuntime.projectVersion} stopped being the literal
+     * {@code 6.3.0} and became {@code ${quarkus.application.version}}, so the value
+     * every consumer sees is now produced by SmallRye Config expression expansion
+     * at startup rather than by a string in a file. Maven does not filter
+     * {@code application.properties} — the expression is still verbatim in
+     * {@code target/classes} — so nothing before this point proves the expansion
+     * happens: {@code mvn package} only proves the BUILD-time properties resolve.
+     * <p>
+     * The failure mode is not a wrong version but a startup
+     * {@code NoSuchElementException} or a User-Agent reading
+     * {@code EDDI.LABS.AI/${quarkus.application.version}} —
+     * {@code HttpClientWrapper} interpolates the same property into every outbound
+     * request.
+     */
+    @Test
+    @Order(13)
+    @DisplayName("the injected release version resolves to the Maven project version")
+    void injectedProjectVersionResolves() throws IOException {
+        String injected = baseRuntime.getVersion();
+
+        assertTrue(injected != null && !injected.isBlank(), "systemRuntime.projectVersion resolved to nothing");
+        assertFalse(injected.contains("${"),
+                "systemRuntime.projectVersion was injected unexpanded as '" + injected + "'. It is served in the"
+                        + " startup banner and interpolated into HttpClientWrapper's User-Agent on every outbound"
+                        + " request, so an unexpanded expression leaves the deployment.");
+        assertEquals(pomVersion(), injected,
+                "the running application reports a different version from pom.xml, which AGENTS.md §1 makes the"
+                        + " single source of truth");
+    }
+
     // ==================== OpenAPI ====================
+
+    /**
+     * U2. {@code OpenApiConfig}'s {@code @Info(version = …)} is now the sentinel
+     * {@code resolved-from-configuration}: an annotation element must be a
+     * compile-time constant, so it cannot derive from pom.xml, and
+     * {@code Info.version()} declares no default so it cannot be dropped. The real
+     * value comes from {@code quarkus.smallrye-openapi.info-version} winning the
+     * SmallRye merge.
+     * <p>
+     * That merge is now load-bearing in a way it was not before. If it ever stops
+     * winning — an extension upgrade, a renamed property, a profile override — the
+     * PUBLIC document at {@code /openapi} advertises
+     * {@code version: resolved-from-configuration} to every SDK generator and API
+     * consumer. The old failure mode was a stale but plausible number; the new one
+     * is obvious nonsense, shipped. Nothing read this field: the assertion above
+     * checks only that the body contains the word "openapi".
+     */
+    @Test
+    @Order(14)
+    @DisplayName("the served OpenAPI document carries the real release version, not the sentinel")
+    void openApiInfoVersionIsResolved() throws Exception {
+        String spec = given()
+                .get("/openapi")
+                .then().assertThat().statusCode(200)
+                .extract().asString();
+
+        // Format-agnostic for the same reason as the $ref sweep below: /openapi
+        // serves YAML by default and JSON on request, and which arrives is
+        // smallrye's business, not this test's.
+        JsonNode info = (spec.stripLeading().startsWith("{") ? new ObjectMapper() : new YAMLMapper())
+                .readTree(spec).path("info");
+        String served = info.path("version").asText();
+
+        assertNotEquals("resolved-from-configuration", served,
+                "the /openapi document is serving OpenApiConfig's sentinel, so quarkus.smallrye-openapi.info-version"
+                        + " is no longer winning the SmallRye merge. Every SDK generator pointed at this spec now"
+                        + " reads that string as the API version.");
+        assertEquals(pomVersion(), served,
+                "the served info.version must be the Maven project version — it reaches API consumers and SDK"
+                        + " generators, and it is derived through ${quarkus.application.version}: " + info);
+    }
 
     @Test
     @Order(5)

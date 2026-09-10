@@ -332,6 +332,43 @@ public class ChannelTargetRouter {
     }
 
     /**
+     * The observe-mode targets configured for this channel, in configuration order.
+     *
+     * Deliberately separate from {@link #resolveTarget}, which answers "who was
+     * this message addressed to". An observer is addressed to nobody: it watches
+     * traffic it was not part of, so it must never be reachable as a trigger match
+     * or as the default target for a mention, and a channel with no observers must
+     * keep behaving exactly as it did before this existed. Whether any of these
+     * should actually answer is {@code ObserveGate}'s decision, not the router's.
+     *
+     * Legacy {@code ChannelConnector} entries have no observe configuration and so
+     * never appear here.
+     *
+     * @return the observers for this channel, or an empty list — never null
+     */
+    public List<ChannelTarget> observeCandidates(String channelType, String platformChannelId) {
+        refreshIfNeeded();
+        String normalizedType = channelType != null ? channelType.toLowerCase(Locale.ROOT) : "";
+        ChannelIntegrationConfiguration integration = integrationMap.get(normalizedType + ":" + platformChannelId);
+        if (integration == null || integration.getTargets() == null) {
+            return List.of();
+        }
+        return integration.getTargets().stream()
+                .filter(ChannelTarget::isObserveMode)
+                .toList();
+    }
+
+    /**
+     * The integration serving this channel, for a caller that already holds a
+     * target from {@link #observeCandidates} and needs its credentials.
+     */
+    public ChannelIntegrationConfiguration integrationFor(String channelType, String platformChannelId) {
+        refreshIfNeeded();
+        String normalizedType = channelType != null ? channelType.toLowerCase(Locale.ROOT) : "";
+        return integrationMap.get(normalizedType + ":" + platformChannelId);
+    }
+
+    /**
      * Get the bot token for a channel, checking new-style integrations first, then
      * legacy. Returns {@code null} if no token is configured for this channel.
      */
@@ -406,6 +443,18 @@ public class ChannelTargetRouter {
             var targets = integration.getTargets();
             if (targets != null) {
                 for (ChannelTarget target : targets) {
+                    // Observers are excluded here for the same reason
+                    // `findDefaultTarget` excludes them: an observer watches
+                    // traffic it was not part of, under a cooldown and daily caps
+                    // that the addressed path does not apply. Its `triggers` are
+                    // an addressed-routing field it has no use for — keyword and
+                    // MIME matching for an observer live in `ObserveConfig` — so
+                    // one left set made the observer reachable as
+                    // `architect: ...`, running its agent with no limits at all,
+                    // as often as anyone cared to type it.
+                    if (target.isObserveMode()) {
+                        continue;
+                    }
                     if (target.getTriggers() != null) {
                         for (String trigger : target.getTriggers()) {
                             if (trigger != null && trigger.toLowerCase(Locale.ROOT).trim().equals(candidateTrigger)) {
@@ -428,6 +477,17 @@ public class ChannelTargetRouter {
         return null;
     }
 
+    /**
+     * The target an addressed message falls back to when no trigger matched.
+     * <p>
+     * Observers are excluded. An observer watches traffic it was not part of, so
+     * making it the answer to "the user mentioned the bot and named no trigger"
+     * inverts what it is for — and would let the same target answer both addressed
+     * and unaddressed messages, each under a different set of limits.
+     * {@code RestChannelIntegrationStore} refuses to store that pairing, so this
+     * only fires for a document written straight to the datastore, past the REST
+     * validation.
+     */
     private ChannelTarget findDefaultTarget(ChannelIntegrationConfiguration integration) {
         String defaultName = integration.getDefaultTargetName();
         if (defaultName == null || integration.getTargets() == null)
@@ -435,6 +495,7 @@ public class ChannelTargetRouter {
         return integration.getTargets().stream()
                 .filter(t -> t.getName() != null
                         && t.getName().equalsIgnoreCase(defaultName))
+                .filter(t -> !t.isObserveMode())
                 .findFirst()
                 .orElse(null);
     }

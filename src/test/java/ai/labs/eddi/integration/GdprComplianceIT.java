@@ -58,10 +58,15 @@ public class GdprComplianceIT extends BaseIntegrationIT {
         // Export
         Response response = given().get(GDPR_BASE + TEST_USER_ID + "/export");
 
+        // 207, not 200: the bundle omits group transcripts, shared artifacts,
+        // schedules and HITL journal entries, so calling it complete would be an
+        // Art. 20 answer that is not true. 200 returns when those exporters land.
         response.then().assertThat()
-                .statusCode(200)
+                .statusCode(207)
                 .contentType(ContentType.JSON)
-                .body("userId", equalTo(TEST_USER_ID));
+                .body("userId", equalTo(TEST_USER_ID))
+                .body("complete", equalTo(false))
+                .body("omittedCategories", not(empty()));
     }
 
     @Test
@@ -72,9 +77,11 @@ public class GdprComplianceIT extends BaseIntegrationIT {
 
         given().get(GDPR_BASE + emptyUser + "/export")
                 .then().assertThat()
-                .statusCode(200)
+                .statusCode(207)
                 .contentType(ContentType.JSON)
-                .body("userId", equalTo(emptyUser));
+                .body("userId", equalTo(emptyUser))
+                .body("complete", equalTo(false))
+                .body("omittedCategories", not(empty()));
     }
 
     // ==================== Processing Restriction (Art. 18) ====================
@@ -167,10 +174,13 @@ public class GdprComplianceIT extends BaseIntegrationIT {
                 .then().statusCode(200);
 
         // Export — should have empty conversations
+        // Still 207: an erased user's bundle is empty AND still omits the four
+        // categories nothing exports yet.
         given().get(GDPR_BASE + userId + "/export")
                 .then().assertThat()
-                .statusCode(200)
-                .body("conversations", empty());
+                .statusCode(207)
+                .body("conversations", empty())
+                .body("complete", equalTo(false));
     }
 
     @Test

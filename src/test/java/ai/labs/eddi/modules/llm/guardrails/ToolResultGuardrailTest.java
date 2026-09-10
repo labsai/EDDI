@@ -39,7 +39,7 @@ class ToolResultGuardrailTest {
     }
 
     private double counted(String action, String source) {
-        var counter = meterRegistry.find("guardrail.toolresult.count").tag("action", action).tag("source", source).counter();
+        var counter = meterRegistry.find("eddi.guardrail.toolresult.count").tag("action", action).tag("source", source).counter();
         return counter == null ? 0 : counter.count();
     }
 

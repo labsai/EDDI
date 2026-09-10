@@ -121,9 +121,14 @@ docker compose -f docker-compose.keycloak.yml up
 This starts Keycloak 26 on port 8180 with:
 
 - **Realm**: `eddi`
-- **Clients**: `eddi-manager` (SPA, public), `eddi-backend` (bearer-only)
+- **Clients**: `eddi-frontend` (SPA, public), `eddi-backend` (bearer-only)
 - **Roles**: `eddi-admin`, `eddi-editor`, `eddi-user`, `eddi-viewer` (plus `eddi-approver`, used by the HITL approval endpoints)
 - **Test users**: `eddi`/`eddi` (`eddi-admin` + `eddi-editor`), `viewer`/`viewer` (`eddi-viewer`), `user`/`user` (`eddi-user`)
+
+> `keycloak/eddi-realm.json` is the source of truth for client ids. Provisioning a
+> realm by hand from a doc that names a different one gets you `invalid_client`
+> at login: `RestManagerResource` hardcodes `eddi-frontend` as the id the Manager
+> SPA requests tokens for, so that is the client that has to exist.
 
 ---
 
@@ -408,9 +413,12 @@ on `localhost:7070`. This is the standard production pattern.
 ### Option 2: TLS Directly in Quarkus
 
 ```properties
-quarkus.http.ssl.certificate.file=/path/to/cert.pem
-quarkus.http.ssl.certificate.key-file=/path/to/key.pem
+quarkus.http.ssl.certificate.files=/path/to/cert.pem
+quarkus.http.ssl.certificate.key-files=/path/to/key.pem
 quarkus.http.ssl-port=8443
+# Required. Configuring TLS does not switch plaintext off: quarkus.http.insecure-requests
+# defaults to `enabled`, so port 7070 keeps serving cleartext alongside 8443.
+quarkus.http.insecure-requests=disabled
 ```
 
 ### Internal Traffic

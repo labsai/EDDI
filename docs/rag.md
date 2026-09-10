@@ -69,7 +69,13 @@ A `RagConfiguration` is a versioned resource at `/ragstore/rags/`. It defines:
 
 ### LLM Task RAG Configuration
 
-RAG is wired into LLM tasks via three fields on `LlmConfiguration.Task`:
+RAG is wired into LLM tasks via four fields on `LlmConfiguration.Task`. Three of them choose what
+is retrieved:
+
+The fourth bounds the result. `maxRagContextChars` (default `20000`) caps the assembled
+RAG context in characters, across every matched knowledge base and any `httpCallRag` response.
+Without it the prompt grows with the corpus until the provider rejects the request. Set `-1`
+or `0` to disable the cap.
 
 #### Option 1: Explicit Knowledge Base References
 

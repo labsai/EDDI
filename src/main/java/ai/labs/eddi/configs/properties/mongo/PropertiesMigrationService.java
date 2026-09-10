@@ -91,11 +91,13 @@ public class PropertiesMigrationService {
 
         int userCount = 0;
         int entryCount = 0;
+        int failedCount = 0;
 
         for (Document doc : legacyCollection.find()) {
             String userId = doc.getString("userId");
             if (userId == null) {
                 LOGGER.warnf("[MIGRATION] Skipping document without userId: %s", doc.getObjectId("_id"));
+                failedCount++;
                 continue;
             }
 
@@ -121,10 +123,25 @@ public class PropertiesMigrationService {
                     userMemoryStore.upsert(entry);
                     entryCount++;
                 } catch (Exception e) {
+                    failedCount++;
                     LOGGER.warnf("[MIGRATION] Failed to migrate key='%s' for userId='%s': %s", key, userId, e.getMessage());
                 }
             }
             userCount++;
+        }
+
+        // Only retire the source once every key made it across. The loop is idempotent
+        // — upsert is keyed on (userId, key) — so leaving the collection in place lets
+        // the next boot retry the entries that failed. Renaming on a partial run made
+        // the migration a permanent no-op afterwards (collectionExists is then false),
+        // so a transient Mongo error on three of four hundred users silently stranded
+        // those users' long-term properties in the backup collection, recoverable only
+        // by renaming it back by hand.
+        if (failedCount > 0) {
+            LOGGER.errorf("[MIGRATION] Migrated %d entries for %d users, but %d failed. Leaving '%s' in place; "
+                    + "the migration will retry on the next startup. Fix the underlying error and restart.", entryCount, userCount,
+                    failedCount, LEGACY_COLLECTION);
+            return;
         }
 
         // Rename old collection as safety backup

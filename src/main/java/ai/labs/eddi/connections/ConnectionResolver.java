@@ -425,7 +425,7 @@ public class ConnectionResolver {
         if (meterRegistry == null) {
             return;
         }
-        meterRegistry.counter("connection.resolve.count", "authType", "unknown", "binding", "unknown", "outcome",
+        meterRegistry.counter("eddi.connection.resolve.count", "authType", "unknown", "binding", "unknown", "outcome",
                 failure.getReason().name().toLowerCase(Locale.ROOT)).increment();
     }
 
@@ -439,12 +439,12 @@ public class ConnectionResolver {
         // /q/metrics.
         String authType = connection.getAuthType() == null ? "unknown" : connection.getAuthType().name();
         String binding = connection.getBinding() == null ? "unknown" : connection.getBinding().name();
-        meterRegistry.counter("connection.resolve.count", "authType", authType, "binding", binding, "outcome", outcome).increment();
+        meterRegistry.counter("eddi.connection.resolve.count", "authType", authType, "binding", binding, "outcome", outcome).increment();
         if (sample != null) {
-            sample.stop(meterRegistry.timer("connection.resolve.time", "authType", authType, "binding", binding));
+            sample.stop(meterRegistry.timer("eddi.connection.resolve.time", "authType", authType, "binding", binding));
         }
         if ("not_connected".equals(outcome)) {
-            meterRegistry.counter("connection.grant.missing.count", "binding", binding).increment();
+            meterRegistry.counter("eddi.connection.grant.missing.count", "binding", binding).increment();
         }
         if (LOGGER.isDebugEnabled()) {
             LOGGER.debugf("Connection '%s' resolve outcome: %s", connection.getName(), outcome);

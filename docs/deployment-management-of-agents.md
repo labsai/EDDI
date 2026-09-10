@@ -112,6 +112,8 @@ The undeployment of a specific agent is done through a **`POST`** to **`/adminis
 | {environment} | (`Path parameter`):`String` deployment environment: `production` (default) or `test`             |
 | {agentId}     | (`Path parameter`):`String` id of the agent that you wish to **undeploy**.               |
 | version       | (`Query parameter`, **required**):`Integer` version of the agent that you wish to **undeploy**. |
+| endAllActiveConversations | (`Query parameter`, optional, default `false`):`Boolean` end the agent's active conversations instead of refusing. Without it, undeploying an agent that has active conversations returns `409`. |
+| undeployThisAndAllPreviousAgentVersions | (`Query parameter`, optional, default `false`):`Boolean` also undeploy every earlier version, counting down to version 1. |
 
 ### Example :
 
@@ -128,6 +130,17 @@ _Response Body_
 _Response Code_
 
 `202`
+
+### Conflict: the agent has active conversations
+
+If the agent has at least one active conversation and `endAllActiveConversations` is `false`,
+the endpoint answers `409 Conflict` with a `text/plain` body naming the count. Nothing is
+undeployed. This is the normal case for a live agent, so a caller that treats any non-2xx as a
+hard failure will abort a rollback here.
+
+Retry with `endAllActiveConversations=true` to end those conversations and proceed:
+
+`http://localhost:7070/administration/production/undeploy/5aaf98e19f7dd421ac3c7de9?version=1&endAllActiveConversations=true`
 
 
 ## **Check the deployment status of an agent:**
@@ -245,7 +258,7 @@ Agent
 | HTTP Method  | `DELETE`                                                                                               |
 | API endpoint | `/agentstore/agents/{id}?version={version}&cascade=true&permanent=true`                                |
 | cascade      | (`Query parameter`) `Boolean` default `false`. If `true`, deletes packages and all extension resources |
-| permanent    | (`Query parameter`) `Boolean` default `false`. Recommended `true` with cascade                         |
+| permanent    | (`Query parameter`) `Boolean` default `false`. Applies to the **agent only** — see below                |
 
 #### Example
 
@@ -257,9 +270,23 @@ DELETE /agentstore/agents/5aaf98e19f7dd421ac3c7de9?version=1&cascade=true&perman
 This will:
 
 1. Read the agent configuration to discover its packages
-2. For each package, read its extensions and delete all resources (behavior sets, HTTP calls, output sets, langchains, property setters, parser dictionaries)
-3. Delete each package
-4. Delete the agent itself
+2. Resolve each package reference to the package's **current** version — references are version-pinned and are not re-pointed when the package is edited, so the pinned version frequently is not the one that exists
+3. Skip any package another agent still references (at any version), and any package with no live version left
+4. Soft-delete each remaining package, which cascades the same way into its extensions (behavior sets, HTTP calls, output sets, langchains, property setters, parser dictionaries)
+5. Delete the agent itself
+
+> **`permanent=true` never cascades.** It applies to the resource named in the request — every
+> version and every history row of that agent, plus its Ed25519 signing keys in the secrets vault,
+> which no endpoint can regenerate. Cascaded resources are always **soft-deleted**, whatever
+> `permanent` says: the "is anyone else using this?" check can only speak for the versions it can
+> see, while `permanent` erases all of them. To erase a shared resource, delete it explicitly,
+> without cascade.
+
+> **`permanent=true` requires the current version.** It is ID-scoped, so a request naming a stale
+> version is refused with **409** before anything is deleted — as `cascade=true` already was. A
+> resource that is already soft-deleted has no current version to be stale against: purging its
+> remaining history still works (and does remove its vault keys), and the cascade is skipped rather
+> than refused.
 
 > **Note:** Cascade delete is error-tolerant. If individual resource deletions fail (e.g., resource already deleted), the operation continues and the agent itself is still deleted. Failures are logged server-side.
 
@@ -270,9 +297,15 @@ This will:
 Workflows can also be individually cascade-deleted:
 
 ```
-DELETE /workflowstore/workflows/{id}?version={version}&cascade=true&permanent=true
-→ 200 OK (package + all extension resources deleted)
+DELETE /workflowstore/workflows/{id}?version={version}&cascade=true
+→ 200 OK (package deleted, exclusively-owned extension resources soft-deleted)
 ```
+
+The workflow delete reports how many extensions the cascade left alone — still referenced, not
+routable, or a delete that failed — in the `X-Cascade-Skipped` response header. It is absent when
+nothing was skipped, so a cascade that removed everything it walked no longer looks exactly like one
+that removed half the graph. The header is **not** propagated onto the agent-delete response; the
+packages a cascading agent delete skipped are named in the server log.
 
 ### Important: Undeploy Before Deleting
 
@@ -313,6 +346,8 @@ Returns a report listing all unreferenced resources across all stores (workflows
 {
   "totalOrphans": 3,
   "deletedCount": 0,
+  "scanComplete": true,
+  "scanWarning": null,
   "orphans": [
     {
       "resourceUri": "eddi://ai.labs.workflow/workflowstore/workflows/abc123?version=1",
@@ -329,6 +364,21 @@ Returns a report listing all unreferenced resources across all stores (workflows
   ]
 }
 ```
+
+> **Check `scanComplete` before acting on this list.** It is `false` when part of the traversal
+> failed — an unreadable agent or workflow, an unreadable deployment record, a store type past the
+> scan ceiling — and `scanWarning` then says which. Every failure *removes* entries from the
+> referenced set, so a partial scan lists live, in-use resources as orphans. The read-only scan still
+> answers so you can see the cause; the purge refuses outright (409, below).
+
+What counts as a reference: the current version of every agent, the current version of every
+workflow, **and** every agent version named by a `deployed` deployment record together with the exact
+workflow versions that version pins. A resource referenced only by a superseded *and* undeployed
+agent version is still reported as an orphan — history is not a reference — so rolling an agent back
+to an older version after a purge can leave it unresolvable. References are compared by resource
+identity, not by URI string, so a version-pinned reference protects every version of the resource,
+and a reference written with a legacy authority (`ai.labs.behavior`, `ai.labs.httpcalls`,
+`ai.labs.regulardictionary`) protects the same resource as the canonical one.
 
 ### Purge Orphans
 
@@ -357,6 +407,18 @@ reviewed.
 > old default now purges *less*; pass `includeDeleted=true` to restore the wider sweep.
 
 The purge refuses with **409** rather than proceeding when the referenced-resource scan could not be
-completed (an unreadable Agent or workflow, or a store type exceeding the scan ceiling). A partial
-reference set makes live, in-use resources look unreferenced, so purging against one could destroy
-working configuration.
+completed (an unreadable Agent or workflow, an unreadable deployment record, or a store type
+exceeding the scan ceiling). A partial reference set makes live, in-use resources look unreferenced,
+so purging against one could destroy working configuration.
+
+Each candidate is re-checked against a fresh reverse lookup immediately before it is deleted, so a
+resource that became referenced between the scan and the purge is skipped rather than erased. That
+narrows the mark/sweep window rather than closing it: there is no deployment-wide write lock, because
+taking one would block configuration editing for the duration of an administrative sweep.
+
+The purge also removes each purged resource's descriptor, so the sweep converges. Descriptors are
+normally only *flagged* as deleted — the HTTP delete filter reads one back afterwards and a missing
+row would answer 404 to a delete that succeeded — but that filter does not run for
+`/administration/orphans`, and a flagged descriptor whose resource is gone is exactly what
+`includeDeleted=true` selects. Left in place, every purged resource came back as an orphan on the next
+`includeDeleted=true` run and was counted as deleted again, forever.

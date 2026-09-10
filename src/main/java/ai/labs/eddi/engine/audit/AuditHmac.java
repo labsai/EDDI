@@ -7,6 +7,8 @@ package ai.labs.eddi.engine.audit;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 
 import javax.crypto.Mac;
+import javax.crypto.SecretKeyFactory;
+import javax.crypto.spec.PBEKeySpec;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
 import java.security.InvalidKeyException;
@@ -171,8 +173,8 @@ public final class AuditHmac {
      */
     public static byte[] deriveHmacKey(String masterKey) {
         try {
-            javax.crypto.SecretKeyFactory factory = javax.crypto.SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");
-            javax.crypto.spec.PBEKeySpec spec = new javax.crypto.spec.PBEKeySpec(masterKey.toCharArray(),
+            SecretKeyFactory factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");
+            PBEKeySpec spec = new PBEKeySpec(masterKey.toCharArray(),
                     PBKDF2_SALT.getBytes(StandardCharsets.UTF_8), PBKDF2_ITERATIONS, 256);
             return factory.generateSecret(spec).getEncoded();
         } catch (Exception e) {
@@ -225,34 +227,6 @@ public final class AuditHmac {
     }
 
     /**
-     * Verify that an audit entry's HMAC matches the expected value.
-     * <p>
-     * The canonical form is selected from the stored value's version tag: a
-     * {@link #V3_PREFIX} row is held to v3 only, a {@link #V2_PREFIX} row to v2
-     * only, and an untagged row (written before either existed) to v1. A form is
-     * never retried against another — falling back would hand the weaker form's
-     * collisions back to an attacker.
-     * <p>
-     * The digests are compared as raw bytes through
-     * {@link MessageDigest#isEqual(byte[], byte[])} rather than with
-     * {@link String#equals(Object)}, which returns on the first differing character
-     * and so leaks, through timing, how much of a forged HMAC is correct — enough
-     * to reconstruct one digit at a time against a compliance ledger. The version
-     * prefix is <em>not</em> secret (it only selects the canonicalizer), so
-     * inspecting it with {@code startsWith} is fine; it is the digest comparison
-     * that has to be data-independent.
-     * <p>
-     * A stored value that is not valid hex — truncated, mangled, or never a digest
-     * at all — cannot match anything and is rejected rather than throwing. Hex
-     * parsing accepts either case; every digest this class writes is lowercase.
-     *
-     * @param entry
-     *            the audit entry with its hmac field populated
-     * @param hmacKey
-     *            the 32-byte HMAC key
-     * @return true if the HMAC is valid, false if tampered
-     */
-    /**
      * The canonical-form version a stored HMAC names: {@code "v4"}, {@code "v3"},
      * {@code "v2"}, {@code "v1"} for a bare pre-tag digest, or {@code null} for an
      * unsigned value.
@@ -282,6 +256,23 @@ public final class AuditHmac {
         return "v1";
     }
 
+    /**
+     * Boolean convenience wrapper over {@link #verify(AuditEntry, byte[], boolean)}
+     * — true when the entry verifies as written, false when it was altered.
+     * <p>
+     * Legacy-recovery is off, so a pre-v4 row whose stored timestamp lost precision
+     * on the way into the database reports false here even though it is intact.
+     * Production uses {@code AuditLedgerService.verifyEntry}, which distinguishes
+     * MATCH from MATCH_RECOVERED and reports UNSIGNED and SIGNING_DISABLED
+     * separately; this method is kept for tests and callers that only need a yes/no
+     * on a v4 row.
+     *
+     * @param entry
+     *            the audit entry with its hmac field populated
+     * @param hmacKey
+     *            the 32-byte HMAC key
+     * @return true if the HMAC verifies, false if it does not
+     */
     public static boolean verifyHmac(AuditEntry entry, byte[] hmacKey) {
         return verify(entry, hmacKey, false) != VerificationOutcome.MISMATCH;
     }

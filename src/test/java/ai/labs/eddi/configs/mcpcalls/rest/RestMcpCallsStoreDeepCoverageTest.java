@@ -22,6 +22,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 import java.util.Map;
 
+import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -52,7 +53,7 @@ class RestMcpCallsStoreDeepCoverageTest {
         @DisplayName("returns tool list with parameters")
         void successWithParams() throws Exception {
             var spec1 = ToolSpecification.builder().name("tool1").description("desc1").build();
-            var paramSchema = dev.langchain4j.model.chat.request.json.JsonObjectSchema.builder()
+            var paramSchema = JsonObjectSchema.builder()
                     .addStringProperty("param1")
                     .build();
             var spec2 = ToolSpecification.builder().name("tool2").description("desc2")

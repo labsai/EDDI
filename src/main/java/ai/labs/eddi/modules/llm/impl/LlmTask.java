@@ -43,12 +43,12 @@ import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
-import static ai.labs.eddi.utils.LogSanitizer.sanitize;
-
 import java.io.IOException;
 import java.net.URI;
 import java.util.*;
 import java.util.regex.Pattern;
+import dev.langchain4j.data.message.SystemMessage;
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 import static ai.labs.eddi.configs.workflows.model.ExtensionDescriptor.ConfigValue;
 import static ai.labs.eddi.configs.workflows.model.ExtensionDescriptor.FieldType;
@@ -494,7 +494,7 @@ public class LlmTask implements ILifecycleTask {
 
         // Build chat messages without system message for agent mode
         // (agent orchestrator adds system message internally)
-        List<ChatMessage> chatMessagesWithoutSystem = messages.stream().filter(m -> !(m instanceof dev.langchain4j.data.message.SystemMessage))
+        List<ChatMessage> chatMessagesWithoutSystem = messages.stream().filter(m -> !(m instanceof SystemMessage))
                 .toList();
 
         // === Multi-Model Cascade Branch ===
@@ -918,17 +918,40 @@ public class LlmTask implements ILifecycleTask {
                     "Streaming response timed out", responseContent, task, currentStep);
         }
 
-        // 5. Refusal heuristic — simple check for common refusal patterns
-        if (!isNullOrEmpty(responseContent)) {
-            String lower = responseContent.trim().toLowerCase();
-            if (lower.startsWith("i'm sorry, i can't") || lower.startsWith("i cannot")
-                    || lower.startsWith("i'm not able to") || lower.startsWith("as an ai")) {
-                responseContent = applyValidationAction(validation.getOnRefusal(), "refusal_detected",
-                        "LLM response appears to be a refusal", responseContent, task, currentStep);
-            }
+        // 5. Refusal heuristic — configured prefixes, defaulting to the four that were
+        // hard-coded here.
+        if (!isNullOrEmpty(responseContent) && looksLikeRefusal(responseContent, validation.getRefusalPatterns())) {
+            responseContent = applyValidationAction(validation.getOnRefusal(), "refusal_detected",
+                    "LLM response appears to be a refusal", responseContent, task, currentStep);
         }
 
         return responseContent;
+    }
+
+    /**
+     * Whether a completion opens with one of the configured refusal prefixes.
+     * <p>
+     * Blank patterns are dropped rather than matched.
+     * {@code "".startsWith(anything)} is true for every response, so one stray
+     * empty entry would apply {@code onRefusal} to every completion — and under
+     * {@code onRefusal: "error"}, fail every turn.
+     * <p>
+     * {@code Locale.ROOT} because the bare {@code toLowerCase()} mangles the
+     * dotted/dotless I on a Turkish-locale JVM, which would silently stop "I
+     * cannot" matching on exactly the deployments least likely to notice.
+     *
+     * @param responseContent
+     *            the model's completion; leading and trailing space is ignored
+     * @param patterns
+     *            the configured prefixes, or {@code null} to detect nothing
+     */
+    static boolean looksLikeRefusal(String responseContent, List<String> patterns) {
+        if (patterns == null || responseContent == null) {
+            return false;
+        }
+        String lower = responseContent.trim().toLowerCase(Locale.ROOT);
+        return patterns.stream().filter(Objects::nonNull).map(String::trim).filter(p -> !p.isEmpty()).map(p -> p.toLowerCase(Locale.ROOT))
+                .anyMatch(lower::startsWith);
     }
 
     /**

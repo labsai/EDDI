@@ -23,9 +23,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
-import java.util.regex.Pattern;
 
-import static ai.labs.eddi.backup.impl.AbstractBackupService.*;
+import static ai.labs.eddi.backup.impl.AbstractBackupService.SNIPPET_EXT;
 
 /**
  * Reads agent resource data from an unzipped directory (the result of unzipping
@@ -37,22 +36,29 @@ import static ai.labs.eddi.backup.impl.AbstractBackupService.*;
  * the unzipped directory. Implements {@link AutoCloseable} to allow cleanup of
  * temporary files.
  *
- * <h3>Expected ZIP directory structure</h3>
+ * <h3>Expected ZIP directory structure</h3> This is the layout
+ * {@link RestExportService} actually produces: it zips from
+ * {@code <scratch>/<agentId>/<version>/}, so that directory <em>is</em> the
+ * archive root — there is no {@code <agentId>/} wrapper inside.
  *
  * <pre>
  * &lt;rootDir&gt;/
- *   &lt;agentId&gt;/
- *     &lt;agentId&gt;.agent.json
- *     &lt;agentId&gt;.descriptor.json
- *     &lt;workflowId&gt;/
- *       &lt;version&gt;/
- *         &lt;workflowId&gt;.workflow.json        (or .package.json for legacy)
- *         &lt;workflowId&gt;.descriptor.json
- *         &lt;extId&gt;.&lt;type&gt;.json              (e.g., abc123.langchain.json)
- *         &lt;extId&gt;.descriptor.json
- *     snippets/                              (may be at root, agent, or version level)
- *       &lt;snippetId&gt;.snippet.json
+ *   &lt;agentId&gt;.agent.json
+ *   &lt;agentId&gt;.descriptor.json
+ *   &lt;workflowId&gt;/
+ *     &lt;version&gt;/
+ *       &lt;workflowId&gt;.workflow.json        (or .package.json for legacy)
+ *       &lt;workflowId&gt;.descriptor.json
+ *       &lt;extId&gt;.&lt;type&gt;.json              (e.g., abc123.langchain.json)
+ *       &lt;extId&gt;.descriptor.json
+ *   snippets/
+ *     &lt;snippetId&gt;.snippet.json
  * </pre>
+ *
+ * {@link #findVersionDir(String, String)} and {@link #findSnippetsDir()} also
+ * accept an extra {@code <agentId>/} level above the workflow directories: that
+ * is the shape a hand-built archive (or a differently-rooted ZIP) can have, and
+ * accepting it costs one directory listing.
  *
  * @since 6.0.0
  */
@@ -60,21 +66,8 @@ public class ZipResourceSource implements IResourceSource {
 
     private static final Logger LOGGER = Logger.getLogger(ZipResourceSource.class);
 
-    /** Map from URI pattern authority to [file extension, step type label]. */
-    private static final Map<Pattern, String[]> EXTENSION_TYPE_MAP = new LinkedHashMap<>();
-
-    static {
-        EXTENSION_TYPE_MAP.put(DICTIONARY_URI_PATTERN, new String[]{DICTIONARY_EXT, "ai.labs.dictionary"});
-        EXTENSION_TYPE_MAP.put(BEHAVIOR_URI_PATTERN, new String[]{BEHAVIOR_EXT, "ai.labs.rules"});
-        EXTENSION_TYPE_MAP.put(HTTPCALLS_URI_PATTERN, new String[]{HTTPCALLS_EXT, "ai.labs.apicalls"});
-        EXTENSION_TYPE_MAP.put(LANGCHAIN_URI_PATTERN, new String[]{LLM_EXT, "ai.labs.llm"});
-        EXTENSION_TYPE_MAP.put(PROPERTY_URI_PATTERN, new String[]{PROPERTY_EXT, "ai.labs.property"});
-        EXTENSION_TYPE_MAP.put(OUTPUT_URI_PATTERN, new String[]{OUTPUT_EXT, "ai.labs.output"});
-        EXTENSION_TYPE_MAP.put(MCPCALLS_URI_PATTERN, new String[]{MCPCALLS_EXT, "ai.labs.mcpcalls"});
-        EXTENSION_TYPE_MAP.put(RAG_URI_PATTERN, new String[]{RAG_EXT, "ai.labs.rag"});
-    }
-
     private static final String AGENT_FILE_ENDING = ".agent.json";
+    private static final String LEGACY_AGENT_FILE_ENDING = ".bot.json";
     private static final String DESCRIPTOR_FILE_ENDING = ".descriptor.json";
 
     private final Path rootDir;
@@ -96,12 +89,19 @@ public class ZipResourceSource implements IResourceSource {
             return agentData;
 
         try {
+            String suffix = AGENT_FILE_ENDING;
             Path agentFilePath = findFileWithSuffix(rootDir, AGENT_FILE_ENDING);
             if (agentFilePath == null) {
-                throw new RuntimeException("No agent file found in ZIP at " + rootDir);
+                // A genuine EDDI 5.x export names the agent file <id>.bot.json.
+                suffix = LEGACY_AGENT_FILE_ENDING;
+                agentFilePath = findFileWithSuffix(rootDir, LEGACY_AGENT_FILE_ENDING);
+            }
+            if (agentFilePath == null) {
+                throw new RuntimeException("No agent file (" + AGENT_FILE_ENDING + " or "
+                        + LEGACY_AGENT_FILE_ENDING + ") found in ZIP at " + rootDir);
             }
 
-            String agentId = extractIdFromFilename(agentFilePath, AGENT_FILE_ENDING);
+            String agentId = extractIdFromFilename(agentFilePath, suffix);
             String agentJson = readFile(agentFilePath);
             agentJson = AbstractBackupService.normalizeLegacyUris(agentJson);
             AgentConfiguration config = jsonSerialization.deserialize(agentJson, AgentConfiguration.class);
@@ -214,68 +214,47 @@ public class ZipResourceSource implements IResourceSource {
         String name = readNameFromDescriptor(versionDir, workflowId);
 
         // Read all extension configs from the workflow directory
-        Map<String, ExtensionSourceData> extensions = readExtensions(versionDir, workflowJson);
+        Map<String, ExtensionSourceData> extensions = readExtensions(versionDir, config);
 
         return new WorkflowSourceData(workflowId, name, positionIndex, config, extensions);
     }
 
     /**
-     * Reads all extension configs for a workflow by scanning the workflow JSON for
-     * URI references, then reading the corresponding files from disk.
+     * Reads all extension configs a workflow references, keyed by the canonical
+     * {@link WorkflowExtensions} key so the map joins with the one
+     * {@link StructuralMatcher} builds from the target workflow.
+     * <p>
+     * The references come from the parsed workflow steps rather than a regex sweep
+     * of the file, so the key can carry the step type and its occurrence ordinal —
+     * a workflow with two steps of the same type keeps both.
      */
-    private Map<String, ExtensionSourceData> readExtensions(Path workflowDir, String workflowJson) {
+    private Map<String, ExtensionSourceData> readExtensions(Path workflowDir, WorkflowConfiguration config) {
         Map<String, ExtensionSourceData> extensions = new LinkedHashMap<>();
 
-        for (Map.Entry<Pattern, String[]> entry : EXTENSION_TYPE_MAP.entrySet()) {
-            Pattern uriPattern = entry.getKey();
-            String fileExtension = entry.getValue()[0];
-            String stepType = entry.getValue()[1];
-
+        for (WorkflowExtensions.ExtensionRef ref : WorkflowExtensions.scan(config)) {
             try {
-                List<URI> uris = extractResourcesUris(workflowJson, uriPattern);
-                for (URI uri : uris) {
-                    IResourceId resId = RestUtilities.extractResourceId(uri);
-                    if (resId == null)
-                        continue;
+                String fileExtension = ref.fileExtension();
+                Path resourcePath = Paths.get(FileUtilities.buildPath(
+                        workflowDir.toString(),
+                        ref.resourceId().getId() + "." + fileExtension + ".json"));
 
-                    Path resourcePath = Paths.get(FileUtilities.buildPath(
-                            workflowDir.toString(),
-                            resId.getId() + "." + fileExtension + ".json"));
-
-                    if (!Files.exists(resourcePath))
-                        continue;
-
-                    String contentJson = readFile(resourcePath);
-                    String name = readNameFromDescriptor(workflowDir, resId.getId());
-
-                    extensions.put(stepType, new ExtensionSourceData(
-                            resId.getId(), name, fileExtension, stepType, contentJson));
+                if (!Files.exists(resourcePath)) {
+                    LOGGER.debugf("Workflow references %s but the archive does not contain %s",
+                            ref.extensionUri(), resourcePath.getFileName());
+                    continue;
                 }
+
+                String contentJson = readFile(resourcePath);
+                String name = readNameFromDescriptor(workflowDir, ref.resourceId().getId());
+
+                extensions.put(ref.key(), new ExtensionSourceData(
+                        ref.resourceId().getId(), name, fileExtension, ref.stepType(), contentJson));
             } catch (Exception e) {
-                LOGGER.debugf("Failed to read %s extensions: %s", fileExtension, e.getMessage());
+                LOGGER.debugf("Failed to read extension %s: %s", ref.extensionUri(), e.getMessage());
             }
         }
 
         return extensions;
-    }
-
-    /**
-     * Extracts resource URIs from a JSON string using the given pattern.
-     */
-    private List<URI> extractResourcesUris(String json, Pattern uriPattern) {
-        List<URI> uris = new ArrayList<>();
-        try {
-            var matcher = uriPattern.matcher(json);
-            while (matcher.find()) {
-                String match = matcher.group();
-                // Remove surrounding quotes
-                String uri = match.substring(1, match.length() - 1);
-                uris.add(URI.create(uri));
-            }
-        } catch (Exception e) {
-            LOGGER.debugf("URI extraction failed: %s", e.getMessage());
-        }
-        return uris;
     }
 
     private Path findVersionDir(String workflowId, String version) {

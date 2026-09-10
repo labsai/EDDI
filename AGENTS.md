@@ -46,12 +46,12 @@ The [README "Maven Command Reference"](README.md#maven-command-reference) is the
 | Command | What it does |
 | ------- | ------------ |
 | `./mvnw compile quarkus:dev` | Start dev mode with live reload — app on port **7070**, Dev UI at `/q/dev` |
-| `./mvnw compile` | Compile only (fast feedback) — run before every commit per §2 rule 6 |
+| `./mvnw compile` | Compile only (fast feedback) — run before every commit per §2 rule 6. It is also where the style gates fire: Checkstyle's import rules and `formatter:validate` are both bound to the `validate` phase, which `compile` runs through, so an unused import or an unformatted file **fails the build here** rather than being silently rewritten. Fix with `./mvnw formatter:format` (formatting) or by deleting the import (Checkstyle) |
 | `./mvnw test` | Unit tests (excludes `*IT.java`); JaCoCo report at `target/site/jacoco/index.html` |
 | `./mvnw test -Dtest=ClassName` | Run a single test class |
 | `./mvnw verify` | Compile + unit tests + package. **Integration tests do NOT run** — `skipITs` defaults to `true` |
 | `./mvnw verify -DskipITs=false` | Full build **including** integration tests — requires Docker. The command CI runs |
-| `./mvnw validate` · `./mvnw formatter:format` | Checkstyle check · auto-format with the project Eclipse formatter |
+| `./mvnw validate` · `./mvnw formatter:format` | The two blocking style gates — Checkstyle (`UnusedImports`/`RedundantImport` are `severity="error"`; `FileLength`/`LineLength` stay advisory) and `formatter:validate`, which **reports** drift and never edits your files · auto-format with the project Eclipse formatter, i.e. the fix for a `formatter:validate` failure |
 
 > **Sandbox caveat:** integration tests (`*IT.java`) and any test that binds a loopback/HTTP socket need Docker and frequently cannot run in sandboxed agent environments — CI verifies those. Locally, rely on `./mvnw test` (unit tests) and treat a green CI run as the source of truth for the rest.
 
@@ -91,7 +91,7 @@ The [README "Maven Command Reference"](README.md#maven-command-reference) is the
    - Stage files individually: `git add path/to/file1 path/to/file2`
    - Run `git status` before committing — if any staged file is not part of your task, unstage it
    - Run `git log --stat -1` after committing to confirm the commit only contains your files
-6. **Each commit must build**: Run `./mvnw compile` (or `./mvnw test` for backend) before committing. Never commit broken code.
+6. **Each commit must build**: Run `./mvnw compile` (or `./mvnw test` for backend) before committing. Never commit broken code. `compile` passes through the `validate` phase, so it also enforces the two style gates — an unused import fails Checkstyle and an unformatted file fails `formatter:validate`. Neither rewrites your sources: run `./mvnw formatter:format` to fix formatting, and delete the import Checkstyle names. (The formatter used to run its `format` goal on every build, which edited tracked files behind your back and put them in `git status` next to your real work — the reason rule 5 forbids `git add .`.)
 7. **Verify factual claims against authoritative sources**: When writing documentation about the project's technology stack, dependencies, or CI configuration, **always verify against the canonical source** (`pom.xml` for dependencies, `ci.yml` for CI behavior, `Dockerfile` for container config). **Never infer from codebase grep results** — migration code, comments about "previous implementations," and backward-compatibility references describe what the project *used to* use, not what it currently uses. If a term appears 40 times in the codebase but zero times in `pom.xml`, the project does not use it.
 8. **Update the changelog immediately before committing**: Edit [`docs/changelog.md`](docs/changelog.md) and include it in the commit that contains the changes being documented. The changelog must land on the **same branch** as the work it documents — never on a different branch after the fact.
    - **Add the entry directly below the `---` that closes the header**, above the most recent existing entry. Never append to a file under `docs/changelog/` — those are archives, and nothing reads them for current context.
@@ -151,6 +151,7 @@ Follow this order unless the user explicitly requests something different.
 | —     | LLM Provider Expansion   | Added Mistral, Azure OpenAI, Bedrock, Oracle GenAI (12 providers; see `docs/langchain.md`)                                     |
 | —     | Quarkus LTS              | LTS platform upgrade, Java 25 module fix (version pinned in `pom.xml`)                              |
 | 12    | CI/CD                    | GitHub Actions unified pipeline, Docker Hub push, CircleCI removed                                  |
+| —     | OpenTelemetry Tracing    | Per-task `eddi.pipeline.task` spans from `LifecycleManager`, MCP circuit breakers — see [`docs/monitoring/monitoring-guide.md`](docs/monitoring/monitoring-guide.md) |
 | 11a   | Persistent Memory        | IUserMemoryStore, UserMemoryTool, DreamService, McpMemoryTools, Property.Visibility                 |
 | —     | Conversation Windows     | Token-aware windowing, rolling summary, ConversationRecallTool                                      |
 | —     | Agentic Improvements 1–5 | Counterweights, MCP governance, capability registry, multimodal attachments, agent signing          |
@@ -172,7 +173,7 @@ Follow this order unless the user explicitly requests something different.
 | —     | Memory Architecture       | Commit flags, RAG threshold, context selection, auto-compaction, property consolidation (see `planning/memory-architecture-plan.md`) |
 | —     | Session Forking           | State snapshotting, conversation forking (see `planning/agentic-improvements-plan.md` §7)                                                 |
 | —     | Conversation Chaining     | Cross-session context carry-over (see `planning/conversation-window-management.md` Strategy 3)                                       |
-| 9     | DAG Pipeline              | Parallel tasks, circuit breakers, OpenTelemetry tracing                                                                                   |
+| 9     | DAG Pipeline              | Parallel task execution and the dependency graph. OpenTelemetry tracing and MCP circuit breakers already shipped — see Completed          |
 | —     | HITL — remaining          | EDDI-Manager approvals UI (Manager repo) and the reserved `inGroupTurns: INBOX` mode for member *tool-call* pauses. Core framework shipped; humans as group *members* shipped in 10c — see Completed. `VoteConfig.tiePolicy: HUMAN_DECIDES` is likewise still save-time rejected pending its own resume machinery |
 | —     | Guardrails                | Config-driven input/output guardrails in LlmTask (see `planning/guardrails-architecture.md`)                                         |
 | 11b   | Multi-Channel             | Teams adapter (Slack already ships via HITL approval channels; see `planning/multi-agent-ux-improvements.md`)                        |
@@ -606,7 +607,7 @@ When implementing a new feature, provide:
 
 - **Always reference types and annotations by their simple name with a top-level `import`** — never inline a fully-qualified name (e.g. write `@Inject IAttachmentStore store;` with the imports, not `@jakarta.inject.Inject ai.labs.eddi.engine.attachments.IAttachmentStore store;`). FQNs in field declarations, method signatures, annotations, and generics hurt readability and are a common review comment.
 - The **only** acceptable inline FQN is disambiguating two classes that share a simple name and are both used in the same file — and even then, prefer restructuring so only one is imported.
-- Don't leave unused imports behind after a refactor; run `./mvnw formatter:format` and `./mvnw validate` (Checkstyle) before committing.
+- Don't leave unused imports behind after a refactor; run `./mvnw formatter:format` and `./mvnw validate` (Checkstyle) before committing. Both are enforced, not advisory: `UnusedImports` and `RedundantImport` carry `severity="error"` in `checkstyle.xml` and the plugin fails on them, and `formatter:validate` fails on unformatted sources instead of rewriting them — so any `./mvnw compile`, `test` or `verify` will stop on either. **Mind the scopes, they differ:** `formatter:validate` grades `src/main/java` *and* `src/test/java`, but the Checkstyle gate sets `includeTestSourceDirectory=false`, so its import rules grade **`src/main/java` only** — an unused import in a test still compiles and still merges. Keep test imports clean by hand; the flag stays off until the 163 pre-existing violations in `src/test/java` are cleared, and `BuildQualityGatesTest` fails if the flag and this sentence ever disagree.
 
 #### Production-Scale Thinking
 
@@ -639,10 +640,14 @@ When designing any new feature, always consider these before finalizing the desi
 
 #### Base Image Management
 
-The production image (`Dockerfile`) uses a Red Hat UBI 9 base pinned by **SHA256 digest** for OpenSSF supply-chain compliance. This means:
+The production image (`Dockerfile`) uses a Red Hat UBI 10 base pinned by **SHA256 digest** for OpenSSF supply-chain compliance. This means:
 
-- The `FROM` line must always include `@sha256:...` — never use a bare tag like `:1.24`
+- Every `FROM` line must include `@sha256:...` — never use a bare tag like `:1.24`
+- The build is multi-stage (`docs` and `runtime`) and **both stages carry the same pin**. Move them together: `base-image-check.yml` reads the last `FROM` but its `sed` rewrites every line carrying the pin, so bumping one leaves a stale base in the image and desynchronises the automation
 - Red Hat periodically republishes the same tag with security patches baked in
+- `ContainerBaseIT` builds its image from this file via `EddiImageDockerfile.forTestContext()`, so the pin cannot drift — never restate the image reference in test code
+
+RHEL 10 carries two constraints the `FROM` line documents in full and that any change here must preserve: a **x86-64-v3 host CPU floor** (glibc refuses to start below it) and a crypto policy that **disables the static-RSA TLS 1.2 suites** for the JVM as well as the OS.
 
 #### Trivy CVE Remediation Procedure
 
@@ -650,7 +655,7 @@ When Trivy (CI container scan) flags a base image CVE:
 
 1. **Check for a newer digest first** — pull the latest image for the same tag and compare:
    ```bash
-   docker pull registry.access.redhat.com/ubi9/openjdk-25-runtime:1.24
+   docker pull registry.access.redhat.com/ubi10/openjdk-25-runtime:1.24
    # Check the digest in the pull output
    docker run --rm <image> rpm -q <vulnerable-package>
    ```
@@ -801,7 +806,7 @@ Matcher:      "actions" : "ask_for_model"
 | `longTerm`     | Persisted to `usermemories` collection across conversations                                                                                   |
 | `secret`       | Auto-vaulted: plaintext stored in SecretsVault, raw input scrubbed from memory, vault reference (`${vault:...}`) stored as property value |
 
-> **Warning**: `scope: "secret"` requires the vault to be active (`EDDI_VAULT_MASTER_KEY` env var set). If vault is disabled (common in dev mode), `autoVaultSecret()` fails and falls back to storing plaintext — but logs an ERROR that may confuse users. For wizard-style agents that collect API keys and pass them to an endpoint (see §5.6), prefer `scope: "conversation"` and delegate vaulting to the receiving service.
+> **Warning**: `scope: "secret"` requires the vault to be active (`EDDI_VAULT_MASTER_KEY` env var set). If the vault is disabled — which is the shipped default — `autoVaultSecret()` **fails closed**: it scrubs the plaintext from the conversation step, logs an ERROR, and throws a `LifecycleException` naming `EDDI_VAULT_MASTER_KEY`. The whole turn fails; the plaintext is never persisted. (An earlier release persisted the plaintext instead; that behaviour was removed deliberately — see the comment in `PropertySetterTask.autoVaultSecret` and `docs/properties.md`.) For wizard-style agents that collect API keys and pass them to an endpoint (see §5.6), prefer `scope: "conversation"` and delegate vaulting to the receiving service — a dev instance without a master key cannot complete a secret-scoped turn at all.
 
 #### Capturing user input vs. setting fixed values
 
@@ -901,7 +906,20 @@ The file naming convention is `{id}.{type}.json` where `{id}` matches the last p
     {outputId}.descriptor.json
     {llmId}.langchain.json        → LLM configuration (file ext stays "langchain", URI uses "llm")
     {llmId}.descriptor.json
+    {dictionaryId}.regulardictionary.json → Regular dictionary (URI uses "dictionary")
+    {dictionaryId}.descriptor.json
+    {mcpId}.mcpcalls.json         → MCP tool calls
+    {mcpId}.descriptor.json
+    {ragId}.rag.json              → RAG retrieval configuration
+    {ragId}.descriptor.json
+snippets/
+  {snippetId}.snippet.json        → Prompt snippets (root, agent, or version level)
+schedules/
+  {scheduleId}.schedule.json      → Agent schedules
 ```
+
+> The authoritative list of file extensions is `AbstractBackupService`'s `*_EXT` constants —
+> twelve of them. Check against that file rather than against this block if the two ever disagree.
 
 > **Important**: File extensions use legacy names (`behavior`, `httpcalls`, `langchain`) while URIs use v6 names (`rules`, `apicalls`, `llm`). The import service maps between them via `AbstractBackupService` constants.
 
@@ -935,6 +953,8 @@ Always use v6 canonical URIs in new configs:
 | `eddi://ai.labs.httpcalls` | `eddi://ai.labs.apicalls/...` | Optional — API calls        |
 | `eddi://ai.labs.output`    | `eddi://ai.labs.output/...`   | Usually yes — user messages |
 | `eddi://ai.labs.llm`       | `eddi://ai.labs.llm/...`      | Optional — LLM interaction  |
+| `eddi://ai.labs.mcpcalls`  | `eddi://ai.labs.mcpcalls/...` | Optional — MCP tool calls   |
+| `eddi://ai.labs.templating`| — (no config URI)             | Yes when any output or system prompt contains `{…}` placeholders — must be last |
 
 ### 5.6 Reference Implementation
 

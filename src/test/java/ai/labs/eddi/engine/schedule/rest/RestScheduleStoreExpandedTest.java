@@ -26,6 +26,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
+import io.quarkus.security.identity.SecurityIdentity;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -45,7 +46,7 @@ class RestScheduleStoreExpandedTest {
     private RestScheduleStore sut;
 
     @BeforeEach
-    void setUp() {
+    void setUp() throws Exception {
         scheduleStore = mock(IScheduleStore.class);
         fireExecutor = mock(ScheduleFireExecutor.class);
         pollerService = mock(SchedulePollerService.class);
@@ -53,12 +54,16 @@ class RestScheduleStoreExpandedTest {
         // admin by default: the HITL redaction/guards are tested in
         // RestScheduleStoreTest — these tests exercise the general surface
         doReturn(true).when(ownershipValidator).isAdmin(any());
+        // A manual fire claims the schedule first, exactly as the poller does, so it
+        // cannot run concurrently with the poller's own fire of the same schedule.
+        // Default the claim to "won" so tests about anything else still reach the fire.
+        when(pollerService.claimForManualFire(any())).thenReturn(true);
 
         sut = new RestScheduleStore();
         setField(sut, "scheduleStore", scheduleStore);
         setField(sut, "fireExecutor", fireExecutor);
         setField(sut, "pollerService", pollerService);
-        setField(sut, "identity", mock(io.quarkus.security.identity.SecurityIdentity.class));
+        setField(sut, "identity", mock(SecurityIdentity.class));
         setField(sut, "ownershipValidator", ownershipValidator);
         // A bare mock admits everything: its void requireAgentUseAccess does nothing.
         setField(sut, "resourceAccessGuard", mock(ResourceAccessGuard.class));
@@ -160,21 +165,21 @@ class RestScheduleStoreExpandedTest {
         @Test
         @DisplayName("should throw InternalServerError when store fails")
         void storeError() throws Exception {
-            when(scheduleStore.readAllSchedules(500))
+            when(scheduleStore.readAllSchedules(500, 0, false))
                     .thenThrow(new RuntimeException("db error"));
 
-            assertThrows(InternalServerErrorException.class, () -> sut.readAllSchedules(null));
+            assertThrows(InternalServerErrorException.class, () -> sut.readAllSchedules(null, 500, 0));
         }
 
         @Test
         @DisplayName("should handle blank agentId as null (read all)")
         void blankAgentId() throws Exception {
-            when(scheduleStore.readAllSchedules(500)).thenReturn(List.of());
+            when(scheduleStore.readAllSchedules(500, 0, false)).thenReturn(List.of());
 
-            List<ScheduleConfiguration> result = sut.readAllSchedules("  ");
+            sut.readAllSchedules("  ", 500, 0);
 
-            verify(scheduleStore).readAllSchedules(500);
-            verify(scheduleStore, never()).readSchedulesByAgentId(anyString());
+            verify(scheduleStore).readAllSchedules(500, 0, false);
+            verify(scheduleStore, never()).readSchedulesByAgentId(anyString(), anyInt(), anyInt(), anyBoolean());
         }
     }
 

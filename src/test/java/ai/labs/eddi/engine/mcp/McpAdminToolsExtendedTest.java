@@ -47,10 +47,11 @@ import java.net.URI;
 import java.time.Instant;
 import java.util.*;
 
+import ai.labs.eddi.configs.rest.StrictConfigurationParser;
+import io.quarkus.security.identity.SecurityIdentity;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
-import ai.labs.eddi.configs.rest.StrictConfigurationParser;
 
 /**
  * Extended tests for McpAdminTools — schedule management, channel integrations,
@@ -118,8 +119,12 @@ class McpAdminToolsExtendedTest {
 
         lenient().when(jsonSerialization.serialize(any())).thenReturn("{}");
         lenient().when(schedulePollerService.getInstanceId()).thenReturn("test-instance");
+        // fire_schedule_now claims the schedule first, exactly as the poller and the
+        // REST endpoint do. Default the claim to "won" so tests about anything else
+        // still reach the fire.
+        lenient().when(schedulePollerService.claimForManualFire(any())).thenReturn(true);
 
-        var mockIdentity = mock(io.quarkus.security.identity.SecurityIdentity.class);
+        var mockIdentity = mock(SecurityIdentity.class);
         lenient().when(mockIdentity.isAnonymous()).thenReturn(true);
 
         tools = new McpAdminTools(restInterfaceFactory, agentAdmin, jsonSerialization,

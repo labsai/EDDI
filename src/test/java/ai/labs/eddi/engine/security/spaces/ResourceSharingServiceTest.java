@@ -11,6 +11,8 @@ import ai.labs.eddi.configs.descriptors.model.ResourceGrant;
 import ai.labs.eddi.configs.descriptors.model.ResourceVisibility;
 import ai.labs.eddi.datastore.IResourceStore;
 import io.quarkus.security.ForbiddenException;
+import jakarta.ws.rs.NotFoundException;
+import jakarta.ws.rs.ServiceUnavailableException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -66,8 +68,15 @@ class ResourceSharingServiceTest {
         descriptors.put(BORROWED_CHILD, descriptor("bob"));
 
         store = mock(IDocumentDescriptorStore.class);
-        // describe() resolves through readCurrentDescriptor; the mutating paths resolve
-        // the version explicitly so they can write back to the version they read.
+        // Every ResourceSharingService path — describe() included — loads through
+        // loadOrNull: getCurrentResourceId, then readDescriptor(id, version). The
+        // version is resolved explicitly so a write can go back to the version it
+        // read. readCurrentDescriptor is the *guard's* read (ResourceAccessGuard is
+        // its only caller in this package) and the guard is mocked here, so nothing
+        // in this fixture reaches that stub. This comment used to claim the opposite
+        // and sent a reviewer after the store-failure stub below, which is correctly
+        // on readDescriptor: injecting the failure on readCurrentDescriptor would
+        // make that test pass without ever reaching the code it names.
         when(store.readCurrentDescriptor(anyString())).thenAnswer(i -> {
             var d = descriptors.get(i.<String>getArgument(0));
             if (d == null) {
@@ -169,6 +178,30 @@ class ResourceSharingServiceTest {
 
         assertEquals(null, grantFor(descriptors.get(AGENT), Subjects.user("carol")));
         assertEquals(null, grantFor(descriptors.get(OWNED_CHILD), Subjects.user("carol")));
+    }
+
+    /**
+     * Finding c2. {@code ResourceStoreException} is the store's I/O failure type —
+     * a MongoDB failover, an exhausted PostgreSQL pool — not an access decision,
+     * and by the time the loader runs {@code accessGuard.requireAccess} has already
+     * settled the authorization question. Translating it into
+     * {@link ForbiddenException} told an operator during an outage that they were
+     * not allowed to view the sharing state of a resource they in fact own, and
+     * kept the outage out of any monitoring keyed on 5xx.
+     */
+    @Test
+    @DisplayName("a store failure is reported as unavailable, not as forbidden")
+    void storeFailureIsNotAnAccessDenial() throws Exception {
+        when(store.readDescriptor(eq(AGENT), anyInt()))
+                .thenThrow(new IResourceStore.ResourceStoreException("connection pool exhausted"));
+
+        assertThrows(ServiceUnavailableException.class, () -> service.describe(AGENT));
+    }
+
+    @Test
+    @DisplayName("a missing resource is still a 404")
+    void missingResourceIsStillNotFound() {
+        assertThrows(NotFoundException.class, () -> service.describe("does-not-exist"));
     }
 
     @Test

@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
+import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalRequiredException;
@@ -32,7 +33,6 @@ import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.TimeoutException;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -894,27 +894,22 @@ class CascadingModelExecutor {
         return s == null || s.isBlank();
     }
 
-    // Retryable transient-failure signatures in an exception message.
-    private static final Pattern RETRYABLE_MESSAGE = Pattern.compile("timeout|rate limit|too many requests|429|50[234]", Pattern.CASE_INSENSITIVE);
-
     /**
-     * Check if an error is retryable (transient network / throttling errors). Same
-     * intent as {@code AgentExecutionHelper}.
+     * Check if an error is retryable (transient network / throttling errors).
+     *
+     * <p>
+     * Delegates to {@link RetryConfiguration#isRetryableError} instead of keeping a
+     * second copy. The two had drifted: this one matched bare
+     * {@code 429}/{@code 50x} in a message but ignored
+     * {@code WebApplicationException} status codes, while the other did the
+     * opposite — and neither knew langchain4j's typed {@code RetriableException} /
+     * {@code NonRetriableException}, which is what {@code chatModel.chat()}
+     * actually throws. The same provider failure was therefore retried on one path
+     * and not the other, decided by the wording of a message.
+     * </p>
      */
     private static boolean isRetryableError(Exception e) {
-        Throwable current = e;
-        while (current != null) {
-            if (current instanceof java.net.SocketTimeoutException || current instanceof TimeoutException
-                    || current instanceof java.net.ConnectException || current instanceof java.net.UnknownHostException) {
-                return true;
-            }
-            String message = current.getMessage();
-            if (message != null && RETRYABLE_MESSAGE.matcher(message).find()) {
-                return true;
-            }
-            current = current.getCause();
-        }
-        return false;
+        return RetryConfiguration.isRetryableError(e);
     }
 
     /**

@@ -58,16 +58,26 @@ class MetricsDashboardCoverageTest {
      * {@code Metrics.globalRegistry} and private {@code increment(...)} helpers
      * alike, and the name is the first argument in every case. Group 1 is the meter
      * <em>type</em>, which decides the exposition suffix.
+     * <p>
+     * The name group is deliberately <em>not</em> anchored on {@code eddi}. It was,
+     * and fourteen meters across four subsystems — every Dream,
+     * connection-resolution, summarization and guardrail meter — simply did not
+     * match, so the guard that exists to make an unwatched meter impossible could
+     * not see them. They were absent from the metrics reference for exactly that
+     * reason, on a green build. The sanity floor below still passed on the ~130
+     * that did match. Those fourteen are now prefixed, and dropping the anchor
+     * means the next unprefixed meter is a failure here rather than an invisible
+     * one.
      */
     private static final Pattern REGISTRATION = Pattern.compile(
-            "(?:^|[^\\w])(counter|timer|gauge|summary|increment)\\s*\\(\\s*\"(eddi[._][\\w.]+)\"");
+            "(?:^|[^\\w])(counter|timer|gauge|summary|increment)\\s*\\(\\s*\"([a-z][\\w.]*)\"");
 
     /**
      * The builder form, e.g.
      * {@code FunctionCounter.builder("eddi.coordinator.total_processed", …)}.
      */
     private static final Pattern BUILDER = Pattern.compile(
-            "(Counter|Timer|Gauge|FunctionCounter|DistributionSummary)\\.builder\\(\\s*\"(eddi[._][\\w.]+)\"");
+            "(Counter|Timer|Gauge|FunctionCounter|DistributionSummary)\\.builder\\(\\s*\"([a-z][\\w.]*)\"");
 
     /**
      * The name a meter is actually scraped under, which is what a dashboard query

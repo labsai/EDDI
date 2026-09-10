@@ -353,26 +353,22 @@ class RemoteApiResourceSourceTest {
         }
 
         @Test
-        @DisplayName("should fallback to version=1 when descriptor lookup fails")
-        void fallbacksToVersion1() throws Exception {
-            var agentConfig = new AgentConfiguration();
-            agentConfig.setWorkflows(new ArrayList<>());
-
+        @DisplayName("should fail loudly when the latest version cannot be resolved")
+        void unresolvableVersionIsAnError() throws Exception {
             // Descriptors return empty (no matching agent)
             mockHttpResponse("/agentstore/agents/descriptors?index=0&limit=0", "[]");
             when(jsonSerialization.deserialize("[]", DocumentDescriptor[].class))
                     .thenReturn(new DocumentDescriptor[0]);
 
-            // Should fallback to version=1
-            mockHttpResponse("/agentstore/agents/" + AGENT_ID + "?version=1", "{agentJson}");
-            when(jsonSerialization.deserialize("{agentJson}", AgentConfiguration.class))
-                    .thenReturn(agentConfig);
-
             try (var source = new RemoteApiResourceSource(
                     BASE_URL, AGENT_ID, null, "Bearer test-token", jsonSerialization, mockHttpClient)) {
-                AgentSourceData result = source.readAgent();
 
-                assertNotNull(result);
+                // "null version = latest" is the documented contract. Falling back to
+                // version 1 met it by reading an arbitrarily old configuration and
+                // writing it into the target as if it were the newest, leaving only a
+                // DEBUG line behind.
+                var ex = assertThrows(RuntimeException.class, source::readAgent);
+                assertTrue(ex.getMessage().contains("latest version"), ex.getMessage());
             }
         }
     }

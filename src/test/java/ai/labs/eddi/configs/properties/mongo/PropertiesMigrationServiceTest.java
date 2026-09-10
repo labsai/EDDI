@@ -23,6 +23,7 @@ import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
 
+import com.mongodb.client.ListCollectionNamesIterable;
 import static org.mockito.Mockito.*;
 
 class PropertiesMigrationServiceTest {
@@ -180,10 +181,19 @@ class PropertiesMigrationServiceTest {
             verify(userMemoryStore, never()).upsert(any());
         }
 
+        /**
+         * The rename retires the source collection, and {@code collectionExists} is
+         * false afterwards — so a rename on a partial run makes the migration a
+         * permanent no-op. A transient Mongo error on three of four hundred users then
+         * strands those users' long-term properties in the backup collection, where
+         * their next conversation loads nothing and recovery means renaming it back by
+         * hand. The loop is idempotent (upsert is keyed on userId and key), so leaving
+         * the collection in place costs a retry and buys the entries back.
+         */
         @Test
-        @DisplayName("should handle upsert failure gracefully")
+        @DisplayName("a failed entry leaves the legacy collection in place so the next boot retries")
         @SuppressWarnings("unchecked")
-        void handleUpsertFailure() throws Exception {
+        void partialFailureDoesNotRetireTheSource() throws Exception {
             // Given
             var service = new PropertiesMigrationService(database, userMemoryStore, "mongodb");
             var iterable1 = mockIterableOf("properties");
@@ -214,8 +224,45 @@ class PropertiesMigrationServiceTest {
             // When — should not throw
             service.onStartup(startupEvent);
 
-            // Then — migration continues despite failure; rename still attempted
-            verify(legacyCollection).renameCollection(any(MongoNamespace.class));
+            // Then — the loop still runs to the end, but the source is NOT retired
+            verify(userMemoryStore).upsert(any(UserMemoryEntry.class));
+            verify(legacyCollection, never()).renameCollection(any(MongoNamespace.class));
+        }
+
+        /**
+         * A document with no userId is skipped, which is also a failure to migrate its
+         * contents — so it must hold the rename back for the same reason.
+         */
+        @Test
+        @DisplayName("a skipped document without a userId also holds the rename back")
+        @SuppressWarnings("unchecked")
+        void skippedDocumentAlsoHoldsTheRenameBack() throws Exception {
+            var service = new PropertiesMigrationService(database, userMemoryStore, "mongodb");
+            // Build both iterables before stubbing: mockIterableOf() mocks internally, and
+            // calling it inside a when(...) chain is nested stubbing, which Mockito
+            // rejects.
+            var iterable1 = mockIterableOf("properties");
+            var iterable2 = mockIterableOf();
+            when(database.listCollectionNames()).thenReturn(iterable1).thenReturn(iterable2);
+
+            MongoCollection<Document> legacyCollection = mock(MongoCollection.class);
+            when(database.getCollection("properties")).thenReturn(legacyCollection);
+            when(legacyCollection.countDocuments()).thenReturn(1L);
+            when(database.getName()).thenReturn("testdb");
+
+            var doc = new Document("_id", new ObjectId()).append("key1", "value1");
+
+            FindIterable<Document> findIterable = mock(FindIterable.class);
+            MongoCursor<Document> cursor = mock(MongoCursor.class);
+            when(legacyCollection.find()).thenReturn(findIterable);
+            when(findIterable.iterator()).thenReturn(cursor);
+            when(cursor.hasNext()).thenReturn(true, false);
+            when(cursor.next()).thenReturn(doc);
+
+            service.onStartup(startupEvent);
+
+            verify(userMemoryStore, never()).upsert(any());
+            verify(legacyCollection, never()).renameCollection(any(MongoNamespace.class));
         }
 
         @Test
@@ -291,8 +338,8 @@ class PropertiesMigrationServiceTest {
      * of strings.
      */
     @SuppressWarnings("unchecked")
-    private static com.mongodb.client.ListCollectionNamesIterable mockIterableOf(String... names) {
-        var iterable = mock(com.mongodb.client.ListCollectionNamesIterable.class);
+    private static ListCollectionNamesIterable mockIterableOf(String... names) {
+        var iterable = mock(ListCollectionNamesIterable.class);
         doReturn(mockCursorOf(names)).when(iterable).iterator();
         return iterable;
     }

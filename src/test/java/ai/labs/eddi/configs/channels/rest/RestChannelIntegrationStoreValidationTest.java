@@ -8,6 +8,7 @@ import static org.mockito.Mockito.mock;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.channels.model.ChannelTarget;
+import ai.labs.eddi.configs.channels.model.ObserveConfig;
 import jakarta.ws.rs.BadRequestException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -16,13 +17,14 @@ import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Unit tests for {@link RestChannelIntegrationStore#validateConfiguration}.
  * Covers all validation rules: name, channelType, targets, defaultTarget,
- * trigger uniqueness, null/blank triggers, and observeMode rejection.
+ * trigger uniqueness, null/blank triggers, and observe-mode configuration.
  */
 class RestChannelIntegrationStoreValidationTest {
 
@@ -289,32 +291,160 @@ class RestChannelIntegrationStoreValidationTest {
     @DisplayName("Observe mode validation")
     class ObserveModeValidation {
 
-        @Test
-        @DisplayName("observeMode=true → BadRequest (not yet implemented)")
-        void observeModeRejected() {
+        /**
+         * The channel's ordinary default target, which the fixture names.
+         *
+         * Every observer test needs one: an observer may not itself be the default, so
+         * a config whose only target is an observer is invalid for a reason unrelated
+         * to what these tests are checking.
+         */
+        private ChannelTarget plainDefault() {
             var target = new ChannelTarget();
             target.setName("support");
             target.setTargetId("agent-abc");
-            target.setTriggers(List.of("support"));
+            target.setType(ChannelTarget.TargetType.AGENT);
+            return target;
+        }
+
+        private ChannelTarget observer() {
+            var target = new ChannelTarget();
+            target.setName("incident-watch");
+            target.setTargetId("agent-watch");
+            target.setType(ChannelTarget.TargetType.AGENT);
+            target.setTriggers(List.of("incident"));
             target.setObserveMode(true);
-            config.setTargets(List.of(target));
+            return target;
+        }
+
+        /** The fixture's default target plus this observer. */
+        private void useObserver(ChannelTarget observer) {
+            config.setTargets(List.of(plainDefault(), observer));
+        }
+
+        @Test
+        @DisplayName("observeMode=true on an AGENT target → passes")
+        void observeModeAccepted() {
+            useObserver(observer());
+            assertDoesNotThrow(() -> store.validateConfiguration(config));
+        }
+
+        @Test
+        @DisplayName("observeMode=true with no config → defaulted, never saved unguarded")
+        void observeConfigDefaulted() {
+            // `observeMode: true` with a null config would mean no cooldown and no
+            // caps, which is the one shape an observer must never be stored in.
+            var target = observer();
+            target.setObserveConfig(null);
+            useObserver(target);
+
+            store.validateConfiguration(config);
+
+            assertNotNull(target.getObserveConfig());
+            assertTrue(target.getObserveConfig().getCooldownSeconds() > 0);
+            assertTrue(target.getObserveConfig().getMaxDailyResponses() > 0);
+            assertTrue(target.getObserveConfig().getMaxCostPerDay() > 0);
+        }
+
+        @Test
+        @DisplayName("observeMode=true on a GROUP target → BadRequest")
+        void observeModeGroupRejected() {
+            // An observer's dollar ceiling is measured against a per-turn cost the
+            // engine can attribute to a 1:1 conversation and not to a group
+            // discussion, so a GROUP observer would run with its primary control
+            // unenforceable.
+            var target = observer();
+            target.setType(ChannelTarget.TargetType.GROUP);
+            useObserver(target);
 
             var ex = assertThrows(BadRequestException.class,
                     () -> store.validateConfiguration(config));
-            assertTrue(ex.getMessage().contains("observeMode"));
+            assertTrue(ex.getMessage().contains("AGENT"));
+        }
+
+        @Test
+        @DisplayName("an observer named as the default target → BadRequest")
+        void observerCannotBeDefaultTarget() {
+            // An observer watches traffic it was not part of; making it the
+            // default also makes it the answer to an unmatched mention, so one
+            // target would answer both addressed and unaddressed messages with
+            // the observer's limits applying to only half of what it says.
+            var target = observer();
+            config.setTargets(List.of(target));
+            config.setDefaultTargetName(target.getName());
+
+            var ex = assertThrows(BadRequestException.class,
+                    () -> store.validateConfiguration(config));
+            assertTrue(ex.getMessage().contains("default target"));
+        }
+
+        @Test
+        @DisplayName("an observer alongside a separate default target → passes")
+        void observerBesideADefaultIsFine() {
+            useObserver(observer());
+            config.setDefaultTargetName("support");
+            assertDoesNotThrow(() -> store.validateConfiguration(config));
+        }
+
+        @Test
+        @DisplayName("negative cooldown / caps → BadRequest")
+        void negativeBoundsRejected() {
+            for (var mutate : List.<Consumer<ObserveConfig>>of(
+                    oc -> oc.setCooldownSeconds(-1),
+                    oc -> oc.setMaxDailyResponses(-1),
+                    oc -> oc.setMaxCostPerDay(-0.01))) {
+                var target = observer();
+                var oc = new ObserveConfig();
+                mutate.accept(oc);
+                target.setObserveConfig(oc);
+                useObserver(target);
+
+                assertThrows(BadRequestException.class, () -> store.validateConfiguration(config));
+            }
+        }
+
+        @Test
+        @DisplayName("zero caps → passes (a configured but deliberately silent observer)")
+        void zeroCapsAllowed() {
+            var target = observer();
+            var oc = new ObserveConfig();
+            oc.setMaxDailyResponses(0);
+            oc.setMaxCostPerDay(0);
+            oc.setCooldownSeconds(0);
+            target.setObserveConfig(oc);
+            useObserver(target);
+
+            assertDoesNotThrow(() -> store.validateConfiguration(config));
+        }
+
+        @Test
+        @DisplayName("blank trigger keyword or MIME type → BadRequest")
+        void blankObserveTriggersRejected() {
+            var target = observer();
+            var oc = new ObserveConfig();
+            oc.setTriggerKeywords(List.of("incident", " "));
+            target.setObserveConfig(oc);
+            useObserver(target);
+            assertThrows(BadRequestException.class, () -> store.validateConfiguration(config));
+
+            var other = observer();
+            var otherConfig = new ObserveConfig();
+            otherConfig.setTriggerMimeTypes(List.of(""));
+            other.setObserveConfig(otherConfig);
+            useObserver(other);
+            assertThrows(BadRequestException.class, () -> store.validateConfiguration(config));
         }
 
         @Test
         @DisplayName("observeMode=false → passes")
         void observeModeFalse() {
-            var target = new ChannelTarget();
-            target.setName("support");
-            target.setTargetId("agent-abc");
+            var target = plainDefault();
             target.setTriggers(List.of("support"));
             target.setObserveMode(false);
             config.setTargets(List.of(target));
 
             assertDoesNotThrow(() -> store.validateConfiguration(config));
+            // A non-observer is not given a config it has no use for.
+            assertNull(target.getObserveConfig());
         }
     }
 

@@ -35,6 +35,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import java.util.List;
 import java.util.Map;
 
+import com.mongodb.ConnectionString;
 import static org.bson.codecs.configuration.CodecRegistries.*;
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -82,7 +83,7 @@ class MongoConversationMemoryStoreTest {
                         new JacksonProvider(bsonMapper)));
 
         var settings = MongoClientSettings.builder()
-                .applyConnectionString(new com.mongodb.ConnectionString(MONGO.getConnectionString()))
+                .applyConnectionString(new ConnectionString(MONGO.getConnectionString()))
                 .codecRegistry(codecRegistry)
                 .build();
 

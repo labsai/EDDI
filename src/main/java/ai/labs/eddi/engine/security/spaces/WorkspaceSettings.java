@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.security.spaces;
 
+import io.quarkus.runtime.Startup;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -22,8 +23,19 @@ import java.util.Optional;
  * and only then turn enforcement on. Turning it on before ownership has been
  * stamped and backfilled is what would hide people's own work from them.
  *
+ * <h3>Why {@code @Startup}</h3> {@link #validate()} refuses to boot on an
+ * unrecognised {@code legacy-visibility}. Without {@code @Startup} that is not
+ * what happens: an {@code @ApplicationScoped} bean is instantiated on first use
+ * through its client proxy, and every injection point here is lazily proxied,
+ * so a typo booted green and then threw a {@code CreationException} as a 500 on
+ * the first guarded request — and on every request after it, since the bean is
+ * never created. That inverts "fail loud at startup" into "fail on the hot path
+ * after deploy". The INFO line below is likewise only useful if it appears in
+ * the boot log an operator actually reads.
+ *
  * @author ginccc
  */
+@Startup
 @ApplicationScoped
 public class WorkspaceSettings {
 

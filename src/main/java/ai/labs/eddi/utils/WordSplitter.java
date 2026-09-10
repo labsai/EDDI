@@ -26,7 +26,12 @@ public class WordSplitter {
             for (int n = 0; n < punctuation.length(); n++) {
                 if (lookup.charAt(i) == punctuation.charAt(n)) {
                     if (punctuation.charAt(n) == '.')
-                        if (n > 0 && n - 1 < lookup.length() && Character.isDigit(lookup.charAt(i - 1)) && Character.isDigit(lookup.charAt(i + 1)))
+                        // The bounds must guard i (the index into the text), not n (the
+                        // index into "!?:.,;", which is always 3 for '.'). They guarded n,
+                        // so a '.' at either end of the input read charAt(-1) or
+                        // charAt(length) and threw — "The answer is 42." was enough.
+                        if (i > 0 && i + 1 < lookup.length() && Character.isDigit(lookup.charAt(i - 1))
+                                && Character.isDigit(lookup.charAt(i + 1)))
                             doNotInsertBlank = true;
 
                     if (!doNotInsertBlank) {
@@ -55,7 +60,11 @@ public class WordSplitter {
                 i++;
                 lastPos = i + 1;
                 i = lastPos;
-            } else if (CharacterUtilities.isStringInteger(String.valueOf(lookup.charAt(i))) && lookup.charAt(i - 1) != ' '
+                // i > 0 is explicit now. This branch reads charAt(i - 1), and it used to
+                // be unreachable at i == 0 only because isStringInteger("") answered
+                // true for the empty substring above and skipped the iteration — a
+                // bounds check standing on an unrelated method's wrong answer.
+            } else if (i > 0 && CharacterUtilities.isStringInteger(String.valueOf(lookup.charAt(i))) && lookup.charAt(i - 1) != ' '
                     && lookup.charAt(i - 1) != ':' && lookup.charAt(i - 1) != '.'
                     && !CharacterUtilities.isStringInteger(String.valueOf(lookup.charAt(i - 1)))) {
                 lookup.insert(i, " ");

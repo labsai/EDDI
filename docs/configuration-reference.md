@@ -33,9 +33,9 @@ eddi.tools.websearch.google.api-key →  EDDI_TOOLS_WEBSEARCH_GOOGLE_API_KEY
 > **Getting this wrong fails silently.** An unrecognised environment variable is
 > not an error — the property simply keeps its default and the service starts
 > normally. `EDDI_VAULT_MASTERKEY` (dash deleted rather than replaced) leaves
-> `eddi.vault.master-key` empty, which means the vault is inactive and
-> `scope: "secret"` properties fall back to plaintext. Nothing in the startup log
-> mentions the variable you set.
+> `eddi.vault.master-key` empty, which means the vault is inactive, and a
+> `scope: "secret"` property setter then fails the whole turn. Nothing in the
+> startup log mentions the variable you set.
 >
 > To check what actually bound, read the value back from the Dev UI at `/q/dev`,
 > or compare against the spellings already used in `docker-compose.yml`,
@@ -116,6 +116,9 @@ Full narrative and metrics: [scheduling.md → Deployment Configuration](schedul
 | `eddi.schedule.min-interval-seconds` | `60` | Smallest cron interval a schedule may request |
 | `eddi.schedule.instance-id` | *(hostname)* | Cluster claim identity. Set explicitly where hostnames are recycled |
 | `eddi.schedule.default-timezone` | `UTC` | IANA zone for schedules that name none |
+| `eddi.schedule.fire-timeout` | `5m` | How long one conversation fire may run before it is abandoned as failed. **Keep it at or below `lease-timeout`** — past the lease another instance may reclaim the schedule regardless |
+| `eddi.schedule.fire-log-retention` | `90d` | Fire logs older than this are deleted by a periodic sweep. `0` keeps everything — a 60-second heartbeat alone writes ~525,600 rows a year |
+| `eddi.schedule.fire-log-prune-interval` | `1h` | How often that sweep runs. The `DELETE` is by timestamp and therefore idempotent, so it needs no cluster claim |
 
 ---
 
@@ -159,7 +162,7 @@ Full guide: [secrets-vault.md](secrets-vault.md).
 
 | Property | Default | Description |
 |---|---|---|
-| `eddi.vault.master-key` | *(empty)* | KEK source. **Empty means the vault is inactive** and `scope: "secret"` properties fall back to plaintext with an ERROR log |
+| `eddi.vault.master-key` | *(empty)* | KEK source. **Empty means the vault is inactive.** A `scope: "secret"` property setter then scrubs the plaintext, logs an ERROR and **fails the turn** with a `LifecycleException` naming `EDDI_VAULT_MASTER_KEY` — it never persists the value. (`AgentSetupService`'s own `vaultApiKey` path is the exception and still degrades; see [secrets-vault.md](secrets-vault.md).) |
 | `eddi.vault.grant-enforcement` | `enforce` | `off`, `warn` or `enforce`. An unrecognised value fails startup rather than silently disabling the check |
 | `eddi.vault.cache-ttl-minutes` | `5` | Resolved-secret cache lifetime |
 | `eddi.vault.cache-max-size` | `1000` | Resolved-secret cache entries |
@@ -190,6 +193,16 @@ property** — the ledger is append-only by design; see
 | `eddi.audit.agent-signing-enabled` | `true` | Sign agent configurations for provenance |
 | `eddi.audit.verify.recover-legacy` | `true` | Accept pre-HMAC rows during chain verification |
 | `eddi.audit.verify.recover-legacy-max-rows` | `500` | Cap on how many such rows are tolerated |
+
+---
+
+## GDPR / CCPA
+
+Full guide: [gdpr-compliance.md](gdpr-compliance.md).
+
+| Property | Default | Description |
+|---|---|---|
+| `eddi.gdpr.restriction-cache-ttl-seconds` | `0` | How long an Art. 18 restriction verdict may be reused without re-reading the store. **`0` — the default — switches the cache off**, so every check reads the store. The cache is node-local with no cross-node invalidation, so a cached "not restricted" on one node keeps a restricted user being processed for the length of the TTL after another node applies the restriction, and keeps answering from cache through a store outage instead of failing closed. Raise it only on a single-node deployment or one with conversation affinity |
 
 ---
 
@@ -249,6 +262,26 @@ Full guide: [attachments-guide.md](attachments-guide.md).
 
 ---
 
+## Backup, export & import
+
+Full guide: [import-export-an-agent.md](import-export-an-agent.md).
+
+| Property | Default | Description |
+|---|---|---|
+| `eddi.backup.export.retention-minutes` | `60` | How long a finished export archive stays downloadable |
+| `eddi.backup.export.sweep-interval` | `15m` | How often the retention sweep runs on its own, independently of exports |
+
+> `POST /backup/export/{agentId}` writes a ZIP under `tmp/archives/` and answers
+> with a `Location` header the client then GETs, so the file has to outlive the
+> request. Nothing else deletes it: the sweep runs before every export *and* on
+> the interval above, so an instance that stops exporting still reclaims what it
+> already wrote. It also removes the loose `tmp/*.zip` archives earlier releases
+> left behind, which are no longer downloadable. Raise the retention if a client
+> may take longer than that between the POST and the GET; lower it to bound disk
+> use on an instance that exports on a cron.
+
+---
+
 ## Protocols & integrations
 
 ### MCP
@@ -268,6 +301,18 @@ Full guide: [attachments-guide.md](attachments-guide.md).
 | `eddi.a2a.tool-description.max-chars` | `1024` | Truncation cap on peer tool descriptions |
 | `eddi.a2a.signing.nonce.max-age-ms` | `300000` (5 min) | Replay window for signed requests |
 | `eddi.a2a.signing.nonce.clock-skew-ms` | `30000` | Tolerated clock difference between peers |
+| `eddi.a2a.task-timeout-seconds` | `systemRuntime.agentTimeoutInSeconds` | How long a peer's `tasks/send` may wait for the turn. Inherits the REST surface's budget, because an operator who raised that has already decided how long a turn may take |
+
+### Slack
+
+Full guide: [slack-integration.md](slack-integration.md).
+
+| Property | Default | Description |
+|---|---|---|
+| `eddi.slack.request-timeout-seconds` | `60` | How long a single agent turn may take before Slack is told it timed out. A turn that legitimately runs longer — a multi-step tool call, a slow provider, a cascade escalation — needs this raised, and answers with a timeout-specific notice naming the limit rather than a generic error |
+| `eddi.slack.group-completion-timeout-seconds` | `300` | How long a whole group discussion may take before follow-up routing gives up |
+| `eddi.slack.api-max-retries` | `3` | Attempts, including the first, for a Slack Web API call |
+| `eddi.slack.api-retry-base-ms` | `500` | Base delay for the exponential backoff between those attempts |
 
 ### OpenAI-compatible API
 

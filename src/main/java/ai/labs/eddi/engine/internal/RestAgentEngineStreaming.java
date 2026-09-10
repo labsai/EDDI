@@ -13,8 +13,12 @@ import ai.labs.eddi.engine.api.IConversationService.ConversationNotFoundExceptio
 import ai.labs.eddi.engine.api.IConversationService.StreamingResponseHandler;
 import ai.labs.eddi.engine.api.IRestAgentEngineStreaming;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictedException;
+import ai.labs.eddi.engine.gdpr.ProcessingRestrictionUnavailableException;
+import ai.labs.eddi.engine.gdpr.ProcessingRestrictionUnavailableExceptionMapper;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
+import ai.labs.eddi.engine.tenancy.QuotaAccountingUnavailableException;
 import ai.labs.eddi.engine.tenancy.QuotaExceededException;
+import ai.labs.eddi.engine.tenancy.rest.QuotaAccountingUnavailableExceptionMapper;
 
 import ai.labs.eddi.engine.lifecycle.TaskId;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
@@ -27,12 +31,12 @@ import jakarta.ws.rs.sse.SseEventSink;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
-import static ai.labs.eddi.utils.LogSanitizer.sanitize;
-
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
  * SSE streaming implementation — maps ConversationService streaming events to
@@ -57,7 +61,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
 
     private static final Logger LOGGER = Logger.getLogger(RestAgentEngineStreaming.class);
-    private static final com.fasterxml.jackson.databind.ObjectMapper MAPPER = new com.fasterxml.jackson.databind.ObjectMapper();
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     /**
      * Audit actor recorded when a turn is cancelled because the SSE client went
@@ -240,12 +244,12 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
      * the opaque internal-error shape.
      * <p>
      * These are not internal errors: the non-streaming twin
-     * ({@code RestAgentEngine}) gives each a proper status (409/410/404/429/403)
-     * with a client-safe body, and before this method the SAME condition on the
-     * streaming path surfaced as {@code {"message":"Internal server error"}} —
-     * observed live when a message was sent into an AWAITING_HUMAN conversation:
-     * the backend refused correctly and the client rendered an opaque 500-style
-     * blob with no way to react.
+     * ({@code RestAgentEngine}) gives each a proper status
+     * (409/410/404/429/403/503) with a client-safe body, and before this method the
+     * SAME condition on the streaming path surfaced as {@code {"message":"Internal
+     * server error"}} — observed live when a message was sent into an
+     * AWAITING_HUMAN conversation: the backend refused correctly and the client
+     * rendered an opaque 500-style blob with no way to react.
      * <p>
      * Per exception, the message mirrors exactly what the twin already discloses —
      * echoed for the conditions whose message is a fixed safe template
@@ -281,12 +285,34 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
         } else if (e instanceof AgentMismatchException) {
             code = "agent_mismatch";
             message = "Agent version mismatch";
+        } else if (e instanceof QuotaAccountingUnavailableException quotaUnavailable) {
+            // Before QuotaExceededException is irrelevant (they are unrelated types),
+            // but the distinction is the same one RestAgentEngine draws: the store
+            // could not answer, so this is not the tenant being over a limit. The
+            // message is this class's own fixed text and names nothing internal, so
+            // it is echoed rather than replaced — through the mapper's accessor, so a
+            // thrower that supplies no message produces the same sentence here as on
+            // the other two surfaces instead of "message":"".
+            code = "quota_accounting_unavailable";
+            message = QuotaAccountingUnavailableExceptionMapper.messageOf(quotaUnavailable);
         } else if (e instanceof QuotaExceededException) {
             code = "quota_exceeded";
             message = e.getMessage();
         } else if (e instanceof ProcessingRestrictedException) {
             code = "processing_restricted";
             message = e.getMessage();
+        } else if (e instanceof ProcessingRestrictionUnavailableException restrictionUnavailable) {
+            // The twin answers 503 restriction_status_unavailable. Without this
+            // branch a store failover reached the client as
+            // {"message":"Internal server error"} on every streamed turn, with an
+            // ERROR stack trace per turn behind it — the honest-503 fix had landed on
+            // the synchronous start endpoint only. The message is a fixed template
+            // naming no deployment internals, so it is echoed rather than replaced —
+            // through the mapper's accessor, so a thrower that supplies no message
+            // produces the same sentence here as on the other two surfaces instead of
+            // an empty one.
+            code = "restriction_status_unavailable";
+            message = ProcessingRestrictionUnavailableExceptionMapper.messageOf(restrictionUnavailable);
         } else {
             return logAndBuildOpaqueErrorEvent(context, e);
         }

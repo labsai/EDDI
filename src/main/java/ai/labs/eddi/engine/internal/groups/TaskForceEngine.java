@@ -29,7 +29,7 @@ import ai.labs.eddi.engine.internal.TaskListParser;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
 import ai.labs.eddi.engine.lifecycle.model.DiscussionControlToken;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
-import ai.labs.eddi.engine.tenancy.QuotaExceededException;
+import ai.labs.eddi.engine.tenancy.QuotaRefusal;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import ai.labs.eddi.utils.LogSanitizer;
 import org.jboss.logging.Logger;
@@ -223,7 +223,7 @@ public class TaskForceEngine {
             }
 
             // Build planning input with member info
-            String planTemplate = DiscussionStylePresets.defaultTemplate(PhaseType.PLAN);
+            String planTemplate = DiscussionStylePresets.templateFor(phase, PhaseType.PLAN);
             Map<String, Object> data = new LinkedHashMap<>();
             data.put("question", question);
             data.put("displayName", planner.displayName());
@@ -450,7 +450,7 @@ public class TaskForceEngine {
                             // Quota errors are non-retryable — abort all tasks immediately.
                             // Checked before the cancellation guard so a quota breach is still
                             // reported even when the wave is already unwinding.
-                            if (e.getCause() instanceof QuotaExceededException) {
+                            if (e.getCause() instanceof QuotaRefusal) {
                                 errors.add(e);
                                 return; // exit the entire agent's CompletableFuture
                             }
@@ -563,7 +563,7 @@ public class TaskForceEngine {
 
             // Quota errors always abort, regardless of onAgentFailure policy
             for (GroupDiscussionException error : errors) {
-                if (error.getCause() instanceof QuotaExceededException) {
+                if (error.getCause() instanceof QuotaRefusal) {
                     throw error;
                 }
             }
@@ -742,7 +742,7 @@ public class TaskForceEngine {
         }
 
         // Build verification input
-        String verifyTemplate = DiscussionStylePresets.defaultTemplate(PhaseType.VERIFY);
+        String verifyTemplate = DiscussionStylePresets.templateFor(phase, PhaseType.VERIFY);
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("question", question);
         data.put("displayName", verifier.displayName());
@@ -790,7 +790,7 @@ public class TaskForceEngine {
      * configured context scope.
      */
     public String buildTaskExecutionInput(TaskItem task, String question, DiscussionPhase phase, GroupConversation gc) {
-        String template = DiscussionStylePresets.defaultTemplate(PhaseType.EXECUTE);
+        String template = DiscussionStylePresets.templateFor(phase, PhaseType.EXECUTE);
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("question", question);
         data.put("taskSubject", task.subject());

@@ -12,6 +12,7 @@ import ai.labs.eddi.engine.api.IConversationService.ConversationNotFoundExceptio
 import ai.labs.eddi.engine.api.IConversationService.*;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictedException;
+import ai.labs.eddi.engine.gdpr.ProcessingRestrictionUnavailableException;
 import ai.labs.eddi.engine.hitl.HitlAccessGuard;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
@@ -23,7 +24,9 @@ import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
 import ai.labs.eddi.engine.security.OwnershipValidator;
+import ai.labs.eddi.engine.tenancy.QuotaAccountingUnavailableException;
 import ai.labs.eddi.engine.tenancy.QuotaExceededException;
+import ai.labs.eddi.engine.tenancy.rest.QuotaAccountingUnavailableExceptionMapper;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.ws.rs.InternalServerErrorException;
@@ -41,6 +44,7 @@ import java.util.Map;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 
+import jakarta.ws.rs.NotFoundException;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -328,7 +332,7 @@ class RestAgentEngineTest {
             restAgentEngine.sayWithinContext("conv-1", false, false,
                     List.of(), inputData, asyncResponse);
 
-            verify(asyncResponse).resume(any(jakarta.ws.rs.NotFoundException.class));
+            verify(asyncResponse).resume(any(NotFoundException.class));
         }
 
         @Test
@@ -346,6 +350,178 @@ class RestAgentEngineTest {
             var captor = ArgumentCaptor.forClass(Response.class);
             verify(asyncResponse).resume(captor.capture());
             assertEquals(403, captor.getValue().getStatus());
+        }
+
+        /**
+         * The honest-503 fix landed on the synchronous start endpoint only. {@code say}
+         * is resumed through an {@code AsyncResponse}, which never reaches an
+         * {@code ExceptionMapper}, so during a store failover the hottest path in the
+         * system answered 500 "An internal error occurred" — not the promised 503
+         * {@code restriction_status_unavailable} — and wrote two ERROR stack traces per
+         * turn per user. Monitoring keyed on 5xx saw a code bug rather than an outage.
+         */
+        @Test
+        @DisplayName("should resume with 503 restriction_status_unavailable, not 500, when the Art. 18 flag cannot be read")
+        void gdprRestrictionStatusUnavailable() throws Exception {
+            var asyncResponse = mock(AsyncResponse.class);
+            var inputData = new InputData("Hello", Map.of());
+
+            doThrow(new ProcessingRestrictionUnavailableException(
+                    "Cannot determine processing-restriction status right now; the request was not processed",
+                    new RuntimeException("connection refused")))
+                    .when(conversationService).say(anyString(), any(), any(), any(), any(), anyBoolean(), any());
+
+            // Without the explicit catch this fell through to the generic handler,
+            // which THROWS InternalServerErrorException instead of resuming — so
+            // both assertions below fail on the old code.
+            restAgentEngine.sayWithinContext("conv-1", false, false,
+                    List.of(), inputData, asyncResponse);
+
+            var captor = ArgumentCaptor.forClass(Response.class);
+            verify(asyncResponse).resume(captor.capture());
+            Response resumed = captor.getValue();
+            assertEquals(503, resumed.getStatus());
+            assertEquals("5", resumed.getHeaderString("Retry-After"));
+            assertEquals(Map.of("error", "restriction_status_unavailable",
+                    "message", "Cannot determine processing-restriction status right now; the request was not processed"),
+                    resumed.getEntity());
+        }
+
+        /**
+         * The branch above built its body with {@code Map.of("message",
+         * e.getMessage())}, unguarded — unlike the quota branch two clauses down.
+         * {@code Map.of} throws {@link NullPointerException} on a null value, and an
+         * exception raised inside a catch clause is not seen by the sibling catches, so
+         * a thrower carrying no message would leave the {@code AsyncResponse} unresumed
+         * and the request hanging to its timeout: strictly worse than the 500 this
+         * branch was added to replace.
+         */
+        @Test
+        @DisplayName("a restriction failure carrying no message still resumes, with the mapper's fallback text")
+        void gdprRestrictionStatusUnavailableWithoutAMessageStillResumes() throws Exception {
+            var asyncResponse = mock(AsyncResponse.class);
+            var inputData = new InputData("Hello", Map.of());
+
+            doThrow(new ProcessingRestrictionUnavailableException(null, new RuntimeException("connection refused")))
+                    .when(conversationService).say(anyString(), any(), any(), any(), any(), anyBoolean(), any());
+
+            restAgentEngine.sayWithinContext("conv-1", false, false,
+                    List.of(), inputData, asyncResponse);
+
+            var captor = ArgumentCaptor.forClass(Response.class);
+            verify(asyncResponse).resume(captor.capture());
+            Response resumed = captor.getValue();
+            assertEquals(503, resumed.getStatus());
+            assertEquals(Map.of("error", "restriction_status_unavailable",
+                    "message", "Processing-restriction status unavailable"), resumed.getEntity());
+        }
+
+        /**
+         * A quota store that cannot answer refuses the turn for safety, which is right
+         * — but it is not the tenant being over a limit. Routing it through the
+         * ordinary denial path answered 429 with {@code Retry-After: 60} and spiked
+         * {@code eddi.tenant.quota.denied}, so neither the client nor the dashboard
+         * could tell a database outage from an exhausted allowance.
+         */
+        @Test
+        @DisplayName("should resume with 503 quota_accounting_unavailable, not 429, when the quota store cannot answer")
+        void quotaAccountingUnavailable() throws Exception {
+            var asyncResponse = mock(AsyncResponse.class);
+            var inputData = new InputData("Hello", Map.of());
+
+            doThrow(new QuotaAccountingUnavailableException("Quota accounting unavailable — denying request for safety"))
+                    .when(conversationService).say(anyString(), any(), any(), any(), any(), anyBoolean(), any());
+
+            restAgentEngine.sayWithinContext("conv-1", false, false,
+                    List.of(), inputData, asyncResponse);
+
+            var captor = ArgumentCaptor.forClass(Response.class);
+            verify(asyncResponse).resume(captor.capture());
+            Response resumed = captor.getValue();
+            assertEquals(503, resumed.getStatus());
+            assertEquals(Map.of("error", "quota_accounting_unavailable",
+                    "message", "Quota accounting unavailable — denying request for safety"),
+                    resumed.getEntity());
+        }
+
+        /**
+         * {@code Map.of} throws {@link NullPointerException} on a null value, and this
+         * branch runs inside a {@code catch} — an exception raised there is not seen by
+         * the sibling catches, so the {@code AsyncResponse} would never be resumed and
+         * the request would hang to its timeout rather than answering 503. The fallback
+         * text keeps the body identical to the one
+         * {@code QuotaAccountingUnavailableExceptionMapper} produces on the synchronous
+         * endpoints.
+         */
+        @Test
+        @DisplayName("a quota-outage refusal carrying no message still resumes, with a fixed body")
+        void quotaAccountingUnavailableWithoutAMessage() throws Exception {
+            var asyncResponse = mock(AsyncResponse.class);
+            var inputData = new InputData("Hello", Map.of());
+
+            doThrow(new QuotaAccountingUnavailableException(null))
+                    .when(conversationService).say(anyString(), any(), any(), any(), any(), anyBoolean(), any());
+
+            restAgentEngine.sayWithinContext("conv-1", false, false,
+                    List.of(), inputData, asyncResponse);
+
+            var captor = ArgumentCaptor.forClass(Response.class);
+            verify(asyncResponse).resume(captor.capture());
+            Response resumed = captor.getValue();
+            assertEquals(503, resumed.getStatus());
+            assertEquals(Map.of("error", "quota_accounting_unavailable",
+                    "message", "Quota accounting unavailable"), resumed.getEntity());
+        }
+
+        /**
+         * The branch exists because {@code say} is resumed through an
+         * {@code AsyncResponse} and so never reaches
+         * {@link QuotaAccountingUnavailableExceptionMapper}, which is what answers the
+         * synchronous endpoints. Two code paths, one outage: a client that retries
+         * {@code POST /agents/{env}/{agentId}} and then {@code POST
+         * /agents/{conversationId}} must not be told two different things, and the
+         * branch's own comment promises exactly that ("Body and headers mirror the
+         * mapper so both surfaces look identical to clients").
+         * <p>
+         * So the mapper is the oracle here rather than a second copy of its expected
+         * body — a duplicated literal drifts silently, while an equality against the
+         * mapper cannot. The header is the half nothing else pins and the half most
+         * likely to be wrong: the exception extends {@link RejectedExecutionException}
+         * and sits one clause above the backpressure branch, and the sibling quota
+         * branch two clauses up answers {@code Retry-After: 60}. A store failover
+         * clears in seconds, so telling a client to wait a minute — or omitting the
+         * header entirely and leaving the retry interval to the client — is a real
+         * behaviour change that the status and body assertions above would not notice.
+         */
+        @Test
+        @DisplayName("the async 503 for a quota-store outage is the mapper's own answer, Retry-After included")
+        void quotaAccountingUnavailableMirrorsTheSynchronousMapper() throws Exception {
+            var asyncResponse = mock(AsyncResponse.class);
+            var inputData = new InputData("Hello", Map.of());
+            var outage = new QuotaAccountingUnavailableException("Quota accounting unavailable — denying request for safety");
+
+            doThrow(outage).when(conversationService).say(anyString(), any(), any(), any(), any(), anyBoolean(), any());
+
+            restAgentEngine.sayWithinContext("conv-1", false, false,
+                    List.of(), inputData, asyncResponse);
+
+            var captor = ArgumentCaptor.forClass(Response.class);
+            verify(asyncResponse).resume(captor.capture());
+            Response resumed = captor.getValue();
+
+            Response synchronousAnswer = new QuotaAccountingUnavailableExceptionMapper().toResponse(outage);
+
+            assertEquals(synchronousAnswer.getStatus(), resumed.getStatus(),
+                    "the same outage must not be a 503 on one endpoint and something else on the other");
+            assertEquals(synchronousAnswer.getEntity(), resumed.getEntity(),
+                    "a client switching endpoints mid-outage parses one error code, not two");
+            assertEquals(synchronousAnswer.getMediaType(), resumed.getMediaType(),
+                    "a JSON body announced as text/plain is unparseable to the same client");
+            assertEquals(synchronousAnswer.getHeaderString("Retry-After"), resumed.getHeaderString("Retry-After"),
+                    "the retry interval is part of the answer, and the two surfaces have to agree on it");
+            assertEquals("5", resumed.getHeaderString("Retry-After"),
+                    "a store failover clears in seconds — 60 is the over-quota backoff and would idle every client "
+                            + "for a minute after the store came back");
         }
 
         @Test
@@ -407,7 +583,7 @@ class RestAgentEngineTest {
             restAgentEngine.sayWithinContext("conv-1", false, false,
                     List.of(), inputData, asyncResponse);
 
-            verify(asyncResponse).resume(any(jakarta.ws.rs.NotFoundException.class));
+            verify(asyncResponse).resume(any(NotFoundException.class));
         }
 
         @Test

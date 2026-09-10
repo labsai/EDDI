@@ -28,14 +28,58 @@ import java.util.List;
  */
 public interface ITenantQuotaStore {
 
+    /**
+     * Denial reason every implementation uses when the store itself could not
+     * answer — as opposed to the tenant genuinely being over a limit.
+     * <p>
+     * Paired with {@link QuotaCheckResult#unavailable}, which is what makes the
+     * difference visible to the caller: an over-limit denial is 429 with
+     * {@code Retry-After: 60} and belongs on {@code eddi.tenant.quota.denied}, an
+     * outage is 503 {@code quota_accounting_unavailable} and belongs on
+     * {@code eddi.tenant.quota.unavailable}. Shared here rather than owned by one
+     * store because the distinction has to hold on <em>every</em> backend — it
+     * shipped PostgreSQL-only, while {@code eddi.datastore.type} defaults to
+     * mongodb, so the documented behaviour did not apply to the default deployment.
+     */
+    String ACCOUNTING_UNAVAILABLE = "Quota accounting unavailable — denying request for safety";
+
+    /**
+     * Refuse the request, flagged as an accounting outage rather than a limit
+     * breach.
+     * <p>
+     * {@link QuotaCheckResult#denied} would still route it through the ordinary
+     * over-quota path: {@code TenantQuotaService} increments
+     * {@code eddi.tenant.quota.denied} and the REST layer answers 429 with
+     * {@code Retry-After: 60}. Only the reason string differed, so a store outage
+     * looked exactly like a tenant burning through its allowance — to the dashboard
+     * and to the client.
+     *
+     * @return a denied result flagged {@code accountingUnavailable}
+     */
+    static QuotaCheckResult accountingUnavailable() {
+        return QuotaCheckResult.unavailable(ACCOUNTING_UNAVAILABLE);
+    }
+
     // ─── Quota Configuration ───
 
     /**
      * Get quota configuration for a tenant.
+     * <p>
+     * This is the first store call every gate in {@link TenantQuotaService} makes,
+     * so on a real outage it is the one that fails — the {@code tryIncrement*}
+     * methods below are never reached. It must therefore fail closed exactly as
+     * they do, and it cannot say so in its return value: {@code null} already means
+     * "this tenant has no quota row", which the service treats as unlimited. A
+     * store that could not be reached throws
+     * {@link QuotaAccountingUnavailableException} instead. Returning null for a
+     * driver failure silently disabled enforcement for every tenant, while the
+     * write half of the very same outage refused the request with a 503.
      *
      * @param tenantId
      *            tenant identifier
-     * @return the quota config, or null if not found
+     * @return the quota config, or null if the tenant has none configured
+     * @throws QuotaAccountingUnavailableException
+     *             if the store could not be reached
      */
     TenantQuota getQuota(String tenantId);
 
@@ -56,6 +100,14 @@ public interface ITenantQuotaStore {
 
     /**
      * Delete quota configuration for a tenant.
+     * <p>
+     * <strong>No REST surface and no production caller today</strong> —
+     * {@code IRestTenantQuota} exposes list/get/update but no DELETE, so this is
+     * reached only from tests and from embedded use. Whether to publish a DELETE
+     * endpoint is an open question (a tenant with no quota row is treated as
+     * <em>unlimited</em>, so deleting the bootstrapped default tenant's row
+     * silently turns enforcement off), which is why the method is documented rather
+     * than removed or wired up on the reviewer's behalf.
      *
      * @param tenantId
      *            tenant identifier
