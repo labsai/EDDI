@@ -368,6 +368,18 @@ public class OAuthTokenService implements AccessTokenSupplier {
         } catch (ConnectionException e) {
             handleRefreshFailure(connection, grant, e);
             throw e;
+        } catch (RuntimeException e) {
+            // A store or vault failure that is not a ConnectionException — a CAS write
+            // throwing, a resolver blowing up. It used to escape the classification
+            // entirely: no transient metric, no log line, and a REST caller saw a 500
+            // rather than the 503 the reason mapper gives a transient failure. The
+            // grant is untouched, so it IS transient, and is reported as such.
+            ConnectionException transientFailure = new ConnectionException(ConnectionException.Reason.TOKEN_ENDPOINT_UNAVAILABLE,
+                    "Refreshing the grant for connection '" + connection.getName() + "' failed unexpectedly (" + e.getClass().getSimpleName()
+                            + "). The grant is unchanged; the next request will retry.",
+                    e);
+            handleRefreshFailure(connection, grant, transientFailure);
+            throw transientFailure;
         } finally {
             releaseQuietly(tenantId, connection.getName(), principal);
         }

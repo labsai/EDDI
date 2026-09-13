@@ -102,12 +102,12 @@ class OAuthTokenClientTest {
         // doReturn rather than when(...): sendValidatedNoRedirect is generic and
         // stubbing it
         // through when() would need the call to type-check against a concrete T.
-        doReturn(response).when(httpClient).sendValidatedNoRedirect(any(), any());
+        doReturn(response).when(httpClient).sendNoRedirect(any(), any());
     }
 
     private HttpRequest sentRequest() throws Exception {
         var captor = ArgumentCaptor.forClass(HttpRequest.class);
-        verify(httpClient).sendValidatedNoRedirect(captor.capture(), any());
+        verify(httpClient).sendNoRedirect(captor.capture(), any());
         return captor.getValue();
     }
 
@@ -291,7 +291,7 @@ class OAuthTokenClientTest {
         var error = assertThrows(ConnectionException.class, () -> client.clientCredentials(connection, CLIENT_SECRET));
 
         assertEquals(ConnectionException.Reason.INVALID_CONFIGURATION, error.getReason());
-        verify(httpClient, never()).sendValidatedNoRedirect(any(), any());
+        verify(httpClient, never()).sendNoRedirect(any(), any());
     }
 
     @Test
@@ -319,9 +319,40 @@ class OAuthTokenClientTest {
     }
 
     @Test
+    @DisplayName("an allowlisted token endpoint on a private network is contacted — the operator's allowlist outranks the SSRF address block")
+    void allowlistedPrivateNetworkTokenEndpointIsContacted() throws Exception {
+        // An on-premises identity provider. sendValidated* would refuse the host
+        // before the request left the process, and the operator who listed the exact
+        // origin is precisely the person entitled to send a client secret there.
+        String privateOrigin = "https://idp.corp.internal";
+        client = new OAuthTokenClient(httpClient, new CredentialEndpointAllowlist(Set.of(privateOrigin)));
+        var connection = connection();
+        connection.getOauth().setTokenUrl(privateOrigin + "/oauth/token");
+        respondWith(200, FULL_TOKEN_BODY);
+
+        assertEquals("at-live", client.clientCredentials(connection, CLIENT_SECRET).accessToken());
+
+        assertEquals(privateOrigin + "/oauth/token", sentRequest().uri().toString());
+        verify(httpClient, never()).sendValidatedNoRedirect(any(), any());
+        verify(httpClient, never()).sendValidated(any(), any());
+    }
+
+    @Test
+    @DisplayName("the exemption is from the address check only — a non-http scheme or a hostless URL is still refused")
+    void schemeAndHostAreStillValidated() {
+        for (String tokenUrl : List.of("ftp://auth.example.com/token", "https:///token")) {
+            var connection = connection();
+            connection.getOauth().setTokenUrl(tokenUrl);
+            // The allowlist itself refuses these first (it only accepts bare http(s)
+            // origins), which is the layered defence the syntax check backs up.
+            assertThrows(RuntimeException.class, () -> client.clientCredentials(connection, CLIENT_SECRET), tokenUrl);
+        }
+    }
+
+    @Test
     @DisplayName("a transport failure is transient — the grant is left alone and the next call retries")
     void transportFailureIsTransient() throws Exception {
-        doThrow(new IOException("connection reset")).when(httpClient).sendValidatedNoRedirect(any(), any());
+        doThrow(new IOException("connection reset")).when(httpClient).sendNoRedirect(any(), any());
 
         var error = assertThrows(ConnectionException.class, () -> client.refresh(connection(), CLIENT_SECRET, "rt-stored"));
 
@@ -333,7 +364,7 @@ class OAuthTokenClientTest {
     @Test
     @DisplayName("an interrupted exchange is transient and hands the interrupt back to the caller")
     void interruptionIsTransientAndRestoresTheInterruptFlag() throws Exception {
-        doThrow(new InterruptedException("shutting down")).when(httpClient).sendValidatedNoRedirect(any(), any());
+        doThrow(new InterruptedException("shutting down")).when(httpClient).sendNoRedirect(any(), any());
 
         var error = assertThrows(ConnectionException.class, () -> client.refresh(connection(), CLIENT_SECRET, "rt-stored"));
 

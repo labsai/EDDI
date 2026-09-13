@@ -290,6 +290,18 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
             count("connection.oauth.callback.count", "outcome", "exchange_failed", connection);
             LOGGER.warnf("Token exchange failed for connection '%s': %s", connection.getName(), e.getReason());
             return redirect(oauthState.getReturnTo(), "error", "exchange_failed", expiredBindingCookie(state));
+        } catch (RuntimeException e) {
+            // Everything else, once the state is claimed. A token host refused by URL
+            // validation (IllegalArgumentException), a grant store that cannot write
+            // (IllegalStateException): each used to escape as a 500 to a browser the
+            // provider just redirected, with the single-use state consumed and a
+            // provider token possibly minted but never stored. The contract is a 303
+            // in every outcome. Class name only — the message can quote the request,
+            // and this is an ERROR line.
+            count("connection.oauth.callback.count", "outcome", "exchange_failed", connection);
+            LOGGER.errorf("Token exchange for connection '%s' failed unexpectedly (%s); the user must start the link again",
+                    sanitize(connection.getName()), e.getClass().getSimpleName());
+            return redirect(oauthState.getReturnTo(), "error", "exchange_failed", expiredBindingCookie(state));
         }
     }
 

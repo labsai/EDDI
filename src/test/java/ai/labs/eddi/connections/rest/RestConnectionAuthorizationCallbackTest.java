@@ -259,6 +259,50 @@ class RestConnectionAuthorizationCallbackTest {
     }
 
     @Test
+    @DisplayName("a failure after the state is claimed that is not a ConnectionException still ends in the documented 303")
+    void unexpectedExchangeFailureStillRedirects() {
+        // UrlValidationUtils throws IllegalArgumentException for a private token host,
+        // a grant store throws IllegalStateException when it cannot write. Both used
+        // to escape as a 500 to a browser the provider just redirected — with the
+        // single-use state consumed, so the user could not even retry.
+        for (RuntimeException failure : List.of(new IllegalArgumentException("URL resolves to a private/internal address"),
+                new IllegalStateException("Failed to write connection grant"))) {
+            var registry = new SimpleMeterRegistry();
+            RestConnectionAuthorization resource = resource(registry);
+            StartedFlow flow = startFlow(resource, "/manage/connections");
+            doAnswer(invocation -> {
+                throw failure;
+            }).when(tokenClient).authorizationCode(any(), any(), any(), any(), any());
+
+            Response response = resource.callback(CODE, flow.row().getState(), null, browserWith(flow.cookie()));
+
+            assertEquals(303, response.getStatus(), failure.getClass().getSimpleName() + " must not become a 500 on a permit path");
+            assertEquals(URI.create("/manage/connections?error=exchange_failed"), response.getLocation(),
+                    "the browser must be told the exchange failed, exactly as for a provider refusal");
+            Counter counted = registry.find(CALLBACK_METRIC).tag("outcome", "exchange_failed").counter();
+            assertTrue(counted != null && counted.count() == 1, "the failure must be counted as exchange_failed");
+            assertEquals(List.of(), grantsStoredFor, "nothing was stored");
+        }
+    }
+
+    @Test
+    @DisplayName("a grant store that throws after the provider minted a token still redirects rather than 500ing")
+    void storeFailureAfterMintingStillRedirects() {
+        RestConnectionAuthorization resource = resource(new SimpleMeterRegistry());
+        StartedFlow flow = startFlow(resource, "/manage/connections");
+        doAnswer(invocation -> {
+            throw new IllegalStateException("Failed to write connection grant");
+        }).when(tokenService).persistNew(any(), any(), any(), any(), any());
+
+        Response response = resource.callback(CODE, flow.row().getState(), null, browserWith(flow.cookie()));
+
+        assertEquals(List.of(CODE), codesRedeemed, "the token WAS minted at the provider before the store failed");
+        assertEquals(303, response.getStatus());
+        assertEquals(URI.create("/manage/connections?error=exchange_failed"), response.getLocation(),
+                "the user has to be told to start again — the minted token was never stored");
+    }
+
+    @Test
     @DisplayName("a metrics registry that throws cannot abort a callback that has already stored the grant")
     void meterFailureCannotUndoACompletedLink() {
         // The original defect threw AFTER persistNew: the tokens were in the database

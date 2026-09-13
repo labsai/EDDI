@@ -10,6 +10,7 @@ import ai.labs.eddi.connections.ConnectionException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import ai.labs.eddi.engine.httpclient.SafeHttpClient;
+import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -146,7 +147,14 @@ public class OAuthTokenClient {
 
         HttpResponse<String> response;
         try {
-            response = httpClient.sendValidatedNoRedirect(request.POST(HttpRequest.BodyPublishers.ofString(encodeForm(body))).build(),
+            // The allowlist above is the access rule here, and it is stricter than the
+            // SSRF check: an exact origin an operator wrote down, not "anything public".
+            // That is what lets an on-premises identity provider on a private network
+            // be a token endpoint at all — the SSRF address block would refuse it, and
+            // the operator who listed it is precisely the person entitled to. Scheme
+            // and host are still validated; only the address class is not.
+            UrlValidationUtils.validateUrlSyntax(oauth.getTokenUrl());
+            response = httpClient.sendNoRedirect(request.POST(HttpRequest.BodyPublishers.ofString(encodeForm(body))).build(),
                     HttpResponse.BodyHandlers.ofString());
         } catch (IOException e) {
             // Transport failure. NOT terminal: the grant stays usable and the next

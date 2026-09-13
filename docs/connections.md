@@ -372,6 +372,16 @@ An empty credential-endpoint allowlist means **no OAuth connection can resolve**
 That is fail-closed on purpose: an unconfigured allowlist is far more likely than
 an operator who meant "anywhere".
 
+**A listed origin may be on a private network.** The token request still goes
+through `SafeHttpClient`, but the SSRF address check — which refuses loopback,
+RFC 1918, link-local and cloud-metadata addresses — is not applied to the token
+endpoint. The allowlist is a stricter rule than that check: an exact origin an
+operator wrote down, not "anything public", and the operator who listed
+`https://idp.corp.internal` is exactly the person entitled to point a client
+secret at it. Scheme and host are still validated, redirects are still never
+followed, and nothing else in EDDI gets the exemption — an httpcall to the same
+host is still subject to `eddi.security.ssrf-protection`.
+
 ---
 
 ## Per-user accounts

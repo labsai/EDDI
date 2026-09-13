@@ -544,6 +544,21 @@ class OAuthTokenServiceRefreshTest {
         assertEquals(ConnectionGrant.Status.ACTIVE, grantStore.find(TENANT, CONNECTION, PRINCIPAL).orElseThrow().getStatus());
     }
 
+    @Test
+    @DisplayName("a failure inside the claim that is not a ConnectionException is reported as transient, not as a 500")
+    void unexpectedFailureInsideTheClaimIsTransient() {
+        seedExpiredGrant();
+        when(tokenClient.refresh(any(), anyString(), anyString())).thenThrow(new IllegalStateException("resolver blew up"));
+
+        var error = assertThrows(ConnectionException.class, () -> service().accessToken(connection(), PRINCIPAL));
+
+        assertEquals(ConnectionException.Reason.TOKEN_ENDPOINT_UNAVAILABLE, error.getReason(),
+                "an unclassified failure used to escape the transient/terminal split entirely and reach a REST caller as a 500");
+        assertEquals(IllegalStateException.class, error.getCause().getClass(), "the cause must be kept for the log");
+        assertEquals(ConnectionGrant.Status.ACTIVE, grantStore.find(TENANT, CONNECTION, PRINCIPAL).orElseThrow().getStatus(),
+                "the grant is untouched, which is what makes the failure transient");
+    }
+
     /**
      * Changes the row underneath a caller that is already waiting, on the nth read.
      * Deterministic where a background thread would race the poll interval.
