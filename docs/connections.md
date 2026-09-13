@@ -813,7 +813,14 @@ treated as an administrator, exactly as `@RolesAllowed` is.
   for, and off a linked-accounts page the connection no longer has. `PUT` answers
   **409** naming the number of linked accounts and the two ways forward: each user
   unlinks with `DELETE /connections/{name}/grant`, or the administrator deletes the
-  connection — which cascades to its grants — and creates the new one.
+  connection — which cascades to its grants — and creates the new one. The count
+  and the update are not atomic, so an account link already in flight could land
+  between them; both sides re-check after their own write. The update counts again
+  once it is written and deletes any grant that appeared (logged at WARN with the
+  number), and the OAuth callback re-reads the connection once its grant is stored
+  and deletes that grant — redirecting with `exchange_failed` — if the connection is
+  gone or no longer a `PER_USER` authorization-code connection. Whichever write
+  lands first, one of the two re-checks sees it.
 * **`VaultGrantChecker` follows the hop.** A `${connection:name}` is an *indirect*
   vault reference: the connection document holds the `${vault:…}` client secret.
   Without following it an agent could use a credential it was never granted

@@ -26,15 +26,18 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -143,6 +146,53 @@ class RestConnectionStoreGrantLifecycleTest {
         when(connectionStore.update(eq(ID), eq(2), any())).thenReturn(3);
 
         rest().updateConnection(ID, 2, connection("drive", "default"));
+
+        verify(connectionStore).update(eq(ID), eq(2), any());
+        verify(grantStore, times(2)).countByConnection("default", "drive");
+        verify(grantStore, never()).deleteByConnection(anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("a grant linked between the count and the update is deleted by the second count, after the update is written")
+    void deletesAGrantLinkedBetweenTheCountAndTheUpdate() throws Exception {
+        // The interleaving the callback cannot see: its grant landed after the first
+        // count said zero, and its own re-read ran before this update was written,
+        // so it still found the old shape. The count made after the write is what
+        // has to catch it.
+        var perUser = connection("drive", "default");
+        perUser.setAuthType(AuthType.OAUTH2_AUTHORIZATION_CODE);
+        perUser.setBinding(Binding.PER_USER);
+        perUser.setStaticAuth(null);
+        perUser.setOauth(oauth());
+        storedAs(perUser, 2);
+        when(connectionStore.idOfName("default", "drive")).thenReturn(ID);
+        when(grantStore.countByConnection("default", "drive")).thenReturn(0L, 1L);
+        when(grantStore.deleteByConnection("default", "drive")).thenReturn(1);
+        when(connectionStore.update(eq(ID), eq(2), any())).thenReturn(3);
+
+        rest().updateConnection(ID, 2, connection("drive", "default"));
+
+        var order = inOrder(grantStore, connectionStore);
+        order.verify(grantStore).countByConnection("default", "drive");
+        order.verify(connectionStore).update(eq(ID), eq(2), any());
+        order.verify(grantStore).countByConnection("default", "drive");
+        order.verify(grantStore).deleteByConnection("default", "drive");
+    }
+
+    @Test
+    @DisplayName("a post-update count that fails is logged, not turned into an error for an update that did land")
+    void aFailedPostUpdateCountDoesNotFailTheUpdate() throws Exception {
+        var perUser = connection("drive", "default");
+        perUser.setAuthType(AuthType.OAUTH2_AUTHORIZATION_CODE);
+        perUser.setBinding(Binding.PER_USER);
+        perUser.setStaticAuth(null);
+        perUser.setOauth(oauth());
+        storedAs(perUser, 2);
+        when(connectionStore.idOfName("default", "drive")).thenReturn(ID);
+        when(grantStore.countByConnection("default", "drive")).thenReturn(0L).thenThrow(new IllegalStateException("blinked"));
+        when(connectionStore.update(eq(ID), eq(2), any())).thenReturn(3);
+
+        assertDoesNotThrow(() -> rest().updateConnection(ID, 2, connection("drive", "default")));
 
         verify(connectionStore).update(eq(ID), eq(2), any());
     }

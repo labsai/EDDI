@@ -5,7 +5,9 @@
 package ai.labs.eddi.connections.rest;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+import ai.labs.eddi.configs.connections.IConnectionStore;
 import ai.labs.eddi.configs.connections.model.AuthType;
+import ai.labs.eddi.configs.connections.model.Binding;
 import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
 import ai.labs.eddi.connections.ConnectionException;
 import ai.labs.eddi.connections.ConnectionRegistry;
@@ -20,6 +22,7 @@ import ai.labs.eddi.connections.oauth.OAuthState;
 import ai.labs.eddi.connections.oauth.OAuthTokenClient;
 import ai.labs.eddi.connections.oauth.OAuthTokenService;
 import ai.labs.eddi.connections.oauth.TokenResponse;
+import ai.labs.eddi.datastore.IResourceStore;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -94,6 +97,8 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
     private static final SecureRandom RANDOM = new SecureRandom();
 
     private final ConnectionRegistry connectionRegistry;
+    /** Uncached, for the post-write re-read the registry's cache cannot serve. */
+    private final IConnectionStore connectionStore;
     private final IOAuthStateStore stateStore;
     private final IConnectionGrantStore grantStore;
     private final OAuthTokenClient tokenClient;
@@ -108,7 +113,8 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
     public RestConnectionAuthorization(ConnectionRegistry connectionRegistry, IOAuthStateStore stateStore, IConnectionGrantStore grantStore,
             OAuthTokenClient tokenClient, OAuthTokenService tokenService, CredentialEndpointAllowlist endpointAllowlist,
             ConnectionsConfig connectionsConfig, SecurityIdentity securityIdentity, CredentialReferenceResolver credentialReferenceResolver,
-            MeterRegistry meterRegistry) {
+            MeterRegistry meterRegistry, IConnectionStore connectionStore) {
+        this.connectionStore = connectionStore;
         this.connectionRegistry = connectionRegistry;
         this.stateStore = stateStore;
         this.grantStore = grantStore;
@@ -284,6 +290,15 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
             // parameter would let anyone who obtains a state install a grant under
             // somebody else's name.
             tokenService.persistNew(connection, oauthState.getTenantId(), oauthState.getPrincipal(), token, token.refreshToken());
+            if (!connectionStillTakesTheGrant(oauthState)) {
+                // An update changed the connection's authType or binding while this
+                // link was in flight. See RestConnectionStore
+                // .deleteGrantsLinkedDuringTheUpdate for why re-reading HERE, after the
+                // grant is written, is what closes the race.
+                discardGrant(oauthState);
+                increment("eddi.connection.oauth.callback.count", "outcome", "exchange_failed", connection);
+                return redirect(oauthState.getReturnTo(), "error", "exchange_failed", expiredBindingCookie(state));
+            }
             increment("eddi.connection.oauth.callback.count", "outcome", "success", connection);
             return redirect(oauthState.getReturnTo(), "connected", connection.getName(), expiredBindingCookie(state));
         } catch (ConnectionException e) {
@@ -350,6 +365,66 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────
+
+    /**
+     * Whether the connection this grant was just stored for still reads grants of
+     * this kind — re-read from the store AFTER the grant was written.
+     * <p>
+     * The other half of
+     * {@code RestConnectionStore.deleteGrantsLinkedDuringTheUpdate}, whose comment
+     * carries the interleaving argument: an update that counted zero grants and
+     * then changed {@code authType} or {@code binding} would otherwise leave this
+     * refresh token under a shape the resolver never reads. So the read must see
+     * that update if it landed first, which rules out the registry: it is cached,
+     * and on another replica its TTL is the only invalidation. The id is found by
+     * name — the name cannot change — and the document read by id at its CURRENT
+     * version, because the descriptor a name lookup follows may still point at the
+     * version before the update.
+     * <p>
+     * A read that fails answers false. Not knowing is not evidence the grant is
+     * usable, and the cost of being wrong is a live refresh token nothing will ever
+     * read or revoke; the cost of the other mistake is the user linking again.
+     */
+    private boolean connectionStillTakesTheGrant(OAuthState oauthState) {
+        try {
+            String id = connectionStore.idOfName(oauthState.getTenantId(), oauthState.getConnectionName());
+            if (id == null) {
+                LOGGER.warnf("Connection '%s' was deleted while an account was being linked to it; the grant just stored is discarded",
+                        sanitize(oauthState.getConnectionName()));
+                return false;
+            }
+            IResourceStore.IResourceId current = connectionStore.getCurrentResourceId(id);
+            ConnectionConfiguration connection = connectionStore.read(id, current.getVersion());
+            if (connection != null && connection.getAuthType() == AuthType.OAUTH2_AUTHORIZATION_CODE && connection.getBinding() == Binding.PER_USER) {
+                return true;
+            }
+            LOGGER.warnf("Connection '%s' stopped being a PER_USER authorization-code connection while an account was being linked to it; the "
+                    + "grant just stored could never be resolved and is discarded", sanitize(oauthState.getConnectionName()));
+            return false;
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            LOGGER.warnf("Connection '%s' was deleted while an account was being linked to it; the grant just stored is discarded",
+                    sanitize(oauthState.getConnectionName()));
+            return false;
+        } catch (Exception e) {
+            LOGGER.warnf("Could not re-read connection '%s' after linking an account (%s), so the grant just stored cannot be shown to be "
+                    + "usable and is discarded; the user must link again", sanitize(oauthState.getConnectionName()), e.getClass().getSimpleName());
+            return false;
+        }
+    }
+
+    /**
+     * Deletes the grant this callback stored — and only that one: the principal
+     * comes from the claimed state row, as it did for the write.
+     */
+    private void discardGrant(OAuthState oauthState) {
+        try {
+            grantStore.delete(oauthState.getTenantId(), oauthState.getConnectionName(), oauthState.getPrincipal());
+        } catch (RuntimeException e) {
+            LOGGER.errorf("A grant for connection '%s' that can never be resolved could not be deleted (%s); its refresh token remains at rest "
+                    + "until the user disconnects or the connection is deleted", sanitize(oauthState.getConnectionName()),
+                    e.getClass().getSimpleName());
+        }
+    }
 
     /**
      * Refuses every route on this resource when the feature is off.

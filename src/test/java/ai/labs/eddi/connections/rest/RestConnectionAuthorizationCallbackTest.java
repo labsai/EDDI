@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.connections.rest;
 
+import ai.labs.eddi.configs.connections.IConnectionStore;
 import ai.labs.eddi.configs.connections.model.AuthType;
 import ai.labs.eddi.configs.connections.model.Binding;
 import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
@@ -19,6 +20,7 @@ import ai.labs.eddi.connections.oauth.OAuthState;
 import ai.labs.eddi.connections.oauth.OAuthTokenClient;
 import ai.labs.eddi.connections.oauth.OAuthTokenService;
 import ai.labs.eddi.connections.oauth.TokenResponse;
+import ai.labs.eddi.datastore.IResourceStore;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tag;
@@ -55,7 +57,10 @@ import static org.mockito.ArgumentMatchers.same;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -110,7 +115,10 @@ class RestConnectionAuthorizationCallbackTest {
     private SecurityIdentity securityIdentity;
     private Principal principal;
     private CredentialReferenceResolver credentialReferenceResolver;
+    private IConnectionStore connectionStore;
     private ConnectionConfiguration connection;
+
+    private static final String CONNECTION_ID = "68a1b2c3d4e5f60718293a4b";
 
     /**
      * The principal each stored grant was filed under, in order. Recorded rather
@@ -123,7 +131,7 @@ class RestConnectionAuthorizationCallbackTest {
     private final List<String> codesRedeemed = new ArrayList<>();
 
     @BeforeEach
-    void setUp() {
+    void setUp() throws Exception {
         grantsStoredFor.clear();
         codesRedeemed.clear();
         connectionRegistry = mock(ConnectionRegistry.class);
@@ -151,6 +159,26 @@ class RestConnectionAuthorizationCallbackTest {
             grantsStoredFor.add(invocation.getArgument(2));
             return null;
         }).when(tokenService).persistNew(any(), any(), any(), any(), any());
+        // The post-write re-read, uncached: by default it finds the connection
+        // unchanged, which is every test's ordinary case.
+        connectionStore = mock(IConnectionStore.class);
+        doReturn(CONNECTION_ID).when(connectionStore).idOfName(TENANT, CONNECTION_NAME);
+        doReturn(currentVersion(1)).when(connectionStore).getCurrentResourceId(CONNECTION_ID);
+        doReturn(connection).when(connectionStore).read(CONNECTION_ID, 1);
+    }
+
+    private static IResourceStore.IResourceId currentVersion(int version) {
+        return new IResourceStore.IResourceId() {
+            @Override
+            public String getId() {
+                return CONNECTION_ID;
+            }
+
+            @Override
+            public Integer getVersion() {
+                return version;
+            }
+        };
     }
 
     private static ConnectionConfiguration connection() {
@@ -176,7 +204,7 @@ class RestConnectionAuthorizationCallbackTest {
 
     private RestConnectionAuthorization resource(MeterRegistry meterRegistry, ConnectionsConfig connectionsConfig) {
         return new RestConnectionAuthorization(connectionRegistry, stateStore, grantStore, tokenClient, tokenService, endpointAllowlist,
-                connectionsConfig, securityIdentity, credentialReferenceResolver, meterRegistry);
+                connectionsConfig, securityIdentity, credentialReferenceResolver, meterRegistry, connectionStore);
     }
 
     /**
@@ -300,6 +328,75 @@ class RestConnectionAuthorizationCallbackTest {
         assertEquals(303, response.getStatus());
         assertEquals(URI.create("/manage/connections?error=exchange_failed"), response.getLocation(),
                 "the user has to be told to start again — the minted token was never stored");
+    }
+
+    // ── a connection that changes shape while an account is being linked ─────
+
+    @Test
+    @DisplayName("an update that landed before the post-write re-read: the grant just stored is deleted and the link reports exchange_failed")
+    void grantStoredUnderAShapeTheConnectionNoLongerHasIsDeleted() throws Exception {
+        // The interleaving the update cannot see: its second count ran before this
+        // grant was written, so its own write preceded the re-read here, and the
+        // re-read is what has to catch it.
+        var registry = new SimpleMeterRegistry();
+        RestConnectionAuthorization resource = resource(registry);
+        StartedFlow flow = startFlow(resource, "/manage/connections");
+        ConnectionConfiguration reshaped = connection();
+        reshaped.setAuthType(AuthType.OAUTH2_CLIENT_CREDENTIALS);
+        reshaped.setBinding(Binding.SERVICE);
+        doReturn(reshaped).when(connectionStore).read(CONNECTION_ID, 1);
+
+        Response response = resource.callback(CODE, flow.row().getState(), null, browserWith(flow.cookie()));
+
+        var order = inOrder(tokenService, connectionStore, grantStore);
+        order.verify(tokenService).persistNew(any(), any(), any(), any(), any());
+        order.verify(connectionStore).read(CONNECTION_ID, 1);
+        order.verify(grantStore).delete(TENANT, CONNECTION_NAME, PRINCIPAL);
+        assertEquals(303, response.getStatus());
+        assertEquals(URI.create("/manage/connections?error=exchange_failed"), response.getLocation(),
+                "an existing error code the Manager already maps — the link did not produce a usable account");
+        Counter failed = registry.find(CALLBACK_METRIC).tag("outcome", "exchange_failed").counter();
+        assertTrue(failed != null && failed.count() == 1, "the discarded link must be counted as exchange_failed");
+        assertEquals(null, registry.find(CALLBACK_METRIC).tag("outcome", "success").counter(), "and not as a success");
+    }
+
+    @Test
+    @DisplayName("a connection deleted while the account was being linked: the grant just stored is deleted")
+    void grantForADeletedConnectionIsDeleted() throws Exception {
+        RestConnectionAuthorization resource = resource(new SimpleMeterRegistry());
+        StartedFlow flow = startFlow(resource, "/manage/connections");
+        doReturn(null).when(connectionStore).idOfName(TENANT, CONNECTION_NAME);
+
+        Response response = resource.callback(CODE, flow.row().getState(), null, browserWith(flow.cookie()));
+
+        verify(grantStore).delete(TENANT, CONNECTION_NAME, PRINCIPAL);
+        assertEquals(URI.create("/manage/connections?error=exchange_failed"), response.getLocation());
+    }
+
+    @Test
+    @DisplayName("a re-read that fails cannot vouch for the grant, so the grant is deleted rather than left unreadable")
+    void grantIsDeletedWhenTheReReadFails() throws Exception {
+        RestConnectionAuthorization resource = resource(new SimpleMeterRegistry());
+        StartedFlow flow = startFlow(resource, "/manage/connections");
+        doThrow(new IResourceStore.ResourceStoreException("blinked")).when(connectionStore).read(CONNECTION_ID, 1);
+
+        Response response = resource.callback(CODE, flow.row().getState(), null, browserWith(flow.cookie()));
+
+        verify(grantStore).delete(TENANT, CONNECTION_NAME, PRINCIPAL);
+        assertEquals(URI.create("/manage/connections?error=exchange_failed"), response.getLocation());
+    }
+
+    @Test
+    @DisplayName("a re-read that still finds a PER_USER authorization-code connection keeps the grant")
+    void grantIsKeptWhenTheConnectionIsUnchanged() throws Exception {
+        RestConnectionAuthorization resource = resource(new SimpleMeterRegistry());
+        StartedFlow flow = startFlow(resource, "/manage/connections");
+
+        Response response = resource.callback(CODE, flow.row().getState(), null, browserWith(flow.cookie()));
+
+        verify(connectionStore).read(CONNECTION_ID, 1);
+        verify(grantStore, never()).delete(anyString(), anyString(), anyString());
+        assertEquals(URI.create("/manage/connections?connected=drive"), response.getLocation());
     }
 
     @Test

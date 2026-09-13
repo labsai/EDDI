@@ -144,7 +144,57 @@ public class RestConnectionStore implements IRestConnectionStore {
         requireDefaultTenant(connectionConfiguration);
         Response response = restVersionInfo.update(id, version, connectionConfiguration);
         connectionRegistry.invalidate();
+        deleteGrantsLinkedDuringTheUpdate(current, connectionConfiguration);
         return response;
+    }
+
+    /**
+     * The second half of {@link #requireGrantsNotStranded}, because a count and an
+     * update are two operations and a grant can land between them.
+     * <p>
+     * An OAuth callback already past its token exchange when the count returned
+     * zero stores its grant under the OLD authType/binding — a refresh token under
+     * a shape the resolver will never read it for. Neither side can make its check
+     * and its write atomic with the other's, so each re-checks after its own write:
+     * <ul>
+     * <li>this method counts again AFTER the update is written (U, then C);</li>
+     * <li>the callback re-reads the connection AFTER its grant is written (G, then
+     * R) and deletes the grant when the connection is gone or no longer a
+     * {@code PER_USER} authorization-code connection
+     * ({@code RestConnectionAuthorization.connectionStillTakesTheGrant}).</li>
+     * </ul>
+     * Either G precedes C, and C sees the grant and deletes it here; or C precedes
+     * G, and then U precedes C precedes G precedes R, so R observes the new shape
+     * and the callback deletes its own grant. No interleaving leaves the grant
+     * behind. The argument rests only on each read seeing every write acknowledged
+     * before it — the single-primary/read-your-writes behaviour both backends give
+     * — and on no clock.
+     * <p>
+     * Deleted rather than refused: the update is already written, and those grants
+     * can never be resolved. Logged at WARN with the count, never with principals.
+     * A failure is logged, not propagated, for the same reason the delete path's
+     * grant cleanup is: the update DID land, and a 500 would say it had not.
+     */
+    private void deleteGrantsLinkedDuringTheUpdate(ConnectionConfiguration previous, ConnectionConfiguration updated) {
+        if (previous == null || updated == null
+                || (previous.getAuthType() == updated.getAuthType() && previous.getBinding() == updated.getBinding())) {
+            return;
+        }
+        String tenant = ConnectionConfiguration.effectiveTenant(previous);
+        try {
+            long linkedMeanwhile = grantStore.countByConnection(tenant, previous.getName());
+            if (linkedMeanwhile == 0) {
+                return;
+            }
+            int deleted = grantStore.deleteByConnection(tenant, previous.getName());
+            LOGGER.warnf("Connection '%s' changed from %s/%s to %s/%s while %d account(s) were being linked under the old shape; deleted %d "
+                    + "grant(s) that could never be resolved. Those users must link the account again.", sanitize(previous.getName()),
+                    previous.getAuthType(), previous.getBinding(), updated.getAuthType(), updated.getBinding(), linkedMeanwhile, deleted);
+        } catch (Exception e) {
+            LOGGER.errorf("Connection '%s' was updated, but grants linked concurrently under its old authType/binding could not be checked or "
+                    + "deleted (%s). Any such refresh token remains at rest and must be removed by hand.", sanitize(previous.getName()),
+                    e.getClass().getSimpleName());
+        }
     }
 
     @Override
