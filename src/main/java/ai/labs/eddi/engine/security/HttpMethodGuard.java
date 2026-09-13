@@ -21,6 +21,11 @@ import java.util.Set;
  * the classic cross-site-tracing primitive for reading headers a script cannot
  * see, and no EDDI endpoint has a use for either method.
  * <p>
+ * The verb is read from {@code method().name()}. On Vert.x 4 {@code HttpMethod}
+ * is a class, not the Vert.x 3 enum with its catch-all {@code OTHER}: the
+ * HTTP/1 server builds it with {@code HttpMethod.fromNetty}, which keeps an
+ * extension method's own name, so {@code TRACK} arrives here as {@code TRACK}.
+ * <p>
  * Registered as a Vert.x route filter rather than a JAX-RS filter so it also
  * covers the non-REST routes ({@code /q/*}, the MCP endpoint, static assets),
  * and at a high priority so it runs before authentication and routing.

@@ -50,16 +50,19 @@ class A2ATaskHandlerTest {
     private A2ATaskHandler handler;
     private MapCache<String, String> taskCache;
     private MapCache<String, String> contextCache;
+    private MapCache<String, String> stateCache;
 
     @BeforeEach
     void setUp() {
         conversationService = mock(IConversationService.class);
         taskCache = new MapCache<>();
         contextCache = new MapCache<>();
+        stateCache = new MapCache<>();
 
         cacheFactory = mock(ICacheFactory.class);
         when(cacheFactory.<String, String>getCache("a2aTaskMapping")).thenReturn(taskCache);
         when(cacheFactory.<String, String>getCache("a2aTaskMapping:context")).thenReturn(contextCache);
+        when(cacheFactory.<String, String>getCache("a2aTaskMapping:state")).thenReturn(stateCache);
 
         // A2A-enabled by default here; the refusal path has its own test.
         agentCardService = mock(AgentCardService.class);
@@ -299,15 +302,15 @@ class A2ATaskHandlerTest {
             A2ATaskHandler peerB = handlerFor(PEER_B);
             peerA.handleTaskSend("agent-1", sendParams("task-shared", null, "Hello"));
 
-            // Control: the creating peer still resolves its own task
+            // Control: the creating peer still resolves its own task — completed, from the
+            // task's own record, although its conversation is READY again
             A2ATask ownView = peerA.handleTaskGet("task-shared");
             assertNotNull(ownView);
-            assertEquals(TaskState.submitted, ownView.status());
+            assertEquals(TaskState.completed, ownView.status());
 
             assertNull(peerB.handleTaskGet("task-shared"),
                     "peer B must not resolve a task created by peer A");
-            // Peer A's lookup is the only one that reached the conversation
-            verify(conversationService, times(1)).getConversationState("conv-a");
+            assertNull(stateCache.get(scopedKey(PEER_B, "task-shared")), "the recorded state is peer-scoped too");
         }
 
         @Test
@@ -325,8 +328,11 @@ class A2ATaskHandlerTest {
                     "peer B must not cancel a task created by peer A");
             verify(conversationService, never()).endConversation(anyString());
 
-            // Control: the creating peer can still cancel
-            assertTrue(peerA.handleTaskCancel("task-shared"));
+            // Control: the creating peer can cancel a task of its own that is still running
+            taskCache.put(scopedKey(PEER_A, "task-running"), "conv-a");
+            when(conversationService.getConversationState("conv-a")).thenReturn(ConversationState.IN_PROGRESS);
+            assertFalse(peerB.handleTaskCancel("task-running"));
+            assertTrue(peerA.handleTaskCancel("task-running"));
             verify(conversationService).endConversation("conv-a");
         }
 
@@ -490,6 +496,49 @@ class A2ATaskHandlerTest {
 
             assertTrue(handler.handleTaskCancel("t-live"));
             verify(conversationService).endConversation("conv-live");
+        }
+
+        @Test
+        @DisplayName("a completed task reads back as completed and is not cancelable, although its conversation is READY again")
+        void completedTaskIsTerminalEvenWhenItsConversationIsReady() throws Exception {
+            when(conversationService.startConversation(any(), anyString(), anyString(), anyMap()))
+                    .thenReturn(conversation("conv-reused"));
+            // What Conversation leaves behind after a successful turn: ready for the next.
+            when(conversationService.getConversationState("conv-reused")).thenReturn(ConversationState.READY);
+            stubSay();
+
+            handler.handleTaskSend("agent-1", sendParams("t-finished", "ctx-1", "Hi"));
+
+            assertEquals(TaskState.completed, handler.handleTaskGet("t-finished").status());
+            assertFalse(handler.handleTaskCancel("t-finished"), "a completed task is not cancelable");
+            verify(conversationService, never()).endConversation(anyString());
+        }
+
+        @Test
+        @DisplayName("a cancelled task reads back as canceled and cannot be cancelled twice")
+        void cancelledTaskReadsBackAsCanceled() {
+            taskCache.put(scopedKey(PEER_A, "t-stop"), "conv-stop");
+            when(conversationService.getConversationState("conv-stop")).thenReturn(ConversationState.IN_PROGRESS);
+
+            assertTrue(handler.handleTaskCancel("t-stop"));
+
+            assertEquals(TaskState.canceled, handler.handleTaskGet("t-stop").status());
+            assertFalse(handler.handleTaskCancel("t-stop"));
+            verify(conversationService, times(1)).endConversation("conv-stop");
+        }
+
+        @Test
+        @DisplayName("a turn that fails to start records the task as failed")
+        void failedSendRecordsFailed() throws Exception {
+            when(conversationService.startConversation(any(), anyString(), anyString(), anyMap()))
+                    .thenReturn(conversation("conv-broken"));
+            doThrow(new IllegalStateException("agent not ready")).when(conversationService)
+                    .say(any(), anyString(), anyString(), any(), any(), any(), any(), anyBoolean(), any());
+
+            assertThrows(IllegalStateException.class, () -> handler.handleTaskSend("agent-1", sendParams("t-broken", null, "Hi")));
+
+            assertEquals(TaskState.failed, handler.handleTaskGet("t-broken").status());
+            assertFalse(handler.handleTaskCancel("t-broken"));
         }
     }
 

@@ -141,6 +141,11 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
         // ConversationService re-checks: this layer is defence in depth.
         conversationAccessGuard.requireConversationOwner(conversationId);
 
+        // The input cap, before the sink for the same reason: an oversized input is the
+        // 413 InputTooLargeExceptionMapper answers, not an SSE 'error' event on a 200
+        // stream. ConversationService re-checks, and the catch below still maps it.
+        conversationService.requireInputWithinLimit(inputData);
+
         // Every outbound frame goes through this stream, which doubles as the
         // client-disconnect detector — see SseStream.
         final SseStream stream = new SseStream(conversationId, safeConversationId, eventSink, sse);

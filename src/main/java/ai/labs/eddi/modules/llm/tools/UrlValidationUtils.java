@@ -152,8 +152,9 @@ public final class UrlValidationUtils {
      * <p>
      * Deliberately lenient about everything else — an unparseable URL or an
      * unresolvable host is left for the caller's own checks and the request itself
-     * to reject. With protection off redirects are still followed, so a public URL
-     * redirecting to the metadata address is only stopped by turning protection on.
+     * to reject. This checks one URL; with protection off redirects are still
+     * followed, so the httpcalls client applies it to every redirect hop as well
+     * ({@code HttpClientModule.refusingMetadataHops}).
      *
      * @throws IllegalArgumentException
      *             when the host is, or resolves to, a metadata/link-local address

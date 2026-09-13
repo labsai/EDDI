@@ -213,9 +213,11 @@ Server-Side Request Forgery (SSRF) occurs when an attacker tricks a server-side 
 > `metadata.google.internal` and the whole link-local range (`169.254.0.0/16`,
 > `fe80::/10`) — including a hostname that resolves there
 > (`UrlValidationUtils.rejectCloudMetadataTarget`). The metadata service hands out
-> the instance's cloud credentials; nobody configures it as an API. One caveat
-> remains: with protection off redirects are still followed, so only turning
-> protection on stops a public URL that redirects to it.
+> the instance's cloud credentials; nobody configures it as an API. With protection
+> off redirects are still followed, so the httpCalls client checks every redirect
+> hop too: a public URL answering `302 Location: http://169.254.169.254/…` fails
+> instead of being followed. For MCP servers and A2A peers only the configured
+> target is checked while protection is off; turn it on to stop a redirect there.
 
 ### Scheme Allowlist
 

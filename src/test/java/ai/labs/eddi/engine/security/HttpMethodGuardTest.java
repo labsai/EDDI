@@ -16,6 +16,8 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 
+import static io.netty.handler.codec.http.HttpMethod.valueOf;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
@@ -46,6 +48,30 @@ class HttpMethodGuardTest {
         verify(context.response()).setStatusCode(405);
         verify(context.response()).putHeader("Allow", HttpMethodGuard.ALLOWED_METHODS);
         verify(context.response()).end();
+        verify(context, never()).next();
+    }
+
+    /**
+     * The method exactly as the HTTP/1 server hands it to the filter:
+     * {@code Http1xServerRequest.method()} is {@code HttpMethod.fromNetty} of the
+     * decoded request line ({@code valueOf} is Netty's). TRACK is a constant on
+     * neither side, so this is the path that would lose the verb if anything did.
+     */
+    private static HttpMethod decodedByServer(String verb) {
+        return HttpMethod.fromNetty(valueOf(verb));
+    }
+
+    @ParameterizedTest(name = "{0} as decoded by the server is refused with 405")
+    @ValueSource(strings = {"TRACE", "TRACK", "track"})
+    @DisplayName("refuses TRACE and TRACK as the HTTP/1 server decodes them, extension method included")
+    void refusesServerDecodedTraceMethods(String verb) {
+        HttpMethod decoded = decodedByServer(verb);
+        assertEquals(verb, decoded.name(), "Vert.x 4 keeps an extension method's own name");
+        RoutingContext context = contextFor(decoded);
+
+        HttpMethodGuard.handle(context);
+
+        verify(context.response()).setStatusCode(405);
         verify(context, never()).next();
     }
 

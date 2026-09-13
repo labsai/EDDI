@@ -76,10 +76,12 @@ public class RestLlmStore implements IRestLlmStore {
 
     /**
      * Task parameter names that carry a provider credential, compared
-     * case-insensitively.
+     * case-insensitively. Beyond the generic names: {@code accessToken} is the
+     * Hugging Face key and {@code nonAzureApiKey} the OpenAI key the Azure OpenAI
+     * builder accepts.
      */
-    static final Set<String> SECRET_PARAMETER_NAMES = Set.of("apikey", "authtoken", "secretkey", "secretaccesskey", "privatekey",
-            "password", "clientsecret", "token");
+    static final Set<String> SECRET_PARAMETER_NAMES = Set.of("apikey", "nonazureapikey", "accesstoken", "authtoken", "secretkey",
+            "secretaccesskey", "privatekey", "password", "clientsecret", "token");
 
     /**
      * Warns — rather than rejects — when an LLM task stores a credential in

@@ -42,6 +42,17 @@ class RestLlmStorePlaintextSecretTest {
     }
 
     @Test
+    @DisplayName("the provider-specific credential names count too: Hugging Face accessToken, Azure OpenAI nonAzureApiKey")
+    void providerSpecificCredentialNamesAreReported() {
+        var config = new LlmConfiguration(List.of(
+                task(Map.of("accessToken", "plain")),
+                task(Map.of("nonAzureApiKey", "plain"))));
+
+        assertEquals(List.of("tasks[0].parameters.accessToken", "tasks[1].parameters.nonAzureApiKey"),
+                RestLlmStore.plaintextSecretParameters(config));
+    }
+
+    @Test
     @DisplayName("references, templates, blanks and non-credential parameters are not plaintext secrets")
     void referencesAndTemplatesAreFine() {
         var config = new LlmConfiguration(List.of(

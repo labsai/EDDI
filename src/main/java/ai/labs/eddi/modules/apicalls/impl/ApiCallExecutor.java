@@ -753,7 +753,8 @@ public class ApiCallExecutor implements IApiCallExecutor {
             // Opting out of SSRF protection keeps private and loopback targets
             // reachable (configured internal APIs), but never the cloud instance-
             // metadata service: that is a credential endpoint, not an API anyone
-            // configures on purpose.
+            // configures on purpose. Redirects stay followed here; the client itself
+            // refuses any hop onto the metadata service (HttpClientModule).
             UrlValidationUtils.rejectCloudMetadataTarget(targetUri.toString());
         }
 

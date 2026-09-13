@@ -75,16 +75,20 @@ was retracted as a false positive**: the check had matched the `<REDACTED>` plac
   default). `UrlValidationUtils.rejectCloudMetadataTarget` now refuses `169.254.169.254`,
   `fd00:ec2::254`, `100.100.100.200`, `metadata.google.internal` and the link-local ranges —
   including hostnames resolving there — on httpcall, MCP and A2A paths **regardless of the setting**.
-  Private/loopback targets stay reachable (that is what opting out is for).
+  With protection off the httpcalls client still follows redirects, so `HttpClientModule` wraps its
+  redirect handler and refuses any hop onto the metadata service (on a worker thread — the check can
+  resolve DNS). Private/loopback targets stay reachable (that is what opting out is for).
 - **S5 — export rewrote `modelName: claude-sonnet-5` to `${vault:REDACTED}`** (the entropy heuristic);
   the imported agent failed every turn. Model identifier fields are structural for `SecretScrubber`.
 - **B16 — an unresolvable `${vault:…}` was sent to the provider as the key.** `SecretResolver.requireResolved`
   fails closed, naming the parameter and reference (never a value), in `ChatModelRegistry`,
   `EmbeddingModelFactory` and `EmbeddingStoreFactory`.
 - **W16** `TRACE`/`TRACK` → 405 (`HttpMethodGuard`). **W17** input over
-  `eddi.conversations.max-input-chars` (default 200000) → 413 `input_too_large` (REST, SSE, A2A) before
-  any paid call. **W15** plaintext credentials in LLM configs are warned about at save (not rejected —
-  setup falls back to plaintext without a vault). **B12** a declared image/PDF whose bytes carry no
+  `eddi.conversations.max-input-chars` (default 200000) is refused before any paid call: 413
+  `input_too_large` on REST and SSE (checked before the stream opens, so it is a real status, not an
+  `error` event), 400 on the OpenAI API, invalid params over A2A. **W15** plaintext credentials in LLM
+  configs are warned about at save (not rejected — setup falls back to plaintext without a vault),
+  including Hugging Face `accessToken` and Azure OpenAI `nonAzureApiKey`. **B12** a declared image/PDF whose bytes carry no
   signature is rejected.
 
 **Engine / metrics**
@@ -123,7 +127,9 @@ was retracted as a false positive**: the check had matched the `<REDACTED>` plac
 - **W18/W32** agents referencing a malformed or non-existent workflow → 400; deleting an agent
   undeploys its live versions. **B10** bad snippet name / missing patch op → 400 (were 500). **B11**
   `/actions` skips steps without a URI (NPE → 500 on every real workflow) and names `workflowId`.
-  **B13** A2A cancel of a finished task → not cancelable. **W19** MCP discover-tools reports a refused
+  **B13** A2A cancel of a finished task → not cancelable. The task's state is recorded per task
+  (`a2aTaskMapping:state`), not inferred from its conversation, which a completed turn leaves `READY`
+  for the context's next task: `tasks/get` answers `completed`/`canceled`/`failed` from that record. **W19** MCP discover-tools reports a refused
   configuration as 400. **W20** tool costs resolve by slug. **W21** unmatched endpoint filters are
   reported. **W22** aliased extensions listed once. **W23** unknown ingestion id → 404. **W24** channel
   descriptors get their name (create/update descriptor-version lag). **W26** `list_agent_resources`
