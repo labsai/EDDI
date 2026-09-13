@@ -26,6 +26,7 @@ import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tag;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.quarkus.security.identity.SecurityIdentity;
+import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.core.Cookie;
 import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.NewCookie;
@@ -39,16 +40,19 @@ import java.net.URI;
 import java.security.Principal;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -61,6 +65,7 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -120,6 +125,12 @@ class RestConnectionAuthorizationCallbackTest {
 
     private static final String CONNECTION_ID = "68a1b2c3d4e5f60718293a4b";
 
+    /** A different connection that later takes the same name. */
+    private static final String REPLACEMENT_ID = "79b2c3d4e5f60718293a4b5c";
+
+    /** Which connection id the name resolves to in the store, right now. */
+    private final AtomicReference<String> nameHolder = new AtomicReference<>();
+
     /**
      * The principal each stored grant was filed under, in order. Recorded rather
      * than only verified, so "nothing was stored" is an assertion with a message
@@ -159,10 +170,12 @@ class RestConnectionAuthorizationCallbackTest {
             grantsStoredFor.add(invocation.getArgument(2));
             return null;
         }).when(tokenService).persistNew(any(), any(), any(), any(), any());
-        // The post-write re-read, uncached: by default it finds the connection
-        // unchanged, which is every test's ordinary case.
+        // The uncached reads — at authorize, before the exchange and after the grant
+        // is written: by default the name stays with the connection the flow was
+        // started for, which is every test's ordinary case.
         connectionStore = mock(IConnectionStore.class);
-        doReturn(CONNECTION_ID).when(connectionStore).idOfName(TENANT, CONNECTION_NAME);
+        nameHolder.set(CONNECTION_ID);
+        doAnswer(invocation -> nameHolder.get()).when(connectionStore).idOfName(TENANT, CONNECTION_NAME);
         doReturn(currentVersion(1)).when(connectionStore).getCurrentResourceId(CONNECTION_ID);
         doReturn(connection).when(connectionStore).read(CONNECTION_ID, 1);
     }
@@ -249,6 +262,19 @@ class RestConnectionAuthorizationCallbackTest {
         HttpHeaders headers = mock(HttpHeaders.class);
         doReturn(Map.of()).when(headers).getCookies();
         return headers;
+    }
+
+    /**
+     * Runs {@code meanwhile} as the grant is written — after the pre-exchange
+     * check, before the post-write re-read — which is the window the re-read exists
+     * for.
+     */
+    private void onGrantStored(Runnable meanwhile) {
+        doAnswer(invocation -> {
+            grantsStoredFor.add(invocation.getArgument(2));
+            meanwhile.run();
+            return null;
+        }).when(tokenService).persistNew(any(), any(), any(), any(), any());
     }
 
     private void assertNothingWasStored(String because) {
@@ -365,7 +391,7 @@ class RestConnectionAuthorizationCallbackTest {
     void grantForADeletedConnectionIsDeleted() throws Exception {
         RestConnectionAuthorization resource = resource(new SimpleMeterRegistry());
         StartedFlow flow = startFlow(resource, "/manage/connections");
-        doReturn(null).when(connectionStore).idOfName(TENANT, CONNECTION_NAME);
+        onGrantStored(() -> nameHolder.set(null));
 
         Response response = resource.callback(CODE, flow.row().getState(), null, browserWith(flow.cookie()));
 
@@ -378,25 +404,120 @@ class RestConnectionAuthorizationCallbackTest {
     void grantIsDeletedWhenTheReReadFails() throws Exception {
         RestConnectionAuthorization resource = resource(new SimpleMeterRegistry());
         StartedFlow flow = startFlow(resource, "/manage/connections");
-        doThrow(new IResourceStore.ResourceStoreException("blinked")).when(connectionStore).read(CONNECTION_ID, 1);
+        // The pre-exchange read succeeds; the post-write re-read is the one that fails.
+        doReturn(connection).doThrow(new IResourceStore.ResourceStoreException("blinked")).when(connectionStore).read(CONNECTION_ID, 1);
 
         Response response = resource.callback(CODE, flow.row().getState(), null, browserWith(flow.cookie()));
 
+        assertEquals(List.of(PRINCIPAL), grantsStoredFor, "the grant was stored before the re-read failed");
         verify(grantStore).delete(TENANT, CONNECTION_NAME, PRINCIPAL);
         assertEquals(URI.create("/manage/connections?error=exchange_failed"), response.getLocation());
     }
 
     @Test
-    @DisplayName("a re-read that still finds a PER_USER authorization-code connection keeps the grant")
+    @DisplayName("a re-read that still finds the same PER_USER authorization-code connection under the name keeps the grant")
     void grantIsKeptWhenTheConnectionIsUnchanged() throws Exception {
-        RestConnectionAuthorization resource = resource(new SimpleMeterRegistry());
+        var registry = new SimpleMeterRegistry();
+        RestConnectionAuthorization resource = resource(registry);
         StartedFlow flow = startFlow(resource, "/manage/connections");
 
         Response response = resource.callback(CODE, flow.row().getState(), null, browserWith(flow.cookie()));
 
-        verify(connectionStore).read(CONNECTION_ID, 1);
+        // Once at authorize, once before the exchange, once after the grant is written.
+        verify(connectionStore, times(3)).idOfName(TENANT, CONNECTION_NAME);
+        verify(connectionStore, times(2)).read(CONNECTION_ID, 1);
         verify(grantStore, never()).delete(anyString(), anyString(), anyString());
         assertEquals(URI.create("/manage/connections?connected=drive"), response.getLocation());
+        Counter succeeded = registry.find(CALLBACK_METRIC).tag("outcome", "success").counter();
+        assertTrue(succeeded != null && succeeded.count() == 1, "an unchanged binding is an ordinary success");
+    }
+
+    // ── a connection replaced under the same name while an account is being linked
+
+    @Test
+    @DisplayName("authorize binds the state to the resource id of the connection it was started for")
+    void authorizeBindsTheStateToTheConnectionId() {
+        StartedFlow flow = startFlow(resource(new SimpleMeterRegistry()), "/manage/connections");
+
+        assertEquals(CONNECTION_ID, flow.row().getConnectionId(),
+                "without the id, a connection re-created under the same name is indistinguishable from the original at callback time");
+    }
+
+    @Test
+    @DisplayName("authorize refuses a connection the uncached store no longer has, and issues no state")
+    void authorizeRefusesAConnectionTheStoreNoLongerHas() {
+        RestConnectionAuthorization resource = resource(new SimpleMeterRegistry());
+        nameHolder.set(null);
+
+        assertThrows(NotFoundException.class, () -> resource.authorize(CONNECTION_NAME, "/manage/connections"));
+        verify(stateStore, never()).create(any());
+    }
+
+    @Test
+    @DisplayName("a connection deleted, or replaced under the same name, before the callback: the code is not redeemed")
+    void replacementBeforeTheExchangeRedeemsNothing() throws Exception {
+        for (String holder : Arrays.asList(null, REPLACEMENT_ID)) {
+            nameHolder.set(CONNECTION_ID);
+            var registry = new SimpleMeterRegistry();
+            RestConnectionAuthorization resource = resource(registry);
+            StartedFlow flow = startFlow(resource, "/manage/connections");
+            // The replacement is exactly the kind of connection that would accept the
+            // grant: only its id tells it apart from the original.
+            nameHolder.set(holder);
+            doReturn(currentVersion(1)).when(connectionStore).getCurrentResourceId(REPLACEMENT_ID);
+            doReturn(connection()).when(connectionStore).read(REPLACEMENT_ID, 1);
+
+            Response response = resource.callback(CODE, flow.row().getState(), null, browserWith(flow.cookie()));
+
+            assertNothingWasStored("the name now belongs to " + holder + ", not to the connection the flow was started for");
+            assertEquals(URI.create("/manage/connections?error=connection_removed"), response.getLocation(), "holder " + holder);
+            Counter failed = registry.find(CALLBACK_METRIC).tag("outcome", "exchange_failed").counter();
+            assertTrue(failed != null && failed.count() == 1, "the refusal must be counted, holder " + holder);
+        }
+        verify(connectionStore, never()).read(REPLACEMENT_ID, 1);
+        verify(grantStore, never()).delete(anyString(), anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("a connection replaced under the same name after the grant is written: the grant is discarded")
+    void replacementAfterTheGrantIsStoredDiscardsIt() throws Exception {
+        var registry = new SimpleMeterRegistry();
+        RestConnectionAuthorization resource = resource(registry);
+        StartedFlow flow = startFlow(resource, "/manage/connections");
+        // Same name, same shape — PER_USER authorization-code — so the shape check
+        // alone would keep the grant. Only the id catches it.
+        doReturn(currentVersion(1)).when(connectionStore).getCurrentResourceId(REPLACEMENT_ID);
+        doReturn(connection()).when(connectionStore).read(REPLACEMENT_ID, 1);
+        onGrantStored(() -> nameHolder.set(REPLACEMENT_ID));
+
+        Response response = resource.callback(CODE, flow.row().getState(), null, browserWith(flow.cookie()));
+
+        assertEquals(List.of(CODE), codesRedeemed, "the pre-exchange check passed: the replacement landed afterwards");
+        var order = inOrder(tokenService, grantStore);
+        order.verify(tokenService).persistNew(any(), any(), any(), any(), any());
+        order.verify(grantStore).delete(TENANT, CONNECTION_NAME, PRINCIPAL);
+        assertEquals(URI.create("/manage/connections?error=exchange_failed"), response.getLocation());
+        Counter failed = registry.find(CALLBACK_METRIC).tag("outcome", "exchange_failed").counter();
+        assertTrue(failed != null && failed.count() == 1, "the discarded link must be counted as exchange_failed");
+        assertEquals(null, registry.find(CALLBACK_METRIC).tag("outcome", "success").counter(), "and not as a success");
+    }
+
+    @Test
+    @DisplayName("a state row written before states carried a connection id is refused as an invalid state")
+    void stateWithoutAConnectionIdIsRefused() throws Exception {
+        var registry = new SimpleMeterRegistry();
+        RestConnectionAuthorization resource = resource(registry);
+        StartedFlow flow = startFlow(resource, "/manage/connections");
+        flow.row().setConnectionId(null);
+
+        Response response = resource.callback(CODE, flow.row().getState(), null, browserWith(flow.cookie()));
+
+        assertEquals(URI.create("/manage/connections?error=invalid_state"), response.getLocation(),
+                "answered as any other unusable state; the user starts again");
+        assertNothingWasStored("a row that cannot say which connection it was started for must not produce a grant");
+        Counter bad = registry.find(CALLBACK_METRIC).tag("outcome", "bad_state").counter();
+        assertTrue(bad != null && bad.count() == 1, "counted as bad_state");
+        verify(connectionStore, never()).getCurrentResourceId(anyString());
     }
 
     @Test

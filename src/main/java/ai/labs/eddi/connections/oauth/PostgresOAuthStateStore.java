@@ -38,6 +38,7 @@ public class PostgresOAuthStateStore implements IOAuthStateStore {
                 state VARCHAR(128) PRIMARY KEY,
                 tenant_id VARCHAR(255) NOT NULL,
                 connection_name VARCHAR(255) NOT NULL,
+                connection_id VARCHAR(255),
                 principal VARCHAR(255) NOT NULL,
                 code_verifier VARCHAR(255) NOT NULL,
                 redirect_uri TEXT NOT NULL,
@@ -56,6 +57,13 @@ public class PostgresOAuthStateStore implements IOAuthStateStore {
      * rather than an insert that fails on every account link.
      */
     private static final String ADD_NONCE_COLUMN = "ALTER TABLE connection_oauth_states ADD COLUMN IF NOT EXISTS nonce_hash VARCHAR(128)";
+
+    /**
+     * Added after the table shipped, for the same reason. Nullable: a row written
+     * before it carries no connection id, and the callback refuses such a row as an
+     * invalid state — it lives ten minutes, and the user starts again.
+     */
+    private static final String ADD_CONNECTION_ID_COLUMN = "ALTER TABLE connection_oauth_states ADD COLUMN IF NOT EXISTS connection_id VARCHAR(255)";
 
     /**
      * Resolved lazily, never at construction.
@@ -81,6 +89,7 @@ public class PostgresOAuthStateStore implements IOAuthStateStore {
         try (Connection connection = dataSourceInstance.get().getConnection(); Statement statement = connection.createStatement()) {
             statement.execute(CREATE_TABLE);
             statement.execute(ADD_NONCE_COLUMN);
+            statement.execute(ADD_CONNECTION_ID_COLUMN);
             statement.execute(CREATE_INDEX);
             schemaInitialized = true;
         } catch (SQLException e) {
@@ -94,8 +103,8 @@ public class PostgresOAuthStateStore implements IOAuthStateStore {
         String sql = """
                 INSERT INTO connection_oauth_states
                     (state, tenant_id, connection_name, principal, code_verifier, redirect_uri, return_to, nonce_hash,
-                     created_at, expires_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     created_at, expires_at, connection_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """;
         try (Connection connection = dataSourceInstance.get().getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, state.getState());
@@ -108,6 +117,7 @@ public class PostgresOAuthStateStore implements IOAuthStateStore {
             statement.setString(8, state.getNonceHash());
             statement.setTimestamp(9, Timestamp.from(state.getCreatedAt()));
             statement.setTimestamp(10, Timestamp.from(state.getExpiresAt()));
+            statement.setString(11, state.getConnectionId());
             statement.executeUpdate();
         } catch (SQLException e) {
             throw new IllegalStateException("Failed to store an OAuth state", e);
@@ -131,7 +141,7 @@ public class PostgresOAuthStateStore implements IOAuthStateStore {
                    SET consumed_at = ?
                  WHERE state = ? AND consumed_at IS NULL AND expires_at > ?
                 RETURNING state, tenant_id, connection_name, principal, code_verifier, redirect_uri, return_to,
-                          nonce_hash, created_at, expires_at, consumed_at
+                          nonce_hash, created_at, expires_at, consumed_at, connection_id
                 """;
         Instant now = Instant.now();
         try (Connection connection = dataSourceInstance.get().getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
@@ -167,6 +177,8 @@ public class PostgresOAuthStateStore implements IOAuthStateStore {
         state.setState(rows.getString("state"));
         state.setTenantId(rows.getString("tenant_id"));
         state.setConnectionName(rows.getString("connection_name"));
+        // NULL on a row written before the column existed; the callback refuses it.
+        state.setConnectionId(rows.getString("connection_id"));
         state.setPrincipal(rows.getString("principal"));
         state.setCodeVerifier(rows.getString("code_verifier"));
         state.setRedirectUri(rows.getString("redirect_uri"));

@@ -579,8 +579,11 @@ to it as a top-level GET with no bearer token, and
   code;
 * server-stored, not in memory, because behind a load balancer the redirect
   routinely lands on a different replica than the one that issued it;
-* short-lived (10 minutes) and bound to tenant, connection and principal, so the
-  callback never trusts a request parameter for identity.
+* short-lived (10 minutes) and bound to tenant, connection id and principal, so the
+  callback never trusts a request parameter for identity. The id, not only the
+  name: if the connection is deleted and another is created under the same name
+  while the user is on the consent screen, the callback redeems nothing, and a
+  replacement that lands after the grant is stored has that grant discarded.
 
 The state is **not sufficient on its own**, and the reason is the attack people
 usually have backwards. The state binds a principal — but on a hostile flow the

@@ -29,6 +29,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.ForbiddenException;
+import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.NewCookie;
@@ -55,8 +56,8 @@ import java.util.Map;
  * <h3>The callback is the interesting part</h3> It is a {@code permit} path
  * because it has to be, and it is guarded by two things that must both hold: a
  * single-use, server-stored, short-TTL {@code state} that binds the tenant, the
- * connection and the principal, and a nonce cookie proving the callback reached
- * the browser that started the flow.
+ * connection (by resource id) and the principal, and a nonce cookie proving the
+ * callback reached the browser that started the flow.
  * <p>
  * Both are needed. The state binds a principal, but the ATTACKER chooses that
  * principal: they start a flow under their own account, keep the state, and
@@ -139,6 +140,7 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
         }
         endpointAllowlist.require(connection.getOauth().getAuthorizationUrl(), "oauth.authorizationUrl");
         endpointAllowlist.require(connection.getOauth().getTokenUrl(), "oauth.tokenUrl");
+        String connectionId = requireConnectionId(connection);
 
         String codeVerifier = randomUrlSafe(64);
         String nonce = randomUrlSafe(32);
@@ -146,6 +148,7 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
         state.setState(randomUrlSafe(32));
         state.setTenantId(ConnectionConfiguration.effectiveTenant(connection));
         state.setConnectionName(connection.getName());
+        state.setConnectionId(connectionId);
         state.setPrincipal(principal);
         state.setCodeVerifier(codeVerifier);
         state.setRedirectUri(connectionsConfig.redirectUri());
@@ -260,6 +263,18 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
             return redirect(oauthState.getReturnTo(), "error", "invalid_state", expiredBindingCookie(state));
         }
 
+        if (oauthState.getConnectionId() == null || oauthState.getConnectionId().isBlank()) {
+            // A row written before states carried the connection id. Refused rather
+            // than grandfathered, like a row without a nonce hash: it lives at most
+            // STATE_TTL past an upgrade, and without the id the callback cannot tell the
+            // connection the flow was started for from a new one that took its name.
+            // The user starts again.
+            increment("eddi.connection.oauth.callback.count", "outcome", "bad_state", null);
+            LOGGER.warnf("An OAuth callback for connection '%s' carried a state written before states were bound to a connection id; the "
+                    + "user must start the link again", sanitize(oauthState.getConnectionName()));
+            return redirect(oauthState.getReturnTo(), "error", "invalid_state", expiredBindingCookie(state));
+        }
+
         if (error != null && !error.isBlank()) {
             // The user declined, or the provider refused. The provider's own
             // error_description is not bound at all, let alone echoed onward: it is
@@ -275,11 +290,27 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
             return redirect(oauthState.getReturnTo(), "error", "missing_code", expiredBindingCookie(state));
         }
 
+        // BEFORE anything is exchanged: the connection this flow was started for must
+        // still be the one holding the name. Grants are filed under the name, so a
+        // connection deleted and re-created under it while the user sat on the consent
+        // screen would otherwise be handed a token issued for its predecessor's
+        // client — and its own allowlist decides where that token is sent. The
+        // document is read by the bound id at its current version, uncached: the
+        // registry is keyed by name, and on another replica its TTL can still serve
+        // the predecessor.
         ConnectionConfiguration connection;
         try {
-            connection = connectionRegistry.require(new ConnectionReference(oauthState.getTenantId(), oauthState.getConnectionName()));
-        } catch (ConnectionException e) {
+            connection = boundConnection(oauthState);
+        } catch (Exception e) {
             increment("eddi.connection.oauth.callback.count", "outcome", "exchange_failed", null);
+            LOGGER.warnf("Could not read connection '%s' before redeeming an authorization code (%s); nothing was exchanged",
+                    sanitize(oauthState.getConnectionName()), e.getClass().getSimpleName());
+            return redirect(oauthState.getReturnTo(), "error", "exchange_failed", expiredBindingCookie(state));
+        }
+        if (connection == null) {
+            increment("eddi.connection.oauth.callback.count", "outcome", "exchange_failed", null);
+            LOGGER.warnf("Connection '%s' was deleted, or replaced by another connection of the same name, while an account was being linked "
+                    + "to it; the authorization code is not redeemed", sanitize(oauthState.getConnectionName()));
             return redirect(oauthState.getReturnTo(), "error", "connection_removed", expiredBindingCookie(state));
         }
 
@@ -376,8 +407,10 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
      * then changed {@code authType} or {@code binding} would otherwise leave this
      * refresh token under a shape the resolver never reads. So the read must see
      * that update if it landed first, which rules out the registry: it is cached,
-     * and on another replica its TTL is the only invalidation. The id is found by
-     * name — the name cannot change — and the document read by id at its CURRENT
+     * and on another replica its TTL is the only invalidation. The name must still
+     * resolve to the id the state was bound to — a connection deleted and
+     * re-created under the same name after the pre-exchange check would otherwise
+     * inherit this grant — and the document is read by that id at its CURRENT
      * version, because the descriptor a name lookup follows may still point at the
      * version before the update.
      * <p>
@@ -388,9 +421,9 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
     private boolean connectionStillTakesTheGrant(OAuthState oauthState) {
         try {
             String id = connectionStore.idOfName(oauthState.getTenantId(), oauthState.getConnectionName());
-            if (id == null) {
-                LOGGER.warnf("Connection '%s' was deleted while an account was being linked to it; the grant just stored is discarded",
-                        sanitize(oauthState.getConnectionName()));
+            if (!oauthState.getConnectionId().equals(id)) {
+                LOGGER.warnf("Connection '%s' was deleted, or replaced by another connection of the same name, while an account was being "
+                        + "linked to it; the grant just stored is discarded", sanitize(oauthState.getConnectionName()));
                 return false;
             }
             IResourceStore.IResourceId current = connectionStore.getCurrentResourceId(id);
@@ -410,6 +443,47 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
                     + "usable and is discarded; the user must link again", sanitize(oauthState.getConnectionName()), e.getClass().getSimpleName());
             return false;
         }
+    }
+
+    /**
+     * The connection the state is bound to, provided it still holds the state's
+     * name: read by that id at its current version, from the uncached store.
+     *
+     * @return {@code null} when the name is free, belongs to a different
+     *         connection, or its document is gone
+     */
+    private ConnectionConfiguration boundConnection(OAuthState oauthState)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+        String holder = connectionStore.idOfName(oauthState.getTenantId(), oauthState.getConnectionName());
+        if (!oauthState.getConnectionId().equals(holder)) {
+            return null;
+        }
+        IResourceStore.IResourceId current;
+        try {
+            current = connectionStore.getCurrentResourceId(holder);
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            return null;
+        }
+        return connectionStore.read(holder, current.getVersion());
+    }
+
+    /**
+     * The resource id of the connection a flow is being started for, from the same
+     * uncached store the callback checks it against.
+     */
+    private String requireConnectionId(ConnectionConfiguration connection) {
+        String id;
+        try {
+            id = connectionStore.idOfName(ConnectionConfiguration.effectiveTenant(connection), connection.getName());
+        } catch (IResourceStore.ResourceStoreException e) {
+            throw new InternalServerErrorException("Could not look up connection '" + connection.getName() + "'.", e);
+        }
+        if (id == null) {
+            // The registry is cached and can outlive a delete by its TTL; the store
+            // cannot.
+            throw new NotFoundException("No connection named '" + connection.getName() + "'.");
+        }
+        return id;
     }
 
     /**
