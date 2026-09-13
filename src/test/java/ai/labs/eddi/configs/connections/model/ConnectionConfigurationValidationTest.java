@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -219,9 +220,85 @@ class ConnectionConfigurationValidationTest {
         @DisplayName("a non-secret protocol parameter is fine")
         void acceptsProtocolParams() {
             var connection = oauthConnection(AuthType.OAUTH2_CLIENT_CREDENTIALS);
-            connection.getOauth().setExtraAuthParams(Map.of("prompt", "consent", "audience", "api.atlassian.com"));
+            connection.getOauth().setExtraAuthParams(Map.of("prompt", "consent", "audience", "api.atlassian.com", "access_type", "offline"));
 
             assertDoesNotThrow(connection::validate);
+        }
+
+        @ParameterizedTest
+        @DisplayName("a parameter EDDI composes itself is refused whatever its case or punctuation")
+        @ValueSource(strings = {"redirect_uri", "Redirect_uri", "REDIRECT-URI", "state", "State", "code_challenge", "Code-Challenge-Method",
+                "client_id", "ClientId", "response_type"})
+        void refusesReservedProtocolParams(String key) {
+            // Before, only the exact lower-case credential names were caught, so
+            // "Redirect_uri" — which a lenient provider reads as redirect_uri — could
+            // point the authorization code somewhere else.
+            var connection = oauthConnection(AuthType.OAUTH2_AUTHORIZATION_CODE);
+            connection.getOauth().setExtraAuthParams(Map.of(key, "https://attacker.example/callback"));
+
+            var error = assertThrows(IllegalArgumentException.class, connection::validate, key);
+
+            assertTrue(error.getMessage().contains("composes itself"), key + ": " + error.getMessage());
+        }
+
+        @ParameterizedTest
+        @DisplayName("a credential-shaped VALUE is refused even under an innocent key")
+        @ValueSource(strings = {"sk-live-abcdef0123", "xoxb-1234-5678-abcd", "ghp_abcdefghijklmnop", "AKIAIOSFODNN7EXAMPLE",
+                "eyJhbGciOiJIUzI1NiJ9.e30.abc", "Bearer abcdef", "basic dXNlcjpwYXNz"})
+        void refusesCredentialShapedValues(String value) {
+            // The docs said the map "is checked too"; only the keys were, so a value
+            // pasted under "prompt" landed in plaintext in the document.
+            var connection = oauthConnection(AuthType.OAUTH2_CLIENT_CREDENTIALS);
+            connection.getOauth().setExtraAuthParams(Map.of("prompt", value));
+
+            var error = assertThrows(IllegalArgumentException.class, connection::validate, value);
+
+            assertTrue(error.getMessage().contains("looks like a credential"), value + ": " + error.getMessage());
+            assertFalse(error.getMessage().contains(value), "the refusal must not echo the value: " + error.getMessage());
+        }
+
+        @Test
+        @DisplayName("a value carrying a reference is refused — it would be resolved into the browser-visible URL")
+        void refusesReferenceInValue() {
+            var connection = oauthConnection(AuthType.OAUTH2_CLIENT_CREDENTIALS);
+            connection.getOauth().setExtraAuthParams(Map.of("audience", "${vault:audience}"));
+
+            var error = assertThrows(IllegalArgumentException.class, connection::validate);
+
+            assertTrue(error.getMessage().contains("${…} reference"), error.getMessage());
+        }
+
+        @Test
+        @DisplayName("a value over 512 characters is refused")
+        void refusesOverlongValue() {
+            var connection = oauthConnection(AuthType.OAUTH2_CLIENT_CREDENTIALS);
+            connection.getOauth().setExtraAuthParams(Map.of("audience", "a".repeat(513)));
+
+            var error = assertThrows(IllegalArgumentException.class, connection::validate);
+
+            assertTrue(error.getMessage().contains("512"), error.getMessage());
+        }
+
+        @Test
+        @DisplayName("a value of exactly 512 characters is still accepted")
+        void acceptsValueAtTheBound() {
+            var connection = oauthConnection(AuthType.OAUTH2_CLIENT_CREDENTIALS);
+            connection.getOauth().setExtraAuthParams(Map.of("audience", "a".repeat(512)));
+
+            assertDoesNotThrow(connection::validate);
+        }
+
+        @Test
+        @DisplayName("a parameter with a null value is refused rather than sent as the word null")
+        void refusesNullValue() {
+            var connection = oauthConnection(AuthType.OAUTH2_CLIENT_CREDENTIALS);
+            var params = new HashMap<String, String>();
+            params.put("prompt", null);
+            connection.getOauth().setExtraAuthParams(params);
+
+            var error = assertThrows(IllegalArgumentException.class, connection::validate);
+
+            assertTrue(error.getMessage().contains("no value"), error.getMessage());
         }
     }
 

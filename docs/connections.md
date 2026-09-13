@@ -217,7 +217,13 @@ names `POST /secretstore/secrets`.
 This is not stylistic. A plaintext key in a connection document would sit outside
 the vault, outside export scrubbing, and outside `VaultGrantChecker`'s
 `${vault:}` scan — one field defeating three controls. `extraAuthParams` is
-checked too, since an arbitrary string map is the obvious place to paste one.
+checked too, since an arbitrary string map is the obvious place to paste one:
+a credential-shaped **key** (`api_key`, `code_verifier`, …) is refused however it
+is punctuated, a key EDDI composes itself (`redirect_uri`, `state`,
+`code_challenge`, `code_challenge_method`, `client_id`, `response_type`,
+`code_verifier`, `client_secret`) is refused case-insensitively, and every
+**value** must be a literal of at most 512 characters with no `${…}` reference
+and no credential-shaped prefix (`sk-`, `xoxb-`, `ghp_`, `AKIA`, `eyJ`, `Bearer `).
 
 For `clientSecret` and `passwordRef` the check is "the value **is** a reference",
 not "contains one". A `valueTemplate` may carry literal text around its references

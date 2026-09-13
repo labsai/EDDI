@@ -109,6 +109,32 @@ public class ConnectionConfiguration {
             "token", "accesstoken", "refreshtoken", "authorization", "auth", "credential", "credentials", "privatekey", "clientsecret",
             "assertion", "codeverifier");
 
+    /**
+     * Parameters of the authorization request that EDDI composes itself. Same
+     * normalized form as {@link #CREDENTIAL_PARAM_NAMES}, and for the same reason:
+     * {@code Redirect_uri} and {@code redirect-uri} are one name on the wire once a
+     * provider has applied its own leniency. A value here would either be silently
+     * ignored or override the one PKCE and the callback depend on — a
+     * {@code redirect_uri} pointing elsewhere is an authorization code delivered
+     * elsewhere.
+     */
+    private static final Set<String> RESERVED_OAUTH_PARAM_NAMES = Set.of("redirecturi", "state", "codechallenge", "codechallengemethod",
+            "clientid", "responsetype", "codeverifier", "clientsecret");
+
+    /** Longest value an extra authorization parameter may carry. */
+    static final int MAX_EXTRA_AUTH_PARAM_VALUE_CHARS = 512;
+
+    /**
+     * Value prefixes no protocol parameter legitimately starts with and every
+     * common credential format does: OpenAI/Stripe keys, Slack tokens, GitHub
+     * tokens, AWS access key ids, JWTs, and a pasted {@code Authorization} header.
+     * A small local list rather than the export scrubber's entropy heuristic — this
+     * is a write-boundary check on a handful of short values, so it can afford to
+     * refuse by shape and say so.
+     */
+    private static final Pattern CREDENTIAL_SHAPED_VALUE = Pattern
+            .compile("^(?:sk-|xox[abpsre]-|gh[pousr]_|github_pat_|AKIA|eyJ|(?i:bearer|basic)\\s)");
+
     /** Referenced as {@code ${connection:name}}. */
     private String name;
 
@@ -337,7 +363,8 @@ public class ConnectionConfiguration {
         if (params == null) {
             return;
         }
-        for (String key : params.keySet()) {
+        for (Map.Entry<String, String> param : params.entrySet()) {
+            String key = param.getKey();
             if (key == null) {
                 continue;
             }
@@ -346,6 +373,43 @@ public class ConnectionConfiguration {
                 throw new IllegalArgumentException("oauth.extraAuthParams may carry only non-secret protocol parameters (prompt, audience, …). '"
                         + key + "' is credential-shaped; store it with POST /secretstore/secrets and reference it instead.");
             }
+            if (RESERVED_OAUTH_PARAM_NAMES.contains(normalized)) {
+                throw new IllegalArgumentException("oauth.extraAuthParams must not set '" + key + "': it is a protocol parameter EDDI "
+                        + "composes itself when it builds the authorization request (redirect_uri, state, code_challenge, "
+                        + "code_challenge_method, client_id, response_type). A value here would be ignored or would override the one the "
+                        + "callback and PKCE depend on.");
+            }
+            requireProtocolParameterValue(key, param.getValue());
+        }
+    }
+
+    /**
+     * The value half of the same check. The docs promised the map "is checked too",
+     * and the keys were — but a key called {@code prompt} carrying a pasted API key
+     * sailed through, straight into a plaintext field of the document. So: no
+     * reference (a {@code ${vault:…}} here would be RESOLVED into the authorization
+     * URL, which the browser history, the {@code Referer} and every proxy log see),
+     * a bounded length, and no credential-shaped prefix.
+     */
+    private static void requireProtocolParameterValue(String key, String value) {
+        if (value == null) {
+            throw new IllegalArgumentException("oauth.extraAuthParams['" + key + "'] has no value. A parameter with nothing to send does "
+                    + "not belong in the authorization request; remove it.");
+        }
+        if (value.contains("${")) {
+            throw new IllegalArgumentException("oauth.extraAuthParams['" + key + "'] must not carry a ${…} reference: the authorization URL "
+                    + "is opened in the user's browser, so a resolved value would land in browser history, the Referer and every proxy log "
+                    + "in front of the provider. Only literal, non-secret protocol values belong here.");
+        }
+        if (value.length() > MAX_EXTRA_AUTH_PARAM_VALUE_CHARS) {
+            throw new IllegalArgumentException("oauth.extraAuthParams['" + key + "'] is " + value.length() + " characters long; a protocol "
+                    + "parameter is at most " + MAX_EXTRA_AUTH_PARAM_VALUE_CHARS + ". Anything longer is being smuggled through the "
+                    + "authorization URL.");
+        }
+        if (CREDENTIAL_SHAPED_VALUE.matcher(value).find()) {
+            throw new IllegalArgumentException("oauth.extraAuthParams['" + key + "'] looks like a credential ('" + quoteLiteral(value)
+                    + "'). The map may carry only non-secret protocol parameters (prompt, audience, access_type, …); store a credential "
+                    + "with POST /secretstore/secrets and reference it from the field that expects it.");
         }
     }
 
