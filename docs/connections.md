@@ -353,6 +353,7 @@ console; none of them stops the boot.
 | a `PER_USER` connection while `/v1` is enabled in api-key mode with `eddi.openai-compat.trust-user-headers=true` | Conversations opened through `/v1` carry a caller-supplied user id, so a holder of the shared api key can open a conversation as anyone. Those conversations are refused a `PER_USER` credential — see [Whose identity counts](#whose-identity-counts). |
 | a `CALLER_SUPPLIED` connection with `authorization.enabled=false` | Every call through it is refused as `NO_CALLER_CREDENTIAL`: the credential header is read only from an authenticated caller, and with OIDC off every caller is anonymous. |
 | an OAuth connection with an inert vault | Every grant it would store or read is refused. Grants are envelope-encrypted with the tenant DEK, and this is the one place the `autoVaultSecret` degrade-to-plaintext pattern is unacceptable — these are refresh tokens. |
+| a first-release `OAUTH2_AUTHORIZATION_CODE` connection still bound to `SERVICE` | Validation runs on write only, so the document loads — and fails every call as "not connected", because the flow files its grant under the user who consented and a `SERVICE`-bound resolution looks under a principal nothing can create a grant for. Re-save it as `PER_USER`. |
 
 One more is reported at WARN rather than ERROR: a connection whose
 `baseUrlAllowlist` sends its credential over plaintext `http://` to a non-loopback

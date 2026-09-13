@@ -79,6 +79,7 @@ class ConnectionStartupGuardTest {
     private static final String INACTIVE_VAULT_REPORT = "EDDI_VAULT_MASTER_KEY";
     private static final String ANY_PER_USER_REPORT = "PER_USER connection is stored";
     private static final String CALLER_SUPPLIED_REPORT = "CALLER_SUPPLIED connection is stored";
+    private static final String LEGACY_BINDING_REPORT = "Re-save it as PER_USER";
 
     private IConnectionStore connectionStore;
     private IDocumentDescriptorStore descriptorStore;
@@ -357,6 +358,31 @@ class ConnectionStartupGuardTest {
         assertDoesNotThrow(() -> start(enabledGuard(openAiCompatOff(), true)));
 
         assertFalse(logged(CALLER_SUPPLIED_REPORT), logRecords.toString());
+    }
+
+    @Test
+    @DisplayName("a first-release authorization-code connection still bound to SERVICE is reported, with the fix")
+    void legacyServiceBoundAuthorizationCodeIsReported() throws Exception {
+        // Validation runs on write only, so this document — the pre-fix DEFAULT for an
+        // authorization-code block — still loads and fails every call as "not
+        // connected" for a user who has just connected.
+        storedConnections(connection("legacy-drive", AuthType.OAUTH2_AUTHORIZATION_CODE, Binding.SERVICE));
+
+        assertDoesNotThrow(() -> start(enabledGuard()));
+
+        assertTrue(logged(LEGACY_BINDING_REPORT), logRecords.toString());
+        assertTrue(logged("legacy-drive"), "the report must name the connection to re-save; saw: " + logRecords);
+        assertTrue(logged("not connected"), "and the symptom the operator is chasing; saw: " + logRecords);
+    }
+
+    @Test
+    @DisplayName("a correctly bound authorization-code connection is not reported as legacy")
+    void perUserAuthorizationCodeIsNotReportedAsLegacy() throws Exception {
+        storedConnections(perUserConnection());
+
+        assertDoesNotThrow(() -> start(enabledGuard()));
+
+        assertFalse(logged(LEGACY_BINDING_REPORT), logRecords.toString());
     }
 
     @Test

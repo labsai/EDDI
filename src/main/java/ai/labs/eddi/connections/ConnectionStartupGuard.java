@@ -5,6 +5,7 @@
 package ai.labs.eddi.connections;
 
 import ai.labs.eddi.configs.connections.IConnectionStore;
+import ai.labs.eddi.configs.connections.model.AuthType;
 import ai.labs.eddi.configs.connections.model.Binding;
 import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
 import ai.labs.eddi.configs.connections.mongo.ConnectionStore;
@@ -190,6 +191,20 @@ public class ConnectionStartupGuard {
                     + "REFUSED at request time, because without a verified identity any caller could claim any userId and resolve that "
                     + "user's tokens (see OpenAiAuthFilter's trust-user-headers caveat). Enable OIDC, or change the connection to SERVICE "
                     + "binding.");
+        }
+        // Validation runs on the write path only, so a first-release document that
+        // paired the authorization-code flow with SERVICE binding — the default
+        // binding, before the model refused the pair — still loads. It resolves
+        // every call against the __service__ principal, which no consent screen can
+        // ever produce a grant for, so it fails every call as "not connected" with
+        // nothing naming the cause.
+        for (ConnectionConfiguration connection : connections) {
+            if (connection.getAuthType() == AuthType.OAUTH2_AUTHORIZATION_CODE && connection.getBinding() != Binding.PER_USER) {
+                LOGGER.errorf("[CONNECTIONS] Connection '%s' pairs authType OAUTH2_AUTHORIZATION_CODE with binding %s, which the model no "
+                        + "longer accepts. It will fail every call as not connected: the flow files its grant under the user who consented, "
+                        + "and a %s-bound resolution looks under a principal nothing can ever create a grant for. Re-save it as PER_USER.",
+                        sanitize(connection.getName()), connection.getBinding(), connection.getBinding());
+            }
         }
         boolean anyCallerSupplied = connections.stream().anyMatch(connection -> connection.getBinding() == Binding.CALLER_SUPPLIED);
         if (anyCallerSupplied && !authorizationEnabled) {
