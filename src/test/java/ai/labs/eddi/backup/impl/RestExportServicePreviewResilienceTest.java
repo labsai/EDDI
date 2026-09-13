@@ -5,6 +5,7 @@
 package ai.labs.eddi.backup.impl;
 
 import ai.labs.eddi.backup.IZipArchive;
+import ai.labs.eddi.configs.connections.IConnectionStore;
 import ai.labs.eddi.backup.model.ExportPreview;
 import ai.labs.eddi.backup.model.ExportPreview.ExportableResource;
 import ai.labs.eddi.configs.agents.IAgentStore;
@@ -100,7 +101,7 @@ class RestExportServicePreviewResilienceTest {
                 mock(IPropertySetterStore.class), mock(IOutputStore.class), mock(IMcpCallsStore.class),
                 mock(IRagStore.class), snippetStore, jsonSerialization, mock(IZipArchive.class),
                 mock(SecretScrubber.class), mock(IScheduleStore.class), mock(ResourceAccessGuard.class),
-                mock(BackupMetrics.class));
+                mock(BackupMetrics.class), mock(IConnectionStore.class));
 
         var agentConfig = new AgentConfiguration();
         agentConfig.setWorkflows(List.of(URI.create(

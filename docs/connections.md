@@ -10,7 +10,8 @@
 [Enabling connections](#enabling-connections) · [Per-user accounts](#per-user-accounts) ·
 [Refresh, and what happens when it fails](#refresh-and-what-happens-when-it-fails) ·
 [Rotating the key that holds them](#rotating-the-key-that-holds-them) ·
-[Security rules](#security-rules) · [Metrics](#metrics) · [Limitations](#limitations)
+[Export and import](#export-and-import) · [Security rules](#security-rules) · [Metrics](#metrics) ·
+[Limitations](#limitations)
 
 ---
 
@@ -137,6 +138,15 @@ is refused at save time rather than left to race theirs. `username` and
 `passwordRef` are refused for the same reason, and `authType` must be `STATIC` —
 there is nothing for EDDI to encode, exchange or refresh.
 
+**The caller must be authenticated to EDDI.** The header is read only from a
+request with a verified identity; an anonymous request has it dropped, with a
+warning, so that an unauthenticated caller can never make EDDI spend a credential
+on its behalf. With `authorization.enabled=false` (the shipped default) every
+caller is anonymous, so a `CALLER_SUPPLIED` connection could save and then refuse
+every call. It is therefore refused at the write boundary with a **400** naming
+`authorization.enabled`, exactly as a `PER_USER` connection is, and a stored one
+is reported by the startup guard.
+
 The caller attaches it per request, once per connection:
 
 ```
@@ -194,14 +204,14 @@ as "not connected". Use `OAUTH2_CLIENT_CREDENTIALS` for a service account.
 
 | Field | Purpose |
 | --- | --- |
-| `name` | What `${connection:name}` refers to |
+| `name` | What `${connection:name}` refers to. Must match `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$` — letters, digits, `.`, `_`, `-`, starting with a letter or digit, at most 64 characters, no surrounding whitespace. Refused otherwise, never trimmed: a space, `/`, `}` or `:` would make the name unreferenceable, and the `X-EDDI-Connection-Credential` header splits at the first space |
 | `authType` | `STATIC`, `BASIC`, `OAUTH2_CLIENT_CREDENTIALS`, `OAUTH2_AUTHORIZATION_CODE` |
 | `binding` | `SERVICE` (one grant for everyone), `PER_USER` (the caller's own, stored), or `CALLER_SUPPLIED` (the caller's own, handed over per request) |
 | `allowUnverifiedPrincipal` | `PER_USER` only. Accept a user id EDDI never authenticated, on the grounds that a front proxy did. Default `false` — see [Whose identity counts](#whose-identity-counts) |
 | `staticAuth` | Header name plus a reference-only value template |
 | `oauth` | Endpoints, client id, a **vaulted** client secret, scopes |
-| `baseUrlAllowlist` | The origins this credential may be sent to. **Required.** |
-| `timeoutMs` | Token-endpoint timeout |
+| `baseUrlAllowlist` | The origins this credential may be sent to. **Required.** Bare origins (`scheme://host[:port]`). `http://` is accepted — silently for loopback, with a **WARN** at save time and again at boot for any other host, because the credential then crosses the network unencrypted |
+| `timeoutMs` | Token-endpoint timeout in milliseconds, **1–60000**; refused outside that range at save time. Unset means the resolver's default. The token client applies its own lower ceiling at use so the refresh lease always outlasts the request |
 
 `binding` is the field that makes Amplitude and Google Drive the same system.
 `PER_USER` is only legal with `OAUTH2_AUTHORIZATION_CODE` — a static key is the
@@ -217,11 +227,26 @@ names `POST /secretstore/secrets`.
 This is not stylistic. A plaintext key in a connection document would sit outside
 the vault, outside export scrubbing, and outside `VaultGrantChecker`'s
 `${vault:}` scan — one field defeating three controls. `extraAuthParams` is
-checked too, since an arbitrary string map is the obvious place to paste one.
+checked too, since an arbitrary string map is the obvious place to paste one:
+a credential-shaped **key** (`api_key`, `code_verifier`, …) is refused however it
+is punctuated, a key EDDI composes itself (`redirect_uri`, `state`,
+`code_challenge`, `code_challenge_method`, `client_id`, `response_type`,
+`code_verifier`, `client_secret`) is refused case-insensitively, and every
+**value** must be a literal of at most 512 characters with no `${…}` reference
+and no credential-shaped prefix (`sk-`, `xoxb-`, `ghp_`, `AKIA`, `eyJ`, `Bearer `).
 
-Note also that the check is "the value **is** a reference", not "contains one":
+For `clientSecret` and `passwordRef` the check is "the value **is** a reference",
+not "contains one". A `valueTemplate` may carry literal text around its references
+— that is how `Bearer ${vault:k}` gets its scheme — so its literal text is checked
+too, under three rules: every `${` must be a well-formed `${vault:…}` or
+`${vars:…}` reference (an unknown prefix, an empty key, an unclosed brace or a key
+over 256 characters is refused rather than treated as literal text); at least one
+reference must be present; and each literal segment between or around the
+references is at most **32 characters** with **no run of 12 or more key
+characters** (`[A-Za-z0-9_-+/=.]`). `Bearer `, `Basic `, `token=` and `SSWS ` pass;
 `sk-live-abcdef${vault:unused}` is a literal key with a reference stapled on, and
-it is refused.
+it is refused with a message that quotes the literal redacted to its first four
+characters.
 
 ---
 
@@ -314,9 +339,9 @@ deployment rather than of any stored document:
 | Refusal | Why |
 | --- | --- |
 | enabled with no `public-base-url` | It becomes the OAuth `redirect_uri`, which the provider matches **exactly**. Deriving it from an inbound request would let a `Host` header steer it. |
-| `public-base-url` that is not a bare https origin | `startsWith("https://")` accepts a path, query, fragment and userinfo — each produces a redirect URI the provider will not match, and the failure surfaces as a user-facing OAuth error rather than a config problem. Dev and test also accept `http://localhost`. |
+| `public-base-url` that is not a bare https origin | `startsWith("https://")` accepts a path, query, fragment and userinfo — each produces a redirect URI the provider will not match, and the failure surfaces as a user-facing OAuth error rather than a config problem. The scheme is compared case-insensitively. Dev and test also accept `http://localhost[:port]` and `http://127.0.0.1[:port]` — loopback only, and still a bare origin. |
 
-### Three states the guard reports rather than refuses
+### The states the guard reports rather than refuses
 
 These are read from what is actually **stored**, because the dangerous state is
 "somebody created this connection on a deployment that cannot honour it" and no
@@ -327,7 +352,14 @@ console; none of them stops the boot.
 | --- | --- |
 | a `PER_USER` connection with `authorization.enabled=false` | Every resolution of it is refused. There is no verified identity, so anyone claiming `userId=alice` would otherwise resolve Alice's tokens. |
 | a `PER_USER` connection while `/v1` is enabled in api-key mode with `eddi.openai-compat.trust-user-headers=true` | Conversations opened through `/v1` carry a caller-supplied user id, so a holder of the shared api key can open a conversation as anyone. Those conversations are refused a `PER_USER` credential — see [Whose identity counts](#whose-identity-counts). |
+| a `CALLER_SUPPLIED` connection with `authorization.enabled=false` | Every call through it is refused as `NO_CALLER_CREDENTIAL`: the credential header is read only from an authenticated caller, and with OIDC off every caller is anonymous. |
 | an OAuth connection with an inert vault | Every grant it would store or read is refused. Grants are envelope-encrypted with the tenant DEK, and this is the one place the `autoVaultSecret` degrade-to-plaintext pattern is unacceptable — these are refresh tokens. |
+| a first-release `OAUTH2_AUTHORIZATION_CODE` connection still bound to `SERVICE` | Validation runs on write only, so the document loads — and fails every call as "not connected", because the flow files its grant under the user who consented and a `SERVICE`-bound resolution looks under a principal nothing can create a grant for. Re-save it as `PER_USER`. |
+
+One more is reported at WARN rather than ERROR: a connection whose
+`baseUrlAllowlist` sends its credential over plaintext `http://` to a non-loopback
+host. It is accepted — see [The model](#the-model) — but said out loud at boot as
+well as at save time.
 
 **Reporting, not refusing, is deliberate**, and the reason is worth stating because
 it looks like a weakened control and is not. Refusing meant that an administrator
@@ -340,11 +372,12 @@ the database.
 Enforcement lives in the two places where it costs nothing and lands on someone
 who can act:
 
-* **The write boundary.** `POST /connectionstore/connections` and
-  `PUT /connectionstore/connections/{id}` answer **400**
-  for a `PER_USER` connection when `authorization.enabled=false`, and **400** for an
-  OAuth connection when the vault is inert. The administrator who wrote it is still
-  looking at it.
+* **The write boundary.** `POST /connectionstore/connections`,
+  `PUT /connectionstore/connections/{id}` and the duplicate endpoint
+  `POST /connectionstore/connections/{id}` answer **400** for a `PER_USER` or
+  `CALLER_SUPPLIED` connection when `authorization.enabled=false`, and **400** for
+  an OAuth connection when the vault is inert. The administrator who wrote it is
+  still looking at it.
 * **Per request.** `ConnectionResolver` refuses, and never falls back to the service
   grant. Sending the wrong authority is how one user reads another's data.
 
@@ -630,7 +663,50 @@ just the newest, and leaves ciphertext untouched.
 
 ---
 
+## Export and import
+
+An agent archive carries the connections its configurations reference. Exporting an
+agent scans every archived config for `${connection:name}` — an httpcall header, an
+mcpcalls or A2A `apiKey`, wherever an author put one — and writes each referenced
+connection's document into `connections/{connectionId}.connection.json`. A connection
+nothing references is not exported, and neither is a reference to a tenant other than
+the default.
+
+**What travels is the document, and only the document**: name, `authType`, `binding`,
+`staticAuth` or `oauth` block, `baseUrlAllowlist`. Every secret-bearing field in it is a
+`${vault:…}` reference, so the target needs the same vault entries — exactly as it does
+for any other exported config — and nothing resolved ever enters the archive. **Grants
+are never exported.** Linked accounts stay where they were linked; a user links again on
+the target.
+
+On import, a connection is created only when the target holds **no connection of that
+name**. An existing one is **never overwritten** — it is a live credential configuration,
+possibly with linked accounts filed under that name — whatever the import strategy. The
+create runs through the same gate as `POST /connectionstore/connections`: structural
+validation, the deployment checks (`PER_USER` and `CALLER_SUPPLIED` need OIDC, OAuth needs
+an active vault) and the name-uniqueness lock. A document the deployment refuses is
+**skipped with the reason logged**, not a failed import — the agent is still worth having,
+and the refusal names what to fix. Skips of both kinds are counted in an
+`X-Connections-Skipped` header on the import response.
+
 ## Security rules
+
+### Who may do what
+
+| Endpoint | Roles |
+| --- | --- |
+| `GET /connectionstore/connections/descriptors` — list connections | `eddi-admin`, `eddi-editor` |
+| `GET /connectionstore/connections/{id}` — read one document | `eddi-admin`, `eddi-editor` |
+| `POST`, `PUT`, `DELETE` and the duplicate `POST /{id}` | `eddi-admin` only |
+| `GET /connectionstore/connections/jsonSchema` | `eddi-admin` only |
+| `POST /connections/{name}/authorize`, `GET /connections/mine`, `DELETE /connections/{name}/grant` | any authenticated user — see [Per-user accounts](#per-user-accounts) |
+
+Writes are admin-only because a connection is an egress channel plus a
+credential — the same class of capability as a vault write. The two reads admit
+an editor because an httpcall author cannot write `${connection:jira}` without
+knowing that `jira` exists, and the Manager's picker needs the same list. Reading
+is safe: a document carries only `${vault:…}` references, `clientId` is public by
+definition, and every secret-bearing field is refused a literal at write time.
 
 * **Only a reference is ever inherited, never a token.** Configs carry
   `${connection:name}`; the credential exists in memory for one outbound request.
@@ -642,6 +718,17 @@ just the newest, and leaves ciphertext untouched.
 * **Grants are never exported**, never returned by any REST endpoint, and never
   logged. `/connections/mine` returns connection name, status, scopes and expiry,
   enumerated explicitly rather than serialised from the entity.
+* **A name is unique per tenant, case-sensitive.** `${connection:jira}` names
+  one connection and must keep naming the same one. The store is a versioned
+  document store with no unique index, so uniqueness is enforced on the write
+  path: creates of one name are serialised inside a node — the document *and* its
+  descriptor, which is what a name lookup reads, are both written before the lock
+  is released, so a second create on the same node always sees the first — and
+  after the write lands the store is asked again who holds the name. A create
+  that finds another holder is rolled back, descriptor included, and answered
+  **409**. What remains is replication lag between nodes: two replicas that each
+  see the other both stand down, and both callers are told to retry — a wasted
+  request, chosen over the alternative of two connections under one name.
 * **Deleting a connection deletes its grants**, decided by re-reading the
   connection's `(tenant, name)` at its *current* version rather than by the
   `permanent` flag or the version in the request — a soft delete already stops the
@@ -653,6 +740,15 @@ just the newest, and leaves ciphertext untouched.
   next — a fresh connection, possibly to a different provider, resolving other
   people's live refresh tokens on its first call. Create a new connection and let
   users link it.
+* **A connection's `authType` and `binding` cannot change while it has linked
+  accounts.** The rename rule protects the name a grant is filed under; this
+  protects what the grant *is*. Re-saving a `PER_USER` authorization-code
+  connection as `STATIC` or as `SERVICE`-bound client credentials would leave
+  every user's refresh token at rest under a name the resolver never reads them
+  for, and off a linked-accounts page the connection no longer has. `PUT` answers
+  **409** naming the number of linked accounts and the two ways forward: each user
+  unlinks with `DELETE /connections/{name}/grant`, or the administrator deletes the
+  connection — which cascades to its grants — and creates the new one.
 * **`VaultGrantChecker` follows the hop.** A `${connection:name}` is an *indirect*
   vault reference: the connection document holds the `${vault:…}` client secret.
   Without following it an agent could use a credential it was never granted
@@ -751,6 +847,11 @@ Three of those are worth knowing by name:
   whose authority a debating agent carries. Decide before relying on it.
 * **No dynamic client registration** (RFC 7591). An admin registers the client
   once and stores the id and secret.
+* **Live sync does not carry connections.** Agent ZIP export and import do (see
+  [Export and import](#export-and-import)); the instance-to-instance sync in
+  [Agent Sync](agent-sync-guide.md) transfers workflows, extensions and snippets
+  only, so a synced agent whose header reads `${connection:jira}` needs `jira`
+  created on the target by hand or by a ZIP import.
 * **Revocation is local.** Deleting a grant stops EDDI resolving it; EDDI does
   not call the provider's revocation endpoint, so the token stays live at the
   provider until it expires.

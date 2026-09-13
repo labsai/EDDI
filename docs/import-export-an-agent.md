@@ -29,6 +29,15 @@ When you export an agent, EDDI packages:
 - ✅ **Origin IDs** (resource identifiers for merge tracking)
 - ✅ **Prompt snippets** the agent's configurations reference, under `snippets/`
 - ✅ **Scheduled triggers** (cron and heartbeat) of the agent, under `schedules/`
+- ✅ **Connections** the agent's configurations reference as `${connection:name}`, under
+  `connections/` — the connection *document* only: a name, an auth shape, `${vault:…}`
+  references and an allowlist. Never a resolved secret, and never a grant (linked accounts
+  stay where they were linked). On import a connection is created only when no connection
+  of that name exists yet; an existing one is **never overwritten**, and a document this
+  deployment refuses (a `PER_USER` connection without OIDC, an OAuth one without an active
+  vault) is skipped with the reason logged rather than failing the import. Both cases are
+  counted in an `X-Connections-Skipped` response header. See
+  [Connections → Export and import](connections.md#export-and-import).
 
 **Note**: Conversations and conversation history are **NOT** exported (only configurations).
 HITL approval-timeout schedules are not exported either: they are safety timers for one

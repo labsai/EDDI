@@ -5,6 +5,7 @@
 package ai.labs.eddi.backup.impl;
 
 import ai.labs.eddi.backup.IZipArchive;
+import ai.labs.eddi.configs.connections.IConnectionStore;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.apicalls.IApiCallsStore;
@@ -113,7 +114,7 @@ class RestExportServiceSelectionContractTest {
                 llmStore, mock(IPropertySetterStore.class), mock(IOutputStore.class),
                 mock(IMcpCallsStore.class), mock(IRagStore.class), snippetStore,
                 jsonSerialization, zipArchive, secretScrubber, scheduleStore,
-                mock(ResourceAccessGuard.class), mock(BackupMetrics.class));
+                mock(ResourceAccessGuard.class), mock(BackupMetrics.class), mock(IConnectionStore.class));
 
         tmpDir = Paths.get(FileUtilities.buildPath(System.getProperty("user.dir"), "tmp"));
         exportRoot = tmpDir.resolve("export");

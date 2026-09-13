@@ -17,6 +17,9 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.net.URI;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.Date;
 import java.util.List;
 
 /**
@@ -71,22 +74,45 @@ public class ConnectionStore extends AbstractResourceStore<ConnectionConfigurati
         return match == null ? null : match.id();
     }
 
-    /** One connection and the resource id it lives under. */
-    private record Match(String id, ConnectionConfiguration connection) {
+    @Override
+    public List<String> idsOfName(String tenantId, String name) throws ResourceStoreException {
+        return findAllByName(tenantId, name).stream().sorted(OLDEST_FIRST).map(Match::id).toList();
     }
 
+    /**
+     * Descriptor creation time first, then id. Both halves matter: the time is what
+     * "oldest" means, and the id breaks a tie the same way on every replica, which
+     * is what lets two of them reach the same verdict about one name.
+     */
+    private static final Comparator<Match> OLDEST_FIRST = Comparator
+            .comparing((Match match) -> match.createdOn(), Comparator.nullsLast(Comparator.naturalOrder())).thenComparing(Match::id);
+
+    /**
+     * One connection, the resource id it lives under, and when its descriptor was
+     * created.
+     */
+    private record Match(String id, ConnectionConfiguration connection, Date createdOn) {
+    }
+
+    /** The first match in index order — what a single-holder lookup wants. */
     private Match findByName(String tenantId, String name) throws ResourceStoreException {
+        List<Match> matches = findAllByName(tenantId, name);
+        return matches.isEmpty() ? null : matches.get(0);
+    }
+
+    private List<Match> findAllByName(String tenantId, String name) throws ResourceStoreException {
         if (name == null || name.isBlank()) {
-            return null;
+            return List.of();
         }
         String effectiveTenant = ConnectionConfiguration.effectiveTenant(tenantId);
+        var matches = new ArrayList<Match>();
         try {
             // null rather than "": a blank filter is still a filter, and the descriptor
             // store turns it into five OR'd regex clauses over fields a connection
             // lookup does not consult.
             List<DocumentDescriptor> descriptors = descriptorStore.readDescriptors(RESOURCE_TYPE, null, 0, IDescriptorStore.NO_LIMIT, false);
             if (descriptors == null) {
-                return null;
+                return matches;
             }
             for (DocumentDescriptor descriptor : descriptors) {
                 URI resourceUri = descriptor.getResource();
@@ -99,12 +125,12 @@ public class ConnectionStore extends AbstractResourceStore<ConnectionConfigurati
                     continue;
                 }
                 if (name.equals(candidate.getName()) && effectiveTenant.equals(ConnectionConfiguration.effectiveTenant(candidate))) {
-                    return new Match(id, candidate);
+                    matches.add(new Match(id, candidate, descriptor.getCreatedOn()));
                 }
             }
-            return null;
+            return matches;
         } catch (ResourceNotFoundException e) {
-            return null;
+            return matches;
         }
     }
 

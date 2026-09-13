@@ -5,6 +5,7 @@
 package ai.labs.eddi.connections;
 
 import ai.labs.eddi.configs.connections.IConnectionStore;
+import ai.labs.eddi.configs.connections.model.AuthType;
 import ai.labs.eddi.configs.connections.model.Binding;
 import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
 import ai.labs.eddi.configs.connections.mongo.ConnectionStore;
@@ -27,6 +28,7 @@ import org.jboss.logging.Logger;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -120,16 +122,22 @@ public class ConnectionStartupGuard {
         } catch (Exception e) {
             throw new IllegalStateException("eddi.connections.public-base-url is not a valid URL: " + publicBaseUrl, e);
         }
-        if (isDevOrTest()) {
-            // http://localhost is the normal shape while developing, and refusing it
-            // would make the feature untestable outside a TLS-terminating proxy.
-            return;
-        }
-        boolean bareHttpsOrigin = "https".equals(base.getScheme()) && base.getUserInfo() == null && base.getQuery() == null
-                && base.getFragment() == null && (base.getPath() == null || base.getPath().isEmpty() || "/".equals(base.getPath()))
-                && base.getHost() != null;
-        if (!bareHttpsOrigin) {
-            throw new IllegalStateException("eddi.connections.public-base-url must be a bare https origin (scheme://host[:port]) — got: "
+        // Case-insensitive, like the model's own canonicalisation: "HTTPS://…" is the
+        // same scheme, and refusing it here while ConnectionConfiguration accepted it
+        // in an allowlist was two rules for one thing.
+        String scheme = base.getScheme() == null ? "" : base.getScheme().toLowerCase(Locale.ROOT);
+        boolean bareOrigin = base.getUserInfo() == null && base.getQuery() == null && base.getFragment() == null
+                && (base.getPath() == null || base.getPath().isEmpty() || "/".equals(base.getPath())) && base.getHost() != null;
+        // http://localhost is the normal shape while developing, and refusing it
+        // would make the feature untestable outside a TLS-terminating proxy. Only
+        // loopback, though, and only a bare origin: dev and test used to accept any
+        // parseable URL, so a path or a remote http host that would fail the
+        // provider's redirect_uri match in production sailed through every test.
+        boolean loopbackHttpWhileDeveloping = isDevOrTest() && "http".equals(scheme) && base.getHost() != null
+                && ConnectionConfiguration.isLoopbackHost(base.getHost());
+        if (!bareOrigin || !("https".equals(scheme) || loopbackHttpWhileDeveloping)) {
+            throw new IllegalStateException("eddi.connections.public-base-url must be a bare https origin (scheme://host[:port])"
+                    + (isDevOrTest() ? ", or http://localhost[:port] / http://127.0.0.1[:port] while developing or testing" : "") + " — got: "
                     + publicBaseUrl);
         }
     }
@@ -159,6 +167,7 @@ public class ConnectionStartupGuard {
      */
     private void requireStoredConnectionsAreSupportable() {
         List<ConnectionConfiguration> connections = readAll();
+        reportPlaintextOrigins(connections);
         boolean anyPerUser = connections.stream().anyMatch(connection -> connection.getBinding() == Binding.PER_USER);
         boolean anyOAuth = connections.stream()
                 .anyMatch(connection -> connection.getAuthType() != null && connection.getAuthType().isOAuth());
@@ -183,11 +192,51 @@ public class ConnectionStartupGuard {
                     + "user's tokens (see OpenAiAuthFilter's trust-user-headers caveat). Enable OIDC, or change the connection to SERVICE "
                     + "binding.");
         }
+        // Validation runs on the write path only, so a first-release document that
+        // paired the authorization-code flow with SERVICE binding — the default
+        // binding, before the model refused the pair — still loads. It resolves
+        // every call against the __service__ principal, which no consent screen can
+        // ever produce a grant for, so it fails every call as "not connected" with
+        // nothing naming the cause.
+        for (ConnectionConfiguration connection : connections) {
+            if (connection.getAuthType() == AuthType.OAUTH2_AUTHORIZATION_CODE && connection.getBinding() != Binding.PER_USER) {
+                LOGGER.errorf("[CONNECTIONS] Connection '%s' pairs authType OAUTH2_AUTHORIZATION_CODE with binding %s, which the model no "
+                        + "longer accepts. It will fail every call as not connected: the flow files its grant under the user who consented, "
+                        + "and a %s-bound resolution looks under a principal nothing can ever create a grant for. Re-save it as PER_USER.",
+                        sanitize(connection.getName()), connection.getBinding(), connection.getBinding());
+            }
+        }
+        boolean anyCallerSupplied = connections.stream().anyMatch(connection -> connection.getBinding() == Binding.CALLER_SUPPLIED);
+        if (anyCallerSupplied && !authorizationEnabled) {
+            LOGGER.error("[CONNECTIONS] A CALLER_SUPPLIED connection is stored, but authorization.enabled=false. The credential travels in "
+                    + "the X-EDDI-Connection-Credential header, which is only read from an authenticated caller — an anonymous request "
+                    + "has it dropped — so every call through it will be REFUSED at request time as NO_CALLER_CREDENTIAL. Enable OIDC, "
+                    + "or change the connection to SERVICE binding with a vaulted key.");
+        }
         if (anyOAuth && !secretProvider.isAvailable()) {
             LOGGER.error("[CONNECTIONS] An OAuth connection is stored, but the SecretsVault is inactive (EDDI_VAULT_MASTER_KEY is unset). "
                     + "Every grant it would store or read will be REFUSED at request time: grants are envelope-encrypted with the tenant "
                     + "DEK and there is deliberately no plaintext fallback. This is the one place the autoVaultSecret pattern of degrading "
                     + "to plaintext is not acceptable, because these are refresh tokens.");
+        }
+    }
+
+    /**
+     * A credential allowed to travel in the clear is accepted at save time with a
+     * warning; this repeats it at boot, where the operator reading the log is not
+     * necessarily the author who saw the first one.
+     */
+    private void reportPlaintextOrigins(List<ConnectionConfiguration> connections) {
+        for (ConnectionConfiguration connection : connections) {
+            if (connection.getBaseUrlAllowlist() == null) {
+                continue;
+            }
+            for (String origin : connection.getBaseUrlAllowlist()) {
+                if (ConnectionConfiguration.isPlaintextRemoteOrigin(origin)) {
+                    LOGGER.warnf("[CONNECTIONS] Connection '%s' allows its credential to be sent over plaintext http to %s; the credential "
+                            + "crosses the network unencrypted. Prefer an https origin.", sanitize(connection.getName()), sanitize(origin));
+                }
+            }
         }
     }
 

@@ -340,7 +340,7 @@ Full guide: [connections.md](connections.md).
 |---|---|---|
 | `eddi.connections.enabled` | `false` | Master switch for the connection credential model |
 | `eddi.connections.public-base-url` | *(empty)* | Externally reachable base URL for OAuth redirect URIs |
-| `eddi.connections.credential-endpoint-allowlist` | *(empty)* | Hosts permitted to receive resolved credentials |
+| `eddi.connections.credential-endpoint-allowlist` | *(empty)* | Origins that may receive the **client secret** — a connection's token, authorization and discovery endpoints. Not where the access token goes: that is each connection's own `baseUrlAllowlist` |
 | `eddi.connections.state-sweep-interval` | `1h` | How often expired OAuth state entries are cleared |
 
 ---

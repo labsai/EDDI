@@ -78,6 +78,8 @@ class ConnectionStartupGuardTest {
     private static final String UNVERIFIED_IDENTITY_REPORT = "authorization.enabled=false";
     private static final String INACTIVE_VAULT_REPORT = "EDDI_VAULT_MASTER_KEY";
     private static final String ANY_PER_USER_REPORT = "PER_USER connection is stored";
+    private static final String CALLER_SUPPLIED_REPORT = "CALLER_SUPPLIED connection is stored";
+    private static final String LEGACY_BINDING_REPORT = "Re-save it as PER_USER";
 
     private IConnectionStore connectionStore;
     private IDocumentDescriptorStore descriptorStore;
@@ -190,6 +192,41 @@ class ConnectionStartupGuardTest {
         assertDoesNotThrow(() -> start(guardWithBaseUrl("http://localhost:7070")));
     }
 
+    @ParameterizedTest
+    @EnumSource(value = LaunchMode.class, names = {"DEVELOPMENT", "TEST"})
+    @DisplayName("plain http on 127.0.0.1 and an upper-cased https scheme are accepted while developing")
+    void devAndTestModesAcceptLoopbackAndCaseInsensitiveHttps(LaunchMode launchMode) {
+        LaunchMode.set(launchMode);
+
+        assertDoesNotThrow(() -> start(guardWithBaseUrl("http://127.0.0.1:7070")));
+        assertDoesNotThrow(() -> start(guardWithBaseUrl("HTTPS://eddi.example.com")));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"http://eddi.example.com", "http://localhost:7070/eddi", "https://eddi.example.com?tenant=acme",
+            "https://ops@eddi.example.com", "http://localhost#x"})
+    @DisplayName("dev and test still require a bare origin, and plain http only on loopback")
+    void devModeRefusesWhatAProviderWouldNotMatch(String publicBaseUrl) {
+        // Any parseable URL used to pass here, so a path or a remote http host that
+        // fails the provider's exact redirect_uri match in production sailed through
+        // every test and was discovered as a user-facing OAuth error.
+        LaunchMode.set(LaunchMode.DEVELOPMENT);
+        var guard = guardWithBaseUrl(publicBaseUrl);
+
+        var failure = assertThrows(IllegalStateException.class, () -> start(guard));
+
+        assertTrue(failure.getMessage().contains("bare https origin"), failure.getMessage());
+        assertTrue(failure.getMessage().contains("http://localhost"), "dev mode must say what else it accepts: " + failure.getMessage());
+        assertTrue(failure.getMessage().contains(publicBaseUrl), "the operator has to be told which value to fix");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"HTTPS://eddi.example.com", "Https://EDDI.example.com:8443"})
+    @DisplayName("production compares the scheme case-insensitively, as the model does everywhere else")
+    void productionAcceptsAnUpperCasedHttpsScheme(String publicBaseUrl) {
+        assertDoesNotThrow(() -> start(guardWithBaseUrl(publicBaseUrl)));
+    }
+
     @Test
     @DisplayName("plain http is refused once the deployment is running for real")
     void productionRefusesTheLocalhostShape() {
@@ -299,6 +336,56 @@ class ConnectionStartupGuardTest {
     }
 
     @Test
+    @DisplayName("a stored CALLER_SUPPLIED connection is reported when nothing authenticates the caller who would supply it")
+    void callerSuppliedWithoutAuthorizationIsReported() throws Exception {
+        // The credential header is dropped for an anonymous identity, and with
+        // authorization off every identity is anonymous — so the connection fails
+        // every call as NO_CALLER_CREDENTIAL while the operator can see the header
+        // going out. Nothing connected the two before this report.
+        storedConnections(callerSuppliedConnection());
+
+        assertDoesNotThrow(() -> start(enabledGuard(openAiCompatOff(), false)));
+
+        assertTrue(logged(CALLER_SUPPLIED_REPORT), logRecords.toString());
+        assertTrue(logged("NO_CALLER_CREDENTIAL"), "the report must name the refusal the operator will see; saw: " + logRecords);
+    }
+
+    @Test
+    @DisplayName("the CALLER_SUPPLIED report is withheld once callers are authenticated")
+    void callerSuppliedWithAuthorizationIsNotReported() throws Exception {
+        storedConnections(callerSuppliedConnection());
+
+        assertDoesNotThrow(() -> start(enabledGuard(openAiCompatOff(), true)));
+
+        assertFalse(logged(CALLER_SUPPLIED_REPORT), logRecords.toString());
+    }
+
+    @Test
+    @DisplayName("a first-release authorization-code connection still bound to SERVICE is reported, with the fix")
+    void legacyServiceBoundAuthorizationCodeIsReported() throws Exception {
+        // Validation runs on write only, so this document — the pre-fix DEFAULT for an
+        // authorization-code block — still loads and fails every call as "not
+        // connected" for a user who has just connected.
+        storedConnections(connection("legacy-drive", AuthType.OAUTH2_AUTHORIZATION_CODE, Binding.SERVICE));
+
+        assertDoesNotThrow(() -> start(enabledGuard()));
+
+        assertTrue(logged(LEGACY_BINDING_REPORT), logRecords.toString());
+        assertTrue(logged("legacy-drive"), "the report must name the connection to re-save; saw: " + logRecords);
+        assertTrue(logged("not connected"), "and the symptom the operator is chasing; saw: " + logRecords);
+    }
+
+    @Test
+    @DisplayName("a correctly bound authorization-code connection is not reported as legacy")
+    void perUserAuthorizationCodeIsNotReportedAsLegacy() throws Exception {
+        storedConnections(perUserConnection());
+
+        assertDoesNotThrow(() -> start(enabledGuard()));
+
+        assertFalse(logged(LEGACY_BINDING_REPORT), logRecords.toString());
+    }
+
+    @Test
     @DisplayName("neither PER_USER report is made when every stored connection is service-bound")
     void serviceBoundConnectionsAreNotReported() throws Exception {
         storedConnections(staticConnection(), serviceOAuthConnection());
@@ -380,6 +467,35 @@ class ConnectionStartupGuardTest {
         assertFalse(logged(ANY_PER_USER_REPORT), logRecords.toString());
         assertFalse(logged(INACTIVE_VAULT_REPORT), logRecords.toString());
         assertTrue(logged("Credential endpoints allowed"), "the one line a healthy boot does print; saw: " + logRecords);
+    }
+
+    // --- Plaintext origins: accepted, but said out loud --------------------
+
+    @Test
+    @DisplayName("a stored connection allowing plaintext http to a remote host is reported at boot, naming both")
+    void plaintextRemoteOriginIsReported() throws Exception {
+        var internal = staticConnection();
+        internal.setBaseUrlAllowlist(List.of("http://api.internal.example:8080"));
+        storedConnections(internal);
+
+        assertDoesNotThrow(() -> start(enabledGuard()));
+
+        assertTrue(logged("plaintext http"), logRecords.toString());
+        assertTrue(logged("jira"), "the report must name the connection; saw: " + logRecords);
+        assertTrue(logged("http://api.internal.example:8080"), "and the origin; saw: " + logRecords);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"http://localhost:7070", "http://127.0.0.1", "https://api.example.com"})
+    @DisplayName("loopback and https origins are not reported")
+    void loopbackAndHttpsOriginsAreNotReported(String origin) throws Exception {
+        var connection = staticConnection();
+        connection.setBaseUrlAllowlist(List.of(origin));
+        storedConnections(connection);
+
+        assertDoesNotThrow(() -> start(enabledGuard()));
+
+        assertFalse(logged("plaintext http"), logRecords.toString());
     }
 
     // --- Enumerating the store ----------------------------------------------
@@ -569,6 +685,10 @@ class ConnectionStartupGuardTest {
 
     private static ConnectionConfiguration staticConnection() {
         return connection("jira", AuthType.STATIC, Binding.SERVICE);
+    }
+
+    private static ConnectionConfiguration callerSuppliedConnection() {
+        return connection("gnowbe", AuthType.STATIC, Binding.CALLER_SUPPLIED);
     }
 
     private static DocumentDescriptor descriptorOf(String resourceUri) {

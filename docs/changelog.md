@@ -138,6 +138,95 @@ address"; the httpcalls path keeps `eddi.security.ssrf-protection` untouched.
 **Not verifiable here:** `SafeHttpClientTest` binds a loopback server, which this sandbox refuses at
 `HttpServer.create` (pre-existing for the whole class); its three new no-redirect cases run in CI.
 
+---
+
+## 🧩 fix(connections): configuration, store and export findings from the connections review (2026-09-13)
+
+**Repo:** EDDI (`fix/connections-review-findings`, merged from `wip/connections-config-findings`)
+
+Thirteen findings from the connections code review, each its own commit with a regression test
+that fails without it. The runtime findings of the same review are on a sibling branch; the
+two meet in `docs/connections.md` and here.
+
+**Write-boundary validation (`ConnectionConfiguration`):**
+
+- **`valueTemplate` literal text is now checked** (C1). The old check inspected only the `${…}`
+  segments, so `sk-live-abcdef${vault:unused}` saved while the docs said it was refused. Rule:
+  every `${` must be a well-formed `${vault:…}`/`${vars:…}` reference (an unclosed brace or a
+  key over 256 chars used to count as literal text), at least one reference, and each literal
+  segment ≤ 32 chars with no run of ≥ 12 key characters. Scheme prefixes pass; a key does not.
+- **The name has a grammar** (C2): `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`, refused rather than
+  trimmed. `ConnectionReference` stops at `/` and `}`, the credential header splits at the first
+  space, so `acme/jira` resolved as tenant `acme` and a name with a space resolved for nobody.
+- **`extraAuthParams` values are checked** (C7): no `${…}` reference (it would be resolved into a
+  browser-visible URL), ≤ 512 chars, no credential-shaped prefix (`sk-`, `xox?-`, `gh?_`,
+  `AKIA`, `eyJ`, `Bearer`). The key denylist gains the parameters EDDI composes itself
+  (`redirect_uri`, `state`, `code_challenge`, …), normalised so `Redirect_uri` is caught.
+- **`timeoutMs` is bounded 1..60000** at save time (C9); the token client's own ceiling still
+  clamps at use. A non-loopback `http://` origin in `baseUrlAllowlist` stays accepted but is
+  logged at WARN when saved and again by the startup guard.
+
+**REST store (`RestConnectionStore`):**
+
+- **Name uniqueness is no longer check-then-act** (C3). Creates of one `(tenant, name)` are
+  serialised on a striped lock inside the JVM; after the write lands the store is asked again
+  who holds the name (`IConnectionStore.idsOfName`, oldest-first). **Review fix:** the first
+  version of this left the descriptor to `DocumentDescriptorFilter` *after* the method
+  returned — outside the lock — so the lock guarded nothing: a second create on the same
+  node took it the instant the first released it, scanned, found no descriptor yet, and both
+  landed. `RestConnectionStore` now writes the descriptor itself inside the lock (the filter
+  finds it and does nothing; `RestImportService.recordCreatedConnection` writes one only when
+  missing). Our own id is expected in the post-write scan and filtered out; the rule stays
+  "any other holder visible now wins" — ours is removed permanently, descriptor included, and
+  the caller gets 409. Chosen over "oldest wins" because under asymmetric visibility the latter
+  duplicates the name; the cost is that two replicas seeing each other both stand down and both
+  callers retry. What remains is replication lag between nodes.
+- **Duplicate goes through `validateForWrite`** (C4) — it skipped the deployment checks.
+- **`CALLER_SUPPLIED` needs OIDC** (C5): `CallerIdentityContext` drops the credential header for
+  an anonymous identity, so with `authorization.enabled=false` the connection saved and failed
+  every call as `NO_CALLER_CREDENTIAL`. Now 400 at the write boundary and a stored-state report
+  at boot, like `PER_USER`.
+- **An `authType`/`binding` change with linked accounts is a 409** (C6), naming the count and
+  the way out (`DELETE /connections/{name}/grant`, or delete the connection). Re-saving a
+  `PER_USER` OAuth connection as `STATIC` left every user's refresh token at rest under a name
+  the resolver never read again. `IConnectionGrantStore.countByConnection` added (Mongo,
+  Postgres, in-memory double) — the only change under `connections/grants/`.
+- **Editors may list and read connections** (C11): `eddi-editor` on the descriptor listing and
+  the single read; every write stays admin-only. A document carries references only.
+
+**Startup guard:** dev/test now require a bare origin and accept plain http on loopback only,
+and the scheme is compared case-insensitively in every profile (C8); a first-release
+`OAUTH2_AUTHORIZATION_CODE` + `SERVICE` document is reported with the fix (C12).
+
+**Export/import (C10):** an agent archive now carries the connections its configs reference,
+as `connections/{connectionId}.connection.json` — document only, never a grant. Two defects
+made this necessary rather than nice: `AbstractBackupService` had no connection entry, and
+`SecretScrubber` redacted `${connection:jira}` in an `Authorization` header to
+`${vault:REDACTED}`, so the reference died before the archive was written. **Review fix:** the
+scrubber's exemption is for a value that *is* exactly one `${connection:…}` reference, not one
+that contains it — every outbound path refuses a mixed value (`ConnectionReference.requireSole`),
+so a "contains" exemption only kept `Bearer sk-… ${connection:jira}` legible. Import creates a
+connection only when the name is free — an existing one is never overwritten — through
+`RestConnectionStore.createConnection` (same validation, deployment checks and lock as REST);
+a refused document is skipped with its reason and counted in `X-Connections-Skipped`. The
+descriptor is written by the store inside its name lock; the import writes one by hand only
+when it is missing, as `createResourceDirect` does. Live sync still does not carry
+connections; said so under Limitations. `AGENTS.md` §5.5 lists the file and counts thirteen.
+
+**Docs (C13):** `configuration-reference.md` no longer describes
+`credential-endpoint-allowlist` as where resolved credentials go; it bounds the client secret.
+
+**Files:** `configs/connections/**`, `connections/ConnectionStartupGuard.java`,
+`connections/grants/{IConnectionGrantStore,MongoConnectionGrantStore,PostgresConnectionGrantStore}.java`,
+`backup/impl/{AbstractBackupService,RestExportService,RestImportService}.java`,
+`secrets/sanitize/SecretScrubber.java`, `docs/{connections,configuration-reference,import-export-an-agent,agent-sync-architecture}.md`,
+`AGENTS.md`, and the tests named in each commit.
+
+**Not done / for the runtime branch:** the resolver still reads `timeoutMs` through the
+client's own clamp (fine, now documented); `SecretRedactionFilter` was not touched. A legacy
+document written before C1 could carry a literal in `valueTemplate` and is now readable by
+editors (C11) — re-saving it fails validation, which is the signal to fix it.
+
 ## ⚙️ fix(config): fifteen configuration defects, from scheduler units to a nine-megabyte orphan (2026-09-07)
 
 **Repo:** EDDI (`fix/review-quickwins-config`)

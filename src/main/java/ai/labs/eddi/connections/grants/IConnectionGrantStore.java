@@ -119,4 +119,15 @@ public interface IConnectionGrantStore {
 
     /** Counts by status, for the {@code connection.grant.status} gauge. */
     long countByStatus(String tenantId, ConnectionGrant.Status status);
+
+    /**
+     * How many grants a connection holds, across every principal and status.
+     * <p>
+     * Exists so an update that changes a connection's {@code authType} or
+     * {@code binding} can be refused while linked accounts still exist: their
+     * refresh tokens would otherwise stay at rest under a name the resolver no
+     * longer reads them for. A count rather than a listing, because the caller
+     * needs a number for its refusal and must never receive token ciphertext.
+     */
+    long countByConnection(String tenantId, String connectionName);
 }

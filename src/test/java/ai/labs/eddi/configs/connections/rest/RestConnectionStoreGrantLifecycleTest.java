@@ -18,14 +18,17 @@ import ai.labs.eddi.connections.grants.IConnectionGrantStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.secrets.ISecretProvider;
 import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.ClientErrorException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
@@ -99,6 +102,63 @@ class RestConnectionStoreGrantLifecycleTest {
 
         assertTrue(error.getMessage().contains("jira"), error.getMessage());
         assertTrue(error.getMessage().contains("grant"), "the message must say WHY, or it reads as gratuitous: " + error.getMessage());
+    }
+
+    @Test
+    @DisplayName("an authType change is refused while linked accounts exist, naming the count and the way out")
+    void refusesAuthTypeChangeWithLinkedAccounts() throws Exception {
+        // The rename rule was in place, but nothing stopped the same PUT from turning a
+        // per-user OAuth connection into a static one: the resolver then never read the
+        // grants again, and nothing deleted them either — every user's refresh token
+        // at rest under a name that now meant something else.
+        var perUser = connection("drive", "default");
+        perUser.setAuthType(AuthType.OAUTH2_AUTHORIZATION_CODE);
+        perUser.setBinding(Binding.PER_USER);
+        perUser.setStaticAuth(null);
+        perUser.setOauth(oauth());
+        storedAs(perUser, 2);
+        when(connectionStore.idOfName("default", "drive")).thenReturn(ID);
+        when(grantStore.countByConnection("default", "drive")).thenReturn(2L);
+
+        var error = assertThrows(ClientErrorException.class, () -> rest().updateConnection(ID, 2, connection("drive", "default")));
+
+        assertEquals(409, error.getResponse().getStatus());
+        assertTrue(error.getMessage().contains("2 linked account"), error.getMessage());
+        assertTrue(error.getMessage().contains("DELETE /connections/drive/grant"), "the refusal must name the way out: " + error.getMessage());
+        verify(connectionStore, never()).update(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("an authType change goes through once nobody is linked any more")
+    void permitsAuthTypeChangeWithoutLinkedAccounts() throws Exception {
+        var perUser = connection("drive", "default");
+        perUser.setAuthType(AuthType.OAUTH2_AUTHORIZATION_CODE);
+        perUser.setBinding(Binding.PER_USER);
+        perUser.setStaticAuth(null);
+        perUser.setOauth(oauth());
+        storedAs(perUser, 2);
+        when(connectionStore.idOfName("default", "drive")).thenReturn(ID);
+        when(grantStore.countByConnection("default", "drive")).thenReturn(0L);
+        when(connectionStore.update(eq(ID), eq(2), any())).thenReturn(3);
+
+        rest().updateConnection(ID, 2, connection("drive", "default"));
+
+        verify(connectionStore).update(eq(ID), eq(2), any());
+    }
+
+    @Test
+    @DisplayName("an update that keeps authType and binding never consults the grant store")
+    void doesNotCountGrantsWhenNothingChanges() throws Exception {
+        storedAs(connection("jira", "default"), 2);
+        when(connectionStore.idOfName("default", "jira")).thenReturn(ID);
+        when(connectionStore.update(eq(ID), eq(2), any())).thenReturn(3);
+        var edited = connection("jira", "default");
+        edited.setDescription("only the description");
+
+        rest().updateConnection(ID, 2, edited);
+
+        verify(grantStore, never()).countByConnection(anyString(), anyString());
+        verify(connectionStore).update(eq(ID), eq(2), any());
     }
 
     @Test

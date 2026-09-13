@@ -183,6 +183,12 @@ public class InMemoryConnectionGrantStore implements IConnectionGrantStore {
         return grants.values().stream().filter(g -> tenantId.equals(g.getTenantId()) && g.getStatus() == status).count();
     }
 
+    @Override
+    public synchronized long countByConnection(String tenantId, String connectionName) {
+        String prefix = tenantId + "|" + connectionName + "|";
+        return grants.keySet().stream().filter(k -> k.startsWith(prefix)).count();
+    }
+
     /** Places a grant directly, for arranging a test. */
     public synchronized void seed(ConnectionGrant grant) {
         upsert(grant);

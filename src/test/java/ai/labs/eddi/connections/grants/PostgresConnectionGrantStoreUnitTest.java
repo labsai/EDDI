@@ -769,4 +769,27 @@ class PostgresConnectionGrantStoreUnitTest {
 
         assertWraps("Failed to count connection grants", boom, () -> store.countByStatus(TENANT, ConnectionGrant.Status.ACTIVE));
     }
+
+    @Test
+    @DisplayName("countByConnection binds the tenant and the connection name and returns the count")
+    void countByConnectionReturnsTheCount() throws Exception {
+        when(preparedStatement.executeQuery()).thenReturn(resultSet);
+        when(resultSet.next()).thenReturn(true);
+        when(resultSet.getLong(1)).thenReturn(3L);
+
+        assertEquals(3L, store.countByConnection(TENANT, CONNECTION));
+
+        verify(preparedStatement).setString(1, TENANT);
+        verify(preparedStatement).setString(2, CONNECTION);
+        verify(resultSet).close();
+    }
+
+    @Test
+    @DisplayName("countByConnection wraps a database failure with its cause intact")
+    void countByConnectionWrapsSqlException() throws Exception {
+        var boom = new SQLException("connection reset");
+        when(preparedStatement.executeQuery()).thenThrow(boom);
+
+        assertWraps("Failed to count a connection's grants", boom, () -> store.countByConnection(TENANT, CONNECTION));
+    }
 }
