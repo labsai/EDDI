@@ -111,7 +111,10 @@ and the scheme is compared case-insensitively in every profile (C8); a first-rel
 as `connections/{connectionId}.connection.json` — document only, never a grant. Two defects
 made this necessary rather than nice: `AbstractBackupService` had no connection entry, and
 `SecretScrubber` redacted `${connection:jira}` in an `Authorization` header to
-`${vault:REDACTED}`, so the reference died before the archive was written. Import creates a
+`${vault:REDACTED}`, so the reference died before the archive was written. **Review fix:** the
+scrubber's exemption is for a value that *is* exactly one `${connection:…}` reference, not one
+that contains it — every outbound path refuses a mixed value (`ConnectionReference.requireSole`),
+so a "contains" exemption only kept `Bearer sk-… ${connection:jira}` legible. Import creates a
 connection only when the name is free — an existing one is never overwritten — through
 `RestConnectionStore.createConnection` (same validation, deployment checks and lock as REST);
 a refused document is skipped with its reason and counted in `X-Connections-Skipped`. The

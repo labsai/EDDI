@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.secrets.sanitize;
 
+import ai.labs.eddi.connections.model.ConnectionReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -70,6 +71,13 @@ public class SecretScrubber {
 
     /** Pattern matching strings that look like API keys / tokens */
     private static final Pattern KEY_LIKE_PATTERN = Pattern.compile("[a-zA-Z0-9_.+/~$\\-]{14,1022}");
+
+    /**
+     * A value that is exactly one {@code ${connection:…}} reference — the only
+     * shape of connection reference any outbound path accepts, and therefore the
+     * only one worth keeping legible. See {@link #scrubTextValue}.
+     */
+    private static final Pattern SOLE_CONNECTION_REFERENCE = Pattern.compile("\\s*" + ConnectionReference.CONNECTION_PATTERN + "\\s*");
 
     /**
      * Fields whose value is a schema-fixed identifier — a discriminator, a name, or
@@ -208,6 +216,14 @@ public class SecretScrubber {
         // reading ${connection:jira} came back as ${vault:REDACTED} and the
         // reference was lost before the archive was even written.
         //
+        // The two exemptions differ in width, on purpose. "Bearer ${vault:k}" is a
+        // legitimate shape, so a vault reference exempts the value it sits in. A
+        // connection reference is legitimate ONLY on its own — every outbound path
+        // refuses "Bearer sk-… ${connection:jira}" through
+        // ConnectionReference.requireSole — so exempting a value that merely contains
+        // one would keep a literal credential legible for the sake of a config that
+        // cannot run. A sole reference passes; a mixed value is judged like any other.
+        //
         // The exemption speaks for one value, and a URL is not one value: it is a
         // host, a path and a set of independent query parameters. Read over a whole
         // URL, "carries a reference somewhere" exempted the LIVE credential sitting
@@ -215,8 +231,8 @@ public class SecretScrubber {
         // `?api_key=${vault:k}&access_token=<plaintext>` was exported intact. A URL
         // is therefore always handed to the part-by-part pass below, which judges
         // each parameter on its own.
-        if (!looksLikeUrl(textValue)
-                && (textValue.contains("${vault:") || textValue.contains("${eddivault:") || textValue.contains("${connection:"))) {
+        if (!looksLikeUrl(textValue) && (textValue.contains("${vault:") || textValue.contains("${eddivault:")
+                || SOLE_CONNECTION_REFERENCE.matcher(textValue).matches())) {
             return null;
         }
 

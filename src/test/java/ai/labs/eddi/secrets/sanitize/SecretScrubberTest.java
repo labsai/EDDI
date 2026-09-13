@@ -555,4 +555,20 @@ class SecretScrubberTest {
         assertTrue(scrubbed.contains("${connection:acme/drive}"), "and so must a tenant-qualified one in an apiKey: " + scrubbed);
         assertFalse(scrubbed.contains("REDACTED"), scrubbed);
     }
+
+    @Test
+    @DisplayName("a connection reference exempts only a value that IS the reference — a literal beside it is still redacted")
+    void scrubJson_connectionReferenceBesideALiteral_stillRedacted() {
+        // Every outbound path refuses a mixed value (ConnectionReference.requireSole),
+        // so there is no legitimate config to preserve here — only a pasted credential
+        // that a "contains" exemption would have exported legibly.
+        String json = "{\"headers\":{\"Authorization\":\"Bearer sk-live-abcdef ${connection:jira}\"},"
+                + "\"apiKey\":\"${connection:drive} xoxb-1234567890-abcdef\"}";
+
+        String scrubbed = scrubber.scrubJson(json);
+
+        assertFalse(scrubbed.contains("sk-live-abcdef"), "the literal credential must not survive export: " + scrubbed);
+        assertFalse(scrubbed.contains("xoxb-1234567890"), scrubbed);
+        assertTrue(scrubbed.contains(SecretScrubber.REDACTED), scrubbed);
+    }
 }
