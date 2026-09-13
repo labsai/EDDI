@@ -5,6 +5,7 @@
 package ai.labs.eddi.datastore.postgres;
 
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
+import ai.labs.eddi.configs.properties.MemorySearchTerms;
 import ai.labs.eddi.configs.properties.model.Properties;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
@@ -457,12 +458,25 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
         if (query == null || query.isBlank()) {
             return getAllEntries(userId);
         }
-        String sql = "SELECT * FROM usermemories WHERE user_id = ? AND (key ILIKE ? OR value::text ILIKE ?) ORDER BY updated_at DESC";
-        String pattern = "%" + query + "%";
+        // Every term must appear in the key or the value — see MemorySearchTerms. The
+        // raw query used to be the LIKE pattern, so "dog name" missed "dog_name" and a
+        // "%" or "_" typed by the model acted as a wildcard. Terms are letters and
+        // digits only, so nothing in them needs escaping.
+        List<String> terms = MemorySearchTerms.tokenize(query);
+        if (terms.isEmpty()) {
+            return new ArrayList<>();
+        }
+        String sql = "SELECT * FROM usermemories WHERE user_id = ?"
+                + " AND (key ILIKE ? OR value::text ILIKE ?)".repeat(terms.size())
+                + " ORDER BY updated_at DESC";
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, userId);
-            ps.setString(2, pattern);
-            ps.setString(3, pattern);
+            int parameterIndex = 2;
+            for (String term : terms) {
+                String pattern = "%" + term + "%";
+                ps.setString(parameterIndex++, pattern);
+                ps.setString(parameterIndex++, pattern);
+            }
             List<UserMemoryEntry> entries = new ArrayList<>();
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {

@@ -93,8 +93,8 @@ public class EmbeddingModelFactory {
         Map<String, String> rawParams = config.getEmbeddingParameters() != null ? config.getEmbeddingParameters() : Map.of();
         Map<String, String> params = globalVariableResolver.resolveAll(rawParams);
         ConnectionParameterGuard.rejectConnectionReferences(params);
-        params = secretResolver.resolveSecrets(params);
         String provider = config.getEmbeddingProvider();
+        params = SecretResolver.requireResolved(secretResolver.resolveSecrets(params), "embedding model '" + provider + "'");
         LOGGER.infof("Building embedding model for provider: %s", provider);
 
         return switch (provider) {

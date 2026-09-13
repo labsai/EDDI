@@ -7,6 +7,8 @@ package ai.labs.eddi.engine.attachments;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -186,6 +188,30 @@ class MimeValidatorTest {
         @DisplayName("Should accept when detection returns octet-stream")
         void testUnknownDetection() {
             assertTrue(MimeValidator.isCompatible("application/custom", "application/octet-stream"));
+        }
+
+        @Test
+        @DisplayName("Should accept text/plain content that has no signature")
+        void testPlainTextUndetected() {
+            assertTrue(MimeValidator.isCompatible("text/plain", MimeValidator.detectMime("hello world, plain text".getBytes())));
+        }
+
+        @ParameterizedTest(name = "rejects signature-less content declared as {0}")
+        @ValueSource(strings = {"image/png", "image/jpeg", "image/gif", "image/webp", "application/pdf",
+                "IMAGE/PNG; charset=binary"})
+        @DisplayName("Should reject undetectable content declared as a signature-bearing type")
+        void testSignatureRequired(String declared) {
+            byte[] text = "this is not a png at all".getBytes();
+            assertEquals("application/octet-stream", MimeValidator.detectMime(text));
+            assertFalse(MimeValidator.isCompatible(declared, MimeValidator.detectMime(text)),
+                    "plain text must not pass as " + declared);
+        }
+
+        @Test
+        @DisplayName("Should still accept real content for a signature-bearing type")
+        void testSignatureRequiredAcceptsRealContent() {
+            byte[] png = new byte[]{(byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
+            assertTrue(MimeValidator.isCompatible("image/png", MimeValidator.detectMime(png)));
         }
 
         @Test

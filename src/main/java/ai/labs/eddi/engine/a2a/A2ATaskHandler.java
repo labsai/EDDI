@@ -8,6 +8,7 @@ import ai.labs.eddi.engine.a2a.A2AModels.*;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
+import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
 import io.quarkus.security.identity.SecurityIdentity;
@@ -167,12 +168,23 @@ public class A2ATaskHandler {
             throw new InvalidA2ARequestException("Agent is not available over A2A: " + agentId);
         }
 
-        // Resolve or create conversation — scoped to the calling peer
-        String conversationId = resolveConversation(agentId, taskId, contextId, callerPrincipal());
-
         // Build InputData
         InputData inputData = new InputData();
         inputData.setInput(userInput);
+
+        // The same input cap the conversationId entry points enforce: A2A drives the
+        // agent-id overload on behalf of an external peer, so it applies the check
+        // itself — before resolving the task, so a refused message does not leave a
+        // started conversation behind. Reported as invalid params, not an internal
+        // error.
+        try {
+            conversationService.requireInputWithinLimit(inputData);
+        } catch (IConversationService.InputTooLargeException e) {
+            throw new InvalidA2ARequestException(e.getMessage());
+        }
+
+        // Resolve or create conversation — scoped to the calling peer
+        String conversationId = resolveConversation(agentId, taskId, contextId, callerPrincipal());
 
         // Execute synchronously via ConversationService
         CompletableFuture<String> responseFuture = new CompletableFuture<>();
@@ -240,6 +252,13 @@ public class A2ATaskHandler {
         }
 
         try {
+            // A task that already reached a terminal state cannot be cancelled (A2A
+            // TaskNotCancelableError). Ending it again reported success for a no-op and
+            // told the peer its cancel had stopped work that was long finished.
+            ConversationState state = conversationService.getConversationState(conversationId);
+            if (state == ConversationState.ENDED || state == ConversationState.ERROR) {
+                return false;
+            }
             conversationService.endConversation(conversationId);
             return true;
         } catch (Exception e) {

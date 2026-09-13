@@ -749,6 +749,12 @@ public class ApiCallExecutor implements IApiCallExecutor {
         // Off by default to preserve calls to internal/private APIs.
         if (ssrfProtectionEnabled) {
             UrlValidationUtils.validateUrl(targetUri.toString());
+        } else {
+            // Opting out of SSRF protection keeps private and loopback targets
+            // reachable (configured internal APIs), but never the cloud instance-
+            // metadata service: that is a credential endpoint, not an API anyone
+            // configures on purpose.
+            UrlValidationUtils.rejectCloudMetadataTarget(targetUri.toString());
         }
 
         // Locale.ROOT is defensive rather than a live fix: no current Method

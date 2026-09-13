@@ -175,6 +175,20 @@ class A2ATaskHandlerTest {
         }
 
         @Test
+        @DisplayName("input above eddi.conversations.max-input-chars is invalid params and never reaches the agent")
+        void oversizedInputIsRejectedBeforeTheTurn() throws Exception {
+            doThrow(new IConversationService.InputTooLargeException(5_000_000, 200_000))
+                    .when(conversationService).requireInputWithinLimit(any());
+
+            InvalidA2ARequestException e = assertThrows(InvalidA2ARequestException.class,
+                    () -> handler.handleTaskSend("agent-1", sendParams("task-big", null, "too long")));
+
+            assertTrue(e.getMessage().contains("200000"), e.getMessage());
+            verify(conversationService, never()).say(any(Environment.class), anyString(), anyString(), anyBoolean(), anyBoolean(), any(),
+                    any(), anyBoolean(), any(ConversationResponseHandler.class));
+        }
+
+        @Test
         @DisplayName("should throw when message is missing from params")
         void missingMessage() {
             Map<String, Object> params = new HashMap<>();
@@ -453,6 +467,29 @@ class A2ATaskHandlerTest {
             doThrow(new RuntimeException("fail")).when(conversationService).endConversation("conv-fail");
 
             assertFalse(handler.handleTaskCancel("t-fail"));
+        }
+
+        @Test
+        @DisplayName("a task that already completed or failed is not cancelable and is left untouched")
+        void terminalTaskIsNotCancelable() {
+            taskCache.put(scopedKey(PEER_A, "t-done"), "conv-done");
+            taskCache.put(scopedKey(PEER_A, "t-failed"), "conv-failed");
+            when(conversationService.getConversationState("conv-done")).thenReturn(ConversationState.ENDED);
+            when(conversationService.getConversationState("conv-failed")).thenReturn(ConversationState.ERROR);
+
+            assertFalse(handler.handleTaskCancel("t-done"));
+            assertFalse(handler.handleTaskCancel("t-failed"));
+            verify(conversationService, never()).endConversation(anyString());
+        }
+
+        @Test
+        @DisplayName("a task still in flight is cancelled")
+        void inFlightTaskIsCancelled() {
+            taskCache.put(scopedKey(PEER_A, "t-live"), "conv-live");
+            when(conversationService.getConversationState("conv-live")).thenReturn(ConversationState.IN_PROGRESS);
+
+            assertTrue(handler.handleTaskCancel("t-live"));
+            verify(conversationService).endConversation("conv-live");
         }
     }
 

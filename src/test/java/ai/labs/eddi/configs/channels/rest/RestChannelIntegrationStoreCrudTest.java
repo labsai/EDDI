@@ -170,6 +170,28 @@ class RestChannelIntegrationStoreCrudTest {
             assertEquals(200, response.getStatus());
         }
 
+        /**
+         * On update the descriptor still lives at the previous version until
+         * DocumentDescriptorFilter promotes it after the call. Reading only the new
+         * version failed, was swallowed, and channel descriptors kept an empty name.
+         */
+        @Test
+        @DisplayName("syncs name and description onto the descriptor still at version-1")
+        void updateSyncsOntoPreviousVersionDescriptor() throws Exception {
+            var config = validConfig();
+            when(channelStore.update(eq(CHANNEL_ID), eq(1), any())).thenReturn(2);
+            when(channelStore.getCurrentResourceId(CHANNEL_ID)).thenReturn(dummyResourceId(CHANNEL_ID, 2));
+            when(documentDescriptorStore.readDescriptor(CHANNEL_ID, 2)).thenThrow(new IResourceStore.ResourceNotFoundException("not yet"));
+            when(documentDescriptorStore.readDescriptor(CHANNEL_ID, 1)).thenReturn(new DocumentDescriptor());
+            lenient().when(documentDescriptorStore.readDescriptors(eq("ai.labs.channel"), eq(""), eq(0), eq(IDescriptorStore.NO_LIMIT), eq(false)))
+                    .thenReturn(List.of());
+
+            sut.updateChannel(CHANNEL_ID, 1, config);
+
+            verify(documentDescriptorStore).setDescriptor(eq(CHANNEL_ID), eq(1),
+                    argThat(d -> "My Slack Hub".equals(d.getName()) && "slack integration".equals(d.getDescription())));
+        }
+
         @Test
         @DisplayName("should reject invalid config on update")
         void rejectInvalidOnUpdate() {

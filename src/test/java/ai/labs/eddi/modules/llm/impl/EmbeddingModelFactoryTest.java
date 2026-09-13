@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 
+import java.util.HashMap;
 import java.util.Map;
 import java.util.function.Consumer;
 
@@ -38,9 +39,35 @@ class EmbeddingModelFactoryTest {
     @BeforeEach
     void setUp() {
         openMocks(this);
-        when(secretResolver.resolveSecrets(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(secretResolver.resolveSecrets(any())).thenAnswer(inv -> resolvingVault(inv.getArgument(0)));
         when(globalVariableResolver.resolveAll(any())).thenAnswer(inv -> inv.getArgument(0));
         factory = new EmbeddingModelFactory(globalVariableResolver, secretResolver);
+    }
+
+    /**
+     * A working vault: every reference resolves, except names starting with
+     * {@code no-such}, which stay unresolved like a missing secret does.
+     */
+    private static Map<String, String> resolvingVault(Map<String, String> params) {
+        if (params == null) {
+            return null;
+        }
+        var resolved = new HashMap<>(params);
+        resolved.replaceAll((key, value) -> value != null && value.startsWith("${vault:") && !value.startsWith("${vault:no-such")
+                ? "resolved-secret"
+                : value);
+        return resolved;
+    }
+
+    @Test
+    @DisplayName("an unresolvable vault reference fails before the model is built, instead of reaching the provider as the key")
+    void unresolvedVaultReferenceFailsClosed() {
+        var config = createConfig("openai", Map.of("model", "text-embedding-3-small", "apiKey", "${vault:no-such-key}"));
+
+        var e = assertThrows(SecretResolver.UnresolvedSecretReferenceException.class, () -> factory.getOrCreate(config));
+
+        assertTrue(e.getMessage().contains("'apiKey'"), e.getMessage());
+        assertTrue(e.getMessage().contains("embedding model 'openai'"), e.getMessage());
     }
 
     @Test

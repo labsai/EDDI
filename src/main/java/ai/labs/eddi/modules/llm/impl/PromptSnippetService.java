@@ -147,7 +147,11 @@ public class PromptSnippetService {
                 try {
                     URI resourceUri = descriptor.getResource();
                     String id = extractIdFromUri(resourceUri);
-                    Integer version = extractVersionFromUri(resourceUri);
+                    // Read the CURRENT version. The descriptor's resource URI keeps the
+                    // version the snippet was created with, so after an update agents kept
+                    // rendering the old content even though the cache had been invalidated.
+                    IResourceStore.IResourceId current = snippetStore.getCurrentResourceId(id);
+                    Integer version = current != null ? current.getVersion() : extractVersionFromUri(resourceUri);
                     PromptSnippet snippet = snippetStore.read(id, version);
                     if (snippet != null && snippet.getName() != null && snippet.getContent() != null) {
                         // Stored RAW — see the class javadoc. A snippet reaches a prompt as a

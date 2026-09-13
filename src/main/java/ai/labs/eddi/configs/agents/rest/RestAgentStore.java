@@ -11,7 +11,11 @@ import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.configs.agents.crypto.AgentPublicKey;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
+import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.engine.model.Deployment;
+import ai.labs.eddi.engine.runtime.IAgent;
+import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
@@ -28,12 +32,14 @@ import org.jboss.logging.Logger;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 import static ai.labs.eddi.configs.descriptors.ResourceUtilities.*;
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
@@ -57,6 +63,7 @@ public class RestAgentStore implements IRestAgentStore {
     private final CapabilityRegistryService capabilityRegistryService;
     private final IDeploymentStore deploymentStore;
     private final AgentSigningService agentSigningService;
+    private final IAgentFactory agentFactory;
     private final String defaultTenantId;
 
     private static final Logger log = Logger.getLogger(RestAgentStore.class);
@@ -67,7 +74,9 @@ public class RestAgentStore implements IRestAgentStore {
             IDeploymentStore deploymentStore,
             ResourceAccessGuard resourceAccessGuard,
             AgentSigningService agentSigningService,
+            IAgentFactory agentFactory,
             @ConfigProperty(name = "eddi.tenant.default-id", defaultValue = "default") String defaultTenantId) {
+        this.agentFactory = agentFactory;
         this.resourceAccessGuard = resourceAccessGuard;
         restVersionInfo = new RestVersionInfo<>(resourceURI, agentStore, documentDescriptorStore, resourceAccessGuard);
         this.documentDescriptorStore = documentDescriptorStore;
@@ -145,6 +154,7 @@ public class RestAgentStore implements IRestAgentStore {
     @Override
     public Response updateAgent(String id, Integer version, AgentConfiguration agentConfiguration) {
         validateSecurityFlags(agentConfiguration);
+        requireWorkflowsExist(agentConfiguration);
         Response response = restVersionInfo.update(id, version, agentConfiguration);
         capabilityRegistryService.register(id, agentConfiguration);
         return response;
@@ -192,6 +202,7 @@ public class RestAgentStore implements IRestAgentStore {
     @Override
     public Response createAgent(AgentConfiguration agentConfiguration) {
         validateSecurityFlags(agentConfiguration);
+        requireWorkflowsExist(agentConfiguration);
 
         // createDocument() because the id and version are what this method needs.
         // NOT because Response.getLocation() is broken for eddi:// URIs — it is not;
@@ -306,6 +317,10 @@ public class RestAgentStore implements IRestAgentStore {
         // vault cleanup below for why. null means "no key material".
         List<Integer> signingKeyVersions = Boolean.TRUE.equals(permanent) ? signingKeyVersions(id, version) : null;
 
+        // Collected BEFORE the delete for the same reason: the deployment records are
+        // removed below, and afterwards nothing names the versions still running.
+        List<DeploymentInfo> liveDeployments = liveDeploymentsOf(id);
+
         // DECIDED before the delete, EXECUTED after it — the same split, and for the
         // same reason, as RestWorkflowStore.deleteWorkflow.
         //
@@ -326,6 +341,10 @@ public class RestAgentStore implements IRestAgentStore {
         List<IResourceId> cascadeTargets = cascade && isCurrentVersion(id, version) ? planCascade(id, version) : null;
 
         Response response = restVersionInfo.delete(id, version, permanent);
+
+        // After the delete, which throws on a stale or unknown version: a refused
+        // delete must leave a running Agent running.
+        undeployLiveDeployments(id, liveDeployments);
 
         if (cascadeTargets != null) {
             try {
@@ -398,6 +417,94 @@ public class RestAgentStore implements IRestAgentStore {
         }
 
         return response;
+    }
+
+    /**
+     * Every deployment of {@code id} that is still live, from the deployment
+     * records and from the runtime itself.
+     * <p>
+     * Deleting an Agent removed its deployment records but never undeployed it, so
+     * a deleted Agent kept answering in its environment until the process restarted
+     * — and nothing could stop it, because every undeploy path starts by reading
+     * the configuration that was just deleted. The runtime is asked as well as the
+     * records because a version can be running without a record (a record write
+     * that failed, or one a previous delete already removed).
+     */
+    private List<DeploymentInfo> liveDeploymentsOf(String id) {
+        List<DeploymentInfo> live = new ArrayList<>();
+        try {
+            for (DeploymentInfo info : deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed)) {
+                if (id.equals(info.getAgentId())) {
+                    live.add(info);
+                }
+            }
+        } catch (Exception e) {
+            log.warnf("Could not read deployment records for Agent %s before deleting it: %s", sanitize(id), sanitize(e.getMessage()));
+        }
+        for (Deployment.Environment environment : Deployment.Environment.values()) {
+            try {
+                for (IAgent agent : agentFactory.getAllLatestAgents(environment)) {
+                    if (id.equals(agent.getAgentId()) && live.stream().noneMatch(
+                            info -> info.getEnvironment() == environment && Objects.equals(info.getAgentVersion(), agent.getAgentVersion()))) {
+                        DeploymentInfo info = new DeploymentInfo();
+                        info.setAgentId(id);
+                        info.setAgentVersion(agent.getAgentVersion());
+                        info.setEnvironment(environment);
+                        info.setDeploymentStatus(DeploymentInfo.DeploymentStatus.deployed);
+                        live.add(info);
+                    }
+                }
+            } catch (Exception e) {
+                log.warnf("Could not list running Agents in %s before deleting Agent %s: %s", environment, sanitize(id), sanitize(e.getMessage()));
+            }
+        }
+        return live;
+    }
+
+    private void undeployLiveDeployments(String id, List<DeploymentInfo> liveDeployments) {
+        for (DeploymentInfo info : liveDeployments) {
+            try {
+                agentFactory.undeployAgent(info.getEnvironment(), id, info.getAgentVersion());
+                log.infof("Undeployed Agent %s v%d from %s because the Agent was deleted", sanitize(id), info.getAgentVersion(),
+                        info.getEnvironment());
+            } catch (Exception e) {
+                log.warnf("Failed to undeploy deleted Agent %s v%d from %s: %s", sanitize(id), info.getAgentVersion(), info.getEnvironment(),
+                        sanitize(e.getMessage()));
+            }
+        }
+    }
+
+    /**
+     * Rejects a create or update that names a workflow which does not exist.
+     * <p>
+     * {@code AgentStore} checks the shape of each URI; this checks that it
+     * resolves. Accepting a dangling reference with 201 moved the failure to deploy
+     * time, where it surfaced as an opaque deployment ERROR with nothing pointing
+     * back at the typo. It lives here rather than in the store because ZIP import
+     * and sync write through the store directly, after creating the workflows they
+     * reference.
+     */
+    private void requireWorkflowsExist(AgentConfiguration agentConfiguration) {
+        List<URI> workflows = agentConfiguration.getWorkflows();
+        if (workflows == null) {
+            return;
+        }
+        for (URI workflowUri : workflows) {
+            IResourceId resourceId = workflowUri == null ? null : validateUri(workflowUri.toString());
+            if (resourceId == null) {
+                // Malformed: AgentStore rejects it with the precise message.
+                continue;
+            }
+            try {
+                restWorkflowStore.readWorkflow(resourceId.getId(), resourceId.getVersion());
+            } catch (Exception e) {
+                if (e instanceof IResourceStore.ResourceNotFoundException || e instanceof NotFoundException) {
+                    throw new BadRequestException(Response.status(BAD_REQUEST).type(MediaType.TEXT_PLAIN)
+                            .entity("workflows references a workflow that does not exist: " + workflowUri).build());
+                }
+                throw sneakyThrow(e);
+            }
+        }
     }
 
     /**

@@ -176,6 +176,20 @@ class RestOutputStoreTest {
         }
 
         @Test
+        @DisplayName("a missing operation is a caller error (400), not a NullPointerException (500)")
+        void missingOperationIsIllegalArgument() throws Exception {
+            var current = new OutputConfigurationSet();
+            current.setOutputSet(new ArrayList<>());
+            when(outputStore.read("out-1", 1)).thenReturn(current);
+
+            var instruction = new PatchInstruction<OutputConfigurationSet>();
+            instruction.setDocument(new OutputConfigurationSet());
+
+            assertThrows(IllegalArgumentException.class, () -> restStore.patchOutputSet("out-1", 1, List.of(instruction)));
+            verify(outputStore, never()).update(any(), any(), any());
+        }
+
+        @Test
         @DisplayName("should apply DELETE patch")
         void appliesDeletePatch() throws Exception {
             var current = new OutputConfigurationSet();

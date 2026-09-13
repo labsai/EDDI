@@ -133,7 +133,18 @@ public final class MimeValidator {
             return true; // lenient when detection fails
         }
         if ("application/octet-stream".equals(detectedMime)) {
-            return true; // unknown detection — allow declared
+            // Unrecognised content may carry any declared type — EXCEPT a type this
+            // class can recognise by its signature. Content that claims to be a PNG
+            // but has no PNG signature is not an unknown file, it is a mislabelled
+            // one, and allowing it through made the check pass exactly the uploads it
+            // exists to stop (plain text declared image/png was stored with
+            // forwardableInline=true and handed to a vision model).
+            String declared = normalize(declaredMime);
+            if (SIGNATURE_REQUIRED.contains(declared)) {
+                LOGGER.debugf("MIME mismatch: declared='%s' carries no matching signature", declared);
+                return false;
+            }
+            return true;
         }
 
         // Normalize
@@ -165,6 +176,21 @@ public final class MimeValidator {
         }
         return true;
     }
+
+    /**
+     * Declared types whose content this class can always recognise. A file declared
+     * as one of these must carry the signature: undetectable content is rejected
+     * rather than waved through as "unknown". Kept to the formats that are sent to
+     * a model inline (images, PDF), where a mislabelled upload does real harm; the
+     * audio/video/office signatures above stay lenient so an unusual but legitimate
+     * container variant is not refused.
+     */
+    static final Set<String> SIGNATURE_REQUIRED = Set.of(
+            "image/png",
+            "image/jpeg",
+            "image/gif",
+            "image/webp",
+            "application/pdf");
 
     /** ZIP-based MIME types that share the PK\x03\x04 signature */
     private static final Set<String> MIME_ZIP_SUBTYPES = Set.of(

@@ -132,7 +132,7 @@ Full narrative and metrics: [scheduling.md → Deployment Configuration](schedul
 | Property | Default | Description |
 |---|---|---|
 | `eddi.security.allow-unauthenticated` | `false` | Permits running with OIDC disabled outside dev. `AuthStartupGuard` refuses a production boot without it |
-| `eddi.security.ssrf-protection.enabled` | `false` | **Opt-in.** Validates the fully resolved target of httpCalls, MCP and A2A calls and stops following redirects. Off by default because configured targets legitimately reach internal hosts — **turn it on if any outbound URL is influenced by conversation input.** See [security.md → SSRF Protection](security.md#ssrf-protection--urlvalidationutils) |
+| `eddi.security.ssrf-protection.enabled` | `false` | **Opt-in.** Validates the fully resolved target of httpCalls, MCP and A2A calls and stops following redirects. Off by default because configured targets legitimately reach internal hosts — **turn it on if any outbound URL is influenced by conversation input.** The cloud instance-metadata service (and the link-local range it lives in) is refused regardless of this setting. See [security.md → SSRF Protection](security.md#ssrf-protection--urlvalidationutils) |
 | `eddi.mcp.allow-unauthenticated` | `false` | Exposes the MCP server without auth. Needs its own opt-in on top of `eddi.security.allow-unauthenticated` — inheriting one flag must not be enough to open agent CRUD |
 | `eddi.secretstore.allow-unauthenticated` | `false` | Same, for the secrets vault REST surface |
 | `eddi.caller-identity.enabled` | `true` | Enables `${caller:token}` / `${caller:userId}` in httpCall headers. See [httpcalls.md](httpcalls.md) |
@@ -250,6 +250,7 @@ Full guide: [attachments-guide.md](attachments-guide.md).
 |---|---|---|
 | `eddi.attachments.max-size-bytes` | `20971520` (20 MB) | Largest single upload |
 | `eddi.attachments.max-per-turn` | `5` | Attachments per turn — **per member turn** in a group conversation |
+| `eddi.conversations.max-input-chars` | `200000` | Longest turn input, in characters, accepted from a caller (REST, streaming, managed conversations, MCP, OpenAI adapter, Slack, A2A). Longer input is refused with **413** `input_too_large` before anything reaches the model. `0` or negative disables the limit. Turns the engine drives itself for group members and sub-agents are exempt |
 | `eddi.attachments.max-per-conversation` | `50` | Attachments per conversation |
 | `eddi.attachments.max-total-bytes-per-conversation` | `104857600` (100 MB) | Aggregate bytes per conversation |
 | `eddi.attachments.max-forward-bytes` | `10485760` (10 MB) | Per-file ceiling on what is forwarded to the LLM, across every source |

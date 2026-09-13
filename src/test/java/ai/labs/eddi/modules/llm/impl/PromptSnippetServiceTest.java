@@ -101,6 +101,23 @@ class PromptSnippetServiceTest {
         }
 
         @Test
+        void shouldLoadTheCurrentVersionNotTheDescriptorsOriginalOne() throws Exception {
+            // The descriptor still points at v1 after the snippet was updated to v2.
+            DocumentDescriptor desc = createDescriptor("snippet1", 1);
+            when(descriptorStore.readDescriptors("ai.labs.snippet", "", 0, 0, false))
+                    .thenReturn(List.of(desc));
+            IResourceStore.IResourceId current = mock(IResourceStore.IResourceId.class);
+            when(current.getVersion()).thenReturn(2);
+            when(snippetStore.getCurrentResourceId("snippet1")).thenReturn(current);
+            when(snippetStore.read("snippet1", 1))
+                    .thenReturn(new PromptSnippet("tone", null, null, "old content", null, true));
+            when(snippetStore.read("snippet1", 2))
+                    .thenReturn(new PromptSnippet("tone", null, null, "updated content", null, true));
+
+            assertEquals("updated content", service.getAll().get("tone"));
+        }
+
+        @Test
         void shouldLoadMultipleSnippets() throws Exception {
             DocumentDescriptor desc1 = createDescriptor("s1", 1);
             DocumentDescriptor desc2 = createDescriptor("s2", 2);

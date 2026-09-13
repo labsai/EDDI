@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.audit.TurnAuditBuffer;
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.lifecycle.ILifecycleManager;
 import ai.labs.eddi.engine.lifecycle.exceptions.ConversationPauseException;
@@ -47,7 +48,7 @@ public class Conversation implements IConversation {
     private static final String KEY_CONTEXT = "context";
     private static final String KEY_PROPERTIES = "properties";
     private static final String KEY_SECRET_INPUT = "secretInput";
-    private static final String SECRET_INPUT_PLACEHOLDER = "<secret input>";
+    private static final String SECRET_INPUT_PLACEHOLDER = MemoryKeys.SECRET_INPUT_PLACEHOLDER;
     private static final String CONVERSATION_START = "CONVERSATION_START";
     private static final String CONVERSATION_END = "CONVERSATION_END";
 
@@ -505,6 +506,9 @@ public class Conversation implements IConversation {
     private void executeConversationStep(List<IData<?>> lifecycleData, List<String> lifecycleTaskTypes)
             throws LifecycleException {
         boolean paused = false;
+        // Audit entries are held until the whole turn has run: only then is it known
+        // whether a later task vaulted the input as a secret (see TurnAuditBuffer).
+        TurnAuditBuffer auditBuffer = TurnAuditBuffer.install(conversationMemory);
         try {
             executeWorkflows(lifecycleData, lifecycleTaskTypes);
         } catch (ConversationStopException unused) {
@@ -520,6 +524,9 @@ public class Conversation implements IConversation {
                 paused = true;
             }
         } finally {
+            if (auditBuffer != null) {
+                auditBuffer.flush(conversationMemory);
+            }
             // BEFORE the persist decision below, and on every exit including the
             // exception path: note which longTerm properties this turn changed. If the
             // turn does not reach storePropertiesPermanently (pause / error / cancel)
@@ -874,6 +881,10 @@ public class Conversation implements IConversation {
             // A RULE pause must never carry a stale tool batch (e.g. the gate tripped
             // earlier in the same turn on a path that recovered) — belt and braces.
             clearToolPauseState();
+            // clearToolPauseState() also nulls the pause type stamped a few lines up, which
+            // left every rule pause reporting hitlPauseType=null while tool pauses said
+            // TOOL_CALL — clients branching on the type could not recognise a rule pause.
+            conversationMemory.setHitlPauseType(e.getPauseOrigin().name());
             // A RULE pause aborts the turn BEFORE the output/templating tasks run, so
             // the paused step would otherwise commit an EMPTY conversationOutput and a
             // client that renders turns from the output list shows a blank bubble.
@@ -1111,6 +1122,7 @@ public class Conversation implements IConversation {
         if (getConversationState() != ConversationState.AWAITING_HUMAN) {
             throw new ConversationNotReadyException("Not in AWAITING_HUMAN state");
         }
+        TurnAuditBuffer auditBuffer = TurnAuditBuffer.install(conversationMemory);
         try {
             setConversationState(ConversationState.IN_PROGRESS);
 
@@ -1230,6 +1242,9 @@ public class Conversation implements IConversation {
             setConversationState(ConversationState.ERROR);
             throw new LifecycleException(e.getLocalizedMessage(), e);
         } finally {
+            if (auditBuffer != null) {
+                auditBuffer.flush(conversationMemory);
+            }
             checkActionsForConversationEnd();
             ConversationState finalState = getConversationState();
             if (finalState == ConversationState.IN_PROGRESS)

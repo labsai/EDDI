@@ -10,11 +10,13 @@ import ai.labs.eddi.engine.api.IConversationService.AgentNotReadyException;
 import ai.labs.eddi.engine.api.IConversationService.ConversationAwaitingApprovalException;
 import ai.labs.eddi.engine.api.IConversationService.ConversationEndedException;
 import ai.labs.eddi.engine.api.IConversationService.ConversationNotFoundException;
+import ai.labs.eddi.engine.api.IConversationService.InputTooLargeException;
 import ai.labs.eddi.engine.api.IConversationService.StreamingResponseHandler;
 import ai.labs.eddi.engine.api.IRestAgentEngineStreaming;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictedException;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictionUnavailableException;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictionUnavailableExceptionMapper;
+import ai.labs.eddi.engine.exception.InputTooLargeExceptionMapper;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.tenancy.QuotaAccountingUnavailableException;
 import ai.labs.eddi.engine.tenancy.QuotaExceededException;
@@ -275,6 +277,11 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
             // only the caller's own (sanitized) conversationId, so it is echoed
             // rather than replaced — no new disclosure.
             code = "conversation_not_found";
+            message = e.getMessage();
+        } else if (e instanceof InputTooLargeException) {
+            // The twin answers 413. The message names only the length and the
+            // documented limit, so it is echoed.
+            code = InputTooLargeExceptionMapper.ERROR_CODE;
             message = e.getMessage();
         } else if (e instanceof ConversationEndedException) {
             code = "conversation_ended";

@@ -464,6 +464,18 @@ class MongoConversationMemoryStoreTest {
         }
 
         @Test
+        @DisplayName("a pause stored without a pause type (rule pauses before the fix) is reported as RULE")
+        void findPendingApprovalSummariesDefaultsMissingPauseTypeToRule() throws IResourceStore.ResourceStoreException {
+            var legacyRulePause = createSnapshot(null, "agent1", 1, "user1", ConversationState.AWAITING_HUMAN);
+            String id = store.storeConversationMemorySnapshot(legacyRulePause);
+
+            var summary = store.findPendingApprovalSummaries(10).stream()
+                    .filter(s -> id.equals(s.getConversationId())).findFirst().orElseThrow();
+
+            assertEquals("RULE", summary.getPauseType());
+        }
+
+        @Test
         @DisplayName("Task 14/6: a fully-populated PendingToolCallBatch survives a real BSON round-trip "
                 + "(JacksonCodec) — every field, including nested traceSoFar maps")
         void pendingToolCallBatchFullRoundTrip() throws IResourceStore.ResourceStoreException {

@@ -49,6 +49,99 @@ bottom of this file and are never archived.
 
 ---
 
+## 🧪 fix: the defects a full end-to-end run of 6.4.0 found (2026-09-13)
+
+**Repo:** EDDI (`fix/e2e-test-findings`, from `origin/main` @ `d0832d9da`)
+
+A full E2E pass over a running 6.4.0 exercised 342 REST operations, all 84 MCP tools, 28 single-agent
+variations and every group style (Anthropic `claude-sonnet-5` via `${vault:anthropic-key}`). It
+confirmed 15 bugs and ~30 usability defects. **S1 (a vault-resolved key persisted in an httpcall body)
+was retracted as a false positive**: the check had matched the `<REDACTED>` placeholder, and
+`RequestRedactor` already scrubs bodies. Everything else is fixed here with regression tests.
+
+**Security**
+
+- **S2 — a `scope: "secret"` input survived in derived forms.** `PropertySetterTask` scrubbed only
+  exact copies, but the parser tokenizes input (`unknown(sk-live_abc)`), so the key stayed in
+  `expressions:parsed`, `expressions:matches` and `intents`. Those are now dropped wholesale once the
+  input is scrubbed. The audit ledger was worse: parser and rules entries, submitted before the
+  property setter ran, carried the plaintext into an append-only signed ledger. New `TurnAuditBuffer`
+  holds a turn's entries until the pipeline finishes (say and resume paths), then redacts the recorded
+  input everywhere in the entry before submitting. `MemoryKeys.SECRET_INPUT_PLACEHOLDER` is the shared
+  marker.
+- **S3 — unknown `environment` silently targeted production.** `EnvironmentParamConverterProvider`
+  makes every JAX-RS `Deployment.Environment` parameter strict: `staging` → 400 naming the valid values.
+- **S4 — config-authored httpcalls reached the cloud metadata service** with SSRF protection off (the
+  default). `UrlValidationUtils.rejectCloudMetadataTarget` now refuses `169.254.169.254`,
+  `fd00:ec2::254`, `100.100.100.200`, `metadata.google.internal` and the link-local ranges —
+  including hostnames resolving there — on httpcall, MCP and A2A paths **regardless of the setting**.
+  Private/loopback targets stay reachable (that is what opting out is for).
+- **S5 — export rewrote `modelName: claude-sonnet-5` to `${vault:REDACTED}`** (the entropy heuristic);
+  the imported agent failed every turn. Model identifier fields are structural for `SecretScrubber`.
+- **B16 — an unresolvable `${vault:…}` was sent to the provider as the key.** `SecretResolver.requireResolved`
+  fails closed, naming the parameter and reference (never a value), in `ChatModelRegistry`,
+  `EmbeddingModelFactory` and `EmbeddingStoreFactory`.
+- **W16** `TRACE`/`TRACK` → 405 (`HttpMethodGuard`). **W17** input over
+  `eddi.conversations.max-input-chars` (default 200000) → 413 `input_too_large` (REST, SSE, A2A) before
+  any paid call. **W15** plaintext credentials in LLM configs are warned about at save (not rejected —
+  setup falls back to plaintext without a vault). **B12** a declared image/PDF whose bytes carry no
+  signature is rejected.
+
+**Engine / metrics**
+
+- **B6 — every priced tool failed in production.** Gauge `eddi.tool.costs.total` and counter
+  `eddi.tool.costs{tool}` both render as `eddi_tool_costs_total`; Prometheus refused the second.
+  Gauge renamed **`eddi.tool.costs.accrued`** (dashboards, `docs/metrics.md` and alert examples
+  updated); meter failures no longer fail cost accounting, and a cost-tracking failure no longer
+  replaces a tool result. *Breaking for anyone querying the old gauge name.*
+- **B7 — shared artifacts were invisible to other members.** All members run as one user, so under
+  USER cache scope `listArtifacts()` served a stale "no artifacts". `ToolCacheService.isCacheable`
+  excludes every `@Tool` of the artifact, group-task, dynamic-agent, memory and recall tool classes
+  (derived reflectively). The discuss/continue/human-input responses now attach artifacts too.
+- **B14** rule pauses kept `hitlPauseType: null` (`clearToolPauseState` cleared it); now `RULE`, and
+  stored legacy pauses report `RULE` in the inbox. **W25** the audit `modelName` was the provider type.
+- **A1** active conversations no longer require `agentVersion`. **W12** memory search splits the query
+  into terms (`MemorySearchTerms`) — "dog name" finds `dog_name`, and `%`/`_` are no longer wildcards.
+
+**Groups**
+
+- **B8 — `create_sub_agent` never inherited the parent's key.** Inheritance read the parent over the
+  REST loopback from the LLM tool thread, which has no request to forward credentials from; the
+  failure was swallowed. It now reads the in-process stores, and a failed inheritance says why.
+- **B9** `GroupMember` defaults a null `memberType` to AGENT — the ops-task-force template found zero
+  bidders. **B15/W5/W6** new save-time errors: member without `agentId`, negative
+  turns/retries/timeouts/caps/repeats, preset DEBATE/DEVIL_ADVOCATE without their roles, nesting
+  cycles; template instantiation rejects non-existent agents; RAG rejects unknown `embeddingProvider`.
+  Every shipped template passes (asserted). **W1/W7** enabling artifacts/tasks/dynamic agents logs the
+  `enableBuiltInTools` prerequisite.
+- **W3** `LAST_SYNTHESIS` accepts `**Option A:**`, list markers, `.`/`)` separators, any case.
+  **W4** CRITIQUE without `targetEachPeer` reviews all peers (`TEMPLATE_CRITIQUE_PANEL`) instead of an
+  empty target. **W8** EXECUTE without PLAN materializes configured tasks.
+
+**API consistency**
+
+- **W18/W32** agents referencing a malformed or non-existent workflow → 400; deleting an agent
+  undeploys its live versions. **B10** bad snippet name / missing patch op → 400 (were 500). **B11**
+  `/actions` skips steps without a URI (NPE → 500 on every real workflow) and names `workflowId`.
+  **B13** A2A cancel of a finished task → not cancelable. **W19** MCP discover-tools reports a refused
+  configuration as 400. **W20** tool costs resolve by slug. **W21** unmatched endpoint filters are
+  reported. **W22** aliased extensions listed once. **W23** unknown ingestion id → 404. **W24** channel
+  descriptors get their name (create/update descriptor-version lag). **W26** `list_agent_resources`
+  maps v6 step types. `read_conversation`'s `returningFields` passes sections to the service and
+  filters output keys (it returned an empty snapshot for its own example). **W13** snippets read their
+  current version. **W14** template preview resolves `{vars.*}`. **W29** setup states the streaming
+  backstop. `apply_agent_changes` reports a failed redeploy.
+
+**Docs:** security (metadata block), configuration reference, metrics, dashboards, group
+conversations (roles, options, cadence semantics, async approve/human-input, cycles, critique, EXECUTE
+without PLAN, cache), hitl, langchain (`anchorFirstSteps` is token-window only), user memory search,
+MCP client notes (protocol-version warning, non-idempotent retries).
+
+**Not changed, by design:** `${eddivault:` is a supported legacy alias; GDPR export `complete:false`;
+sync rejecting loopback sources.
+
+---
+
 ## ⚙️ fix(config): fifteen configuration defects, from scheduler units to a nine-megabyte orphan (2026-09-07)
 
 **Repo:** EDDI (`fix/review-quickwins-config`)
@@ -3719,6 +3812,10 @@ _For recording decisions that come up during implementation that aren't in the p
 | 2026-03-05 | Use Astro (not Expo) for website                                      | Static site on GitHub Pages           | Expo would add unnecessary abstraction for a marketing site |
 | 2026-03-05 | Use AI complexity scale (🟢/🟡/🔴/⚫) instead of human time estimates | AI will do all implementation work    | Human hours are meaningless for AI execution                |
 | 2026-03-05 | Docs already published at docs.labs.ai                                | Third-party tool reads `docs/` folder | Could migrate to Astro Content Collections later            |
+| 2026-09-13 | Block the cloud metadata service on every outbound path, even with `eddi.security.ssrf-protection.enabled=false` | E2E: a config-authored httpcall reached `169.254.169.254` | Flip SSRF protection on by default — breaks every configured internal API |
+| 2026-09-13 | Buffer a turn's audit entries and flush them after the pipeline, redacting a vaulted input | E2E: parser/rules entries carried a `scope: secret` plaintext into the append-only ledger | Redact after submission — impossible, entries are signed and immutable |
+| 2026-09-13 | Exclude stateful tools from the tool cache by reflecting over their `@Tool` classes | E2E: group members share a user, so `listArtifacts()` was served stale | Make caching opt-in per tool — changes every existing cached tool |
+| 2026-09-13 | New group save-time checks (member agentId, negative limits, preset roles, nesting cycles) are hard errors | E2E: all saved fine and failed at run time | Warn only — the invalid configs cannot run as written, and shipped templates pass |
 |            |                                                                       |                                       |                                                             |
 
 ---
