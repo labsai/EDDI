@@ -36,6 +36,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -773,7 +775,10 @@ class PostgresConnectionGrantStoreUnitTest {
     @Test
     @DisplayName("countByConnection binds the tenant and the connection name and returns the count")
     void countByConnectionReturnsTheCount() throws Exception {
-        when(preparedStatement.executeQuery()).thenReturn(resultSet);
+        // doReturn rather than when(executeQuery()): stubbing through a real-looking
+        // call obtains a ResultSet nobody closes, which a resource-leak analyzer
+        // cannot tell from production code. The close is asserted below instead.
+        doReturn(resultSet).when(preparedStatement).executeQuery();
         when(resultSet.next()).thenReturn(true);
         when(resultSet.getLong(1)).thenReturn(3L);
 
@@ -788,7 +793,7 @@ class PostgresConnectionGrantStoreUnitTest {
     @DisplayName("countByConnection wraps a database failure with its cause intact")
     void countByConnectionWrapsSqlException() throws Exception {
         var boom = new SQLException("connection reset");
-        when(preparedStatement.executeQuery()).thenThrow(boom);
+        doThrow(boom).when(preparedStatement).executeQuery();
 
         assertWraps("Failed to count a connection's grants", boom, () -> store.countByConnection(TENANT, CONNECTION));
     }
