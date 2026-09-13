@@ -5,7 +5,7 @@ metadata:
   name: eddi
   labels:
     app.kubernetes.io/name: eddi
-    app.kubernetes.io/version: "6.3.0"
+    app.kubernetes.io/version: "6.4.0"
     app.kubernetes.io/component: server
     app.kubernetes.io/part-of: eddi
 spec:
@@ -38,7 +38,7 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: eddi
-        app.kubernetes.io/version: "6.3.0"
+        app.kubernetes.io/version: "6.4.0"
         app.kubernetes.io/component: server
         app.kubernetes.io/part-of: eddi
       annotations:
@@ -89,10 +89,10 @@ spec:
           #   cosign verify \
           #     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
           #     --certificate-identity-regexp '^https://github\.com/labsai/EDDI/\.github/workflows/ci\.yml@refs/(heads/main|tags/.+)$' \
-          #     labsai/eddi:6.3.0
-          #   crane digest labsai/eddi:6.3.0   # → sha256:...
-          # then append it here:  image: labsai/eddi:6.3.0@sha256:<digest>
-          image: labsai/eddi:6.3.0
+          #     labsai/eddi:6.4.0
+          #   crane digest labsai/eddi:6.4.0   # → sha256:...
+          # then append it here:  image: labsai/eddi:6.4.0@sha256:<digest>
+          image: labsai/eddi:6.4.0
           imagePullPolicy: IfNotPresent
           # Container-level hardening — without this the pod is rejected outright
           # by a namespace running the "restricted" Pod Security Standard.
