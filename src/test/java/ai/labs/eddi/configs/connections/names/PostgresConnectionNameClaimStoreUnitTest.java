@@ -31,6 +31,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mockingDetails;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -77,6 +78,28 @@ class PostgresConnectionNameClaimStoreUnitTest {
         mocks.close();
     }
 
+    /**
+     * Every connection and statement the store obtained was closed.
+     * <p>
+     * The stubs in {@link #setUp} hand out mocks; nothing is acquired there. The
+     * contract worth pinning is the production side: that each
+     * {@code getConnection()}, {@code createStatement()} and
+     * {@code prepareStatement()} is matched by a {@code close()}, on the failure
+     * path as well as the success path.
+     */
+    private void assertEveryConnectionAndStatementClosed() throws SQLException {
+        int connections = invocations(dataSource, "getConnection");
+        assertTrue(connections > 0, "the scenario must actually have opened a connection");
+        verify(connection, times(connections)).close();
+        verify(statement, times(invocations(connection, "createStatement"))).close();
+        verify(preparedStatement, times(invocations(connection, "prepareStatement"))).close();
+    }
+
+    private static int invocations(Object mock, String method) {
+        return (int) mockingDetails(mock).getInvocations().stream().filter(invocation -> invocation.getMethod().getName().equals(method))
+                .count();
+    }
+
     private String capturedSql() throws SQLException {
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         verify(connection).prepareStatement(sql.capture());
@@ -96,6 +119,19 @@ class PostgresConnectionNameClaimStoreUnitTest {
         assertTrue(ddl.getValue().contains("UNIQUE (tenant_id, connection_name)"), "the constraint is the whole guarantee: " + ddl.getValue());
         assertTrue(ddl.getValue().contains("claimed_at TIMESTAMPTZ"),
                 "compared with CURRENT_TIMESTAMP, so it must be the same kind of timestamp: " + ddl.getValue());
+        assertEveryConnectionAndStatementClosed();
+    }
+
+    @Test
+    @DisplayName("a failed schema step still closes its statement and connection")
+    void schemaFailureClosesItsResources() throws Exception {
+        when(statement.execute(anyString())).thenThrow(new SQLException("permission denied for schema public"));
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+
+        assertTrue(store.claim(TENANT, NAME, "token-1"));
+
+        verify(statement).close();
+        assertEveryConnectionAndStatementClosed();
     }
 
     @Test
@@ -127,6 +163,7 @@ class PostgresConnectionNameClaimStoreUnitTest {
         when(preparedStatement.executeUpdate()).thenThrow(new SQLException("duplicate key value violates unique constraint", "23505"));
 
         assertFalse(store.claim(TENANT, NAME, "token-1"));
+        assertEveryConnectionAndStatementClosed();
     }
 
     @Test
@@ -137,6 +174,8 @@ class PostgresConnectionNameClaimStoreUnitTest {
 
         var thrown = assertThrows(IllegalStateException.class, () -> store.claim(TENANT, NAME, "token-1"));
         assertSame(boom, thrown.getCause());
+        verify(preparedStatement).close();
+        assertEveryConnectionAndStatementClosed();
     }
 
     @Test
@@ -151,6 +190,26 @@ class PostgresConnectionNameClaimStoreUnitTest {
 
         assertEquals(new NameClaim(TENANT, NAME, "t", "c1"), store.find(TENANT, NAME).orElseThrow());
         assertTrue(store.find(TENANT, NAME).isEmpty());
+
+        // Both reads, the hit and the miss, release their ResultSet.
+        verify(resultSet, times(2)).close();
+        assertEveryConnectionAndStatementClosed();
+    }
+
+    @Test
+    @DisplayName("find closes the ResultSet, statement and connection when mapping a row fails")
+    void findClosesEverythingWhenMappingFails() throws Exception {
+        when(preparedStatement.executeQuery()).thenReturn(resultSet);
+        when(resultSet.next()).thenReturn(true);
+        var boom = new SQLException("column tenant_id does not exist");
+        when(resultSet.getString("tenant_id")).thenThrow(boom);
+
+        var thrown = assertThrows(IllegalStateException.class, () -> store.find(TENANT, NAME));
+
+        assertSame(boom, thrown.getCause());
+        verify(resultSet).close();
+        verify(preparedStatement).close();
+        assertEveryConnectionAndStatementClosed();
     }
 
     @Test
@@ -210,5 +269,6 @@ class PostgresConnectionNameClaimStoreUnitTest {
         assertTrue(sql.getAllValues().get(1).endsWith("AND connection_id = ?"), sql.getAllValues().get(1));
         verify(preparedStatement).setString(3, "token-1");
         verify(preparedStatement).setString(3, "c1");
+        assertEveryConnectionAndStatementClosed();
     }
 }

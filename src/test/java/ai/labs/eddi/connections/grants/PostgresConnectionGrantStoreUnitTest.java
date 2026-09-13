@@ -42,6 +42,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mockingDetails;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -109,6 +110,28 @@ class PostgresConnectionGrantStoreUnitTest {
         if (mocks != null) {
             mocks.close();
         }
+    }
+
+    /**
+     * Every connection and statement the store obtained was closed.
+     * <p>
+     * The stubs in {@link #setUp} hand out mocks; nothing is acquired there. The
+     * contract worth pinning is the production side: that each
+     * {@code getConnection()}, {@code createStatement()} and
+     * {@code prepareStatement()} is matched by a {@code close()}, on the failure
+     * path as well as the success path.
+     */
+    private void assertEveryConnectionAndStatementClosed() throws SQLException {
+        int connections = invocations(dataSource, "getConnection");
+        assertTrue(connections > 0, "the scenario must actually have opened a connection");
+        verify(connection, times(connections)).close();
+        verify(statement, times(invocations(connection, "createStatement"))).close();
+        verify(preparedStatement, times(invocations(connection, "prepareStatement"))).close();
+    }
+
+    private static int invocations(Object mock, String method) {
+        return (int) mockingDetails(mock).getInvocations().stream().filter(invocation -> invocation.getMethod().getName().equals(method))
+                .count();
     }
 
     private static ConnectionGrant grant() {
@@ -794,9 +817,8 @@ class PostgresConnectionGrantStoreUnitTest {
     @Test
     @DisplayName("countByConnection binds the tenant and the connection name and returns the count")
     void countByConnectionReturnsTheCount() throws Exception {
-        // doReturn rather than when(executeQuery()): stubbing through a real-looking
-        // call obtains a ResultSet nobody closes, which a resource-leak analyzer
-        // cannot tell from production code. The close is asserted below instead.
+        // A stubbing expression on a mock acquires nothing, whichever form it takes.
+        // What is worth asserting is that the store closes what it opens.
         doReturn(resultSet).when(preparedStatement).executeQuery();
         when(resultSet.next()).thenReturn(true);
         when(resultSet.getLong(1)).thenReturn(3L);
@@ -806,6 +828,7 @@ class PostgresConnectionGrantStoreUnitTest {
         verify(preparedStatement).setString(1, TENANT);
         verify(preparedStatement).setString(2, CONNECTION);
         verify(resultSet).close();
+        assertEveryConnectionAndStatementClosed();
     }
 
     @Test
@@ -815,5 +838,9 @@ class PostgresConnectionGrantStoreUnitTest {
         doThrow(boom).when(preparedStatement).executeQuery();
 
         assertWraps("Failed to count a connection's grants", boom, () -> store.countByConnection(TENANT, CONNECTION));
+        // The query threw, so no ResultSet exists; the statement and connection that
+        // do exist are still released.
+        verify(preparedStatement).close();
+        assertEveryConnectionAndStatementClosed();
     }
 }
