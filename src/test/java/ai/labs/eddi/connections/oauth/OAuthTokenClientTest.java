@@ -99,14 +99,15 @@ class OAuthTokenClientTest {
         HttpResponse<String> response = mock(HttpResponse.class);
         doReturn(statusCode).when(response).statusCode();
         doReturn(body).when(response).body();
-        // doReturn rather than when(...): sendValidated is generic and stubbing it
+        // doReturn rather than when(...): sendValidatedNoRedirect is generic and
+        // stubbing it
         // through when() would need the call to type-check against a concrete T.
-        doReturn(response).when(httpClient).sendValidated(any(), any());
+        doReturn(response).when(httpClient).sendValidatedNoRedirect(any(), any());
     }
 
     private HttpRequest sentRequest() throws Exception {
         var captor = ArgumentCaptor.forClass(HttpRequest.class);
-        verify(httpClient).sendValidated(captor.capture(), any());
+        verify(httpClient).sendValidatedNoRedirect(captor.capture(), any());
         return captor.getValue();
     }
 
@@ -290,13 +291,37 @@ class OAuthTokenClientTest {
         var error = assertThrows(ConnectionException.class, () -> client.clientCredentials(connection, CLIENT_SECRET));
 
         assertEquals(ConnectionException.Reason.INVALID_CONFIGURATION, error.getReason());
+        verify(httpClient, never()).sendValidatedNoRedirect(any(), any());
+    }
+
+    @Test
+    @DisplayName("a redirect from the token endpoint is never followed and is transient, not a dead grant")
+    void redirectIsRefusedRatherThanFollowed() throws Exception {
+        // The request that produced this carries the client secret and the refresh
+        // token. Following a 307 preserves method and body, so everything would be
+        // re-sent to whatever host the Location names — validated only against the
+        // SSRF rules, never against the operator's credential-endpoint allowlist.
+        for (int status : List.of(301, 302, 303, 307, 308)) {
+            respondWith(status, "");
+
+            var error = assertThrows(ConnectionException.class, () -> client.refresh(connection(), CLIENT_SECRET, "rt-stored"),
+                    "HTTP " + status);
+
+            assertEquals(ConnectionException.Reason.TOKEN_ENDPOINT_UNAVAILABLE, error.getReason(),
+                    "HTTP " + status + ": a redirect is a configuration problem at the provider, not a revoked grant");
+            assertTrue(error.getMessage().contains("must not redirect"), error.getMessage());
+            assertTrue(error.getMessage().contains("unchanged"), "the grant must be reported untouched: " + error.getMessage());
+        }
+        // The no-redirect send is the whole guarantee: the ordinary send would have
+        // followed the hop with the body intact before this client ever saw a 3xx.
         verify(httpClient, never()).sendValidated(any(), any());
+        verify(httpClient, never()).send(any(), any());
     }
 
     @Test
     @DisplayName("a transport failure is transient — the grant is left alone and the next call retries")
     void transportFailureIsTransient() throws Exception {
-        doThrow(new IOException("connection reset")).when(httpClient).sendValidated(any(), any());
+        doThrow(new IOException("connection reset")).when(httpClient).sendValidatedNoRedirect(any(), any());
 
         var error = assertThrows(ConnectionException.class, () -> client.refresh(connection(), CLIENT_SECRET, "rt-stored"));
 
@@ -308,7 +333,7 @@ class OAuthTokenClientTest {
     @Test
     @DisplayName("an interrupted exchange is transient and hands the interrupt back to the caller")
     void interruptionIsTransientAndRestoresTheInterruptFlag() throws Exception {
-        doThrow(new InterruptedException("shutting down")).when(httpClient).sendValidated(any(), any());
+        doThrow(new InterruptedException("shutting down")).when(httpClient).sendValidatedNoRedirect(any(), any());
 
         var error = assertThrows(ConnectionException.class, () -> client.refresh(connection(), CLIENT_SECRET, "rt-stored"));
 

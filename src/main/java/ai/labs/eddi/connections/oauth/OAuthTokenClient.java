@@ -34,12 +34,19 @@ import java.util.Map;
  * and are tested differently: this one is about RFC 6749 wire format and
  * provider quirks, the service is about concurrency and storage.
  *
- * <h3>Every request goes through {@link SafeHttpClient}</h3> This is the one
- * new outbound path the connectors work introduces, so it starts compliant
- * rather than joining the four services that already bypass it. That buys
- * {@code Redirect.NEVER} — which matters more here than almost anywhere else,
- * since a token request carries the client secret in an {@code Authorization}
- * header and a followed redirect would hand it to whatever host the 302 named.
+ * <h3>Every request goes through {@link SafeHttpClient}, and follows no
+ * redirect</h3> This is the one new outbound path the connectors work
+ * introduces, so it starts compliant rather than joining the four services that
+ * already bypass it. It uses the client's <em>no-redirect</em> send
+ * deliberately: the ordinary {@code sendValidated} re-implements redirect
+ * following on top of {@code Redirect.NEVER}, preserving method and body on a
+ * 307/308, and validates the target only against the SSRF rules — never against
+ * the operator's credential-endpoint allowlist. A token request carries the
+ * client secret in an {@code Authorization} header or the form body, and always
+ * a refresh token or a code plus verifier in the body, so a followed redirect
+ * would hand all of that to whatever host an allowlisted endpoint pointed at.
+ * Any 3xx from a token endpoint is therefore answered as a transient failure
+ * and never followed.
  */
 @ApplicationScoped
 public class OAuthTokenClient {
@@ -139,7 +146,7 @@ public class OAuthTokenClient {
 
         HttpResponse<String> response;
         try {
-            response = httpClient.sendValidated(request.POST(HttpRequest.BodyPublishers.ofString(encodeForm(body))).build(),
+            response = httpClient.sendValidatedNoRedirect(request.POST(HttpRequest.BodyPublishers.ofString(encodeForm(body))).build(),
                     HttpResponse.BodyHandlers.ofString());
         } catch (IOException e) {
             // Transport failure. NOT terminal: the grant stays usable and the next
@@ -157,6 +164,20 @@ public class OAuthTokenClient {
 
         if (response.statusCode() >= 200 && response.statusCode() < 300) {
             return parse(connection, response.body());
+        }
+        if (response.statusCode() >= 300 && response.statusCode() < 400) {
+            // Never followed. The request that produced this carried the client
+            // secret and a refresh token or authorization code, and the only thing a
+            // redirect can mean is "send them somewhere else" — to a host the operator
+            // never approved for them. The grant is untouched: a provider migrating
+            // its token endpoint is a configuration change, not a dead grant.
+            LOGGER.warnf("Token endpoint for connection '%s' answered HTTP %d with a redirect, which is never followed",
+                    connection.getName(), response.statusCode());
+            throw new ConnectionException(ConnectionException.Reason.TOKEN_ENDPOINT_UNAVAILABLE, "Token endpoint for connection '"
+                    + connection.getName() + "' answered HTTP " + response.statusCode()
+                    + ". A token endpoint must not redirect: the request carries the client secret and the grant's refresh token, and "
+                    + "following it would send them to a host the credential-endpoint allowlist never approved. Point oauth.tokenUrl at the "
+                    + "endpoint's final address. The grant is unchanged.");
         }
         throw errorFor(connection, response);
     }

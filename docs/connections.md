@@ -662,11 +662,17 @@ just the newest, and leaves ciphertext untouched.
   whose credentials the approved call may spend; reading the request identity there
   ran approved calls against the approver's SaaS account, and the approval did not
   mean what the approver was shown.
-* **The token client goes through `SafeHttpClient`.** This is the one new
-  outbound path, so it starts compliant. `Redirect.NEVER` matters more here than
-  almost anywhere: a token request carries the client secret in an
-  `Authorization` header, and a followed redirect would hand it to whatever host
-  the 302 named.
+* **The token client goes through `SafeHttpClient`, and follows no redirect.**
+  This is the one new outbound path, so it starts compliant — and it uses the
+  client's no-redirect send deliberately. The ordinary `sendValidated` follows
+  redirects itself on top of `Redirect.NEVER`, preserving method and body on a
+  307/308, and checks the target only against the SSRF rules, never against the
+  credential-endpoint allowlist. A token request carries the client secret in an
+  `Authorization` header or the form body, and always a refresh token or a code
+  plus verifier in the body, so a followed redirect would hand all of that to
+  whatever host an allowlisted endpoint pointed at. Any 3xx from a token endpoint
+  is therefore answered as `TOKEN_ENDPOINT_UNAVAILABLE` — the grant is untouched
+  — with a message saying a token endpoint must not redirect.
 
 ---
 
