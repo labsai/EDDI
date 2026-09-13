@@ -40,7 +40,9 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -236,6 +238,9 @@ class VaultGrantCheckerTest {
             when(globalVariableResolver.resolveValue("${vars:default-model}", "default")).thenReturn("claude-sonnet-4-6");
 
             assertTrue(checker.findUngrantedReferences(agent, "some-other-agent").isEmpty());
+            // Without this the test passes with expansion skipped entirely: the default
+            // pass-through stub also yields no vault reference.
+            verify(globalVariableResolver, atLeastOnce()).resolveValue("${vars:default-model}", "default");
         }
     }
 
