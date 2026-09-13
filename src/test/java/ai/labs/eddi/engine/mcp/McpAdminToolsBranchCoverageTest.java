@@ -616,7 +616,7 @@ class McpAdminToolsBranchCoverageTest {
         }
 
         @SuppressWarnings("unchecked")
-        private Map<String, Object> resultOf(String ignored) throws Exception {
+        private Map<String, Object> lastSerializedResult() throws Exception {
             var captor = ArgumentCaptor.forClass(Object.class);
             verify(jsonSerialization, atLeastOnce()).serialize(captor.capture());
             return (Map<String, Object>) captor.getValue();
@@ -631,7 +631,8 @@ class McpAdminToolsBranchCoverageTest {
             when(deployResponse.getEntity()).thenReturn(Map.of("status", "ERROR", "error", "Deployment failed. Check server logs for details."));
             when(agentAdmin.deployAgent(any(), eq("agent1"), eq(2), eq(true), eq(true))).thenReturn(deployResponse);
 
-            var result = resultOf(tools.applyAgentChanges("agent1", 1, "[...]", true, "production"));
+            tools.applyAgentChanges("agent1", 1, "[...]", true, "production");
+            var result = lastSerializedResult();
 
             assertEquals(false, result.get("redeployed"));
             assertEquals("ERROR", result.get("deploymentStatus"));
@@ -648,7 +649,8 @@ class McpAdminToolsBranchCoverageTest {
             when(deployResponse.getEntity()).thenReturn(Map.of("status", "READY"));
             when(agentAdmin.deployAgent(any(), eq("agent1"), eq(2), eq(true), eq(true))).thenReturn(deployResponse);
 
-            var result = resultOf(tools.applyAgentChanges("agent1", 1, "[...]", true, "production"));
+            tools.applyAgentChanges("agent1", 1, "[...]", true, "production");
+            var result = lastSerializedResult();
 
             assertEquals(true, result.get("redeployed"));
             assertEquals("READY", result.get("deploymentStatus"));
