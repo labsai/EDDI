@@ -360,7 +360,10 @@ an OAuth connection is below.
 
 `baseUrlAllowlist` (per connection) says where the **access token** may go.
 `eddi.connections.credential-endpoint-allowlist` (per deployment) says where the
-**client secret** may go — token, authorization and discovery endpoints.
+**client secret** may go — the token and authorization endpoints, and only those.
+(RFC 9728 resource-metadata discovery is **not implemented**: `McpAuthChallengeParser`
+can read a `WWW-Authenticate` challenge, but nothing fetches the metadata document
+or selects an authorization server from it.)
 
 They are separate because a client secret mints new access tokens, and because a
 connection document must not be able to vouch for its own token endpoint: an

@@ -575,6 +575,38 @@ class ConnectionResolverTest {
     }
 
     @Test
+    @DisplayName("a store failure on the discovery path is counted as a lookup failure, not silently NOT_FOUND")
+    void discoveryCountsAStoreFailure() {
+        // resolveForDiscovery reads the binding through registry.find, which turns a
+        // store outage into a NOT_FOUND ConnectionException. resolve() counts that;
+        // the discovery path did not, so an MCP server failing every handshake over a
+        // database blip showed a flat dashboard.
+        var meterRegistry = new SimpleMeterRegistry();
+        when(registry.find(any(ConnectionReference.class)))
+                .thenThrow(new ConnectionException(ConnectionException.Reason.NOT_FOUND, "Could not read connection 'jira': store down"));
+        var resolver = new ConnectionResolver(registry, new CredentialReferenceResolver(secretResolver, globalVariableResolver),
+                callerIdentityContext, meterRegistry, accessTokenSupplier, false);
+
+        assertThrows(ConnectionException.class, () -> resolver.resolveForDiscovery("${connection:jira}", ALLOWED_TARGET));
+
+        var counter = meterRegistry.find("eddi.connection.resolve.count").tag("outcome", "not_found").counter();
+        assertTrue(counter != null && counter.count() == 1, "a discovery lookup failure must reach the same counter a tool-call lookup failure does");
+    }
+
+    @Test
+    @DisplayName("bindingOf names the binding a caller was withheld a credential for")
+    void bindingOfNamesTheActualBinding() {
+        var connection = staticConnection();
+        connection.setBinding(Binding.CALLER_SUPPLIED);
+        connection.getStaticAuth().setValueTemplate(null);
+        register(connection);
+
+        assertEquals(Optional.of(Binding.CALLER_SUPPLIED), resolver(true).bindingOf("${connection:jira}"),
+                "a warning that assumes PER_USER for a CALLER_SUPPLIED connection sends the operator looking for an OAuth grant");
+        assertTrue(resolver(true).resolveForDiscovery("${connection:jira}", ALLOWED_TARGET).isEmpty());
+    }
+
+    @Test
     @DisplayName("an unknown connection still throws at discovery rather than quietly returning nothing")
     void unknownConnectionThrowsAtDiscovery() {
         when(registry.find(any(ConnectionReference.class))).thenReturn(Optional.empty());

@@ -174,19 +174,48 @@ public class ConnectionResolver {
      *             list
      */
     public Optional<ResolvedCredential> resolveForDiscovery(String reference, URI targetUrl) {
-        ConnectionReference parsed = ConnectionReference.parse(reference);
         // Read the binding without resolving. An unknown name falls through to
         // resolve(), which throws NOT_FOUND and counts it — swallowing it here would
         // reintroduce the empty-tool-list-with-no-explanation failure by a new route.
-        Binding binding = connectionRegistry.find(parsed).map(ConnectionConfiguration::getBinding).orElse(null);
+        Binding binding = bindingOf(reference).orElse(null);
         // CALLER_SUPPLIED is withheld from discovery for exactly the reason PER_USER
         // is: the handshake's result is cached and replayed for every conversation
         // that follows, so whichever caller happened to trigger it would pin their
         // credential — and their permissions — onto everybody after them.
-        if (binding == Binding.PER_USER || binding == Binding.CALLER_SUPPLIED) {
+        if (isWithheldFromDiscovery(binding)) {
             return Optional.empty();
         }
         return Optional.of(resolve(reference, targetUrl, null));
+    }
+
+    /**
+     * Whether a connection of this binding contributes nothing to a shared, cached
+     * session.
+     */
+    public static boolean isWithheldFromDiscovery(Binding binding) {
+        return binding == Binding.PER_USER || binding == Binding.CALLER_SUPPLIED;
+    }
+
+    /**
+     * The binding a reference names, without resolving anything — so a caller that
+     * was handed nothing by {@link #resolveForDiscovery} can say <em>why</em> in
+     * its own log line, naming the actual binding rather than guessing
+     * {@code PER_USER}.
+     *
+     * @return the binding, or empty when no connection of that name exists
+     * @throws ConnectionException
+     *             when the registry could not be read at all — counted as a lookup
+     *             failure, exactly as {@link #resolve} counts it, so a store outage
+     *             on the discovery path does not present as a flat dashboard
+     */
+    public Optional<Binding> bindingOf(String reference) {
+        ConnectionReference parsed = ConnectionReference.parse(reference);
+        try {
+            return connectionRegistry.find(parsed).map(ConnectionConfiguration::getBinding);
+        } catch (ConnectionException e) {
+            countLookupFailure(e);
+            throw e;
+        }
     }
 
     private ResolvedCredential resolveCredential(ConnectionConfiguration connection, String principalOverride) {

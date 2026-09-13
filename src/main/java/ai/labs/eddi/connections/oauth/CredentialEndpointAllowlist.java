@@ -29,10 +29,12 @@ import java.util.stream.Collectors;
  * at a host they control and receive the vault-resolved secret on the first
  * refresh.
  * <p>
- * It is also what bounds MCP OAuth discovery: {@code WWW-Authenticate} names a
- * metadata document, and that document names an authorization server. Discovery
- * may <em>select</em> among pre-approved servers; it may never
- * <em>introduce</em> one.
+ * It covers the token and authorization endpoints, and only those. RFC 9728
+ * resource-metadata discovery — a {@code WWW-Authenticate} challenge naming a
+ * metadata document that names an authorization server — is <em>not</em>
+ * implemented: {@code McpAuthChallengeParser} can read such a challenge, but
+ * nothing fetches the document or selects a server from it. If that ever lands,
+ * this allowlist is where the selected server has to be checked.
  * <p>
  * Configured as {@code eddi.connections.credential-endpoint-allowlist}, a
  * comma-separated list of bare origins. Empty means <b>no OAuth connection can
@@ -78,7 +80,7 @@ public class CredentialEndpointAllowlist {
      * Refuses a credential endpoint the operator has not approved.
      *
      * @param url
-     *            a token, authorization or discovery URL
+     *            a token or authorization URL
      * @param what
      *            names the field, so the error says which one to fix
      */

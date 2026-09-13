@@ -517,8 +517,19 @@ public class A2AToolProviderManager {
             }
             ConnectionReference.requireSole(apiKey, "The apiKey of the A2A agent at " + agentUrl);
             if (discovery) {
-                connectionResolver.resolveForDiscovery(apiKey, URI.create(agentUrl))
-                        .ifPresent(credential -> requestBuilder.header(credential.headerName(), credential.headerValue()));
+                var credential = connectionResolver.resolveForDiscovery(apiKey, URI.create(agentUrl));
+                if (credential.isEmpty()) {
+                    // Same rule and same warning as the MCP handshake: the agent card is
+                    // fetched once and reused, so a per-caller credential must not pin one
+                    // caller's authority onto everybody after them — but a peer that
+                    // requires a token then answers 401, and without this line nothing
+                    // names the cause.
+                    String binding = connectionResolver.bindingOf(apiKey).map(Enum::name).orElse("PER_USER or CALLER_SUPPLIED");
+                    LOGGER.warnf("A2A agent at %s is bound to a %s connection, so agent-card discovery is sent unauthenticated. If the peer "
+                            + "requires a token to serve its agent card, bind it to a SERVICE connection instead.", agentUrl, binding);
+                    return;
+                }
+                requestBuilder.header(credential.get().headerName(), credential.get().headerValue());
                 return;
             }
             var credential = connectionResolver.resolve(apiKey, URI.create(agentUrl), null);
