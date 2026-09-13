@@ -117,6 +117,52 @@ class CallerIdentityContextTest {
     }
 
     @Test
+    @DisplayName("propagate() carries the turn's ResolutionPrincipal across the hop as well as the caller")
+    void propagateCarriesTheResolutionPrincipalToo() throws Exception {
+        // A model cascade step and a fire-and-forget batch are dispatched with
+        // propagate(). It used to carry only the caller, so a PER_USER connection
+        // resolved inside either found no principal and was refused as if the turn
+        // were a scheduled run — with advice about scheduled runs.
+        var principals = new ResolutionPrincipalContext();
+        var principal = new ResolutionPrincipal("alice", ResolutionPrincipal.Provenance.VERIFIED);
+        context.bind(new CallerIdentity("alice-token", "alice", "https://eddi.example:443"));
+        principals.bind(principal);
+        try {
+            var work = context.propagate(principals::current);
+            var executor = Executors.newSingleThreadExecutor();
+            try {
+                assertEquals(principal, executor.submit(work).get(),
+                        "the conversation's principal must reach the dispatched work, or PER_USER connections refuse inside a cascade");
+                assertNull(executor.submit(principals::current).get(), "and the pooled thread must not keep it afterwards");
+            } finally {
+                executor.shutdownNow();
+            }
+        } finally {
+            principals.clear();
+        }
+    }
+
+    @Test
+    @DisplayName("propagate() with no principal bound masks a stale principal on the worker rather than inheriting it")
+    void propagateWithoutPrincipalMasksRatherThanInherits() throws Exception {
+        var principals = new ResolutionPrincipalContext();
+        principals.clear();
+        var wrapped = context.propagate(principals::current);
+
+        var executor = Executors.newSingleThreadExecutor();
+        try {
+            var stale = new ResolutionPrincipal("mallory", ResolutionPrincipal.Provenance.VERIFIED);
+            executor.submit(() -> principals.bind(stale)).get();
+            assertEquals(stale, executor.submit(principals::current).get(), "the worker really is carrying a stale principal");
+
+            assertNull(executor.submit(wrapped).get(), "must not pick up the previous occupant's conversation owner");
+        } finally {
+            executor.submit(principals::clear).get();
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
     @DisplayName("propagate() clears the borrowed thread afterwards")
     void propagateClearsAfterRunning() throws Exception {
         context.bind(new CallerIdentity("alice-token", "alice", "https://eddi.example:443"));

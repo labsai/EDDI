@@ -262,20 +262,43 @@ public class CallerIdentityContext {
     }
 
     /**
-     * Wrap work that will run on another thread so it keeps the current caller.
+     * The turn's other binding, carried alongside the caller by {@link #propagate}.
      * <p>
-     * Used where the pipeline hands work to a further executor — a fire-and-forget
-     * batch, for instance — which would otherwise lose the binding and make a
-     * {@code ${caller:token}} reference fail closed for no reason the config author
-     * could see.
+     * Stateless over a static {@link ThreadLocal}, so a private instance is the
+     * same context CDI injects everywhere else. Held here rather than injected so
+     * that a {@code CallerIdentityContext} built by hand in a test still carries
+     * both.
+     */
+    private static final ResolutionPrincipalContext PRINCIPALS = new ResolutionPrincipalContext();
+
+    /**
+     * Wrap work that will run on another thread so it keeps <em>everything</em>
+     * this thread's turn has bound: the current caller AND the current
+     * {@link ResolutionPrincipal}.
+     * <p>
+     * Used where the pipeline hands work to a further executor — a model cascade
+     * step, a fire-and-forget batch — which would otherwise lose the bindings and
+     * make a {@code ${caller:token}} reference or a {@code PER_USER} connection
+     * fail closed for no reason the config author could see. Both travel together
+     * deliberately: they used to be propagated one at a time, and the one that was
+     * forgotten refused every per-user credential inside a cascade with advice
+     * about scheduled runs. A wrapper that carries only one of the two is the drift
+     * this method exists to prevent — add the next binding here, not at the call
+     * sites.
+     * <p>
+     * The explicit {@link #withIdentity} overloads carry only the caller, on
+     * purpose: their callers either dispatch from a request thread, where the
+     * member conversation binds its own principal from stored memory, or compose
+     * with {@code ResolutionPrincipalContext#withPrincipal} themselves (the HITL
+     * resume, where the two identities are different people).
      */
     public <T> Callable<T> propagate(Callable<T> work) {
-        return withIdentity(current(), work);
+        return withIdentity(current(), PRINCIPALS.propagate(work));
     }
 
     /** {@link #propagate(Callable)} for work dispatched as a {@link Runnable}. */
     public Runnable propagate(Runnable work) {
-        return withIdentity(current(), work);
+        return withIdentity(current(), PRINCIPALS.propagate(work));
     }
 
     /**
