@@ -200,8 +200,8 @@ as "not connected". Use `OAUTH2_CLIENT_CREDENTIALS` for a service account.
 | `allowUnverifiedPrincipal` | `PER_USER` only. Accept a user id EDDI never authenticated, on the grounds that a front proxy did. Default `false` — see [Whose identity counts](#whose-identity-counts) |
 | `staticAuth` | Header name plus a reference-only value template |
 | `oauth` | Endpoints, client id, a **vaulted** client secret, scopes |
-| `baseUrlAllowlist` | The origins this credential may be sent to. **Required.** |
-| `timeoutMs` | Token-endpoint timeout |
+| `baseUrlAllowlist` | The origins this credential may be sent to. **Required.** Bare origins (`scheme://host[:port]`). `http://` is accepted — silently for loopback, with a **WARN** at save time and again at boot for any other host, because the credential then crosses the network unencrypted |
+| `timeoutMs` | Token-endpoint timeout in milliseconds, **1–60000**; refused outside that range at save time. Unset means the resolver's default. The token client applies its own lower ceiling at use so the refresh lease always outlasts the request |
 
 `binding` is the field that makes Amplitude and Google Drive the same system.
 `PER_USER` is only legal with `OAUTH2_AUTHORIZATION_CODE` — a static key is the

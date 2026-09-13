@@ -4,15 +4,23 @@
  */
 package ai.labs.eddi.configs.connections.model;
 
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -303,8 +311,89 @@ class ConnectionConfigurationValidationTest {
     }
 
     @Nested
+    @DisplayName("the token-endpoint timeout")
+    class Timeout {
+
+        @ParameterizedTest
+        @DisplayName("a timeout outside 1..60000 ms is refused at save time rather than clamped at use")
+        @ValueSource(ints = {0, -1, 60_001, Integer.MAX_VALUE})
+        void refusesOutOfRangeTimeout(int timeoutMs) {
+            // OAuthTokenClient clamps what it uses, so an out-of-range document worked —
+            // at a timeout the author never wrote, with the only notice a log line at
+            // refresh time.
+            var connection = staticConnection();
+            connection.setTimeoutMs(timeoutMs);
+
+            var error = assertThrows(IllegalArgumentException.class, connection::validate, String.valueOf(timeoutMs));
+
+            assertTrue(error.getMessage().contains("timeoutMs"), error.getMessage());
+            assertTrue(error.getMessage().contains("60000"), "the message must state the bound: " + error.getMessage());
+        }
+
+        @ParameterizedTest
+        @DisplayName("the bounds themselves are accepted, and so is leaving it unset")
+        @ValueSource(ints = {1, 15_000, 60_000})
+        void acceptsTimeoutInRange(int timeoutMs) {
+            var connection = staticConnection();
+            connection.setTimeoutMs(timeoutMs);
+
+            assertDoesNotThrow(connection::validate);
+        }
+
+        @Test
+        @DisplayName("an unset timeout means the resolver's default")
+        void acceptsUnsetTimeout() {
+            var connection = staticConnection();
+            connection.setTimeoutMs(null);
+
+            assertDoesNotThrow(connection::validate);
+        }
+    }
+
+    @Nested
     @DisplayName("allowlists")
     class Allowlists {
+
+        private final List<String> logRecords = new ArrayList<>();
+        private Logger modelLogger;
+        private Handler logHandler;
+        private Level previousLevel;
+        private boolean previousUseParentHandlers;
+
+        @BeforeEach
+        void captureLog() {
+            logHandler = new Handler() {
+                @Override
+                public void publish(LogRecord record) {
+                    logRecords.add(record.getMessage() + " " + Arrays.toString(record.getParameters()));
+                }
+
+                @Override
+                public void flush() {
+                    // nothing is buffered
+                }
+
+                @Override
+                public void close() {
+                    // nothing to release
+                }
+            };
+            // src/test/resources/logging.properties silences the ai.labs.eddi namespace,
+            // so the level has to be raised for the record to reach a handler at all.
+            modelLogger = Logger.getLogger(ConnectionConfiguration.class.getName());
+            previousLevel = modelLogger.getLevel();
+            previousUseParentHandlers = modelLogger.getUseParentHandlers();
+            modelLogger.setLevel(Level.ALL);
+            modelLogger.setUseParentHandlers(false);
+            modelLogger.addHandler(logHandler);
+        }
+
+        @AfterEach
+        void releaseLog() {
+            modelLogger.removeHandler(logHandler);
+            modelLogger.setLevel(previousLevel);
+            modelLogger.setUseParentHandlers(previousUseParentHandlers);
+        }
 
         @Test
         @DisplayName("an empty baseUrlAllowlist is refused — a credential must name where it may go")
@@ -313,6 +402,31 @@ class ConnectionConfigurationValidationTest {
             connection.setBaseUrlAllowlist(List.of());
 
             assertThrows(IllegalArgumentException.class, connection::validate);
+        }
+
+        @Test
+        @DisplayName("a plaintext http origin on a remote host is accepted, with a WARN naming the connection and the origin")
+        void warnsAboutPlaintextRemoteOrigin() {
+            var connection = staticConnection();
+            connection.setBaseUrlAllowlist(List.of("http://api.internal.example"));
+
+            assertDoesNotThrow(connection::validate);
+
+            assertTrue(logRecords.stream().anyMatch(record -> record.contains("plaintext http")), logRecords.toString());
+            assertTrue(logRecords.stream().anyMatch(record -> record.contains("jira") && record.contains("http://api.internal.example")),
+                    "the warning must name the connection and the origin, or nobody can find it: " + logRecords);
+        }
+
+        @ParameterizedTest
+        @DisplayName("loopback over http and any https origin are accepted silently")
+        @ValueSource(strings = {"http://localhost:7070", "http://127.0.0.1:8080", "https://api.internal.example"})
+        void staysQuietForLoopbackAndHttps(String origin) {
+            var connection = staticConnection();
+            connection.setBaseUrlAllowlist(List.of(origin));
+
+            assertDoesNotThrow(connection::validate);
+
+            assertTrue(logRecords.isEmpty(), origin + " must not be reported: " + logRecords);
         }
 
         @Test

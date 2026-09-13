@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.connections.model;
 
 import ai.labs.eddi.connections.model.ConnectionReference;
+import org.jboss.logging.Logger;
 
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -15,6 +16,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
  * How to authenticate to one external system.
@@ -49,6 +52,8 @@ import java.util.regex.Pattern;
  * folding them into one list does not work.
  */
 public class ConnectionConfiguration {
+
+    private static final Logger LOGGER = Logger.getLogger(ConnectionConfiguration.class);
 
     /**
      * A reference EDDI resolves at use time. Anchored and whole-segment: a value
@@ -185,8 +190,21 @@ public class ConnectionConfiguration {
      */
     private List<String> baseUrlAllowlist = new ArrayList<>();
 
-    /** Timeout for the token endpoint. Null means the resolver's default. */
+    /**
+     * Timeout for the token endpoint,
+     * {@value #MIN_TIMEOUT_MS}..{@value #MAX_TIMEOUT_MS} ms. Null means the
+     * resolver's default.
+     */
     private Integer timeoutMs;
+
+    /** Lower bound of {@link #timeoutMs}. */
+    public static final int MIN_TIMEOUT_MS = 1;
+
+    /**
+     * Upper bound of {@link #timeoutMs}: a token endpoint that takes a minute is
+     * down.
+     */
+    public static final int MAX_TIMEOUT_MS = 60_000;
 
     /**
      * Rejects a connection the engine cannot honour safely.
@@ -213,6 +231,7 @@ public class ConnectionConfiguration {
         validateBinding();
         validateUnverifiedPrincipalFlag();
         validateAllowlist();
+        validateTimeout();
         switch (authType) {
             case STATIC, BASIC -> validateStaticAuth();
             case OAUTH2_CLIENT_CREDENTIALS, OAUTH2_AUTHORIZATION_CODE -> validateOAuth();
@@ -272,7 +291,52 @@ public class ConnectionConfiguration {
                     + "or a config edit can redirect that credential to any host.");
         }
         for (String origin : baseUrlAllowlist) {
-            requireCanonicalOrigin(origin, "baseUrlAllowlist");
+            String canonical = requireCanonicalOrigin(origin, "baseUrlAllowlist");
+            // Accepted, deliberately: an internal service behind a private network is
+            // a real deployment and refusing it would only push authors to put the
+            // credential somewhere with no allowlist at all. But it is a credential
+            // crossing the network unencrypted, so it is said out loud at the moment
+            // somebody can still change their mind — and again at boot, by
+            // ConnectionStartupGuard, for a document that arrived some other way.
+            if (isPlaintextRemoteOrigin(canonical)) {
+                LOGGER.warnf("[CONNECTIONS] Connection '%s' allows its credential to be sent over plaintext http to %s. Accepted, but "
+                        + "the credential crosses the network unencrypted; prefer an https origin.", sanitize(name), canonical);
+            }
+        }
+    }
+
+    /**
+     * Whether a canonical origin sends traffic in the clear to something other than
+     * this host. Loopback is exempt: {@code http://localhost} never leaves the
+     * machine, and it is the normal shape of a development setup.
+     */
+    public static boolean isPlaintextRemoteOrigin(String canonicalOrigin) {
+        if (canonicalOrigin == null || !canonicalOrigin.startsWith("http://")) {
+            return false;
+        }
+        String host = URI.create(canonicalOrigin).getHost();
+        return host != null && !isLoopbackHost(host);
+    }
+
+    /**
+     * {@code localhost}, {@code 127.0.0.1} or {@code ::1}, as {@link URI#getHost()}
+     * renders them.
+     */
+    public static boolean isLoopbackHost(String host) {
+        String lower = host.toLowerCase(Locale.ROOT);
+        return "localhost".equals(lower) || "127.0.0.1".equals(lower) || "[::1]".equals(lower) || "::1".equals(lower);
+    }
+
+    /**
+     * A bound rather than a clamp. {@code OAuthTokenClient} already clamps the
+     * value it uses, so an out-of-range document worked — silently, at a timeout
+     * the author did not write. Refusing at save time is the only place the author
+     * finds out.
+     */
+    private void validateTimeout() {
+        if (timeoutMs != null && (timeoutMs < MIN_TIMEOUT_MS || timeoutMs > MAX_TIMEOUT_MS)) {
+            throw new IllegalArgumentException("timeoutMs must be between " + MIN_TIMEOUT_MS + " and " + MAX_TIMEOUT_MS
+                    + " milliseconds; got: " + timeoutMs + ". Leave it unset for the resolver's default.");
         }
     }
 

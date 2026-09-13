@@ -382,6 +382,35 @@ class ConnectionStartupGuardTest {
         assertTrue(logged("Credential endpoints allowed"), "the one line a healthy boot does print; saw: " + logRecords);
     }
 
+    // --- Plaintext origins: accepted, but said out loud --------------------
+
+    @Test
+    @DisplayName("a stored connection allowing plaintext http to a remote host is reported at boot, naming both")
+    void plaintextRemoteOriginIsReported() throws Exception {
+        var internal = staticConnection();
+        internal.setBaseUrlAllowlist(List.of("http://api.internal.example:8080"));
+        storedConnections(internal);
+
+        assertDoesNotThrow(() -> start(enabledGuard()));
+
+        assertTrue(logged("plaintext http"), logRecords.toString());
+        assertTrue(logged("jira"), "the report must name the connection; saw: " + logRecords);
+        assertTrue(logged("http://api.internal.example:8080"), "and the origin; saw: " + logRecords);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"http://localhost:7070", "http://127.0.0.1", "https://api.example.com"})
+    @DisplayName("loopback and https origins are not reported")
+    void loopbackAndHttpsOriginsAreNotReported(String origin) throws Exception {
+        var connection = staticConnection();
+        connection.setBaseUrlAllowlist(List.of(origin));
+        storedConnections(connection);
+
+        assertDoesNotThrow(() -> start(enabledGuard()));
+
+        assertFalse(logged("plaintext http"), logRecords.toString());
+    }
+
     // --- Enumerating the store ----------------------------------------------
 
     @Test

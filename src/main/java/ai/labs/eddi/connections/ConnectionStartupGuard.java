@@ -159,6 +159,7 @@ public class ConnectionStartupGuard {
      */
     private void requireStoredConnectionsAreSupportable() {
         List<ConnectionConfiguration> connections = readAll();
+        reportPlaintextOrigins(connections);
         boolean anyPerUser = connections.stream().anyMatch(connection -> connection.getBinding() == Binding.PER_USER);
         boolean anyOAuth = connections.stream()
                 .anyMatch(connection -> connection.getAuthType() != null && connection.getAuthType().isOAuth());
@@ -188,6 +189,25 @@ public class ConnectionStartupGuard {
                     + "Every grant it would store or read will be REFUSED at request time: grants are envelope-encrypted with the tenant "
                     + "DEK and there is deliberately no plaintext fallback. This is the one place the autoVaultSecret pattern of degrading "
                     + "to plaintext is not acceptable, because these are refresh tokens.");
+        }
+    }
+
+    /**
+     * A credential allowed to travel in the clear is accepted at save time with a
+     * warning; this repeats it at boot, where the operator reading the log is not
+     * necessarily the author who saw the first one.
+     */
+    private void reportPlaintextOrigins(List<ConnectionConfiguration> connections) {
+        for (ConnectionConfiguration connection : connections) {
+            if (connection.getBaseUrlAllowlist() == null) {
+                continue;
+            }
+            for (String origin : connection.getBaseUrlAllowlist()) {
+                if (ConnectionConfiguration.isPlaintextRemoteOrigin(origin)) {
+                    LOGGER.warnf("[CONNECTIONS] Connection '%s' allows its credential to be sent over plaintext http to %s; the credential "
+                            + "crosses the network unencrypted. Prefer an https origin.", sanitize(connection.getName()), sanitize(origin));
+                }
+            }
         }
     }
 
