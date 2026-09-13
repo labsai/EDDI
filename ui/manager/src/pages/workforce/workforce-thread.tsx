@@ -23,6 +23,7 @@ import {
   ArrowDown,
   Copy,
   Check,
+  Square,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -31,10 +32,12 @@ import { useSmartAutoScroll } from "@/hooks/use-smart-auto-scroll";
 import { useGroup } from "@/hooks/use-groups";
 import {
   startConversation,
-  sendMessage,
-  sendMessageWithContext,
+  sendMessageStreaming,
   readConversation,
+  type InputData,
 } from "@/lib/api/chat";
+import { translateStreamError } from "@/hooks/use-chat";
+import { getErrorMessage, isApiError } from "@/lib/api-client";
 import {
   uploadAttachment,
   deleteAttachment,
@@ -74,6 +77,46 @@ interface ThreadMessage {
   content: string;
   timestamp: number;
   attachments?: SentAttachment[];
+  /** True while tokens are still arriving for this message. */
+  streaming?: boolean;
+}
+
+/**
+ * A turn that did not produce an answer.
+ *
+ * This used to be appended to the transcript as a message with
+ * `role: "agent"` reading "Sorry, I encountered an error." — so an expired
+ * token, an exceeded quota, an undeployed agent and a discussion paused for
+ * approval all rendered identically, in the agent's own voice, while the
+ * backend's actual sentence went to `console.error` and nowhere else. It is
+ * not a message; it is the turn failing, and it says what happened and offers
+ * the send again.
+ */
+interface ThreadSendError {
+  message: string;
+  /** The text to re-send on retry. */
+  retryText: string;
+  retryAttachments?: SentAttachment[];
+  /**
+   * The optimistic user message this failed turn added, when it is still in the
+   * transcript.
+   *
+   * A retry re-sends through `handleSend`, which appends its own optimistic
+   * message — so without withdrawing this one first, a successful retry leaves
+   * the same text on screen twice. Kept by identity rather than by text so two
+   * genuinely identical messages are never confused for each other.
+   *
+   * Null when the turn was already withdrawn, which is what the 409 path does:
+   * there the backend never received the message at all, so leaving it on
+   * screen would show it as sent.
+   */
+  pendingUserMessage: ThreadMessage | null;
+  /**
+   * The backend rejected the send because the conversation is paused awaiting
+   * a human decision (409). Nothing is wrong and retrying will not help — the
+   * pause has to be decided first.
+   */
+  paused: boolean;
 }
 
 interface GroupContext {
@@ -645,6 +688,7 @@ function WorkforceThread() {
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ThreadMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [sendError, setSendError] = useState<ThreadSendError | null>(null);
   const [isStarting, setIsStarting] = useState(true);
   const [inputPrefill, setInputPrefill] = useState("");
   const [showDetails, setShowDetails] = useState(false);
@@ -654,6 +698,10 @@ function WorkforceThread() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const initRef = useRef(false);
   const sendingRef = useRef(false);
+  /** Aborts the in-flight stream — for the Stop button and for unmount. */
+  const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   // Track latest messages for unmount cleanup of sent-message preview URLs
   const messagesRef = useRef(messages);
@@ -773,75 +821,262 @@ function WorkforceThread() {
         timestamp: Date.now(),
         attachments: attachments?.length ? attachments : undefined,
       };
-      setMessages((prev) => [...prev, userMsg]);
+      // The placeholder the tokens stream into. Present from the start so the
+      // reply appears where it will finally sit, rather than jumping in at the
+      // end from under a separate typing indicator.
+      const placeholder: ThreadMessage = {
+        role: "agent",
+        content: "",
+        timestamp: Date.now(),
+        streaming: true,
+      };
+      setMessages((prev) => [...prev, userMsg, placeholder]);
       setIsLoading(true);
+      setSendError(null);
+
+      const abort = new AbortController();
+      abortRef.current = abort;
+
+      /** Append streamed text to the placeholder, which is always last. */
+      const appendToken = (chunk: string) => {
+        setMessages((prev) => {
+          const next = [...prev];
+          const last = next[next.length - 1];
+          if (last?.role === "agent" && last.streaming) {
+            next[next.length - 1] = { ...last, content: last.content + chunk };
+          }
+          return next;
+        });
+      };
+
+      /** Settle the placeholder: keep it if it has content, drop it if not. */
+      const settle = (finalContent?: string) => {
+        setMessages((prev) => {
+          const next = [...prev];
+          const last = next[next.length - 1];
+          if (last?.role !== "agent" || !last.streaming) return prev;
+          const content = finalContent ?? last.content;
+          if (!content.trim()) {
+            next.pop();
+            return next;
+          }
+          next[next.length - 1] = { ...last, content, streaming: false };
+          return next;
+        });
+      };
+
+      /** Drop the placeholder AND the optimistic user message. */
+      const dropTurn = () => {
+        setMessages((prev) => {
+          const next = [...prev];
+          const last = next[next.length - 1];
+          if (last?.role === "agent" && last.streaming) next.pop();
+          if (next[next.length - 1] === userMsg) next.pop();
+          return next;
+        });
+      };
+
+      /**
+       * The failure state for a turn whose user message is still on screen.
+       *
+       * It stays there deliberately: the reader should be able to see what they
+       * sent while the error is in front of them. `handleRetry` withdraws it
+       * just before re-sending, so exactly one copy survives a retry.
+       *
+       * Not withdrawn once tokens have arrived. `settle` keeps a partial reply,
+       * and a retry that took the question away would leave that half-answer
+       * stranded above the NEXT question rather than below the one it belongs
+       * to. Decided here rather than at each call site: four sites were spelling
+       * out the same rule, and the one that did not — the pause after `done` --
+       * was the one that got it wrong.
+       */
+      const failed = (message: string, paused: boolean): ThreadSendError => ({
+        message,
+        retryText: messageText,
+        retryAttachments: attachments,
+        paused,
+        pendingUserMessage: streamedAnything ? null : userMsg,
+      });
+
+      let streamedAnything = false;
+
+      const inputData: InputData = attachments?.length
+        ? {
+            // Send ALL attachments (including non-forwardable ones) so the
+            // backend can log the storageRef; it decides what to inline from
+            // `forwardableInline`.
+            input: messageText || attachments[0]?.fileName || "attachment",
+            context: buildAttachmentContext(
+              attachments.map(
+                (a): AttachmentRef => ({
+                  storageRef: a.storageRef,
+                  fileName: a.fileName,
+                  mimeType: a.mimeType,
+                  sizeBytes: a.sizeBytes,
+                  forwardableInline: a.forwardableInline,
+                }),
+              ),
+            ),
+          }
+        : { input: messageText };
 
       try {
-        let snapshot;
+        // Which terminal event actually arrived. A stream can also just stop —
+        // a dropped connection, a proxy timing out — and that is neither.
+        let sawDone = false;
+        let sawError = false;
 
-        if (attachments?.length) {
-          // Build attachment context — send ALL attachments (including
-          // non-forwardable ones) so the backend can log the storageRef.
-          // The backend decides whether to inline based on forwardableInline.
-          const refs: AttachmentRef[] = attachments.map((a) => ({
-            storageRef: a.storageRef,
-            fileName: a.fileName,
-            mimeType: a.mimeType,
-            sizeBytes: a.sizeBytes,
-            forwardableInline: a.forwardableInline,
-          }));
-          const context = buildAttachmentContext(refs);
-          snapshot = await sendMessageWithContext(
-            "production",
-            memberId,
-            conversationId,
-            {
-              input: messageText || attachments[0]?.fileName || "attachment",
-              context,
-            },
-          );
-        } else {
-          snapshot = await sendMessage(
-            "production",
-            memberId,
-            conversationId,
-            messageText,
-          );
+        for await (const event of sendMessageStreaming(
+          "production",
+          memberId,
+          conversationId,
+          inputData,
+          abort.signal,
+        )) {
+          if (event.type === "token") {
+            streamedAnything = true;
+            appendToken(event.data);
+            continue;
+          }
+          if (event.type === "error") {
+            sawError = true;
+            // The backend sends `{"message","code"}`; a known code has a
+            // sentence in the reader's language, and the backend's own text is
+            // the fallback rather than something discarded.
+            let message = event.data;
+            let code: string | undefined;
+            try {
+              const parsed = JSON.parse(event.data);
+              if (typeof parsed?.message === "string") message = parsed.message;
+              if (typeof parsed?.code === "string") code = parsed.code;
+            } catch {
+              /* non-JSON payload — the raw text is what there is */
+            }
+            settle();
+            setSendError(failed(translateStreamError(code, t) ?? message, false));
+            break;
+          }
+          if (event.type === "done") {
+            sawDone = true;
+            // A turn that produced no tokens still has its answer in the
+            // snapshot, and a turn that paused for approval says so there.
+            let finalContent: string | undefined;
+            let paused = false;
+            if (event.data) {
+              try {
+                const snapshot = JSON.parse(event.data);
+                paused = snapshot?.conversationState === "AWAITING_HUMAN";
+                if (!streamedAnything && Array.isArray(snapshot?.conversationSteps)) {
+                  // The LAST agent message, never a join across steps.
+                  // `sendMessageStreaming` posts to `/agents/{id}/stream` with no
+                  // query params, so unlike the `returnCurrentStepOnly=true`
+                  // calls this replaced, the `done` snapshot carries the whole
+                  // conversation. Joining it filled the new bubble with every
+                  // reply in the thread — the entire history rendered a second
+                  // time, and on a paused turn directly above the pause banner.
+                  // `use-chat` and `use-operator-chat` both take only the last
+                  // output for the same reason.
+                  const agentSteps = parseConversationSteps(snapshot.conversationSteps).filter(
+                    (m) => m.role === "agent",
+                  );
+                  finalContent = agentSteps[agentSteps.length - 1]?.content;
+                }
+              } catch {
+                /* an unreadable snapshot costs the fallback text, not the turn */
+              }
+            }
+            settle(finalContent);
+            if (paused) {
+              setSendError(
+                failed(
+                  t(
+                    "Workforce.thread.pausedForApproval",
+                    "This turn is paused waiting for a human decision. It resumes once the request is approved.",
+                  ),
+                  true,
+                ),
+              );
+            }
+            // The stream is logically over; abort so the reader resolves now
+            // instead of waiting for the server to close.
+            abort.abort();
+            break;
+          }
         }
 
-        // Parse the agent's reply from the returned step(s)
-        const newMessages = parseConversationSteps(
-          snapshot.conversationSteps ?? [],
-        );
-
-        // Extract only agent messages from the response (user message already added)
-        const agentMessages = newMessages.filter((m) => m.role === "agent");
-        if (agentMessages.length > 0) {
-          setMessages((prev) => [...prev, ...agentMessages]);
+        // A stream that ended without `done` still has to settle, or the
+        // placeholder streams forever — but settling silently was wrong: it
+        // presented a truncated reply as a finished one, with no way to tell
+        // and nothing to do about it.
+        settle();
+        if (!sawDone && !sawError && !abort.signal.aborted) {
+          setSendError(
+            failed(
+              t(
+                "Workforce.thread.streamEnded",
+                "The connection ended before the reply finished. What arrived is above — send again to retry.",
+              ),
+              false,
+            ),
+          );
         }
-
         updateActivityRef.current(boardId, memberId);
       } catch (err) {
-        console.error("Failed to send message:", err);
-        // Add an error message from the agent
-        setMessages((prev) => [
-          ...prev,
-          {
-            role: "agent",
-            content: t(
-              "Workforce.thread.sendError",
-              "Sorry, I encountered an error. Please try again.",
+        // Expected once `done` has already aborted the reader.
+        if (err instanceof DOMException && err.name === "AbortError") {
+          settle();
+        } else if (isApiError(err) && err.status === 409) {
+          // The send was rejected WITHOUT being consumed because the
+          // conversation is paused. Both the placeholder and the optimistic
+          // user message have to go: the backend never received it, and
+          // leaving it in the transcript shows a message as sent that was not.
+          // `dropTurn` already removed the message: the backend never received
+          // it, so whatever `failed` records here has nothing left to withdraw.
+          // A paused error offers a link to the approvals queue rather than a
+          // Retry, so it is never read either way.
+          dropTurn();
+          setSendError(
+            failed(
+              t(
+                "Workforce.thread.pausedRejected",
+                "This conversation is paused waiting for a human decision, so the message was not sent.",
+              ),
+              true,
             ),
-            timestamp: Date.now(),
-          },
-        ]);
+          );
+        } else {
+          settle();
+          setSendError(failed(getErrorMessage(err), false));
+        }
       } finally {
+        abortRef.current = null;
         sendingRef.current = false;
         setIsLoading(false);
       }
     },
     [conversationId, isLoading, inputPrefill, memberId, boardId, t],
   );
+
+  /** Stop generating — the stream is abandoned, what arrived is kept. */
+  const handleStop = useCallback(() => {
+    abortRef.current?.abort();
+  }, []);
+
+  /**
+   * Re-send the turn that failed.
+   *
+   * The failed turn's user message is withdrawn first: `handleSend` appends its
+   * own, so without this a successful retry would show the same text twice.
+   */
+  const handleRetry = useCallback(() => {
+    const previous = sendError;
+    if (!previous) return;
+    setSendError(null);
+    if (previous.pendingUserMessage) {
+      setMessages((prev) => prev.filter((msg) => msg !== previous.pendingUserMessage));
+    }
+    void handleSend(previous.retryText, previous.retryAttachments);
+  }, [sendError, handleSend]);
 
   // ─── Starting state ──────────────────────────────────────────
   if (isStarting) {
@@ -1037,6 +1272,9 @@ function WorkforceThread() {
                   )}
 
                   {msg.role === "agent" ? (() => {
+                    // A placeholder with nothing in it yet is the reply on its
+                    // way, not an empty answer.
+                    if (msg.streaming && !msg.content) return <TypingDots />;
                     const parsed = parseTranscriptContent(msg.content);
                     if (!parsed.trim()) return <p className="italic text-muted-foreground">{t("Workforce.thread.noResponse", "No response")}</p>;
                     return (
@@ -1067,24 +1305,62 @@ function WorkforceThread() {
             </div>
           ))}
 
-          {/* Agent typing indicator */}
-          {isLoading && (
-            <div className="flex justify-start">
-              <div className="me-2 mt-1 shrink-0">
-                <AdvisorAvatar
-                  name={memberName}
-                  agentId={memberId}
-                  size="sm"
-                />
-              </div>
-              <div
+          {/* A failed turn.
+              This used to be appended to the transcript as a message from the
+              agent reading "Sorry, I encountered an error." — so a paused
+              conversation, an expired token and a quota rejection all looked
+              like the agent apologising, and the backend's own sentence went
+              only to the console. It is not something the agent said. */}
+          {sendError && (
+            <div
+              className={cn(
+                "flex items-start gap-2 rounded-xl border p-3 text-sm",
+                sendError.paused
+                  ? "border-warning/30 bg-warning/5"
+                  : "border-destructive/30 bg-destructive/5",
+              )}
+              role="alert"
+              data-testid="thread-send-error"
+            >
+              <AlertTriangle
                 className={cn(
-                  "rounded-2xl rounded-es-md border",
-                  "bg-card",
-                  "border-border",
+                  "mt-0.5 h-4 w-4 shrink-0",
+                  sendError.paused ? "text-warning" : "text-destructive",
                 )}
-              >
-                <TypingDots />
+                aria-hidden="true"
+              />
+              <div className="min-w-0 flex-1">
+                <p className="text-foreground">{sendError.message}</p>
+                <div className="mt-1.5 flex flex-wrap items-center gap-3">
+                  {sendError.paused ? (
+                    // Retrying will not help until the pause is decided, and
+                    // the queue that decides it is a screen away.
+                    <Link
+                      to="/manage/approvals"
+                      className="text-xs font-medium text-warning underline-offset-2 hover:underline"
+                      data-testid="thread-review-approvals"
+                    >
+                      {t("Workforce.thread.reviewApprovals", "Review pending approvals")}
+                    </Link>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={handleRetry}
+                      className="text-xs font-medium text-primary underline-offset-2 hover:underline"
+                      data-testid="thread-retry"
+                    >
+                      {t("common.retry", "Retry")}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setSendError(null)}
+                    className="text-xs text-muted-foreground underline-offset-2 hover:underline"
+                    data-testid="thread-dismiss-error"
+                  >
+                    {t("common.dismiss", "Dismiss")}
+                  </button>
+                </div>
               </div>
             </div>
           )}
@@ -1111,6 +1387,22 @@ function WorkforceThread() {
           </button>
         )}
       </div>
+
+        {/* Stop generating — a streamed turn can be long, and the only way to
+            end one used to be to wait it out. */}
+        {isLoading && (
+          <div className="flex shrink-0 justify-center pb-1">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleStop}
+              data-testid="thread-stop"
+            >
+              <Square className="h-3 w-3" />
+              {t("Workforce.thread.stop", "Stop generating")}
+            </Button>
+          </div>
+        )}
 
         {/* Thread input with file attachment support */}
         <ThreadInput

@@ -2660,7 +2660,51 @@
         "flow": "自分で定義するフェーズ"
       }
     },
-    "unsupportedStyle": "このサーバーは {{style}} に対応していません。別の形式を選んでください。"
+    "unsupportedStyle": "このサーバーは {{style}} に対応していません。別の形式を選んでください。",
+    "payload": {
+      "ballot": "投票",
+      "confidence": "確信度 {{percent}}%",
+      "noOption": "選択肢が示されていないため、この投票は集計に含まれません。",
+      "bids_one": "{{count}} 件の入札",
+      "bids_other": "{{count}} 件の入札",
+      "noBids": "どのタスクにも入札しませんでした。",
+      "bargain": "交渉の一手",
+      "counterProposal": "対案",
+      "accepted": "提案 {{proposal}} を受諾しました。",
+      "acceptSuperseded": "{{proposal}} も受諾していますが、上の対案がそれに優先します。",
+      "inReturnFor": "{{received}} と引き換えに",
+      "lessons_one": "チームへの学び {{count}} 件",
+      "lessons_other": "チームへの学び {{count}} 件"
+    },
+    "discussionDeleted": "ディスカッションを削除しました",
+    "confirmDeleteDiscussionTitle": "このディスカッションを削除しますか？",
+    "confirmDeleteDiscussionDescription": "記録とその内容はすべて完全に削除されます。元に戻すことはできません。",
+    "taskStatus": {
+      "PENDING": "未着手",
+      "ASSIGNED": "割り当て済み",
+      "IN_PROGRESS": "進行中",
+      "COMPLETED": "完了",
+      "VERIFIED": "検証済み",
+      "FAILED": "失敗",
+      "BLOCKED": "ブロック中",
+      "AWAITING_APPROVAL": "承認待ち"
+    },
+    "confirmDeleteMembers": "このグループのメンバーエージェントも削除します。残すとどこにも属さなくなり、「孤立」に表示されます。",
+    "export": {
+      "discussion": "ディスカッション",
+      "date": "日付",
+      "status": "状態",
+      "question": "質問",
+      "synthesis": "統合",
+      "error": "エラー",
+      "winner": "勝者",
+      "outcome": "結果",
+      "unparsedJudgment": "解析できなかった判定",
+      "minorityReport": "少数意見",
+      "finalAnswer": "最終回答",
+      "phase": "フェーズ"
+    },
+    "deleteMembersConfigFailed": "グループのメンバーを読み取れなかったため、何も削除されていません。もう一度お試しください。"
   },
   "taskBoard": {
     "title": "タスクボード",
@@ -3124,7 +3168,11 @@
     "hitlApprovalChannel": "承認チャネル ID",
     "hitlApprovalChannelHint": "会話が一時停止したときに承認カードを受け取る Slack チャネル。",
     "hitlApproverUserIds": "承認者ユーザー ID",
-    "hitlApproverUserIdsHint": "ボタンで承認できる Slack ユーザー ID（カンマ区切り）。このリストがない場合、ボタンは表示されません（フェイルクローズ）。"
+    "hitlApproverUserIdsHint": "ボタンで承認できる Slack ユーザー ID（カンマ区切り）。このリストがない場合、ボタンは表示されません（フェイルクローズ）。",
+    "typeAgent": "エージェント",
+    "typeGroup": "グループ",
+    "selectGroup": "グループを選択…",
+    "unknownGroup": "{{id}}（見つかりません）"
   },
   "hitl": {
     "loadingApprovalDetails": "承認の詳細を読み込んでいます…",
@@ -3211,7 +3259,10 @@
     "humanTurn": "メンバーの番",
     "humanTurnReason": "{{member}} の発言を待っています",
     "humanTurnMemberFallback": "あるメンバー",
-    "decidedProgress": "{{total}} 件中 {{decided}} 件を判断済み"
+    "decidedProgress": "{{total}} 件中 {{decided}} 件を判断済み",
+    "groupLinkUnavailable": "このグループが見つからないため、確実なリンクを表示できません。",
+    "confirmApproveGroupDescription": "停止中のフェーズ全体を承認し、ディスカッションを再開します。保留中のタスクもすべて併せて承認されます。個別に判断するにはグループを開いてください。",
+    "confirmRejectGroupDescription": "一時停止中のフェーズ全体を却下します。この一時停止を待っているタスクもすべて却下され、議論はこれ以上進みません。個別に判断するにはグループを開いてください。"
   },
   "chatDrawer": {
     "deploying": "エージェントをデプロイ中…",
@@ -3516,7 +3567,12 @@
       "sendError": "申し訳ありません。エラーが発生しました。もう一度お試しください。",
       "startingConversation": "会話を開始しています…",
       "toggleContext": "コンテキストの表示切替",
-      "placeholderNamed": "{{name}} にメッセージ…"
+      "placeholderNamed": "{{name}} にメッセージ…",
+      "pausedForApproval": "このターンは人による判断を待って停止しています。承認されると再開します。",
+      "pausedRejected": "この会話は人による判断を待って停止しているため、メッセージは送信されませんでした。",
+      "reviewApprovals": "保留中の承認を確認",
+      "stop": "生成を停止",
+      "streamEnded": "返信が完了する前に接続が終了しました。届いた分は上に表示されています。もう一度送信してやり直してください。"
     },
     "chat": {
       "agentDetails": "エージェントの詳細",
@@ -4223,7 +4279,10 @@
     "maxCostInvalid": "1回あたりの最大コストは 0 以上の数値である必要があります。",
     "cadenceSummary_other": "1回の実行につき最大 {{max}} タスク",
     "cadenceSummary_one": "1回の実行につき最大 {{max}} タスク",
-    "inputTemplateTooLong": "プロンプトテンプレートは {{max}} 文字までです。"
+    "inputTemplateTooLong": "プロンプトテンプレートは {{max}} 文字までです。",
+    "cronInvalid": "有効な cron 式ではありません。",
+    "scheduleUnknown": "スケジュールを取得できません",
+    "nextRun": "次回 {{when}}"
   },
   "workforceWizard": {
     "title": "新しいチーム"

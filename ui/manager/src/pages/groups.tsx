@@ -1,13 +1,20 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useOnboarding } from "@/hooks/use-onboarding";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router-dom";
 import { Boxes, Search, Plus, ExternalLink, Copy, Trash2, ArrowUp, ArrowDown, ArrowUpDown, LayoutTemplate } from "lucide-react";
 import { toast } from "sonner";
-import { useEnrichedGroupDescriptors, useDeleteGroup, useDuplicateGroup } from "@/hooks/use-groups";
+import {
+  useEnrichedGroupDescriptors,
+  useDeleteGroup,
+  useDeleteGroupWithMembers,
+  useDuplicateGroup,
+} from "@/hooks/use-groups";
 import { GroupCard } from "@/components/groups/group-card";
 import { styleDisplay } from "@/lib/discussion-styles";
 import { CreateGroupDialog } from "@/components/groups/create-group-dialog";
+import { getGroup, type AgentGroupConfiguration } from "@/lib/api/groups";
+import { getErrorMessage } from "@/lib/api-client";
 import { CreateOrWizardDialog } from "@/components/shared/create-or-wizard-dialog";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -59,7 +66,47 @@ export function GroupsPage() {
 
   const { data: enrichedGroups, isLoading, isError, refetch } = useEnrichedGroupDescriptors(100, 0, search);
   const deleteMutation = useDeleteGroup();
+  const deleteWithMembersMutation = useDeleteGroupWithMembers();
   const duplicateMutation = useDuplicateGroup();
+  /**
+   * Whether to take the group's member agents with it.
+   *
+   * The group config panel and the Workforce settings page both offer this;
+   * the list's trash icon — the entry point most people actually use — deleted
+   * the group alone and said nothing, so a wizard-built team left its agents
+   * behind with nothing pointing at them. They show up on `/manage/orphans`,
+   * which is a poor way to learn what just happened.
+   */
+  const [deleteMembers, setDeleteMembers] = useState(false);
+
+  /**
+   * Close the delete dialog and forget the cascade choice.
+   *
+   * `onOpenChange` only fires when the dialog closes itself, so a successful
+   * delete that cleared `deleteTarget` left `deleteMembers` set — and the next
+   * group's dialog opened with "also delete its agents" already ticked.
+   */
+  /**
+   * The delete the dialog is currently asking about.
+   *
+   * A cascade awaits `getGroup()` before it can mutate, and the dialog stays
+   * dismissable throughout — Escape and the scrim both close it, whatever
+   * `isPending` says. Without this token the awaited continuation would resume
+   * against a dialog nobody is looking at any more and delete the group's
+   * agents anyway.
+   */
+  const deleteRequestRef = useRef(0);
+  /** True while a cascade is reading the group it is about to delete over. */
+  const [readingConfig, setReadingConfig] = useState(false);
+
+  const closeDeleteDialog = useCallback(() => {
+    // Invalidate any in-flight request first: the continuation checks this
+    // token before it mutates.
+    deleteRequestRef.current++;
+    setReadingConfig(false);
+    setDeleteTarget(null);
+    setDeleteMembers(false);
+  }, []);
 
   const groupedGroups = useMemo(() => {
     const list = enrichedGroups ?? [];
@@ -90,16 +137,71 @@ export function GroupsPage() {
     setDeleteTarget({ id, version });
   }
 
-  function confirmDelete() {
-    if (deleteTarget) {
-      deleteMutation.mutate(deleteTarget, {
-        onSuccess: () => {
-          toast.success(t("common.delete") + " ✓");
-          setDeleteTarget(null);
+  /**
+   * Delete the group, and its member agents when the reader asked for that.
+   *
+   * The cascade reads the group's REAL configuration rather than the enriched
+   * descriptor behind this list. The descriptor carries a member list but no
+   * `moderatorAgentId`, and `deleteGroupWithMembers` deletes the moderator too
+   * — so cascading over the descriptor would have left exactly the orphan the
+   * checkbox exists to prevent. Its error path also yields an empty member
+   * list, which would have deleted nothing while reporting success.
+   */
+  async function confirmDelete() {
+    if (!deleteTarget) return;
+
+    if (deleteMembers) {
+      const request = ++deleteRequestRef.current;
+      let config: AgentGroupConfiguration;
+      setReadingConfig(true);
+      try {
+        config = await getGroup(deleteTarget.id, deleteTarget.version);
+      } catch {
+        // Only this request may clear the flag. A dismissed request resolving
+        // late would otherwise report a NEWER one as idle while it is still
+        // reading, and the dialog would look ready when it is not.
+        if (deleteRequestRef.current !== request) return;
+        setReadingConfig(false);
+        // Do not quietly downgrade to a group-only delete: keeping the agents
+        // is the one thing the reader said they did not want.
+        toast.error(
+          t(
+            "groups.deleteMembersConfigFailed",
+            "Could not read the group's members, so nothing was deleted. Try again.",
+          ),
+        );
+        return;
+      }
+      // Dismissed while the read was in flight — the reader withdrew the
+      // request, so nothing is deleted, nothing is reported, and a newer
+      // request's pending state is left alone.
+      if (deleteRequestRef.current !== request) return;
+      setReadingConfig(false);
+      deleteWithMembersMutation.mutate(
+        { groupId: deleteTarget.id, version: deleteTarget.version, config },
+        {
+          onSuccess: () => {
+            toast.success(
+              t(
+                "groups.deleteWithMembersSuccess",
+                "Group and all member agents deleted (soft-delete)",
+              ),
+            );
+            closeDeleteDialog();
+          },
+          onError: (err) => toast.error(getErrorMessage(err)),
         },
-        onError: () => toast.error(t("common.error")),
-      });
+      );
+      return;
     }
+
+    deleteMutation.mutate(deleteTarget, {
+      onSuccess: () => {
+        toast.success(t("groups.deleteGroupOnlySuccess", "Group deleted (agents kept)"));
+        closeDeleteDialog();
+      },
+      onError: (err) => toast.error(getErrorMessage(err)),
+    });
   }
 
   function handleDuplicate(id: string, version: number) {
@@ -407,14 +509,38 @@ export function GroupsPage() {
       {/* Delete confirmation */}
       <AlertDialog
         open={deleteTarget !== null}
-        onOpenChange={(open) => !open && setDeleteTarget(null)}
+        onOpenChange={(open) => {
+          if (!open) closeDeleteDialog();
+        }}
         title={t("groups.confirmDelete", "Delete this group?")}
-        description={t("groups.confirmDeleteDesc", "This will permanently delete the group configuration.")}
+        description={t(
+          "groups.confirmDeleteDesc",
+          "This will permanently delete the group configuration.",
+        )}
         confirmLabel={t("common.delete")}
         cancelLabel={t("common.cancel")}
-        onConfirm={confirmDelete}
-        isPending={deleteMutation.isPending}
-      />
+        variant="destructive"
+        onConfirm={() => void confirmDelete()}
+        isPending={
+          readingConfig || deleteMutation.isPending || deleteWithMembersMutation.isPending
+        }
+      >
+        <label className="flex items-start gap-2 text-xs text-muted-foreground">
+          <input
+            type="checkbox"
+            checked={deleteMembers}
+            onChange={(e) => setDeleteMembers(e.target.checked)}
+            className="mt-0.5"
+            data-testid="delete-members-checkbox"
+          />
+          <span>
+            {t(
+              "groups.confirmDeleteMembers",
+              "Also delete this group's member agents. Left behind, they belong to nothing and show up under Orphans.",
+            )}
+          </span>
+        </label>
+      </AlertDialog>
     </div>
   );
 }

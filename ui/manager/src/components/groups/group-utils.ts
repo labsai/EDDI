@@ -368,19 +368,132 @@ export function parseVerdictJson(content: string | null | undefined): VerdictJso
   return verdictFields(parsed as Record<string, unknown>);
 }
 
+/** How deep the fallback renderer descends before giving up and stringifying. */
+const MAX_JSON_RENDER_DEPTH = 5;
+
 /**
- * Last resort for a JSON object this build has no reader for: a markdown
- * definition list, so an unrecognised shape still reads as content rather than
- * as a dump. Nested values keep their JSON form inline — the point is that the
- * keys become legible, not that arbitrary trees get a bespoke layout.
+ * A JSON key as a sentence-cased label: `estimatedComplexity` → "Estimated
+ * complexity", `task_id` → "Task id". An all-caps run is an acronym and keeps
+ * its case ("URL", "ETA"), because lowercasing it reads as a typo.
+ *
+ * Not localized, deliberately: these are the backend's own field names on a
+ * shape this build has no reader for, so there is no key to translate under.
+ * Every contract this build DOES know is rendered by a typed, localized
+ * component instead — see `lib/group-payloads.ts`.
+ */
+export function humanizeJsonKey(key: string): string {
+  const words = key
+    .replace(/[_-]+/g, " ")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => (/^[A-Z0-9]{2,}$/.test(word) ? word : word.toLowerCase()));
+  if (words.length === 0) return key;
+  const first = words[0]!;
+  return [first.charAt(0).toUpperCase() + first.slice(1), ...words.slice(1)].join(" ");
+}
+
+/** A value with no structure of its own — rendered inline after its label. */
+function isScalar(value: unknown): boolean {
+  return (
+    typeof value === "string" || typeof value === "number" || typeof value === "boolean"
+  );
+}
+
+function scalarText(value: unknown): string {
+  return typeof value === "string" ? value.trim() : String(value);
+}
+
+/** Indent an already-rendered block one list level deeper. */
+function indentBlock(lines: string[], by = 2): string[] {
+  return lines.map((line) => " ".repeat(by) + line);
+}
+
+/**
+ * One object of an array, as a bullet group: its first field rides on the
+ * bullet and the rest hang under it as a nested list. Keeping the first field
+ * inline is what makes two adjacent items read as two items — a flat run of
+ * sibling bullets would merge them into one undifferentiated list.
+ */
+function renderJsonItem(record: Record<string, unknown>, indent: number, depth: number): string[] {
+  const lines = renderJsonRecord(record, indent, depth);
+  if (lines.length === 0) return [];
+  return [lines[0]!, ...indentBlock(lines.slice(1))];
+}
+
+/**
+ * One object as markdown bullets at `indent`. Every field is its own bullet, so
+ * the result is a real list rather than a run of soft-wrapped lines — a plain
+ * newline between two `**Label**: value` lines is a soft break in CommonMark and
+ * renders them jammed onto one line.
+ */
+function renderJsonRecord(
+  record: Record<string, unknown>,
+  indent: number,
+  depth: number,
+): string[] {
+  const pad = " ".repeat(indent);
+  const lines: string[] = [];
+
+  for (const [key, value] of Object.entries(record)) {
+    // A null or empty field says nothing the absence of the line does not.
+    if (value === null || value === undefined) continue;
+    const label = `${pad}- **${humanizeJsonKey(key)}**:`;
+
+    if (isScalar(value)) {
+      const text = scalarText(value);
+      if (text.length > 0) lines.push(`${label} ${text}`);
+      continue;
+    }
+
+    if (depth >= MAX_JSON_RENDER_DEPTH) {
+      // Deeper than anything a real contract nests. Stringifying here is the
+      // bounded escape hatch, not the normal path.
+      lines.push(`${label} ${JSON.stringify(value)}`);
+      continue;
+    }
+
+    if (Array.isArray(value)) {
+      const items = value.filter((item) => item !== null && item !== undefined);
+      if (items.length === 0) continue;
+      // A list of plain values is a sentence, not a bullet list — "a, b, c"
+      // reads better and costs three lines less.
+      if (items.every(isScalar)) {
+        lines.push(`${label} ${items.map(scalarText).join(", ")}`);
+        continue;
+      }
+      const rendered = items.flatMap((item) =>
+        isScalar(item)
+          ? [`${" ".repeat(indent + 2)}- ${scalarText(item)}`]
+          : renderJsonItem(item as Record<string, unknown>, indent + 2, depth + 1),
+      );
+      if (rendered.length > 0) lines.push(label, ...rendered);
+      continue;
+    }
+
+    if (typeof value === "object") {
+      const nested = renderJsonRecord(value as Record<string, unknown>, indent + 2, depth + 1);
+      if (nested.length > 0) lines.push(label, ...nested);
+    }
+  }
+
+  return lines;
+}
+
+/**
+ * Last resort for a JSON object this build has no reader for: a markdown list,
+ * so an unrecognised shape still reads as content rather than as a dump.
+ *
+ * Nested values used to keep their JSON form inline, on the theory that only
+ * the keys needed to be legible. Several of EDDI's own phase contracts nest —
+ * a BID turn is `{"bids": [{subject, confidence, …}]}`, a RETRO turn is
+ * `{"lessons": [{lesson, context}]}`, a BARGAIN turn carries `concessions` —
+ * so that theory put a raw JSON array on screen in the middle of a discussion
+ * transcript, which is the exact thing this function exists to prevent.
+ * Nesting now recurses into a sub-list instead.
  */
 function readableJsonObject(record: Record<string, unknown>): string {
-  const lines = Object.entries(record).map(([key, value]) => {
-    const rendered =
-      typeof value === "string" ? value : JSON.stringify(value) ?? String(value);
-    return `**${key}**: ${rendered}`;
-  });
-  return lines.join("\n\n");
+  return renderJsonRecord(record, 0, 0).join("\n");
 }
 
 /**

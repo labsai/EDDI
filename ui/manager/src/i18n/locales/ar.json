@@ -2768,7 +2768,59 @@
         "flow": "مراحل تحددها بنفسك"
       }
     },
-    "unsupportedStyle": "لا يدعم هذا الخادم {{style}}. اختر إطارًا آخر للمتابعة."
+    "unsupportedStyle": "لا يدعم هذا الخادم {{style}}. اختر إطارًا آخر للمتابعة.",
+    "payload": {
+      "ballot": "بطاقة التصويت",
+      "confidence": "ثقة {{percent}} ٪",
+      "noOption": "لم يُذكر أي خيار، لذا لا يُحتسب هذا الصوت في النتيجة.",
+      "bids_one": "عرض واحد",
+      "bids_other": "{{count}} عروض",
+      "noBids": "لم يتقدَّم بعرض لأي مهمة.",
+      "bargain": "خطوة تفاوضية",
+      "counterProposal": "عرض مضاد",
+      "accepted": "تم قبول المقترح {{proposal}}.",
+      "acceptSuperseded": "قَبِل أيضًا {{proposal}}، غير أن العرض المضاد أعلاه يلغيه.",
+      "inReturnFor": "مقابل {{received}}",
+      "lessons_one": "درس واحد للفريق",
+      "lessons_other": "{{count}} دروس للفريق",
+      "bids_zero": "لا عروض",
+      "bids_two": "عرضان",
+      "bids_few": "{{count}} عروض",
+      "bids_many": "{{count}} عرضًا",
+      "lessons_zero": "لا دروس للفريق",
+      "lessons_two": "درسان للفريق",
+      "lessons_few": "{{count}} دروس للفريق",
+      "lessons_many": "{{count}} درسًا للفريق"
+    },
+    "discussionDeleted": "تم حذف النقاش",
+    "confirmDeleteDiscussionTitle": "حذف هذا النقاش؟",
+    "confirmDeleteDiscussionDescription": "سيُحذف السجل وكل ما فيه نهائيًا. لا يمكن التراجع عن ذلك.",
+    "taskStatus": {
+      "PENDING": "قيد الانتظار",
+      "ASSIGNED": "مُسنَدة",
+      "IN_PROGRESS": "قيد التنفيذ",
+      "COMPLETED": "مكتملة",
+      "VERIFIED": "مُتحقَّق منها",
+      "FAILED": "فاشلة",
+      "BLOCKED": "محجوبة",
+      "AWAITING_APPROVAL": "بانتظار الموافقة"
+    },
+    "confirmDeleteMembers": "احذف أيضًا وكلاء هذه المجموعة. إن بقوا فلن ينتموا إلى شيء وسيظهرون ضمن «اليتيمة».",
+    "export": {
+      "discussion": "نقاش",
+      "date": "التاريخ",
+      "status": "الحالة",
+      "question": "السؤال",
+      "synthesis": "الخلاصة",
+      "error": "خطأ",
+      "winner": "الفائز",
+      "outcome": "النتيجة",
+      "unparsedJudgment": "حكم غير مُحلَّل",
+      "minorityReport": "رأي الأقلية",
+      "finalAnswer": "الإجابة النهائية",
+      "phase": "مرحلة"
+    },
+    "deleteMembersConfigFailed": "تعذّرت قراءة أعضاء المجموعة، لذا لم يُحذف أي شيء. حاول مرة أخرى."
   },
   "taskBoard": {
     "title": "لوحة المهام",
@@ -3240,7 +3292,11 @@
     "hitlApprovalChannel": "معرّف قناة الموافقة",
     "hitlApprovalChannelHint": "قناة Slack التي تتلقى بطاقة موافقة عند إيقاف المحادثة مؤقتًا.",
     "hitlApproverUserIds": "معرّفات مستخدمي الموافِقين",
-    "hitlApproverUserIdsHint": "معرّفات مستخدمي Slack مفصولة بفواصل ويُسمح لهم بالموافقة عبر الأزرار. بدون هذه القائمة لا تُعرض الأزرار (فشل مغلق)."
+    "hitlApproverUserIdsHint": "معرّفات مستخدمي Slack مفصولة بفواصل ويُسمح لهم بالموافقة عبر الأزرار. بدون هذه القائمة لا تُعرض الأزرار (فشل مغلق).",
+    "typeAgent": "وكيل",
+    "typeGroup": "مجموعة",
+    "selectGroup": "اختر مجموعة…",
+    "unknownGroup": "{{id}} (غير موجودة)"
   },
   "hitl": {
     "loadingApprovalDetails": "جارٍ تحميل تفاصيل الموافقة…",
@@ -3327,7 +3383,10 @@
     "humanTurn": "دور العضو",
     "humanTurnReason": "في انتظار أن يتحدث {{member}}",
     "humanTurnMemberFallback": "أحد الأعضاء",
-    "decidedProgress": "تم البت في {{decided}} من {{total}}"
+    "decidedProgress": "تم البت في {{decided}} من {{total}}",
+    "groupLinkUnavailable": "تعذّر العثور على هذه المجموعة، لذا لا يوجد رابط موثوق إليها.",
+    "confirmApproveGroupDescription": "الموافقة على المرحلة المتوقفة بالكامل واستئناف النقاش. تُعتمد معها كل مهمة معلَّقة — افتح المجموعة للبتّ فيها فرديًا.",
+    "confirmRejectGroupDescription": "رفض المرحلة المتوقفة بالكامل. تُرفض معها كل مهمة تنتظر هذا التوقف، ولا تتجاوزه المناقشة — افتح المجموعة لاتخاذ القرار في كل مهمة على حدة."
   },
   "chatDrawer": {
     "deploying": "جارٍ نشر الوكيل…",
@@ -3648,7 +3707,12 @@
       "sendError": "عذراً، حدث خطأ. يرجى المحاولة مرة أخرى.",
       "startingConversation": "جارٍ بدء المحادثة…",
       "toggleContext": "تبديل السياق",
-      "placeholderNamed": "رسالة إلى {{name}}…"
+      "placeholderNamed": "رسالة إلى {{name}}…",
+      "pausedForApproval": "هذه الخطوة متوقفة بانتظار قرار بشري، وستُستأنف بمجرد الموافقة على الطلب.",
+      "pausedRejected": "هذه المحادثة متوقفة بانتظار قرار بشري، لذا لم تُرسَل الرسالة.",
+      "reviewApprovals": "مراجعة الموافقات المعلَّقة",
+      "stop": "إيقاف التوليد",
+      "streamEnded": "انقطع الاتصال قبل اكتمال الرد. ما وصل معروض أعلاه — أعد الإرسال للمحاولة مجددًا."
     },
     "chat": {
       "agentDetails": "تفاصيل الوكيل",
@@ -4375,7 +4439,10 @@
     "cadenceSummary_two": "حتى {{max}} مهام/تشغيل",
     "cadenceSummary_zero": "حتى {{max}} مهام/تشغيل",
     "cadenceSummary_other": "حتى {{max}} مهام/تشغيل",
-    "inputTemplateTooLong": "قالب المطالبة محدود بـ {{max}} حرفاً."
+    "inputTemplateTooLong": "قالب المطالبة محدود بـ {{max}} حرفاً.",
+    "cronInvalid": "هذا ليس تعبير cron صالحًا.",
+    "scheduleUnknown": "الجدولة غير متاحة",
+    "nextRun": "التالي {{when}}"
   },
   "workforceWizard": {
     "title": "فريق جديد"

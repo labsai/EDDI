@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams, useSearchParams } from "react-router-dom";
 import {
@@ -13,6 +13,13 @@ import { AlertDialog } from "@/components/ui/alert-dialog";
 import { getErrorMessage } from "@/lib/api-client";
 import { cn, formatUsd } from "@/lib/utils";
 import { useGroup } from "@/hooks/use-groups";
+import { useSchedules } from "@/hooks/use-schedules";
+import {
+  describeCron,
+  formatInstantInZone,
+  isValidCron,
+  type ScheduleConfiguration,
+} from "@/lib/api/schedules";
 import {
   useGroupWorkspace,
   useAddWorkspaceBacklogTask,
@@ -25,6 +32,18 @@ import {
   WORKSPACE_MAX_INPUT_TEMPLATE_LENGTH,
   NO_RUNNING_DISCUSSION,
 } from "@/lib/api/group-workspace";
+
+/** The backend's own task statuses, as labels a reader can read. */
+const STATUS_FALLBACK: Record<string, string> = {
+  PENDING: "Pending",
+  ASSIGNED: "Assigned",
+  IN_PROGRESS: "In progress",
+  COMPLETED: "Completed",
+  VERIFIED: "Verified",
+  FAILED: "Failed",
+  BLOCKED: "Blocked",
+  AWAITING_APPROVAL: "Awaiting approval",
+};
 
 const STATUS_BADGE: Record<string, string> = {
   PENDING: "bg-muted text-muted-foreground",
@@ -40,13 +59,49 @@ const STATUS_BADGE: Record<string, string> = {
 export function GroupWorkspacePage() {
   const { id: groupId } = useParams<{ id: string }>();
   const [searchParams] = useSearchParams();
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  /**
+   * `describeCron`'s own translator. Passing `undefined` localizes only the
+   * weekday and month names — the sentences around them ("every Monday at
+   * {{time}}") stay English. Same adapter the schedules page uses.
+   */
+  const describeT = useCallback(
+    (key: string, fallback: string, vars?: Record<string, string>) =>
+      t(key, { defaultValue: fallback, ...(vars ?? {}) }),
+    [t],
+  );
   // Same convention as the group detail page: the version rides on the URL.
   // Hardcoding 1 here read the group's FIRST version, so a renamed group showed
   // its original name in this page's header and back-link.
   const version = Number(searchParams.get("version")) || 1;
   const { data: groupConfig } = useGroup(groupId || "", version);
   const { data: workspace, isLoading, isError, refetch } = useGroupWorkspace(groupId);
+
+  /**
+   * The schedule rows the cadences point at.
+   *
+   * `Cadence` carries a `scheduleRef` and nothing about when it runs — the cron
+   * expression and time zone live only on the paired row in the schedule store.
+   * So a cadence list showed a column of UUIDs: you could not tell which one was
+   * the Monday 9am run, or which of three to delete. One list call joins them.
+   */
+  const { data: schedules } = useSchedules();
+  const scheduleById = useMemo(() => {
+    const map = new Map<string, ScheduleConfiguration>();
+    for (const schedule of schedules ?? []) {
+      if (schedule.id) map.set(schedule.id, schedule);
+    }
+    return map;
+  }, [schedules]);
+
+  /** agentId → the name the group calls that member, for the stats table. */
+  const memberNames = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const member of groupConfig?.members ?? []) {
+      if (member.displayName) map.set(member.agentId, member.displayName);
+    }
+    return map;
+  }, [groupConfig]);
   const addTask = useAddWorkspaceBacklogTask(groupId);
   const addCadence = useAddWorkspaceCadence(groupId);
   const deleteCadence = useDeleteWorkspaceCadence(groupId);
@@ -88,6 +143,15 @@ export function GroupWorkspacePage() {
     // bounds), so a negative or non-numeric value would be persisted verbatim
     // and then min()'d against the group ceiling — silently capping every run
     // at a nonsense budget. Refuse it here instead.
+    // The backend answers a blank or unparseable cron with a 400. Saying so
+    // before the round trip is the same information sooner, and the parser is
+    // already here for the description below the field.
+    if (!isValidCron(cron.trim())) {
+      setCadenceError(
+        t("groupWorkspace.cronInvalid", "That is not a valid cron expression."),
+      );
+      return;
+    }
     const parsedCost = maxCostPerRun.trim() ? Number(maxCostPerRun) : undefined;
     if (parsedCost !== undefined && (!Number.isFinite(parsedCost) || parsedCost < 0)) {
       setCadenceError(
@@ -201,7 +265,12 @@ export function GroupWorkspacePage() {
             <tbody>
               {Object.entries(workspace.metrics.perMemberStats).map(([agentId, stats]) => (
                 <tr key={agentId} className="border-t border-border">
-                  <td className="py-1.5 font-mono text-xs text-foreground">{agentId}</td>
+                  {/* The group knows what it calls this member; a raw agent id
+                      makes the table unreadable. The id stays as the tooltip,
+                      because it is what the API and the logs use. */}
+                  <td className="py-1.5 text-xs text-foreground" title={agentId}>
+                    {memberNames.get(agentId) ?? agentId}
+                  </td>
                   <td className="py-1.5 text-end text-emerald-600">{stats.tasksVerified}</td>
                   <td className="py-1.5 text-end text-destructive">{stats.tasksFailed}</td>
                 </tr>
@@ -226,7 +295,7 @@ export function GroupWorkspacePage() {
                 <div className="flex items-center gap-2">
                   <span className="flex-1 text-xs font-medium text-foreground">{task.subject}</span>
                   <span className={cn("rounded-full px-1.5 py-0 text-[9px] font-medium", STATUS_BADGE[task.status] ?? "bg-muted")}>
-                    {task.status}
+                    {t(`groups.taskStatus.${task.status}`, STATUS_FALLBACK[task.status] ?? task.status)}
                   </span>
                   <span className="text-[10px] text-muted-foreground">P{task.priority}</span>
                 </div>
@@ -298,7 +367,34 @@ export function GroupWorkspacePage() {
                 data-testid={`cadence-${cadence.cadenceId}`}
               >
                 <div className="min-w-0 flex-1 text-xs">
-                  <p className="font-mono text-foreground">{cadence.cadenceId}</p>
+                  {(() => {
+                    const schedule = scheduleById.get(cadence.scheduleRef);
+                    const cron = schedule?.cronExpression;
+                    const zone = schedule?.timeZone || "UTC";
+                    const described = cron
+                      ? describeCron(cron, describeT, i18n.language)
+                      : null;
+                    return (
+                      <>
+                        <p className="font-medium text-foreground" data-testid={`cadence-when-${cadence.cadenceId}`}>
+                          {described ?? cron ?? t("groupWorkspace.scheduleUnknown", "Schedule unavailable")}
+                        </p>
+                        <p className="text-[10px] text-muted-foreground">
+                          {cron && <span className="font-mono me-1.5">{cron}</span>}
+                          {/* Only when the schedule was actually read: "Schedule
+                              unavailable / UTC" states a zone we do not know. */}
+                          {schedule && <span>{zone}</span>}
+                          {schedule?.nextFire != null && (
+                            <span className="ms-1.5">
+                              {t("groupWorkspace.nextRun", "next {{when}}", {
+                                when: formatInstantInZone(schedule.nextFire, zone),
+                              })}
+                            </span>
+                          )}
+                        </p>
+                      </>
+                    );
+                  })()}
                   <p className="text-muted-foreground">
                     {t("groupWorkspace.cadenceSummary", {
                       defaultValue: "up to {{max}} task/run",
@@ -338,8 +434,21 @@ export function GroupWorkspacePage() {
                 onChange={(e) => setCron(e.target.value)}
                 placeholder={t("groupWorkspace.cronPlaceholder", "e.g. 0 9 * * MON")}
                 className={inputCls}
+                aria-describedby="workspace-cron-hint"
                 data-testid="workspace-cron-input"
               />
+              {/* What the expression means, while it is being typed — five
+                  numbers are not something to have to decode after saving. */}
+              <p
+                id="workspace-cron-hint"
+                className="mt-0.5 text-[10px] text-muted-foreground"
+                data-testid="workspace-cron-hint"
+              >
+                {cron.trim()
+                  ? (describeCron(cron.trim(), describeT, i18n.language) ??
+                    t("groupWorkspace.cronInvalid", "That is not a valid cron expression."))
+                  : "\u00a0"}
+              </p>
             </div>
             <div>
               <label htmlFor="workspace-timezone" className="mb-0.5 block text-[10px] text-muted-foreground">

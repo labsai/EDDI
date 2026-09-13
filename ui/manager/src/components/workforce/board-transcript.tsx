@@ -393,6 +393,7 @@ function EnhancedResponseEntry({
         role={t(`groups.entryType.${entry.type}`, info.label)}
         roleBadgeVariant={variant}
         content={entry.content}
+        entryType={entry.type}
         boardId={boardId}
         timestamp={time}
       />

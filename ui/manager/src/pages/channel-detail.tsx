@@ -16,6 +16,8 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
+import { AgentPicker } from "@/components/shared/agent-picker";
+import { useEnrichedGroupDescriptors } from "@/hooks/use-groups";
 import { useChannel, useUpdateChannel, useDeleteChannel } from "@/hooks/use-channels";
 import {
   CHANNEL_TYPES,
@@ -72,16 +74,51 @@ function TargetCard({
             </div>
             <div className="space-y-1">
               <label className="text-xs font-medium">{t("channelDetail.targetType", "Type")}</label>
-              <select className="flex h-8 w-full rounded-lg border border-border bg-background px-2 text-sm" value={target.type} onChange={(e) => onUpdate({ ...target, type: e.target.value as "AGENT" | "GROUP" })}>
-                <option value="AGENT">Agent</option>
-                <option value="GROUP">Group</option>
+              <select
+                className="flex h-8 w-full rounded-lg border border-border bg-background px-2 text-sm"
+                value={target.type}
+                onChange={(e) => {
+                  // The id space is per-type: an agent id is not a group id, so
+                  // carrying one across the switch leaves the target pointing at
+                  // something that does not exist under the new type.
+                  const type = e.target.value as "AGENT" | "GROUP";
+                  onUpdate({ ...target, type, targetId: type === target.type ? target.targetId : "" });
+                }}
+                aria-label={t("channelDetail.targetType", "Type")}
+              >
+                <option value="AGENT">{t("channelDetail.typeAgent", "Agent")}</option>
+                <option value="GROUP">{t("channelDetail.typeGroup", "Group")}</option>
               </select>
             </div>
           </div>
 
           <div className="space-y-1">
-            <label className="text-xs font-medium">{target.type === "GROUP" ? t("channelDetail.groupId", "Group ID") : t("channelDetail.agentId", "Agent ID")}</label>
-            <Input data-testid={`target-id-${index}`} className="h-8 text-sm" value={target.targetId} onChange={(e) => onUpdate({ ...target, targetId: e.target.value })} />
+            <label
+              className="text-xs font-medium"
+              htmlFor={`target-id-${index}`}
+            >
+              {target.type === "GROUP"
+                ? t("channelDetail.groupId", "Group ID")
+                : t("channelDetail.agentId", "Agent ID")}
+            </label>
+            {/* Both id spaces are UUIDs the user has no way to know by heart,
+                and nothing validated what was typed — a channel could route to
+                an id that does not exist and only fail at message time. The
+                same pickers the wizards use resolve them by name. */}
+            {target.type === "GROUP" ? (
+              <GroupTargetPicker
+                id={`target-id-${index}`}
+                testId={`target-id-${index}`}
+                value={target.targetId}
+                onChange={(targetId) => onUpdate({ ...target, targetId })}
+              />
+            ) : (
+              <AgentPicker
+                id={`target-id-${index}`}
+                value={target.targetId}
+                onChange={(targetId) => onUpdate({ ...target, targetId })}
+              />
+            )}
           </div>
 
           <div className="space-y-1">
@@ -113,6 +150,59 @@ function TargetCard({
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * Choose a group by name.
+ *
+ * A plain `<select>` rather than the combobox `AgentPicker` is: a deployment
+ * has far fewer groups than agents, and the descriptor list already carries
+ * their names. A group id already saved but no longer in the list is kept as
+ * its own option, so opening an old channel never silently repoints it.
+ */
+function GroupTargetPicker({
+  id,
+  testId,
+  value,
+  onChange,
+}: {
+  id: string;
+  testId: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const { t } = useTranslation();
+  const { data: groups, isLoading } = useEnrichedGroupDescriptors(100);
+  const known = (groups ?? []).some((g) => g.id === value);
+
+  return (
+    <select
+      id={id}
+      data-testid={testId}
+      className="flex h-8 w-full rounded-lg border border-border bg-background px-2 text-sm"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+    >
+      <option value="">
+        {isLoading
+          ? t("common.loading", "Loading…")
+          : t("channelDetail.selectGroup", "Select a group…")}
+      </option>
+      {value && !known && (
+        // The group this channel already points at, which the list does not
+        // carry — deleted, or past the first hundred. Dropping it would rewrite
+        // the target the moment someone opened the page.
+        <option value={value}>
+          {t("channelDetail.unknownGroup", "{{id}} (not found)", { id: value })}
+        </option>
+      )}
+      {(groups ?? []).map((group) => (
+        <option key={group.id} value={group.id}>
+          {group.name || group.id}
+        </option>
+      ))}
+    </select>
   );
 }
 

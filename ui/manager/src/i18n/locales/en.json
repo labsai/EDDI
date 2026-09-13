@@ -2713,7 +2713,51 @@
         "flow": "Phases you define yourself"
       }
     },
-    "unsupportedStyle": "This server does not support {{style}}. Pick another framework to continue."
+    "unsupportedStyle": "This server does not support {{style}}. Pick another framework to continue.",
+    "payload": {
+      "ballot": "Ballot",
+      "confidence": "{{percent}}% confident",
+      "noOption": "No option was named, so this ballot does not count towards the tally.",
+      "bids_one": "{{count}} bid",
+      "bids_other": "{{count}} bids",
+      "noBids": "Did not bid on any task.",
+      "bargain": "Bargaining move",
+      "counterProposal": "Counter-proposal",
+      "accepted": "Accepted proposal {{proposal}}.",
+      "acceptSuperseded": "Also accepted {{proposal}}, which the counter-proposal above supersedes.",
+      "inReturnFor": "in return for {{received}}",
+      "lessons_one": "{{count}} lesson for the team",
+      "lessons_other": "{{count}} lessons for the team"
+    },
+    "discussionDeleted": "Discussion deleted",
+    "confirmDeleteDiscussionTitle": "Delete this discussion?",
+    "confirmDeleteDiscussionDescription": "The transcript and everything in it are removed permanently. This cannot be undone.",
+    "taskStatus": {
+      "PENDING": "Pending",
+      "ASSIGNED": "Assigned",
+      "IN_PROGRESS": "In progress",
+      "COMPLETED": "Completed",
+      "VERIFIED": "Verified",
+      "FAILED": "Failed",
+      "BLOCKED": "Blocked",
+      "AWAITING_APPROVAL": "Awaiting approval"
+    },
+    "confirmDeleteMembers": "Also delete this group's member agents. Left behind, they belong to nothing and show up under Orphans.",
+    "export": {
+      "discussion": "Discussion",
+      "date": "Date",
+      "status": "Status",
+      "question": "Question",
+      "synthesis": "Synthesis",
+      "error": "Error",
+      "winner": "Winner",
+      "outcome": "Outcome",
+      "unparsedJudgment": "Unparsed judgment",
+      "minorityReport": "Minority report",
+      "finalAnswer": "Final answer",
+      "phase": "Phase"
+    },
+    "deleteMembersConfigFailed": "Could not read the group's members, so nothing was deleted. Try again."
   },
   "taskBoard": {
     "title": "Task Board",
@@ -3164,7 +3208,11 @@
     "hitlApprovalChannel": "Approval Channel ID",
     "hitlApprovalChannelHint": "Slack channel that receives an approval card when a conversation pauses.",
     "hitlApproverUserIds": "Approver User IDs",
-    "hitlApproverUserIdsHint": "Comma-separated Slack user IDs allowed to approve via buttons. Without this list, buttons are not rendered (fail-closed)."
+    "hitlApproverUserIdsHint": "Comma-separated Slack user IDs allowed to approve via buttons. Without this list, buttons are not rendered (fail-closed).",
+    "typeAgent": "Agent",
+    "typeGroup": "Group",
+    "selectGroup": "Select a group…",
+    "unknownGroup": "{{id}} (not found)"
   },
   "hitl": {
     "loadingApprovalDetails": "Loading approval details…",
@@ -3251,7 +3299,10 @@
     "humanTurn": "Member's turn",
     "humanTurnReason": "Waiting on {{member}} to speak",
     "humanTurnMemberFallback": "a member",
-    "decidedProgress": "{{decided}} of {{total}} decided"
+    "decidedProgress": "{{decided}} of {{total}} decided",
+    "groupLinkUnavailable": "This group could not be located, so there is no safe link to it.",
+    "confirmApproveGroupDescription": "Approve the whole paused phase and resume the discussion. Every task waiting on this pause is approved with it — open the group to decide them individually.",
+    "confirmRejectGroupDescription": "Reject the whole paused phase. Every task waiting on this pause is rejected with it, and the discussion does not continue past it — open the group to decide them individually."
   },
   "chatDrawer": {
     "deploying": "Deploying agent…",
@@ -3516,7 +3567,12 @@
       "sendError": "Sorry, I encountered an error. Please try again.",
       "startingConversation": "Starting conversation...",
       "toggleContext": "Toggle context",
-      "placeholderNamed": "Message {{name}}..."
+      "placeholderNamed": "Message {{name}}...",
+      "pausedForApproval": "This turn is paused waiting for a human decision. It resumes once the request is approved.",
+      "pausedRejected": "This conversation is paused waiting for a human decision, so the message was not sent.",
+      "reviewApprovals": "Review pending approvals",
+      "stop": "Stop generating",
+      "streamEnded": "The connection ended before the reply finished. What arrived is above — send again to retry."
     },
     "chat": {
       "agentDetails": "Agent Details",
@@ -4223,7 +4279,10 @@
     "maxCostInvalid": "Max cost per run must be a number of 0 or more.",
     "cadenceSummary_one": "up to {{max}} task/run",
     "cadenceSummary_other": "up to {{max}} tasks/run",
-    "inputTemplateTooLong": "The prompt template is limited to {{max}} characters."
+    "inputTemplateTooLong": "The prompt template is limited to {{max}} characters.",
+    "cronInvalid": "That is not a valid cron expression.",
+    "scheduleUnknown": "Schedule unavailable",
+    "nextRun": "next {{when}}"
   },
   "workforceWizard": {
     "title": "New Team"

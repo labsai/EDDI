@@ -2660,7 +2660,51 @@
         "flow": "Phasen, die Sie selbst festlegen"
       }
     },
-    "unsupportedStyle": "Dieser Server unterstützt {{style}} nicht. Wählen Sie ein anderes Format, um fortzufahren."
+    "unsupportedStyle": "Dieser Server unterstützt {{style}} nicht. Wählen Sie ein anderes Format, um fortzufahren.",
+    "payload": {
+      "ballot": "Stimmzettel",
+      "confidence": "{{percent}} % Zuversicht",
+      "noOption": "Es wurde keine Option genannt, daher zählt diese Stimme nicht für das Ergebnis.",
+      "bids_one": "{{count}} Gebot",
+      "bids_other": "{{count}} Gebote",
+      "noBids": "Hat auf keine Aufgabe geboten.",
+      "bargain": "Verhandlungszug",
+      "counterProposal": "Gegenvorschlag",
+      "accepted": "Vorschlag {{proposal}} angenommen.",
+      "acceptSuperseded": "Außerdem wurde {{proposal}} angenommen — der Gegenvorschlag oben hebt das auf.",
+      "inReturnFor": "im Gegenzug für {{received}}",
+      "lessons_one": "{{count}} Erkenntnis für das Team",
+      "lessons_other": "{{count}} Erkenntnisse für das Team"
+    },
+    "discussionDeleted": "Diskussion gelöscht",
+    "confirmDeleteDiscussionTitle": "Diese Diskussion löschen?",
+    "confirmDeleteDiscussionDescription": "Das Protokoll und alles darin werden dauerhaft entfernt. Das lässt sich nicht rückgängig machen.",
+    "taskStatus": {
+      "PENDING": "Offen",
+      "ASSIGNED": "Zugewiesen",
+      "IN_PROGRESS": "In Arbeit",
+      "COMPLETED": "Abgeschlossen",
+      "VERIFIED": "Geprüft",
+      "FAILED": "Fehlgeschlagen",
+      "BLOCKED": "Blockiert",
+      "AWAITING_APPROVAL": "Wartet auf Freigabe"
+    },
+    "confirmDeleteMembers": "Auch die Mitglieds-Agenten dieser Gruppe löschen. Bleiben sie zurück, gehören sie zu nichts mehr und erscheinen unter „Verwaiste“.",
+    "export": {
+      "discussion": "Diskussion",
+      "date": "Datum",
+      "status": "Status",
+      "question": "Frage",
+      "synthesis": "Synthese",
+      "error": "Fehler",
+      "winner": "Gewinner",
+      "outcome": "Ergebnis",
+      "unparsedJudgment": "Nicht ausgewertetes Urteil",
+      "minorityReport": "Minderheitsvotum",
+      "finalAnswer": "Endgültige Antwort",
+      "phase": "Phase"
+    },
+    "deleteMembersConfigFailed": "Die Mitglieder der Gruppe konnten nicht gelesen werden — es wurde nichts gelöscht. Bitte erneut versuchen."
   },
   "taskBoard": {
     "title": "Aufgabenübersicht",
@@ -3124,7 +3168,11 @@
     "hitlApprovalChannel": "Freigabe-Channel-ID",
     "hitlApprovalChannelHint": "Slack-Channel, der eine Freigabekarte erhält, wenn eine Konversation pausiert.",
     "hitlApproverUserIds": "Benutzer-IDs der Freigeber",
-    "hitlApproverUserIdsHint": "Kommagetrennte Slack-Benutzer-IDs, die über Buttons freigeben dürfen. Ohne diese Liste werden keine Buttons angezeigt (fail-closed)."
+    "hitlApproverUserIdsHint": "Kommagetrennte Slack-Benutzer-IDs, die über Buttons freigeben dürfen. Ohne diese Liste werden keine Buttons angezeigt (fail-closed).",
+    "typeAgent": "Agent",
+    "typeGroup": "Gruppe",
+    "selectGroup": "Gruppe auswählen …",
+    "unknownGroup": "{{id}} (nicht gefunden)"
   },
   "hitl": {
     "loadingApprovalDetails": "Freigabedetails werden geladen …",
@@ -3211,7 +3259,10 @@
     "humanTurn": "Zug des Mitglieds",
     "humanTurnReason": "Wartet darauf, dass {{member}} spricht",
     "humanTurnMemberFallback": "ein Mitglied",
-    "decidedProgress": "{{decided}} von {{total}} entschieden"
+    "decidedProgress": "{{decided}} von {{total}} entschieden",
+    "groupLinkUnavailable": "Diese Gruppe wurde nicht gefunden, daher gibt es keinen verlässlichen Link dorthin.",
+    "confirmApproveGroupDescription": "Die gesamte pausierte Phase freigeben und die Diskussion fortsetzen. Jede wartende Aufgabe wird mit freigegeben — für Einzelentscheidungen die Gruppe öffnen.",
+    "confirmRejectGroupDescription": "Die gesamte pausierte Phase ablehnen. Jede wartende Aufgabe wird mit abgelehnt, und die Diskussion läuft nicht darüber hinaus weiter — für Einzelentscheidungen die Gruppe öffnen."
   },
   "chatDrawer": {
     "deploying": "Agent wird bereitgestellt…",
@@ -3516,7 +3567,12 @@
       "sendError": "Entschuldigung, es ist ein Fehler aufgetreten. Bitte versuchen Sie es erneut.",
       "startingConversation": "Konversation wird gestartet …",
       "toggleContext": "Kontext umschalten",
-      "placeholderNamed": "Nachricht an {{name}} …"
+      "placeholderNamed": "Nachricht an {{name}} …",
+      "pausedForApproval": "Dieser Schritt wartet auf eine menschliche Entscheidung. Nach der Freigabe läuft er weiter.",
+      "pausedRejected": "Diese Unterhaltung wartet auf eine menschliche Entscheidung — die Nachricht wurde deshalb nicht gesendet.",
+      "reviewApprovals": "Offene Freigaben prüfen",
+      "stop": "Erzeugung stoppen",
+      "streamEnded": "Die Verbindung endete, bevor die Antwort fertig war. Was angekommen ist, steht oben — zum erneuten Versuch noch einmal senden."
     },
     "chat": {
       "agentDetails": "Agenten-Details",
@@ -4223,7 +4279,10 @@
     "maxCostInvalid": "Die maximalen Kosten pro Lauf müssen eine Zahl ab 0 sein.",
     "cadenceSummary_one": "bis zu {{max}} Aufgabe/Lauf",
     "cadenceSummary_other": "bis zu {{max}} Aufgaben/Lauf",
-    "inputTemplateTooLong": "Die Prompt-Vorlage ist auf {{max}} Zeichen begrenzt."
+    "inputTemplateTooLong": "Die Prompt-Vorlage ist auf {{max}} Zeichen begrenzt.",
+    "cronInvalid": "Das ist kein gültiger Cron-Ausdruck.",
+    "scheduleUnknown": "Zeitplan nicht verfügbar",
+    "nextRun": "nächster {{when}}"
   },
   "workforceWizard": {
     "title": "Neues Team"

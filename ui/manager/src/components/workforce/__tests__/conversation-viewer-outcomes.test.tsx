@@ -264,7 +264,7 @@ describe("ConversationViewer — structured outcomes", () => {
       );
       const exportBtn = await screen.findByLabelText("Export");
       exportBtn.click();
-      await waitFor(() => expect(exported).toContain("## Decision (NONE)"));
+      await waitFor(() => expect(exported).toContain("## No structured decision"));
       expect(exported).toContain("Unreadable judgment body.");
     } finally {
       URL.createObjectURL = originalCreate;

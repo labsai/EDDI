@@ -2660,7 +2660,51 @@
         "flow": "ขั้นตอนที่คุณกำหนดเอง"
       }
     },
-    "unsupportedStyle": "เซิร์ฟเวอร์นี้ไม่รองรับ {{style}} โปรดเลือกรูปแบบอื่นเพื่อดำเนินการต่อ"
+    "unsupportedStyle": "เซิร์ฟเวอร์นี้ไม่รองรับ {{style}} โปรดเลือกรูปแบบอื่นเพื่อดำเนินการต่อ",
+    "payload": {
+      "ballot": "บัตรลงคะแนน",
+      "confidence": "มั่นใจ {{percent}}%",
+      "noOption": "ไม่ได้ระบุตัวเลือก คะแนนนี้จึงไม่ถูกนับรวม",
+      "bids_one": "{{count}} ข้อเสนอ",
+      "bids_other": "{{count}} ข้อเสนอ",
+      "noBids": "ไม่ได้เสนอรับงานใดเลย",
+      "bargain": "การเจรจาต่อรอง",
+      "counterProposal": "ข้อเสนอโต้กลับ",
+      "accepted": "ยอมรับข้อเสนอ {{proposal}} แล้ว",
+      "acceptSuperseded": "ยอมรับ {{proposal}} ด้วย แต่ข้อเสนอโต้กลับด้านบนมีผลแทน",
+      "inReturnFor": "แลกกับ {{received}}",
+      "lessons_one": "บทเรียนสำหรับทีม {{count}} ข้อ",
+      "lessons_other": "บทเรียนสำหรับทีม {{count}} ข้อ"
+    },
+    "discussionDeleted": "ลบการอภิปรายแล้ว",
+    "confirmDeleteDiscussionTitle": "ลบการอภิปรายนี้หรือไม่",
+    "confirmDeleteDiscussionDescription": "บันทึกการสนทนาและทุกอย่างในนั้นจะถูกลบอย่างถาวร และไม่สามารถกู้คืนได้",
+    "taskStatus": {
+      "PENDING": "รอดำเนินการ",
+      "ASSIGNED": "มอบหมายแล้ว",
+      "IN_PROGRESS": "กำลังดำเนินการ",
+      "COMPLETED": "เสร็จสิ้น",
+      "VERIFIED": "ตรวจสอบแล้ว",
+      "FAILED": "ล้มเหลว",
+      "BLOCKED": "ถูกบล็อก",
+      "AWAITING_APPROVAL": "รออนุมัติ"
+    },
+    "confirmDeleteMembers": "ลบเอเจนต์สมาชิกของกลุ่มนี้ด้วย หากปล่อยไว้ เอเจนต์จะไม่สังกัดสิ่งใดและจะไปอยู่ในรายการกำพร้า",
+    "export": {
+      "discussion": "การอภิปราย",
+      "date": "วันที่",
+      "status": "สถานะ",
+      "question": "คำถาม",
+      "synthesis": "บทสรุปรวม",
+      "error": "ข้อผิดพลาด",
+      "winner": "ผู้ชนะ",
+      "outcome": "ผลลัพธ์",
+      "unparsedJudgment": "คำตัดสินที่อ่านค่าไม่ได้",
+      "minorityReport": "ความเห็นเสียงข้างน้อย",
+      "finalAnswer": "คำตอบสุดท้าย",
+      "phase": "เฟส"
+    },
+    "deleteMembersConfigFailed": "อ่านรายชื่อสมาชิกของกลุ่มไม่ได้ จึงไม่มีการลบสิ่งใด กรุณาลองอีกครั้ง"
   },
   "taskBoard": {
     "title": "บอร์ดงาน",
@@ -3124,7 +3168,11 @@
     "hitlApprovalChannel": "ID ช่องอนุมัติ",
     "hitlApprovalChannelHint": "ช่อง Slack ที่รับการ์ดอนุมัติเมื่อการสนทนาหยุดชั่วคราว",
     "hitlApproverUserIds": "ID ผู้ใช้ที่เป็นผู้อนุมัติ",
-    "hitlApproverUserIdsHint": "ID ผู้ใช้ Slack คั่นด้วยจุลภาคที่ได้รับอนุญาตให้อนุมัติผ่านปุ่ม หากไม่มีรายการนี้ ปุ่มจะไม่ถูกแสดง (ปิดโดยปริยายเมื่อล้มเหลว)"
+    "hitlApproverUserIdsHint": "ID ผู้ใช้ Slack คั่นด้วยจุลภาคที่ได้รับอนุญาตให้อนุมัติผ่านปุ่ม หากไม่มีรายการนี้ ปุ่มจะไม่ถูกแสดง (ปิดโดยปริยายเมื่อล้มเหลว)",
+    "typeAgent": "เอเจนต์",
+    "typeGroup": "กลุ่ม",
+    "selectGroup": "เลือกกลุ่ม…",
+    "unknownGroup": "{{id}} (ไม่พบ)"
   },
   "hitl": {
     "loadingApprovalDetails": "กำลังโหลดรายละเอียดการอนุมัติ…",
@@ -3211,7 +3259,10 @@
     "humanTurn": "ตาของสมาชิก",
     "humanTurnReason": "กำลังรอให้ {{member}} พูด",
     "humanTurnMemberFallback": "สมาชิกคนหนึ่ง",
-    "decidedProgress": "ตัดสินใจแล้ว {{decided}} จาก {{total}}"
+    "decidedProgress": "ตัดสินใจแล้ว {{decided}} จาก {{total}}",
+    "groupLinkUnavailable": "ไม่พบกลุ่มนี้ จึงไม่มีลิงก์ที่เชื่อถือได้",
+    "confirmApproveGroupDescription": "อนุมัติทั้งเฟสที่หยุดไว้และดำเนินการอภิปรายต่อ งานที่รออยู่ทั้งหมดจะได้รับการอนุมัติไปด้วย เปิดกลุ่มเพื่อตัดสินแยกรายการ",
+    "confirmRejectGroupDescription": "ปฏิเสธทั้งเฟสที่หยุดชั่วคราว งานทุกงานที่รอการหยุดนี้จะถูกปฏิเสธไปด้วย และการอภิปรายจะไม่ดำเนินต่อไป — เปิดกลุ่มเพื่อตัดสินใจทีละงาน"
   },
   "chatDrawer": {
     "deploying": "กำลังปรับใช้เอเจนต์…",
@@ -3516,7 +3567,12 @@
       "sendError": "ขออภัย เกิดข้อผิดพลาด กรุณาลองอีกครั้ง",
       "startingConversation": "กำลังเริ่มการสนทนา…",
       "toggleContext": "สลับบริบท",
-      "placeholderNamed": "ส่งข้อความถึง {{name}}…"
+      "placeholderNamed": "ส่งข้อความถึง {{name}}…",
+      "pausedForApproval": "รอบนี้หยุดรอการตัดสินใจจากคน และจะดำเนินต่อเมื่อคำขอได้รับอนุมัติ",
+      "pausedRejected": "การสนทนานี้หยุดรอการตัดสินใจจากคน ข้อความจึงไม่ถูกส่ง",
+      "reviewApprovals": "ตรวจสอบรายการที่รออนุมัติ",
+      "stop": "หยุดสร้างคำตอบ",
+      "streamEnded": "การเชื่อมต่อสิ้นสุดก่อนที่คำตอบจะเสร็จ ส่วนที่ได้รับแสดงอยู่ด้านบน — ส่งอีกครั้งเพื่อลองใหม่"
     },
     "chat": {
       "agentDetails": "รายละเอียดเอเจนต์",
@@ -4223,7 +4279,10 @@
     "maxCostInvalid": "ต้นทุนสูงสุดต่อการรันต้องเป็นตัวเลขตั้งแต่ 0 ขึ้นไป",
     "cadenceSummary_other": "สูงสุด {{max}} งานต่อการรัน",
     "cadenceSummary_one": "สูงสุด {{max}} งานต่อการรัน",
-    "inputTemplateTooLong": "เทมเพลตพรอมต์จำกัดที่ {{max}} อักขระ"
+    "inputTemplateTooLong": "เทมเพลตพรอมต์จำกัดที่ {{max}} อักขระ",
+    "cronInvalid": "นี่ไม่ใช่นิพจน์ cron ที่ถูกต้อง",
+    "scheduleUnknown": "ไม่พบตารางเวลา",
+    "nextRun": "ครั้งถัดไป {{when}}"
   },
   "workforceWizard": {
     "title": "ทีมใหม่"

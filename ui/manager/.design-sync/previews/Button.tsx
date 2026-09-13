@@ -30,6 +30,9 @@ export const Sizes = () => (
     <Button size="icon" aria-label="Add">
       <Plus />
     </Button>
+    <Button size="iconSm" variant="ghost" aria-label="Add">
+      <Plus />
+    </Button>
   </div>
 );
 

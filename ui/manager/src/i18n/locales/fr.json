@@ -2687,7 +2687,53 @@
         "flow": "Des phases que vous définissez vous-même"
       }
     },
-    "unsupportedStyle": "Ce serveur ne prend pas en charge {{style}}. Choisissez un autre cadre pour continuer."
+    "unsupportedStyle": "Ce serveur ne prend pas en charge {{style}}. Choisissez un autre cadre pour continuer.",
+    "payload": {
+      "ballot": "Bulletin",
+      "confidence": "{{percent}} % de confiance",
+      "noOption": "Aucune option n'a été nommée, ce bulletin ne compte donc pas dans le décompte.",
+      "bids_one": "{{count}} offre",
+      "bids_other": "{{count}} offres",
+      "noBids": "N'a soumissionné pour aucune tâche.",
+      "bargain": "Mouvement de négociation",
+      "counterProposal": "Contre-proposition",
+      "accepted": "Proposition {{proposal}} acceptée.",
+      "acceptSuperseded": "A également accepté {{proposal}}, que la contre-proposition ci-dessus annule.",
+      "inReturnFor": "en échange de {{received}}",
+      "lessons_one": "{{count}} enseignement pour l'équipe",
+      "lessons_other": "{{count}} enseignements pour l'équipe",
+      "bids_many": "{{count}} offres",
+      "lessons_many": "{{count}} enseignements pour l'équipe"
+    },
+    "discussionDeleted": "Discussion supprimée",
+    "confirmDeleteDiscussionTitle": "Supprimer cette discussion ?",
+    "confirmDeleteDiscussionDescription": "La transcription et tout ce qu'elle contient sont supprimés définitivement. Cette action est irréversible.",
+    "taskStatus": {
+      "PENDING": "En attente",
+      "ASSIGNED": "Attribuée",
+      "IN_PROGRESS": "En cours",
+      "COMPLETED": "Terminée",
+      "VERIFIED": "Vérifiée",
+      "FAILED": "Échouée",
+      "BLOCKED": "Bloquée",
+      "AWAITING_APPROVAL": "En attente d'approbation"
+    },
+    "confirmDeleteMembers": "Supprimer aussi les agents membres de ce groupe. S'ils restent, ils n'appartiennent plus à rien et apparaissent dans Orphelins.",
+    "export": {
+      "discussion": "Discussion",
+      "date": "Date",
+      "status": "Statut",
+      "question": "Question",
+      "synthesis": "Synthèse",
+      "error": "Erreur",
+      "winner": "Gagnant",
+      "outcome": "Résultat",
+      "unparsedJudgment": "Verdict non interprété",
+      "minorityReport": "Avis minoritaire",
+      "finalAnswer": "Réponse finale",
+      "phase": "Phase"
+    },
+    "deleteMembersConfigFailed": "Impossible de lire les membres du groupe : rien n'a été supprimé. Réessayez."
   },
   "taskBoard": {
     "title": "Tableau des tâches",
@@ -3153,7 +3199,11 @@
     "hitlApprovalChannel": "ID du canal d'approbation",
     "hitlApprovalChannelHint": "Canal Slack qui reçoit une carte d'approbation lorsqu'une conversation est mise en pause.",
     "hitlApproverUserIds": "ID des utilisateurs approbateurs",
-    "hitlApproverUserIdsHint": "ID d'utilisateurs Slack séparés par des virgules, autorisés à approuver via les boutons. Sans cette liste, les boutons ne sont pas affichés (échec par fermeture)."
+    "hitlApproverUserIdsHint": "ID d'utilisateurs Slack séparés par des virgules, autorisés à approuver via les boutons. Sans cette liste, les boutons ne sont pas affichés (échec par fermeture).",
+    "typeAgent": "Agent",
+    "typeGroup": "Groupe",
+    "selectGroup": "Choisir un groupe…",
+    "unknownGroup": "{{id}} (introuvable)"
   },
   "hitl": {
     "loadingApprovalDetails": "Chargement des détails d’approbation…",
@@ -3240,7 +3290,10 @@
     "humanTurn": "Tour du membre",
     "humanTurnReason": "En attente de la prise de parole de {{member}}",
     "humanTurnMemberFallback": "un membre",
-    "decidedProgress": "{{decided}} sur {{total}} décidés"
+    "decidedProgress": "{{decided}} sur {{total}} décidés",
+    "groupLinkUnavailable": "Ce groupe est introuvable ; aucun lien fiable ne peut être proposé.",
+    "confirmApproveGroupDescription": "Approuver toute la phase en pause et reprendre la discussion. Chaque tâche en attente est approuvée avec elle ; ouvrez le groupe pour les décider une par une.",
+    "confirmRejectGroupDescription": "Rejeter toute la phase en pause. Chaque tâche en attente est rejetée avec elle et la discussion ne va pas plus loin ; ouvrez le groupe pour les décider une par une."
   },
   "chatDrawer": {
     "deploying": "Déploiement de l'agent…",
@@ -3549,7 +3602,12 @@
       "sendError": "Désolé, une erreur s'est produite. Veuillez réessayer.",
       "startingConversation": "Démarrage de la conversation…",
       "toggleContext": "Afficher/masquer le contexte",
-      "placeholderNamed": "Message à {{name}}…"
+      "placeholderNamed": "Message à {{name}}…",
+      "pausedForApproval": "Ce tour est en pause dans l'attente d'une décision humaine. Il reprendra une fois la demande approuvée.",
+      "pausedRejected": "Cette conversation est en pause dans l'attente d'une décision humaine ; le message n'a donc pas été envoyé.",
+      "reviewApprovals": "Examiner les approbations en attente",
+      "stop": "Arrêter la génération",
+      "streamEnded": "La connexion s'est interrompue avant la fin de la réponse. Ce qui est arrivé figure ci-dessus ; renvoyez le message pour réessayer."
     },
     "chat": {
       "agentDetails": "Détails de l agent",
@@ -4261,7 +4319,10 @@
     "cadenceSummary_many": "jusqu'à {{max}} tâches/exécution",
     "cadenceSummary_one": "jusqu'à {{max}} tâche/exécution",
     "cadenceSummary_other": "jusqu'à {{max}} tâches/exécution",
-    "inputTemplateTooLong": "Le modèle de prompt est limité à {{max}} caractères."
+    "inputTemplateTooLong": "Le modèle de prompt est limité à {{max}} caractères.",
+    "cronInvalid": "Cette expression cron n'est pas valide.",
+    "scheduleUnknown": "Planification indisponible",
+    "nextRun": "prochaine {{when}}"
   },
   "workforceWizard": {
     "title": "Nouvelle équipe"

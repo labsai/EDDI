@@ -74,6 +74,7 @@ export function AlertDialog({
               className="flex-1"
               onClick={() => onOpenChange(false)}
               disabled={isPending}
+              data-testid="alert-dialog-cancel"
             >
               {cancelLabel}
             </Button>
@@ -84,6 +85,7 @@ export function AlertDialog({
                 onConfirm();
               }}
               disabled={isPending || confirmDisabled}
+              data-testid="alert-dialog-confirm"
             >
               {isPending ? "…" : confirmLabel}
             </Button>

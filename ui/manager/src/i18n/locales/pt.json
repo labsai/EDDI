@@ -2687,7 +2687,53 @@
         "flow": "Fases que você mesmo define"
       }
     },
-    "unsupportedStyle": "Este servidor não oferece suporte a {{style}}. Escolha outro formato para continuar."
+    "unsupportedStyle": "Este servidor não oferece suporte a {{style}}. Escolha outro formato para continuar.",
+    "payload": {
+      "ballot": "Voto",
+      "confidence": "{{percent}} % de confiança",
+      "noOption": "Nenhuma opção foi indicada, por isso este voto não conta para a apuração.",
+      "bids_one": "{{count}} proposta",
+      "bids_other": "{{count}} propostas",
+      "noBids": "Não se candidatou a nenhuma tarefa.",
+      "bargain": "Movimento de negociação",
+      "counterProposal": "Contraproposta",
+      "accepted": "Proposta {{proposal}} aceite.",
+      "acceptSuperseded": "Também aceitou {{proposal}}, que a contraproposta acima substitui.",
+      "inReturnFor": "em troca de {{received}}",
+      "lessons_one": "{{count}} lição para a equipa",
+      "lessons_other": "{{count}} lições para a equipa",
+      "bids_many": "{{count}} propostas",
+      "lessons_many": "{{count}} lições para a equipa"
+    },
+    "discussionDeleted": "Discussão eliminada",
+    "confirmDeleteDiscussionTitle": "Eliminar esta discussão?",
+    "confirmDeleteDiscussionDescription": "A transcrição e tudo o que contém são removidos permanentemente. Não é possível anular.",
+    "taskStatus": {
+      "PENDING": "Pendente",
+      "ASSIGNED": "Atribuída",
+      "IN_PROGRESS": "Em curso",
+      "COMPLETED": "Concluída",
+      "VERIFIED": "Verificada",
+      "FAILED": "Falhou",
+      "BLOCKED": "Bloqueada",
+      "AWAITING_APPROVAL": "A aguardar aprovação"
+    },
+    "confirmDeleteMembers": "Eliminar também os agentes membros deste grupo. Se ficarem, deixam de pertencer a algo e aparecem em Órfãos.",
+    "export": {
+      "discussion": "Discussão",
+      "date": "Data",
+      "status": "Estado",
+      "question": "Pergunta",
+      "synthesis": "Síntese",
+      "error": "Erro",
+      "winner": "Vencedor",
+      "outcome": "Resultado",
+      "unparsedJudgment": "Veredicto não interpretado",
+      "minorityReport": "Voto vencido",
+      "finalAnswer": "Resposta final",
+      "phase": "Fase"
+    },
+    "deleteMembersConfigFailed": "Não foi possível ler os membros do grupo, por isso nada foi eliminado. Tente novamente."
   },
   "taskBoard": {
     "title": "Quadro de tarefas",
@@ -3153,7 +3199,11 @@
     "hitlApprovalChannel": "ID do Canal de Aprovação",
     "hitlApprovalChannelHint": "Canal do Slack que recebe um cartão de aprovação quando uma conversa é pausada.",
     "hitlApproverUserIds": "IDs de Utilizador dos Aprovadores",
-    "hitlApproverUserIdsHint": "IDs de utilizador do Slack separados por vírgulas com permissão para aprovar através de botões. Sem esta lista, os botões não são apresentados (falha fechada)."
+    "hitlApproverUserIdsHint": "IDs de utilizador do Slack separados por vírgulas com permissão para aprovar através de botões. Sem esta lista, os botões não são apresentados (falha fechada).",
+    "typeAgent": "Agente",
+    "typeGroup": "Grupo",
+    "selectGroup": "Escolher um grupo…",
+    "unknownGroup": "{{id}} (não encontrado)"
   },
   "hitl": {
     "loadingApprovalDetails": "Carregando detalhes de aprovação…",
@@ -3240,7 +3290,10 @@
     "humanTurn": "Vez do membro",
     "humanTurnReason": "A aguardar que {{member}} fale",
     "humanTurnMemberFallback": "um membro",
-    "decidedProgress": "{{decided}} de {{total}} decididas"
+    "decidedProgress": "{{decided}} de {{total}} decididas",
+    "groupLinkUnavailable": "Este grupo não foi encontrado, por isso não há uma ligação fiável para ele.",
+    "confirmApproveGroupDescription": "Aprovar toda a fase em pausa e retomar a discussão. Cada tarefa pendente é aprovada com ela — abra o grupo para as decidir individualmente.",
+    "confirmRejectGroupDescription": "Rejeitar toda a fase em pausa. Cada tarefa pendente é rejeitada com ela e a discussão não avança para além dela — abra o grupo para as decidir individualmente."
   },
   "chatDrawer": {
     "deploying": "Implantando agente…",
@@ -3549,7 +3602,12 @@
       "sendError": "Desculpe, ocorreu um erro. Tente novamente.",
       "startingConversation": "Iniciando conversa…",
       "toggleContext": "Alternar contexto",
-      "placeholderNamed": "Mensagem para {{name}}…"
+      "placeholderNamed": "Mensagem para {{name}}…",
+      "pausedForApproval": "Esta vez está em pausa à espera de uma decisão humana. Retoma assim que o pedido for aprovado.",
+      "pausedRejected": "Esta conversa está em pausa à espera de uma decisão humana, por isso a mensagem não foi enviada.",
+      "reviewApprovals": "Rever aprovações pendentes",
+      "stop": "Parar a geração",
+      "streamEnded": "A ligação terminou antes de a resposta ficar completa. O que chegou está acima — envie novamente para tentar outra vez."
     },
     "chat": {
       "agentDetails": "Detalhes do Agente",
@@ -4261,7 +4319,10 @@
     "cadenceSummary_many": "até {{max}} tarefas/execução",
     "cadenceSummary_one": "até {{max}} tarefa/execução",
     "cadenceSummary_other": "até {{max}} tarefas/execução",
-    "inputTemplateTooLong": "O modelo de prompt está limitado a {{max}} caracteres."
+    "inputTemplateTooLong": "O modelo de prompt está limitado a {{max}} caracteres.",
+    "cronInvalid": "Essa expressão cron não é válida.",
+    "scheduleUnknown": "Agendamento indisponível",
+    "nextRun": "próxima {{when}}"
   },
   "workforceWizard": {
     "title": "Nova equipa"

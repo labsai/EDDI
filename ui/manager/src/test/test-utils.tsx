@@ -4,7 +4,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { ThemeProvider } from "@/components/layout/theme-provider";
 import type { ReactElement } from "react";
 
-function createTestQueryClient() {
+export function createTestQueryClient() {
   return new QueryClient({
     defaultOptions: {
       queries: { retry: false },

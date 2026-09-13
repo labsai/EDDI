@@ -26,6 +26,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AlertDialog } from "@/components/ui/alert-dialog";
+import { AccessibleDialog } from "@/components/ui/accessible-dialog";
 import { BackLink } from "@/components/shared/back-link";
 import { ErrorState } from "@/components/shared/error-state";
 import { cn } from "@/lib/utils";
@@ -91,9 +92,9 @@ function friendlyGroupActionError(
 export function GroupDetailPage() {
   const { id: groupId } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   // Backend requires version — default to 1 if missing from URL (e.g. wizard link).
-  // To update after a save: pull setSearchParams from useSearchParams() and call
+  // To update after a save: call
   // setSearchParams(p => { p.set("version", String(newVersion)); return p }, { replace: true })
   const version = useMemo(
     () => (searchParams.get("version") ? Number(searchParams.get("version")) : 1),
@@ -101,15 +102,51 @@ export function GroupDetailPage() {
   );
   const { t } = useTranslation();
   const queryClient = useQueryClient();
-  const [selectedConvId, setSelectedConvId] = useState<string | null>(null);
+
+  /**
+   * The selected discussion lives in the URL, as it does on the Workforce
+   * board.
+   *
+   * It used to be local state, which cost three things: a reload landed on
+   * whatever discussion happened to be first rather than the one being read,
+   * a discussion could not be linked to, and the approvals inbox — whose whole
+   * job is to send someone to a specific paused discussion — could only drop
+   * them on the group and let them find it.
+   */
+  const selectedConvId = searchParams.get("conversation");
+  const setSelectedConvId = useCallback(
+    (convId: string | null) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          if (convId) next.set("conversation", convId);
+          else next.delete("conversation");
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
   const [showConfig, setShowConfig] = useState(true);
   const [showDiscussions, setShowDiscussions] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [configSheetOpen, setConfigSheetOpen] = useState(false);
   // Discussion id awaiting a cancel confirmation. The hover "X" sits right next
   // to the Delete trash icon, so a mis-click must not abort a live discussion —
   // route it through a confirmation before the cancel mutation fires.
   const [cancelTarget, setCancelTarget] = useState<string | null>(null);
+  /**
+   * Discussion awaiting a delete confirmation.
+   *
+   * Cancel already had one, on the argument that a mis-click next to the trash
+   * icon must not abort a live discussion. Delete is the more destructive of
+   * the pair — it removes the transcript permanently, at any state including a
+   * running one — and had none. The Workforce history page, which deletes the
+   * same resource, has always confirmed.
+   */
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
 
   const {
     data: groupConfig,
@@ -128,8 +165,15 @@ export function GroupDetailPage() {
     isLoading: convLoading,
   } = useGroupConversation(groupId || "", selectedConvId || "");
 
-  // SSE streaming hook
-  const { streamState, startStream, continueStream, approveAndStream, abortStream, resetStream } = useGroupDiscussionStream();
+  // SSE streaming hook, bound to this group.
+  //
+  // Called with no argument, the hook keys off local state that only exists
+  // once THIS instance starts a stream — so navigating away and back left a
+  // running discussion streaming into the store with nothing rendering it, and
+  // the transcript fell back to the 3-second poll mid-discussion. The Workforce
+  // board passes its board id for the same reason.
+  const { streamState, startStream, continueStream, approveAndStream, abortStream, resetStream } =
+    useGroupDiscussionStream(groupId);
 
   const deleteConvMutation = useDeleteGroupConversation();
   const cancelDiscussionMutation = useCancelGroupDiscussion();
@@ -151,7 +195,7 @@ export function GroupDetailPage() {
     ) {
       setSelectedConvId(conversations[0]!.id);
     }
-  }, [conversations, selectedConvId, streamState.isStreaming, streamState.conversationId]);
+  }, [conversations, selectedConvId, streamState.isStreaming, streamState.conversationId, setSelectedConvId]);
 
   // ─── Context-aware input mode ─────────────────────────────────
   const inputMode = useMemo((): "new" | "continue" | "disabled" => {
@@ -193,13 +237,13 @@ export function GroupDetailPage() {
       startStream(groupId, question, attachments);
       toast.info(t("groups.discussionStarted", "Discussion started — streaming live"));
     }
-  }, [groupId, inputMode, selectedConvId, continueStream, startStream, t]);
+  }, [groupId, inputMode, selectedConvId, continueStream, startStream, setSelectedConvId, t]);
 
   const handleNewDiscussion = useCallback(() => {
     resetStream();
     pendingDecisionRef.current = null;
     setSelectedConvId(null);
-  }, [resetStream]);
+  }, [resetStream, setSelectedConvId]);
 
   // Approve/reject a paused group discussion. Resumes over the approve/stream
   // SSE endpoint so the continued discussion renders live in the transcript.
@@ -212,7 +256,7 @@ export function GroupDetailPage() {
       setSelectedConvId(null); // switch the transcript to the live resumed stream
       approveAndStream(groupId, gcId, { decision: { verdict, note }, taskApprovals });
     },
-    [groupId, approveAndStream],
+    [groupId, approveAndStream, setSelectedConvId],
   );
 
   // Toast the decision outcome once the resumed stream confirms (hitl_resume) or
@@ -356,7 +400,7 @@ export function GroupDetailPage() {
     ) {
       setSelectedConvId(streamState.conversationId);
     }
-  }, [streamState.state, streamState.conversationId, groupId, queryClient]);
+  }, [streamState.state, streamState.conversationId, groupId, queryClient, setSelectedConvId]);
 
   function handleDeleteConversation(convId: string) {
     if (!groupId) return;
@@ -364,9 +408,10 @@ export function GroupDetailPage() {
       { groupId, conversationId: convId },
       {
         onSuccess: () => {
-          toast.success(t("common.delete") + " ✓");
+          toast.success(t("groups.discussionDeleted", "Discussion deleted"));
           if (selectedConvId === convId) setSelectedConvId(null);
         },
+        onError: (err) => toast.error(getErrorMessage(err)),
       }
     );
   }
@@ -486,30 +531,39 @@ export function GroupDetailPage() {
                 <span className="text-[10px] text-muted-foreground">
                   {safeFormatDate(conv.created, "date")}
                 </span>
-                <button
+                {/* `focus-visible:opacity-100` and the group's own focus-within
+                    are not optional decoration: opacity-0 alone left these
+                    controls invisible to a keyboard user and to touch, while
+                    still being clickable. */}
+                <Button
+                  variant="ghost"
+                  size="iconSm"
                   onClick={(e) => {
                     e.stopPropagation();
-                    handleDeleteConversation(conv.id);
+                    setDeleteTarget(conv.id);
                   }}
-                  className="ms-auto opacity-0 group-hover/item:opacity-100 rounded p-0.5 text-muted-foreground hover:text-destructive transition-all"
-                  title={t("common.delete")}
-                  aria-label={t("common.delete")}
+                  className="ms-auto opacity-0 group-hover/item:opacity-100 group-focus-within/item:opacity-100 focus-visible:opacity-100 max-md:opacity-100 text-muted-foreground hover:text-destructive"
+                  title={t("common.delete", "Delete")}
+                  aria-label={t("common.delete", "Delete")}
+                  data-testid={`delete-discussion-${conv.id}`}
                 >
-                  <Trash2 className="h-3 w-3" />
-                </button>
+                  <Trash2 />
+                </Button>
                 {(conv.state === "AWAITING_APPROVAL" || conv.state === "AWAITING_HUMAN_INPUT" || conv.state === "IN_PROGRESS") && (
-                  <button
+                  <Button
+                    variant="ghost"
+                    size="iconSm"
                     onClick={(e) => {
                       e.stopPropagation();
                       setCancelTarget(conv.id);
                     }}
-                    className="opacity-0 group-hover/item:opacity-100 rounded p-0.5 text-muted-foreground hover:text-destructive transition-all"
+                    className="opacity-0 group-hover/item:opacity-100 group-focus-within/item:opacity-100 focus-visible:opacity-100 max-md:opacity-100 text-muted-foreground hover:text-destructive"
                     title={t("hitl.cancelDiscussion", "Cancel discussion")}
                     aria-label={t("hitl.cancelDiscussion", "Cancel discussion")}
                     disabled={cancelDiscussionMutation.isPending}
                   >
-                    <X className="h-3 w-3" />
-                  </button>
+                    <X />
+                  </Button>
                 )}
               </div>
             </div>
@@ -593,6 +647,24 @@ export function GroupDetailPage() {
               className="max-xl:hidden"
             >
               <PanelRightOpen className="h-4 w-4" />
+            </Button>
+          )}
+
+          {/* Below xl the side panel is hidden outright, and its re-open button
+              with it — so a tablet or phone had no route to the group's
+              configuration from this page at all. This opens the same panel as
+              a sheet. */}
+          {!isFullscreen && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setConfigSheetOpen(true)}
+              title={t("groups.showConfig", "Show config panel")}
+              aria-label={t("groups.showConfig", "Show config panel")}
+              className="xl:hidden"
+              data-testid="open-config-sheet"
+            >
+              <Settings2 className="h-4 w-4" />
             </Button>
           )}
 
@@ -729,7 +801,10 @@ export function GroupDetailPage() {
         </div>
 
         {/* RIGHT: Config panel — hidden on small screens and in fullscreen */}
-        {showConfig && !isFullscreen && (
+        {/* Not while the sheet is open: below `xl` this block is CSS-hidden
+            rather than unmounted, so the two would be live at once — duplicate
+            test ids in the DOM and two panels with independent editing state. */}
+        {showConfig && !isFullscreen && !configSheetOpen && (
           <div className="w-72 shrink-0 rounded-xl border border-border bg-card overflow-hidden flex flex-col max-xl:hidden">
             <div className="p-3 border-b border-border flex items-center justify-between">
               <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
@@ -750,6 +825,45 @@ export function GroupDetailPage() {
           </div>
         )}
       </div>
+
+      {/* The same configuration panel, as a sheet, for viewports where the
+          sidebar is hidden. One `GroupConfigPanel`, two placements. */}
+      <AccessibleDialog
+        open={configSheetOpen}
+        onClose={() => setConfigSheetOpen(false)}
+        title={t("groups.configuration", "Configuration")}
+        testId="config-sheet-dialog"
+      >
+        <div className="max-h-[70vh] overflow-y-auto" data-testid="config-sheet">
+          <GroupConfigPanel
+            key={`sheet-${groupId}`}
+            config={safeConfig}
+            groupId={groupId}
+            groupVersion={version}
+          />
+        </div>
+      </AccessibleDialog>
+
+      {/* Delete confirmation — permanent, and offered on a running discussion
+          too, so it is the one of the pair that most needs asking. */}
+      <AlertDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
+        title={t("groups.confirmDeleteDiscussionTitle", "Delete this discussion?")}
+        description={t(
+          "groups.confirmDeleteDiscussionDescription",
+          "The transcript and everything in it are removed permanently. This cannot be undone.",
+        )}
+        confirmLabel={t("common.delete", "Delete")}
+        cancelLabel={t("common.cancel")}
+        variant="destructive"
+        onConfirm={() => {
+          if (deleteTarget) handleDeleteConversation(deleteTarget);
+          setDeleteTarget(null);
+        }}
+      />
 
       {/* Cancel confirmation — the hover "X" must not abort a discussion on a
           single (mis-)click next to the Delete icon. */}

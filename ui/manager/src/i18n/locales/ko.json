@@ -2660,7 +2660,51 @@
         "flow": "직접 정의하는 단계"
       }
     },
-    "unsupportedStyle": "이 서버는 {{style}}을(를) 지원하지 않습니다. 다른 형식을 선택하세요."
+    "unsupportedStyle": "이 서버는 {{style}}을(를) 지원하지 않습니다. 다른 형식을 선택하세요.",
+    "payload": {
+      "ballot": "투표",
+      "confidence": "확신도 {{percent}}%",
+      "noOption": "선택지를 밝히지 않아 이 투표는 집계에 포함되지 않습니다.",
+      "bids_one": "입찰 {{count}}건",
+      "bids_other": "입찰 {{count}}건",
+      "noBids": "어떤 작업에도 입찰하지 않았습니다.",
+      "bargain": "협상 수",
+      "counterProposal": "역제안",
+      "accepted": "제안 {{proposal}}을(를) 수락했습니다.",
+      "acceptSuperseded": "{{proposal}}도 수락했지만 위의 역제안이 이를 대체합니다.",
+      "inReturnFor": "{{received}}을(를) 대가로",
+      "lessons_one": "팀을 위한 교훈 {{count}}건",
+      "lessons_other": "팀을 위한 교훈 {{count}}건"
+    },
+    "discussionDeleted": "토론을 삭제했습니다",
+    "confirmDeleteDiscussionTitle": "이 토론을 삭제할까요?",
+    "confirmDeleteDiscussionDescription": "기록과 그 안의 모든 내용이 영구적으로 삭제됩니다. 되돌릴 수 없습니다.",
+    "taskStatus": {
+      "PENDING": "대기 중",
+      "ASSIGNED": "배정됨",
+      "IN_PROGRESS": "진행 중",
+      "COMPLETED": "완료",
+      "VERIFIED": "검증됨",
+      "FAILED": "실패",
+      "BLOCKED": "차단됨",
+      "AWAITING_APPROVAL": "승인 대기"
+    },
+    "confirmDeleteMembers": "이 그룹의 구성원 에이전트도 삭제합니다. 남겨두면 어디에도 속하지 않은 채 '고아' 목록에 나타납니다.",
+    "export": {
+      "discussion": "토론",
+      "date": "날짜",
+      "status": "상태",
+      "question": "질문",
+      "synthesis": "종합",
+      "error": "오류",
+      "winner": "승자",
+      "outcome": "결과",
+      "unparsedJudgment": "해석되지 않은 판정",
+      "minorityReport": "소수 의견",
+      "finalAnswer": "최종 답변",
+      "phase": "단계"
+    },
+    "deleteMembersConfigFailed": "그룹 구성원을 읽지 못해 아무것도 삭제되지 않았습니다. 다시 시도해 주세요."
   },
   "taskBoard": {
     "title": "작업 보드",
@@ -3124,7 +3168,11 @@
     "hitlApprovalChannel": "승인 채널 ID",
     "hitlApprovalChannelHint": "대화가 일시 정지될 때 승인 카드를 받는 Slack 채널입니다.",
     "hitlApproverUserIds": "승인자 사용자 ID",
-    "hitlApproverUserIdsHint": "버튼으로 승인할 수 있는 쉼표로 구분된 Slack 사용자 ID입니다. 이 목록이 없으면 버튼이 렌더링되지 않습니다(기본 차단)."
+    "hitlApproverUserIdsHint": "버튼으로 승인할 수 있는 쉼표로 구분된 Slack 사용자 ID입니다. 이 목록이 없으면 버튼이 렌더링되지 않습니다(기본 차단).",
+    "typeAgent": "에이전트",
+    "typeGroup": "그룹",
+    "selectGroup": "그룹 선택…",
+    "unknownGroup": "{{id}} (찾을 수 없음)"
   },
   "hitl": {
     "loadingApprovalDetails": "승인 세부 정보를 불러오는 중…",
@@ -3211,7 +3259,10 @@
     "humanTurn": "구성원 차례",
     "humanTurnReason": "{{member}}님의 발언을 기다리는 중",
     "humanTurnMemberFallback": "한 구성원",
-    "decidedProgress": "{{total}}건 중 {{decided}}건 결정됨"
+    "decidedProgress": "{{total}}건 중 {{decided}}건 결정됨",
+    "groupLinkUnavailable": "이 그룹을 찾을 수 없어 안전한 링크를 제공할 수 없습니다.",
+    "confirmApproveGroupDescription": "일시 중지된 단계 전체를 승인하고 토론을 재개합니다. 대기 중인 모든 작업도 함께 승인됩니다. 개별 결정은 그룹에서 하세요.",
+    "confirmRejectGroupDescription": "일시 중지된 단계 전체를 거부합니다. 이 일시 중지를 기다리는 모든 작업이 함께 거부되며 논의는 더 진행되지 않습니다. 개별적으로 결정하려면 그룹을 여세요."
   },
   "chatDrawer": {
     "deploying": "에이전트 배포 중…",
@@ -3516,7 +3567,12 @@
       "sendError": "죄송합니다. 오류가 발생했습니다. 다시 시도해 주세요.",
       "startingConversation": "대화를 시작하는 중…",
       "toggleContext": "컨텍스트 전환",
-      "placeholderNamed": "{{name}}에게 메시지…"
+      "placeholderNamed": "{{name}}에게 메시지…",
+      "pausedForApproval": "이 차례는 사람의 결정을 기다리며 멈춰 있습니다. 요청이 승인되면 다시 진행됩니다.",
+      "pausedRejected": "이 대화는 사람의 결정을 기다리며 멈춰 있어 메시지가 전송되지 않았습니다.",
+      "reviewApprovals": "대기 중인 승인 검토",
+      "stop": "생성 중지",
+      "streamEnded": "답변이 끝나기 전에 연결이 종료되었습니다. 도착한 내용은 위에 있습니다. 다시 보내 재시도하세요."
     },
     "chat": {
       "agentDetails": "에이전트 상세 정보",
@@ -4223,7 +4279,10 @@
     "maxCostInvalid": "실행당 최대 비용은 0 이상의 숫자여야 합니다.",
     "cadenceSummary_other": "실행당 최대 {{max}}개 작업",
     "cadenceSummary_one": "실행당 최대 {{max}}개 작업",
-    "inputTemplateTooLong": "프롬프트 템플릿은 최대 {{max}}자입니다."
+    "inputTemplateTooLong": "프롬프트 템플릿은 최대 {{max}}자입니다.",
+    "cronInvalid": "유효한 cron 표현식이 아닙니다.",
+    "scheduleUnknown": "일정을 가져올 수 없음",
+    "nextRun": "다음 {{when}}"
   },
   "workforceWizard": {
     "title": "새 팀"

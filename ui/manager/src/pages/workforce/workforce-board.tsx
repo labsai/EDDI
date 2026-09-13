@@ -29,6 +29,7 @@ import { GroupConfigPanel } from "@/components/groups/group-config-panel";
 import {
   followupGroupMember,
   closeGroupConversation,
+  type GroupAttachmentRef,
 } from "@/lib/api/groups";
 import { useSubmitHumanInput } from "@/hooks/use-hitl";
 import { getErrorMessage } from "@/lib/api-client";
@@ -347,14 +348,18 @@ function WorkforceBoard() {
 
   // ─── Handlers ──────────────────────────────────────────────────
   const handleSend = useCallback(
-    (question: string) => {
+    (question: string, attachments?: GroupAttachmentRef[]) => {
       if (!boardId) return;
       if (inputMode === "continue" && selectedConvId) {
+        // Attachments are deliberately not forwarded: the backend shares files
+        // with member agents only when a discussion starts and rejects a
+        // continuation carrying any. `BoardInput` hides the affordance in this
+        // mode, so there should be none to drop.
         continueStream(boardId, selectedConvId, question);
         toast.success(t("groups.continueStreamStarted", "Continuation started — streaming live"));
       } else {
         setSelectedConvId(null);
-        startStream(boardId, question);
+        startStream(boardId, question, attachments);
       }
     },
     [boardId, inputMode, selectedConvId, continueStream, startStream, setSelectedConvId, t],

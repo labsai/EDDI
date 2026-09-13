@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseTranscriptContent, parseEmojiVerification, parseVerdictJson, truncateContent, safeFormatDate } from "@/components/groups/group-utils";
+import { parseTranscriptContent, parseEmojiVerification, parseVerdictJson, truncateContent, safeFormatDate, humanizeJsonKey } from "@/components/groups/group-utils";
 
 describe("group-utils", () => {
   describe("parseTranscriptContent", () => {
@@ -331,17 +331,16 @@ describe("parseTranscriptContent — JSON that is somebody's answer", () => {
 
   it("renders a winner-plus-extras object in full rather than as nothing", () => {
     const out = parseTranscriptContent(JSON.stringify({ winner: "player1", analysis: "detail" }));
-    expect(out).toContain("winner");
-    expect(out).toContain("player1");
-    expect(out).toContain("analysis");
-    expect(out).toContain("detail");
+    // Keys become sentence-cased labels — the raw JSON name is not what a
+    // reader needs, but every field still has to survive.
+    expect(out).toContain("**Winner**: player1");
+    expect(out).toContain("**Analysis**: detail");
   });
 
   it("keeps every field of a structured answer that is not a verdict", () => {
     const out = parseTranscriptContent(JSON.stringify({ position: "PRO", reasoning: "because" }));
-    expect(out).toContain("position");
-    expect(out).toContain("PRO");
-    expect(out).toContain("because");
+    expect(out).toContain("**Position**: PRO");
+    expect(out).toContain("**Reasoning**: because");
   });
 
   it("reads a single-string output envelope", () => {
@@ -349,7 +348,7 @@ describe("parseTranscriptContent — JSON that is somebody's answer", () => {
   });
 
   it("renders a list of unrecognised objects rather than a blank card", () => {
-    expect(parseTranscriptContent(JSON.stringify([{ foo: "bar" }]))).toContain("foo");
+    expect(parseTranscriptContent(JSON.stringify([{ foo: "bar" }]))).toContain("**Foo**: bar");
     // An empty list is still an empty answer.
     expect(parseTranscriptContent("[]")).toBe("");
   });
@@ -364,8 +363,84 @@ describe("parseTranscriptContent — JSON that is somebody's answer", () => {
     // This used to return "" for anything that was an object without `output`,
     // so an unrecognised answer rendered as a blank card.
     const out = parseTranscriptContent(JSON.stringify({ verdict: "PRO", margin: 2 }));
-    expect(out).toContain("verdict");
-    expect(out).toContain("PRO");
-    expect(out).toContain("margin");
+    expect(out).toContain("**Verdict**: PRO");
+    expect(out).toContain("**Margin**: 2");
+  });
+
+  /**
+   * The regression these guard: EDDI hands a member a JSON contract for four
+   * phase types and stores the reply verbatim, so a BID turn's body really is
+   * `{"bids": [{…}]}`. Rendering nested values with `JSON.stringify` put that
+   * array on screen as a raw blob in the middle of a discussion transcript.
+   */
+  describe("nested JSON never renders as a blob", () => {
+    it("expands an array of objects into a sub-list", () => {
+      const out = parseTranscriptContent(
+        JSON.stringify({ bids: [{ subject: "Draft spec", confidence: 0.9 }] }),
+      );
+      expect(out).not.toContain('{"');
+      expect(out).not.toContain("[{");
+      expect(out).toContain("- **Bids**:");
+      expect(out).toContain("**Subject**: Draft spec");
+      expect(out).toContain("**Confidence**: 0.9");
+    });
+
+    it("expands a nested object into a sub-list", () => {
+      const out = parseTranscriptContent(JSON.stringify({ meta: { round: 2, judge: "m1" } }));
+      expect(out).not.toContain("{");
+      expect(out).toContain("**Round**: 2");
+      expect(out).toContain("**Judge**: m1");
+    });
+
+    it("joins an array of plain values into a sentence rather than a list", () => {
+      expect(parseTranscriptContent(JSON.stringify({ tags: ["a", "b"] }))).toContain(
+        "**Tags**: a, b",
+      );
+    });
+
+    it("drops a null field rather than printing the word null", () => {
+      const out = parseTranscriptContent(JSON.stringify({ kept: "yes", dropped: null }));
+      expect(out).toContain("**Kept**: yes");
+      expect(out).not.toContain("Dropped");
+    });
+
+    it("keeps each item of an array visually separate", () => {
+      const out = parseTranscriptContent(
+        JSON.stringify({ bids: [{ subject: "A", note: "x" }, { subject: "B", note: "y" }] }),
+      );
+      // The first field of each item rides on its own bullet; a flat run of
+      // sibling bullets would merge the two bids into one undifferentiated list.
+      expect(out).toContain("  - **Subject**: A");
+      expect(out).toContain("  - **Subject**: B");
+    });
+
+    it("stops recursing on a pathologically deep object instead of hanging", () => {
+      let deep: Record<string, unknown> = { end: "bottom" };
+      for (let i = 0; i < 12; i++) deep = { level: deep };
+      const out = parseTranscriptContent(JSON.stringify(deep));
+      expect(out).toContain("**Level**");
+      // The escape hatch is bounded stringification, not an unbounded descent.
+      expect(out.length).toBeLessThan(2000);
+    });
+  });
+
+  describe("humanizeJsonKey", () => {
+    it("sentence-cases a camelCase key", () => {
+      expect(humanizeJsonKey("estimatedComplexity")).toBe("Estimated complexity");
+    });
+
+    it("treats underscores and hyphens as word breaks", () => {
+      expect(humanizeJsonKey("task_id")).toBe("Task id");
+      expect(humanizeJsonKey("in-return-for")).toBe("In return for");
+    });
+
+    it("leaves an acronym in caps, where lowercasing would read as a typo", () => {
+      expect(humanizeJsonKey("URL")).toBe("URL");
+      expect(humanizeJsonKey("requestURL")).toBe("Request URL");
+    });
+
+    it("returns an unusable key unchanged rather than an empty label", () => {
+      expect(humanizeJsonKey("")).toBe("");
+    });
   });
 });

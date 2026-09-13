@@ -10,6 +10,8 @@ import {
 } from "lucide-react";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import {
+  useEnrichedGroupDescriptors,
+  useGroup,
   useGroupConversations,
   useDeleteGroupConversation,
 } from "@/hooks/use-groups";
@@ -234,6 +236,20 @@ function WorkforceHistory() {
   const listRef = useRef<HTMLDivElement>(null);
 
   // Data
+  // Titles the exported file. Without it every export is headed "Discussion",
+  // whichever task force produced it.
+  // Nothing links here with a `version`, and `getGroup` sends one, so a fixed
+  // 1 read the group's FIRST version — a renamed task force would export under
+  // its original name. The descriptor list carries the current version.
+  const { data: boardDescriptors } = useEnrichedGroupDescriptors(200);
+  const boardVersion = useMemo(
+    () => boardDescriptors?.find((g) => g.id === boardId)?.version,
+    [boardDescriptors, boardId],
+  );
+  // Left unfetched until the descriptor names a version. Falling back to 1
+  // reads the group's FIRST version, so the export would be titled with the
+  // name the group was created under until the descriptors arrive.
+  const { data: boardConfig } = useGroup(boardVersion ? (boardId ?? "") : "", boardVersion);
   const { data: conversations, isLoading, isError } = useGroupConversations(
     boardId ?? "",
     PAGE_SIZE * (page + 1),
@@ -486,6 +502,7 @@ function WorkforceHistory() {
             <ConversationViewer
               groupId={boardId}
               conversationId={selectedId}
+              groupName={boardConfig?.name}
               onClose={() => {
                 setSelectedId(null);
                 setShowViewer(false);

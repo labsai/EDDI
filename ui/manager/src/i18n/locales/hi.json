@@ -2660,7 +2660,51 @@
         "flow": "वे चरण जो आप ख़ुद तय करते हैं"
       }
     },
-    "unsupportedStyle": "यह सर्वर {{style}} का समर्थन नहीं करता। जारी रखने के लिए दूसरा ढाँचा चुनें।"
+    "unsupportedStyle": "यह सर्वर {{style}} का समर्थन नहीं करता। जारी रखने के लिए दूसरा ढाँचा चुनें।",
+    "payload": {
+      "ballot": "मतपत्र",
+      "confidence": "{{percent}}% विश्वास",
+      "noOption": "कोई विकल्प नहीं बताया गया, इसलिए यह मत गणना में नहीं गिना जाएगा।",
+      "bids_one": "{{count}} बोली",
+      "bids_other": "{{count}} बोलियाँ",
+      "noBids": "किसी कार्य के लिए बोली नहीं लगाई।",
+      "bargain": "सौदेबाज़ी की चाल",
+      "counterProposal": "प्रति-प्रस्ताव",
+      "accepted": "प्रस्ताव {{proposal}} स्वीकार किया।",
+      "acceptSuperseded": "{{proposal}} भी स्वीकार किया, जिसे ऊपर का प्रति-प्रस्ताव रद्द कर देता है।",
+      "inReturnFor": "{{received}} के बदले में",
+      "lessons_one": "टीम के लिए {{count}} सीख",
+      "lessons_other": "टीम के लिए {{count}} सीखें"
+    },
+    "discussionDeleted": "चर्चा हटाई गई",
+    "confirmDeleteDiscussionTitle": "यह चर्चा हटाएँ?",
+    "confirmDeleteDiscussionDescription": "प्रतिलेख और उसमें मौजूद सब कुछ स्थायी रूप से हट जाएगा। इसे पूर्ववत नहीं किया जा सकता।",
+    "taskStatus": {
+      "PENDING": "लंबित",
+      "ASSIGNED": "सौंपी गई",
+      "IN_PROGRESS": "चल रही है",
+      "COMPLETED": "पूर्ण",
+      "VERIFIED": "सत्यापित",
+      "FAILED": "विफल",
+      "BLOCKED": "अवरुद्ध",
+      "AWAITING_APPROVAL": "स्वीकृति की प्रतीक्षा में"
+    },
+    "confirmDeleteMembers": "इस समूह के सदस्य एजेंट भी हटाएँ। पीछे छूटने पर वे किसी से नहीं जुड़े रहते और «अनाथ» में दिखते हैं।",
+    "export": {
+      "discussion": "चर्चा",
+      "date": "दिनांक",
+      "status": "स्थिति",
+      "question": "प्रश्न",
+      "synthesis": "संश्लेषण",
+      "error": "त्रुटि",
+      "winner": "विजेता",
+      "outcome": "परिणाम",
+      "unparsedJudgment": "अपठित निर्णय",
+      "minorityReport": "अल्पमत मत",
+      "finalAnswer": "अंतिम उत्तर",
+      "phase": "चरण"
+    },
+    "deleteMembersConfigFailed": "समूह के सदस्य पढ़े नहीं जा सके, इसलिए कुछ भी नहीं हटाया गया। फिर से प्रयास करें।"
   },
   "taskBoard": {
     "title": "कार्य बोर्ड",
@@ -3124,7 +3168,11 @@
     "hitlApprovalChannel": "अनुमोदन चैनल ID",
     "hitlApprovalChannelHint": "Slack चैनल जिसे बातचीत रुकने पर अनुमोदन कार्ड प्राप्त होता है।",
     "hitlApproverUserIds": "अनुमोदक उपयोगकर्ता ID",
-    "hitlApproverUserIdsHint": "अल्पविराम-पृथक Slack उपयोगकर्ता ID जिन्हें बटन के माध्यम से अनुमोदन की अनुमति है। इस सूची के बिना, बटन प्रदर्शित नहीं होते (फेल-क्लोज्ड)।"
+    "hitlApproverUserIdsHint": "अल्पविराम-पृथक Slack उपयोगकर्ता ID जिन्हें बटन के माध्यम से अनुमोदन की अनुमति है। इस सूची के बिना, बटन प्रदर्शित नहीं होते (फेल-क्लोज्ड)।",
+    "typeAgent": "एजेंट",
+    "typeGroup": "समूह",
+    "selectGroup": "एक समूह चुनें…",
+    "unknownGroup": "{{id}} (नहीं मिला)"
   },
   "hitl": {
     "loadingApprovalDetails": "अनुमोदन विवरण लोड हो रहा है…",
@@ -3211,7 +3259,10 @@
     "humanTurn": "सदस्य की बारी",
     "humanTurnReason": "{{member}} के बोलने की प्रतीक्षा",
     "humanTurnMemberFallback": "एक सदस्य",
-    "decidedProgress": "{{total}} में से {{decided}} तय"
+    "decidedProgress": "{{total}} में से {{decided}} तय",
+    "groupLinkUnavailable": "यह समूह नहीं मिला, इसलिए इसका कोई भरोसेमंद लिंक नहीं है।",
+    "confirmApproveGroupDescription": "पूरे रुके हुए चरण को स्वीकृत करें और चर्चा जारी रखें। इस विराम पर प्रतीक्षारत हर कार्य भी स्वीकृत हो जाएगा — अलग-अलग निर्णय के लिए समूह खोलें।",
+    "confirmRejectGroupDescription": "पूरे रुके हुए चरण को अस्वीकार करें। इस विराम पर प्रतीक्षा कर रहा हर कार्य इसके साथ अस्वीकार हो जाएगा और चर्चा आगे नहीं बढ़ेगी — अलग-अलग निर्णय लेने के लिए समूह खोलें।"
   },
   "chatDrawer": {
     "deploying": "एजेंट Deploy हो रहा है…",
@@ -3516,7 +3567,12 @@
       "sendError": "क्षमा करें, एक त्रुटि हुई। कृपया पुनः प्रयास करें।",
       "startingConversation": "वार्तालाप शुरू हो रहा है…",
       "toggleContext": "संदर्भ टॉगल करें",
-      "placeholderNamed": "{{name}} को संदेश…"
+      "placeholderNamed": "{{name}} को संदेश…",
+      "pausedForApproval": "यह चरण किसी मानवीय निर्णय की प्रतीक्षा में रुका है। अनुरोध स्वीकृत होते ही यह आगे बढ़ेगा।",
+      "pausedRejected": "यह बातचीत मानवीय निर्णय की प्रतीक्षा में रुकी है, इसलिए संदेश भेजा नहीं गया।",
+      "reviewApprovals": "लंबित स्वीकृतियाँ देखें",
+      "stop": "उत्तर बनाना रोकें",
+      "streamEnded": "उत्तर पूरा होने से पहले कनेक्शन समाप्त हो गया। जो मिला वह ऊपर है — फिर से प्रयास करने के लिए दोबारा भेजें।"
     },
     "chat": {
       "agentDetails": "एजेंट विवरण",
@@ -4223,7 +4279,10 @@
     "maxCostInvalid": "प्रति रन अधिकतम लागत 0 या उससे अधिक संख्या होनी चाहिए।",
     "cadenceSummary_one": "प्रति रन अधिकतम {{max}} कार्य",
     "cadenceSummary_other": "प्रति रन अधिकतम {{max}} कार्य",
-    "inputTemplateTooLong": "प्रॉम्प्ट टेम्पलेट {{max}} वर्णों तक सीमित है।"
+    "inputTemplateTooLong": "प्रॉम्प्ट टेम्पलेट {{max}} वर्णों तक सीमित है।",
+    "cronInvalid": "यह मान्य क्रॉन अभिव्यक्ति नहीं है।",
+    "scheduleUnknown": "शेड्यूल उपलब्ध नहीं",
+    "nextRun": "अगला {{when}}"
   },
   "workforceWizard": {
     "title": "नई टीम"

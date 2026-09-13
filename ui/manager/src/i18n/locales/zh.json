@@ -2660,7 +2660,51 @@
         "flow": "由你自行定义的阶段"
       }
     },
-    "unsupportedStyle": "此服务器不支持 {{style}}。请选择其他框架以继续。"
+    "unsupportedStyle": "此服务器不支持 {{style}}。请选择其他框架以继续。",
+    "payload": {
+      "ballot": "投票",
+      "confidence": "置信度 {{percent}}%",
+      "noOption": "未指明任何选项，因此该票不计入统计。",
+      "bids_one": "{{count}} 项竞标",
+      "bids_other": "{{count}} 项竞标",
+      "noBids": "未对任何任务竞标。",
+      "bargain": "谈判动作",
+      "counterProposal": "反提案",
+      "accepted": "已接受提案 {{proposal}}。",
+      "acceptSuperseded": "同时接受了 {{proposal}}，但上方的反提案取而代之。",
+      "inReturnFor": "以换取 {{received}}",
+      "lessons_one": "为团队总结 {{count}} 条经验",
+      "lessons_other": "为团队总结 {{count}} 条经验"
+    },
+    "discussionDeleted": "已删除讨论",
+    "confirmDeleteDiscussionTitle": "删除该讨论？",
+    "confirmDeleteDiscussionDescription": "记录及其中的全部内容将被永久删除，且无法撤销。",
+    "taskStatus": {
+      "PENDING": "待处理",
+      "ASSIGNED": "已指派",
+      "IN_PROGRESS": "进行中",
+      "COMPLETED": "已完成",
+      "VERIFIED": "已验证",
+      "FAILED": "已失败",
+      "BLOCKED": "已阻塞",
+      "AWAITING_APPROVAL": "等待审批"
+    },
+    "confirmDeleteMembers": "同时删除该群组的成员智能体。若保留，它们将不再归属任何群组，并出现在“孤立项”中。",
+    "export": {
+      "discussion": "讨论",
+      "date": "日期",
+      "status": "状态",
+      "question": "问题",
+      "synthesis": "综合结论",
+      "error": "错误",
+      "winner": "获胜方",
+      "outcome": "结果",
+      "unparsedJudgment": "未能解析的裁决",
+      "minorityReport": "少数意见",
+      "finalAnswer": "最终答案",
+      "phase": "阶段"
+    },
+    "deleteMembersConfigFailed": "无法读取该群组的成员，因此未删除任何内容。请重试。"
   },
   "taskBoard": {
     "title": "任务看板",
@@ -3124,7 +3168,11 @@
     "hitlApprovalChannel": "审批频道 ID",
     "hitlApprovalChannelHint": "会话暂停时接收审批卡片的 Slack 频道。",
     "hitlApproverUserIds": "审批者用户 ID",
-    "hitlApproverUserIdsHint": "以逗号分隔、允许通过按钮进行审批的 Slack 用户 ID。若无此列表，则不渲染按钮（默认关闭）。"
+    "hitlApproverUserIdsHint": "以逗号分隔、允许通过按钮进行审批的 Slack 用户 ID。若无此列表，则不渲染按钮（默认关闭）。",
+    "typeAgent": "智能体",
+    "typeGroup": "群组",
+    "selectGroup": "选择群组…",
+    "unknownGroup": "{{id}}（未找到）"
   },
   "hitl": {
     "loadingApprovalDetails": "正在加载审批详情…",
@@ -3211,7 +3259,10 @@
     "humanTurn": "成员发言",
     "humanTurnReason": "正在等待 {{member}} 发言",
     "humanTurnMemberFallback": "某位成员",
-    "decidedProgress": "已决定 {{decided}}/{{total}}"
+    "decidedProgress": "已决定 {{decided}}/{{total}}",
+    "groupLinkUnavailable": "未找到该群组，因此无法提供可靠的链接。",
+    "confirmApproveGroupDescription": "批准整个暂停阶段并继续讨论。该暂停下等待的每项任务都会一并批准；如需逐项决定，请打开该群组。",
+    "confirmRejectGroupDescription": "拒绝整个暂停阶段。等待该暂停的每项任务都会一并被拒绝，讨论也不会继续往下进行。如需逐项决定，请打开该群组。"
   },
   "chatDrawer": {
     "deploying": "正在部署智能体…",
@@ -3516,7 +3567,12 @@
       "sendError": "抱歉，出现了错误。请重试。",
       "startingConversation": "正在开始对话…",
       "toggleContext": "切换上下文",
-      "placeholderNamed": "发送消息给 {{name}}…"
+      "placeholderNamed": "发送消息给 {{name}}…",
+      "pausedForApproval": "此轮已暂停，正在等待人工决定。请求获批后会继续。",
+      "pausedRejected": "该对话正在等待人工决定，因此消息未发送。",
+      "reviewApprovals": "查看待处理的审批",
+      "stop": "停止生成",
+      "streamEnded": "回复尚未完成，连接已中断。已收到的内容显示在上方，可再次发送重试。"
     },
     "chat": {
       "agentDetails": "智能体详情",
@@ -4223,7 +4279,10 @@
     "maxCostInvalid": "每次运行的最高费用必须是大于或等于 0 的数字。",
     "cadenceSummary_other": "每次运行最多 {{max}} 个任务",
     "cadenceSummary_one": "每次运行最多 {{max}} 个任务",
-    "inputTemplateTooLong": "提示模板限制为 {{max}} 个字符。"
+    "inputTemplateTooLong": "提示模板限制为 {{max}} 个字符。",
+    "cronInvalid": "这不是有效的 cron 表达式。",
+    "scheduleUnknown": "无法获取排程",
+    "nextRun": "下次 {{when}}"
   },
   "workforceWizard": {
     "title": "新建团队"

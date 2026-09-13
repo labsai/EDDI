@@ -4,10 +4,13 @@ import { Paperclip, X } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import {
+  formatAttachmentBytes,
+  useGroupAttachmentStaging,
+} from "@/hooks/use-group-attachment-staging";
+import { MAX_GROUP_QUESTION_CHARS, type GroupAttachmentRef } from "@/lib/api/groups";
 
 // ─── Constants ───────────────────────────────────────────────────
-
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
 
 const ALLOWED_FILE_TYPES = new Set([
   "image/png",
@@ -27,13 +30,18 @@ const ALLOWED_FILE_TYPES = new Set([
 
 // ─── Types ───────────────────────────────────────────────────────
 
-export interface AttachmentInfo {
-  fileName: string;
-  file: File;
-}
-
 interface BoardInputProps {
-  onSend: (message: string, attachment?: AttachmentInfo) => void;
+  /**
+   * `attachments` is only ever non-empty in `mode: "new"` — the backend rejects
+   * a continuation that carries any, because files are shared with member
+   * agents when the discussion first starts.
+   *
+   * This used to be a single `File`, and `workforce-board` never read it: the
+   * paperclip staged a file, rendered a chip, and dropped it on send with no
+   * error. The shape now matches `DiscussionInput`'s, which the group endpoint
+   * actually takes.
+   */
+  onSend: (message: string, attachments?: GroupAttachmentRef[]) => void;
   disabled?: boolean;
   placeholder?: string;
   className?: string;
@@ -70,23 +78,46 @@ function SendIcon() {
 function BoardInput({ onSend, disabled = false, placeholder, className, mode = "new", disabledMessage }: BoardInputProps) {
   const { t } = useTranslation();
   const [message, setMessage] = useState("");
-  const [attachment, setAttachment] = useState<AttachmentInfo | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // The backend rejects attachments on a continuation outright.
+  const canAttach = mode !== "continue";
+  const {
+    attachments,
+    isStaging,
+    addFiles,
+    remove: removeAttachment,
+    clear: clearAttachments,
+    toRefs: attachmentRefs,
+  } = useGroupAttachmentStaging(canAttach);
+
   const trimmed = message.trim();
-  const canSend = (trimmed.length > 0 || !!attachment) && !disabled;
+  // The backend caps the question and fans it out to every member in every
+  // phase, so this is a real ceiling. Unenforced, a 50k-character question
+  // uploaded in full and came back as a 400 the user never saw — the Manager's
+  // composer already blocks it, and this one posts to the same endpoint.
+  // Measured on the trimmed body, which is what is actually sent — trailing
+  // whitespace should not block a question that fits.
+  const tooLong = trimmed.length > MAX_GROUP_QUESTION_CHARS;
+  const canSend =
+    (trimmed.length > 0 || attachments.length > 0) && !disabled && !tooLong && !isStaging;
 
   const handleSend = useCallback(() => {
     if (!canSend) return;
-    onSend(trimmed, attachment ?? undefined);
+    const files = attachmentRefs();
+    // One argument when there is nothing to attach: the message-only call is
+    // the overwhelming case and its shape should not change because the
+    // signature grew.
+    if (files) onSend(trimmed, files);
+    else onSend(trimmed);
     setMessage("");
-    setAttachment(null);
+    clearAttachments();
     // Reset textarea height
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
     }
-  }, [canSend, onSend, trimmed, attachment]);
+  }, [canSend, onSend, trimmed, attachmentRefs, clearAttachments]);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -113,30 +144,29 @@ function BoardInput({ onSend, disabled = false, placeholder, className, mode = "
 
   const handleFileChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (file) {
-        if (file.size > MAX_FILE_SIZE) {
-          toast.error(
-            t("Workforce.board.fileTooLarge", "File must be under 10MB"),
-          );
-        } else if (!ALLOWED_FILE_TYPES.has(file.type)) {
+      // Materialize the list here: clearing `value` below also clears `files`,
+      // and the staging queue awaits between reads.
+      const picked = Array.from(e.target.files ?? []);
+      // The type gate stays a board concern — `accept` already narrows the
+      // picker and this catches what slips past it. Size and count belong to
+      // the shared hook, so they match what the endpoint actually enforces.
+      const allowed = picked.filter((file) => {
+        if (file.type && !ALLOWED_FILE_TYPES.has(file.type)) {
           toast.error(
             t("Workforce.board.fileTypeNotAllowed", "This file type is not supported"),
           );
-        } else {
-          setAttachment({ fileName: file.name, file });
+          return false;
         }
-      }
+        return true;
+      });
+      if (allowed.length) void addFiles(allowed);
+      // Reset so re-picking the same file fires change again.
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
       }
     },
-    [t],
+    [t, addFiles],
   );
-
-  const removeAttachment = useCallback(() => {
-    setAttachment(null);
-  }, []);
 
   return (
     <div
@@ -146,24 +176,46 @@ function BoardInput({ onSend, disabled = false, placeholder, className, mode = "
         className,
       )}
     >
-      {/* Attachment chip */}
-      {attachment && (
-        <div className="mb-2 flex items-center gap-1">
-          <span
-            className="inline-flex items-center gap-1.5 rounded-full ps-3 pe-3 py-1 text-xs font-medium bg-muted text-muted-foreground"
-          >
-            <Paperclip className="h-3 w-3" />
-            <span className="max-w-48 truncate">{attachment.fileName}</span>
-            <button
-              type="button"
-              onClick={removeAttachment}
-              className="ms-0.5 rounded-full p-0.5 hover:bg-muted-foreground/20 transition-colors"
-              aria-label={t("Workforce.board.removeAttachment", "Remove attachment")}
+      {/* Attachment chips */}
+      {attachments.length > 0 && (
+        <ul className="mb-2 flex flex-wrap items-center gap-1" data-testid="board-attachments">
+          {attachments.map((a) => (
+            <li
+              key={a.id}
+              className="inline-flex items-center gap-1.5 rounded-full ps-3 pe-3 py-1 text-xs font-medium bg-muted text-muted-foreground"
             >
-              <X className="h-3 w-3" />
-            </button>
-          </span>
-        </div>
+              <Paperclip className="h-3 w-3 shrink-0" aria-hidden="true" />
+              <span className="max-w-48 truncate" title={a.fileName ?? undefined}>
+                {a.fileName}
+              </span>
+              {/* Without a size, the total-size cap can only be found by hitting it. */}
+              <span className="tabular-nums">{formatAttachmentBytes(a.sizeBytes)}</span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="iconSm"
+                onClick={() => removeAttachment(a.id)}
+                className="ms-0.5 rounded-full hover:bg-muted-foreground/20"
+                aria-label={t("groups.removeAttachment", "Remove {{name}}", { name: a.fileName })}
+              >
+                <X />
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {tooLong && (
+        <p
+          className="mb-2 text-xs text-destructive"
+          role="alert"
+          id="board-question-too-long"
+          data-testid="board-question-too-long"
+        >
+          {t("groups.questionTooLong", "A question can be at most {{max}} characters", {
+            max: MAX_GROUP_QUESTION_CHARS.toLocaleString(),
+          })}
+        </p>
       )}
 
       <div className="flex items-end gap-2">
@@ -171,6 +223,7 @@ function BoardInput({ onSend, disabled = false, placeholder, className, mode = "
         <input
           ref={fileInputRef}
           type="file"
+          multiple
           onChange={handleFileChange}
           accept="image/*,.pdf,.txt,.csv,.md,.json,.doc,.docx,.xls,.xlsx"
           className="hidden"
@@ -184,7 +237,7 @@ function BoardInput({ onSend, disabled = false, placeholder, className, mode = "
             variant="ghost"
             size="icon"
             onClick={handleFileSelect}
-            disabled={disabled}
+            disabled={disabled || isStaging}
             className="h-10 w-10 shrink-0 rounded-full text-muted-foreground hover:text-foreground"
             aria-label={t("Workforce.board.attachFile", "Attach file")}
           >
@@ -201,6 +254,8 @@ function BoardInput({ onSend, disabled = false, placeholder, className, mode = "
             handleInput();
           }}
           onKeyDown={handleKeyDown}
+          aria-invalid={tooLong || undefined}
+          aria-describedby={tooLong ? "board-question-too-long" : undefined}
           placeholder={
             disabled && disabledMessage
               ? disabledMessage

@@ -26,6 +26,9 @@ const buttonVariants = cva(
         md: "h-10 px-4 py-2.5",
         lg: "h-11 px-6 text-base",
         icon: "h-10 w-10",
+        // For icon controls inside a dense list row, where h-10 would set the
+        // row height. Overrides the base 16px glyph as well as the box.
+        iconSm: "h-6 w-6 [&_svg]:h-3 [&_svg]:w-3",
       },
     },
     defaultVariants: {

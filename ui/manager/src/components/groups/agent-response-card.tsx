@@ -10,6 +10,8 @@ import type { TranscriptEntry, TranscriptEntryType, DiscussionStyle, TaskDefinit
 import { entryTypeInfo, hasEnvelopeData } from "@/lib/api/groups";
 import { parseTranscriptContent, formatMarkdownText, parseEmojiVerification, truncateContent, safeFormatDate } from "./group-utils";
 import type { StructuredItem } from "./group-utils";
+import { parseStructuredPayload } from "@/lib/group-payloads";
+import { StructuredTurnCard } from "./structured-turn-card";
 
 /** Style-aware badge colors for different discussion roles */
 const STYLE_BADGE_OVERRIDES: Partial<Record<DiscussionStyle, Partial<Record<TranscriptEntryType, "default" | "secondary" | "success" | "warning" | "destructive" | "outline">>>> = {
@@ -169,11 +171,22 @@ export function AgentResponseCard({ entry, isSpeaking, allowHtml, discussionStyl
   const badgeVar = (discussionStyle && STYLE_BADGE_OVERRIDES[discussionStyle]?.[entry.type])
     || defaultBadgeVariant(entry.type);
 
+  // A ballot, bid sheet, bargaining move or retro harvest — the four turns whose
+  // stored body is a JSON contract rather than prose. Read first, because the
+  // generic readers below would each mangle them: `tryParseStructuredItems`
+  // matches a BID's `bids` array on its `subject` field and renders the subjects
+  // as a bare numbered list, silently dropping every confidence, complexity and
+  // rationale in it; the prose path prints the object's fields under the
+  // backend's own English key names.
+  const structuredPayload = parseStructuredPayload(entry.type, entry.content);
+
   const rawParsed = entry.content ? parseTranscriptContent(entry.content) : null;
   // Guard: treat whitespace-only content as empty and auto-format markdown syntax
   const parsedContent = rawParsed?.trim() ? formatMarkdownText(rawParsed) : null;
   // Try parsing as structured JSON array — check both raw and unwrapped content (no type gate)
-  let structuredItems = tryParseStructuredItems(entry.content) ?? tryParseStructuredItems(parsedContent);
+  let structuredItems = structuredPayload
+    ? null
+    : tryParseStructuredItems(entry.content) ?? tryParseStructuredItems(parsedContent);
 
   // For VERIFICATION entries, also try emoji-based text parsing (✅/❌ format from backend)
   if (!structuredItems && isVerification) {
@@ -287,6 +300,8 @@ export function AgentResponseCard({ entry, isSpeaking, allowHtml, discussionStyl
             <span className="h-1.5 w-1.5 rounded-full bg-primary animate-bounce [animation-delay:300ms]" />
             <span className="text-xs text-muted-foreground ms-1">{t("groups.responding", "responding…")}</span>
           </div>
+        ) : structuredPayload ? (
+          <StructuredTurnCard payload={structuredPayload} />
         ) : structuredItems ? (
           /* Render structured items (plans, verifications, etc.) instead of raw JSON */
           <div className="space-y-2">

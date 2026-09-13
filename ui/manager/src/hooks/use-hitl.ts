@@ -6,7 +6,9 @@ import {
   resumeConversation,
   cancelConversation,
   cancelGroupDiscussion,
+  approveGroupPhase,
   type HitlDecision,
+  type GroupApprovalRequest,
 } from "@/lib/api/hitl";
 import { submitHumanInput } from "@/lib/api/groups";
 import { useChatStore } from "@/hooks/use-chat";
@@ -111,6 +113,35 @@ export function useCancelConversation() {
       qc.invalidateQueries({ queryKey: ["pending-approvals"] });
       qc.invalidateQueries({ queryKey: ["approval-status", conversationId] });
       clearChatPauseIfCurrent(conversationId);
+    },
+  });
+}
+
+/**
+ * Approve or reject a paused group discussion, without streaming the resume.
+ *
+ * The group page uses the streaming variant, because it has a transcript to
+ * play the resumed discussion into. The cross-group approvals inbox does not:
+ * it is a queue of decisions, and its rows previously offered no decision at
+ * all for a group pause — only a link out, on a screen whose whole purpose is
+ * answering "what is waiting for me?" in one place. A 1:1 pause could always be
+ * decided inline; this is the group equivalent.
+ */
+export function useApproveGroupPhase() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      groupId,
+      gcId,
+      request,
+    }: {
+      groupId: string;
+      gcId: string;
+      request: GroupApprovalRequest;
+    }) => approveGroupPhase(groupId, gcId, request),
+    onSuccess: (_data, { groupId }) => {
+      qc.invalidateQueries({ queryKey: ["groupConversations", groupId] });
+      qc.invalidateQueries({ queryKey: ["all-group-pending-approvals"] });
     },
   });
 }

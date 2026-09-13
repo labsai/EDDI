@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect, memo } from "react";
+import { useState, useCallback, useMemo, useRef, useEffect, memo } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
@@ -7,7 +7,10 @@ import { Check, Clipboard, Star, MessageCircle, AlertCircle, ChevronDown, Chevro
 import { cn, getInitials } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { truncateContent } from "@/components/groups/group-utils";
+import { parseTranscriptContent, truncateContent } from "@/components/groups/group-utils";
+import { StructuredTurnCard } from "@/components/groups/structured-turn-card";
+import { parseStructuredPayload } from "@/lib/group-payloads";
+import type { TranscriptEntryType } from "@/lib/api/groups";
 
 // ─── Pin Types & Hook ────────────────────────────────────────────
 
@@ -72,6 +75,15 @@ interface AdvisorResponseCardProps {
   /** Badge variant for the role label (matches manager group chat style) */
   roleBadgeVariant?: "default" | "secondary" | "success" | "warning" | "destructive" | "outline";
   content: string | null;
+  /**
+   * The transcript entry's type, when this card is rendering one.
+   *
+   * Four of them (`VOTE`, `BID`, `BARGAIN`, `RETRO`) store the member's raw JSON
+   * reply rather than prose, and get a typed card instead of markdown — see
+   * `lib/group-payloads.ts`. Optional so a caller with no entry (a plain
+   * message) keeps the prose path.
+   */
+  entryType?: TranscriptEntryType | string | null;
 
   boardId: string;
   /** Optional session ID for pin storage */
@@ -147,12 +159,31 @@ const AdvisorResponseCard = memo(function AdvisorResponseCard({
   role,
   roleBadgeVariant = "secondary",
   content,
+  entryType,
   boardId,
   sessionId = "",
   timestamp,
   className,
 }: AdvisorResponseCardProps) {
   const { t } = useTranslation();
+
+  /**
+   * The readable body.
+   *
+   * This card used to hand `content` straight to ReactMarkdown. The other two
+   * transcript renderers both run it through `parseTranscriptContent` first, and
+   * they are right to: EDDI stores a judge's verdict as a ```json fence and
+   * four phase types store a JSON contract verbatim, so the unparsed path put a
+   * JSON document on screen in the middle of a discussion — and copied it.
+   */
+  const structuredPayload = useMemo(
+    () => parseStructuredPayload(entryType, content),
+    [entryType, content],
+  );
+  const readable = useMemo(
+    () => (content !== null ? parseTranscriptContent(content) : null),
+    [content],
+  );
 
   // ── Copy to clipboard ────────────────────────────────────────
   const [copied, setCopied] = useState(false);
@@ -162,7 +193,8 @@ const AdvisorResponseCard = memo(function AdvisorResponseCard({
   const handleCopy = async () => {
     if (!content) return;
     try {
-      await navigator.clipboard.writeText(content);
+      // What is on screen, not the wire format behind it.
+      await navigator.clipboard.writeText(readable?.trim() ? readable : content);
       setCopied(true);
       copyTimerRef.current = setTimeout(() => setCopied(false), 2000);
     } catch {
@@ -186,8 +218,11 @@ const AdvisorResponseCard = memo(function AdvisorResponseCard({
   };
 
   const isStreaming = content === null;
-  const isEmpty = !isStreaming && !content?.trim();
-  const { contentRef, isCollapsible, isExpanded, setIsExpanded } = useCollapsibleContent(content);
+  // Emptiness is judged on what will actually be shown: a response envelope that
+  // carried no text parses to "" and must read as "no response generated",
+  // not as a card with an invisible body.
+  const isEmpty = !isStreaming && !structuredPayload && !readable?.trim();
+  const { contentRef, isCollapsible, isExpanded, setIsExpanded } = useCollapsibleContent(readable);
 
   return (
     <div
@@ -287,6 +322,8 @@ const AdvisorResponseCard = memo(function AdvisorResponseCard({
                 {t("Workforce.board.noResponseGenerated", "No response generated")}
               </span>
             </div>
+          ) : structuredPayload ? (
+            <StructuredTurnCard payload={structuredPayload} />
           ) : (
             <>
               <div
@@ -298,7 +335,7 @@ const AdvisorResponseCard = memo(function AdvisorResponseCard({
               >
                 <div className="prose prose-sm dark:prose-invert max-w-none overflow-hidden [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs">
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {truncateContent(content!, t("groups.contentTruncated", "[Content truncated]"))}
+                    {truncateContent(readable!, t("groups.contentTruncated", "[Content truncated]"))}
                   </ReactMarkdown>
                 </div>
                 {isCollapsible && !isExpanded && (

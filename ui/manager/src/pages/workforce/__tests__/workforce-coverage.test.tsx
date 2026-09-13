@@ -185,16 +185,14 @@ describe("Workforce Coverage Tests", () => {
 
       vi.spyOn(chatApi, "startConversation").mockResolvedValue("conv-123");
       vi.spyOn(chatApi, "readConversation").mockResolvedValue({ conversationSteps: [] } as any);
-      const sendMsgMock = vi.spyOn(chatApi, "sendMessage").mockResolvedValue({
-        conversationSteps: [
-          {
-            timestamp: Date.now(),
-            conversationStep: [
-              { key: "output:text:0", value: "Hello from agent" }
-            ]
-          }
-        ]
-      } as any);
+      // The thread streams its turns now, so the reply arrives as tokens
+      // rather than whole in a snapshot.
+      const sendMsgMock = (vi.spyOn(chatApi, "sendMessageStreaming") as any).mockImplementation(
+        async function* () {
+          yield { type: "token", data: "Hello from agent" };
+          yield { type: "done", data: "" };
+        },
+      );
 
       renderPage("/workforce/board1/thread/agent1", <WorkforceThread />, "/workforce/:boardId/thread/:memberId");
       
@@ -208,7 +206,13 @@ describe("Workforce Coverage Tests", () => {
       const sendBtn = screen.getByRole("button", { name: /Send/i });
       await user.click(sendBtn);
 
-      expect(sendMsgMock).toHaveBeenCalledWith("production", "agent1", "conv-123", "Hello");
+      expect(sendMsgMock).toHaveBeenCalledWith(
+        "production",
+        "agent1",
+        "conv-123",
+        { input: "Hello" },
+        expect.anything(),
+      );
       
       await waitFor(() => {
         expect(screen.getAllByText(/Hello from agent/i).length).toBeGreaterThan(0);

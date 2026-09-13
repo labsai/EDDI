@@ -10,6 +10,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { parseTranscriptContent, truncateContent } from "@/components/groups/group-utils";
+import { downloadFile, generateMarkdown } from "@/lib/group-transcript-export";
+import { StructuredTurnCard } from "@/components/groups/structured-turn-card";
+import { parseStructuredPayload } from "@/lib/group-payloads";
 import { DiscussionInsights } from "@/components/groups/discussion-insights";
 import { PersistedTaskBoard } from "@/components/groups/task-board";
 import { DecisionRecordCard } from "@/components/groups/decision-record-card";
@@ -25,6 +28,8 @@ import {
 interface ConversationViewerProps {
   groupId: string;
   conversationId: string;
+  /** Titles the exported file. Without it the export is headed "Discussion". */
+  groupName?: string;
   onClose?: () => void;
   className?: string;
 }
@@ -212,6 +217,10 @@ function AgentEntryCard({
   const { t } = useTranslation();
   const typeInfo = entryTypeInfo(entry.type);
   const borderClass = agentBorderClass(entry.speakerAgentId);
+  // A ballot, bid sheet, bargaining move or retro harvest stores the member's
+  // raw JSON reply rather than prose, and gets a typed card — see
+  // `lib/group-payloads.ts`. Everything else takes the markdown path below.
+  const structuredPayload = parseStructuredPayload(entry.type, entry.content);
   const parsedContent = parseTranscriptContent(entry.content ?? "");
   const hasContent = parsedContent.trim().length > 0;
   const { contentRef, isCollapsible, isExpanded, setIsExpanded } = useCollapsibleContent(parsedContent);
@@ -250,7 +259,9 @@ function AgentEntryCard({
 
       {/* Content */}
       <div className="ps-10">
-        {hasContent ? (
+        {structuredPayload ? (
+          <StructuredTurnCard payload={structuredPayload} />
+        ) : hasContent ? (
           <>
             <div
               ref={contentRef}
@@ -399,6 +410,7 @@ function ErrorEntryCard({
   index: number;
 }) {
   const { t } = useTranslation();
+  const errorBody = parseTranscriptContent(entry.content ?? "").trim();
 
   return (
     <div
@@ -426,9 +438,13 @@ function ErrorEntryCard({
           {entry.errorReason}
         </p>
       )}
-      {entry.content && (
+      {/* An ERROR entry normally carries its text in `errorReason` with a null
+          body, but the engine has more than one site that builds one and a
+          future/older shape may put text here. Parse it like every other body
+          rather than printing whatever the wire held. */}
+      {errorBody && (
         <p className="text-sm text-red-700 dark:text-red-300 whitespace-pre-wrap mt-2 ps-6">
-          {entry.content}
+          {errorBody}
         </p>
       )}
     </div>
@@ -548,6 +564,7 @@ function ViewerSkeleton() {
 function ConversationViewer({
   groupId,
   conversationId,
+  groupName,
   onClose,
   className,
 }: ConversationViewerProps) {
@@ -564,120 +581,25 @@ function ConversationViewer({
   }, [conversationId]);
 
   // ── Export conversation as Markdown ────────────────────────
+  /**
+   * Export the discussion as Markdown.
+   *
+   * This used to be a second, hand-rolled copy of the board export menu's
+   * renderer — its own code comment said so. The two had drifted: this one
+   * titled every file "# Task Force Discussion" whatever the discussion style,
+   * and omitted the group name, the structured decision, the minority report
+   * and an unparsed judgment. One renderer now serves both toolbars.
+   */
   const handleExport = useCallback(() => {
     if (!conversation) return;
-
-    const lines: string[] = [];
-    lines.push("# Task Force Discussion");
-    lines.push("");
-    lines.push(`**Question:** ${conversation.originalQuestion || "—"}`);
-    lines.push(`**Date:** ${conversation.created ? new Date(conversation.created).toLocaleString() : "—"}`);
-    lines.push(`**Status:** ${conversation.state}`);
-    lines.push("");
-    lines.push("---");
-    lines.push("");
-
-    let lastPhaseIndex = -1;
-    for (const entry of conversation.transcript) {
-      // Phase separator
-      if (
-        entry.phaseIndex >= 0 &&
-        entry.phaseIndex !== lastPhaseIndex &&
-        entry.type !== "QUESTION"
-      ) {
-        lastPhaseIndex = entry.phaseIndex;
-        lines.push(`## Phase ${entry.phaseIndex + 1}: ${entry.phaseName ?? entry.type}`);
-        lines.push("");
-      }
-
-      // The same reading the transcript on screen does. This is a second,
-      // parallel markdown export to `export-menu`'s — reachable from the
-      // history viewer's own toolbar — so it needs the same treatment or a
-      // judge's ```json verdict lands verbatim in the downloaded file.
-      const body = entry.content ? parseTranscriptContent(entry.content) : "";
-      if (entry.type === "QUESTION") {
-        lines.push(`> **Question:** ${body}`);
-        lines.push("");
-      } else if (entry.type === "SYNTHESIS") {
-        lines.push("## Synthesis");
-        lines.push("");
-        lines.push(body);
-        lines.push("");
-      } else if (entry.type === "ERROR") {
-        lines.push(`### ⚠️ ${entry.speakerDisplayName} (Error)`);
-        if (entry.errorReason) lines.push(`> ${entry.errorReason}`);
-        if (body) lines.push(body);
-        lines.push("");
-      } else if (entry.type !== "SKIPPED") {
-        lines.push(`### ${entry.speakerDisplayName} (${entry.type})`);
-        lines.push("");
-        lines.push(body);
-        lines.push("");
-      }
-    }
-
-    // Structured decision (F3) — the machine-readable outcome belongs in the
-    // export too, or "who won" survives only as prose.
-    if (hasDisplayableDecision(conversation.decision)) {
-      const d = conversation.decision;
-      lines.push("---");
-      lines.push("");
-      lines.push(`## Decision (${d.type})`);
-      lines.push("");
-      if (d.winner) lines.push(`**Winner:** ${d.winner}`);
-      if (d.outcome) lines.push(`**Outcome:** ${d.outcome}`);
-      // See export-menu: a NONE decision with `raw` is an unparsed judgment,
-      // not an absent one.
-      if (d.type === "NONE" && d.raw?.trim()) {
-        lines.push("");
-        lines.push("### Unparsed judgment");
-        lines.push("");
-        lines.push(d.raw);
-      }
-      if (d.tally && Object.keys(d.tally).length > 0) {
-        lines.push("");
-        for (const [key, value] of Object.entries(d.tally)) {
-          lines.push(`- ${key}: ${typeof value === "object" ? JSON.stringify(value) : String(value)}`);
-        }
-      }
-      const dissents = d.dissents ?? [];
-      if (dissents.length > 0) {
-        lines.push("");
-        lines.push("**Minority report:**");
-        for (const dis of dissents) {
-          lines.push(`- ${dis.displayName || dis.agentId}: ${dis.position}`);
-        }
-      }
-      lines.push("");
-    }
-
-    // Final synthesized answer (if present and not already in transcript)
-    const finalAnswer = conversation.synthesizedAnswer
-      ? parseTranscriptContent(conversation.synthesizedAnswer)
-      : "";
-    if (
-      finalAnswer.trim() &&
-      !conversation.transcript.some((e) => e.type === "SYNTHESIS")
-    ) {
-      lines.push("---");
-      lines.push("");
-      lines.push("## Final Synthesized Answer");
-      lines.push("");
-      lines.push(finalAnswer);
-      lines.push("");
-    }
-
-    const markdown = lines.join("\n");
-    const blob = new Blob([markdown], { type: "text/markdown" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `task-force-discussion-${conversationId}.md`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  }, [conversation, conversationId]);
+    downloadFile(
+      generateMarkdown(conversation, groupName, (key, fallback) =>
+        t(key, { defaultValue: fallback }),
+      ),
+      `discussion-${conversationId.slice(0, 8)}.md`,
+      "text/markdown",
+    );
+  }, [conversation, conversationId, groupName, t]);
 
   // Process transcript to insert phase separators
   const processedEntries = useMemo(() => {

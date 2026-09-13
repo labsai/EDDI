@@ -81,7 +81,10 @@ describe("GroupWorkspacePage", () => {
     await waitFor(() => {
       expect(screen.getByTestId("backlog-task-t1")).toHaveTextContent("Refresh the changelog");
     });
-    expect(screen.getByTestId("backlog-task-t1")).toHaveTextContent("PENDING");
+    // A label, not the wire enum: "AWAITING_APPROVAL" is not something to put
+    // in front of a reader, and it was untranslated in every language.
+    expect(screen.getByTestId("backlog-task-t1")).toHaveTextContent("Pending");
+    expect(screen.getByTestId("backlog-task-t1")).not.toHaveTextContent("PENDING");
     expect(screen.getByTestId("backlog-task-t1")).toHaveTextContent("P2");
   });
 
