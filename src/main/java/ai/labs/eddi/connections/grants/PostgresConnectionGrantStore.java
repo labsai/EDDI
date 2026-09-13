@@ -342,6 +342,21 @@ public class PostgresConnectionGrantStore implements IConnectionGrantStore {
         }
     }
 
+    @Override
+    public long countByConnection(String tenantId, String connectionName) {
+        createSchema();
+        String sql = "SELECT COUNT(*) FROM connection_grants WHERE tenant_id = ? AND connection_name = ?";
+        try (Connection connection = dataSourceInstance.get().getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, tenantId);
+            statement.setString(2, connectionName);
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next() ? rows.getLong(1) : 0L;
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to count a connection's grants", e);
+        }
+    }
+
     private static ConnectionGrant toGrant(ResultSet rows) throws SQLException {
         var grant = new ConnectionGrant();
         grant.setId(rows.getString("id"));

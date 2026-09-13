@@ -662,6 +662,22 @@ class MongoConnectionGrantStoreTest {
         assertEquals("REVOKED", capturedCountFilter().get("status").asString().getValue());
     }
 
+    // ==================== countByConnection ====================
+
+    @Test
+    @DisplayName("countByConnection — counts one connection's grants in one tenant, whatever their status")
+    void countByConnectionCounts() {
+        when(grants.countDocuments(any(Bson.class))).thenReturn(3L);
+
+        assertEquals(3L, store.countByConnection(TENANT, CONNECTION));
+
+        Map<String, BsonValue> filter = capturedCountFilter();
+        assertEquals(2, filter.size(), "the count is by (tenant, name) and nothing else — a status clause would hide REFRESH_FAILED tokens "
+                + "that are still at rest");
+        assertEquals(TENANT, filter.get("tenantId").asString().getValue());
+        assertEquals(CONNECTION, filter.get("connectionName").asString().getValue());
+    }
+
     // ==================== Helpers ====================
 
     private static BsonDocument render(Bson bson) {

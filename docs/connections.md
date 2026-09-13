@@ -672,6 +672,15 @@ just the newest, and leaves ciphertext untouched.
   next — a fresh connection, possibly to a different provider, resolving other
   people's live refresh tokens on its first call. Create a new connection and let
   users link it.
+* **A connection's `authType` and `binding` cannot change while it has linked
+  accounts.** The rename rule protects the name a grant is filed under; this
+  protects what the grant *is*. Re-saving a `PER_USER` authorization-code
+  connection as `STATIC` or as `SERVICE`-bound client credentials would leave
+  every user's refresh token at rest under a name the resolver never reads them
+  for, and off a linked-accounts page the connection no longer has. `PUT` answers
+  **409** naming the number of linked accounts and the two ways forward: each user
+  unlinks with `DELETE /connections/{name}/grant`, or the administrator deletes the
+  connection — which cascades to its grants — and creates the new one.
 * **`VaultGrantChecker` follows the hop.** A `${connection:name}` is an *indirect*
   vault reference: the connection document holds the `${vault:…}` client secret.
   Without following it an agent could use a credential it was never granted

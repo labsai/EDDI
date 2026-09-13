@@ -22,6 +22,7 @@ import ai.labs.eddi.secrets.ISecretProvider;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.ClientErrorException;
 import jakarta.ws.rs.core.Response;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
@@ -83,8 +84,9 @@ public class RestConnectionStore implements IRestConnectionStore {
     @Override
     public Response updateConnection(String id, Integer version, ConnectionConfiguration connectionConfiguration) {
         validateForWrite(connectionConfiguration);
-        requireIdentityUnchanged(id, connectionConfiguration);
+        ConnectionConfiguration current = requireIdentityUnchanged(id, connectionConfiguration);
         requireNameIsFree(connectionConfiguration, id);
+        requireGrantsNotStranded(current, connectionConfiguration);
         // Last of the write checks, deliberately: it refuses a document that is not
         // wrong, only ahead of the feature, so anything genuinely malformed gets to
         // name its own field first.
@@ -158,18 +160,71 @@ public class RestConnectionStore implements IRestConnectionStore {
      * names.
      */
     private ConnectionIdentity identityOf(String id) {
+        ConnectionConfiguration connection = currentOf(id);
+        if (connection == null || connection.getName() == null) {
+            return null;
+        }
+        return new ConnectionIdentity(ConnectionConfiguration.effectiveTenant(connection), connection.getName());
+    }
+
+    /** The document at its current version, or null when it cannot be read. */
+    private ConnectionConfiguration currentOf(String id) {
         try {
             IResourceStore.IResourceId current = connectionStore.getCurrentResourceId(id);
-            ConnectionConfiguration connection = connectionStore.read(id, current.getVersion());
-            if (connection == null || connection.getName() == null) {
-                return null;
-            }
-            return new ConnectionIdentity(ConnectionConfiguration.effectiveTenant(connection), connection.getName());
+            return connectionStore.read(id, current.getVersion());
         } catch (Exception e) {
             LOGGER.warnf("Could not resolve the identity of connection '%s'; its grants cannot be cleaned up automatically and may need "
                     + "removing by hand.", sanitize(id));
             return null;
         }
+    }
+
+    /**
+     * Refuses an {@code authType} or {@code binding} change while the connection
+     * still has linked accounts.
+     * <p>
+     * The rename rule protects the (tenant, name) a grant is filed under; this
+     * protects what the grant IS. A grant minted by the authorization-code flow
+     * under PER_USER binding is a refresh token for one end user. Re-save the
+     * connection as STATIC, or as SERVICE-bound client credentials, and the
+     * resolver never reads those rows again — but nothing deletes them either, so
+     * every user's live refresh token stays at rest under a name that now means
+     * something else, invisible to the linked-accounts page of a connection that no
+     * longer has one.
+     * <p>
+     * Refused with the count and the two ways forward, rather than cascaded: each
+     * user unlinks through {@code DELETE /connections/{name}/grant}, or the
+     * administrator deletes the connection — which cascades to its grants — and
+     * creates the new one. A silent cascade inside a PUT would be a mass revocation
+     * nobody asked for.
+     */
+    private void requireGrantsNotStranded(ConnectionConfiguration current, ConnectionConfiguration target) {
+        if (current == null || target == null) {
+            return;
+        }
+        boolean sameAuthType = current.getAuthType() == target.getAuthType();
+        boolean sameBinding = current.getBinding() == target.getBinding();
+        if (sameAuthType && sameBinding) {
+            return;
+        }
+        String tenant = ConnectionConfiguration.effectiveTenant(current);
+        long linked;
+        try {
+            linked = grantStore.countByConnection(tenant, current.getName());
+        } catch (Exception e) {
+            throw new BadRequestException("Could not count the linked accounts of connection '" + current.getName() + "' ("
+                    + e.getClass().getSimpleName() + "), so this authType/binding change cannot be checked for grants it would strand. "
+                    + "Retry once the grant store is reachable.", e);
+        }
+        if (linked == 0) {
+            return;
+        }
+        throw new ClientErrorException("Connection '" + current.getName() + "' has " + linked + " linked account(s) whose grants were "
+                + "produced under authType " + current.getAuthType() + " / binding " + current.getBinding() + ". Changing it to "
+                + target.getAuthType() + " / " + target.getBinding() + " would leave their refresh tokens at rest under a name the "
+                + "resolver never reads them for. Have each user unlink with DELETE /connections/" + current.getName()
+                + "/grant, or delete the connection — which deletes its grants with it — and create the new one.",
+                Response.Status.CONFLICT);
     }
 
     /**
@@ -194,11 +249,14 @@ public class RestConnectionStore implements IRestConnectionStore {
      * rename" from no evidence, and the cost of being wrong is the inheritance
      * above.
      */
-    private void requireIdentityUnchanged(String id, ConnectionConfiguration connectionConfiguration) {
+    private ConnectionConfiguration requireIdentityUnchanged(String id, ConnectionConfiguration connectionConfiguration) {
         if (connectionConfiguration == null) {
-            return;
+            return null;
         }
-        ConnectionIdentity current = identityOf(id);
+        ConnectionConfiguration currentDocument = currentOf(id);
+        ConnectionIdentity current = currentDocument == null || currentDocument.getName() == null
+                ? null
+                : new ConnectionIdentity(ConnectionConfiguration.effectiveTenant(currentDocument), currentDocument.getName());
         if (current == null) {
             throw new BadRequestException("Could not read the current identity of connection '" + id + "', so this update cannot be checked "
                     + "for a rename or a tenant move. Permitting it unchecked would orphan every grant filed under the old (tenant, name) "
@@ -206,7 +264,7 @@ public class RestConnectionStore implements IRestConnectionStore {
         }
         var target = new ConnectionIdentity(ConnectionConfiguration.effectiveTenant(connectionConfiguration), connectionConfiguration.getName());
         if (current.equals(target)) {
-            return;
+            return currentDocument;
         }
         throw new BadRequestException("A connection cannot be moved from '" + current.tenantId() + "/" + current.name() + "' to '"
                 + target.tenantId() + "/" + target.name() + "'. The name is what a connection reference points at, and (tenant, name) "

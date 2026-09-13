@@ -198,6 +198,11 @@ public class MongoConnectionGrantStore implements IConnectionGrantStore {
         return grants.countDocuments(Filters.and(Filters.eq(FIELD_TENANT, tenantId), Filters.eq(FIELD_STATUS, status.name())));
     }
 
+    @Override
+    public long countByConnection(String tenantId, String connectionName) {
+        return grants.countDocuments(Filters.and(Filters.eq(FIELD_TENANT, tenantId), Filters.eq(FIELD_CONNECTION, connectionName)));
+    }
+
     private static ConnectionGrant toGrant(Document document) {
         var grant = new ConnectionGrant();
         grant.setId(document.getObjectId("_id") == null ? null : document.getObjectId("_id").toHexString());
