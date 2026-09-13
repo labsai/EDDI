@@ -13,6 +13,7 @@ import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
 import ai.labs.eddi.configs.mcpcalls.IMcpCallsStore;
 import ai.labs.eddi.connections.model.ConnectionReference;
 import ai.labs.eddi.configs.rag.IRagStore;
+import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
@@ -83,6 +84,15 @@ public class VaultGrantChecker {
      */
     private static final Pattern CONNECTION_PATTERN = Pattern.compile(ConnectionReference.CONNECTION_PATTERN);
 
+    /**
+     * Finds a {@code ${vars:…}} so it can be expanded before the vault scan.
+     * {@code CredentialReferenceResolver} resolves global variables FIRST and a
+     * variable may expand to a vault reference, so a {@code clientSecret} of
+     * {@code ${vars:x}} was invisible to grant enforcement — one indirection
+     * defeating the check the reference-only rule exists to feed.
+     */
+    private static final Pattern VARS_PATTERN = Pattern.compile("\\$\\{vars:[^}]+\\}");
+
     private final ISecretProvider secretProvider;
     private final IAgentStore agentStore;
     private final IWorkflowStore workflowStore;
@@ -91,10 +101,12 @@ public class VaultGrantChecker {
     private final IMcpCallsStore mcpCallsStore;
     private final IRagStore ragStore;
     private final IConnectionStore connectionStore;
+    private final GlobalVariableResolver globalVariableResolver;
 
     @Inject
     public VaultGrantChecker(ISecretProvider secretProvider, IAgentStore agentStore, IWorkflowStore workflowStore, ILlmStore llmStore,
-            IApiCallsStore apiCallsStore, IMcpCallsStore mcpCallsStore, IRagStore ragStore, IConnectionStore connectionStore) {
+            IApiCallsStore apiCallsStore, IMcpCallsStore mcpCallsStore, IRagStore ragStore, IConnectionStore connectionStore,
+            GlobalVariableResolver globalVariableResolver) {
         this.secretProvider = secretProvider;
         this.agentStore = agentStore;
         this.workflowStore = workflowStore;
@@ -103,6 +115,7 @@ public class VaultGrantChecker {
         this.mcpCallsStore = mcpCallsStore;
         this.ragStore = ragStore;
         this.connectionStore = connectionStore;
+        this.globalVariableResolver = globalVariableResolver;
     }
 
     /**
@@ -122,12 +135,20 @@ public class VaultGrantChecker {
 
     /**
      * Every vault reference in {@code agentConfiguration}'s extension configs that
-     * is NOT granted to {@code agentId}.
+     * is NOT granted to {@code agentId} — plus every {@code ${connection:…}} whose
+     * document could not be read.
      * <p>
-     * Only a provable violation is reported. A secret whose metadata cannot be read
-     * — vault disabled, secret absent, provider error — is skipped: "could not
-     * determine the grant" is not "the grant is missing", and a deployment gate
-     * that fires on a transient store failure is worse than the hole it closes.
+     * Only a provable violation is reported for a <em>secret</em>. A secret whose
+     * metadata cannot be read — vault disabled, secret absent, provider error — is
+     * skipped: "could not determine the grant" is not "the grant is missing", and a
+     * deployment gate that fires on a transient store failure is worse than the
+     * hole it closes.
+     * <p>
+     * A <em>connection</em> that cannot be read is the opposite case and fails
+     * closed. The hop exists because a connection is an indirect vault reference;
+     * skipping an unreadable one means "whatever secrets it holds are granted",
+     * which is exactly the outcome an agent naming somebody else's connection is
+     * after. The violation names the connection so the operator knows what to fix.
      *
      * @return the offending references, empty when the agent is fully granted
      */
@@ -137,7 +158,7 @@ public class VaultGrantChecker {
         }
 
         List<String> violations = new ArrayList<>();
-        for (String reference : collectVaultReferences(agentConfiguration)) {
+        for (String reference : collectVaultReferences(agentConfiguration, violations)) {
             if (!isGranted(reference, agentId)) {
                 violations.add(reference);
             }
@@ -175,7 +196,7 @@ public class VaultGrantChecker {
      * rots: a new credential field is added somewhere and the scanner silently
      * stops covering it.
      */
-    private Set<String> collectVaultReferences(AgentConfiguration agentConfiguration) {
+    private Set<String> collectVaultReferences(AgentConfiguration agentConfiguration, List<String> unreadableConnections) {
         Set<String> references = new LinkedHashSet<>();
 
         // The agent document FIRST. AgentConfiguration.DreamConfig.parameters
@@ -205,7 +226,7 @@ public class VaultGrantChecker {
                     // connection document holds the ${vault:…} client secret, and
                     // without following the hop an agent could use a credential it was
                     // never granted simply by naming a connection somebody else made.
-                    scanReferencedConnections(extensionConfig, references);
+                    scanReferencedConnections(extensionConfig, references, unreadableConnections);
                 }
             }
         }
@@ -260,7 +281,7 @@ public class VaultGrantChecker {
      * new field is added, and the traversal above already made that argument for
      * vault references.
      */
-    private void scanReferencedConnections(Object config, Set<String> sink) {
+    private void scanReferencedConnections(Object config, Set<String> sink, List<String> unreadableConnections) {
         String serialized;
         try {
             serialized = MAPPER.writeValueAsString(config);
@@ -279,14 +300,31 @@ public class VaultGrantChecker {
                 ConnectionConfiguration connection = connectionStore.readByName(tenantId, name);
                 if (connection != null) {
                     scanForVaultReferences(connection, sink);
+                } else {
+                    // Absent, not unreadable: there is no document, so there is no
+                    // secret to be ungranted for. The runtime refuses it as NOT_FOUND.
+                    LOGGER.debugf("Connection %s referenced by the agent does not exist; nothing to check", sanitize(name));
                 }
             } catch (Exception e) {
-                LOGGER.debugf("Could not read connection %s while checking vault grants: %s", sanitize(name), sanitize(e.getMessage()));
+                // Fail CLOSED. Continuing at DEBUG meant an unreadable connection's
+                // secrets counted as granted — the one outcome this hop exists to
+                // prevent — and the deployment went through with nothing in the log
+                // above DEBUG.
+                LOGGER.warnf("Could not read connection '%s' while checking vault grants (%s); its vault references cannot be verified, "
+                        + "so the deployment is refused", sanitize(name), e.getClass().getSimpleName());
+                unreadableConnections.add(matcher.group(0) + " (connection '" + name + "' could not be read: " + e.getClass().getSimpleName()
+                        + ", so its vault references cannot be verified)");
             }
         }
     }
 
-    private static void scanForVaultReferences(Object config, Set<String> sink) {
+    /**
+     * Scans a serialized config for {@code ${vault:…}}, expanding every
+     * {@code ${vars:…}} first and scanning the expansion too — a global variable
+     * may hold a vault reference, and the runtime resolves variables before vault
+     * references, so the expanded form is what actually reaches the vault.
+     */
+    private void scanForVaultReferences(Object config, Set<String> sink) {
         String serialized;
         try {
             serialized = MAPPER.writeValueAsString(config);
@@ -296,6 +334,26 @@ public class VaultGrantChecker {
         Matcher matcher = SecretReference.compiledPattern().matcher(serialized);
         while (matcher.find()) {
             sink.add(matcher.group(0));
+        }
+        if (globalVariableResolver == null) {
+            return;
+        }
+        Matcher vars = VARS_PATTERN.matcher(serialized);
+        while (vars.find()) {
+            String expanded;
+            try {
+                expanded = globalVariableResolver.resolveValue(vars.group(0));
+            } catch (Exception e) {
+                LOGGER.debugf("Could not expand %s while checking vault grants: %s", sanitize(vars.group(0)), sanitize(e.getMessage()));
+                continue;
+            }
+            if (expanded == null || expanded.equals(vars.group(0))) {
+                continue;
+            }
+            Matcher inExpansion = SecretReference.compiledPattern().matcher(expanded);
+            while (inExpansion.find()) {
+                sink.add(inExpansion.group(0));
+            }
         }
     }
 }
