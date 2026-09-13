@@ -9,7 +9,6 @@ import ai.labs.eddi.configs.connections.model.AuthType;
 import ai.labs.eddi.configs.connections.model.Binding;
 import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
 import ai.labs.eddi.configs.connections.model.OAuthConfig;
-import ai.labs.eddi.connections.ConnectionRegistry;
 import ai.labs.eddi.connections.ConnectionsConfig;
 import ai.labs.eddi.connections.CredentialReferenceResolver;
 import ai.labs.eddi.connections.grants.IConnectionGrantStore;
@@ -56,9 +55,11 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.same;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
@@ -111,7 +112,6 @@ class RestConnectionAuthorizationCallbackTest {
     /** A deployment whose public base URL is well-formed; the ordinary case. */
     private static final ConnectionsConfig CONFIG = new ConnectionsConfig(true, Optional.of("https://eddi.example.com"));
 
-    private ConnectionRegistry connectionRegistry;
     private IOAuthStateStore stateStore;
     private IConnectionGrantStore grantStore;
     private OAuthTokenClient tokenClient;
@@ -145,7 +145,6 @@ class RestConnectionAuthorizationCallbackTest {
     void setUp() throws Exception {
         grantsStoredFor.clear();
         codesRedeemed.clear();
-        connectionRegistry = mock(ConnectionRegistry.class);
         stateStore = mock(IOAuthStateStore.class);
         grantStore = mock(IConnectionGrantStore.class);
         tokenClient = mock(OAuthTokenClient.class);
@@ -158,7 +157,6 @@ class RestConnectionAuthorizationCallbackTest {
 
         doReturn(principal).when(securityIdentity).getPrincipal();
         doReturn(PRINCIPAL).when(principal).getName();
-        doReturn(connection).when(connectionRegistry).require(new ConnectionReference(TENANT, CONNECTION_NAME));
         doReturn(CLIENT_SECRET).when(credentialReferenceResolver).resolveRequired(anyString(), anyString(), anyString());
         // Stubbed permissively so a wrong argument shows up as a failed verify below
         // rather than as a NullPointerException three frames away.
@@ -216,7 +214,7 @@ class RestConnectionAuthorizationCallbackTest {
     }
 
     private RestConnectionAuthorization resource(MeterRegistry meterRegistry, ConnectionsConfig connectionsConfig) {
-        return new RestConnectionAuthorization(connectionRegistry, stateStore, grantStore, tokenClient, tokenService, endpointAllowlist,
+        return new RestConnectionAuthorization(stateStore, grantStore, tokenClient, tokenService, endpointAllowlist,
                 connectionsConfig, securityIdentity, credentialReferenceResolver, meterRegistry, connectionStore);
     }
 
@@ -425,7 +423,7 @@ class RestConnectionAuthorizationCallbackTest {
 
         // Once at authorize, once before the exchange, once after the grant is written.
         verify(connectionStore, times(3)).idOfName(TENANT, CONNECTION_NAME);
-        verify(connectionStore, times(2)).read(CONNECTION_ID, 1);
+        verify(connectionStore, times(3)).read(CONNECTION_ID, 1);
         verify(grantStore, never()).delete(anyString(), anyString(), anyString());
         assertEquals(URI.create("/manage/connections?connected=drive"), response.getLocation());
         Counter succeeded = registry.find(CALLBACK_METRIC).tag("outcome", "success").counter();
@@ -441,6 +439,22 @@ class RestConnectionAuthorizationCallbackTest {
 
         assertEquals(CONNECTION_ID, flow.row().getConnectionId(),
                 "without the id, a connection re-created under the same name is indistinguishable from the original at callback time");
+    }
+
+    @Test
+    @DisplayName("authorize builds the consent URL from the connection the store holds now")
+    void authorizeUsesTheConnectionTheStoreHoldsNow() throws Exception {
+        // Read by id at its current version, uncached: the client id in the consent URL
+        // and the id bound into the state come from the same document.
+        ConnectionConfiguration current = connection();
+        current.getOauth().setClientId("current-client");
+        doReturn(current).when(connectionStore).read(CONNECTION_ID, 1);
+
+        Response response = resource(new SimpleMeterRegistry()).authorize(CONNECTION_NAME, "/manage/connections");
+
+        String authorizationUrl = String.valueOf(((Map<?, ?>) response.getEntity()).get("authorizationUrl"));
+        assertTrue(authorizationUrl.contains("client_id=current-client"), authorizationUrl);
+        verify(stateStore).create(argThat(state -> CONNECTION_ID.equals(state.getConnectionId())));
     }
 
     @Test
@@ -509,6 +523,9 @@ class RestConnectionAuthorizationCallbackTest {
         RestConnectionAuthorization resource = resource(registry);
         StartedFlow flow = startFlow(resource, "/manage/connections");
         flow.row().setConnectionId(null);
+        // authorize reads the connection to start the flow; the assertion below is
+        // about the callback.
+        clearInvocations(connectionStore);
 
         Response response = resource.callback(CODE, flow.row().getState(), null, browserWith(flow.cookie()));
 

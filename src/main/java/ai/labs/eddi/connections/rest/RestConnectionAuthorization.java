@@ -10,7 +10,6 @@ import ai.labs.eddi.configs.connections.model.AuthType;
 import ai.labs.eddi.configs.connections.model.Binding;
 import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
 import ai.labs.eddi.connections.ConnectionException;
-import ai.labs.eddi.connections.ConnectionRegistry;
 import ai.labs.eddi.connections.CredentialReferenceResolver;
 import ai.labs.eddi.connections.ConnectionsConfig;
 import ai.labs.eddi.connections.grants.ConnectionGrant;
@@ -97,7 +96,6 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
 
     private static final SecureRandom RANDOM = new SecureRandom();
 
-    private final ConnectionRegistry connectionRegistry;
     /** Uncached, for the post-write re-read the registry's cache cannot serve. */
     private final IConnectionStore connectionStore;
     private final IOAuthStateStore stateStore;
@@ -111,12 +109,11 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
     private final MeterRegistry meterRegistry;
 
     @Inject
-    public RestConnectionAuthorization(ConnectionRegistry connectionRegistry, IOAuthStateStore stateStore, IConnectionGrantStore grantStore,
+    public RestConnectionAuthorization(IOAuthStateStore stateStore, IConnectionGrantStore grantStore,
             OAuthTokenClient tokenClient, OAuthTokenService tokenService, CredentialEndpointAllowlist endpointAllowlist,
             ConnectionsConfig connectionsConfig, SecurityIdentity securityIdentity, CredentialReferenceResolver credentialReferenceResolver,
             MeterRegistry meterRegistry, IConnectionStore connectionStore) {
         this.connectionStore = connectionStore;
-        this.connectionRegistry = connectionRegistry;
         this.stateStore = stateStore;
         this.grantStore = grantStore;
         this.tokenClient = tokenClient;
@@ -132,7 +129,8 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
     public Response authorize(String name, String returnTo) {
         requireEnabled();
         String principal = requirePrincipal();
-        ConnectionConfiguration connection = requireConnection(name);
+        CurrentConnection current = requireCurrentConnection(name);
+        ConnectionConfiguration connection = current.configuration();
 
         if (connection.getAuthType() != AuthType.OAUTH2_AUTHORIZATION_CODE) {
             throw new BadRequestException("Connection '" + name + "' is " + connection.getAuthType()
@@ -140,7 +138,7 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
         }
         endpointAllowlist.require(connection.getOauth().getAuthorizationUrl(), "oauth.authorizationUrl");
         endpointAllowlist.require(connection.getOauth().getTokenUrl(), "oauth.tokenUrl");
-        String connectionId = requireConnectionId(connection);
+        String connectionId = current.id();
 
         String codeVerifier = randomUrlSafe(64);
         String nonce = randomUrlSafe(32);
@@ -468,22 +466,37 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
     }
 
     /**
-     * The resource id of the connection a flow is being started for, from the same
-     * uncached store the callback checks it against.
+     * The connection {@code authorize} starts a flow for, read the way the callback
+     * reads it: the id from the store, then the document by that id at its current
+     * version, uncached.
+     * <p>
+     * The name-keyed registry is a cache cleared only on the replica that wrote the
+     * change, so right after a delete and re-create it can still return the
+     * predecessor. Building the consent URL from that document while binding the
+     * state to the replacement's id sends the user to the wrong client's consent
+     * screen, and the link can only fail at the callback.
      */
-    private String requireConnectionId(ConnectionConfiguration connection) {
-        String id;
+    private CurrentConnection requireCurrentConnection(String name) {
         try {
-            id = connectionStore.idOfName(ConnectionConfiguration.effectiveTenant(connection), connection.getName());
+            String id = connectionStore.idOfName(ConnectionReference.DEFAULT_TENANT, name);
+            if (id != null) {
+                IResourceStore.IResourceId version = connectionStore.getCurrentResourceId(id);
+                ConnectionConfiguration connection = connectionStore.read(id, version.getVersion());
+                if (connection != null) {
+                    return new CurrentConnection(id, connection);
+                }
+            }
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            // Deleted between the name lookup and the read: the same answer as no such
+            // name.
         } catch (IResourceStore.ResourceStoreException e) {
-            throw new InternalServerErrorException("Could not look up connection '" + connection.getName() + "'.", e);
+            throw new InternalServerErrorException("Could not look up connection '" + name + "'.", e);
         }
-        if (id == null) {
-            // The registry is cached and can outlive a delete by its TTL; the store
-            // cannot.
-            throw new NotFoundException("No connection named '" + connection.getName() + "'.");
-        }
-        return id;
+        throw new NotFoundException("No connection named '" + name + "'.");
+    }
+
+    /** A connection document together with the resource id it was read under. */
+    private record CurrentConnection(String id, ConnectionConfiguration configuration) {
     }
 
     /**
@@ -536,14 +549,6 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
             throw new ForbiddenException("The authenticated identity has no principal name.");
         }
         return name;
-    }
-
-    private ConnectionConfiguration requireConnection(String name) {
-        try {
-            return connectionRegistry.require(new ConnectionReference(ConnectionReference.DEFAULT_TENANT, name));
-        } catch (ConnectionException e) {
-            throw new NotFoundException("No connection named '" + name + "'.");
-        }
     }
 
     private String resolveClientSecret(ConnectionConfiguration connection) {
