@@ -44,7 +44,12 @@ import java.util.List;
  * connection document carries only references ({@code ${vault:…}}), the
  * {@code clientId} is public by definition, and
  * {@code ConnectionConfiguration#validate()} refuses a literal in every
- * secret-bearing field at write time.
+ * secret-bearing field at write time. A document written before those rules can
+ * still hold one, so a caller who is not {@code eddi-admin} reads a copy in
+ * which {@code oauth.clientSecret}, {@code staticAuth.passwordRef},
+ * {@code staticAuth.valueTemplate} and each {@code oauth.extraAuthParams} entry
+ * that fails its write-time rule is redacted; an administrator reads the
+ * document as stored, to find and fix it.
  * <p>
  * Note what is <em>not</em> here: there is no endpoint that returns a resolved
  * credential, and no endpoint that returns a grant. A grant carries tokens, so
@@ -82,7 +87,8 @@ public interface IRestConnectionStore extends IRestVersionInfo {
     @Path("/{id}")
     @Produces(MediaType.APPLICATION_JSON)
     @RolesAllowed({"eddi-admin", "eddi-editor"})
-    @Operation(summary = "Read connection", description = "Read a connection configuration. Secret-bearing fields are references, never values.")
+    @Operation(summary = "Read connection", description = "Read a connection configuration. Secret-bearing fields are references, never values; "
+            + "for a caller who is not eddi-admin, a legacy literal in one of them is redacted.")
     ConnectionConfiguration readConnection(@PathParam("id") String id,
                                            @Parameter(name = "version", required = true, example = "1")
                                            @QueryParam("version") Integer version);

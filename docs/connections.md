@@ -737,7 +737,7 @@ and the refusal names what to fix. Skips of both kinds are counted in an
 | Endpoint | Roles |
 | --- | --- |
 | `GET /connectionstore/connections/descriptors` — list connections | `eddi-admin`, `eddi-editor` |
-| `GET /connectionstore/connections/{id}` — read one document | `eddi-admin`, `eddi-editor` |
+| `GET /connectionstore/connections/{id}` — read one document | `eddi-admin` (as stored), `eddi-editor` (legacy literals redacted — see below) |
 | `POST`, `PUT`, `DELETE` and the duplicate `POST /{id}` | `eddi-admin` only |
 | `GET /connectionstore/connections/jsonSchema` | `eddi-admin` only |
 | `POST /connections/{name}/authorize`, `GET /connections/mine`, `DELETE /connections/{name}/grant` | any authenticated user — see [Per-user accounts](#per-user-accounts) |
@@ -748,6 +748,19 @@ an editor because an httpcall author cannot write `${connection:jira}` without
 knowing that `jira` exists, and the Manager's picker needs the same list. Reading
 is safe: a document carries only `${vault:…}` references, `clientId` is public by
 definition, and every secret-bearing field is refused a literal at write time.
+
+A document saved **before** those rules existed can still hold a literal, so a
+caller who is not `eddi-admin` reads a copy. In it `oauth.clientSecret`,
+`staticAuth.passwordRef`, `staticAuth.valueTemplate` and each
+`oauth.extraAuthParams` entry keep their value only if it passes the rule save-time
+validation applies to that field — reference-only for the first two, the template
+rule, the key-and-value rule — and otherwise read
+`<redacted: a literal value where a vault reference is required - an eddi-admin must re-save this connection>`.
+Everything else, including `name`, `authType`, `binding` and
+`staticAuth.headerName`, is returned unchanged. An `eddi-admin` reads the document
+as stored, so a legacy literal can be found and replaced. With
+`authorization.enabled=false` role checks are off entirely and every caller is
+treated as an administrator, exactly as `@RolesAllowed` is.
 
 * **Only a reference is ever inherited, never a token.** Configs carry
   `${connection:name}`; the credential exists in memory for one outbound request.

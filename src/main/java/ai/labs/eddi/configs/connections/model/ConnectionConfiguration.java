@@ -452,22 +452,70 @@ public class ConnectionConfiguration {
             return;
         }
         for (Map.Entry<String, String> param : params.entrySet()) {
-            String key = param.getKey();
-            if (key == null) {
-                continue;
-            }
-            String normalized = key.toLowerCase(Locale.ROOT).replaceAll("[\\-._]", "");
-            if (CREDENTIAL_PARAM_NAMES.contains(normalized)) {
-                throw new IllegalArgumentException("oauth.extraAuthParams may carry only non-secret protocol parameters (prompt, audience, …). '"
-                        + key + "' is credential-shaped; store it with POST /secretstore/secrets and reference it instead.");
-            }
-            if (RESERVED_OAUTH_PARAM_NAMES.contains(normalized)) {
-                throw new IllegalArgumentException("oauth.extraAuthParams must not set '" + key + "': it is a protocol parameter EDDI "
-                        + "composes itself when it builds the authorization request (redirect_uri, state, code_challenge, "
-                        + "code_challenge_method, client_id, response_type). A value here would be ignored or would override the one the "
-                        + "callback and PKCE depend on.");
-            }
-            requireProtocolParameterValue(key, param.getValue());
+            requireExtraAuthParam(param.getKey(), param.getValue());
+        }
+    }
+
+    /** One entry of {@code extraAuthParams}: its key, then its value. */
+    private static void requireExtraAuthParam(String key, String value) {
+        if (key == null) {
+            return;
+        }
+        String normalized = key.toLowerCase(Locale.ROOT).replaceAll("[\\-._]", "");
+        if (CREDENTIAL_PARAM_NAMES.contains(normalized)) {
+            throw new IllegalArgumentException("oauth.extraAuthParams may carry only non-secret protocol parameters (prompt, audience, …). '"
+                    + key + "' is credential-shaped; store it with POST /secretstore/secrets and reference it instead.");
+        }
+        if (RESERVED_OAUTH_PARAM_NAMES.contains(normalized)) {
+            throw new IllegalArgumentException("oauth.extraAuthParams must not set '" + key + "': it is a protocol parameter EDDI "
+                    + "composes itself when it builds the authorization request (redirect_uri, state, code_challenge, "
+                    + "code_challenge_method, client_id, response_type). A value here would be ignored or would override the one the "
+                    + "callback and PKCE depend on.");
+        }
+        requireProtocolParameterValue(key, value);
+    }
+
+    // --- The write-time rules as predicates -----------------------------------
+    //
+    // For a reader that must decide whether a STORED value would pass today's
+    // rules — a document written before them can still hold a literal — without
+    // copying the rules and letting the two drift.
+
+    /**
+     * Whether a value passes the rule {@code oauth.clientSecret} and
+     * {@code staticAuth.passwordRef} are held to at write time: exactly one
+     * {@code ${vault:…}} or {@code ${vars:…}} reference and nothing else.
+     */
+    public static boolean isReferenceOnly(String value) {
+        return value != null && REFERENCE_ONLY.matcher(value.trim()).matches();
+    }
+
+    /**
+     * Whether a {@code staticAuth.valueTemplate} passes the write-time template
+     * rule — see {@link #requireTemplateIsReferenceOnly}.
+     */
+    public static boolean isAcceptableValueTemplate(String template) {
+        if (template == null) {
+            return false;
+        }
+        try {
+            requireTemplateIsReferenceOnly(template);
+            return true;
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+    }
+
+    /**
+     * Whether one {@code oauth.extraAuthParams} entry passes the write-time rules
+     * for its key and its value.
+     */
+    public static boolean isAcceptableExtraAuthParam(String key, String value) {
+        try {
+            requireExtraAuthParam(key, value);
+            return true;
+        } catch (IllegalArgumentException e) {
+            return false;
         }
     }
 
@@ -512,7 +560,7 @@ public class ConnectionConfiguration {
         if (value == null || value.isBlank()) {
             throw new IllegalArgumentException(field + " is required, as a ${vault:…} reference.");
         }
-        if (!REFERENCE_ONLY.matcher(value.trim()).matches()) {
+        if (!isReferenceOnly(value)) {
             throw new IllegalArgumentException(field + " must be a ${vault:…} or ${vars:…} reference, not a literal. Store the value with "
                     + "POST /secretstore/secrets and reference it here — a literal here bypasses the vault, export scrubbing and deploy-time "
                     + "grant enforcement at once.");

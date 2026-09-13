@@ -103,7 +103,12 @@ public class RestConnectionStore implements IRestConnectionStore {
 
     @Override
     public ConnectionConfiguration readConnection(String id, Integer version) {
-        return restVersionInfo.read(id, version);
+        ConnectionConfiguration stored = restVersionInfo.read(id, version);
+        // An administrator sees the document as stored, legacy literal included, so
+        // it can be found and fixed. Anyone else admitted here (eddi-editor) gets a
+        // copy with such literals redacted. isAdmin() is true for everyone when
+        // authorization.enabled=false, which is also when @RolesAllowed is off.
+        return resourceAccessGuard.isAdmin() ? stored : ConnectionReadRedactor.redactLegacyLiterals(stored);
     }
 
     @Override
