@@ -445,7 +445,7 @@ class OAuthTokenServiceRefreshTest {
         // polling for somebody else's refresh.
         grantStore = new InterferingGrantStore(2, store -> store.delete(TENANT, CONNECTION, PRINCIPAL));
         seedExpiredGrant();
-        grantStore.claimRefresh(TENANT, CONNECTION, PRINCIPAL, "another-replica", Instant.now().plus(Duration.ofSeconds(60)));
+        grantStore.claimRefresh(TENANT, CONNECTION, PRINCIPAL, "another-replica", Duration.ofSeconds(60));
 
         long start = System.nanoTime();
         var error = assertThrows(ConnectionException.class, () -> service().accessToken(connection(), PRINCIPAL));
@@ -466,7 +466,7 @@ class OAuthTokenServiceRefreshTest {
         grantStore = new InterferingGrantStore(2,
                 store -> store.releaseRefresh(TENANT, CONNECTION, PRINCIPAL, "another-replica"));
         seedExpiredGrant();
-        grantStore.claimRefresh(TENANT, CONNECTION, PRINCIPAL, "another-replica", Instant.now().plus(Duration.ofSeconds(60)));
+        grantStore.claimRefresh(TENANT, CONNECTION, PRINCIPAL, "another-replica", Duration.ofSeconds(60));
         when(tokenClient.refresh(any(), anyString(), anyString())).thenAnswer(invocation -> {
             tokenRequests.incrementAndGet();
             return new TokenResponse("fresh-access", "new-refresh", Duration.ofHours(1), List.of());
@@ -571,7 +571,7 @@ class OAuthTokenServiceRefreshTest {
         OAuthTokenService service = service(registry);
         service.awaitTimeoutForTests(Duration.ofMillis(600));
         // Held by a dead replica whose lease expires before the deadline does.
-        grantStore.claimRefresh(TENANT, CONNECTION, PRINCIPAL, "dead-replica", Instant.now().plus(Duration.ofMillis(300)));
+        grantStore.claimRefresh(TENANT, CONNECTION, PRINCIPAL, "dead-replica", Duration.ofMillis(300));
         when(tokenClient.refresh(any(), anyString(), anyString())).thenAnswer(invocation -> {
             tokenRequests.incrementAndGet();
             return new TokenResponse("fresh-access", "new-refresh", Duration.ofHours(1), List.of());
@@ -591,7 +591,7 @@ class OAuthTokenServiceRefreshTest {
         OAuthTokenService service = service();
         service.awaitTimeoutForTests(Duration.ofMillis(600));
         // Held, and still live long after the waiter gives up.
-        grantStore.claimRefresh(TENANT, CONNECTION, PRINCIPAL, "another-replica", Instant.now().plus(Duration.ofHours(1)));
+        grantStore.claimRefresh(TENANT, CONNECTION, PRINCIPAL, "another-replica", Duration.ofHours(1));
 
         var error = assertThrows(ConnectionException.class, () -> service.accessToken(connection(), PRINCIPAL));
 

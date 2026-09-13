@@ -21,8 +21,10 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Timestamp;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.AbstractList;
+import java.util.Calendar;
 import java.util.List;
 import java.util.Optional;
 
@@ -33,6 +35,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -70,6 +73,7 @@ class PostgresConnectionGrantStoreUnitTest {
     private static final Instant UPDATED_AT = Instant.parse("2025-12-01T11:00:00Z");
     private static final Instant LAST_REFRESH_AT = Instant.parse("2025-12-24T12:00:00Z");
     private static final Instant LEASE_EXPIRES_AT = Instant.parse("2026-01-02T03:00:00Z");
+    private static final Duration LEASE = Duration.ofSeconds(60);
 
     @Mock
     private Instance<DataSource> dataSourceInstance;
@@ -162,7 +166,7 @@ class PostgresConnectionGrantStoreUnitTest {
         when(resultSet.getTimestamp("created_at")).thenReturn(Timestamp.from(CREATED_AT));
         when(resultSet.getTimestamp("updated_at")).thenReturn(Timestamp.from(UPDATED_AT));
         when(resultSet.getTimestamp("last_refresh_at")).thenReturn(Timestamp.from(LAST_REFRESH_AT));
-        when(resultSet.getTimestamp("refresh_lease_expires_at")).thenReturn(Timestamp.from(LEASE_EXPIRES_AT));
+        when(resultSet.getTimestamp(eq("refresh_lease_expires_at"), any(Calendar.class))).thenReturn(Timestamp.from(LEASE_EXPIRES_AT));
     }
 
     private void stubTwoRows() throws SQLException {
@@ -408,36 +412,36 @@ class PostgresConnectionGrantStoreUnitTest {
     void claimRefreshReturnsTrueWhenTheLeaseWasTaken() throws Exception {
         when(preparedStatement.executeUpdate()).thenReturn(1);
 
-        assertTrue(store.claimRefresh(TENANT, CONNECTION, PRINCIPAL, CLAIMANT, LEASE_EXPIRES_AT));
+        assertTrue(store.claimRefresh(TENANT, CONNECTION, PRINCIPAL, CLAIMANT, LEASE));
 
         verify(preparedStatement).setString(1, CLAIMANT);
-        verify(preparedStatement).setTimestamp(2, Timestamp.from(LEASE_EXPIRES_AT));
+        verify(preparedStatement).setLong(2, 60_000L);
         verify(preparedStatement).setString(3, TENANT);
         verify(preparedStatement).setString(4, CONNECTION);
         verify(preparedStatement).setString(5, PRINCIPAL);
-        assertTrue(capturedSql().contains("refresh_in_progress IS NULL OR refresh_lease_expires_at < ?"),
+        assertTrue(capturedSql().contains("refresh_in_progress IS NULL OR refresh_lease_expires_at < (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')"),
                 "the free-lease predicate is what makes the claim atomic; a read-then-write lets two replicas both win");
     }
 
     @Test
-    @DisplayName("claimRefresh judges an expired lease by the JVM clock that wrote it, not by CURRENT_TIMESTAMP")
-    void claimRefreshBindsTheJvmInstantForTheExpiryPredicate() throws Exception {
-        // The lease expiry was written from Instant.now(), and the Mongo store and the
-        // OAuth state store both compare it against Instant.now(). Comparing against
-        // the database clock instead lets app/DB skew shorten the lease, and a lease
-        // that expires early is a second replica refreshing while the claimant is
-        // still in flight: the double refresh the claim exists to prevent.
+    @DisplayName("claimRefresh writes and compares the lease expiry by the database clock, binding only the lease duration")
+    void claimRefreshUsesTheDatabaseClockOnBothSides() throws Exception {
+        // An expiry stamped by the claimant JVM's clock and compared on a contender
+        // JVM's clock frees a live lease early by the skew between the two replicas:
+        // a second refresh while the claimant is still in flight, the double refresh
+        // the claim exists to prevent. One clock — the database's — on both sides,
+        // and the same kind of timestamp on both sides, so no session time zone can
+        // shift one relative to the other.
         when(preparedStatement.executeUpdate()).thenReturn(1);
-        Instant before = Instant.now();
 
-        store.claimRefresh(TENANT, CONNECTION, PRINCIPAL, CLAIMANT, LEASE_EXPIRES_AT);
+        store.claimRefresh(TENANT, CONNECTION, PRINCIPAL, CLAIMANT, LEASE);
 
-        var bound = ArgumentCaptor.forClass(Timestamp.class);
-        verify(preparedStatement).setTimestamp(eq(6), bound.capture());
-        Instant now = bound.getValue().toInstant();
-        assertFalse(now.isBefore(before), "the bound instant must be this JVM's now, taken at the time of the claim");
-        assertFalse(now.isAfter(Instant.now()), "the bound instant must be this JVM's now, taken at the time of the claim");
-        assertFalse(capturedSql().contains("CURRENT_TIMESTAMP"), "the predicate must not consult the database clock");
+        String sql = capturedSql();
+        assertTrue(sql.contains("refresh_lease_expires_at = (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') + (? * INTERVAL '1 millisecond')"),
+                "the expiry is written as database-now plus the bound duration: " + sql);
+        assertTrue(sql.contains("refresh_lease_expires_at < (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')"),
+                "and compared with database-now, in the same kind of timestamp: " + sql);
+        verify(preparedStatement, never()).setTimestamp(anyInt(), any(Timestamp.class));
     }
 
     @Test
@@ -445,18 +449,20 @@ class PostgresConnectionGrantStoreUnitTest {
     void claimRefreshReturnsFalseWhenTheLeaseIsHeld() throws Exception {
         when(preparedStatement.executeUpdate()).thenReturn(0);
 
-        assertFalse(store.claimRefresh(TENANT, CONNECTION, PRINCIPAL, CLAIMANT, LEASE_EXPIRES_AT),
+        assertFalse(store.claimRefresh(TENANT, CONNECTION, PRINCIPAL, CLAIMANT, LEASE),
                 "reporting a lost race as won sends a second token request and rotates the winner's refresh token away");
     }
 
     @Test
-    @DisplayName("claimRefresh refuses a lease with no expiry rather than writing one nobody can reclaim")
-    void claimRefreshRefusesANullLeaseExpiry() throws Exception {
+    @DisplayName("claimRefresh refuses a missing or non-positive lease rather than writing one nobody can reclaim")
+    void claimRefreshRefusesAnUnusableLease() throws Exception {
         // A missing expiry is not a shorter lease, it is a permanent one: the claim
         // predicate asks whether the lease has expired, and `NULL <
         // CURRENT_TIMESTAMP` is NULL rather than true, so the row could never be
         // claimed again and refresh for that grant would be wedged for good.
         assertThrows(IllegalArgumentException.class, () -> store.claimRefresh(TENANT, CONNECTION, PRINCIPAL, CLAIMANT, null));
+        assertThrows(IllegalArgumentException.class, () -> store.claimRefresh(TENANT, CONNECTION, PRINCIPAL, CLAIMANT, Duration.ZERO));
+        assertThrows(IllegalArgumentException.class, () -> store.claimRefresh(TENANT, CONNECTION, PRINCIPAL, CLAIMANT, Duration.ofMillis(-1)));
 
         verify(preparedStatement, never()).executeUpdate();
     }
@@ -467,7 +473,20 @@ class PostgresConnectionGrantStoreUnitTest {
         var boom = new SQLException("lock timeout");
         when(preparedStatement.executeUpdate()).thenThrow(boom);
 
-        assertWraps("Failed to claim a refresh lease", boom, () -> store.claimRefresh(TENANT, CONNECTION, PRINCIPAL, CLAIMANT, LEASE_EXPIRES_AT));
+        assertWraps("Failed to claim a refresh lease", boom, () -> store.claimRefresh(TENANT, CONNECTION, PRINCIPAL, CLAIMANT, LEASE));
+    }
+
+    @Test
+    @DisplayName("find reads the lease expiry back as the UTC wall clock claimRefresh wrote it in")
+    void findReadsTheLeaseExpiryAsUtc() throws Exception {
+        stubFullRow();
+
+        store.find(TENANT, CONNECTION, PRINCIPAL);
+
+        var calendar = ArgumentCaptor.forClass(Calendar.class);
+        verify(resultSet).getTimestamp(eq("refresh_lease_expires_at"), calendar.capture());
+        assertEquals("UTC", calendar.getValue().getTimeZone().getID(),
+                "read in this JVM's zone, the expiry would be off by the zone's offset on any replica not running in UTC");
     }
 
     @Test

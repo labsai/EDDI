@@ -4,7 +4,7 @@
  */
 package ai.labs.eddi.connections.grants;
 
-import java.time.Instant;
+import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 
@@ -37,19 +37,27 @@ public interface IConnectionGrantStore {
      * invalidated one of them. The CAS would then dutifully serialise two writes,
      * one carrying a token the provider had already killed, and the user is
      * silently logged out.
+     * <p>
+     * <b>One clock.</b> "now" is the <em>database's</em> clock, both where the
+     * expiry is written ({@code now + lease}) and where it is compared. The caller
+     * passes a duration, never an instant. An expiry written from the claimant
+     * JVM's clock and compared on a contender JVM's clock frees a live lease early
+     * by exactly the skew between the two, and a lease freed early is a second
+     * replica refreshing while the first is still in flight.
      *
-     * @param leaseExpiresAt
-     *            must be later than the token-endpoint timeout, or a slow provider
-     *            frees the lease while the claimant is still in flight and
-     *            reintroduces exactly the double refresh this prevents. Must also
-     *            be non-null: a missing expiry is not a shorter lease but a
-     *            permanent one, since the predicate asks whether the lease has
-     *            expired and {@code NULL < CURRENT_TIMESTAMP} is NULL rather than
-     *            true. Implementations reject it instead of writing a grant whose
-     *            refresh can never be claimed again
+     * @param lease
+     *            how long the claimant owns the refresh. Must be longer than the
+     *            token-endpoint timeout, or a slow provider frees the lease while
+     *            the claimant is still in flight and reintroduces exactly the
+     *            double refresh this prevents. Must also be non-null and positive:
+     *            a missing lease is not a shorter one but a permanent one, since
+     *            the predicate asks whether the lease has expired and
+     *            {@code NULL < CURRENT_TIMESTAMP} is NULL rather than true.
+     *            Implementations reject it instead of writing a grant whose refresh
+     *            can never be claimed again
      * @return true if this caller now owns the refresh
      */
-    boolean claimRefresh(String tenantId, String connectionName, String principal, String claimantId, Instant leaseExpiresAt);
+    boolean claimRefresh(String tenantId, String connectionName, String principal, String claimantId, Duration lease);
 
     /**
      * Writes a refreshed grant and clears the lease, guarded by the version the

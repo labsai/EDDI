@@ -636,6 +636,16 @@ which point both replicas have already called the endpoint and the provider has
 already rotated one token away — the CAS then dutifully serialises two writes,
 one carrying a token that is already dead.
 
+**The lease runs on one clock: the database's.** The claimant passes a lease
+*duration*, and the store both writes the expiry as database-now plus that
+duration and compares it with database-now — `CURRENT_TIMESTAMP` on PostgreSQL,
+`$$NOW` on MongoDB (which needs MongoDB 4.2 or later; EDDI supports 6.0+). An
+expiry stamped by the claimant's clock and judged by another replica's would free a
+live lease early by exactly the skew between them, and a lease freed early is a
+second refresh while the first is still in flight. A waiter that gives up polling
+does consult its own clock, but only to decide when to *ask* again: the retry is the
+same conditional update, and it fails if the lease is still live.
+
 Failure semantics distinguish two cases that a naive implementation conflates:
 
 | Provider says | EDDI does |

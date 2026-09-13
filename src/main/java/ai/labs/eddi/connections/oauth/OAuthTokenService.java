@@ -251,7 +251,7 @@ public class OAuthTokenService implements AccessTokenSupplier {
     private String refreshOrAwait(ConnectionConfiguration connection, String tenantId, String principal, ConnectionGrant grant) {
         Instant deadline = Instant.now().plus(awaitTimeout);
         while (true) {
-            if (grantStore.claimRefresh(tenantId, connection.getName(), principal, claimantId, Instant.now().plus(REFRESH_LEASE))) {
+            if (grantStore.claimRefresh(tenantId, connection.getName(), principal, claimantId, REFRESH_LEASE)) {
                 increment("eddi.connection.token.refresh.claim.count", "outcome", "claimed");
                 return refreshAsClaimant(connection, tenantId, principal);
             }
@@ -285,8 +285,16 @@ public class OAuthTokenService implements AccessTokenSupplier {
                 // The lease outlived its holder — a crashed replica, or one that hung.
                 // Retry the claim rather than refreshing blind, so exactly one caller
                 // proceeds even now.
+                //
+                // This JVM-clock comparison is a POLLING HINT only: a deadline this
+                // replica set, measured on this replica's own clock, deciding when to
+                // stop waiting and ask again. Whether the lease has really expired is
+                // never decided here. The claim below decides it, as a conditional
+                // update against the store's clock, and simply fails if the holder's
+                // lease is still live — so skew between replicas can cost a waiter an
+                // early retry or a late one, never a second refresh.
                 increment("eddi.connection.token.refresh.claim.count", "outcome", "lease_expired");
-                if (grantStore.claimRefresh(tenantId, connection.getName(), principal, claimantId, Instant.now().plus(REFRESH_LEASE))) {
+                if (grantStore.claimRefresh(tenantId, connection.getName(), principal, claimantId, REFRESH_LEASE)) {
                     return refreshAsClaimant(connection, tenantId, principal);
                 }
                 throw new ConnectionException(ConnectionException.Reason.TOKEN_ENDPOINT_UNAVAILABLE, "Timed out waiting for a token refresh on "

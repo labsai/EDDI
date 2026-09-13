@@ -18,6 +18,7 @@ import jakarta.inject.Inject;
 import org.bson.Document;
 import org.bson.conversions.Bson;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Date;
@@ -95,20 +96,35 @@ public class MongoConnectionGrantStore implements IConnectionGrantStore {
     }
 
     @Override
-    public boolean claimRefresh(String tenantId, String connectionName, String principal, String claimantId, Instant leaseExpiresAt) {
+    public boolean claimRefresh(String tenantId, String connectionName, String principal, String claimantId, Duration lease) {
         // A null lease is not a shorter lease, it is a permanent one: the claim
         // predicate asks whether the lease has expired, and in SQL
         // `NULL < CURRENT_TIMESTAMP` is NULL rather than true, so a row claimed
         // without an expiry can never be claimed by anyone again and refresh for
         // that grant is wedged until something rewrites the row. Refused here
         // rather than written, and refused the same way on both backends.
-        checkNotNull(leaseExpiresAt, "leaseExpiresAt");
-        Instant now = Instant.now();
+        checkNotNull(lease, "lease");
+        if (lease.isNegative() || lease.isZero()) {
+            throw new IllegalArgumentException("A refresh lease must be positive, was " + lease);
+        }
+        // One clock, the server's: $$NOW both where the expiry is compared and where
+        // it is written, so no two replicas can disagree about when a lease ends.
+        // Stamping it from this JVM and comparing it on another frees a live lease
+        // early by the skew between them. $$NOW and pipeline updates need MongoDB 4.2+;
+        // EDDI documents 6.0+ and docker-compose pins 7.0, and the driver the Quarkus
+        // BOM manages supports both.
+        //
+        // A lease field that is missing compares less than $$NOW in $expr, so a row
+        // somehow left with a claimant and no expiry is claimable here rather than
+        // wedged.
         Bson free = Filters.or(Filters.exists(FIELD_REFRESH_IN_PROGRESS, false), Filters.eq(FIELD_REFRESH_IN_PROGRESS, null),
-                Filters.lt(FIELD_LEASE_EXPIRES, Date.from(now)));
+                Filters.expr(new Document("$lt", List.of("$" + FIELD_LEASE_EXPIRES, "$$NOW"))));
         Bson filter = Filters.and(key(tenantId, connectionName, principal), free);
-        Bson update = Updates.combine(Updates.set(FIELD_REFRESH_IN_PROGRESS, claimantId),
-                Updates.set(FIELD_LEASE_EXPIRES, Date.from(leaseExpiresAt)));
+        // A pipeline update, the only form in which $$NOW can be written. The
+        // claimant id goes through $literal because a pipeline reads any string
+        // starting with '$' as a field path.
+        List<Bson> update = List.of(new Document("$set", new Document(FIELD_REFRESH_IN_PROGRESS, new Document("$literal", claimantId))
+                .append(FIELD_LEASE_EXPIRES, new Document("$add", List.of("$$NOW", lease.toMillis())))));
         // Deliberately NOT an upsert: claiming a refresh on a grant that does not
         // exist would create an empty row and make "not connected" look like
         // "connected but unusable".

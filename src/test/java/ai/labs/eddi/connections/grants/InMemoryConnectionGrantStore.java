@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.connections.grants;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -79,18 +80,21 @@ public class InMemoryConnectionGrantStore implements IConnectionGrantStore {
     }
 
     @Override
-    public synchronized boolean claimRefresh(String tenantId, String connectionName, String principal, String claimantId, Instant leaseExpiresAt) {
+    public synchronized boolean claimRefresh(String tenantId, String connectionName, String principal, String claimantId, Duration lease) {
         ConnectionGrant grant = grants.get(key(tenantId, connectionName, principal));
         if (grant == null) {
             return false;
         }
+        // One clock for writing and comparing the expiry, as in the real stores —
+        // here the only clock there is.
+        Instant now = Instant.now();
         boolean free = grant.getRefreshInProgress() == null
-                || (grant.getRefreshLeaseExpiresAt() != null && grant.getRefreshLeaseExpiresAt().isBefore(Instant.now()));
+                || (grant.getRefreshLeaseExpiresAt() != null && grant.getRefreshLeaseExpiresAt().isBefore(now));
         if (!free) {
             return false;
         }
         grant.setRefreshInProgress(claimantId);
-        grant.setRefreshLeaseExpiresAt(leaseExpiresAt);
+        grant.setRefreshLeaseExpiresAt(now.plus(lease));
         return true;
     }
 

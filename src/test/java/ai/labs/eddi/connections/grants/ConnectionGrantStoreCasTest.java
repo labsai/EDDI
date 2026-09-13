@@ -8,6 +8,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
 import java.time.Instant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -117,8 +118,8 @@ class ConnectionGrantStoreCasTest {
     @DisplayName("a re-seal neither takes nor clears a refresh lease it does not own")
     void doesNotDisturbTheRefreshLease() {
         store.upsert(grant("gen-1", "original"));
-        Instant leaseUntil = Instant.now().plusSeconds(60);
-        assertTrue(store.claimRefresh(TENANT, CONNECTION, PRINCIPAL, "another-replica", leaseUntil), "the lease must start out held by somebody");
+        assertTrue(store.claimRefresh(TENANT, CONNECTION, PRINCIPAL, "another-replica", Duration.ofSeconds(60)),
+                "the lease must start out held by somebody");
 
         assertTrue(store.updateSealedTokens(grant("gen-2", "resealed"), stored().getVersion()));
 
