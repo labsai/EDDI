@@ -40,6 +40,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -67,6 +68,7 @@ class ApiCallExecutorConnectionHeaderTest {
 
     private ConnectionResolver connectionResolver;
     private ApiCallExecutor executor;
+    private PrePostUtils prePostUtils;
 
     private IConversationMemory memory;
     private IRequest mockRequest;
@@ -76,7 +78,7 @@ class ApiCallExecutorConnectionHeaderTest {
         IHttpClient httpClient = mock(IHttpClient.class);
         IJsonSerialization jsonSerialization = mock(IJsonSerialization.class);
         IRuntime runtime = mock(IRuntime.class);
-        PrePostUtils prePostUtils = mock(PrePostUtils.class);
+        prePostUtils = mock(PrePostUtils.class);
         connectionResolver = mock(ConnectionResolver.class);
 
         SecretResolver secretResolver = mock(SecretResolver.class);
@@ -371,6 +373,103 @@ class ApiCallExecutorConnectionHeaderTest {
                             + failure.getMessage());
             verify(mockRequest, never()).send();
             verify(connectionResolver, never()).resolve(anyString(), any(), any());
+        }
+    }
+
+    @Nested
+    @DisplayName("A connection-owned header is redacted wherever the request is shown")
+    class ConnectionOwnedHeadersAreRedacted {
+
+        private static final String AMP_REF = "${connection:amplitude}";
+        private static final String GNOWBE_REF = "${connection:gnowbe}";
+        private static final String AMP_VALUE = "amp-live-id-12345";
+        private static final String GNOWBE_VALUE = "key-id:secret";
+
+        /**
+         * A STATIC connection on a custom header and a CALLER_SUPPLIED one on another:
+         * neither name matches a credential pattern, and neither value has a
+         * recognisable secret shape. Redaction by heuristics alone stores both in full,
+         * which is exactly the leak this test pins.
+         */
+        @BeforeEach
+        void connectionsResolveToUnremarkableLookingValues() {
+            doAnswer(inv -> inv.<String>getArgument(0).contains("amplitude")
+                    ? new ResolvedCredential("X-Custom-Id", AMP_VALUE)
+                    : new ResolvedCredential("X-Gnowbe-Key", GNOWBE_VALUE)).when(connectionResolver).resolve(anyString(), any(), any());
+            // The request map has to reflect what was actually written to the request,
+            // or "the stored map is redacted" would be asserting on an empty map.
+            var written = new LinkedHashMap<String, String>();
+            when(mockRequest.setHttpHeader(any(), any())).thenAnswer(inv -> {
+                written.put(inv.getArgument(0), inv.getArgument(1));
+                return mockRequest;
+            });
+            when(mockRequest.toMap()).thenAnswer(inv -> new HashMap<>(Map.of(IRequest.KEY_HEADERS, new HashMap<>(written))));
+        }
+
+        private ApiCall callWithBothConnections() {
+            var headers = new LinkedHashMap<String, String>();
+            headers.put("X-Custom-Id", AMP_REF);
+            headers.put("X-Gnowbe-Key", GNOWBE_REF);
+            headers.put("Accept", "application/json");
+            return callWithHeaders(headers);
+        }
+
+        @Test
+        @DisplayName("the request map persisted to conversation memory carries [REDACTED] for every connection-owned header")
+        void storedRequestMapIsRedacted() throws Exception {
+            executor.execute(callWithBothConnections(), memory, templateData("alice"), SERVER);
+
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<Map<String, Object>> stored = ArgumentCaptor.forClass(Map.class);
+            verify(prePostUtils).createMemoryEntry(any(), stored.capture(), eq("connection-callRequest"), anyString());
+            @SuppressWarnings("unchecked")
+            Map<String, String> headers = (Map<String, String>) stored.getValue().get(IRequest.KEY_HEADERS);
+
+            assertEquals(RequestRedactor.REDACTED, headers.get("X-Custom-Id"),
+                    "a STATIC connection's value on a custom header name matches no credential heuristic, so only the executor's "
+                            + "knowledge that a connection filled it can keep it out of MongoDB");
+            assertEquals(RequestRedactor.REDACTED, headers.get("X-Gnowbe-Key"),
+                    "a CALLER_SUPPLIED credential is the end user's own key and must never be persisted");
+            assertEquals("application/json", headers.get("Accept"), "a plain header must stay readable in the debug record");
+            // The live request still went out with the real values — redaction is of
+            // the record, not of the call.
+            assertEquals(AMP_VALUE, capturedHeaders().get("X-Custom-Id"));
+            assertEquals(GNOWBE_VALUE, capturedHeaders().get("X-Gnowbe-Key"));
+        }
+
+        @Test
+        @DisplayName("the HITL approval preview shows [REDACTED] for the same headers, so the two records cannot disagree")
+        void approvalPreviewIsRedacted() throws Exception {
+            ResolvedRequest preview = executor.resolve(callWithBothConnections(), memory, templateData("alice"), SERVER);
+
+            // ResolvedRequest lower-cases header names for a stable fingerprint.
+            assertEquals(RequestRedactor.REDACTED, preview.headers().get("x-custom-id"),
+                    "the approver is routinely not the user whose turn raised the pause and must not see the org-wide key");
+            assertEquals(RequestRedactor.REDACTED, preview.headers().get("x-gnowbe-key"),
+                    "the approver must not see the end user's caller-supplied credential");
+            assertEquals("application/json", preview.headers().get("accept"));
+        }
+
+        @Test
+        @DisplayName("the header is matched case-insensitively, as HTTP header names are")
+        void redactionIgnoresHeaderNameCase() throws Exception {
+            // A transport that normalises header names on the way out: the connection
+            // wrote "X-Custom-Id", the request reads back "x-custom-id". Both are the
+            // same header on the wire, and a case-sensitive match would reopen the leak.
+            var written = new LinkedHashMap<String, String>();
+            when(mockRequest.setHttpHeader(any(), any())).thenAnswer(inv -> {
+                written.put(inv.<String>getArgument(0).toLowerCase(), inv.getArgument(1));
+                return mockRequest;
+            });
+            when(mockRequest.toMap()).thenAnswer(inv -> new HashMap<>(Map.of(IRequest.KEY_HEADERS, new HashMap<>(written))));
+            var headers = new LinkedHashMap<String, String>();
+            headers.put("X-Custom-Id", AMP_REF);
+
+            ResolvedRequest preview = executor.resolve(callWithHeaders(headers), memory, templateData("alice"), SERVER);
+
+            assertEquals(RequestRedactor.REDACTED, preview.headers().get("x-custom-id"),
+                    "a case difference between what the connection wrote and what the transport reports must not reopen the leak: "
+                            + preview.headers());
         }
     }
 
