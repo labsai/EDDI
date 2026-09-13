@@ -129,8 +129,26 @@ public class OAuthTokenClient {
         // by import or by a direct write, and this is the last point before the
         // client secret leaves the process.
         endpointAllowlist.require(oauth.getTokenUrl(), "oauth.tokenUrl");
+        // The allowlist is the access rule here, and it is stricter than the SSRF
+        // check: an exact origin an operator wrote down, not "anything public". That
+        // is what lets an on-premises identity provider on a private network be a
+        // token endpoint at all — the SSRF address block would refuse it, and the
+        // operator who listed it is precisely the person entitled to. Scheme and
+        // host are still validated; only the address class is not. Validated BEFORE
+        // the request is built, and the URI it parsed is the one fetched: a token
+        // URL the allowlist accepts once trimmed but that will not parse (trailing
+        // whitespace, say) used to surface as a raw IllegalArgumentException from
+        // URI.create — not a ConnectionException, so the MCP failure classifier fed
+        // it to the circuit breaker as a server outage.
+        URI tokenUri;
+        try {
+            tokenUri = UrlValidationUtils.validateUrlSyntax(oauth.getTokenUrl());
+        } catch (IllegalArgumentException e) {
+            throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION, "oauth.tokenUrl of connection '"
+                    + connection.getName() + "' is not a usable URL: " + e.getMessage(), e);
+        }
 
-        HttpRequest.Builder request = HttpRequest.newBuilder().uri(URI.create(oauth.getTokenUrl()))
+        HttpRequest.Builder request = HttpRequest.newBuilder().uri(tokenUri)
                 .timeout(effectiveTimeout(connection))
                 .header("Content-Type", "application/x-www-form-urlencoded").header("Accept", "application/json");
 
@@ -147,13 +165,6 @@ public class OAuthTokenClient {
 
         HttpResponse<String> response;
         try {
-            // The allowlist above is the access rule here, and it is stricter than the
-            // SSRF check: an exact origin an operator wrote down, not "anything public".
-            // That is what lets an on-premises identity provider on a private network
-            // be a token endpoint at all — the SSRF address block would refuse it, and
-            // the operator who listed it is precisely the person entitled to. Scheme
-            // and host are still validated; only the address class is not.
-            UrlValidationUtils.validateUrlSyntax(oauth.getTokenUrl());
             response = httpClient.sendNoRedirect(request.POST(HttpRequest.BodyPublishers.ofString(encodeForm(body))).build(),
                     HttpResponse.BodyHandlers.ofString());
         } catch (IOException e) {

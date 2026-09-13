@@ -227,6 +227,14 @@ client's own clamp (fine, now documented); `SecretRedactionFilter` was not touch
 document written before C1 could carry a literal in `valueTemplate` and is now readable by
 editors (C11) — re-saving it fails validation, which is the signal to fix it.
 
+**Review pass — token URL syntax check ran after the URI was built.** R6 added
+`UrlValidationUtils.validateUrlSyntax` to `OAuthTokenClient.exchange`, but after
+`URI.create(tokenUrl)`, so a token URL the allowlist accepts once trimmed but that will not
+parse (trailing whitespace on a document written straight to the store) still surfaced as a raw
+`IllegalArgumentException` — not a `ConnectionException`, which on the service-grant mint path is
+exactly what R11 keeps out of the MCP circuit breaker. The check now runs first, its parsed URI
+is the one fetched, and a failure is `INVALID_CONFIGURATION` naming `oauth.tokenUrl`.
+
 ## ⚙️ fix(config): fifteen configuration defects, from scheduler units to a nine-megabyte orphan (2026-09-07)
 
 **Repo:** EDDI (`fix/review-quickwins-config`)

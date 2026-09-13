@@ -350,6 +350,23 @@ class OAuthTokenClientTest {
     }
 
     @Test
+    @DisplayName("a tokenUrl the allowlist accepts once trimmed but that will not parse is a configuration error, and nothing is sent")
+    void unparseableTokenUrlIsAConfigurationError() throws Exception {
+        // The allowlist trims before it judges the origin, so this passes it; the
+        // request builder does not, so URI.create threw a raw IllegalArgumentException
+        // — which is not a ConnectionException, and on the mint path the MCP failure
+        // classifier fed it to the circuit breaker as a server outage.
+        var connection = connection();
+        connection.getOauth().setTokenUrl(TOKEN_URL + " ");
+
+        var error = assertThrows(ConnectionException.class, () -> client.clientCredentials(connection, CLIENT_SECRET));
+
+        assertEquals(ConnectionException.Reason.INVALID_CONFIGURATION, error.getReason(), error.getMessage());
+        assertTrue(error.getMessage().contains("oauth.tokenUrl"), "the message must name the field to fix: " + error.getMessage());
+        verify(httpClient, never()).sendNoRedirect(any(), any());
+    }
+
+    @Test
     @DisplayName("a transport failure is transient — the grant is left alone and the next call retries")
     void transportFailureIsTransient() throws Exception {
         doThrow(new IOException("connection reset")).when(httpClient).sendNoRedirect(any(), any());
