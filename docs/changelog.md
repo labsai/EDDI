@@ -79,11 +79,17 @@ two meet in `docs/connections.md` and here.
 
 - **Name uniqueness is no longer check-then-act** (C3). Creates of one `(tenant, name)` are
   serialised on a striped lock inside the JVM; after the write lands the store is asked again
-  who holds the name (`IConnectionStore.idsOfName`, oldest-first). The descriptor of the new
-  document is written by the response filter *after* the method returns, so the scan can never
-  see our own document — hence the rule is "any other holder visible now wins": ours is removed
-  permanently and the caller gets 409 naming the survivor. What remains is the interval between
-  one replica's write and its descriptor becoming visible to another's scan.
+  who holds the name (`IConnectionStore.idsOfName`, oldest-first). **Review fix:** the first
+  version of this left the descriptor to `DocumentDescriptorFilter` *after* the method
+  returned — outside the lock — so the lock guarded nothing: a second create on the same
+  node took it the instant the first released it, scanned, found no descriptor yet, and both
+  landed. `RestConnectionStore` now writes the descriptor itself inside the lock (the filter
+  finds it and does nothing; `RestImportService.recordCreatedConnection` writes one only when
+  missing). Our own id is expected in the post-write scan and filtered out; the rule stays
+  "any other holder visible now wins" — ours is removed permanently, descriptor included, and
+  the caller gets 409. Chosen over "oldest wins" because under asymmetric visibility the latter
+  duplicates the name; the cost is that two replicas seeing each other both stand down and both
+  callers retry. What remains is replication lag between nodes.
 - **Duplicate goes through `validateForWrite`** (C4) — it skipped the deployment checks.
 - **`CALLER_SUPPLIED` needs OIDC** (C5): `CallerIdentityContext` drops the credential header for
   an anonymous identity, so with `authorization.enabled=false` the connection saved and failed
@@ -109,7 +115,8 @@ made this necessary rather than nice: `AbstractBackupService` had no connection 
 connection only when the name is free — an existing one is never overwritten — through
 `RestConnectionStore.createConnection` (same validation, deployment checks and lock as REST);
 a refused document is skipped with its reason and counted in `X-Connections-Skipped`. The
-descriptor is written by hand, as `createResourceDirect` does. Live sync still does not carry
+descriptor is written by the store inside its name lock; the import writes one by hand only
+when it is missing, as `createResourceDirect` does. Live sync still does not carry
 connections; said so under Limitations. `AGENTS.md` §5.5 lists the file and counts thirteen.
 
 **Docs (C13):** `configuration-reference.md` no longer describes

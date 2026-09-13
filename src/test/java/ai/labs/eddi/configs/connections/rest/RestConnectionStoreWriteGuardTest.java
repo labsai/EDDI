@@ -34,9 +34,11 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -55,6 +57,7 @@ class RestConnectionStoreWriteGuardTest {
     private static final String ID = "68a1b2c3d4e5f60718293a4b";
 
     private IConnectionStore connectionStore;
+    private IDocumentDescriptorStore documentDescriptorStore;
     private IConnectionGrantStore grantStore;
     private ConnectionRegistry connectionRegistry;
     private ISecretProvider secretProvider;
@@ -62,6 +65,7 @@ class RestConnectionStoreWriteGuardTest {
     @BeforeEach
     void setUp() {
         connectionStore = mock(IConnectionStore.class);
+        documentDescriptorStore = mock(IDocumentDescriptorStore.class);
         grantStore = mock(IConnectionGrantStore.class);
         connectionRegistry = mock(ConnectionRegistry.class);
         secretProvider = mock(ISecretProvider.class);
@@ -69,8 +73,8 @@ class RestConnectionStoreWriteGuardTest {
     }
 
     private RestConnectionStore rest() {
-        return new RestConnectionStore(connectionStore, mock(IDocumentDescriptorStore.class), mock(IJsonSchemaCreator.class), connectionRegistry,
-                grantStore, secretProvider, true, mock(ResourceAccessGuard.class));
+        return new RestConnectionStore(connectionStore, documentDescriptorStore, mock(IJsonSchemaCreator.class), connectionRegistry, grantStore,
+                secretProvider, true, mock(ResourceAccessGuard.class));
     }
 
     /** A document that passes every OTHER check, so a refusal is attributable. */
@@ -185,8 +189,56 @@ class RestConnectionStoreWriteGuardTest {
             var error = assertThrows(ClientErrorException.class, () -> rest().createConnection(connection("jira", null)));
 
             assertEquals(409, error.getResponse().getStatus());
-            assertTrue(error.getMessage().contains(OTHER_REPLICAS_ID), "the refusal must name the survivor: " + error.getMessage());
+            assertTrue(error.getMessage().contains(OTHER_REPLICAS_ID), "the refusal must name the other holder: " + error.getMessage());
             verify(connectionStore).deleteAllPermanently(ID);
+            // The descriptor written inside the lock goes with it, or the name scan
+            // keeps finding a descriptor whose resource is gone.
+            verify(documentDescriptorStore).deleteAllDescriptor(ID);
+        }
+
+        @Test
+        @DisplayName("the descriptor is written inside the name lock, before the post-create scan and before the method returns")
+        void writesTheDescriptorBeforeReleasingTheLock() throws Exception {
+            // A name scan reads descriptors. Leaving the descriptor to the response
+            // filter meant the lock guarded nothing: the next create took it the moment
+            // this one let go, scanned, saw no descriptor for this document yet, and
+            // landed too.
+            when(connectionStore.idOfName("default", "jira")).thenReturn(null);
+            when(connectionStore.create(any())).thenReturn(resourceId(1));
+            when(connectionStore.idsOfName("default", "jira")).thenReturn(List.of(ID));
+
+            rest().createConnection(connection("jira", null));
+
+            var inOrder = inOrder(connectionStore, documentDescriptorStore);
+            inOrder.verify(connectionStore).create(any());
+            inOrder.verify(documentDescriptorStore).createDescriptor(eq(ID), eq(1), any());
+            inOrder.verify(connectionStore).idsOfName("default", "jira");
+        }
+
+        @Test
+        @DisplayName("a second create of the same name on the same node is refused even before any response filter has run")
+        void aSecondCreateOnTheSameNodeSeesTheFirst() throws Exception {
+            // The store answers name lookups from the descriptors it has been given —
+            // which is exactly what the real store does — so this fails when the
+            // descriptor is only written after createConnection returns.
+            var descriptors = new ArrayList<String>();
+            lenient().doAnswer(invocation -> {
+                descriptors.add(invocation.getArgument(0));
+                return null;
+            }).when(documentDescriptorStore).createDescriptor(any(), any(), any());
+            // The pre-check hands the store the document's raw tenantId (null here) and
+            // the real store normalises it to the default, so the stub accepts either.
+            when(connectionStore.idOfName(any(), eq("jira"))).thenAnswer(invocation -> descriptors.isEmpty() ? null : descriptors.get(0));
+            when(connectionStore.idsOfName("default", "jira")).thenAnswer(invocation -> List.copyOf(descriptors));
+            when(connectionStore.create(any())).thenReturn(resourceId(1));
+            var rest = rest();
+
+            assertEquals(201, rest.createConnection(connection("jira", null)).getStatus());
+            var error = assertThrows(BadRequestException.class, () -> rest.createConnection(connection("jira", null)));
+
+            assertTrue(error.getMessage().contains("already exists"), error.getMessage());
+            verify(connectionStore, times(1)).create(any());
+            verify(connectionStore, never()).deleteAllPermanently(any());
         }
 
         @Test
@@ -252,8 +304,8 @@ class RestConnectionStoreWriteGuardTest {
     class DeploymentGuard {
 
         private RestConnectionStore restWithoutAuthorization() {
-            return new RestConnectionStore(connectionStore, mock(IDocumentDescriptorStore.class), mock(IJsonSchemaCreator.class),
-                    connectionRegistry, grantStore, secretProvider, false, mock(ResourceAccessGuard.class));
+            return new RestConnectionStore(connectionStore, documentDescriptorStore, mock(IJsonSchemaCreator.class), connectionRegistry,
+                    grantStore, secretProvider, false, mock(ResourceAccessGuard.class));
         }
 
         private ConnectionConfiguration callerSupplied() {

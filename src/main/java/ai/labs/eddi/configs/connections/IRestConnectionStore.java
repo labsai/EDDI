@@ -96,6 +96,13 @@ public interface IRestConnectionStore extends IRestVersionInfo {
                               @QueryParam("version") Integer version,
                               ConnectionConfiguration connectionConfiguration);
 
+    /**
+     * Creates a connection, and — unlike its sibling stores — writes the new
+     * document's descriptor itself before returning, inside the lock that keeps
+     * {@code (tenant, name)} unique. An in-process caller (the import service) may
+     * rely on that; the HTTP response filter finds the descriptor and leaves it
+     * alone.
+     */
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
     @Operation(summary = "Create connection", description = "Create a connection configuration.")

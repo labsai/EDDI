@@ -144,10 +144,35 @@ class RestImportServiceConnectionsTest {
         assertEquals("jira", created.getValue().getName());
         assertEquals("Bearer ${vault:jira-token}", created.getValue().getStaticAuth().getValueTemplate(),
                 "the document travels as references — the target needs the same vault entry, never a value");
-        // Without this the name never resolves: ${connection:jira} is found through
-        // the descriptor index, and the filter that writes descriptors runs on HTTP
-        // responses only.
+        // The store found no descriptor for the new document (the mock knows none),
+        // so the import writes one: without it the name never resolves —
+        // ${connection:jira} is found through the descriptor index, and no response
+        // filter runs on an in-process call.
         verify(documentDescriptorStore).createDescriptor(eq(CREATED_CONNECTION_ID), eq(1), any());
+    }
+
+    @Test
+    @DisplayName("the descriptor the connection store wrote inside its name lock is not written a second time")
+    void doesNotDuplicateTheDescriptorTheStoreWrote() throws Exception {
+        // RestConnectionStore writes the descriptor itself, before the name lock is
+        // released, so that a concurrent create can see the document. The import must
+        // find that one and leave it alone rather than produce a second descriptor for
+        // the same document.
+        when(connectionStore.idOfName("default", "jira")).thenReturn(null);
+        when(restConnectionStore.createConnection(any()))
+                .thenReturn(Response.status(201).header("X-Resource-URI", CREATED_CONNECTION_URI).build());
+        var written = new DocumentDescriptor();
+        written.setResource(URI.create(CREATED_CONNECTION_URI));
+        when(documentDescriptorStore.readDescriptor(CREATED_CONNECTION_ID, 1)).thenReturn(written);
+
+        Response response;
+        try (var cdi = stubCdi(IAgentStore.class, agentStore, IRestConnectionStore.class, restConnectionStore, IConnectionStore.class,
+                connectionStore)) {
+            response = importService.importAgent(new ByteArrayInputStream(new byte[0]), "create", null, null, null);
+        }
+
+        assertEquals(201, response.getStatus());
+        verify(documentDescriptorStore, never()).createDescriptor(eq(CREATED_CONNECTION_ID), any(), any());
     }
 
     @Test

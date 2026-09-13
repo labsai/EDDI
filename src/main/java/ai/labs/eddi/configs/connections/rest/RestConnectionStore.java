@@ -31,6 +31,7 @@ import org.jboss.logging.Logger;
 import java.net.URI;
 import java.util.List;
 
+import static ai.labs.eddi.configs.descriptors.ResourceUtilities.createDocumentDescriptor;
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 
 /**
@@ -42,6 +43,8 @@ public class RestConnectionStore implements IRestConnectionStore {
     private static final Logger LOGGER = Logger.getLogger(RestConnectionStore.class);
 
     private final IConnectionStore connectionStore;
+    private final IDocumentDescriptorStore documentDescriptorStore;
+    private final ResourceAccessGuard resourceAccessGuard;
     private final IConnectionGrantStore grantStore;
     private final IJsonSchemaCreator jsonSchemaCreator;
     private final ConnectionRegistry connectionRegistry;
@@ -63,6 +66,8 @@ public class RestConnectionStore implements IRestConnectionStore {
             ResourceAccessGuard resourceAccessGuard) {
         this.restVersionInfo = new RestVersionInfo<>(resourceURI, connectionStore, documentDescriptorStore, resourceAccessGuard);
         this.connectionStore = connectionStore;
+        this.documentDescriptorStore = documentDescriptorStore;
+        this.resourceAccessGuard = resourceAccessGuard;
         this.jsonSchemaCreator = jsonSchemaCreator;
         this.connectionRegistry = connectionRegistry;
         this.grantStore = grantStore;
@@ -124,12 +129,18 @@ public class RestConnectionStore implements IRestConnectionStore {
      * The store is a versioned document store, so no unique index can enforce the
      * rule; two things close the window instead.
      * <p>
-     * Inside one JVM, creates of the same (tenant, name) are serialised on a lock,
-     * so the common single-node deployment never races at all. Across replicas,
+     * Inside one JVM, creates of the same (tenant, name) are serialised on a lock —
+     * and the descriptor, which is what a name scan reads, is written INSIDE that
+     * lock rather than left to {@code DocumentDescriptorFilter} after the method
+     * returns. Without that the lock closed nothing: the second create took the
+     * lock the moment the first released it, scanned, found no descriptor for the
+     * first document yet, and both landed. With it, the common single-node
+     * deployment never races at all. Across replicas,
      * {@link #requireCreateWonTheName} re-asks the store who holds the name AFTER
      * the write landed and rolls this one back if somebody else does. What remains
-     * is the interval between a replica's write and its descriptor becoming visible
-     * to the other's scan — milliseconds, against a check that used to be absent.
+     * is the interval between a replica's descriptor write and its becoming visible
+     * to the other's scan — replication lag, against a check that used to be
+     * absent.
      */
     private Response createUnderNameLock(ConnectionConfiguration connectionConfiguration) {
         if (connectionConfiguration == null) {
@@ -144,9 +155,40 @@ public class RestConnectionStore implements IRestConnectionStore {
             // name its own field first.
             requireDefaultTenant(connectionConfiguration);
             Response response = restVersionInfo.create(connectionConfiguration);
+            URI createdUri = createdUriOf(response);
+            writeDescriptorNow(createdUri, connectionConfiguration.getName());
             connectionRegistry.invalidate();
-            requireCreateWonTheName(tenant, connectionConfiguration.getName(), response);
+            requireCreateWonTheName(tenant, connectionConfiguration.getName(), createdUri);
             return response;
+        }
+    }
+
+    /**
+     * Writes the new document's descriptor before the name lock is released.
+     * <p>
+     * The same descriptor {@code DocumentDescriptorFilter} would write once the
+     * response is on its way — it finds this one and leaves it alone — only
+     * earlier, because a name scan reads descriptors and a document without one is
+     * invisible to the next create of the same name. Also what lets an in-process
+     * caller such as the import service create a connection without writing a
+     * descriptor by hand.
+     * <p>
+     * A descriptor that cannot be written is logged and left to the filter to
+     * retry: the document is already there, and refusing the whole create for an
+     * index row the filter can still produce would be the worse outcome.
+     */
+    private void writeDescriptorNow(URI createdUri, String name) {
+        if (createdUri == null) {
+            return;
+        }
+        IResourceStore.IResourceId created = RestUtilities.extractResourceId(createdUri);
+        try {
+            documentDescriptorStore.createDescriptor(created.getId(), created.getVersion(),
+                    resourceAccessGuard.stampNewDescriptor(createDocumentDescriptor(createdUri)));
+        } catch (Exception e) {
+            LOGGER.warnf(e, "Created connection '%s' (id %s) but could not write its descriptor inside the name lock; the response "
+                    + "filter will retry, and until then a concurrent create of the same name cannot see this one.", sanitize(name),
+                    sanitize(created.getId()));
         }
     }
 
@@ -161,26 +203,31 @@ public class RestConnectionStore implements IRestConnectionStore {
     /**
      * The cross-replica half of the uniqueness rule.
      * <p>
-     * The descriptor of the document just written does not exist yet — the
-     * {@code DocumentDescriptorFilter} writes it once this method has returned a
-     * 201 — so the scan can never see our own document, and the rule is
-     * correspondingly simple: any OTHER holder of the name visible now completed
-     * its create before ours, and wins. Ours is removed permanently (nothing has
-     * been told about it yet, so there is nothing to soft-delete for) and the
-     * caller is answered 409 naming the survivor.
+     * Our own descriptor is visible by now — {@link #writeDescriptorNow} — so our
+     * own id is expected in the scan and filtered out; the rule is about everyone
+     * else: any OTHER holder of the name visible now completed its create
+     * concurrently with ours, and ours stands down. It is removed permanently,
+     * descriptor included (nothing has been told about it yet, so there is nothing
+     * to soft-delete for), and the caller is answered 409.
+     * <p>
+     * "Any other holder wins" rather than "the oldest wins", deliberately. When two
+     * replicas each see only themselves plus the other, both stand down and both
+     * callers are told to retry — an empty name, and a second request. The
+     * alternative, each keeping its own when it is the older, duplicates the name
+     * whenever one replica's scan runs before the other's descriptor has
+     * replicated, and a duplicate name is a credential that may go to the wrong
+     * host. A wasted request is the cheaper failure by a wide margin.
      * <p>
      * A store that cannot be scanned fails closed the same way the pre-check does:
-     * the document is removed again and the caller is asked to retry, because a
-     * connection that MAY be a duplicate is a credential that may go to the wrong
-     * host.
+     * the document is removed again and the caller is asked to retry.
      */
-    private void requireCreateWonTheName(String tenant, String name, Response response) {
-        IResourceStore.IResourceId created = createdIdOf(response);
-        if (created == null) {
+    private void requireCreateWonTheName(String tenant, String name, URI createdUri) {
+        if (createdUri == null) {
             LOGGER.warnf("Created connection '%s' but could not read its id back, so the cross-replica name check was skipped.",
                     sanitize(name));
             return;
         }
+        IResourceStore.IResourceId created = RestUtilities.extractResourceId(createdUri);
         List<String> holders;
         try {
             holders = connectionStore.idsOfName(tenant, name);
@@ -195,23 +242,31 @@ public class RestConnectionStore implements IRestConnectionStore {
             return;
         }
         removeLosingCreate(created, name);
-        throw new ClientErrorException("A connection named '" + name + "' was created concurrently and won: " + others.get(0)
-                + " already held the name when this one landed, so this one has been removed again. Reference ${connection:" + name
-                + "} to use the surviving connection, or create yours under another name.", Response.Status.CONFLICT);
+        throw new ClientErrorException("A connection named '" + name + "' was created concurrently on another node: " + others.get(0)
+                + " also held the name when this one landed, so this one has been removed again. If ${connection:" + name
+                + "} resolves, that one survived — reference it. If it does not, the other node stood down for the same reason: retry "
+                + "the create.", Response.Status.CONFLICT);
     }
 
-    private static IResourceStore.IResourceId createdIdOf(Response response) {
+    private static URI createdUriOf(Response response) {
         String createdUri = response == null ? null : response.getHeaderString("X-Resource-URI");
         if (createdUri == null || createdUri.isBlank()) {
             return null;
         }
         try {
-            return RestUtilities.extractResourceId(URI.create(createdUri));
+            URI uri = URI.create(createdUri);
+            RestUtilities.extractResourceId(uri);
+            return uri;
         } catch (RuntimeException e) {
             return null;
         }
     }
 
+    /**
+     * Removes a create that lost the name — the document and the descriptor
+     * {@link #writeDescriptorNow} gave it, or the name scan would go on finding a
+     * descriptor whose resource is gone.
+     */
     private void removeLosingCreate(IResourceStore.IResourceId created, String name) {
         try {
             connectionStore.deleteAllPermanently(created.getId());
@@ -219,6 +274,12 @@ public class RestConnectionStore implements IRestConnectionStore {
         } catch (Exception e) {
             LOGGER.errorf(e, "Connection '%s' (id %s) lost a concurrent-create race but could not be removed; two connections now hold the "
                     + "name and the loser must be deleted by hand.", sanitize(name), sanitize(created.getId()));
+        }
+        try {
+            documentDescriptorStore.deleteAllDescriptor(created.getId());
+        } catch (Exception e) {
+            LOGGER.warnf(e, "Connection '%s' (id %s) was removed after losing a concurrent-create race but its descriptor could not be; "
+                    + "the dangling descriptor is skipped by name lookups and can be deleted by hand.", sanitize(name), sanitize(created.getId()));
         }
     }
 

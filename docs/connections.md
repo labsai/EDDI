@@ -708,11 +708,14 @@ definition, and every secret-bearing field is refused a literal at write time.
 * **A name is unique per tenant, case-sensitive.** `${connection:jira}` names
   one connection and must keep naming the same one. The store is a versioned
   document store with no unique index, so uniqueness is enforced on the write
-  path: creates of one name are serialised inside a node, and after the write
-  lands the store is asked again who holds the name — a create that finds another
-  holder is rolled back and answered **409** naming the survivor. What remains is
-  the interval between one replica's write and its descriptor becoming visible to
-  another's scan.
+  path: creates of one name are serialised inside a node — the document *and* its
+  descriptor, which is what a name lookup reads, are both written before the lock
+  is released, so a second create on the same node always sees the first — and
+  after the write lands the store is asked again who holds the name. A create
+  that finds another holder is rolled back, descriptor included, and answered
+  **409**. What remains is replication lag between nodes: two replicas that each
+  see the other both stand down, and both callers are told to retry — a wasted
+  request, chosen over the alternative of two connections under one name.
 * **Deleting a connection deletes its grants**, decided by re-reading the
   connection's `(tenant, name)` at its *current* version rather than by the
   `permanent` flag or the version in the request — a soft delete already stops the

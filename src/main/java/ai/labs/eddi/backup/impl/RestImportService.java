@@ -1207,10 +1207,11 @@ public class RestImportService extends AbstractBackupService implements IRestImp
      * still worth having, and the refusal names what to fix.</li>
      * </ul>
      * Grants are never in an archive, so nothing here touches them. The descriptor
-     * is written by hand for the same reason {@link #createResourceDirect} writes
-     * one: the filter that normally does so runs on HTTP responses only, and a
-     * connection without a descriptor is invisible to {@code ${connection:…}}
-     * resolution.
+     * is normally written by {@code RestConnectionStore} itself, inside its name
+     * lock; {@link #recordCreatedConnection} writes one only when it is missing,
+     * for the same reason {@link #createResourceDirect} writes one: the filter that
+     * otherwise does so runs on HTTP responses only, and a connection without a
+     * descriptor is invisible to {@code ${connection:…}} resolution.
      *
      * @return how many archived connections were NOT imported
      */
@@ -1268,7 +1269,13 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
     /**
      * Records a connection this import created — so a later failure rolls it back —
-     * and writes its descriptor, without which the name never resolves.
+     * and makes sure it has a descriptor, without which the name never resolves.
+     * <p>
+     * {@code RestConnectionStore.createConnection} writes the descriptor itself,
+     * inside its name lock, so the usual outcome here is finding it and doing
+     * nothing. Writing one only when it is missing keeps the import self-sufficient
+     * — no response filter runs on an in-process call — without ever producing a
+     * second descriptor for one document.
      */
     private void recordCreatedConnection(Response createResponse, ImportTransaction transaction) {
         if (createResponse.getStatus() != 201) {
@@ -1282,6 +1289,16 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         URI resourceUri = URI.create(createdUri);
         IResourceId resourceId = RestUtilities.extractResourceId(resourceUri);
         transaction.recordCreated(IConnectionStore.class, resourceId);
+        try {
+            if (documentDescriptorStore.readDescriptor(resourceId.getId(), resourceId.getVersion()) != null) {
+                return;
+            }
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            // Absent: the store could not write it, so it falls to us.
+        } catch (Exception e) {
+            LOGGER.warnf("Could not check whether connection %s has a descriptor: %s", LogSanitizer.sanitize(resourceId.getId()),
+                    LogSanitizer.sanitize(e.getMessage()));
+        }
         try {
             documentDescriptorStore.createDescriptor(resourceId.getId(), resourceId.getVersion(),
                     resourceAccessGuard.stampNewDescriptor(createDocumentDescriptor(resourceUri)));
