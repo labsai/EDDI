@@ -329,7 +329,7 @@ deployment rather than of any stored document:
 | Refusal | Why |
 | --- | --- |
 | enabled with no `public-base-url` | It becomes the OAuth `redirect_uri`, which the provider matches **exactly**. Deriving it from an inbound request would let a `Host` header steer it. |
-| `public-base-url` that is not a bare https origin | `startsWith("https://")` accepts a path, query, fragment and userinfo — each produces a redirect URI the provider will not match, and the failure surfaces as a user-facing OAuth error rather than a config problem. Dev and test also accept `http://localhost`. |
+| `public-base-url` that is not a bare https origin | `startsWith("https://")` accepts a path, query, fragment and userinfo — each produces a redirect URI the provider will not match, and the failure surfaces as a user-facing OAuth error rather than a config problem. The scheme is compared case-insensitively. Dev and test also accept `http://localhost[:port]` and `http://127.0.0.1[:port]` — loopback only, and still a bare origin. |
 
 ### Three states the guard reports rather than refuses
 

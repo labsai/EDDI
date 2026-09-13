@@ -190,6 +190,41 @@ class ConnectionStartupGuardTest {
         assertDoesNotThrow(() -> start(guardWithBaseUrl("http://localhost:7070")));
     }
 
+    @ParameterizedTest
+    @EnumSource(value = LaunchMode.class, names = {"DEVELOPMENT", "TEST"})
+    @DisplayName("plain http on 127.0.0.1 and an upper-cased https scheme are accepted while developing")
+    void devAndTestModesAcceptLoopbackAndCaseInsensitiveHttps(LaunchMode launchMode) {
+        LaunchMode.set(launchMode);
+
+        assertDoesNotThrow(() -> start(guardWithBaseUrl("http://127.0.0.1:7070")));
+        assertDoesNotThrow(() -> start(guardWithBaseUrl("HTTPS://eddi.example.com")));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"http://eddi.example.com", "http://localhost:7070/eddi", "https://eddi.example.com?tenant=acme",
+            "https://ops@eddi.example.com", "http://localhost#x"})
+    @DisplayName("dev and test still require a bare origin, and plain http only on loopback")
+    void devModeRefusesWhatAProviderWouldNotMatch(String publicBaseUrl) {
+        // Any parseable URL used to pass here, so a path or a remote http host that
+        // fails the provider's exact redirect_uri match in production sailed through
+        // every test and was discovered as a user-facing OAuth error.
+        LaunchMode.set(LaunchMode.DEVELOPMENT);
+        var guard = guardWithBaseUrl(publicBaseUrl);
+
+        var failure = assertThrows(IllegalStateException.class, () -> start(guard));
+
+        assertTrue(failure.getMessage().contains("bare https origin"), failure.getMessage());
+        assertTrue(failure.getMessage().contains("http://localhost"), "dev mode must say what else it accepts: " + failure.getMessage());
+        assertTrue(failure.getMessage().contains(publicBaseUrl), "the operator has to be told which value to fix");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"HTTPS://eddi.example.com", "Https://EDDI.example.com:8443"})
+    @DisplayName("production compares the scheme case-insensitively, as the model does everywhere else")
+    void productionAcceptsAnUpperCasedHttpsScheme(String publicBaseUrl) {
+        assertDoesNotThrow(() -> start(guardWithBaseUrl(publicBaseUrl)));
+    }
+
     @Test
     @DisplayName("plain http is refused once the deployment is running for real")
     void productionRefusesTheLocalhostShape() {

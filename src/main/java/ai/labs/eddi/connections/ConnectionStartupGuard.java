@@ -27,6 +27,7 @@ import org.jboss.logging.Logger;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -120,16 +121,22 @@ public class ConnectionStartupGuard {
         } catch (Exception e) {
             throw new IllegalStateException("eddi.connections.public-base-url is not a valid URL: " + publicBaseUrl, e);
         }
-        if (isDevOrTest()) {
-            // http://localhost is the normal shape while developing, and refusing it
-            // would make the feature untestable outside a TLS-terminating proxy.
-            return;
-        }
-        boolean bareHttpsOrigin = "https".equals(base.getScheme()) && base.getUserInfo() == null && base.getQuery() == null
-                && base.getFragment() == null && (base.getPath() == null || base.getPath().isEmpty() || "/".equals(base.getPath()))
-                && base.getHost() != null;
-        if (!bareHttpsOrigin) {
-            throw new IllegalStateException("eddi.connections.public-base-url must be a bare https origin (scheme://host[:port]) — got: "
+        // Case-insensitive, like the model's own canonicalisation: "HTTPS://…" is the
+        // same scheme, and refusing it here while ConnectionConfiguration accepted it
+        // in an allowlist was two rules for one thing.
+        String scheme = base.getScheme() == null ? "" : base.getScheme().toLowerCase(Locale.ROOT);
+        boolean bareOrigin = base.getUserInfo() == null && base.getQuery() == null && base.getFragment() == null
+                && (base.getPath() == null || base.getPath().isEmpty() || "/".equals(base.getPath())) && base.getHost() != null;
+        // http://localhost is the normal shape while developing, and refusing it
+        // would make the feature untestable outside a TLS-terminating proxy. Only
+        // loopback, though, and only a bare origin: dev and test used to accept any
+        // parseable URL, so a path or a remote http host that would fail the
+        // provider's redirect_uri match in production sailed through every test.
+        boolean loopbackHttpWhileDeveloping = isDevOrTest() && "http".equals(scheme) && base.getHost() != null
+                && ConnectionConfiguration.isLoopbackHost(base.getHost());
+        if (!bareOrigin || !("https".equals(scheme) || loopbackHttpWhileDeveloping)) {
+            throw new IllegalStateException("eddi.connections.public-base-url must be a bare https origin (scheme://host[:port])"
+                    + (isDevOrTest() ? ", or http://localhost[:port] / http://127.0.0.1[:port] while developing or testing" : "") + " — got: "
                     + publicBaseUrl);
         }
     }
