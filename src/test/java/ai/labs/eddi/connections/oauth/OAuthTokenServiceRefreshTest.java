@@ -41,6 +41,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.doAnswer;
@@ -478,6 +479,69 @@ class OAuthTokenServiceRefreshTest {
         assertEquals(1, tokenRequests.get(), "the waiter must take the lease over and refresh, exactly once");
         assertTrue(elapsedMillis < OAuthTokenService.AWAIT_TIMEOUT.toMillis() / 2,
                 "must not wait out the deadline for a refresh nobody is performing: took " + elapsedMillis + "ms");
+    }
+
+    @Test
+    @DisplayName("an access token that will not unseal inside the claim is transient and leaves the grant ACTIVE")
+    void undecryptableAccessTokenInsideTheClaimIsTransient() throws Exception {
+        // The claimant re-reads the row inside its lease and finds a token another
+        // replica refreshed a moment ago — usable, but sealed under a DEK this
+        // replica cannot open right now. That is a vault problem, not a revoked
+        // grant: reporting it as GRANT_UNUSABLE reached handleRefreshFailure, which
+        // wrote REFRESH_FAILED and demanded a reconnect for a blip.
+        grantStore = new InterferingGrantStore(2, store -> {
+            var refreshedElsewhere = new ConnectionGrant();
+            refreshedElsewhere.setTenantId(TENANT);
+            refreshedElsewhere.setConnectionName(CONNECTION);
+            refreshedElsewhere.setPrincipal(PRINCIPAL);
+            refreshedElsewhere.setEncryptedAccessToken("unopenable");
+            refreshedElsewhere.setAccessTokenIv("iv");
+            refreshedElsewhere.setEncryptedRefreshToken("sealed:new-refresh");
+            refreshedElsewhere.setRefreshTokenIv("iv");
+            refreshedElsewhere.setDekId(ACTIVE_DEK);
+            refreshedElsewhere.setExpiresAt(Instant.now().plus(Duration.ofHours(1)));
+            refreshedElsewhere.setLastRefreshAt(Instant.now());
+            refreshedElsewhere.setStatus(ConnectionGrant.Status.ACTIVE);
+            store.seed(refreshedElsewhere);
+        });
+        seedExpiredGrant();
+        // doAnswer, not when(...): the latter invokes the setUp answer with null
+        // arguments while the stub is being recorded.
+        doAnswer(i -> {
+            throw new ISecretProvider.SecretProviderException("DEK generation not available");
+        }).when(secretProvider).unseal(anyString(), argThat(sealed -> sealed != null && "unopenable".equals(sealed.ciphertext())));
+
+        var error = assertThrows(ConnectionException.class, () -> service().accessToken(connection(), PRINCIPAL));
+
+        assertEquals(ConnectionException.Reason.TOKEN_ENDPOINT_UNAVAILABLE, error.getReason(),
+                "ciphertext that will not open is a vault problem the next request may not have, not a dead grant");
+        assertEquals(ConnectionGrant.Status.ACTIVE, grantStore.find(TENANT, CONNECTION, PRINCIPAL).orElseThrow().getStatus(),
+                "the grant must not be marked REFRESH_FAILED over a token the provider never rejected");
+        assertEquals(0, tokenRequests.get(), "nothing was sent to the provider, so nothing about the grant can have changed");
+    }
+
+    @Test
+    @DisplayName("a live access token that will not unseal outside the claim is transient too")
+    void undecryptableLiveAccessTokenIsTransient() throws Exception {
+        var grant = new ConnectionGrant();
+        grant.setTenantId(TENANT);
+        grant.setConnectionName(CONNECTION);
+        grant.setPrincipal(PRINCIPAL);
+        grant.setEncryptedAccessToken("unopenable");
+        grant.setAccessTokenIv("iv");
+        grant.setDekId(STORED_DEK);
+        grant.setExpiresAt(Instant.now().plus(Duration.ofHours(1)));
+        grant.setStatus(ConnectionGrant.Status.ACTIVE);
+        grantStore.seed(grant);
+        doAnswer(i -> {
+            throw new ISecretProvider.SecretProviderException("vault sealed");
+        }).when(secretProvider).unseal(anyString(), any());
+
+        var error = assertThrows(ConnectionException.class, () -> service().accessToken(connection(), PRINCIPAL));
+
+        assertEquals(ConnectionException.Reason.TOKEN_ENDPOINT_UNAVAILABLE, error.getReason(),
+                "telling the user to reconnect over a vault blip is the same conflation as calling an outage invalid_grant");
+        assertEquals(ConnectionGrant.Status.ACTIVE, grantStore.find(TENANT, CONNECTION, PRINCIPAL).orElseThrow().getStatus());
     }
 
     /**

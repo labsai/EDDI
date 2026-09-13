@@ -210,13 +210,25 @@ public class OAuthTokenClient {
                 + connection.getName() + "' returned HTTP " + response.statusCode() + " (" + errorCode + "). The grant is unchanged.");
     }
 
+    /**
+     * Reads a 2xx body as an RFC 6749 §5.1 token response.
+     * <p>
+     * A 2xx that is not a token response — an HTML maintenance page behind a
+     * misbehaving load balancer, an empty body, JSON with no {@code access_token} —
+     * is the endpoint being unavailable, not the grant being dead. Only a provider
+     * error body naming {@code invalid_grant}, {@code invalid_client} or
+     * {@code unauthorized_client} is terminal (see {@link #errorFor}); everything
+     * else leaves the grant untouched for the next request to retry. Reporting it
+     * as terminal wrote {@code REFRESH_FAILED} for every user of the connection
+     * during a provider's bad minute.
+     */
     private static TokenResponse parse(ConnectionConfiguration connection, String body) {
         try {
             JsonNode json = MAPPER.readTree(body);
             String accessToken = json.path("access_token").asText(null);
             if (accessToken == null || accessToken.isBlank()) {
-                throw new ConnectionException(ConnectionException.Reason.GRANT_UNUSABLE,
-                        "Token endpoint for connection '" + connection.getName() + "' returned 200 with no access_token.");
+                throw new ConnectionException(ConnectionException.Reason.TOKEN_ENDPOINT_UNAVAILABLE, "Token endpoint for connection '"
+                        + connection.getName() + "' returned 200 with no access_token. The grant is unchanged; the next request will retry.");
             }
             String refreshToken = json.path("refresh_token").asText(null);
             Duration expiresIn = json.hasNonNull("expires_in")
@@ -239,8 +251,9 @@ public class OAuthTokenClient {
         } catch (ConnectionException e) {
             throw e;
         } catch (Exception e) {
-            throw new ConnectionException(ConnectionException.Reason.GRANT_UNUSABLE,
-                    "Token endpoint for connection '" + connection.getName() + "' returned a body that is not a token response.", e);
+            throw new ConnectionException(ConnectionException.Reason.TOKEN_ENDPOINT_UNAVAILABLE, "Token endpoint for connection '"
+                    + connection.getName() + "' returned a body that is not a token response. The grant is unchanged; the next request "
+                    + "will retry.", e);
         }
     }
 

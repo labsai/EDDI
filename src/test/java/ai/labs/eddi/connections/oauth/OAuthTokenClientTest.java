@@ -437,8 +437,12 @@ class OAuthTokenClientTest {
     }
 
     @Test
-    @DisplayName("a 200 with no usable access token is a dead grant, not a success")
+    @DisplayName("a 200 with no usable access token is the endpoint misbehaving, not a dead grant")
     void refusesATwoHundredWithoutAnAccessToken() throws Exception {
+        // Only a provider error body naming invalid_grant / invalid_client /
+        // unauthorized_client is terminal. A 2xx that is not a token response leaves
+        // the grant alone; calling it terminal wrote REFRESH_FAILED for every user of
+        // the connection during a provider's bad minute.
         List<String> bodies = List.of("{\"token_type\":\"Bearer\"}", "{\"access_token\":null}", "{\"access_token\":\"\"}",
                 "{\"access_token\":\"   \"}");
         for (String body : bodies) {
@@ -446,20 +450,23 @@ class OAuthTokenClientTest {
 
             var error = assertThrows(ConnectionException.class, () -> client.clientCredentials(connection(), CLIENT_SECRET));
 
-            assertEquals(ConnectionException.Reason.GRANT_UNUSABLE, error.getReason(), body);
+            assertEquals(ConnectionException.Reason.TOKEN_ENDPOINT_UNAVAILABLE, error.getReason(), body);
             assertTrue(error.getMessage().contains("no access_token"), error.getMessage());
+            assertTrue(error.getMessage().contains("unchanged"), "the grant must be reported untouched: " + error.getMessage());
         }
     }
 
     @Test
-    @DisplayName("a body that is not a token response at all is reported as such")
+    @DisplayName("a 200 that is not a token response at all — an HTML maintenance page — is transient")
     void refusesAMalformedBody() throws Exception {
         respondWith(200, "<html>we are down for maintenance</html>");
 
         var error = assertThrows(ConnectionException.class, () -> client.clientCredentials(connection(), CLIENT_SECRET));
 
-        assertEquals(ConnectionException.Reason.GRANT_UNUSABLE, error.getReason());
+        assertEquals(ConnectionException.Reason.TOKEN_ENDPOINT_UNAVAILABLE, error.getReason(),
+                "a maintenance page is the endpoint being unavailable; marking the grant dead demands a reconnect for an outage");
         assertTrue(error.getMessage().contains("not a token response"), error.getMessage());
+        assertTrue(error.getMessage().contains("unchanged"), "the grant must be reported untouched: " + error.getMessage());
     }
 
     @Test
@@ -469,7 +476,7 @@ class OAuthTokenClientTest {
 
         var error = assertThrows(ConnectionException.class, () -> client.clientCredentials(connection(), CLIENT_SECRET));
 
-        assertEquals(ConnectionException.Reason.GRANT_UNUSABLE, error.getReason());
+        assertEquals(ConnectionException.Reason.TOKEN_ENDPOINT_UNAVAILABLE, error.getReason());
         assertTrue(error.getMessage().contains("no access_token"), error.getMessage());
     }
 

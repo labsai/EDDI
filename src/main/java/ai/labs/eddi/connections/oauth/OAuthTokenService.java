@@ -546,11 +546,23 @@ public class OAuthTokenService implements AccessTokenSupplier {
         }
     }
 
+    /**
+     * Opens a stored access token, or fails <em>transiently</em>.
+     * <p>
+     * Ciphertext that will not open is a vault or DEK problem — the master key
+     * briefly unavailable, a generation not yet swept — and not a revoked grant.
+     * This used to throw {@code GRANT_UNUSABLE}, and inside the refresh claim that
+     * reached {@link #handleRefreshFailure}, which wrote {@code REFRESH_FAILED} for
+     * a token the provider never rejected: the user was told to reconnect over
+     * something that fixed itself. The refresh-token path already made this
+     * distinction ({@link #storedRefreshToken}); the access-token path now does
+     * too.
+     */
     private String unseal(String tenantId, String ciphertext, String iv, String dekId, ConnectionConfiguration connection) {
         String plaintext = unsealOrNull(tenantId, ciphertext, iv, dekId);
         if (plaintext == null) {
-            throw new ConnectionException(ConnectionException.Reason.GRANT_UNUSABLE,
-                    "The stored token for connection '" + connection.getName() + "' could not be decrypted. The user must reconnect.");
+            throw new ConnectionException(ConnectionException.Reason.TOKEN_ENDPOINT_UNAVAILABLE, "The stored access token for connection '"
+                    + connection.getName() + "' could not be decrypted. The grant is unchanged; the next request will retry.");
         }
         return plaintext;
     }
