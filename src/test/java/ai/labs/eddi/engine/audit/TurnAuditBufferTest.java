@@ -17,6 +17,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -95,10 +96,36 @@ class TurnAuditBufferTest {
     @Test
     @DisplayName("a short secret replaces only the recorded input, not every matching substring")
     void shortInputOnlyReplacesTheInputField() {
-        AuditEntry redacted = TurnAuditBuffer.redactUserInput(entry("llm", "ok", Map.of("modelResponse", "ok, done")));
+        AuditEntry redacted = TurnAuditBuffer.redact(entry("llm", "ok", Map.of("modelResponse", "ok, done")), Set.of("ok"));
 
         assertEquals(MemoryKeys.SECRET_INPUT_PLACEHOLDER, redacted.input().get("userInput"));
         assertEquals("ok, done", redacted.llmDetail().get("modelResponse"));
+    }
+
+    @Test
+    @DisplayName("entries that record no input — a task failure quoting the token — and entries built after the scrub are redacted too")
+    void entriesWithoutOrAfterTheInputAreRedacted() {
+        TurnAuditBuffer buffer = TurnAuditBuffer.install(memory);
+        memory.getAuditCollector().collect(entry("parser", SECRET, null));
+        // A failure entry carries no userInput at all.
+        memory.getAuditCollector().collect(new AuditEntry("id-fail", "conv-1", "agent-1", 1, "user-1", null, 1, "normalizer", "type", 1, 5L, null,
+                Map.of("status", "TASK_FAILED", "errorMessage", "cannot normalize '" + SECRET + "'"), null, null, List.of(), 0.0, Instant.now(),
+                null, null));
+        memory.getCurrentStep().storeData(new Data<>(MemoryKeys.INPUT_INITIAL.key(), MemoryKeys.SECRET_INPUT_PLACEHOLDER));
+        // An entry built after the property setter records the placeholder, but its
+        // tool call still quotes the secret.
+        memory.getAuditCollector().collect(new AuditEntry("id-llm", "conv-1", "agent-1", 1, "user-1", null, 1, "llm", "type", 3, 5L,
+                Map.of("userInput", MemoryKeys.SECRET_INPUT_PLACEHOLDER), null, null, Map.of("args", List.of("key=" + SECRET)), List.of(), 0.0,
+                Instant.now(), null, null));
+
+        buffer.flush(memory);
+
+        assertEquals(3, ledger.size());
+        for (AuditEntry submitted : ledger) {
+            assertFalse(String.valueOf(submitted).contains(SECRET), "no copy of the secret may reach the ledger: " + submitted);
+        }
+        assertNull(ledger.get(1).input(), "an entry with no input stays without one");
+        assertEquals("cannot normalize '" + MemoryKeys.SECRET_INPUT_PLACEHOLDER + "'", ledger.get(1).output().get("errorMessage"));
     }
 
     @Test

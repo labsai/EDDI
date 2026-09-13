@@ -76,6 +76,7 @@ applies in dev mode only.
 |---|---|---|
 | `eddi.conversations.maximumLifeTimeOfIdleConversationsInDays` | `90` | Idle conversations are closed after this many days |
 | `eddi.conversations.deleteEndedConversationsOnceOlderThanDays` | `365` | Ended conversations are permanently deleted after this many days |
+| `eddi.conversations.max-input-chars` | `200000` | Longest turn input, in characters, a caller may send to an existing conversation. Longer input is refused before anything reaches the model: **413** `input_too_large` on the REST and streaming conversation endpoints, **400** `input_too_large` on the OpenAI-compatible API, invalid params over A2A; other surfaces built on those entry points report the refusal as an error. `0` or negative disables the limit. Turns the engine drives itself for group members and sub-agents are exempt |
 | `eddi.usermemories.deleteOlderThanDays` | `-1` | Persistent user memories older than this are deleted. **`-1` disables the sweep** — memories are kept forever until you set a positive number. Relevant to [GDPR](gdpr-compliance.md) and [HIPAA](hipaa-compliance.md) |
 | `eddi.coordinator.max-active-conversations` | `10000` | Ceiling on concurrently tracked conversations |
 | `eddi.coordinator.max-dead-letters` | `1000` | Retained dead-letter entries. `-1` unbounded, `0` retain none |
@@ -250,7 +251,6 @@ Full guide: [attachments-guide.md](attachments-guide.md).
 |---|---|---|
 | `eddi.attachments.max-size-bytes` | `20971520` (20 MB) | Largest single upload |
 | `eddi.attachments.max-per-turn` | `5` | Attachments per turn — **per member turn** in a group conversation |
-| `eddi.conversations.max-input-chars` | `200000` | Longest turn input, in characters, accepted from a caller (REST, streaming, managed conversations, MCP, OpenAI adapter, Slack, A2A). Longer input is refused with **413** `input_too_large` before anything reaches the model. `0` or negative disables the limit. Turns the engine drives itself for group members and sub-agents are exempt |
 | `eddi.attachments.max-per-conversation` | `50` | Attachments per conversation |
 | `eddi.attachments.max-total-bytes-per-conversation` | `104857600` (100 MB) | Aggregate bytes per conversation |
 | `eddi.attachments.max-forward-bytes` | `10485760` (10 MB) | Per-file ceiling on what is forwarded to the LLM, across every source |

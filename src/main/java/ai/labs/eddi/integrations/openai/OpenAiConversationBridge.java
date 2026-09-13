@@ -546,6 +546,9 @@ public class OpenAiConversationBridge {
                 : message;
     }
 
+    /** Error code for input over {@code eddi.conversations.max-input-chars}. */
+    static final String INPUT_TOO_LARGE_CODE = "input_too_large";
+
     /** Translate a turn failure into the OpenAI error envelope. */
     OpenAiApiException asApiException(Exception e) {
         if (e instanceof OpenAiApiException apiException) {
@@ -560,6 +563,14 @@ public class OpenAiConversationBridge {
         }
         if (e instanceof IResourceStore.ResourceNotFoundException) {
             return OpenAiApiException.notFound(null, "The conversation no longer exists.");
+        }
+        // A caller error, not a server one: the input cap refused the turn before any
+        // model call. 400 is what OpenAI itself answers for an over-long prompt.
+        IConversationService.InputTooLargeException tooLarge = e instanceof IConversationService.InputTooLargeException direct
+                ? direct
+                : e.getCause() instanceof IConversationService.InputTooLargeException cause ? cause : null;
+        if (tooLarge != null) {
+            return OpenAiApiException.badRequest(INPUT_TOO_LARGE_CODE, tooLarge.getMessage());
         }
         if (e.getCause() instanceof OpenAiApiException causeException) {
             return causeException;

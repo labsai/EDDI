@@ -154,6 +154,10 @@ public class RestAgentStore implements IRestAgentStore {
     @Override
     public Response updateAgent(String id, Integer version, AgentConfiguration agentConfiguration) {
         validateSecurityFlags(agentConfiguration);
+        // The agent's own EDIT check first (update() repeats it): the workflow lookup
+        // below answers "exists / does not exist", which a caller with no rights to
+        // this agent must not be able to use as an oracle for arbitrary workflow ids.
+        restVersionInfo.requireEditAccess(id);
         requireWorkflowsExist(agentConfiguration);
         Response response = restVersionInfo.update(id, version, agentConfiguration);
         capabilityRegistryService.register(id, agentConfiguration);
@@ -483,6 +487,11 @@ public class RestAgentStore implements IRestAgentStore {
      * back at the typo. It lives here rather than in the store because ZIP import
      * and sync write through the store directly, after creating the workflows they
      * reference.
+     * <p>
+     * The lookup goes through the access-guarded REST store on purpose: pointing an
+     * agent at a workflow the caller cannot view is refused (403) rather than
+     * accepted — assembling an agent from someone else's private workflow is not a
+     * reference the caller is entitled to make.
      */
     private void requireWorkflowsExist(AgentConfiguration agentConfiguration) {
         List<URI> workflows = agentConfiguration.getWorkflows();

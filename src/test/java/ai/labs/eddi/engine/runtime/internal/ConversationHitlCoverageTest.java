@@ -487,6 +487,33 @@ class ConversationHitlCoverageTest {
             assertNull(memory.getCurrentStep().getLatestData("hitl:status"));
             assertFalse(memory.getCurrentStep().getConversationOutput().containsKey("hitl:status"));
         }
+
+        @Test
+        @DisplayName("a resolved RULE pause does not leave hitlPauseType=RULE on the READY conversation")
+        void resolvedRulePauseClearsPauseType() throws Exception {
+            memory.setConversationState(ConversationState.AWAITING_HUMAN);
+            memory.setHitlPausedWorkflowId("wf1");
+            memory.setHitlPausedAbsoluteTaskIndex(0);
+            memory.setHitlPauseType("RULE");
+
+            createConversation().resume(decision(HitlVerdict.APPROVED));
+
+            assertNotEquals(ConversationState.AWAITING_HUMAN, memory.getConversationState());
+            assertNull(memory.getHitlPauseType());
+        }
+
+        @Test
+        @DisplayName("a rejected RULE pause does not leave hitlPauseType=RULE behind either")
+        void rejectedRulePauseClearsPauseType() throws Exception {
+            memory.setConversationState(ConversationState.AWAITING_HUMAN);
+            memory.setHitlPausedWorkflowId("wf1");
+            memory.setHitlPausedAbsoluteTaskIndex(0);
+            memory.setHitlPauseType("RULE");
+
+            createConversation().resume(decision(HitlVerdict.REJECTED));
+
+            assertNull(memory.getHitlPauseType());
+        }
     }
 
     // =====================================================================

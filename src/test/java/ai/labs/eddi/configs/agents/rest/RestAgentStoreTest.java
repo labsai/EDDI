@@ -21,7 +21,9 @@ import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.ForbiddenException;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.Response;
@@ -219,6 +221,19 @@ class RestAgentStoreTest {
             AgentConfiguration config = new AgentConfiguration();
             config.setWorkflows(new ArrayList<>(List.of(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + workflowId + "?version=1"))));
             return config;
+        }
+
+        @Test
+        @DisplayName("update checks EDIT on the agent before looking any workflow up — no existence oracle")
+        void updateChecksAgentAccessBeforeWorkflowLookup() {
+            ResourceAccessGuard denyingGuard = mock(ResourceAccessGuard.class);
+            doThrow(new ForbiddenException("no")).when(denyingGuard).requireAccess(eq("agent-x"), eq(AccessLevel.EDIT), any());
+            var guardedStore = new RestAgentStore(AgentStore, restWorkflowStore, documentDescriptorStore, jsonSchemaCreator, scheduleStore,
+                    capabilityRegistryService, deploymentStore, denyingGuard, agentSigningService, agentFactory, "default");
+
+            assertThrows(ForbiddenException.class, () -> guardedStore.updateAgent("agent-x", 1, referencing(PKG1_ID)));
+
+            verify(restWorkflowStore, never()).readWorkflow(anyString(), anyInt());
         }
 
         @Test

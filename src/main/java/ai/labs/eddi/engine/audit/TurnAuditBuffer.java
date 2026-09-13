@@ -11,9 +11,12 @@ import ai.labs.eddi.engine.memory.MemoryKeys;
 import org.jboss.logging.Logger;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -35,6 +38,12 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * process dies mid-pipeline) are not written — the same turn's conversation
  * state is not persisted either, so the ledger and the document still agree.
  * <p>
+ * <b>What is redacted.</b> Every input form any entry of the turn recorded as
+ * {@code userInput} (raw and normalized can differ) is removed from EVERY
+ * buffered entry — including entries that record no input themselves, such as a
+ * task-failure entry whose error message quotes the offending token, and
+ * entries built after the property setter already replaced the recorded input.
+ * <p>
  * Not thread-safe beyond what a single turn needs: the pipeline runs its tasks
  * sequentially, but {@link #collect} is synchronized anyway because a buffer
  * that silently loses an entry is the worst failure an audit component can
@@ -54,6 +63,8 @@ public final class TurnAuditBuffer implements IAuditEntryCollector {
 
     private final IAuditEntryCollector delegate;
     private final List<AuditEntry> entries = new ArrayList<>();
+    /** Every non-placeholder input form this turn's entries recorded. */
+    private final Set<String> recordedInputs = new LinkedHashSet<>();
 
     private TurnAuditBuffer(IAuditEntryCollector delegate) {
         this.delegate = delegate;
@@ -79,8 +90,13 @@ public final class TurnAuditBuffer implements IAuditEntryCollector {
 
     @Override
     public synchronized void collect(AuditEntry entry) {
-        if (entry != null) {
-            entries.add(entry);
+        if (entry == null) {
+            return;
+        }
+        entries.add(entry);
+        if (entry.input() != null && entry.input().get(USER_INPUT) instanceof String recorded && !recorded.isEmpty()
+                && !MemoryKeys.SECRET_INPUT_PLACEHOLDER.equals(recorded)) {
+            recordedInputs.add(recorded);
         }
     }
 
@@ -91,14 +107,17 @@ public final class TurnAuditBuffer implements IAuditEntryCollector {
     public void flush(IConversationMemory memory) {
         memory.setAuditCollector(delegate);
         List<AuditEntry> pending;
+        Set<String> inputs;
         synchronized (this) {
             pending = List.copyOf(entries);
+            inputs = Set.copyOf(recordedInputs);
             entries.clear();
+            recordedInputs.clear();
         }
         boolean secretInput = inputWasScrubbed(memory);
         for (AuditEntry entry : pending) {
             try {
-                delegate.collect(secretInput ? redactUserInput(entry) : entry);
+                delegate.collect(secretInput ? redact(entry, inputs) : entry);
             } catch (RuntimeException e) {
                 LOGGER.warnf(e, "Audit entry for task '%s' of conversation '%s' could not be submitted",
                         sanitize(entry.taskId()), sanitize(entry.conversationId()));
@@ -116,41 +135,45 @@ public final class TurnAuditBuffer implements IAuditEntryCollector {
     }
 
     /**
-     * The entry with its recorded user input replaced by the placeholder, and every
-     * other copy of that input (a compiled prompt, a tool argument) removed from
-     * the rest of its payload.
+     * The entry with any recorded user input replaced by the placeholder and every
+     * occurrence of {@code secretInputs} (those of at least
+     * {@link #MIN_REDACTED_INPUT_LENGTH} characters) removed from all four payload
+     * maps. Longer inputs are replaced first, so a normalized form contained in the
+     * raw one cannot leave a fragment behind.
      */
-    static AuditEntry redactUserInput(AuditEntry entry) {
-        Map<String, Object> input = entry.input();
-        Object recorded = input != null ? input.get(USER_INPUT) : null;
-        if (!(recorded instanceof String raw) || raw.isEmpty() || MemoryKeys.SECRET_INPUT_PLACEHOLDER.equals(raw)) {
-            return entry;
+    static AuditEntry redact(AuditEntry entry, Set<String> secretInputs) {
+        List<String> needles = secretInputs.stream()
+                .filter(input -> input.length() >= MIN_REDACTED_INPUT_LENGTH)
+                .sorted(Comparator.comparingInt(String::length).reversed())
+                .toList();
+        Map<String, Object> input = entry.input() != null ? new LinkedHashMap<>(entry.input()) : null;
+        if (input != null && input.containsKey(USER_INPUT)) {
+            input.put(USER_INPUT, MemoryKeys.SECRET_INPUT_PLACEHOLDER);
         }
-        Map<String, Object> redactedInput = new LinkedHashMap<>(input);
-        redactedInput.put(USER_INPUT, MemoryKeys.SECRET_INPUT_PLACEHOLDER);
-        if (raw.length() < MIN_REDACTED_INPUT_LENGTH) {
-            return entry.withPayload(redactedInput, entry.output(), entry.llmDetail(), entry.toolCalls());
-        }
-        return entry.withPayload(redactedInput, redactMap(entry.output(), raw), redactMap(entry.llmDetail(), raw),
-                redactMap(entry.toolCalls(), raw));
+        return entry.withPayload(redactMap(input, needles), redactMap(entry.output(), needles), redactMap(entry.llmDetail(), needles),
+                redactMap(entry.toolCalls(), needles));
     }
 
     @SuppressWarnings("unchecked")
-    private static Map<String, Object> redactMap(Map<String, Object> map, String raw) {
-        return map == null ? null : (Map<String, Object>) redactValue(map, raw);
+    private static Map<String, Object> redactMap(Map<String, Object> map, List<String> needles) {
+        return map == null || needles.isEmpty() ? map : (Map<String, Object>) redactValue(map, needles);
     }
 
-    private static Object redactValue(Object value, String raw) {
+    private static Object redactValue(Object value, List<String> needles) {
         if (value instanceof String text) {
-            return text.contains(raw) ? text.replace(raw, MemoryKeys.SECRET_INPUT_PLACEHOLDER) : text;
+            String redacted = text;
+            for (String needle : needles) {
+                redacted = redacted.replace(needle, MemoryKeys.SECRET_INPUT_PLACEHOLDER);
+            }
+            return redacted;
         }
         if (value instanceof Map<?, ?> map) {
             Map<String, Object> copy = new LinkedHashMap<>();
-            map.forEach((key, nested) -> copy.put(String.valueOf(key), redactValue(nested, raw)));
+            map.forEach((key, nested) -> copy.put(String.valueOf(key), redactValue(nested, needles)));
             return copy;
         }
         if (value instanceof List<?> list) {
-            return list.stream().map(nested -> redactValue(nested, raw)).toList();
+            return list.stream().map(nested -> redactValue(nested, needles)).toList();
         }
         return value;
     }

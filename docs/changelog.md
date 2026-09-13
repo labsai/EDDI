@@ -137,6 +137,19 @@ conversations (roles, options, cadence semantics, async approve/human-input, cyc
 without PLAN, cache), hitl, langchain (`anchorFirstSteps` is token-window only), user memory search,
 MCP client notes (protocol-version warning, non-idempotent retries).
 
+**Review follow-ups** (independent review of the whole change): the audit buffer now redacts every
+input form any entry recorded from *every* buffered entry — including task-failure entries, which carry
+no `userInput` but can quote the token, and entries built after the scrub; a resolved RULE pause no
+longer leaves `hitlPauseType: RULE` on a READY conversation (it logged a stale-state WARN on every later
+turn); `updateAgent` checks EDIT on the agent before the workflow-existence lookup (no existence oracle,
+and a workflow the caller cannot view is a 403 by intent); the OpenAI adapter maps the input cap to
+400 `input_too_large` instead of 500; a PDF header anywhere in the first 1024 bytes counts as a PDF;
+`EmbeddingModelFactory` trims the provider as `RagConfiguration` does;
+`eddi.conversations.max-input-chars` is declared in `application.properties` and documented in the
+conversation table. A later workflow of a multi-workflow agent sees empty parser data on a turn whose
+input was vaulted — deliberate, noted in `PropertySetterTask`. `EnvironmentParamConverterProvider` and
+`HttpMethodGuard` are unit-tested only; an integration test through the Quarkus stack is still open.
+
 **Not changed, by design:** `${eddivault:` is a supported legacy alias; GDPR export `complete:false`;
 sync rejecting loopback sources.
 

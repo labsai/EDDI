@@ -581,9 +581,11 @@ public class PropertySetterTask implements ILifecycleTask {
      * Patching these by containment does not work: the parser tokenizes the input
      * and wraps the pieces ({@code unknown(sk-live_abc)}, {@code "sk-live_abc" →
      * unknown(...)}), so the resolved secret is never a substring of them and the
-     * verbatim scrub left the key in the stored step. The behavior rules that
-     * consume them have already run by the time a property setter executes, so
-     * nothing later in the turn needs them.
+     * verbatim scrub left the key in the stored step. The behavior rules of this
+     * workflow that consume them have already run by the time a property setter
+     * executes. A LATER workflow of a multi-workflow agent sees them empty for this
+     * turn — deliberate: its input matchers would otherwise be matching against a
+     * vaulted secret.
      */
     private void dropParsedForms(IWritableConversationStep currentStep) {
         if (currentStep.getLatestData(EXPRESSIONS_PARSED_IDENTIFIER) != null) {

@@ -37,6 +37,24 @@ public final class MimeValidator {
      *            the file content (at least 12 bytes for reliable detection)
      * @return detected MIME type, or "application/octet-stream" if unknown
      */
+    private static final byte[] PDF_HEADER = {0x25, 0x50, 0x44, 0x46, 0x2D};
+    private static final int PDF_HEADER_SEARCH_WINDOW = 1024;
+
+    /** Whether {@code needle} starts within the first {@code window} bytes. */
+    private static boolean containsWithinFirst(byte[] bytes, byte[] needle, int window) {
+        int lastStart = Math.min(window, bytes.length) - needle.length;
+        for (int start = 0; start <= lastStart; start++) {
+            int matched = 0;
+            while (matched < needle.length && bytes[start + matched] == needle[matched]) {
+                matched++;
+            }
+            if (matched == needle.length) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public static String detectMime(byte[] bytes) {
         if (bytes == null || bytes.length < 4) {
             return "application/octet-stream";
@@ -67,8 +85,10 @@ public final class MimeValidator {
         if (startsWith(bytes, 0x49, 0x49, 0x2A, 0x00) || startsWith(bytes, 0x4D, 0x4D, 0x00, 0x2A)) {
             return "image/tiff";
         }
-        // PDF: 25 50 44 46 (%PDF)
-        if (startsWith(bytes, 0x25, 0x50, 0x44, 0x46)) {
+        // PDF: %PDF- — readers accept the header anywhere in the first 1024 bytes, and
+        // real generators emit leading bytes (BOM, print-job prefixes). Offset 0 only
+        // would refuse those as "mislabelled" now that PDFs require a signature.
+        if (containsWithinFirst(bytes, PDF_HEADER, PDF_HEADER_SEARCH_WINDOW)) {
             return "application/pdf";
         }
         // ZIP/DOCX/XLSX: 50 4B 03 04

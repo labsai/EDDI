@@ -10,6 +10,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.nio.charset.StandardCharsets;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 @DisplayName("MimeValidator Tests")
@@ -38,6 +40,18 @@ class MimeValidatorTest {
         void testDetectGif() {
             byte[] gif = new byte[]{0x47, 0x49, 0x46, 0x38, 0x39, 0x61};
             assertEquals("image/gif", MimeValidator.detectMime(gif));
+        }
+
+        @Test
+        @DisplayName("a PDF header after leading bytes (BOM, print-job prefix) is still a PDF, within the first 1024 bytes")
+        void testDetectPdfWithLeadingBytes() {
+            byte[] prefixed = "﻿%!PS-Adobe job prefix\n%PDF-1.7\n".getBytes(StandardCharsets.UTF_8);
+            assertEquals("application/pdf", MimeValidator.detectMime(prefixed));
+            assertEquals("application/pdf", MimeValidator.detectMime("%PDF-1.4\n".getBytes(StandardCharsets.US_ASCII)));
+
+            byte[] tooLate = new byte[1100];
+            System.arraycopy("%PDF-".getBytes(StandardCharsets.US_ASCII), 0, tooLate, 1030, 5);
+            assertEquals("application/octet-stream", MimeValidator.detectMime(tooLate));
         }
 
         @Test

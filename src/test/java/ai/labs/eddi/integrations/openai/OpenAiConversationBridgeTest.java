@@ -677,6 +677,16 @@ class OpenAiConversationBridgeTest {
     }
 
     @Test
+    void inputOverTheCap_is400NotServerError() {
+        var direct = bridge.asApiException(new IConversationService.InputTooLargeException(5_000, 100));
+        assertEquals(400, direct.getStatus());
+        assertTrue(direct.getMessage().contains("100"), direct.getMessage());
+
+        var wrapped = bridge.asApiException(new RuntimeException("turn failed", new IConversationService.InputTooLargeException(5_000, 100)));
+        assertEquals(400, wrapped.getStatus());
+    }
+
+    @Test
     void agentNotReady_is503() throws Exception {
         when(conversationService.startConversation(any(), any(), any(), any()))
                 .thenThrow(new IConversationService.AgentNotReadyException("not deployed"));

@@ -1256,7 +1256,12 @@ public class Conversation implements IConversation {
             // linger on memory and poison the next turn's resume-mode detection. If the
             // batch is still present and this was NOT a fresh re-pause (AWAITING_HUMAN),
             // clear it. A fresh re-pause legitimately re-arms the batch, so leave it.
-            if (conversationMemory.getHitlPendingToolCalls() != null && finalState != ConversationState.AWAITING_HUMAN) {
+            // The pause type too: a RULE pause carries no batch but does carry
+            // hitlPauseType=RULE, and leaving it on a READY conversation made the next
+            // turn log "clearing stale HITL tool-pause state" for every conversation
+            // that ever passed a rule gate.
+            if ((conversationMemory.getHitlPendingToolCalls() != null || conversationMemory.getHitlPauseType() != null)
+                    && finalState != ConversationState.AWAITING_HUMAN) {
                 clearToolPauseState();
             }
             // Same contract as the say path: note the owed writes BEFORE deciding
