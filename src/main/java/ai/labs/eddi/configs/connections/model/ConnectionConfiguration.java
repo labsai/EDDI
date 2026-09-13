@@ -42,10 +42,10 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * one field defeating three controls.
  *
  * <h3>Two separate allowlists</h3> {@code baseUrlAllowlist} says where the
- * ACCESS TOKEN may be sent. Credential endpoints — {@code tokenUrl},
- * {@code authorizationUrl}, {@code discoveryUrl} — are validated against their
- * own operator-managed list, because the vault-resolved {@code clientSecret} is
- * sent to {@code tokenUrl}: an unvalidated token URL is a direct client-secret
+ * ACCESS TOKEN may be sent. Credential endpoints — {@code tokenUrl} and
+ * {@code authorizationUrl} — are validated against their own operator-managed
+ * list, because the vault-resolved {@code clientSecret} is sent to
+ * {@code tokenUrl}: an unvalidated token URL is a direct client-secret
  * exfiltration path, strictly worse than a misdirected access token. Their
  * origins routinely differ from the API's (Atlassian:
  * {@code auth.atlassian.com} versus {@code api.atlassian.com}), which is why
