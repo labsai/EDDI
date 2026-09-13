@@ -295,6 +295,37 @@ class OAuthTokenClientTest {
     }
 
     @Test
+    @DisplayName("an allowlisted plain-http token URL on a remote host is refused before the client secret is sent in the clear")
+    void refusesAPlaintextRemoteTokenUrl() throws Exception {
+        // The allowlist accepts http origins, and a document that never ran write-time
+        // validation can carry an http tokenUrl, so the allowlist alone let this go.
+        client = new OAuthTokenClient(httpClient, new CredentialEndpointAllowlist(Set.of("http://auth.example.com")));
+        var connection = connection();
+        connection.getOauth().setTokenUrl("http://auth.example.com/oauth/token");
+
+        var error = assertThrows(ConnectionException.class, () -> client.clientCredentials(connection, CLIENT_SECRET));
+
+        assertEquals(ConnectionException.Reason.INVALID_CONFIGURATION, error.getReason(), error.getMessage());
+        assertTrue(error.getMessage().contains("oauth.tokenUrl"), "the message must name the field to fix: " + error.getMessage());
+        verify(httpClient, never()).sendNoRedirect(any(), any());
+    }
+
+    @Test
+    @DisplayName("a plain-http token URL on a loopback host is contacted — nothing crosses the network")
+    void contactsALoopbackHttpTokenUrl() throws Exception {
+        for (String origin : List.of("http://localhost:9999", "http://127.0.0.1:9999", "http://[::1]:9999")) {
+            httpClient = mock(SafeHttpClient.class);
+            client = new OAuthTokenClient(httpClient, new CredentialEndpointAllowlist(Set.of(origin)));
+            var connection = connection();
+            connection.getOauth().setTokenUrl(origin + "/oauth/token");
+            respondWith(200, FULL_TOKEN_BODY);
+
+            assertEquals("at-live", client.clientCredentials(connection, CLIENT_SECRET).accessToken(), origin);
+            assertEquals(origin + "/oauth/token", sentRequest().uri().toString(), origin);
+        }
+    }
+
+    @Test
     @DisplayName("a redirect from the token endpoint is never followed and is transient, not a dead grant")
     void redirectIsRefusedRatherThanFollowed() throws Exception {
         // The request that produced this carries the client secret and the refresh

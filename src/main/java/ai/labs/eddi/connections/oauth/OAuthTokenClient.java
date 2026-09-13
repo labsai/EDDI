@@ -149,6 +149,16 @@ public class OAuthTokenClient {
             throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION, "oauth.tokenUrl of connection '"
                     + connection.getName() + "' is not a usable URL: " + e.getMessage(), e);
         }
+        // Checked here, before the request is built, and not left to the allowlist:
+        // the allowlist accepts an http origin, and a document that never ran
+        // write-time validation can carry one. The client secret travels in this
+        // request, so an http token URL to anything but loopback sends it in the clear.
+        if (!ConnectionConfiguration.isSecureCredentialEndpoint(tokenUri)) {
+            throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION, "oauth.tokenUrl of connection '"
+                    + connection.getName() + "' must use https: the client secret is sent to it, and plain http is accepted only for a "
+                    + "loopback host (localhost, 127.0.0.1, [::1]). Nothing was sent. Got: " + tokenUri.getScheme() + "://"
+                    + tokenUri.getHost());
+        }
 
         HttpRequest.Builder request = HttpRequest.newBuilder().uri(tokenUri)
                 .timeout(effectiveTimeout(connection))

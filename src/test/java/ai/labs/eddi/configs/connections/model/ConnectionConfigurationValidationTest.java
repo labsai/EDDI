@@ -460,6 +460,17 @@ class ConnectionConfigurationValidationTest {
             assertTrue(error.getMessage().contains("https"), error.getMessage());
         }
 
+        @ParameterizedTest
+        @DisplayName("a token URL over http to a loopback host is accepted — the same rule the token client applies before sending")
+        @ValueSource(strings = {"http://localhost:9999/token", "http://127.0.0.1:9999/token", "http://[::1]:9999/token",
+                "HTTPS://auth.atlassian.com/oauth/token"})
+        void acceptsLoopbackHttpTokenUrl(String tokenUrl) {
+            var connection = oauthConnection(AuthType.OAUTH2_CLIENT_CREDENTIALS);
+            connection.getOauth().setTokenUrl(tokenUrl);
+
+            assertDoesNotThrow(connection::validate);
+        }
+
         @Test
         @DisplayName("a token URL with userinfo is refused")
         void refusesTokenUrlWithUserInfo() {

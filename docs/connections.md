@@ -404,6 +404,15 @@ author who can edit one could otherwise point `tokenUrl` at a host they control
 and receive the vault-resolved secret on the first refresh. Their origins also
 routinely differ (`auth.atlassian.com` versus `api.atlassian.com`).
 
+**A credential endpoint must be https.** `tokenUrl` and `authorizationUrl` are
+refused at save time unless they use `https`, or plain `http` to a loopback host
+(`localhost`, `127.0.0.1`, `[::1]`) where nothing crosses the network. The token
+client applies the same rule again immediately before a request leaves the process,
+answering `INVALID_CONFIGURATION` naming `oauth.tokenUrl` with nothing sent: the
+allowlist below accepts `http://` origins, and a document that reached the store by
+a direct database write never ran save-time validation, so the allowlist alone
+would let a client secret travel in the clear.
+
 An empty credential-endpoint allowlist means **no OAuth connection can resolve**.
 That is fail-closed on purpose: an unconfigured allowlist is far more likely than
 an operator who meant "anywhere".

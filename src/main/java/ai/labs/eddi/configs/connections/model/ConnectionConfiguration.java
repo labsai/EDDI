@@ -319,6 +319,27 @@ public class ConnectionConfiguration {
     }
 
     /**
+     * Whether a credential endpoint may be sent a client secret: https to any host,
+     * or plain http to a loopback host only.
+     * <p>
+     * One rule for the write boundary and for {@code OAuthTokenClient}, which
+     * re-checks it immediately before a request leaves the process — a document
+     * that reached the store by import or a direct write never ran validation, and
+     * the credential-endpoint allowlist accepts http origins, so the allowlist
+     * alone would let a secret go out in the clear. The loopback exemption is the
+     * one {@code baseUrlAllowlist} and the dev-mode {@code public-base-url} rule
+     * already make, with the same host set: {@code http://localhost} never leaves
+     * the machine.
+     */
+    public static boolean isSecureCredentialEndpoint(URI endpoint) {
+        if (endpoint == null || endpoint.getScheme() == null || endpoint.getHost() == null) {
+            return false;
+        }
+        String scheme = endpoint.getScheme().toLowerCase(Locale.ROOT);
+        return "https".equals(scheme) || ("http".equals(scheme) && isLoopbackHost(endpoint.getHost()));
+    }
+
+    /**
      * {@code localhost}, {@code 127.0.0.1} or {@code ::1}, as {@link URI#getHost()}
      * renders them.
      */
@@ -589,8 +610,9 @@ public class ConnectionConfiguration {
             return;
         }
         URI parsed = parse(url, field);
-        if (!"https".equals(parsed.getScheme())) {
-            throw new IllegalArgumentException(field + " must use https — the client secret is sent to it: " + url);
+        if (!isSecureCredentialEndpoint(parsed)) {
+            throw new IllegalArgumentException(field + " must use https — the client secret is sent to it. Plain http is accepted only for "
+                    + "a loopback host (localhost, 127.0.0.1, [::1]), where nothing crosses the network: " + url);
         }
         if (parsed.getUserInfo() != null) {
             throw new IllegalArgumentException(field + " must not carry userinfo: " + url);
