@@ -315,6 +315,64 @@ class ConnectionResolverTest {
         }
 
         @Test
+        @DisplayName("a STATIC document with no staticAuth is a configuration error, not an NPE")
+        void staticWithoutStaticAuthIsAConfigurationError() {
+            // A cached document written before the validation rules, or straight into
+            // the store. An NPE here is not a ConnectionException, so the MCP failure
+            // classifier could not tell it from an outage and tripped the breaker.
+            var cases = new LinkedHashMap<String, StaticAuth>();
+            cases.put("no staticAuth block", null);
+            var blankHeader = new StaticAuth();
+            blankHeader.setHeaderName(" ");
+            blankHeader.setValueTemplate("Bearer ${vault:jira-token}");
+            cases.put("blank headerName", blankHeader);
+            var noTemplate = new StaticAuth();
+            noTemplate.setHeaderName("Authorization");
+            cases.put("no valueTemplate", noTemplate);
+
+            for (var entry : cases.entrySet()) {
+                var connection = staticConnection();
+                connection.setStaticAuth(entry.getValue());
+                register(connection);
+
+                var error = assertThrows(ConnectionException.class,
+                        () -> resolver(false).resolve("${connection:jira}", ALLOWED_TARGET, null), entry.getKey());
+
+                assertEquals(ConnectionException.Reason.INVALID_CONFIGURATION, error.getReason(), entry.getKey());
+                assertTrue(error.getMessage().contains("staticAuth"), entry.getKey() + ": " + error.getMessage());
+            }
+        }
+
+        @Test
+        @DisplayName("BASIC with no username refuses rather than sending 'null:password'")
+        void basicWithoutUsernameIsAConfigurationError() {
+            var cases = new LinkedHashMap<String, StaticAuth>();
+            cases.put("no staticAuth block", null);
+            var noUser = new StaticAuth();
+            noUser.setHeaderName("Authorization");
+            noUser.setPasswordRef("${vault:jira-password}");
+            cases.put("null username", noUser);
+            var noPassword = new StaticAuth();
+            noPassword.setHeaderName("Authorization");
+            noPassword.setUsername("svc-eddi");
+            cases.put("no passwordRef", noPassword);
+
+            for (var entry : cases.entrySet()) {
+                var connection = staticConnection();
+                connection.setAuthType(AuthType.BASIC);
+                connection.setStaticAuth(entry.getValue());
+                register(connection);
+
+                var error = assertThrows(ConnectionException.class,
+                        () -> resolver(false).resolve("${connection:jira}", ALLOWED_TARGET, null), entry.getKey());
+
+                assertEquals(ConnectionException.Reason.INVALID_CONFIGURATION, error.getReason(), entry.getKey());
+                assertTrue(error.getMessage().contains("staticAuth"), entry.getKey() + ": " + error.getMessage());
+            }
+            verify(secretResolver, never()).resolveValue(anyString());
+        }
+
+        @Test
         @DisplayName("an unresolved GLOBAL VARIABLE is refused too, not only a vault key")
         void refusesUnresolvedGlobalVariable() {
             // Checking only ${vault:} left half the guard missing: an unresolved

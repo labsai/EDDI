@@ -227,11 +227,41 @@ public class ConnectionResolver {
             return callerSuppliedCredential(connection);
         }
         return switch (connection.getAuthType()) {
-            case STATIC -> new ResolvedCredential(connection.getStaticAuth().getHeaderName(),
-                    resolveReferences(connection.getStaticAuth().getValueTemplate(), connection));
+            case STATIC -> staticCredential(connection);
             case BASIC -> basicCredential(connection);
             case OAUTH2_CLIENT_CREDENTIALS, OAUTH2_AUTHORIZATION_CODE -> oauthCredential(connection, principalOverride);
         };
+    }
+
+    /**
+     * The STATIC header, guarded the way the CALLER_SUPPLIED branch is.
+     * <p>
+     * The registry serves cached documents and never re-runs {@code validate()}, so
+     * a document written before the validation rules existed — or straight into the
+     * store — can lack {@code staticAuth} entirely. Dereferenced unguarded that was
+     * an NPE, which is not a {@link ConnectionException}: the MCP manager's failure
+     * classifier could not recognise it as a credential problem and fed it to the
+     * circuit breaker, which then told the operator the server was down and
+     * suppressed discovery for everybody configured against it.
+     */
+    private ResolvedCredential staticCredential(ConnectionConfiguration connection) {
+        StaticAuth staticAuth = requireStaticAuth(connection, "STATIC");
+        if (staticAuth.getValueTemplate() == null || staticAuth.getValueTemplate().isBlank()) {
+            throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION,
+                    "Connection '" + connection.getName() + "' is STATIC but has no staticAuth.valueTemplate, so there is no credential to "
+                            + "send. Re-save the connection to apply the current validation rules.");
+        }
+        return new ResolvedCredential(staticAuth.getHeaderName(), resolveReferences(staticAuth.getValueTemplate(), connection));
+    }
+
+    private static StaticAuth requireStaticAuth(ConnectionConfiguration connection, String authType) {
+        StaticAuth staticAuth = connection.getStaticAuth();
+        if (staticAuth == null || staticAuth.getHeaderName() == null || staticAuth.getHeaderName().isBlank()) {
+            throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION,
+                    "Connection '" + connection.getName() + "' is " + authType + " but names no staticAuth.headerName, so there is no "
+                            + "header to send the credential in. Re-save the connection to apply the current validation rules.");
+        }
+        return staticAuth;
     }
 
     /**
@@ -299,7 +329,19 @@ public class ConnectionResolver {
      * something that does not look like one.
      */
     private ResolvedCredential basicCredential(ConnectionConfiguration connection) {
-        StaticAuth staticAuth = connection.getStaticAuth();
+        StaticAuth staticAuth = requireStaticAuth(connection, "BASIC");
+        // A null username would be sent as the literal "null:password" — an
+        // authentication failure with no visible cause. Refused instead.
+        if (staticAuth.getUsername() == null || staticAuth.getUsername().isBlank()) {
+            throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION,
+                    "Connection '" + connection.getName() + "' is BASIC but has no staticAuth.username. Re-save the connection to apply the "
+                            + "current validation rules.");
+        }
+        if (staticAuth.getPasswordRef() == null || staticAuth.getPasswordRef().isBlank()) {
+            throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION,
+                    "Connection '" + connection.getName() + "' is BASIC but has no staticAuth.passwordRef. Re-save the connection to apply "
+                            + "the current validation rules.");
+        }
         String password = resolveReferences(staticAuth.getPasswordRef(), connection);
         String encoded = Base64.getEncoder()
                 .encodeToString((staticAuth.getUsername() + ":" + password).getBytes(StandardCharsets.UTF_8));
