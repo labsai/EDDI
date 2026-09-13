@@ -7,6 +7,8 @@ package ai.labs.eddi.configs.connections;
 import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
 import ai.labs.eddi.datastore.IResourceStore;
 
+import java.util.List;
+
 /**
  * Versioned store for {@link ConnectionConfiguration} documents.
  * <p>
@@ -40,4 +42,16 @@ public interface IConnectionStore extends IResourceStore<ConnectionConfiguration
      * after a delete or a re-index.
      */
     String idOfName(String tenantId, String name) throws ResourceStoreException;
+
+    /**
+     * Every connection currently holding {@code name} in a tenant, oldest first —
+     * by descriptor creation time, then by id, so two replicas scanning the same
+     * index agree on the order.
+     * <p>
+     * Exists for the post-create check in {@code RestConnectionStore}: the
+     * pre-create {@link #idOfName} is a check-then-act, and two replicas creating
+     * "jira" in the same instant both pass it. This is the store being asked
+     * afterwards who holds the name now. Empty when nobody does.
+     */
+    List<String> idsOfName(String tenantId, String name) throws ResourceStoreException;
 }

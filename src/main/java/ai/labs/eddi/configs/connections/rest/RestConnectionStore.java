@@ -19,6 +19,7 @@ import ai.labs.eddi.connections.grants.IConnectionGrantStore;
 import ai.labs.eddi.connections.model.ConnectionReference;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.secrets.ISecretProvider;
+import ai.labs.eddi.utils.RestUtilities;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.BadRequestException;
@@ -27,6 +28,7 @@ import jakarta.ws.rs.core.Response;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
+import java.net.URI;
 import java.util.List;
 
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
@@ -47,6 +49,12 @@ public class RestConnectionStore implements IRestConnectionStore {
     private final boolean authorizationEnabled;
     private final RestVersionInfo<ConnectionConfiguration> restVersionInfo;
 
+    /**
+     * See {@link #createUnderNameLock}. Sixty-four stripes: plenty for a config
+     * write path.
+     */
+    private final Object[] nameLocks = new Object[64];
+
     @Inject
     public RestConnectionStore(IConnectionStore connectionStore, IDocumentDescriptorStore documentDescriptorStore,
             IJsonSchemaCreator jsonSchemaCreator, ConnectionRegistry connectionRegistry, IConnectionGrantStore grantStore,
@@ -60,6 +68,9 @@ public class RestConnectionStore implements IRestConnectionStore {
         this.grantStore = grantStore;
         this.secretProvider = secretProvider;
         this.authorizationEnabled = authorizationEnabled;
+        for (int stripe = 0; stripe < nameLocks.length; stripe++) {
+            nameLocks[stripe] = new Object();
+        }
     }
 
     @Override
@@ -99,11 +110,116 @@ public class RestConnectionStore implements IRestConnectionStore {
     @Override
     public Response createConnection(ConnectionConfiguration connectionConfiguration) {
         validateForWrite(connectionConfiguration);
-        requireNameIsFree(connectionConfiguration, null);
-        requireDefaultTenant(connectionConfiguration);
-        Response response = restVersionInfo.create(connectionConfiguration);
-        connectionRegistry.invalidate();
-        return response;
+        return createUnderNameLock(connectionConfiguration);
+    }
+
+    /**
+     * The one path every new connection document takes, so that a name can be
+     * claimed only once.
+     * <p>
+     * {@link #requireNameIsFree} is a check-then-act: two creates of "jira" a few
+     * milliseconds apart both find the name free, both land, and
+     * {@code ${connection:jira}} then resolves by descriptor scan order — one
+     * system's credential to another system's allowlisted origin, intermittently.
+     * The store is a versioned document store, so no unique index can enforce the
+     * rule; two things close the window instead.
+     * <p>
+     * Inside one JVM, creates of the same (tenant, name) are serialised on a lock,
+     * so the common single-node deployment never races at all. Across replicas,
+     * {@link #requireCreateWonTheName} re-asks the store who holds the name AFTER
+     * the write landed and rolls this one back if somebody else does. What remains
+     * is the interval between a replica's write and its descriptor becoming visible
+     * to the other's scan — milliseconds, against a check that used to be absent.
+     */
+    private Response createUnderNameLock(ConnectionConfiguration connectionConfiguration) {
+        if (connectionConfiguration == null) {
+            // RestVersionInfo produces its own error for a missing body.
+            return restVersionInfo.create(null);
+        }
+        String tenant = ConnectionConfiguration.effectiveTenant(connectionConfiguration);
+        synchronized (nameLock(tenant, connectionConfiguration.getName())) {
+            requireNameIsFree(connectionConfiguration, null);
+            // Last of the write checks, deliberately: it refuses a document that is not
+            // wrong, only ahead of the feature, so anything genuinely malformed gets to
+            // name its own field first.
+            requireDefaultTenant(connectionConfiguration);
+            Response response = restVersionInfo.create(connectionConfiguration);
+            connectionRegistry.invalidate();
+            requireCreateWonTheName(tenant, connectionConfiguration.getName(), response);
+            return response;
+        }
+    }
+
+    /**
+     * Striped, so the lock table cannot grow with the number of names ever created.
+     */
+    private Object nameLock(String tenant, String name) {
+        int stripe = Math.floorMod((tenant + "/" + name).hashCode(), nameLocks.length);
+        return nameLocks[stripe];
+    }
+
+    /**
+     * The cross-replica half of the uniqueness rule.
+     * <p>
+     * The descriptor of the document just written does not exist yet — the
+     * {@code DocumentDescriptorFilter} writes it once this method has returned a
+     * 201 — so the scan can never see our own document, and the rule is
+     * correspondingly simple: any OTHER holder of the name visible now completed
+     * its create before ours, and wins. Ours is removed permanently (nothing has
+     * been told about it yet, so there is nothing to soft-delete for) and the
+     * caller is answered 409 naming the survivor.
+     * <p>
+     * A store that cannot be scanned fails closed the same way the pre-check does:
+     * the document is removed again and the caller is asked to retry, because a
+     * connection that MAY be a duplicate is a credential that may go to the wrong
+     * host.
+     */
+    private void requireCreateWonTheName(String tenant, String name, Response response) {
+        IResourceStore.IResourceId created = createdIdOf(response);
+        if (created == null) {
+            LOGGER.warnf("Created connection '%s' but could not read its id back, so the cross-replica name check was skipped.",
+                    sanitize(name));
+            return;
+        }
+        List<String> holders;
+        try {
+            holders = connectionStore.idsOfName(tenant, name);
+        } catch (IResourceStore.ResourceStoreException e) {
+            removeLosingCreate(created, name);
+            throw new BadRequestException("Could not verify that the connection name '" + name + "' is still unique after creating it ("
+                    + e.getClass().getSimpleName() + "), so the new connection was removed again. Retry once the configuration store is "
+                    + "reachable.", e);
+        }
+        List<String> others = holders.stream().filter(holder -> !holder.equals(created.getId())).toList();
+        if (others.isEmpty()) {
+            return;
+        }
+        removeLosingCreate(created, name);
+        throw new ClientErrorException("A connection named '" + name + "' was created concurrently and won: " + others.get(0)
+                + " already held the name when this one landed, so this one has been removed again. Reference ${connection:" + name
+                + "} to use the surviving connection, or create yours under another name.", Response.Status.CONFLICT);
+    }
+
+    private static IResourceStore.IResourceId createdIdOf(Response response) {
+        String createdUri = response == null ? null : response.getHeaderString("X-Resource-URI");
+        if (createdUri == null || createdUri.isBlank()) {
+            return null;
+        }
+        try {
+            return RestUtilities.extractResourceId(URI.create(createdUri));
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    private void removeLosingCreate(IResourceStore.IResourceId created, String name) {
+        try {
+            connectionStore.deleteAllPermanently(created.getId());
+            connectionRegistry.invalidate();
+        } catch (Exception e) {
+            LOGGER.errorf(e, "Connection '%s' (id %s) lost a concurrent-create race but could not be removed; two connections now hold the "
+                    + "name and the loser must be deleted by hand.", sanitize(name), sanitize(created.getId()));
+        }
     }
 
     @Override
@@ -121,11 +237,8 @@ public class RestConnectionStore implements IRestConnectionStore {
         // duplicated into a second connection that saves and then fails every call.
         validateForWrite(config);
         // Duplicating a pre-existing non-default-tenant document would mint a
-        // second one nobody can link or unlink.
-        requireDefaultTenant(config);
-        Response response = restVersionInfo.create(config);
-        connectionRegistry.invalidate();
-        return response;
+        // second one nobody can link or unlink — createUnderNameLock refuses it.
+        return createUnderNameLock(config);
     }
 
     @Override

@@ -18,13 +18,16 @@ import ai.labs.eddi.connections.grants.IConnectionGrantStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.secrets.ISecretProvider;
 import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.ClientErrorException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -159,6 +162,88 @@ class RestConnectionStoreWriteGuardTest {
             // Not on a TTL: a connection whose allowlist just narrowed must stop
             // resolving to the old one immediately.
             verify(connectionRegistry).invalidate();
+        }
+    }
+
+    @Nested
+    @DisplayName("name uniqueness across replicas")
+    class NameUniqueness {
+
+        private static final String OTHER_REPLICAS_ID = "68a1b2c3d4e5f60718293a4c";
+
+        @Test
+        @DisplayName("a create that finds another holder of the name after landing is rolled back and answered 409 naming the winner")
+        void losesToAConcurrentCreateOnAnotherReplica() throws Exception {
+            // The pre-create check is a check-then-act: both replicas found "jira" free.
+            // Ours landed second, and the other's descriptor is visible by the time we
+            // look again — so ours is the duplicate, and it must not survive to make
+            // ${connection:jira} resolve by scan order.
+            when(connectionStore.idOfName("default", "jira")).thenReturn(null);
+            when(connectionStore.create(any())).thenReturn(resourceId(1));
+            when(connectionStore.idsOfName("default", "jira")).thenReturn(List.of(OTHER_REPLICAS_ID));
+
+            var error = assertThrows(ClientErrorException.class, () -> rest().createConnection(connection("jira", null)));
+
+            assertEquals(409, error.getResponse().getStatus());
+            assertTrue(error.getMessage().contains(OTHER_REPLICAS_ID), "the refusal must name the survivor: " + error.getMessage());
+            verify(connectionStore).deleteAllPermanently(ID);
+        }
+
+        @Test
+        @DisplayName("a create nobody else raced is kept, and its own id in the scan does not count against it")
+        void winsWhenNoOtherReplicaCreatedTheName() throws Exception {
+            when(connectionStore.idOfName("default", "jira")).thenReturn(null);
+            when(connectionStore.create(any())).thenReturn(resourceId(1));
+            when(connectionStore.idsOfName("default", "jira")).thenReturn(List.of(ID));
+
+            var response = rest().createConnection(connection("jira", null));
+
+            assertEquals(201, response.getStatus());
+            verify(connectionStore, never()).deleteAllPermanently(any());
+        }
+
+        @Test
+        @DisplayName("a post-create scan that cannot run removes the document again and asks for a retry")
+        void failsClosedWhenThePostCreateScanCannotRun() throws Exception {
+            // A connection that MAY be a duplicate is a credential that may go to the
+            // wrong host; the pre-check fails closed on an unreadable store and this
+            // does the same.
+            when(connectionStore.idOfName("default", "jira")).thenReturn(null);
+            when(connectionStore.create(any())).thenReturn(resourceId(1));
+            when(connectionStore.idsOfName("default", "jira")).thenThrow(new IResourceStore.ResourceStoreException("blinked"));
+
+            var error = assertThrows(BadRequestException.class, () -> rest().createConnection(connection("jira", null)));
+
+            assertTrue(error.getMessage().contains("removed again"), error.getMessage());
+            verify(connectionStore).deleteAllPermanently(ID);
+        }
+
+        @Test
+        @DisplayName("creates of one name never overlap inside a node, so the single-node case cannot race at all")
+        void serialisesConcurrentCreatesOfOneName() throws Exception {
+            var inCreate = new AtomicInteger();
+            var mostConcurrent = new AtomicInteger();
+            when(connectionStore.idOfName("default", "jira")).thenReturn(null);
+            when(connectionStore.create(any())).thenAnswer(invocation -> {
+                int now = inCreate.incrementAndGet();
+                mostConcurrent.accumulateAndGet(now, Math::max);
+                Thread.sleep(30);
+                inCreate.decrementAndGet();
+                return resourceId(1);
+            });
+            var rest = rest();
+
+            var workers = new ArrayList<Thread>();
+            for (int worker = 0; worker < 4; worker++) {
+                var thread = new Thread(() -> rest.createConnection(connection("jira", null)));
+                workers.add(thread);
+                thread.start();
+            }
+            for (Thread thread : workers) {
+                thread.join(5_000);
+            }
+
+            assertEquals(1, mostConcurrent.get(), "two creates of the same name were inside the store at once");
         }
     }
 

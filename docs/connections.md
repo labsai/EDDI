@@ -661,6 +661,14 @@ just the newest, and leaves ciphertext untouched.
 * **Grants are never exported**, never returned by any REST endpoint, and never
   logged. `/connections/mine` returns connection name, status, scopes and expiry,
   enumerated explicitly rather than serialised from the entity.
+* **A name is unique per tenant, case-sensitive.** `${connection:jira}` names
+  one connection and must keep naming the same one. The store is a versioned
+  document store with no unique index, so uniqueness is enforced on the write
+  path: creates of one name are serialised inside a node, and after the write
+  lands the store is asked again who holds the name — a create that finds another
+  holder is rolled back and answered **409** naming the survivor. What remains is
+  the interval between one replica's write and its descriptor becoming visible to
+  another's scan.
 * **Deleting a connection deletes its grants**, decided by re-reading the
   connection's `(tenant, name)` at its *current* version rather than by the
   `permanent` flag or the version in the request — a soft delete already stops the
