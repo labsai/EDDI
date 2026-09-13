@@ -1004,45 +1004,46 @@ public class RestExportService extends AbstractBackupService implements IRestExp
      * reference that names no existing connection is logged rather than fatal: the
      * archive is still worth having, and the import side will say the same thing
      * when the reference dangles there.
+     * <p>
+     * That is the only failure skipped. A store, serialization, scrubbing or file
+     * failure propagates, so {@code exportAgent} fails and removes its scratch
+     * tree: swallowing it produced a ZIP silently missing a connection its configs
+     * reference, which is a broken archive that looks like a good one.
      */
-    private void exportConnections(Path agentPath, List<String> configStrings) {
+    private void exportConnections(Path agentPath, List<String> configStrings) throws IResourceStore.ResourceStoreException, IOException {
         Set<ConnectionReference> references = extractConnectionReferences(configStrings);
         if (references.isEmpty()) {
             return;
         }
-        try {
-            Path connectionsDir = null;
-            int exported = 0;
-            for (ConnectionReference reference : references) {
-                if (!ConnectionReference.DEFAULT_TENANT.equals(reference.tenantId())) {
-                    LOGGER.warnf("Not exporting %s: only default-tenant connections are exported",
-                            LogSanitizer.sanitize(reference.toReferenceString()));
-                    continue;
-                }
-                String id = connectionStore.idOfName(reference.tenantId(), reference.name());
-                ConnectionConfiguration connection = id == null ? null : connectionStore.readByName(reference.tenantId(), reference.name());
-                if (connection == null) {
-                    LOGGER.warnf("The agent references %s but no such connection exists; the reference will dangle on import",
-                            LogSanitizer.sanitize(reference.toReferenceString()));
-                    continue;
-                }
-                if (connectionsDir == null) {
-                    connectionsDir = Files.createDirectories(Paths.get(agentPath.toString(), CONNECTIONS_DIR));
-                }
-                String json = secretScrubber.scrubJson(jsonSerialization.serialize(connection));
-                Path filePath = Paths.get(connectionsDir.toString(), id + "." + CONNECTION_EXT + ".json");
-                deleteFileIfExists(filePath);
-                try (BufferedWriter writer = Files.newBufferedWriter(filePath)) {
-                    writer.write(json);
-                }
-                exported++;
+        Path connectionsDir = null;
+        int exported = 0;
+        for (ConnectionReference reference : references) {
+            if (!ConnectionReference.DEFAULT_TENANT.equals(reference.tenantId())) {
+                LOGGER.warnf("Not exporting %s: only default-tenant connections are exported",
+                        LogSanitizer.sanitize(reference.toReferenceString()));
+                continue;
             }
-            if (exported > 0) {
-                LOGGER.infof("Exported %d connection(s) (referenced: %s)", exported,
-                        LogSanitizer.sanitize(references.stream().map(ConnectionReference::toReferenceString).toList().toString()));
+            String id = connectionStore.idOfName(reference.tenantId(), reference.name());
+            ConnectionConfiguration connection = id == null ? null : connectionStore.readByName(reference.tenantId(), reference.name());
+            if (connection == null) {
+                LOGGER.warnf("The agent references %s but no such connection exists; the reference will dangle on import",
+                        LogSanitizer.sanitize(reference.toReferenceString()));
+                continue;
             }
-        } catch (Exception e) {
-            LOGGER.warnf("Failed to export connections: %s", LogSanitizer.sanitize(e.getMessage()));
+            if (connectionsDir == null) {
+                connectionsDir = Files.createDirectories(Paths.get(agentPath.toString(), CONNECTIONS_DIR));
+            }
+            String json = secretScrubber.scrubJson(jsonSerialization.serialize(connection));
+            Path filePath = Paths.get(connectionsDir.toString(), id + "." + CONNECTION_EXT + ".json");
+            deleteFileIfExists(filePath);
+            try (BufferedWriter writer = Files.newBufferedWriter(filePath)) {
+                writer.write(json);
+            }
+            exported++;
+        }
+        if (exported > 0) {
+            LOGGER.infof("Exported %d connection(s) (referenced: %s)", exported,
+                    LogSanitizer.sanitize(references.stream().map(ConnectionReference::toReferenceString).toList().toString()));
         }
     }
 

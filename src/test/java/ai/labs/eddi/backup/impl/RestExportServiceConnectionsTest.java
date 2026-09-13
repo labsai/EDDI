@@ -23,6 +23,7 @@ import ai.labs.eddi.configs.rules.IRuleSetStore;
 import ai.labs.eddi.configs.snippets.IPromptSnippetStore;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
@@ -52,11 +53,13 @@ import java.util.logging.Logger;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -78,6 +81,7 @@ class RestExportServiceConnectionsTest {
     private static final String CONNECTION_ID = "68a1b2c3d4e5f60718293a4b";
 
     private IConnectionStore connectionStore;
+    private SecretScrubber secretScrubber;
     private IZipArchive zipArchive;
     private RestExportService exportService;
     private String httpCallsJson;
@@ -93,7 +97,7 @@ class RestExportServiceConnectionsTest {
         var documentDescriptorStore = mock(IDocumentDescriptorStore.class);
         var jsonSerialization = mock(IJsonSerialization.class);
         var scheduleStore = mock(IScheduleStore.class);
-        var secretScrubber = mock(SecretScrubber.class);
+        secretScrubber = mock(SecretScrubber.class);
         connectionStore = mock(IConnectionStore.class);
         zipArchive = mock(IZipArchive.class);
 
@@ -205,6 +209,48 @@ class RestExportServiceConnectionsTest {
 
         assertEquals(200, response.getStatus(), "an archive is still worth having; the import side reports the dangling name too");
         assertFalse(connectionsDirExists.get());
+    }
+
+    @Test
+    @DisplayName("a connection store failure fails the export and removes its scratch tree, rather than shipping an archive without the connection")
+    void storeFailureFailsTheExport() throws Exception {
+        when(connectionStore.idOfName("default", "jira")).thenThrow(new IResourceStore.ResourceStoreException("store down"));
+
+        assertThrows(IResourceStore.ResourceStoreException.class, () -> exportService.exportAgent(AGENT_ID, 1, null, null, null));
+
+        verify(zipArchive, never()).createZip(anyString(), anyString(), any());
+        assertScratchTreeRemoved();
+    }
+
+    @Test
+    @DisplayName("a scrubbing failure on the connection document fails the export too")
+    void scrubFailureFailsTheExport() throws Exception {
+        var jira = new ConnectionConfiguration();
+        jira.setName("jira");
+        when(connectionStore.idOfName("default", "jira")).thenReturn(CONNECTION_ID);
+        when(connectionStore.readByName("default", "jira")).thenReturn(jira);
+        when(secretScrubber.scrubJson(anyString())).thenAnswer(invocation -> {
+            String json = invocation.getArgument(0);
+            if (json.contains("\"authType\"")) {
+                throw new IllegalStateException("scrubber failed");
+            }
+            return json;
+        });
+
+        assertThrows(IllegalStateException.class, () -> exportService.exportAgent(AGENT_ID, 1, null, null, null));
+
+        verify(zipArchive, never()).createZip(anyString(), anyString(), any());
+        assertScratchTreeRemoved();
+    }
+
+    private void assertScratchTreeRemoved() throws IOException {
+        if (!Files.exists(exportRoot)) {
+            return;
+        }
+        try (var entries = Files.list(exportRoot)) {
+            assertEquals(List.of(), entries.map(path -> path.getFileName().toString()).toList(),
+                    "a failed export must remove the scratch tree it created");
+        }
     }
 
     @Test
