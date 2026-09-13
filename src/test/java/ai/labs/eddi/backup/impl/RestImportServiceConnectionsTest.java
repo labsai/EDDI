@@ -5,6 +5,7 @@
 package ai.labs.eddi.backup.impl;
 
 import ai.labs.eddi.backup.IZipArchive;
+import ai.labs.eddi.backup.model.UpgradeResult;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.connections.IConnectionStore;
@@ -36,6 +37,7 @@ import java.io.File;
 import java.io.InputStream;
 import java.net.URI;
 import java.nio.file.Files;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -45,6 +47,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
@@ -80,7 +83,10 @@ class RestImportServiceConnectionsTest {
     private IRestConnectionStore restConnectionStore;
     private IConnectionStore connectionStore;
     private IAgentStore agentStore;
+    private UpgradeExecutor upgradeExecutor;
     private RestImportService importService;
+
+    private static final String TARGET_AGENT_ID = "eeff11112222333344445555";
 
     private final ObjectMapper mapper = new ObjectMapper();
 
@@ -94,8 +100,9 @@ class RestImportServiceConnectionsTest {
         var templateSyntaxMigrator = mock(TemplateSyntaxMigrator.class);
         when(templateSyntaxMigrator.migrate(anyString())).thenAnswer(inv -> inv.getArgument(0));
 
+        upgradeExecutor = mock(UpgradeExecutor.class);
         importService = new RestImportService(zipArchive, jsonSerialization, mock(IMigrationManager.class), documentDescriptorStore,
-                templateSyntaxMigrator, mock(StructuralMatcher.class), mock(UpgradeExecutor.class), mock(IScheduleStore.class),
+                templateSyntaxMigrator, mock(StructuralMatcher.class), upgradeExecutor, mock(IScheduleStore.class),
                 mock(BackupMetrics.class), mock(ResourceAccessGuard.class), mock(SpaceContext.class));
 
         when(jsonSerialization.deserialize(anyString(), eq(AgentConfiguration.class)))
@@ -230,6 +237,64 @@ class RestImportServiceConnectionsTest {
 
         verify(connectionStore).deleteAllPermanently(CREATED_CONNECTION_ID);
         verify(documentDescriptorStore).deleteAllDescriptor(CREATED_CONNECTION_ID);
+    }
+
+    @Test
+    @DisplayName("strategy=upgrade creates the archive's missing connections before the upgrade writes configs that reference them")
+    void upgradeImportsConnectionsFirst() throws Exception {
+        when(connectionStore.idOfName("default", "jira")).thenReturn(null);
+        when(restConnectionStore.createConnection(any()))
+                .thenReturn(Response.status(201).header("X-Resource-URI", CREATED_CONNECTION_URI).build());
+        when(upgradeExecutor.executeUpgrade(any(), eq(TARGET_AGENT_ID), any(), any())).thenReturn(upgraded());
+
+        Response response;
+        try (var cdi = stubCdi(IRestConnectionStore.class, restConnectionStore, IConnectionStore.class, connectionStore)) {
+            response = importService.importAgent(new ByteArrayInputStream(new byte[0]), "upgrade", null, TARGET_AGENT_ID, null);
+        }
+
+        assertTrue(response.getStatus() < 300, "status " + response.getStatus());
+        assertNull(response.getHeaderString("X-Connections-Skipped"));
+        var order = inOrder(restConnectionStore, upgradeExecutor);
+        order.verify(restConnectionStore).createConnection(any());
+        order.verify(upgradeExecutor).executeUpgrade(any(), eq(TARGET_AGENT_ID), any(), any());
+        verify(connectionStore, never()).deleteAllPermanently(any());
+    }
+
+    @Test
+    @DisplayName("strategy=upgrade never overwrites an existing connection, and counts the skip")
+    void upgradeSkipsAnExistingConnection() throws Exception {
+        when(connectionStore.idOfName("default", "jira")).thenReturn("1111222233334444aaaabbbb");
+        when(upgradeExecutor.executeUpgrade(any(), eq(TARGET_AGENT_ID), any(), any())).thenReturn(upgraded());
+
+        Response response;
+        try (var cdi = stubCdi(IRestConnectionStore.class, restConnectionStore, IConnectionStore.class, connectionStore)) {
+            response = importService.importAgent(new ByteArrayInputStream(new byte[0]), "upgrade", null, TARGET_AGENT_ID, null);
+        }
+
+        assertEquals("1", response.getHeaderString("X-Connections-Skipped"));
+        verify(restConnectionStore, never()).createConnection(any());
+        verify(upgradeExecutor).executeUpgrade(any(), eq(TARGET_AGENT_ID), any(), any());
+    }
+
+    @Test
+    @DisplayName("a connection strategy=upgrade created is removed again when the upgrade fails")
+    void upgradeRollsBackACreatedConnection() throws Exception {
+        when(connectionStore.idOfName("default", "jira")).thenReturn(null);
+        when(restConnectionStore.createConnection(any()))
+                .thenReturn(Response.status(201).header("X-Resource-URI", CREATED_CONNECTION_URI).build());
+        when(upgradeExecutor.executeUpgrade(any(), eq(TARGET_AGENT_ID), any(), any())).thenThrow(new RuntimeException("Upgrade failed: store down"));
+
+        try (var cdi = stubCdi(IRestConnectionStore.class, restConnectionStore, IConnectionStore.class, connectionStore)) {
+            assertThrows(InternalServerErrorException.class,
+                    () -> importService.importAgent(new ByteArrayInputStream(new byte[0]), "upgrade", null, TARGET_AGENT_ID, null));
+        }
+
+        verify(connectionStore).deleteAllPermanently(CREATED_CONNECTION_ID);
+        verify(documentDescriptorStore).deleteAllDescriptor(CREATED_CONNECTION_ID);
+    }
+
+    private static UpgradeResult upgraded() {
+        return new UpgradeResult(URI.create("eddi://ai.labs.agent/agentstore/agents/" + TARGET_AGENT_ID + "?version=2"), true, 1, 0, 0, List.of());
     }
 
     @SuppressWarnings({"unchecked", "rawtypes"})

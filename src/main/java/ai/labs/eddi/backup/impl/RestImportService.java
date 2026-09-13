@@ -2404,7 +2404,29 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 Set<String> selectedSet = parseSelectedResources(selectedOriginIds);
                 List<String> workflowOrder = parseWorkflowOrder(workflowOrderString);
 
-                return upgradeResponse(upgradeExecutor.executeUpgrade(source, targetAgentId, selectedSet, workflowOrder));
+                // Connections first, exactly as on the create and merge path: the configs
+                // the upgrade writes reference them by name, and this path used to skip
+                // them, so an upgraded httpcall reading ${connection:jira} could land on
+                // a deployment with no jira at all. Same rules — never over an existing
+                // one, a refusal is a skip — and a connection this request created is
+                // removed again if the import or the upgrade throws. An upgrade that
+                // completes with per-resource failures (207) keeps them: part of it
+                // landed, and what landed may reference them.
+                var transaction = new ImportTransaction();
+                int connectionsNotImported;
+                UpgradeResult result;
+                try {
+                    connectionsNotImported = importConnections(targetDir.toPath(), transaction);
+                    result = upgradeExecutor.executeUpgrade(source, targetAgentId, selectedSet, workflowOrder);
+                } catch (RuntimeException e) {
+                    rollbackCreatedResources(transaction);
+                    throw e;
+                }
+                Response response = upgradeResponse(result);
+                if (connectionsNotImported > 0) {
+                    return Response.fromResponse(response).header(HEADER_CONNECTIONS_SKIPPED, connectionsNotImported).build();
+                }
+                return response;
             }
         } catch (WebApplicationException e) {
             throw e;
