@@ -164,20 +164,29 @@ public class PostgresConnectionGrantStore implements IConnectionGrantStore {
     @Override
     public boolean claimRefresh(String tenantId, String connectionName, String principal, String claimantId, Instant leaseExpiresAt) {
         // A null lease is not a shorter lease, it is a permanent one: the claim
-        // predicate asks whether the lease has expired, and in SQL
-        // `NULL < CURRENT_TIMESTAMP` is NULL rather than true, so a row claimed
-        // without an expiry can never be claimed by anyone again and refresh for
-        // that grant is wedged until something rewrites the row. Refused here
-        // rather than written, and refused the same way on both backends.
+        // predicate asks whether the lease has expired, and in SQL `NULL < now` is
+        // NULL rather than true, so a row claimed without an expiry can never be
+        // claimed by anyone again and refresh for that grant is wedged until
+        // something rewrites the row. Refused here rather than written, and refused
+        // the same way on both backends.
         checkNotNull(leaseExpiresAt, "leaseExpiresAt");
         createSchema();
         // One statement, so the predicate and the write happen under one row lock.
         // A SELECT followed by an UPDATE lets two replicas both see the lease free.
+        //
+        // The expiry is compared against a JVM instant that is BOUND, not against
+        // CURRENT_TIMESTAMP. The lease was written from a JVM clock (this method,
+        // and OAuthTokenService's REFRESH_LEASE), the Mongo store compares it against
+        // Instant.now(), and PostgresOAuthStateStore binds the instant for the same
+        // reason: judged by the database clock instead, app/DB skew shortens or
+        // lengthens the lease by the skew. A lease that expires early lets a second
+        // replica refresh while the claimant is still in flight, which is the very
+        // double refresh the claim exists to prevent.
         String sql = """
                 UPDATE connection_grants
                    SET refresh_in_progress = ?, refresh_lease_expires_at = ?
                  WHERE tenant_id = ? AND connection_name = ? AND principal = ?
-                   AND (refresh_in_progress IS NULL OR refresh_lease_expires_at < CURRENT_TIMESTAMP)
+                   AND (refresh_in_progress IS NULL OR refresh_lease_expires_at < ?)
                 """;
         try (Connection connection = dataSourceInstance.get().getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, claimantId);
@@ -185,6 +194,7 @@ public class PostgresConnectionGrantStore implements IConnectionGrantStore {
             statement.setString(3, tenantId);
             statement.setString(4, connectionName);
             statement.setString(5, principal);
+            statement.setTimestamp(6, Timestamp.from(Instant.now()));
             return statement.executeUpdate() == 1;
         } catch (SQLException e) {
             throw new IllegalStateException("Failed to claim a refresh lease", e);

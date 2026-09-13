@@ -35,6 +35,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -412,8 +413,29 @@ class PostgresConnectionGrantStoreUnitTest {
         verify(preparedStatement).setString(3, TENANT);
         verify(preparedStatement).setString(4, CONNECTION);
         verify(preparedStatement).setString(5, PRINCIPAL);
-        assertTrue(capturedSql().contains("refresh_in_progress IS NULL OR refresh_lease_expires_at < CURRENT_TIMESTAMP"),
+        assertTrue(capturedSql().contains("refresh_in_progress IS NULL OR refresh_lease_expires_at < ?"),
                 "the free-lease predicate is what makes the claim atomic; a read-then-write lets two replicas both win");
+    }
+
+    @Test
+    @DisplayName("claimRefresh judges an expired lease by the JVM clock that wrote it, not by CURRENT_TIMESTAMP")
+    void claimRefreshBindsTheJvmInstantForTheExpiryPredicate() throws Exception {
+        // The lease expiry was written from Instant.now(), and the Mongo store and the
+        // OAuth state store both compare it against Instant.now(). Comparing against
+        // the database clock instead lets app/DB skew shorten the lease, and a lease
+        // that expires early is a second replica refreshing while the claimant is
+        // still in flight: the double refresh the claim exists to prevent.
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+        Instant before = Instant.now();
+
+        store.claimRefresh(TENANT, CONNECTION, PRINCIPAL, CLAIMANT, LEASE_EXPIRES_AT);
+
+        var bound = ArgumentCaptor.forClass(Timestamp.class);
+        verify(preparedStatement).setTimestamp(eq(6), bound.capture());
+        Instant now = bound.getValue().toInstant();
+        assertFalse(now.isBefore(before), "the bound instant must be this JVM's now, taken at the time of the claim");
+        assertFalse(now.isAfter(Instant.now()), "the bound instant must be this JVM's now, taken at the time of the claim");
+        assertFalse(capturedSql().contains("CURRENT_TIMESTAMP"), "the predicate must not consult the database clock");
     }
 
     @Test
