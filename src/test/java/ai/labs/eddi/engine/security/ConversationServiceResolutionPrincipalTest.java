@@ -32,12 +32,15 @@ import ai.labs.eddi.engine.security.ResolutionPrincipal.Provenance;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.quarkus.security.credential.TokenCredential;
+import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.event.Event;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.security.Principal;
 import java.util.Stack;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -75,19 +78,25 @@ class ConversationServiceResolutionPrincipalTest {
     private CallerIdentityContext callerIdentityContext;
     private ResolutionPrincipalContext resolutionPrincipalContext;
 
+    private IAgentFactory agentFactory;
+    private IConversationMemoryStore conversationMemoryStore;
+    private IConversationSetup conversationSetup;
+    private GdprComplianceService gdprComplianceService;
+    private TenantQuotaService tenantQuotaService;
+    private ICacheFactory cacheFactory;
+
     private IAgent agent;
     private IConversationMemory memory;
 
     @BeforeEach
-    @SuppressWarnings("unchecked")
     void setUp() throws Exception {
-        IAgentFactory agentFactory = mock(IAgentFactory.class);
-        IConversationMemoryStore conversationMemoryStore = mock(IConversationMemoryStore.class);
-        IConversationSetup conversationSetup = mock(IConversationSetup.class);
-        GdprComplianceService gdprComplianceService = mock(GdprComplianceService.class);
-        TenantQuotaService tenantQuotaService = mock(TenantQuotaService.class);
+        agentFactory = mock(IAgentFactory.class);
+        conversationMemoryStore = mock(IConversationMemoryStore.class);
+        conversationSetup = mock(IConversationSetup.class);
+        gdprComplianceService = mock(GdprComplianceService.class);
+        tenantQuotaService = mock(TenantQuotaService.class);
 
-        ICacheFactory cacheFactory = mock(ICacheFactory.class);
+        cacheFactory = mock(ICacheFactory.class);
         doReturn(mock(ICache.class)).when(cacheFactory).getCache("conversationState");
 
         // A real CallerIdentityContext built without a SecurityIdentity: capture()
@@ -98,12 +107,7 @@ class ConversationServiceResolutionPrincipalTest {
         resolutionPrincipalContext = new ResolutionPrincipalContext();
         resolutionPrincipalContext.clear();
 
-        conversationService = new ConversationService(agentFactory, conversationMemoryStore,
-                mock(IConversationDescriptorStore.class), mock(IUserMemoryStore.class),
-                mock(IConversationCoordinator.class), conversationSetup, cacheFactory, mock(IRuntime.class),
-                mock(IContextLogger.class), mock(AuditLedgerService.class), gdprComplianceService, tenantQuotaService,
-                mock(IScheduleStore.class), mock(IAgentStore.class), mock(IJsonSerialization.class),
-                new SimpleMeterRegistry(), (Event<HitlResumeCompletedEvent>) mock(Event.class), callerIdentityContext, 30);
+        conversationService = serviceWith(callerIdentityContext);
 
         agent = mock(IAgent.class);
         memory = mock(IConversationMemory.class);
@@ -231,6 +235,69 @@ class ConversationServiceResolutionPrincipalTest {
                         + "another user next");
     }
 
+    @Test
+    @DisplayName("the request's caller is bound while the CONVERSATION_START turn runs, and the previous binding is restored")
+    void callerIdentityIsBoundAroundConversationStart() throws Exception {
+        // The start turn runs synchronously on the REST thread, inside
+        // startConversation. Every later turn goes through ConversationStepRunner,
+        // which captures the request's caller and binds it around the pool-thread
+        // execution; turn 0 had no such step, so ${caller:token} and every
+        // CALLER_SUPPLIED connection failed closed on it — with a message blaming a
+        // "scheduled run" while the caller was right there on the request.
+        //
+        // A request-backed context, so the identity has to be CAPTURED: nothing is
+        // bound on this thread beforehand, and a test that pre-bound the identity
+        // would pass without the fix.
+        var securityIdentity = mock(SecurityIdentity.class);
+        doReturn(false).when(securityIdentity).isAnonymous();
+        doReturn(new TokenCredential("alice-raw-token", "bearer")).when(securityIdentity).getCredential(TokenCredential.class);
+        doReturn((Principal) () -> USER_ID).when(securityIdentity).getPrincipal();
+        var requestBackedContext = new CallerIdentityContext(securityIdentity, null);
+        requestBackedContext.clear();
+        ConversationService service = serviceWith(requestBackedContext);
+
+        var boundDuringStart = new AtomicReference<CallerIdentity>();
+        doAnswer(invocation -> {
+            boundDuringStart.set(requestBackedContext.current());
+            IConversation conversation = mock(IConversation.class);
+            doReturn(memory).when(conversation).getConversationMemory();
+            return conversation;
+        }).when(agent).startConversation(eq(USER_ID), anyMap(), any(), isNull());
+
+        service.startConversation(ENV, AGENT_ID, USER_ID, null);
+
+        assertEquals("alice-raw-token", boundDuringStart.get() == null ? null : boundDuringStart.get().token(),
+                "the request's caller must be bound while the CONVERSATION_START turn executes, or a ${caller:token} or "
+                        + "CALLER_SUPPLIED connection used by a start-turn tool fails closed with advice about scheduled runs");
+        assertEquals(USER_ID, boundDuringStart.get().userId());
+        assertNull(requestBackedContext.current(),
+                "the binding must not survive startConversation on this thread — it goes back to serving other callers");
+    }
+
+    @Test
+    @DisplayName("a nested start from inside a parent turn restores the parent's caller binding afterwards")
+    void nestedStartRestoresTheParentsCallerBinding() throws Exception {
+        // A sub-agent started from inside a running pipeline turn: the parent's caller
+        // is bound on this thread and its turn continues after the child returns.
+        // Clearing instead of restoring would strand the rest of the parent's turn
+        // with no caller.
+        var parentCaller = new CallerIdentity("parent-token", USER_ID, "https://eddi.example.com");
+        callerIdentityContext.bind(parentCaller);
+
+        var boundDuringStart = new AtomicReference<CallerIdentity>();
+        doAnswer(invocation -> {
+            boundDuringStart.set(callerIdentityContext.current());
+            IConversation conversation = mock(IConversation.class);
+            doReturn(memory).when(conversation).getConversationMemory();
+            return conversation;
+        }).when(agent).startConversation(eq(USER_ID), anyMap(), any(), isNull());
+
+        conversationService.startConversation(ENV, AGENT_ID, USER_ID, null);
+
+        assertEquals(parentCaller, boundDuringStart.get(), "with no request to capture from, the child inherits the thread's caller");
+        assertEquals(parentCaller, callerIdentityContext.current(), "the parent's binding must be restored, not cleared");
+    }
+
     /**
      * {@code ConversationService.resolutionPrincipalContext} is CDI field-injected
      * and package-private, so a directly-constructed service has none. Setting it
@@ -241,5 +308,15 @@ class ConversationServiceResolutionPrincipalTest {
         var field = ConversationService.class.getDeclaredField("resolutionPrincipalContext");
         field.setAccessible(true);
         field.set(conversationService, resolutionPrincipalContext);
+    }
+
+    @SuppressWarnings("unchecked")
+    private ConversationService serviceWith(CallerIdentityContext context) {
+        return new ConversationService(agentFactory, conversationMemoryStore,
+                mock(IConversationDescriptorStore.class), mock(IUserMemoryStore.class),
+                mock(IConversationCoordinator.class), conversationSetup, cacheFactory, mock(IRuntime.class),
+                mock(IContextLogger.class), mock(AuditLedgerService.class), gdprComplianceService, tenantQuotaService,
+                mock(IScheduleStore.class), mock(IAgentStore.class), mock(IJsonSerialization.class),
+                new SimpleMeterRegistry(), (Event<HitlResumeCompletedEvent>) mock(Event.class), context, 30);
     }
 }

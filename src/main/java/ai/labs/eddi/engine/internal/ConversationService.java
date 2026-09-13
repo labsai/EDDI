@@ -377,22 +377,34 @@ public class ConversationService implements IConversationService {
             // resume next week — runs on a request that proves nothing about this
             // conversation's owner, which is why the answer is persisted below rather
             // than re-derived.
-            ResolutionPrincipal resolutionPrincipal = deriveResolutionPrincipal(userId);
+            // Captured once, here, while this is still the request thread: the same
+            // identity decides the principal's provenance below AND runs the start
+            // turn. Every later turn is dispatched to a pool thread through
+            // ConversationStepRunner, which captures and binds the caller itself; the
+            // CONVERSATION_START turn is the one that runs inline, and it used to run
+            // with no caller bound at all — so ${caller:token} and every
+            // CALLER_SUPPLIED connection failed closed on turn 0 with a message
+            // blaming a "scheduled run".
+            CallerIdentity startCaller = callerIdentityContext == null ? null : callerIdentityContext.captureOrCurrent();
+            ResolutionPrincipal resolutionPrincipal = deriveResolutionPrincipal(userId, startCaller);
 
             IConversation conversation;
             // Bound around the call, not merely recorded after it: a behavior rule can
             // fire tool calls on the CONVERSATION_START turn, and that turn executes
             // inside startConversation before there is a memory to read anything from.
             ResolutionPrincipal previousPrincipal = currentResolutionPrincipal();
+            CallerIdentity previousCaller = callerIdentityContext == null ? null : callerIdentityContext.current();
             bindResolutionPrincipal(resolutionPrincipal);
+            bindCallerIdentity(startCaller);
             try {
                 conversation = latestAgent.startConversation(userId, context,
                         createPropertiesHandler(userId, latestAgent.getUserMemoryConfig()), null);
             } finally {
                 // Restore rather than clear — this can be a sub-agent conversation
-                // started from inside a parent's pipeline turn, whose binding must
+                // started from inside a parent's pipeline turn, whose bindings must
                 // survive.
                 bindResolutionPrincipal(previousPrincipal);
+                bindCallerIdentity(previousCaller);
             }
 
             var conversationMemory = conversation.getConversationMemory();
@@ -1199,14 +1211,13 @@ public class ConversationService implements IConversationService {
      * since that surface authenticates a shared key rather than a person.</li>
      * </ul>
      */
-    private ResolutionPrincipal deriveResolutionPrincipal(String conversationUserId) {
+    private ResolutionPrincipal deriveResolutionPrincipal(String conversationUserId, CallerIdentity caller) {
         ResolutionPrincipal inherited = currentResolutionPrincipal();
         if (inherited != null) {
             boolean sameSubject = conversationUserId != null && conversationUserId.equals(inherited.userId());
             return new ResolutionPrincipal(conversationUserId,
                     sameSubject ? inherited.provenance() : ResolutionPrincipal.Provenance.SELF_ASSERTED);
         }
-        CallerIdentity caller = callerIdentityContext == null ? null : callerIdentityContext.captureOrCurrent();
         boolean verified = caller != null && caller.userId() != null && !caller.userId().isBlank()
                 && caller.userId().equals(conversationUserId);
         return new ResolutionPrincipal(conversationUserId,
@@ -1220,6 +1231,19 @@ public class ConversationService implements IConversationService {
     private void bindResolutionPrincipal(ResolutionPrincipal principal) {
         if (resolutionPrincipalContext != null) {
             resolutionPrincipalContext.bind(principal);
+        }
+    }
+
+    /**
+     * Binds (or, with {@code null}, unbinds) the caller for the synchronous
+     * CONVERSATION_START turn. The counterpart of {@link #bindResolutionPrincipal}:
+     * the two bindings answer different questions — who is driving the request,
+     * whose conversation this is — and both have to be live while that turn's tools
+     * resolve credentials.
+     */
+    private void bindCallerIdentity(CallerIdentity caller) {
+        if (callerIdentityContext != null) {
+            callerIdentityContext.bind(caller);
         }
     }
 
