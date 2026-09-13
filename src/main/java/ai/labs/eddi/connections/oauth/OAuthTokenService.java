@@ -367,12 +367,21 @@ public class OAuthTokenService implements AccessTokenSupplier {
     }
 
     private String refreshAsClaimant(ConnectionConfiguration connection, String tenantId, String principal) {
-        // Re-read INSIDE the claim: between the caller's read and the claim landing,
-        // another node may have completed a refresh, in which case there is nothing
-        // to do and the newest refresh token is the one to use.
-        ConnectionGrant grant = grantStore.find(tenantId, connection.getName(), principal).orElseThrow(() -> new ConnectionException(
-                ConnectionException.Reason.NOT_CONNECTED, "The grant for connection '" + connection.getName() + "' disappeared mid-refresh."));
+        // Everything after a successful claim runs inside the cleanup scope — the
+        // re-read included. It used to sit in front of the try, so a grant that had
+        // gone (NOT_CONNECTED) or a store that threw on the read skipped the release
+        // and left this replica's lease held until it expired: a minute in which every
+        // other caller of this grant waited on a refresh nobody was performing.
+        //
+        // Null until the re-read succeeds. Only a GRANT_UNUSABLE failure needs it to
+        // mark the row, and none can happen before the row has been read.
+        ConnectionGrant grant = null;
         try {
+            // Re-read INSIDE the claim: between the caller's read and the claim landing,
+            // another node may have completed a refresh, in which case there is nothing
+            // to do and the newest refresh token is the one to use.
+            grant = grantStore.find(tenantId, connection.getName(), principal).orElseThrow(() -> new ConnectionException(
+                    ConnectionException.Reason.NOT_CONNECTED, "The grant for connection '" + connection.getName() + "' disappeared mid-refresh."));
             if (grant.isAccessTokenUsable(Instant.now(), effectiveMargin(connection, grant))) {
                 return unseal(tenantId, grant.getEncryptedAccessToken(), grant.getAccessTokenIv(), grant.getDekId(), connection);
             }
@@ -381,7 +390,11 @@ public class OAuthTokenService implements AccessTokenSupplier {
             increment("eddi.connection.token.refresh.count", "outcome", "success");
             return refreshed.token().accessToken();
         } catch (ConnectionException e) {
-            handleRefreshFailure(connection, grant, e);
+            if (grant != null) {
+                // A grant that vanished is not a refresh failure — there is nothing to
+                // mark and nothing transient about it — so it is not counted as one.
+                handleRefreshFailure(connection, grant, e);
+            }
             throw e;
         } catch (RuntimeException e) {
             // A store or vault failure that is not a ConnectionException — a CAS write

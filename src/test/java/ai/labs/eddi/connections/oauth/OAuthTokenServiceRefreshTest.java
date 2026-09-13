@@ -560,6 +560,55 @@ class OAuthTokenServiceRefreshTest {
     }
 
     @Test
+    @DisplayName("a grant gone by the claimant's re-read fails as NOT_CONNECTED and still releases the lease")
+    void emptyReReadInsideTheClaimReleasesTheLease() {
+        // The first read (the caller's) finds the expired grant; the second — the
+        // claimant's re-read after the claim landed — finds nothing. The row itself is
+        // left in place, so whether the lease was released is observable afterwards.
+        var reads = new AtomicInteger();
+        grantStore = new InMemoryConnectionGrantStore() {
+            @Override
+            public synchronized Optional<ConnectionGrant> find(String tenantId, String connectionName, String principal) {
+                return reads.incrementAndGet() == 2 ? Optional.empty() : super.find(tenantId, connectionName, principal);
+            }
+        };
+        seedExpiredGrant();
+
+        var error = assertThrows(ConnectionException.class, () -> service().accessToken(connection(), PRINCIPAL));
+
+        assertEquals(ConnectionException.Reason.NOT_CONNECTED, error.getReason());
+        assertEquals(null, grantStore.find(TENANT, CONNECTION, PRINCIPAL).orElseThrow().getRefreshInProgress(),
+                "the lease must be released, or every other caller of this grant waits out a lease nobody is using");
+        assertEquals(0, tokenRequests.get());
+    }
+
+    @Test
+    @DisplayName("a store failure on the claimant's re-read is transient, keeps its cause, and still releases the lease")
+    void throwingReReadInsideTheClaimIsTransientAndReleasesTheLease() {
+        var reads = new AtomicInteger();
+        grantStore = new InMemoryConnectionGrantStore() {
+            @Override
+            public synchronized Optional<ConnectionGrant> find(String tenantId, String connectionName, String principal) {
+                if (reads.incrementAndGet() == 2) {
+                    throw new IllegalStateException("Failed to read connection grant");
+                }
+                return super.find(tenantId, connectionName, principal);
+            }
+        };
+        seedExpiredGrant();
+
+        var error = assertThrows(ConnectionException.class, () -> service().accessToken(connection(), PRINCIPAL),
+                "a raw store exception must not escape the transient/terminal classification");
+
+        assertEquals(ConnectionException.Reason.TOKEN_ENDPOINT_UNAVAILABLE, error.getReason());
+        assertEquals(IllegalStateException.class, error.getCause().getClass(), "the cause must be kept for the log");
+        var after = grantStore.find(TENANT, CONNECTION, PRINCIPAL).orElseThrow();
+        assertEquals(null, after.getRefreshInProgress(), "the lease must be released on this path too");
+        assertEquals(ConnectionGrant.Status.ACTIVE, after.getStatus(), "a store blip must not mark the grant dead");
+        assertEquals(0, tokenRequests.get());
+    }
+
+    @Test
     @DisplayName("a lease that outlives its holder is reclaimed after the deadline, once, and counted as lease_expired")
     void reclaimsAnExpiredLeaseAfterTheDeadline() {
         // A claimant that crashed or hung: the row keeps refresh_in_progress set and
