@@ -203,7 +203,7 @@ public class VaultGrantChecker {
         // explicitly supports vault references and is handed to ChatModelRegistry by
         // DreamService, so a Dream credential lives outside every workflow resource
         // and was invisible to a workflow-only traversal.
-        scanForVaultReferences(agentConfiguration, references);
+        scanForVaultReferences(agentConfiguration, references, ConnectionReference.DEFAULT_TENANT);
 
         if (agentConfiguration.getWorkflows() == null) {
             return references;
@@ -221,7 +221,7 @@ public class VaultGrantChecker {
                 }
                 Object extensionConfig = readExtensionConfig(step.getType().toString(), configuredUri.toString());
                 if (extensionConfig != null) {
-                    scanForVaultReferences(extensionConfig, references);
+                    scanForVaultReferences(extensionConfig, references, ConnectionReference.DEFAULT_TENANT);
                     // A ${connection:name} is an INDIRECT vault reference: the
                     // connection document holds the ${vault:…} client secret, and
                     // without following the hop an agent could use a credential it was
@@ -299,7 +299,10 @@ public class VaultGrantChecker {
             try {
                 ConnectionConfiguration connection = connectionStore.readByName(tenantId, name);
                 if (connection != null) {
-                    scanForVaultReferences(connection, sink);
+                    // In the connection's own tenant: a short-form ${vars:x} in a connection
+                    // filed under "acme" resolves against acme's variables at runtime, and
+                    // the same name in the default tenant can hold something else entirely.
+                    scanForVaultReferences(connection, sink, ConnectionConfiguration.effectiveTenant(connection));
                 } else {
                     // Absent, not unreadable: there is no document, so there is no
                     // secret to be ungranted for. The runtime refuses it as NOT_FOUND.
@@ -323,8 +326,13 @@ public class VaultGrantChecker {
      * {@code ${vars:…}} first and scanning the expansion too — a global variable
      * may hold a vault reference, and the runtime resolves variables before vault
      * references, so the expanded form is what actually reaches the vault.
+     *
+     * @param tenantId
+     *            the tenant a short-form {@code ${vars:key}} resolves in — the
+     *            connection's own for a connection document, the default for
+     *            everything else
      */
-    private void scanForVaultReferences(Object config, Set<String> sink) {
+    private void scanForVaultReferences(Object config, Set<String> sink, String tenantId) {
         String serialized;
         try {
             serialized = MAPPER.writeValueAsString(config);
@@ -342,7 +350,7 @@ public class VaultGrantChecker {
         while (vars.find()) {
             String expanded;
             try {
-                expanded = globalVariableResolver.resolveValue(vars.group(0));
+                expanded = globalVariableResolver.resolveValue(vars.group(0), tenantId);
             } catch (Exception e) {
                 LOGGER.debugf("Could not expand %s while checking vault grants: %s", sanitize(vars.group(0)), sanitize(e.getMessage()));
                 continue;

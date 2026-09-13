@@ -84,7 +84,7 @@ class VaultGrantCheckerTest {
         globalVariableResolver = mock(GlobalVariableResolver.class);
         // Pass-through by default: an unknown variable is left as-is by the real
         // resolver too.
-        when(globalVariableResolver.resolveValue(anyString())).thenAnswer(i -> i.getArgument(0));
+        when(globalVariableResolver.resolveValue(anyString(), anyString())).thenAnswer(i -> i.getArgument(0));
         checker = new VaultGrantChecker(secretProvider, agentStore, workflowStore, llmStore, apiCallsStore, mcpCallsStore,
                 mock(IRagStore.class), connectionStore, globalVariableResolver);
     }
@@ -139,10 +139,30 @@ class VaultGrantCheckerTest {
             givenGrant(List.of("agent-owner"));
             var agent = agentReferencingTheConnection();
             when(connectionStore.readByName("default", "jira")).thenReturn(oauthConnection("${vars:jira-client-secret}"));
-            when(globalVariableResolver.resolveValue("${vars:jira-client-secret}")).thenReturn(VAULT_REF);
+            when(globalVariableResolver.resolveValue("${vars:jira-client-secret}", "default")).thenReturn(VAULT_REF);
 
             assertEquals(List.of(VAULT_REF), checker.findUngrantedReferences(agent, "some-other-agent"),
                     "a ${vars:} indirection must not hide a vault reference from grant enforcement");
+        }
+
+        @Test
+        @DisplayName("a connection's ${vars:} is expanded in the connection's own tenant, not the default one")
+        void expandsVariablesInTheConnectionsTenant() throws Exception {
+            givenGrant(List.of("agent-owner"));
+            var agent = agentWithStep("ai.labs.httpcalls", LLM_ID);
+            var apiCalls = new ApiCallsConfiguration();
+            apiCalls.setTargetServerUrl("https://api.example.com/${connection:acme/jira}");
+            when(apiCallsStore.read(eq(LLM_ID), anyInt())).thenReturn(apiCalls);
+            var connection = oauthConnection("${vars:jira-client-secret}");
+            connection.setTenantId("acme");
+            when(connectionStore.readByName("acme", "jira")).thenReturn(connection);
+            // The same variable name holds nothing secret in the default tenant, so a
+            // default-tenant expansion finds nothing to check.
+            when(globalVariableResolver.resolveValue("${vars:jira-client-secret}", "default")).thenReturn("not-a-reference");
+            when(globalVariableResolver.resolveValue("${vars:jira-client-secret}", "acme")).thenReturn(VAULT_REF);
+
+            assertEquals(List.of(VAULT_REF), checker.findUngrantedReferences(agent, "some-other-agent"),
+                    "the runtime resolves the connection's variables in its own tenant, so the grant check must too");
         }
 
         @Test
@@ -183,7 +203,7 @@ class VaultGrantCheckerTest {
             task.setType("anthropic");
             task.setParameters(new LinkedHashMap<>(Map.of("apiKey", "${vars:anthropic-key}")));
             when(llmStore.read(eq(LLM_ID), anyInt())).thenReturn(new LlmConfiguration(List.of(task)));
-            when(globalVariableResolver.resolveValue("${vars:anthropic-key}")).thenReturn(VAULT_REF);
+            when(globalVariableResolver.resolveValue("${vars:anthropic-key}", "default")).thenReturn(VAULT_REF);
 
             assertEquals(List.of(VAULT_REF), checker.findUngrantedReferences(agent, "some-other-agent"),
                     "the general scan had the same blind spot as the connection hop");
@@ -198,7 +218,7 @@ class VaultGrantCheckerTest {
             task.setType("anthropic");
             task.setParameters(new LinkedHashMap<>(Map.of("modelName", "${vars:default-model}")));
             when(llmStore.read(eq(LLM_ID), anyInt())).thenReturn(new LlmConfiguration(List.of(task)));
-            when(globalVariableResolver.resolveValue("${vars:default-model}")).thenReturn("claude-sonnet-4-6");
+            when(globalVariableResolver.resolveValue("${vars:default-model}", "default")).thenReturn("claude-sonnet-4-6");
 
             assertTrue(checker.findUngrantedReferences(agent, "some-other-agent").isEmpty());
         }
