@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -456,6 +457,66 @@ class ConnectionConfigurationValidationTest {
         connection.setName("  ");
 
         assertThrows(IllegalArgumentException.class, connection::validate);
+    }
+
+    @Nested
+    @DisplayName("the name grammar")
+    class NameGrammar {
+
+        @ParameterizedTest
+        @DisplayName("a name the reference pattern or the credential header could not carry is refused, with the rule in the message")
+        @ValueSource(strings = {"my jira", " jira", "jira ", "acme/jira", "jira}", "tenant:jira", "-jira", ".jira", "jïra", "jira\t",
+                "jira{1}"})
+        void refusesUnreferenceableNames(String name) {
+            // Each of these saved before: the only check was non-blank. "acme/jira"
+            // is the worst of them — ${connection:acme/jira} parses as tenant "acme",
+            // so the reference resolved against a tenant that does not hold it.
+            var connection = staticConnection();
+            connection.setName(name);
+
+            var error = assertThrows(IllegalArgumentException.class, connection::validate, name);
+
+            assertTrue(error.getMessage().contains(ConnectionConfiguration.NAME_GRAMMAR),
+                    "the refusal must show the rule, or the author has to guess: " + error.getMessage());
+        }
+
+        @Test
+        @DisplayName("a name longer than 64 characters is refused")
+        void refusesOverlongName() {
+            var connection = staticConnection();
+            connection.setName("a".repeat(65));
+
+            assertThrows(IllegalArgumentException.class, connection::validate);
+        }
+
+        @Test
+        @DisplayName("surrounding whitespace is refused rather than trimmed away silently")
+        void doesNotTrimSilently() {
+            var connection = staticConnection();
+            connection.setName(" jira ");
+
+            assertThrows(IllegalArgumentException.class, connection::validate);
+            assertEquals(" jira ", connection.getName(), "validation must not rewrite what the author sent");
+        }
+
+        @ParameterizedTest
+        @DisplayName("every shape a reference and the header can carry is accepted")
+        @ValueSource(strings = {"jira", "google-drive", "svc_01", "a.b", "J1", "7up", "Jira.Cloud_v2-prod"})
+        void acceptsReferenceableNames(String name) {
+            var connection = staticConnection();
+            connection.setName(name);
+
+            assertDoesNotThrow(connection::validate, name);
+        }
+
+        @Test
+        @DisplayName("64 characters is the longest accepted name")
+        void acceptsSixtyFourCharacters() {
+            var connection = staticConnection();
+            connection.setName("a".repeat(64));
+
+            assertDoesNotThrow(connection::validate);
+        }
     }
 
     @Test

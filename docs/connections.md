@@ -194,7 +194,7 @@ as "not connected". Use `OAUTH2_CLIENT_CREDENTIALS` for a service account.
 
 | Field | Purpose |
 | --- | --- |
-| `name` | What `${connection:name}` refers to |
+| `name` | What `${connection:name}` refers to. Must match `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$` — letters, digits, `.`, `_`, `-`, starting with a letter or digit, at most 64 characters, no surrounding whitespace. Refused otherwise, never trimmed: a space, `/`, `}` or `:` would make the name unreferenceable, and the `X-EDDI-Connection-Credential` header splits at the first space |
 | `authType` | `STATIC`, `BASIC`, `OAUTH2_CLIENT_CREDENTIALS`, `OAUTH2_AUTHORIZATION_CODE` |
 | `binding` | `SERVICE` (one grant for everyone), `PER_USER` (the caller's own, stored), or `CALLER_SUPPLIED` (the caller's own, handed over per request) |
 | `allowUnverifiedPrincipal` | `PER_USER` only. Accept a user id EDDI never authenticated, on the grounds that a front proxy did. Default `false` — see [Whose identity counts](#whose-identity-counts) |

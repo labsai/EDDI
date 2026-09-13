@@ -77,6 +77,23 @@ public class ConnectionConfiguration {
     private static final int QUOTED_LITERAL_CHARS = 4;
 
     /**
+     * What a connection may be called, spelled out so an author can read it back
+     * from the refusal. Derived from the two places a name is parsed, neither of
+     * which has a grammar of its own:
+     * {@code ConnectionReference.CONNECTION_PATTERN} stops at {@code /} and
+     * {@code }}, and the caller-credential header is split at the first space. A
+     * name carrying a space, a slash, a brace, a colon or surrounding whitespace
+     * therefore saved and could never be referenced or supplied — or, with a slash,
+     * resolved as somebody else's tenant.
+     */
+    public static final String NAME_GRAMMAR = "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$";
+
+    private static final Pattern NAME = Pattern.compile(NAME_GRAMMAR);
+
+    /** How much of an unusable name a refusal quotes back. */
+    private static final int QUOTED_NAME_CHARS = 80;
+
+    /**
      * Names that mark a value as credential-shaped, used to keep one out of
      * {@code extraAuthParams}. Same vocabulary as the export scrubber's, minus the
      * entropy heuristic — this is a write-boundary check on a small map, so it can
@@ -154,6 +171,15 @@ public class ConnectionConfiguration {
     public void validate() {
         if (name == null || name.isBlank()) {
             throw new IllegalArgumentException("A connection needs a name — it is what ${connection:name} refers to.");
+        }
+        // Not trimmed: a name saved with whitespace the author cannot see is a name
+        // that resolves for nobody, and silently storing something other than what
+        // was sent is a worse surprise than refusing it.
+        if (!NAME.matcher(name).matches()) {
+            throw new IllegalArgumentException("Connection name '" + quoteName(name) + "' is not usable. A name must match " + NAME_GRAMMAR
+                    + ": letters, digits, '.', '_' and '-', starting with a letter or digit, at most 64 characters, with no surrounding "
+                    + "whitespace. It is what ${connection:name} refers to and what a caller names in the X-EDDI-Connection-Credential "
+                    + "header, so a space, '/', '}' or ':' in it could never be referenced or supplied.");
         }
         if (authType == null) {
             throw new IllegalArgumentException("authType is required (STATIC, BASIC, OAUTH2_CLIENT_CREDENTIALS or OAUTH2_AUTHORIZATION_CODE).");
@@ -400,6 +426,13 @@ public class ConnectionConfiguration {
                         + "'Bearer '; store the value with POST /secretstore/secrets and reference it here.");
             }
         }
+    }
+
+    /**
+     * A name is not secret, but an unbounded one has no place in an error message.
+     */
+    private static String quoteName(String candidate) {
+        return candidate.length() <= QUOTED_NAME_CHARS ? candidate : candidate.substring(0, QUOTED_NAME_CHARS) + "…";
     }
 
     /**
