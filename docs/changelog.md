@@ -153,6 +153,15 @@ quality.
 `invalid_state`, because its state row carries no connection id. States live ten minutes; the user
 starts the link again.
 
+**Third round.** Two more threads. CodeRabbit found that `authorize` still built the consent
+URL from the name-keyed registry cache while taking the connection id from the store, so right
+after a delete and re-create a replica could send the user to the predecessor's consent screen and
+fail at the callback. `authorize` now reads the connection by id at its current version, uncached,
+and uses that one document for validation, the state and the URL; the registry it no longer
+reads is dropped as a dependency. A further code-quality "leak"
+on a mocked `ResultSet` in the name-claim store test is the same false positive as round two; that
+test already asserts the store closes it.
+
 **Companion:** labsai/EDDI-Manager#208 answered its own review round (a complete reference
 before the chip, retries only on network/5xx, the name grammar in references, Retry through
 the `Button` primitive).
