@@ -559,6 +559,76 @@ class OAuthTokenServiceRefreshTest {
                 "the grant is untouched, which is what makes the failure transient");
     }
 
+    @Test
+    @DisplayName("a lease that outlives its holder is reclaimed after the deadline, once, and counted as lease_expired")
+    void reclaimsAnExpiredLeaseAfterTheDeadline() {
+        // A claimant that crashed or hung: the row keeps refresh_in_progress set and
+        // the waiter's poll never sees a token or a released lease. After the await
+        // deadline it retries the CLAIM rather than refreshing blind, so exactly one
+        // caller proceeds even now.
+        seedExpiredGrant();
+        var registry = new SimpleMeterRegistry();
+        OAuthTokenService service = service(registry);
+        service.awaitTimeoutForTests(Duration.ofMillis(600));
+        // Held by a dead replica whose lease expires before the deadline does.
+        grantStore.claimRefresh(TENANT, CONNECTION, PRINCIPAL, "dead-replica", Instant.now().plus(Duration.ofMillis(300)));
+        when(tokenClient.refresh(any(), anyString(), anyString())).thenAnswer(invocation -> {
+            tokenRequests.incrementAndGet();
+            return new TokenResponse("fresh-access", "new-refresh", Duration.ofHours(1), List.of());
+        });
+
+        assertEquals("fresh-access", service.accessToken(connection(), PRINCIPAL));
+
+        assertEquals(1, tokenRequests.get(), "the waiter must take the expired lease over and refresh, exactly once");
+        var expired = registry.find("eddi.connection.token.refresh.claim.count").tag("outcome", "lease_expired").counter();
+        assertTrue(expired != null && expired.count() == 1, "a lease that outlived its holder is the signal a crashed replica leaves behind");
+    }
+
+    @Test
+    @DisplayName("a lease still held past the deadline fails transiently rather than refreshing blind")
+    void heldLeasePastTheDeadlineIsTransient() {
+        seedExpiredGrant();
+        OAuthTokenService service = service();
+        service.awaitTimeoutForTests(Duration.ofMillis(600));
+        // Held, and still live long after the waiter gives up.
+        grantStore.claimRefresh(TENANT, CONNECTION, PRINCIPAL, "another-replica", Instant.now().plus(Duration.ofHours(1)));
+
+        var error = assertThrows(ConnectionException.class, () -> service.accessToken(connection(), PRINCIPAL));
+
+        assertEquals(ConnectionException.Reason.TOKEN_ENDPOINT_UNAVAILABLE, error.getReason(),
+                "a second refresh while another node holds the lease is the double refresh the claim exists to prevent");
+        assertTrue(error.getMessage().contains("holds the refresh lease"), error.getMessage());
+        assertEquals(0, tokenRequests.get(), "the waiter must not refresh blind");
+    }
+
+    @Test
+    @DisplayName("a store that cannot record REFRESH_FAILED does not turn the provider's verdict into a 500")
+    void terminalVerdictSurvivesAStoreFailureWhileMarkingTheGrant() {
+        grantStore = new InMemoryConnectionGrantStore() {
+            @Override
+            public synchronized boolean completeRefresh(ConnectionGrant grant, long expectedVersion) {
+                throw new IllegalStateException("Failed to write connection grant");
+            }
+        };
+        seedExpiredGrant();
+        when(tokenClient.refresh(any(), anyString(), anyString())).thenThrow(
+                new ConnectionException(ConnectionException.Reason.GRANT_UNUSABLE, "The provider rejected the grant"));
+
+        var error = assertThrows(ConnectionException.class, () -> service().accessToken(connection(), PRINCIPAL));
+
+        assertEquals(ConnectionException.Reason.GRANT_UNUSABLE, error.getReason(),
+                "the one fact the caller needs — reconnect required — must not be replaced by the bookkeeping failure");
+    }
+
+    private OAuthTokenService service(SimpleMeterRegistry registry) {
+        SecretResolver secretResolver = mock(SecretResolver.class);
+        GlobalVariableResolver globalVariableResolver = mock(GlobalVariableResolver.class);
+        lenient().when(globalVariableResolver.resolveValue(anyString())).thenAnswer(i -> i.getArgument(0));
+        lenient().when(secretResolver.resolveValue(anyString())).thenReturn("client-secret-value");
+        return new OAuthTokenService(grantStore, tokenClient, secretProvider, new CredentialReferenceResolver(secretResolver, globalVariableResolver),
+                registry);
+    }
+
     /**
      * Changes the row underneath a caller that is already waiting, on the nth read.
      * Deterministic where a background thread would race the poll interval.

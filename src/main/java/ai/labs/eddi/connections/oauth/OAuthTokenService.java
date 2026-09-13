@@ -83,6 +83,13 @@ public class OAuthTokenService implements AccessTokenSupplier {
     /** How long a non-claimant waits for the claimant's result before retrying. */
     static final Duration AWAIT_TIMEOUT = REFRESH_LEASE;
 
+    /**
+     * The await deadline actually applied. {@link #AWAIT_TIMEOUT} in production;
+     * shortened by a test so the lease-expired branch — a claimant that never
+     * returns — can be reached without waiting out a real lease.
+     */
+    private volatile Duration awaitTimeout = AWAIT_TIMEOUT;
+
     /** Poll interval while awaiting another replica's refresh. */
     static final Duration AWAIT_POLL_INTERVAL = Duration.ofMillis(250);
 
@@ -242,7 +249,7 @@ public class OAuthTokenService implements AccessTokenSupplier {
     }
 
     private String refreshOrAwait(ConnectionConfiguration connection, String tenantId, String principal, ConnectionGrant grant) {
-        Instant deadline = Instant.now().plus(AWAIT_TIMEOUT);
+        Instant deadline = Instant.now().plus(awaitTimeout);
         while (true) {
             if (grantStore.claimRefresh(tenantId, connection.getName(), principal, claimantId, Instant.now().plus(REFRESH_LEASE))) {
                 increment("eddi.connection.token.refresh.claim.count", "outcome", "claimed");
@@ -483,8 +490,26 @@ public class OAuthTokenService implements AccessTokenSupplier {
         }
         increment("eddi.connection.token.refresh.count", "outcome", "invalid_grant");
         grant.setStatus(ConnectionGrant.Status.REFRESH_FAILED);
-        grantStore.completeRefresh(grant, grant.getVersion());
-        LOGGER.warnf("Refresh for connection '%s' was rejected by the provider; the grant is marked REFRESH_FAILED", connection.getName());
+        try {
+            grantStore.completeRefresh(grant, grant.getVersion());
+            LOGGER.warnf("Refresh for connection '%s' was rejected by the provider; the grant is marked REFRESH_FAILED", connection.getName());
+        } catch (RuntimeException e) {
+            // The provider's verdict stands whether or not it could be recorded. A
+            // store failure here used to replace the terminal reason with a raw
+            // IllegalStateException, so the caller lost the one fact that mattered —
+            // reconnect required — and the next request repeats the rejected refresh,
+            // which is harmless and marks the grant then.
+            LOGGER.warnf(e, "Refresh for connection '%s' was rejected by the provider, but the grant could not be marked REFRESH_FAILED; "
+                    + "the next request will repeat the rejection and try again", connection.getName());
+        }
+    }
+
+    /**
+     * Test seam: shortens the await deadline so the lease-expired branch is
+     * reachable.
+     */
+    void awaitTimeoutForTests(Duration timeout) {
+        this.awaitTimeout = timeout;
     }
 
     /**
