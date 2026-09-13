@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -111,6 +112,82 @@ class ConnectionConfigurationValidationTest {
             connection.getStaticAuth().setValueTemplate("Bearer ${vault:jira-token}");
 
             assertDoesNotThrow(connection::validate);
+        }
+
+        @ParameterizedTest
+        @DisplayName("every common scheme prefix passes as literal text")
+        @ValueSource(strings = {"Bearer ", "Basic ", "token=", "SSWS ", "Token token=", "ApiKey "})
+        void acceptsSchemePrefixes(String scheme) {
+            var connection = staticConnection();
+            connection.getStaticAuth().setValueTemplate(scheme + "${vault:jira-token}");
+
+            assertDoesNotThrow(connection::validate);
+        }
+
+        @Test
+        @DisplayName("a literal key with a reference stapled on is refused, and quoted back redacted")
+        void refusesLiteralKeyBeforeReference() {
+            // The bypass the old check allowed: it inspected only the ${…} segments, so
+            // the literal text around them — the one place a key could sit — was never
+            // read, while the Javadoc and the docs both claimed it was.
+            var connection = staticConnection();
+            connection.getStaticAuth().setValueTemplate("sk-live-abcdef${vault:unused}");
+
+            var error = assertThrows(IllegalArgumentException.class, connection::validate);
+
+            assertTrue(error.getMessage().contains("credential-shaped"), error.getMessage());
+            assertTrue(error.getMessage().contains("'sk-l…'"), "the offending literal must be named, redacted: " + error.getMessage());
+            assertFalse(error.getMessage().contains("sk-live-abcdef"), "the refusal must not echo the whole key: " + error.getMessage());
+        }
+
+        @Test
+        @DisplayName("a literal key AFTER the reference is refused too")
+        void refusesLiteralKeyAfterReference() {
+            var connection = staticConnection();
+            connection.getStaticAuth().setValueTemplate("${vault:jira-token}sk-live-abcdef");
+
+            var error = assertThrows(IllegalArgumentException.class, connection::validate);
+
+            assertTrue(error.getMessage().contains("credential-shaped"), error.getMessage());
+        }
+
+        @Test
+        @DisplayName("a long literal segment is refused even without a key-shaped run")
+        void refusesLongLiteralSegment() {
+            var connection = staticConnection();
+            // 34 characters, every word shorter than a key: too much text for a scheme.
+            connection.getStaticAuth().setValueTemplate("Bearer token for the jira service ${vault:jira-token}");
+
+            var error = assertThrows(IllegalArgumentException.class, connection::validate);
+
+            assertTrue(error.getMessage().contains("characters of literal text"), error.getMessage());
+            assertTrue(error.getMessage().contains("32"), "the message must state the bound: " + error.getMessage());
+        }
+
+        @ParameterizedTest
+        @DisplayName("an interpolation that is not a well-formed reference is refused rather than read as literal text")
+        @ValueSource(strings = {"Bearer ${vault:jira-token", "Bearer ${env:HOME} ${vault:jira-token}", "Bearer ${vault:} ${vault:jira-token}",
+                "${vault:jira-token} ${connection:jira}"})
+        void refusesMalformedInterpolation(String template) {
+            // Each of these fell outside the old interpolation pattern and so counted as
+            // literal text, which the old check never looked at.
+            var connection = staticConnection();
+            connection.getStaticAuth().setValueTemplate(template);
+
+            var error = assertThrows(IllegalArgumentException.class, connection::validate);
+
+            assertTrue(error.getMessage().contains("not a well-formed reference"), template + ": " + error.getMessage());
+        }
+
+        @Test
+        @DisplayName("a reference whose key runs past 256 characters is refused as malformed, not swallowed as literal text")
+        void refusesOverlongReferenceKey() {
+            var connection = staticConnection();
+            connection.getStaticAuth().setValueTemplate("Bearer ${vault:" + "k".repeat(257) + "}");
+
+            var error = assertThrows(IllegalArgumentException.class, connection::validate);
+
+            assertTrue(error.getMessage().contains("not a well-formed reference"), error.getMessage());
         }
 
         @Test

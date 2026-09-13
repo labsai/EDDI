@@ -219,9 +219,18 @@ the vault, outside export scrubbing, and outside `VaultGrantChecker`'s
 `${vault:}` scan — one field defeating three controls. `extraAuthParams` is
 checked too, since an arbitrary string map is the obvious place to paste one.
 
-Note also that the check is "the value **is** a reference", not "contains one":
+For `clientSecret` and `passwordRef` the check is "the value **is** a reference",
+not "contains one". A `valueTemplate` may carry literal text around its references
+— that is how `Bearer ${vault:k}` gets its scheme — so its literal text is checked
+too, under three rules: every `${` must be a well-formed `${vault:…}` or
+`${vars:…}` reference (an unknown prefix, an empty key, an unclosed brace or a key
+over 256 characters is refused rather than treated as literal text); at least one
+reference must be present; and each literal segment between or around the
+references is at most **32 characters** with **no run of 12 or more key
+characters** (`[A-Za-z0-9_-+/=.]`). `Bearer `, `Basic `, `token=` and `SSWS ` pass;
 `sk-live-abcdef${vault:unused}` is a literal key with a reference stapled on, and
-it is refused.
+it is refused with a message that quotes the literal redacted to its first four
+characters.
 
 ---
 

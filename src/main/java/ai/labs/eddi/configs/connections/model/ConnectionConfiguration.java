@@ -28,12 +28,15 @@ import java.util.regex.Pattern;
  * request</em>, which is what lets one model cover both an org-wide API key and
  * a per-end-user OAuth grant.
  *
- * <h3>Everything secret is a reference</h3> {@code clientSecret},
- * {@code passwordRef} and any interpolated segment of a {@code valueTemplate}
- * must be a {@code ${vault:…}} or {@code ${vars:…}} reference. A plaintext key
- * in a connection document would sit outside the vault, outside export
- * scrubbing and outside {@code VaultGrantChecker}'s {@code ${vault:}} scan
- * simultaneously — one field defeating three controls.
+ * <h3>Everything secret is a reference</h3> {@code clientSecret} and
+ * {@code passwordRef} must be exactly one {@code ${vault:…}} or
+ * {@code ${vars:…}} reference. A {@code valueTemplate} may add literal text
+ * around its references — a scheme — but that text is bounded and checked for a
+ * credential shape too (see {@link #requireTemplateIsReferenceOnly}), or a
+ * literal key with a reference stapled on would pass. A plaintext key in a
+ * connection document would sit outside the vault, outside export scrubbing and
+ * outside {@code VaultGrantChecker}'s {@code ${vault:}} scan simultaneously —
+ * one field defeating three controls.
  *
  * <h3>Two separate allowlists</h3> {@code baseUrlAllowlist} says where the
  * ACCESS TOKEN may be sent. Credential endpoints — {@code tokenUrl},
@@ -55,8 +58,23 @@ public class ConnectionConfiguration {
      */
     private static final Pattern REFERENCE_ONLY = Pattern.compile("\\$\\{(vault|eddivault|vars):[^}]{1,256}}");
 
-    /** Interpolated segments inside a header value template. */
-    private static final Pattern INTERPOLATION = Pattern.compile("\\$\\{[^}]{0,256}}");
+    /**
+     * The most literal text a {@code valueTemplate} may carry between or around its
+     * references. Enough for a scheme ({@code "Bearer "}, {@code "SSWS "},
+     * {@code "token="}); not enough for a key.
+     */
+    static final int MAX_TEMPLATE_LITERAL_CHARS = 32;
+
+    /**
+     * A run of key characters long enough to be a credential rather than a scheme.
+     * Twelve is below every real API key format and above every scheme word
+     * ({@code Bearer}, {@code Basic}, {@code Authorization} — 13, is the one it
+     * refuses, and a template has no business carrying a header NAME in its value).
+     */
+    private static final Pattern CREDENTIAL_SHAPED_RUN = Pattern.compile("[A-Za-z0-9_\\-+/=.]{12,}");
+
+    /** How much of an offending literal a refusal quotes back. */
+    private static final int QUOTED_LITERAL_CHARS = 4;
 
     /**
      * Names that mark a value as credential-shaped, used to keep one out of
@@ -325,24 +343,71 @@ public class ConnectionConfiguration {
 
     /**
      * A header template may mix literal text with references — {@code "Bearer
-     * ${vault:k}"} — as long as every interpolated segment is one. The literal text
-     * between them is checked too: a template with no interpolation at all is a
-     * plaintext credential wearing a template's clothes.
+     * ${vault:k}"} — under three rules, all of them about the LITERAL text, because
+     * the references were always checked and the literal text was not:
+     * <ol>
+     * <li>every {@code ${} is a well-formed {@code ${vault:…}} or {@code ${vars:…}}
+     * reference. An unknown prefix, an empty key, an unclosed brace or a key over
+     * 256 characters used to fall outside the interpolation pattern and count as
+     * literal text — which the old check never looked at;</li>
+     * <li>at least one reference is present, or the whole value is a plaintext
+     * credential wearing a template's clothes;</li>
+     * <li>each literal segment between or around the references is at most {@value
+     * #MAX_TEMPLATE_LITERAL_CHARS} characters and contains no run of twelve or more
+     * key characters ({@code [A-Za-z0-9_\-+/=.]}). {@code "Bearer "}, {@code "Basic
+     * "}, {@code "token="} and {@code "SSWS "} pass; {@code
+     * "sk-live-abcdef${vault:unused}"} — a literal key with a reference stapled on
+     * to satisfy the pattern — does not.</li>
+     * </ol>
+     * The offending literal is quoted back redacted to its first {@value
+     * #QUOTED_LITERAL_CHARS} characters: it is the one string in the document that
+     * may be a credential.
      */
     private static void requireTemplateIsReferenceOnly(String template) {
-        Matcher matcher = INTERPOLATION.matcher(template);
+        Matcher matcher = REFERENCE_ONLY.matcher(template);
+        List<String> literals = new ArrayList<>();
+        int cursor = 0;
         boolean sawReference = false;
         while (matcher.find()) {
-            String segment = matcher.group();
-            if (!REFERENCE_ONLY.matcher(segment).matches()) {
-                throw new IllegalArgumentException("staticAuth.valueTemplate may only interpolate ${vault:…} or ${vars:…}; found: " + segment);
-            }
+            literals.add(template.substring(cursor, matcher.start()));
+            cursor = matcher.end();
             sawReference = true;
+        }
+        literals.add(template.substring(cursor));
+        for (String literal : literals) {
+            int stray = literal.indexOf("${");
+            if (stray >= 0) {
+                throw new IllegalArgumentException("staticAuth.valueTemplate may only interpolate ${vault:…} or ${vars:…}; the interpolation "
+                        + "at '" + quoteLiteral(literal.substring(stray)) + "' is not a well-formed reference (unknown prefix, empty key, "
+                        + "unclosed brace, or a key over 256 characters).");
+            }
         }
         if (!sawReference) {
             throw new IllegalArgumentException("staticAuth.valueTemplate contains no ${vault:…} reference, so it is a plaintext credential. "
                     + "Store it with POST /secretstore/secrets and reference it here.");
         }
+        for (String literal : literals) {
+            if (literal.length() > MAX_TEMPLATE_LITERAL_CHARS) {
+                throw new IllegalArgumentException("staticAuth.valueTemplate carries " + literal.length() + " characters of literal text ('"
+                        + quoteLiteral(literal) + "') around its references; a literal segment may hold at most " + MAX_TEMPLATE_LITERAL_CHARS
+                        + " characters — a scheme such as 'Bearer ' — so a plaintext credential cannot ride alongside a reference. Store the "
+                        + "value with POST /secretstore/secrets and reference it here.");
+            }
+            Matcher run = CREDENTIAL_SHAPED_RUN.matcher(literal);
+            if (run.find()) {
+                throw new IllegalArgumentException("staticAuth.valueTemplate carries a credential-shaped literal ('" + quoteLiteral(run.group())
+                        + "') around its references — a run of twelve or more key characters. Literal text may only carry a scheme such as "
+                        + "'Bearer '; store the value with POST /secretstore/secrets and reference it here.");
+            }
+        }
+    }
+
+    /**
+     * The first few characters of a literal that may be a credential, and no more.
+     */
+    private static String quoteLiteral(String literal) {
+        String trimmed = literal.strip();
+        return trimmed.length() <= QUOTED_LITERAL_CHARS ? trimmed : trimmed.substring(0, QUOTED_LITERAL_CHARS) + "…";
     }
 
     /**
