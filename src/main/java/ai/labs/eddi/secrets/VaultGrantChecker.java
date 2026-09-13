@@ -288,7 +288,10 @@ public class VaultGrantChecker {
         } catch (Exception e) {
             return;
         }
-        Matcher matcher = CONNECTION_PATTERN.matcher(serialized);
+        // Variables expanded first, as for the vault scan: a ${vars:x} whose value is
+        // ${connection:jira} otherwise hides the whole hop, and with it every secret
+        // the connection holds.
+        Matcher matcher = CONNECTION_PATTERN.matcher(withVariablesExpanded(serialized, ConnectionReference.DEFAULT_TENANT));
         Set<String> alreadyScanned = new LinkedHashSet<>();
         while (matcher.find()) {
             String tenantId = matcher.group(1) != null ? matcher.group(1) : ConnectionReference.DEFAULT_TENANT;
@@ -339,13 +342,26 @@ public class VaultGrantChecker {
         } catch (Exception e) {
             return;
         }
-        Matcher matcher = SecretReference.compiledPattern().matcher(serialized);
+        Matcher matcher = SecretReference.compiledPattern().matcher(withVariablesExpanded(serialized, tenantId));
         while (matcher.find()) {
             sink.add(matcher.group(0));
         }
+    }
+
+    /**
+     * The serialized config followed by the expansion of every {@code ${vars:…}} in
+     * it, so a scan sees both what is written and what the runtime resolves it to.
+     * One helper for the vault scan and the connection scan: expanding for only one
+     * of them is how a variable came to hide a connection hop.
+     *
+     * @param tenantId
+     *            the tenant a short-form {@code ${vars:key}} resolves in
+     */
+    private String withVariablesExpanded(String serialized, String tenantId) {
         if (globalVariableResolver == null) {
-            return;
+            return serialized;
         }
+        StringBuilder scanned = new StringBuilder(serialized);
         Matcher vars = VARS_PATTERN.matcher(serialized);
         while (vars.find()) {
             String expanded;
@@ -355,13 +371,10 @@ public class VaultGrantChecker {
                 LOGGER.debugf("Could not expand %s while checking vault grants: %s", sanitize(vars.group(0)), sanitize(e.getMessage()));
                 continue;
             }
-            if (expanded == null || expanded.equals(vars.group(0))) {
-                continue;
-            }
-            Matcher inExpansion = SecretReference.compiledPattern().matcher(expanded);
-            while (inExpansion.find()) {
-                sink.add(inExpansion.group(0));
+            if (expanded != null && !expanded.equals(vars.group(0))) {
+                scanned.append('\n').append(expanded);
             }
         }
+        return scanned.toString();
     }
 }

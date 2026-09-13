@@ -146,6 +146,21 @@ class VaultGrantCheckerTest {
         }
 
         @Test
+        @DisplayName("a ${vars:} whose value is a ${connection:…} does not hide the hop to an ungranted vault secret")
+        void followsAConnectionReferenceBehindAVariable() throws Exception {
+            givenGrant(List.of("agent-owner"));
+            var agent = agentWithStep("ai.labs.httpcalls", LLM_ID);
+            var apiCalls = new ApiCallsConfiguration();
+            apiCalls.setTargetServerUrl("https://api.example.com/${vars:jira-connection}");
+            when(apiCallsStore.read(eq(LLM_ID), anyInt())).thenReturn(apiCalls);
+            when(globalVariableResolver.resolveValue("${vars:jira-connection}", "default")).thenReturn("${connection:jira}");
+            when(connectionStore.readByName("default", "jira")).thenReturn(oauthConnection(VAULT_REF));
+
+            assertEquals(List.of(VAULT_REF), checker.findUngrantedReferences(agent, "some-other-agent"),
+                    "variables were expanded only before the vault scan, so a connection named through one was never followed");
+        }
+
+        @Test
         @DisplayName("a connection's ${vars:} is expanded in the connection's own tenant, not the default one")
         void expandsVariablesInTheConnectionsTenant() throws Exception {
             givenGrant(List.of("agent-owner"));
