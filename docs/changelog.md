@@ -125,6 +125,34 @@ versioned document store cannot carry a unique index on a field inside the docum
 **Not changed:** CodeRabbit's docstring-coverage pre-merge warning, which counts every
 touched function; the project documents behaviour at class and non-obvious-method level.
 
+**Second round.** The push drew nine more threads from CodeRabbit, CodeQL and GitHub code
+quality.
+
+- **The OAuth callback is bound to the connection's id, not its name** (`bcddbb4a2`). A
+  connection deleted and re-created under the same name while the user was on the consent screen
+  received a grant issued for its predecessor's client, and its own allowlist decided where that
+  token went. The state row now carries the connection id (a MongoDB field; a PostgreSQL
+  `connection_id` column added with `ADD COLUMN IF NOT EXISTS`). The callback exchanges nothing
+  unless the name still resolves to that id, reads the connection by id uncached rather than from
+  the name-keyed registry, and after storing the grant re-checks id and shape and discards it on a
+  mismatch.
+- **A method CodeQL read as a permission check is renamed**, `requirePlaintextOriginsPermitted` to
+  `refusePlaintextRemoteOriginsUnlessAllowed`. `java/tainted-permissions-check` matches any
+  one-argument method whose name contains "permitted"; this one validates input, and who may
+  write is `@RolesAllowed("eddi-admin")`. Renamed rather than dismissed, so no alert needs an
+  admin's judgement.
+- **The PostgreSQL store tests assert resource closing** (`f7be4653f`). The code-quality leak
+  findings pointed at Mockito stubbing expressions, which acquire nothing, and last round's
+  restyling only moved the warning. The tests now check that every connection, statement and
+  result set the name-claim and grant stores open is closed, on the failure paths too.
+- **The in-memory grant store validates the refresh lease first** (`192895d29`), as both real
+  stores do; it used to leave a claim with no expiry behind on a null lease.
+- **The plain-text variable test proves expansion ran** (`fbe3bd213`).
+
+**Upgrade note:** an account link started before the upgrade and finished after it is answered
+`invalid_state`, because its state row carries no connection id. States live ten minutes; the user
+starts the link again.
+
 **Companion:** labsai/EDDI-Manager#208 answered its own review round (a complete reference
 before the chip, retries only on network/5xx, the name grammar in references, Retry through
 the `Button` primitive).
