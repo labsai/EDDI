@@ -730,6 +730,12 @@ and the name-uniqueness lock. A document the deployment refuses is
 and the refusal names what to fix. Skips of both kinds are counted in an
 `X-Connections-Skipped` header on the import response.
 
+A connection the import **did** create is part of the import's rollback, on every
+strategy including `upgrade`: if a later resource or the upgrade fails, it is removed
+again. So is a create the import cannot account for — a create answer carrying no
+resource URI, or a descriptor that cannot be written (without one the name never
+resolves) — which fails the import rather than leaving a connection behind it.
+
 ## Security rules
 
 ### Who may do what

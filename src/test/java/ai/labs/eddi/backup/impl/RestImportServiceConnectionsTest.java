@@ -47,6 +47,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
@@ -237,6 +238,46 @@ class RestImportServiceConnectionsTest {
 
         verify(connectionStore).deleteAllPermanently(CREATED_CONNECTION_ID);
         verify(documentDescriptorStore).deleteAllDescriptor(CREATED_CONNECTION_ID);
+    }
+
+    @Test
+    @DisplayName("a created connection whose response carries no resource URI fails the import, and the connection is found by name and rolled back")
+    void missingResourceUriFailsTheImportAndRollsBack() throws Exception {
+        // Before: logged, counted as imported, and left outside the transaction — a
+        // connection nobody could roll back, on an import that reported success.
+        when(connectionStore.idOfName("default", "jira")).thenReturn(null, CREATED_CONNECTION_ID);
+        when(restConnectionStore.createConnection(any())).thenReturn(Response.status(201).build());
+
+        try (var cdi = stubCdi(IAgentStore.class, agentStore, IRestConnectionStore.class, restConnectionStore, IConnectionStore.class,
+                connectionStore)) {
+            assertThrows(InternalServerErrorException.class,
+                    () -> importService.importAgent(new ByteArrayInputStream(new byte[0]), "create", null, null, null));
+        }
+
+        verify(connectionStore).deleteAllPermanently(CREATED_CONNECTION_ID);
+        verify(agentStore, never()).create(any());
+    }
+
+    @Test
+    @DisplayName("a created connection whose descriptor cannot be written fails the import and is rolled back")
+    void descriptorWriteFailureFailsTheImportAndRollsBack() throws Exception {
+        // Without a descriptor ${connection:jira} never resolves, so the agent would
+        // land with a reference to a connection that is there and invisible.
+        when(connectionStore.idOfName("default", "jira")).thenReturn(null);
+        when(restConnectionStore.createConnection(any()))
+                .thenReturn(Response.status(201).header("X-Resource-URI", CREATED_CONNECTION_URI).build());
+        doThrow(new IllegalStateException("descriptor store down")).when(documentDescriptorStore).createDescriptor(eq(CREATED_CONNECTION_ID),
+                eq(1), any());
+
+        try (var cdi = stubCdi(IAgentStore.class, agentStore, IRestConnectionStore.class, restConnectionStore, IConnectionStore.class,
+                connectionStore)) {
+            assertThrows(InternalServerErrorException.class,
+                    () -> importService.importAgent(new ByteArrayInputStream(new byte[0]), "create", null, null, null));
+        }
+
+        verify(connectionStore).deleteAllPermanently(CREATED_CONNECTION_ID);
+        verify(documentDescriptorStore).deleteAllDescriptor(CREATED_CONNECTION_ID);
+        verify(agentStore, never()).create(any());
     }
 
     @Test

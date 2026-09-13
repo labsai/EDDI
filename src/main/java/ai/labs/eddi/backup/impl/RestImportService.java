@@ -1245,8 +1245,12 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                     }
                     Response response = restConnectionStore.createConnection(connection);
                     checkIfCreatedResponse(response);
-                    recordCreatedConnection(response, transaction);
+                    recordCreatedConnection(response, connection, connectionStore, transaction);
                     imported++;
+                } catch (ConnectionImportFailure e) {
+                    // Not a skip: a connection WAS created and could not be accounted for,
+                    // so the whole import fails and the outer rollback removes it.
+                    throw e;
                 } catch (WebApplicationException e) {
                     // A 400 from validation or the deployment checks, or a 409 from the
                     // name race: the reason is the message, and the agent is still worth
@@ -1278,18 +1282,35 @@ public class RestImportService extends AbstractBackupService implements IRestImp
      * nothing. Writing one only when it is missing keeps the import self-sufficient
      * — no response filter runs on an in-process call — without ever producing a
      * second descriptor for one document.
+     * <p>
+     * A create this cannot account for fails the whole import rather than being
+     * logged: a 201 carrying no usable {@code X-Resource-URI}, or a descriptor that
+     * cannot be written. Either way a connection now exists that the import could
+     * not roll back, or whose name never resolves, and reporting success over it is
+     * how an import leaves one behind. The failure escapes the per-connection skip
+     * so the outer rollback runs. A descriptor the store already wrote is success.
      */
-    private void recordCreatedConnection(Response createResponse, ImportTransaction transaction) {
+    private void recordCreatedConnection(Response createResponse, ConnectionConfiguration connection, IConnectionStore connectionStore,
+                                         ImportTransaction transaction) {
         if (createResponse.getStatus() != 201) {
             return;
         }
         String createdUri = createResponse.getHeaderString("X-Resource-URI");
-        if (createdUri == null) {
-            LOGGER.warn("Created connection carries no resource URI — it cannot be rolled back if the import fails, and it has no descriptor");
-            return;
+        URI resourceUri = null;
+        IResourceId resourceId = null;
+        if (createdUri != null && !createdUri.isBlank()) {
+            try {
+                resourceUri = URI.create(createdUri);
+                resourceId = RestUtilities.extractResourceId(resourceUri);
+            } catch (RuntimeException e) {
+                resourceId = null;
+            }
         }
-        URI resourceUri = URI.create(createdUri);
-        IResourceId resourceId = RestUtilities.extractResourceId(resourceUri);
+        if (resourceId == null || resourceId.getId() == null) {
+            recordCreatedByName(connection, connectionStore, transaction);
+            throw new ConnectionImportFailure("Connection '" + connection.getName() + "' was created, but the create answer carried no "
+                    + "usable resource URI, so this import cannot account for it. The import is rolled back.");
+        }
         transaction.recordCreated(IConnectionStore.class, resourceId);
         try {
             if (documentDescriptorStore.readDescriptor(resourceId.getId(), resourceId.getVersion()) != null) {
@@ -1305,8 +1326,55 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             documentDescriptorStore.createDescriptor(resourceId.getId(), resourceId.getVersion(),
                     resourceAccessGuard.stampNewDescriptor(createDocumentDescriptor(resourceUri)));
         } catch (Exception e) {
-            LOGGER.warnf("Created connection %s but could not write its descriptor, so ${connection:…} will not resolve to it: %s",
-                    LogSanitizer.sanitize(resourceId.getId()), LogSanitizer.sanitize(e.getMessage()));
+            throw new ConnectionImportFailure("Connection '" + connection.getName() + "' (id " + resourceId.getId() + ") was created, but its "
+                    + "descriptor could not be written, so ${connection:" + connection.getName() + "} would never resolve to it. The import "
+                    + "is rolled back.", e);
+        }
+    }
+
+    /**
+     * Records a created connection the create answer did not identify, by the name
+     * it was created under, so the rollback can still remove it. The name was free
+     * immediately before the create, so its holder now is the document this request
+     * wrote.
+     */
+    private static void recordCreatedByName(ConnectionConfiguration connection, IConnectionStore connectionStore,
+                                            ImportTransaction transaction) {
+        try {
+            String id = connectionStore.idOfName(ConnectionConfiguration.effectiveTenant(connection), connection.getName());
+            if (id == null) {
+                return;
+            }
+            transaction.recordCreated(IConnectionStore.class, new IResourceId() {
+                @Override
+                public String getId() {
+                    return id;
+                }
+
+                @Override
+                public Integer getVersion() {
+                    return null;
+                }
+            });
+        } catch (Exception e) {
+            LOGGER.errorf("Created connection '%s' could not be found by name to roll it back (%s); it may need removing by hand",
+                    LogSanitizer.sanitize(connection.getName()), e.getClass().getSimpleName());
+        }
+    }
+
+    /**
+     * A connection this import created but cannot account for. Unlike every other
+     * failure in {@link #importConnections} it is not a skip: it escapes to the
+     * import's rollback, which removes the connection again.
+     */
+    private static final class ConnectionImportFailure extends RuntimeException {
+
+        ConnectionImportFailure(String message) {
+            super(message);
+        }
+
+        ConnectionImportFailure(String message, Throwable cause) {
+            super(message, cause);
         }
     }
 
