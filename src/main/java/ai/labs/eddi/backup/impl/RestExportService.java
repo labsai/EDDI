@@ -1024,6 +1024,15 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                 continue;
             }
             String id = connectionStore.idOfName(reference.tenantId(), reference.name());
+            // Authorised against the connection itself. The agent's own workflows and
+            // extension configs are covered by the VIEW check on the agent; a connection
+            // is a separately owned resource the agent merely names, so naming one in a
+            // config must not be a way to read it. Checked only for a connection that
+            // exists — there is nothing to authorise for one that does not, and that
+            // case is skipped below.
+            if (id != null) {
+                resourceAccessGuard.requireAccess(id, AccessLevel.VIEW, "connection");
+            }
             ConnectionConfiguration connection = id == null ? null : connectionStore.readByName(reference.tenantId(), reference.name());
             if (connection == null) {
                 LOGGER.warnf("The agent references %s but no such connection exists; the reference will dangle on import",

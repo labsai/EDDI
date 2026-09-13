@@ -12,6 +12,7 @@ import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.connections.IConnectionStore;
 import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.dictionary.IDictionaryStore;
 import ai.labs.eddi.configs.llm.ILlmStore;
@@ -29,6 +30,7 @@ import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.secrets.sanitize.SecretScrubber;
 import ai.labs.eddi.utils.FileUtilities;
+import io.quarkus.security.ForbiddenException;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -57,6 +59,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -81,6 +84,7 @@ class RestExportServiceConnectionsTest {
     private static final String CONNECTION_ID = "68a1b2c3d4e5f60718293a4b";
 
     private IConnectionStore connectionStore;
+    private ResourceAccessGuard resourceAccessGuard;
     private SecretScrubber secretScrubber;
     private IZipArchive zipArchive;
     private RestExportService exportService;
@@ -99,12 +103,13 @@ class RestExportServiceConnectionsTest {
         var scheduleStore = mock(IScheduleStore.class);
         secretScrubber = mock(SecretScrubber.class);
         connectionStore = mock(IConnectionStore.class);
+        resourceAccessGuard = mock(ResourceAccessGuard.class);
         zipArchive = mock(IZipArchive.class);
 
         exportService = new RestExportService(documentDescriptorStore, agentStore, workflowStore, mock(IDictionaryStore.class),
                 mock(IRuleSetStore.class), httpCallsStore, mock(ILlmStore.class), mock(IPropertySetterStore.class), mock(IOutputStore.class),
                 mock(IMcpCallsStore.class), mock(IRagStore.class), mock(IPromptSnippetStore.class), jsonSerialization, zipArchive, secretScrubber,
-                scheduleStore, mock(ResourceAccessGuard.class), mock(BackupMetrics.class), connectionStore);
+                scheduleStore, resourceAccessGuard, mock(BackupMetrics.class), connectionStore);
 
         Path tmpDir = Paths.get(FileUtilities.buildPath(System.getProperty("user.dir"), "tmp"));
         exportRoot = tmpDir.resolve("export");
@@ -175,6 +180,21 @@ class RestExportServiceConnectionsTest {
         assertEquals(List.of(CONNECTION_ID + ".connection.json"), connectionsDirEntries.get(),
                 "only the referenced connection is exported — the store is never swept for the rest");
         verify(connectionStore).readByName("default", "jira");
+        verify(resourceAccessGuard).requireAccess(CONNECTION_ID, AccessLevel.VIEW, "connection");
+    }
+
+    @Test
+    @DisplayName("a caller without VIEW on a referenced connection cannot read it by exporting an agent that names it")
+    void refusesAConnectionTheCallerCannotView() throws Exception {
+        when(connectionStore.idOfName("default", "jira")).thenReturn(CONNECTION_ID);
+        when(resourceAccessGuard.requireAccess(CONNECTION_ID, AccessLevel.VIEW, "connection"))
+                .thenThrow(new ForbiddenException("Access denied: you do not have view access to this connection"));
+
+        assertThrows(ForbiddenException.class, () -> exportService.exportAgent(AGENT_ID, 1, null, null, null));
+
+        verify(connectionStore, never()).readByName(anyString(), anyString());
+        verify(zipArchive, never()).createZip(anyString(), anyString(), any());
+        assertScratchTreeRemoved();
     }
 
     @Test
@@ -209,6 +229,7 @@ class RestExportServiceConnectionsTest {
 
         assertEquals(200, response.getStatus(), "an archive is still worth having; the import side reports the dangling name too");
         assertFalse(connectionsDirExists.get());
+        verify(resourceAccessGuard, never()).requireAccess(any(), eq(AccessLevel.VIEW), eq("connection"));
     }
 
     @Test
