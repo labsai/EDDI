@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.connections.oauth;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 import ai.labs.eddi.configs.connections.model.AuthType;
 import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
 import ai.labs.eddi.connections.AccessTokenSupplier;
@@ -431,7 +433,7 @@ public class OAuthTokenService implements AccessTokenSupplier {
         try {
             grantStore.releaseRefresh(tenantId, connectionName, principal, claimantId);
         } catch (RuntimeException e) {
-            LOGGER.warnf("Could not release the refresh lease for connection '%s'; it will expire on its own", connectionName);
+            LOGGER.warnf("Could not release the refresh lease for connection '%s'; it will expire on its own", sanitize(connectionName));
         }
     }
 
@@ -506,14 +508,15 @@ public class OAuthTokenService implements AccessTokenSupplier {
     private void handleRefreshFailure(ConnectionConfiguration connection, ConnectionGrant grant, ConnectionException failure) {
         if (failure.getReason() != ConnectionException.Reason.GRANT_UNUSABLE) {
             increment("eddi.connection.token.refresh.count", "outcome", "transient");
-            LOGGER.warnf("Refresh for connection '%s' failed transiently; the grant is unchanged", connection.getName());
+            LOGGER.warnf("Refresh for connection '%s' failed transiently; the grant is unchanged", sanitize(connection.getName()));
             return;
         }
         increment("eddi.connection.token.refresh.count", "outcome", "invalid_grant");
         grant.setStatus(ConnectionGrant.Status.REFRESH_FAILED);
         try {
             grantStore.completeRefresh(grant, grant.getVersion());
-            LOGGER.warnf("Refresh for connection '%s' was rejected by the provider; the grant is marked REFRESH_FAILED", connection.getName());
+            LOGGER.warnf("Refresh for connection '%s' was rejected by the provider; the grant is marked REFRESH_FAILED",
+                    sanitize(connection.getName()));
         } catch (RuntimeException e) {
             // The provider's verdict stands whether or not it could be recorded. A
             // store failure here used to replace the terminal reason with a raw
@@ -562,7 +565,7 @@ public class OAuthTokenService implements AccessTokenSupplier {
             // Another writer landed first. Not an error: their token is at least as
             // fresh as ours, and the caller gets the one we just obtained, which the
             // provider issued and has not rejected.
-            LOGGER.debugf("Refresh CAS lost for connection '%s'; another writer was ahead", connection.getName());
+            LOGGER.debugf("Refresh CAS lost for connection '%s'; another writer was ahead", sanitize(connection.getName()));
         }
     }
 
