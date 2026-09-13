@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.connections.grants;
 
+import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
+
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -81,6 +83,14 @@ public class InMemoryConnectionGrantStore implements IConnectionGrantStore {
 
     @Override
     public synchronized boolean claimRefresh(String tenantId, String connectionName, String principal, String claimantId, Duration lease) {
+        // Validated first, before the grant is looked up or touched, exactly as both
+        // real stores do. Checked any later, a null lease threw from now.plus(lease)
+        // after refreshInProgress was already set, leaving a claim with no expiry
+        // behind; and a non-positive lease was accepted where both stores refuse it.
+        checkNotNull(lease, "lease");
+        if (lease.isNegative() || lease.isZero()) {
+            throw new IllegalArgumentException("A refresh lease must be positive, was " + lease);
+        }
         ConnectionGrant grant = grants.get(key(tenantId, connectionName, principal));
         if (grant == null) {
             return false;

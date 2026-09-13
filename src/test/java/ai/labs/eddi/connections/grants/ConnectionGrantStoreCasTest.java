@@ -10,10 +10,13 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Arrays;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -138,5 +141,25 @@ class ConnectionGrantStoreCasTest {
         assertFalse(store.updateSealedTokens(grant("gen-2", "resealed"), 1L));
 
         assertTrue(store.find(TENANT, CONNECTION, PRINCIPAL).isEmpty(), "a conditional write must not be an upsert");
+    }
+
+    @Test
+    @DisplayName("claimRefresh refuses an absent or non-positive lease before touching the grant, as both real stores do")
+    void claimRefreshValidatesTheLeaseFirst() {
+        store.upsert(grant("gen-1", "original"));
+
+        for (Duration lease : Arrays.asList(null, Duration.ZERO, Duration.ofSeconds(-1))) {
+            assertThrows(IllegalArgumentException.class, () -> store.claimRefresh(TENANT, CONNECTION, PRINCIPAL, "replica-a", lease),
+                    "lease " + lease);
+            // Refused before the lookup, not only for a grant that happens to exist.
+            assertThrows(IllegalArgumentException.class, () -> store.claimRefresh(TENANT, CONNECTION, "nobody", "replica-a", lease),
+                    "lease " + lease + " for an absent grant");
+        }
+
+        var after = stored();
+        assertNull(after.getRefreshInProgress(), "a refused claim must leave no claimant behind");
+        assertNull(after.getRefreshLeaseExpiresAt(), "and no lease");
+        assertTrue(store.claimRefresh(TENANT, CONNECTION, PRINCIPAL, "replica-b", Duration.ofSeconds(30)),
+                "the grant is still claimable, which a leaked claim without an expiry would have prevented");
     }
 }
