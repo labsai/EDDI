@@ -651,6 +651,23 @@ just the newest, and leaves ciphertext untouched.
 
 ## Security rules
 
+### Who may do what
+
+| Endpoint | Roles |
+| --- | --- |
+| `GET /connectionstore/connections/descriptors` — list connections | `eddi-admin`, `eddi-editor` |
+| `GET /connectionstore/connections/{id}` — read one document | `eddi-admin`, `eddi-editor` |
+| `POST`, `PUT`, `DELETE` and the duplicate `POST /{id}` | `eddi-admin` only |
+| `GET /connectionstore/connections/jsonSchema` | `eddi-admin` only |
+| `POST /connections/{name}/authorize`, `GET /connections/mine`, `DELETE /connections/{name}/grant` | any authenticated user — see [Per-user accounts](#per-user-accounts) |
+
+Writes are admin-only because a connection is an egress channel plus a
+credential — the same class of capability as a vault write. The two reads admit
+an editor because an httpcall author cannot write `${connection:jira}` without
+knowing that `jira` exists, and the Manager's picker needs the same list. Reading
+is safe: a document carries only `${vault:…}` references, `clientId` is public by
+definition, and every secret-bearing field is refused a literal at write time.
+
 * **Only a reference is ever inherited, never a token.** Configs carry
   `${connection:name}`; the credential exists in memory for one outbound request.
 * **Tokens are envelope-encrypted** with the vault's per-tenant DEK — the same
