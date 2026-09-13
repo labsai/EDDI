@@ -10,7 +10,8 @@
 [Enabling connections](#enabling-connections) · [Per-user accounts](#per-user-accounts) ·
 [Refresh, and what happens when it fails](#refresh-and-what-happens-when-it-fails) ·
 [Rotating the key that holds them](#rotating-the-key-that-holds-them) ·
-[Security rules](#security-rules) · [Metrics](#metrics) · [Limitations](#limitations)
+[Export and import](#export-and-import) · [Security rules](#security-rules) · [Metrics](#metrics) ·
+[Limitations](#limitations)
 
 ---
 
@@ -649,6 +650,32 @@ just the newest, and leaves ciphertext untouched.
 
 ---
 
+## Export and import
+
+An agent archive carries the connections its configurations reference. Exporting an
+agent scans every archived config for `${connection:name}` — an httpcall header, an
+mcpcalls or A2A `apiKey`, wherever an author put one — and writes each referenced
+connection's document into `connections/{connectionId}.connection.json`. A connection
+nothing references is not exported, and neither is a reference to a tenant other than
+the default.
+
+**What travels is the document, and only the document**: name, `authType`, `binding`,
+`staticAuth` or `oauth` block, `baseUrlAllowlist`. Every secret-bearing field in it is a
+`${vault:…}` reference, so the target needs the same vault entries — exactly as it does
+for any other exported config — and nothing resolved ever enters the archive. **Grants
+are never exported.** Linked accounts stay where they were linked; a user links again on
+the target.
+
+On import, a connection is created only when the target holds **no connection of that
+name**. An existing one is **never overwritten** — it is a live credential configuration,
+possibly with linked accounts filed under that name — whatever the import strategy. The
+create runs through the same gate as `POST /connectionstore/connections`: structural
+validation, the deployment checks (`PER_USER` and `CALLER_SUPPLIED` need OIDC, OAuth needs
+an active vault) and the name-uniqueness lock. A document the deployment refuses is
+**skipped with the reason logged**, not a failed import — the agent is still worth having,
+and the refusal names what to fix. Skips of both kinds are counted in an
+`X-Connections-Skipped` header on the import response.
+
 ## Security rules
 
 ### Who may do what
@@ -792,6 +819,11 @@ Three of those are worth knowing by name:
   whose authority a debating agent carries. Decide before relying on it.
 * **No dynamic client registration** (RFC 7591). An admin registers the client
   once and stores the id and secret.
+* **Live sync does not carry connections.** Agent ZIP export and import do (see
+  [Export and import](#export-and-import)); the instance-to-instance sync in
+  [Agent Sync](agent-sync-guide.md) transfers workflows, extensions and snippets
+  only, so a synced agent whose header reads `${connection:jira}` needs `jira`
+  created on the target by hand or by a ZIP import.
 * **Revocation is local.** Deleting a grant stops EDDI resolving it; EDDI does
   not call the provider's revocation endpoint, so the token stays live at the
   provider until it expires.

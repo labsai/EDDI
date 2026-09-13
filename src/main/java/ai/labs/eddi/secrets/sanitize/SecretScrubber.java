@@ -200,7 +200,13 @@ public class SecretScrubber {
      */
     private String scrubTextValue(String fieldName, String parentFieldName, String textValue) {
         // A vault reference is a pointer to a secret, not a secret, and is left
-        // legible so an operator can still see WHICH key the config used.
+        // legible so an operator can still see WHICH key the config used. A
+        // connection reference is the same kind of pointer one level up — the
+        // connection document holds the vault references — and it sits in exactly
+        // the fields this scrubber otherwise redacts (an Authorization header, an
+        // apiKey), so without its own exemption every exported httpcall header
+        // reading ${connection:jira} came back as ${vault:REDACTED} and the
+        // reference was lost before the archive was even written.
         //
         // The exemption speaks for one value, and a URL is not one value: it is a
         // host, a path and a set of independent query parameters. Read over a whole
@@ -209,7 +215,8 @@ public class SecretScrubber {
         // `?api_key=${vault:k}&access_token=<plaintext>` was exported intact. A URL
         // is therefore always handed to the part-by-part pass below, which judges
         // each parameter on its own.
-        if (!looksLikeUrl(textValue) && (textValue.contains("${vault:") || textValue.contains("${eddivault:"))) {
+        if (!looksLikeUrl(textValue)
+                && (textValue.contains("${vault:") || textValue.contains("${eddivault:") || textValue.contains("${connection:"))) {
             return null;
         }
 
