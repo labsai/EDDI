@@ -860,7 +860,7 @@ public class RestConnectionStore implements IRestConnectionStore {
                     + "envelope-encrypted with the tenant DEK and there is deliberately no plaintext fallback for refresh tokens, so "
                     + "linking an account would fail at the moment the token comes back.");
         }
-        requirePlaintextOriginsPermitted(connectionConfiguration);
+        refusePlaintextRemoteOriginsUnlessAllowed(connectionConfiguration);
     }
 
     /**
@@ -869,7 +869,7 @@ public class RestConnectionStore implements IRestConnectionStore {
      * Loopback is always allowed. Runs after {@code validate()}, so every entry
      * already canonicalises.
      */
-    private void requirePlaintextOriginsPermitted(ConnectionConfiguration connectionConfiguration) {
+    private void refusePlaintextRemoteOriginsUnlessAllowed(ConnectionConfiguration connectionConfiguration) {
         if ((connectionsConfig != null && connectionsConfig.isAllowPlaintextRemoteOrigins())
                 || connectionConfiguration.getBaseUrlAllowlist() == null) {
             return;
