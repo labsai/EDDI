@@ -49,6 +49,88 @@ bottom of this file and are never archived.
 
 ---
 
+## 🔁 fix(connections): the PR #751 review round — claims, clocks, export, plaintext and redaction (2026-09-13)
+
+**Repo:** EDDI (`fix/connections-review-findings`)
+
+Twenty-two review comments on PR #751 (CodeRabbit, Copilot, CodeQL, code quality), all
+verified against the code and all valid. One commit per finding, each with a regression
+test. Two of them correct fixes recorded in the entries below: R7 bound the contender's JVM
+clock, which only moved the skew, and C3 enforced name uniqueness with scans that could not
+see across replicas.
+
+**Uniqueness and races.**
+
+- **A durable name claim** (`10962ccab`). `IConnectionNameClaimStore` keeps one claim per
+  (tenant, name) under a MongoDB unique index or a PostgreSQL unique constraint. A create
+  claims first and answers 409 for a live holder; a stale claim (crashed create, failed
+  release) is taken over by compare-and-set. The create records its id against its token,
+  then writes the descriptor, and a descriptor failure is now a failed create. Connections
+  that predate claims are found by the one remaining name scan and backfilled. The unused
+  multi-holder scan, `IConnectionStore.idsOfName`, is removed.
+- **Grants linked during an authType/binding change** (`e5db9c0a8`). A count before the
+  update is not atomic with an OAuth callback. Both sides now re-check after their own
+  write — the update counts again and deletes what appeared, the callback re-reads the
+  connection uncached and discards its grant if the shape changed — so one of the two
+  always sees the other.
+- **The refresh lease uses the database clock on both sides** (`22f153147`):
+  `CURRENT_TIMESTAMP AT TIME ZONE 'UTC'` on PostgreSQL, `$$NOW` on MongoDB. `claimRefresh`
+  takes a duration. The lease is released when the claimant's re-read fails (`9cbbb83c2`).
+
+**Credentials in transit and at rest.**
+
+- **Plaintext remote origins need an opt-in** (`e0bf28a9b`):
+  `eddi.connections.allow-plaintext-remote-origins`, default `false`. Refused at save (400),
+  per request (`TARGET_NOT_ALLOWED`) and reported at ERROR at boot. Loopback http is always
+  allowed.
+- **A plaintext token URL is refused before the client secret is sent** (`1adb43c22`);
+  https, or http to a loopback host, shared with save-time validation.
+- **Non-admin reads are redacted** (`414982f3d`). An editor reading a connection gets
+  `clientSecret`, `passwordRef`, `valueTemplate` and each `extraAuthParams` entry only if it
+  passes the write-time rule; a legacy literal is replaced by a marker. Admins see the
+  stored document so they can fix it.
+- **Log lines sanitize user-controlled values** (`a9f87b184`, plus the four refresh-path
+  lines in `OAuthTokenService`), closing CodeQL `java/log-injection`.
+
+**Export, import and grants checking.**
+
+- Export authorizes VIEW on every referenced connection and refuses without it
+  (`2d85bce21`); only a dangling reference is skipped, every other failure fails the export
+  (`c35005ceb`).
+- `strategy=upgrade` imports the archive's connections too (`3b65c91cf`), and an import that
+  cannot account for a connection it created (no resource URI, no descriptor) fails and
+  rolls it back (`5c602dd91`).
+- The vault-grant check expands `${vars:}` in the connection's own tenant (`5735c021d`) and
+  before the connection scan as well as the vault scan (`5a86bbc98`).
+- A malformed stored origin no longer aborts the startup report (`6a8b73ac9`); the allowlist
+  docs no longer mention discovery endpoints (`3cdf0780a`); two mocked `ResultSet` stubs no
+  longer read as leaks (`830acb20e`).
+
+**Decision — export refuses rather than skips** a connection the caller cannot view. An
+archive quietly missing a connection imports into an agent whose references do not resolve,
+and nothing says why.
+
+**Decision — the claim is a separate store, not an index on the config document.** The
+versioned document store cannot carry a unique index on a field inside the document.
+
+**Upgrade notes.**
+
+- Connections with a remote `http://` origin stop resolving until the new property is set
+  or the origin moves to https.
+- MongoDB 4.2+ is required (`$$NOW`); the project documents 6.0+.
+- New storage, created lazily: collection or table `connection_name_claims`.
+- A duplicate name on create answers **409**, not 400.
+- During a rolling upgrade, a replica without claims can still race a create briefly.
+
+**Not changed:** CodeRabbit's docstring-coverage pre-merge warning, which counts every
+touched function; the project documents behaviour at class and non-obvious-method level.
+
+**Companion:** labsai/EDDI-Manager#208 answered its own review round (a complete reference
+before the chip, retries only on network/5xx, the name grammar in references, Retry through
+the `Button` primitive).
+
+---
+
 ## 🔐 fix(connections): runtime and security findings from the connections review (2026-09-13)
 
 **Repo:** EDDI (`fix/connections-review-findings`)
