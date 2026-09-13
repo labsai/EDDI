@@ -49,6 +49,22 @@ bottom of this file and are never archived.
 
 ---
 
+## ⬆️ chore(deps): update Quarkus to 3.39.3 and langchain4j to 1.20.0 / 1.20.0-beta30 (2026-09-13)
+
+**Repo:** EDDI (`chore/deps-and-version-6-4-0`)
+
+- Bump Quarkus platform from `3.39.2` to **`3.39.3`** in `pom.xml`.
+- Bump `langchain4j.version` from `1.19.0` to **`1.20.0`** and `langchain4j-beta.version` from `1.19.0-beta29` to **`1.20.0-beta30`** in `pom.xml`. Both lines are updated together to maintain module version alignment.
+
+Also checked Docker base image statuses across the repository:
+- **Production image** (`src/main/docker/Dockerfile`): `registry.access.redhat.com/ubi10/openjdk-25-runtime:1.24` pinned at `@sha256:c49d36c03d0a9472935b9f318f709c4cf158afa2dc204099f1f463cfbf9d4626` is already current (remote registry matches digest; tag 1.25 and ubi11 do not exist).
+- **Sidecar image** (`mcp-sidecar/Dockerfile`): `ghcr.io/sparfenyuk/mcp-proxy` pinned digest is current with latest.
+- **Demo image** (`src/main/docker/Dockerfile.demo`): newer digests exist on Docker Hub for `maven:3.9-eclipse-temurin-25` and `eclipse-temurin:25-jre`.
+
+**Files touched:**
+- `pom.xml` — updated `quarkus.platform.version`, `langchain4j.version`, and `langchain4j-beta.version`
+- `docs/changelog.md` — this entry
+
 ## ⬆️ chore(release): EDDI 6.4.0, Quarkus 3.39.1, and every safe patch/minor ahead of the release (2026-08-30)
 
 **Repo:** EDDI (`chore/deps-and-version-6-4-0`)
