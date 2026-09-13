@@ -1232,7 +1232,8 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                             ConnectionConfiguration.class);
                     if (connection == null || connection.getName() == null || connection.getName().isBlank()) {
                         skipped++;
-                        LOGGER.warnf("Connection file %s carries no name and was not imported", file.getFileName());
+                        LOGGER.warnf("Connection file %s carries no name and was not imported",
+                                LogSanitizer.sanitize(String.valueOf(file.getFileName())));
                         continue;
                     }
                     name = connection.getName();
@@ -1251,15 +1252,16 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                     // name race: the reason is the message, and the agent is still worth
                     // importing without it.
                     skipped++;
-                    LOGGER.warnf("Connection '%s' from %s was refused and not imported: %s", LogSanitizer.sanitize(name), file.getFileName(),
-                            LogSanitizer.sanitize(e.getMessage()));
+                    LOGGER.warnf("Connection '%s' from %s was refused and not imported: %s", LogSanitizer.sanitize(name),
+                            LogSanitizer.sanitize(String.valueOf(file.getFileName())), LogSanitizer.sanitize(e.getMessage()));
                 } catch (Exception e) {
                     skipped++;
-                    LOGGER.warnf("Failed to import connection from %s: %s", file.getFileName(), LogSanitizer.sanitize(e.getMessage()));
+                    LOGGER.warnf("Failed to import connection from %s: %s", LogSanitizer.sanitize(String.valueOf(file.getFileName())),
+                            LogSanitizer.sanitize(e.getMessage()));
                 }
             }
         } catch (IOException e) {
-            LOGGER.warnf("Could not read the archive's connections: %s", e.getMessage());
+            LOGGER.warnf("Could not read the archive's connections: %s", LogSanitizer.sanitize(e.getMessage()));
         }
         if (imported > 0 || skipped > 0) {
             LOGGER.infof("Connections: imported %d, skipped %d", imported, skipped);

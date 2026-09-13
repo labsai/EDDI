@@ -39,6 +39,7 @@ import ai.labs.eddi.datastore.serialization.IDescriptorStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.secrets.sanitize.SecretScrubber;
 import ai.labs.eddi.utils.FileUtilities;
+import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.utils.RestUtilities;
 import io.quarkus.scheduler.Scheduled;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -979,7 +980,8 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                 try {
                     references.add(ConnectionReference.parse(matcher.group()));
                 } catch (IllegalArgumentException e) {
-                    LOGGER.debugf("Skipping an unparseable connection reference in an exported config: %s", e.getMessage());
+                    LOGGER.debugf("Skipping an unparseable connection reference in an exported config: %s",
+                            LogSanitizer.sanitize(e.getMessage()));
                 }
             }
         }
@@ -1013,14 +1015,15 @@ public class RestExportService extends AbstractBackupService implements IRestExp
             int exported = 0;
             for (ConnectionReference reference : references) {
                 if (!ConnectionReference.DEFAULT_TENANT.equals(reference.tenantId())) {
-                    LOGGER.warnf("Not exporting %s: only default-tenant connections are exported", reference.toReferenceString());
+                    LOGGER.warnf("Not exporting %s: only default-tenant connections are exported",
+                            LogSanitizer.sanitize(reference.toReferenceString()));
                     continue;
                 }
                 String id = connectionStore.idOfName(reference.tenantId(), reference.name());
                 ConnectionConfiguration connection = id == null ? null : connectionStore.readByName(reference.tenantId(), reference.name());
                 if (connection == null) {
                     LOGGER.warnf("The agent references %s but no such connection exists; the reference will dangle on import",
-                            reference.toReferenceString());
+                            LogSanitizer.sanitize(reference.toReferenceString()));
                     continue;
                 }
                 if (connectionsDir == null) {
@@ -1036,10 +1039,10 @@ public class RestExportService extends AbstractBackupService implements IRestExp
             }
             if (exported > 0) {
                 LOGGER.infof("Exported %d connection(s) (referenced: %s)", exported,
-                        references.stream().map(ConnectionReference::toReferenceString).toList());
+                        LogSanitizer.sanitize(references.stream().map(ConnectionReference::toReferenceString).toList().toString()));
             }
         } catch (Exception e) {
-            LOGGER.warnf("Failed to export connections: %s", e.getMessage());
+            LOGGER.warnf("Failed to export connections: %s", LogSanitizer.sanitize(e.getMessage()));
         }
     }
 

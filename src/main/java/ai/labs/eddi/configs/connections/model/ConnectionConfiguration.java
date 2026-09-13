@@ -300,7 +300,7 @@ public class ConnectionConfiguration {
             // ConnectionStartupGuard, for a document that arrived some other way.
             if (isPlaintextRemoteOrigin(canonical)) {
                 LOGGER.warnf("[CONNECTIONS] Connection '%s' allows its credential to be sent over plaintext http to %s. Accepted, but "
-                        + "the credential crosses the network unencrypted; prefer an https origin.", sanitize(name), canonical);
+                        + "the credential crosses the network unencrypted; prefer an https origin.", sanitize(name), sanitize(canonical));
             }
         }
     }

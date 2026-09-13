@@ -39,9 +39,15 @@ import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -199,6 +205,48 @@ class RestExportServiceConnectionsTest {
 
         assertEquals(200, response.getStatus(), "an archive is still worth having; the import side reports the dangling name too");
         assertFalse(connectionsDirExists.get());
+    }
+
+    @Test
+    @DisplayName("a connection name carrying a line break reaches the log sanitized, so it cannot forge a log entry")
+    void logsAReferenceSanitized() throws Exception {
+        // The reference grammar stops only at '}', so an author-written config can
+        // carry a raw line break inside a connection name — and the export logs the
+        // reference it skips.
+        httpCallsJson = "{\"httpCalls\":[{\"request\":{\"headers\":{\"Authorization\":\"${connection:acme/ji\nra}\"}}}]}";
+        List<String> records = new ArrayList<>();
+        var handler = new Handler() {
+            @Override
+            public void publish(LogRecord record) {
+                records.add(record.getMessage() + " " + Arrays.toString(record.getParameters()));
+            }
+
+            @Override
+            public void flush() {
+                // nothing is buffered
+            }
+
+            @Override
+            public void close() {
+                // nothing to release
+            }
+        };
+        var logger = Logger.getLogger(RestExportService.class.getName());
+        Level previousLevel = logger.getLevel();
+        boolean previousUseParentHandlers = logger.getUseParentHandlers();
+        logger.setLevel(Level.ALL);
+        logger.setUseParentHandlers(false);
+        logger.addHandler(handler);
+        try {
+            exportService.exportAgent(AGENT_ID, 1, null, null, null);
+        } finally {
+            logger.removeHandler(handler);
+            logger.setLevel(previousLevel);
+            logger.setUseParentHandlers(previousUseParentHandlers);
+        }
+
+        assertTrue(records.stream().anyMatch(record -> record.contains("ji_ra")), "the skipped reference must be logged; saw: " + records);
+        assertTrue(records.stream().noneMatch(record -> record.contains("ji\nra")), "a raw line break must never reach the log: " + records);
     }
 
     private static void deleteRecursively(Path dir) throws IOException {

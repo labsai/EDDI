@@ -28,6 +28,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 /**
  * Speaks to an OAuth 2.0 token endpoint. Nothing else.
  * <p>
@@ -191,7 +193,7 @@ public class OAuthTokenClient {
             // never approved for them. The grant is untouched: a provider migrating
             // its token endpoint is a configuration change, not a dead grant.
             LOGGER.warnf("Token endpoint for connection '%s' answered HTTP %d with a redirect, which is never followed",
-                    connection.getName(), response.statusCode());
+                    sanitize(connection.getName()), response.statusCode());
             throw new ConnectionException(ConnectionException.Reason.TOKEN_ENDPOINT_UNAVAILABLE, "Token endpoint for connection '"
                     + connection.getName() + "' answered HTTP " + response.statusCode()
                     + ". A token endpoint must not redirect: the request carries the client secret and the grant's refresh token, and "
@@ -219,7 +221,8 @@ public class OAuthTokenClient {
             // A non-JSON error body is itself only worth its status code.
         }
         boolean terminal = TERMINAL_ERRORS.contains(errorCode);
-        LOGGER.warnf("Token endpoint for connection '%s' returned HTTP %d (%s)", connection.getName(), response.statusCode(), errorCode);
+        LOGGER.warnf("Token endpoint for connection '%s' returned HTTP %d (%s)", sanitize(connection.getName()), response.statusCode(),
+                sanitize(errorCode));
         if (terminal) {
             return new ConnectionException(ConnectionException.Reason.GRANT_UNUSABLE, "The provider rejected the grant for connection '"
                     + connection.getName() + "' (" + errorCode + "). The user must reconnect.");
@@ -288,7 +291,7 @@ public class OAuthTokenClient {
         Duration configured = Duration.ofMillis(connection.getTimeoutMs());
         if (configured.compareTo(MAX_TIMEOUT) > 0) {
             LOGGER.warnf("Connection '%s' sets timeoutMs=%d, above the %ds ceiling that keeps the refresh lease meaningful — clamping.",
-                    connection.getName(), connection.getTimeoutMs(), MAX_TIMEOUT.toSeconds());
+                    sanitize(connection.getName()), connection.getTimeoutMs(), MAX_TIMEOUT.toSeconds());
             return MAX_TIMEOUT;
         }
         return configured;

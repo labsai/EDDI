@@ -13,6 +13,7 @@ import ai.labs.eddi.modules.llm.tools.spi.ToolRequestResolver;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.A2AAgentConfig;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import ai.labs.eddi.secrets.SecretResolver;
+import ai.labs.eddi.utils.LogSanitizer;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
@@ -526,7 +527,8 @@ public class A2AToolProviderManager {
                     // names the cause.
                     String binding = connectionResolver.bindingOf(apiKey).map(Enum::name).orElse("PER_USER or CALLER_SUPPLIED");
                     LOGGER.warnf("A2A agent at %s is bound to a %s connection, so agent-card discovery is sent unauthenticated. If the peer "
-                            + "requires a token to serve its agent card, bind it to a SERVICE connection instead.", agentUrl, binding);
+                            + "requires a token to serve its agent card, bind it to a SERVICE connection instead.", LogSanitizer.sanitize(agentUrl),
+                            binding);
                     return;
                 }
                 requestBuilder.header(credential.get().headerName(), credential.get().headerValue());
