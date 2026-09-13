@@ -36,7 +36,7 @@ services:
         condition: service_completed_successfully
 
   ollama:
-    image: ollama/ollama:0.13.0
+    image: ollama/ollama:0.34.0
     restart: always
     ports:
       # Host-visible so the `ollama` CLI and curl still reach it directly.
@@ -60,7 +60,7 @@ services:
   #   OLLAMA_PULL_MODEL=qwen3:4b docker compose -f … up -d
   # or set it empty to skip the pull entirely.
   ollama-pull:
-    image: ollama/ollama:0.13.0
+    image: ollama/ollama:0.34.0
     restart: "no"
     depends_on:
       ollama:
