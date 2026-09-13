@@ -363,6 +363,17 @@ public class RestConnectionStore implements IRestConnectionStore {
                     + "could claim any userId and resolve that user's tokens, so resolution refuses outright — the connection would save "
                     + "and then fail every call. Enable OIDC, or use SERVICE binding.");
         }
+        if (connectionConfiguration.getBinding() == Binding.CALLER_SUPPLIED && !authorizationEnabled) {
+            // The credential arrives in a request header, and CallerIdentityContext
+            // drops that header for an anonymous identity — deliberately, so an
+            // unauthenticated caller cannot make EDDI spend a credential on its behalf.
+            // With authorization off every caller is anonymous, so the connection
+            // would save and then fail every call with NO_CALLER_CREDENTIAL.
+            throw new BadRequestException("A CALLER_SUPPLIED connection requires authorization.enabled=true. The credential travels in the "
+                    + "X-EDDI-Connection-Credential header, which is only read from an authenticated caller — an anonymous request has "
+                    + "it dropped — so with OIDC off the connection would save and then refuse every call as NO_CALLER_CREDENTIAL. Enable "
+                    + "OIDC, or use SERVICE binding with a vaulted key.");
+        }
         if (connectionConfiguration.getAuthType() != null && connectionConfiguration.getAuthType().isOAuth() && !secretProvider.isAvailable()) {
             throw new BadRequestException("An OAuth connection requires an active SecretsVault (set EDDI_VAULT_MASTER_KEY). Grants are "
                     + "envelope-encrypted with the tenant DEK and there is deliberately no plaintext fallback for refresh tokens, so "

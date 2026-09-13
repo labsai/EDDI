@@ -162,6 +162,58 @@ class RestConnectionStoreWriteGuardTest {
     }
 
     @Nested
+    @DisplayName("the deployment guard")
+    class DeploymentGuard {
+
+        private RestConnectionStore restWithoutAuthorization() {
+            return new RestConnectionStore(connectionStore, mock(IDocumentDescriptorStore.class), mock(IJsonSchemaCreator.class),
+                    connectionRegistry, grantStore, secretProvider, false, mock(ResourceAccessGuard.class));
+        }
+
+        private ConnectionConfiguration callerSupplied() {
+            var connection = connection("gnowbe", null);
+            connection.setBinding(Binding.CALLER_SUPPLIED);
+            var auth = new StaticAuth();
+            auth.setHeaderName("x-api-key");
+            connection.setStaticAuth(auth);
+            return connection;
+        }
+
+        @Test
+        @DisplayName("a CALLER_SUPPLIED connection cannot be created where no caller is ever authenticated")
+        void refusesCallerSuppliedWithoutAuthorization() throws Exception {
+            // CallerIdentityContext drops the credential header for an anonymous
+            // identity, and with authorization off every identity is anonymous: the
+            // connection saved and then refused every call as NO_CALLER_CREDENTIAL.
+            var error = assertThrows(BadRequestException.class, () -> restWithoutAuthorization().createConnection(callerSupplied()));
+
+            assertTrue(error.getMessage().contains("authorization.enabled"), "the refusal must name the setting: " + error.getMessage());
+            assertTrue(error.getMessage().contains("CALLER_SUPPLIED"), error.getMessage());
+            verify(connectionStore, never()).create(any());
+        }
+
+        @Test
+        @DisplayName("the same refusal applies on update")
+        void refusesCallerSuppliedWithoutAuthorizationOnUpdate() throws Exception {
+            storedAs(connection("gnowbe", null), 1);
+
+            assertThrows(BadRequestException.class, () -> restWithoutAuthorization().updateConnection(ID, 1, callerSupplied()));
+
+            verify(connectionStore, never()).update(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("a CALLER_SUPPLIED connection is created once callers are authenticated")
+        void createsCallerSuppliedWithAuthorization() throws Exception {
+            when(connectionStore.create(any())).thenReturn(resourceId(1));
+
+            rest().createConnection(callerSupplied());
+
+            verify(connectionStore).create(any());
+        }
+    }
+
+    @Nested
     @DisplayName("the tenant guard")
     class TenantGuard {
 

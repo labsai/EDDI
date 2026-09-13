@@ -191,6 +191,13 @@ public class ConnectionStartupGuard {
                     + "user's tokens (see OpenAiAuthFilter's trust-user-headers caveat). Enable OIDC, or change the connection to SERVICE "
                     + "binding.");
         }
+        boolean anyCallerSupplied = connections.stream().anyMatch(connection -> connection.getBinding() == Binding.CALLER_SUPPLIED);
+        if (anyCallerSupplied && !authorizationEnabled) {
+            LOGGER.error("[CONNECTIONS] A CALLER_SUPPLIED connection is stored, but authorization.enabled=false. The credential travels in "
+                    + "the X-EDDI-Connection-Credential header, which is only read from an authenticated caller — an anonymous request "
+                    + "has it dropped — so every call through it will be REFUSED at request time as NO_CALLER_CREDENTIAL. Enable OIDC, "
+                    + "or change the connection to SERVICE binding with a vaulted key.");
+        }
         if (anyOAuth && !secretProvider.isAvailable()) {
             LOGGER.error("[CONNECTIONS] An OAuth connection is stored, but the SecretsVault is inactive (EDDI_VAULT_MASTER_KEY is unset). "
                     + "Every grant it would store or read will be REFUSED at request time: grants are envelope-encrypted with the tenant "

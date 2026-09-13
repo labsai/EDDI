@@ -137,6 +137,15 @@ is refused at save time rather than left to race theirs. `username` and
 `passwordRef` are refused for the same reason, and `authType` must be `STATIC` —
 there is nothing for EDDI to encode, exchange or refresh.
 
+**The caller must be authenticated to EDDI.** The header is read only from a
+request with a verified identity; an anonymous request has it dropped, with a
+warning, so that an unauthenticated caller can never make EDDI spend a credential
+on its behalf. With `authorization.enabled=false` (the shipped default) every
+caller is anonymous, so a `CALLER_SUPPLIED` connection could save and then refuse
+every call. It is therefore refused at the write boundary with a **400** naming
+`authorization.enabled`, exactly as a `PER_USER` connection is, and a stored one
+is reported by the startup guard.
+
 The caller attaches it per request, once per connection:
 
 ```
@@ -331,7 +340,7 @@ deployment rather than of any stored document:
 | enabled with no `public-base-url` | It becomes the OAuth `redirect_uri`, which the provider matches **exactly**. Deriving it from an inbound request would let a `Host` header steer it. |
 | `public-base-url` that is not a bare https origin | `startsWith("https://")` accepts a path, query, fragment and userinfo — each produces a redirect URI the provider will not match, and the failure surfaces as a user-facing OAuth error rather than a config problem. The scheme is compared case-insensitively. Dev and test also accept `http://localhost[:port]` and `http://127.0.0.1[:port]` — loopback only, and still a bare origin. |
 
-### Three states the guard reports rather than refuses
+### The states the guard reports rather than refuses
 
 These are read from what is actually **stored**, because the dangerous state is
 "somebody created this connection on a deployment that cannot honour it" and no
@@ -342,7 +351,13 @@ console; none of them stops the boot.
 | --- | --- |
 | a `PER_USER` connection with `authorization.enabled=false` | Every resolution of it is refused. There is no verified identity, so anyone claiming `userId=alice` would otherwise resolve Alice's tokens. |
 | a `PER_USER` connection while `/v1` is enabled in api-key mode with `eddi.openai-compat.trust-user-headers=true` | Conversations opened through `/v1` carry a caller-supplied user id, so a holder of the shared api key can open a conversation as anyone. Those conversations are refused a `PER_USER` credential — see [Whose identity counts](#whose-identity-counts). |
+| a `CALLER_SUPPLIED` connection with `authorization.enabled=false` | Every call through it is refused as `NO_CALLER_CREDENTIAL`: the credential header is read only from an authenticated caller, and with OIDC off every caller is anonymous. |
 | an OAuth connection with an inert vault | Every grant it would store or read is refused. Grants are envelope-encrypted with the tenant DEK, and this is the one place the `autoVaultSecret` degrade-to-plaintext pattern is unacceptable — these are refresh tokens. |
+
+One more is reported at WARN rather than ERROR: a connection whose
+`baseUrlAllowlist` sends its credential over plaintext `http://` to a non-loopback
+host. It is accepted — see [The model](#the-model) — but said out loud at boot as
+well as at save time.
 
 **Reporting, not refusing, is deliberate**, and the reason is worth stating because
 it looks like a weakened control and is not. Refusing meant that an administrator
@@ -355,11 +370,12 @@ the database.
 Enforcement lives in the two places where it costs nothing and lands on someone
 who can act:
 
-* **The write boundary.** `POST /connectionstore/connections` and
-  `PUT /connectionstore/connections/{id}` answer **400**
-  for a `PER_USER` connection when `authorization.enabled=false`, and **400** for an
-  OAuth connection when the vault is inert. The administrator who wrote it is still
-  looking at it.
+* **The write boundary.** `POST /connectionstore/connections`,
+  `PUT /connectionstore/connections/{id}` and the duplicate endpoint
+  `POST /connectionstore/connections/{id}` answer **400** for a `PER_USER` or
+  `CALLER_SUPPLIED` connection when `authorization.enabled=false`, and **400** for
+  an OAuth connection when the vault is inert. The administrator who wrote it is
+  still looking at it.
 * **Per request.** `ConnectionResolver` refuses, and never falls back to the service
   grant. Sending the wrong authority is how one user reads another's data.
 

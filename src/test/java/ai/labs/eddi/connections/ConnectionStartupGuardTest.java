@@ -78,6 +78,7 @@ class ConnectionStartupGuardTest {
     private static final String UNVERIFIED_IDENTITY_REPORT = "authorization.enabled=false";
     private static final String INACTIVE_VAULT_REPORT = "EDDI_VAULT_MASTER_KEY";
     private static final String ANY_PER_USER_REPORT = "PER_USER connection is stored";
+    private static final String CALLER_SUPPLIED_REPORT = "CALLER_SUPPLIED connection is stored";
 
     private IConnectionStore connectionStore;
     private IDocumentDescriptorStore descriptorStore;
@@ -331,6 +332,31 @@ class ConnectionStartupGuardTest {
         assertDoesNotThrow(() -> start(enabledGuard(openAiCompatOff(), false)));
 
         assertTrue(logged(UNVERIFIED_IDENTITY_REPORT), logRecords.toString());
+    }
+
+    @Test
+    @DisplayName("a stored CALLER_SUPPLIED connection is reported when nothing authenticates the caller who would supply it")
+    void callerSuppliedWithoutAuthorizationIsReported() throws Exception {
+        // The credential header is dropped for an anonymous identity, and with
+        // authorization off every identity is anonymous — so the connection fails
+        // every call as NO_CALLER_CREDENTIAL while the operator can see the header
+        // going out. Nothing connected the two before this report.
+        storedConnections(callerSuppliedConnection());
+
+        assertDoesNotThrow(() -> start(enabledGuard(openAiCompatOff(), false)));
+
+        assertTrue(logged(CALLER_SUPPLIED_REPORT), logRecords.toString());
+        assertTrue(logged("NO_CALLER_CREDENTIAL"), "the report must name the refusal the operator will see; saw: " + logRecords);
+    }
+
+    @Test
+    @DisplayName("the CALLER_SUPPLIED report is withheld once callers are authenticated")
+    void callerSuppliedWithAuthorizationIsNotReported() throws Exception {
+        storedConnections(callerSuppliedConnection());
+
+        assertDoesNotThrow(() -> start(enabledGuard(openAiCompatOff(), true)));
+
+        assertFalse(logged(CALLER_SUPPLIED_REPORT), logRecords.toString());
     }
 
     @Test
@@ -633,6 +659,10 @@ class ConnectionStartupGuardTest {
 
     private static ConnectionConfiguration staticConnection() {
         return connection("jira", AuthType.STATIC, Binding.SERVICE);
+    }
+
+    private static ConnectionConfiguration callerSuppliedConnection() {
+        return connection("gnowbe", AuthType.STATIC, Binding.CALLER_SUPPLIED);
     }
 
     private static DocumentDescriptor descriptorOf(String resourceUri) {
