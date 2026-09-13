@@ -49,6 +49,95 @@ bottom of this file and are never archived.
 
 ---
 
+## 🔐 fix(connections): runtime and security findings from the connections review (2026-09-13)
+
+**Repo:** EDDI (`fix/connections-review-findings`)
+
+Thirteen findings from the code review of the connections feature, runtime and security side
+(the config/store/docs findings are on a sibling branch). One conventional commit per finding;
+every fix carries a regression test that fails without it.
+
+**Credentials that leaked or went missing.**
+
+- **R1 — connection-owned headers persisted in plaintext.** `RequestRedactor` recognised a
+  credential only by conventional header name, a `${vault:` marker, or value shape. A `STATIC`
+  connection on `X-Amp-Id` or a `CALLER_SUPPLIED` one on `X-Gnowbe-Key` matched none, so the live
+  value was written to MongoDB and shown to a HITL approver. `buildRequest` now returns the header
+  names a connection filled, and both the persisted request map and the approval preview redact them
+  unconditionally, case-insensitively. MCP and A2A persist no request headers.
+- **R2 — no `CallerIdentity` on turn 0.** `startConversation` bound the `ResolutionPrincipal` around
+  the synchronous CONVERSATION_START turn but not the caller, so `${caller:token}` and every
+  `CALLER_SUPPLIED` connection failed closed on turn 0 with advice about scheduled runs. The identity
+  is captured once, binds the start turn, and the previous binding is restored (nested starts).
+- **R5 — principal not propagated to cascade/batch threads.** `callerIdentityContext.propagate`
+  carried the caller only; a `PER_USER` connection inside an agent-mode cascade step or a
+  fire-and-forget batch was refused. `ResolutionPrincipalContext` gains `propagate`/`withPrincipalSupplying`,
+  and `CallerIdentityContext.propagate` composes both — the single helper mid-pipeline dispatches
+  use, so the next binding is added there. The explicit `withIdentity(...)` sites stay caller-only:
+  they dispatch from request threads where the member conversation binds its own principal, or
+  compose with `withPrincipal` themselves (the HITL resume).
+
+**The token endpoint.**
+
+- **R3 — redirects followed with the body.** `sendValidated` re-implements redirect following
+  (method and body preserved on 307/308) and validates the hop against SSRF rules only. A token
+  request carries the client secret and the refresh token or code, so an allowlisted endpoint
+  answering 307 re-sent all of it elsewhere, while docs and Javadoc claimed otherwise.
+  `SafeHttpClient` gains `sendValidatedNoRedirect` and `sendNoRedirect`; any 3xx from a token
+  endpoint is `TOKEN_ENDPOINT_UNAVAILABLE` with a message saying a token endpoint must not redirect.
+- **R4 — transient failures marked terminal.** An access token that would not unseal inside the
+  refresh claim, and a 200 whose body is not a token response (HTML maintenance page, empty body,
+  no `access_token`), were `GRANT_UNUSABLE` and wrote `REFRESH_FAILED`. Both are transient now; only
+  `invalid_grant` / `invalid_client` / `unauthorized_client` is terminal.
+- **R6 — escaping exceptions, and on-prem IdPs.** The callback caught only `ConnectionException`
+  after claiming the state; an `IllegalArgumentException` from URL validation or an
+  `IllegalStateException` from the store reached the browser as a 500 with the state consumed.
+  Every `RuntimeException` after the claim is counted `exchange_failed`, logged at ERROR (class name
+  only) and answered 303. `refreshAsClaimant` wraps the same as `TOKEN_ENDPOINT_UNAVAILABLE` (503).
+  The token request no longer goes through the SSRF address block: the credential-endpoint
+  allowlist is a stricter rule (an exact operator-listed origin), so an on-premises IdP on a private
+  network is usable; scheme and host are still validated, nothing else gets the exemption.
+- **R7 — Postgres lease vs the DB clock.** `claimRefresh` compared a JVM-written lease against
+  `CURRENT_TIMESTAMP`; app/DB skew shortened the lease and let a second replica refresh mid-flight.
+  The JVM instant is bound, as `PostgresOAuthStateStore` and the Mongo store already do.
+
+**What the operator is told.**
+
+- **R8** — with `authorization.enabled=false` every request is anonymous and its credential headers
+  are dropped, so `NO_CALLER_CREDENTIAL` now says the deployment cannot accept one and names the fix,
+  instead of claiming the request carried nothing.
+- **R9** — the four OAuth/refresh meters were unprefixed and registered through a helper the
+  `MetricsDashboardCoverageTest` regex cannot see; they are `eddi.connection.*` now, registered via
+  `increment("eddi.…")`, charted in four new panels, and listed in `docs/metrics.md` and the
+  `docs/connections.md` table. `UNSUPPORTED_PLACEMENT` was mapped to 400 but never thrown —
+  `ApiCallExecutor` now throws it for a `${connection:…}` outside a header.
+- **R10** — the MCP discovery warning named `PER_USER` for `CALLER_SUPPLIED` too and A2A logged
+  nothing; `ConnectionResolver.bindingOf` names the actual binding for both, and routes a registry
+  read failure through `countLookupFailure`. RFC 9728 discovery is not implemented, and the
+  allowlist Javadoc and "Two allowlists" section no longer claim discovery endpoints.
+- **R11** — a cached `STATIC`/`BASIC` document without `staticAuth` NPE'd, which the MCP failure
+  classifier fed to the circuit breaker; both refuse with `INVALID_CONFIGURATION`, and BASIC with a
+  null username refuses rather than sending `null:password`.
+- **R12** — `VaultGrantChecker` skipped an unreadable connection at DEBUG (its secrets counted as
+  granted); it is now a violation naming the connection. `${vars:}` is expanded through
+  `GlobalVariableResolver` before the vault scan, on the connection hop and the general scan alike.
+- **R13** — tests for `X-EDDI-Connection-Credential` parsing, the HITL resume bindings, the
+  `lease_expired` branch (via a package-private await-timeout seam) and a failing `REFRESH_FAILED`
+  write, which no longer replaces the provider's verdict with a raw store exception.
+
+**Decision — `propagate` carries both bindings; `withIdentity` does not.** A wrapper that carries
+one of the two thread bindings and not the other is the drift R5 fixed, so the snapshot-current
+helper composes them. The explicit-identity helpers are used where the principal is deliberately
+different (HITL resume) or established later from stored memory (group members), so they stay
+single-purpose rather than silently overriding a principal the caller set.
+
+**Decision — the credential-endpoint allowlist outranks the SSRF address block for the token
+endpoint only.** An exact origin an operator wrote down is a stronger statement than "not a private
+address"; the httpcalls path keeps `eddi.security.ssrf-protection` untouched.
+
+**Not verifiable here:** `SafeHttpClientTest` binds a loopback server, which this sandbox refuses at
+`HttpServer.create` (pre-existing for the whole class); its three new no-redirect cases run in CI.
+
 ## ⚙️ fix(config): fifteen configuration defects, from scheduler units to a nine-megabyte orphan (2026-09-07)
 
 **Repo:** EDDI (`fix/review-quickwins-config`)
