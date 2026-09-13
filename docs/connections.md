@@ -210,7 +210,7 @@ as "not connected". Use `OAUTH2_CLIENT_CREDENTIALS` for a service account.
 | `allowUnverifiedPrincipal` | `PER_USER` only. Accept a user id EDDI never authenticated, on the grounds that a front proxy did. Default `false` — see [Whose identity counts](#whose-identity-counts) |
 | `staticAuth` | Header name plus a reference-only value template |
 | `oauth` | Endpoints, client id, a **vaulted** client secret, scopes |
-| `baseUrlAllowlist` | The origins this credential may be sent to. **Required.** Bare origins (`scheme://host[:port]`). `http://` is accepted — silently for loopback, with a **WARN** at save time and again at boot for any other host, because the credential then crosses the network unencrypted |
+| `baseUrlAllowlist` | The origins this credential may be sent to. **Required.** Bare origins (`scheme://host[:port]`). `http://` to a loopback host (`localhost`, `127.0.0.1`, `[::1]`) is always accepted. `http://` to any other host sends the credential across the network unencrypted, so it is **refused** unless the deployment sets `eddi.connections.allow-plaintext-remote-origins=true` — see [Plaintext origins](#plaintext-origins) |
 | `timeoutMs` | Token-endpoint timeout in milliseconds, **1–60000**; refused outside that range at save time. Unset means the resolver's default. The token client applies its own lower ceiling at use so the refresh lease always outlasts the request |
 
 `binding` is the field that makes Amplitude and Google Drive the same system.
@@ -356,10 +356,11 @@ console; none of them stops the boot.
 | an OAuth connection with an inert vault | Every grant it would store or read is refused. Grants are envelope-encrypted with the tenant DEK, and this is the one place the `autoVaultSecret` degrade-to-plaintext pattern is unacceptable — these are refresh tokens. |
 | a first-release `OAUTH2_AUTHORIZATION_CODE` connection still bound to `SERVICE` | Validation runs on write only, so the document loads — and fails every call as "not connected", because the flow files its grant under the user who consented and a `SERVICE`-bound resolution looks under a principal nothing can create a grant for. Re-save it as `PER_USER`. |
 
-One more is reported at WARN rather than ERROR: a connection whose
-`baseUrlAllowlist` sends its credential over plaintext `http://` to a non-loopback
-host. It is accepted — see [The model](#the-model) — but said out loud at boot as
-well as at save time.
+A connection whose `baseUrlAllowlist` sends its credential over plaintext `http://`
+to a non-loopback host is reported at **ERROR** while
+`eddi.connections.allow-plaintext-remote-origins=false` (the default), because every
+call through it to that origin is refused, and at **WARN** when the property is
+`true` — see [Plaintext origins](#plaintext-origins).
 
 **Reporting, not refusing, is deliberate**, and the reason is worth stating because
 it looks like a weakened control and is not. Refusing meant that an administrator
@@ -375,9 +376,10 @@ who can act:
 * **The write boundary.** `POST /connectionstore/connections`,
   `PUT /connectionstore/connections/{id}` and the duplicate endpoint
   `POST /connectionstore/connections/{id}` answer **400** for a `PER_USER` or
-  `CALLER_SUPPLIED` connection when `authorization.enabled=false`, and **400** for
-  an OAuth connection when the vault is inert. The administrator who wrote it is
-  still looking at it.
+  `CALLER_SUPPLIED` connection when `authorization.enabled=false`, **400** for
+  an OAuth connection when the vault is inert, and **400** for a remote `http://`
+  origin while `eddi.connections.allow-plaintext-remote-origins=false`. The
+  administrator who wrote it is still looking at it.
 * **Per request.** `ConnectionResolver` refuses, and never falls back to the service
   grant. Sending the wrong authority is how one user reads another's data.
 
@@ -388,6 +390,35 @@ explicable rather than mysterious.
 An empty `credential-endpoint-allowlist` is logged as a **warning** rather than an
 error, because `STATIC` and `BASIC` connections are unaffected by it. What it costs
 an OAuth connection is below.
+
+### Plaintext origins
+
+```properties
+eddi.connections.allow-plaintext-remote-origins=false
+```
+
+A `baseUrlAllowlist` entry is where a connection's credential is delivered, so an
+`http://` origin on anything but loopback puts that credential on the network
+unencrypted. While the property is `false` — the default — such an origin is
+refused in three places:
+
+| Where | What happens |
+| --- | --- |
+| Save (`POST`/`PUT`, duplicate, archive import) | **400** naming the property; an import skips the connection with that reason |
+| Each request (`ConnectionResolver`) | `TARGET_NOT_ALLOWED` naming the property, before any secret is resolved |
+| Boot (`ConnectionStartupGuard`) | Reported at **ERROR** for every stored connection that has one |
+
+Set it to `true` to accept a plaintext internal service deliberately; the origin is
+then resolved as before and reported at **WARN** at save time and at boot.
+`http://localhost`, `http://127.0.0.1` and `http://[::1]` are allowed either way —
+they never leave the machine.
+
+> **Upgrade note.** Earlier builds accepted a remote `http://` origin with a warning.
+> After upgrading, **existing connections with a remote `http://` origin stop
+> resolving** — every call to that origin is refused as `TARGET_NOT_ALLOWED`, and
+> re-saving the connection answers 400 — until the origin is changed to `https://`
+> or `eddi.connections.allow-plaintext-remote-origins=true` is set. The first boot
+> names each affected connection at ERROR.
 
 ### Two allowlists, and why they are separate
 
@@ -693,7 +724,8 @@ name**. An existing one is **never overwritten** — it is a live credential con
 possibly with linked accounts filed under that name — whatever the import strategy. The
 create runs through the same gate as `POST /connectionstore/connections`: structural
 validation, the deployment checks (`PER_USER` and `CALLER_SUPPLIED` need OIDC, OAuth needs
-an active vault) and the name-uniqueness lock. A document the deployment refuses is
+an active vault, a remote `http://` origin needs `eddi.connections.allow-plaintext-remote-origins`)
+and the name-uniqueness lock. A document the deployment refuses is
 **skipped with the reason logged**, not a failed import — the agent is still worth having,
 and the refusal names what to fix. Skips of both kinds are counted in an
 `X-Connections-Skipped` header on the import response.

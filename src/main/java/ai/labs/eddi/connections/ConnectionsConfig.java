@@ -25,8 +25,19 @@ public class ConnectionsConfig {
     /** Path the provider redirects back to. */
     public static final String CALLBACK_PATH = "/connections/callback";
 
+    /** The property behind {@link #isAllowPlaintextRemoteOrigins()}. */
+    public static final String ALLOW_PLAINTEXT_REMOTE_ORIGINS = "eddi.connections.allow-plaintext-remote-origins";
+
     private final boolean enabled;
     private final String publicBaseUrl;
+
+    /**
+     * Field-injected rather than a constructor parameter, so the constructor and
+     * the test seams built on it keep their shape. An instance constructed without
+     * a container reads it as {@code false} — the refusing default.
+     */
+    @ConfigProperty(name = "eddi.connections.allow-plaintext-remote-origins", defaultValue = "false")
+    boolean allowPlaintextRemoteOrigins;
 
     @Inject
     public ConnectionsConfig(@ConfigProperty(name = "eddi.connections.enabled", defaultValue = "false") boolean enabled,
@@ -41,8 +52,30 @@ public class ConnectionsConfig {
         this.publicBaseUrl = publicBaseUrl == null ? "" : publicBaseUrl.trim();
     }
 
+    /** Test seam. */
+    ConnectionsConfig(boolean enabled, String publicBaseUrl, boolean allowPlaintextRemoteOrigins) {
+        this(enabled, publicBaseUrl);
+        this.allowPlaintextRemoteOrigins = allowPlaintextRemoteOrigins;
+    }
+
     public boolean isEnabled() {
         return enabled;
+    }
+
+    /**
+     * Whether a connection may send its credential over plaintext http to a host
+     * other than loopback.
+     * <p>
+     * Default {@code false}: such a credential crosses the network unencrypted, and
+     * a per-connection allowlist entry — writable by one administrator request —
+     * should not be the only thing standing between a key and anyone on the path.
+     * When false the origin is refused at the write boundary, refused per request
+     * by {@code ConnectionResolver}, and reported at ERROR by the startup guard;
+     * when true it is accepted with a WARN. Loopback ({@code localhost},
+     * {@code 127.0.0.1}, {@code [::1]}) is allowed either way.
+     */
+    public boolean isAllowPlaintextRemoteOrigins() {
+        return allowPlaintextRemoteOrigins;
     }
 
     public String getPublicBaseUrl() {

@@ -341,6 +341,7 @@ Full guide: [connections.md](connections.md).
 | `eddi.connections.enabled` | `false` | Master switch for the connection credential model |
 | `eddi.connections.public-base-url` | *(empty)* | Externally reachable base URL for OAuth redirect URIs |
 | `eddi.connections.credential-endpoint-allowlist` | *(empty)* | Origins that may receive the **client secret** — a connection's token and authorization endpoints, and only those (RFC 9728 resource-metadata discovery is not implemented). Not where the access token goes: that is each connection's own `baseUrlAllowlist` |
+| `eddi.connections.allow-plaintext-remote-origins` | `false` | Whether a connection's `baseUrlAllowlist` may send its credential over plaintext `http://` to a non-loopback host. While `false` such an origin is refused at save time (400), refused per request (`TARGET_NOT_ALLOWED`) and reported at ERROR at boot; `true` accepts it with a WARN. Loopback `http://` is always allowed. **Upgrade note:** existing connections with a remote `http://` origin stop resolving until this is set |
 | `eddi.connections.state-sweep-interval` | `1h` | How often expired OAuth state entries are cleared |
 
 ---

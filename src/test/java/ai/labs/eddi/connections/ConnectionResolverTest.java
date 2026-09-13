@@ -450,6 +450,47 @@ class ConnectionResolverTest {
 
             assertThrows(ConnectionException.class, () -> resolver(false).resolve("${connection:jira}", null, null));
         }
+
+        @Test
+        @DisplayName("an allowlisted plaintext http target on a remote host is refused by default, naming the property, before any secret resolves")
+        void refusesPlaintextRemoteTargetByDefault() {
+            var connection = staticConnection();
+            connection.setBaseUrlAllowlist(List.of("http://api.internal.example"));
+            register(connection);
+
+            var error = assertThrows(ConnectionException.class,
+                    () -> resolver(false).resolve("${connection:jira}", URI.create("http://api.internal.example/issue/1"), null));
+
+            assertEquals(ConnectionException.Reason.TARGET_NOT_ALLOWED, error.getReason());
+            assertTrue(error.getMessage().contains("eddi.connections.allow-plaintext-remote-origins"), error.getMessage());
+            verify(secretResolver, never()).resolveValue(anyString());
+        }
+
+        @Test
+        @DisplayName("the same target resolves once the deployment allows plaintext remote origins")
+        void resolvesPlaintextRemoteTargetWhenAllowed() {
+            var connection = staticConnection();
+            connection.setBaseUrlAllowlist(List.of("http://api.internal.example"));
+            register(connection);
+            var resolver = resolver(false);
+            resolver.connectionsConfig = new ConnectionsConfig(true, "https://eddi.example.com", true);
+
+            assertEquals("Bearer live-token",
+                    resolver.resolve("${connection:jira}", URI.create("http://api.internal.example/issue/1"), null).headerValue());
+        }
+
+        @Test
+        @DisplayName("a plaintext http target on loopback resolves with the property at its default")
+        void resolvesLoopbackHttpTargetByDefault() {
+            var connection = staticConnection();
+            connection.setBaseUrlAllowlist(List.of("http://localhost:8080"));
+            register(connection);
+            var resolver = resolver(false);
+            resolver.connectionsConfig = new ConnectionsConfig(true, "https://eddi.example.com", false);
+
+            assertEquals("Bearer live-token",
+                    resolver.resolve("${connection:jira}", URI.create("http://localhost:8080/issue/1"), null).headerValue());
+        }
     }
 
     @Nested

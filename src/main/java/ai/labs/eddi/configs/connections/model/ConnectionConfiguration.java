@@ -292,15 +292,18 @@ public class ConnectionConfiguration {
         }
         for (String origin : baseUrlAllowlist) {
             String canonical = requireCanonicalOrigin(origin, "baseUrlAllowlist");
-            // Accepted, deliberately: an internal service behind a private network is
-            // a real deployment and refusing it would only push authors to put the
-            // credential somewhere with no allowlist at all. But it is a credential
-            // crossing the network unencrypted, so it is said out loud at the moment
-            // somebody can still change their mind — and again at boot, by
-            // ConnectionStartupGuard, for a document that arrived some other way.
+            // Structurally valid, so not refused here: whether a deployment accepts
+            // plaintext to an internal host is a deployment decision
+            // (eddi.connections.allow-plaintext-remote-origins, enforced by the write
+            // boundary and the resolver), not a property of the document. It is a
+            // credential crossing the network unencrypted either way, so it is said
+            // out loud at the moment somebody can still change their mind — and again
+            // at boot, by ConnectionStartupGuard, for a document that arrived some
+            // other way.
             if (isPlaintextRemoteOrigin(canonical)) {
-                LOGGER.warnf("[CONNECTIONS] Connection '%s' allows its credential to be sent over plaintext http to %s. Accepted, but "
-                        + "the credential crosses the network unencrypted; prefer an https origin.", sanitize(name), sanitize(canonical));
+                LOGGER.warnf("[CONNECTIONS] Connection '%s' allows its credential to be sent over plaintext http to %s; the credential "
+                        + "crosses the network unencrypted. It is refused unless eddi.connections.allow-plaintext-remote-origins=true; "
+                        + "prefer an https origin.", sanitize(name), sanitize(canonical));
             }
         }
     }

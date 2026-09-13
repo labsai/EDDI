@@ -245,9 +245,20 @@ public class ConnectionStartupGuard {
                             + "connection with a bare origin.", sanitize(connection.getName()), e.getClass().getSimpleName(), sanitize(origin));
                     continue;
                 }
-                if (plaintextRemote) {
+                if (!plaintextRemote) {
+                    continue;
+                }
+                if (connectionsConfig.isAllowPlaintextRemoteOrigins()) {
                     LOGGER.warnf("[CONNECTIONS] Connection '%s' allows its credential to be sent over plaintext http to %s; the credential "
                             + "crosses the network unencrypted. Prefer an https origin.", sanitize(connection.getName()), sanitize(origin));
+                } else {
+                    // ERROR, not WARN: with the property off this is not a risk being
+                    // accepted but a connection that fails every call to that origin — and
+                    // after an upgrade, one that used to work.
+                    LOGGER.errorf("[CONNECTIONS] Connection '%s' allows its credential to be sent over plaintext http to %s, but %s=false, "
+                            + "so every call through it to that origin is REFUSED at request time as TARGET_NOT_ALLOWED. Change the origin to "
+                            + "https, or set %s=true to accept an unencrypted credential deliberately.", sanitize(connection.getName()),
+                            sanitize(origin), ConnectionsConfig.ALLOW_PLAINTEXT_REMOTE_ORIGINS, ConnectionsConfig.ALLOW_PLAINTEXT_REMOTE_ORIGINS);
                 }
             }
         }

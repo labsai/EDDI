@@ -87,6 +87,16 @@ public class ConnectionResolver {
     @Inject
     ResolutionPrincipalContext resolutionPrincipalContext;
 
+    /**
+     * Deployment settings, read for
+     * {@value ConnectionsConfig#ALLOW_PLAINTEXT_REMOTE_ORIGINS}. Field-injected for
+     * the same reason as {@link #resolutionPrincipalContext}; a resolver built
+     * without a container reads the property as {@code false}, the refusing
+     * default.
+     */
+    @Inject
+    ConnectionsConfig connectionsConfig;
+
     @Inject
     public ConnectionResolver(ConnectionRegistry connectionRegistry, CredentialReferenceResolver credentialReferenceResolver,
             CallerIdentityContext callerIdentityContext, MeterRegistry meterRegistry, AccessTokenSupplier accessTokenSupplier,
@@ -463,11 +473,32 @@ public class ConnectionResolver {
             // same origin, and a comparison that says otherwise looks like a working
             // allowlist that blocks everything.
             if (canonicalise(allowed, connection).equals(origin)) {
+                requireEncryptedUnlessPermitted(connection, origin);
                 return;
             }
         }
         throw new ConnectionException(ConnectionException.Reason.TARGET_NOT_ALLOWED, "Connection '" + connection.getName() + "' may not be sent to "
                 + origin + ". Add that origin to its baseUrlAllowlist if it is intended.");
+    }
+
+    /**
+     * An allowlisted origin is still refused when it would carry the credential in
+     * the clear to another host, unless the deployment has said that is acceptable.
+     * <p>
+     * Checked here as well as at the write boundary, because a document written
+     * before the property existed — or imported, or written straight to the store —
+     * never faced that check. Loopback is exempt: it never leaves the machine.
+     */
+    private void requireEncryptedUnlessPermitted(ConnectionConfiguration connection, String canonicalOrigin) {
+        if (!ConnectionConfiguration.isPlaintextRemoteOrigin(canonicalOrigin)
+                || (connectionsConfig != null && connectionsConfig.isAllowPlaintextRemoteOrigins())) {
+            return;
+        }
+        throw new ConnectionException(ConnectionException.Reason.TARGET_NOT_ALLOWED, "Connection '" + connection.getName() + "' may not be sent to "
+                + canonicalOrigin + ": that is plaintext http to a host other than this one, so the credential would cross the network "
+                + "unencrypted. The origin is on the connection's baseUrlAllowlist, but " + ConnectionsConfig.ALLOW_PLAINTEXT_REMOTE_ORIGINS
+                + "=false. Use an https origin, or set " + ConnectionsConfig.ALLOW_PLAINTEXT_REMOTE_ORIGINS + "=true to accept an "
+                + "unencrypted credential deliberately.");
     }
 
     private static String originOf(URI targetUrl, ConnectionConfiguration connection) {

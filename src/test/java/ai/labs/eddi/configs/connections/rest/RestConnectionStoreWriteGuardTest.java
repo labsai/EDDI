@@ -14,6 +14,7 @@ import ai.labs.eddi.configs.connections.model.StaticAuth;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.connections.ConnectionRegistry;
+import ai.labs.eddi.connections.ConnectionsConfig;
 import ai.labs.eddi.connections.grants.IConnectionGrantStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.secrets.ISecretProvider;
@@ -346,6 +347,46 @@ class RestConnectionStoreWriteGuardTest {
             when(connectionStore.create(any())).thenReturn(resourceId(1));
 
             rest().createConnection(callerSupplied());
+
+            verify(connectionStore).create(any());
+        }
+
+        private ConnectionConfiguration withOrigin(String origin) {
+            var connection = connection("internal", null);
+            connection.setBaseUrlAllowlist(List.of(origin));
+            return connection;
+        }
+
+        @Test
+        @DisplayName("a remote plaintext http origin is refused by default, naming the property")
+        void refusesPlaintextRemoteOriginByDefault() throws Exception {
+            var error = assertThrows(BadRequestException.class, () -> rest().createConnection(withOrigin("http://api.internal.example:8080")));
+
+            assertTrue(error.getMessage().contains("eddi.connections.allow-plaintext-remote-origins"), "the refusal must name the setting: "
+                    + error.getMessage());
+            verify(connectionStore, never()).create(any());
+        }
+
+        @Test
+        @DisplayName("a remote plaintext http origin is created once the deployment allows it")
+        void createsPlaintextRemoteOriginWhenAllowed() throws Exception {
+            when(connectionStore.create(any())).thenReturn(resourceId(1));
+            var store = rest();
+            var connectionsConfig = mock(ConnectionsConfig.class);
+            when(connectionsConfig.isAllowPlaintextRemoteOrigins()).thenReturn(true);
+            store.connectionsConfig = connectionsConfig;
+
+            store.createConnection(withOrigin("http://api.internal.example:8080"));
+
+            verify(connectionStore).create(any());
+        }
+
+        @Test
+        @DisplayName("a loopback http origin is created with the property at its default")
+        void createsLoopbackHttpOriginByDefault() throws Exception {
+            when(connectionStore.create(any())).thenReturn(resourceId(1));
+
+            rest().createConnection(withOrigin("http://localhost:7070"));
 
             verify(connectionStore).create(any());
         }

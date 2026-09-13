@@ -15,6 +15,7 @@ import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.connections.ConnectionRegistry;
+import ai.labs.eddi.connections.ConnectionsConfig;
 import ai.labs.eddi.connections.grants.IConnectionGrantStore;
 import ai.labs.eddi.connections.model.ConnectionReference;
 import ai.labs.eddi.datastore.IResourceStore;
@@ -57,6 +58,14 @@ public class RestConnectionStore implements IRestConnectionStore {
      * write path.
      */
     private final Object[] nameLocks = new Object[64];
+
+    /**
+     * Read for {@value ConnectionsConfig#ALLOW_PLAINTEXT_REMOTE_ORIGINS}.
+     * Field-injected so the constructor keeps its shape; a store built without a
+     * container reads the property as {@code false}, the refusing default.
+     */
+    @Inject
+    ConnectionsConfig connectionsConfig;
 
     @Inject
     public RestConnectionStore(IConnectionStore connectionStore, IDocumentDescriptorStore documentDescriptorStore,
@@ -614,6 +623,29 @@ public class RestConnectionStore implements IRestConnectionStore {
             throw new BadRequestException("An OAuth connection requires an active SecretsVault (set EDDI_VAULT_MASTER_KEY). Grants are "
                     + "envelope-encrypted with the tenant DEK and there is deliberately no plaintext fallback for refresh tokens, so "
                     + "linking an account would fail at the moment the token comes back.");
+        }
+        requirePlaintextOriginsPermitted(connectionConfiguration);
+    }
+
+    /**
+     * Refuses a remote plaintext http origin unless the deployment allows one, so
+     * the connection is not saved only to be refused on every call by the resolver.
+     * Loopback is always allowed. Runs after {@code validate()}, so every entry
+     * already canonicalises.
+     */
+    private void requirePlaintextOriginsPermitted(ConnectionConfiguration connectionConfiguration) {
+        if ((connectionsConfig != null && connectionsConfig.isAllowPlaintextRemoteOrigins())
+                || connectionConfiguration.getBaseUrlAllowlist() == null) {
+            return;
+        }
+        for (String origin : connectionConfiguration.getBaseUrlAllowlist()) {
+            String canonical = ConnectionConfiguration.requireCanonicalOrigin(origin, "baseUrlAllowlist");
+            if (ConnectionConfiguration.isPlaintextRemoteOrigin(canonical)) {
+                throw new BadRequestException("baseUrlAllowlist entry " + canonical + " would send this connection's credential over plaintext "
+                        + "http to a remote host, and " + ConnectionsConfig.ALLOW_PLAINTEXT_REMOTE_ORIGINS + "=false, so every call to it "
+                        + "would be refused. Use an https origin, or set " + ConnectionsConfig.ALLOW_PLAINTEXT_REMOTE_ORIGINS + "=true on "
+                        + "this deployment to accept an unencrypted credential deliberately. Loopback hosts are always allowed.");
+            }
         }
     }
 

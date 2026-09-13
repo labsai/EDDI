@@ -108,7 +108,9 @@ class ConnectionStartupGuardTest {
                 // The printf-style calls keep their arguments out of the message, so both
                 // halves are kept — otherwise an assertion on a logged value silently
                 // matches nothing.
-                logRecords.add(record.getMessage() + " " + Arrays.toString(record.getParameters()));
+                // Prefixed with the level, so a test can tell a report from a refusal
+                // notice.
+                logRecords.add(levelTag(record.getLevel()) + " " + record.getMessage() + " " + Arrays.toString(record.getParameters()));
             }
 
             @Override
@@ -485,6 +487,33 @@ class ConnectionStartupGuardTest {
         assertTrue(logged("http://api.internal.example:8080"), "and the origin; saw: " + logRecords);
     }
 
+    @Test
+    @DisplayName("with plaintext remote origins not allowed (the default) the report is an ERROR naming the property")
+    void plaintextRemoteOriginIsAnErrorByDefault() throws Exception {
+        var internal = staticConnection();
+        internal.setBaseUrlAllowlist(List.of("http://api.internal.example:8080"));
+        storedConnections(internal);
+
+        assertDoesNotThrow(() -> start(enabledGuard()));
+
+        assertTrue(loggedAt("[ERROR]", "plaintext http"), "every call to that origin is refused, so this is not a mere warning; saw: " + logRecords);
+        assertTrue(logged("eddi.connections.allow-plaintext-remote-origins"), "the report must name the setting; saw: " + logRecords);
+        assertFalse(loggedAt("[WARN]", "plaintext http"), logRecords.toString());
+    }
+
+    @Test
+    @DisplayName("with plaintext remote origins allowed the report stays a WARN")
+    void plaintextRemoteOriginIsAWarningWhenAllowed() throws Exception {
+        var internal = staticConnection();
+        internal.setBaseUrlAllowlist(List.of("http://api.internal.example:8080"));
+        storedConnections(internal);
+
+        assertDoesNotThrow(() -> start(guard(new ConnectionsConfig(true, PRODUCTION_BASE_URL, true), approvedEndpoints(), openAiCompatOff(), true)));
+
+        assertTrue(loggedAt("[WARN]", "plaintext http"), logRecords.toString());
+        assertFalse(loggedAt("[ERROR]", "plaintext http"), "an accepted risk is not an error; saw: " + logRecords);
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"http://localhost:7070", "http://127.0.0.1", "https://api.example.com"})
     @DisplayName("loopback and https origins are not reported")
@@ -738,5 +767,22 @@ class ConnectionStartupGuardTest {
 
     private boolean logged(String fragment) {
         return logRecords.stream().anyMatch(record -> record.contains(fragment));
+    }
+
+    private boolean loggedAt(String levelTag, String fragment) {
+        return logRecords.stream().anyMatch(record -> record.startsWith(levelTag) && record.contains(fragment));
+    }
+
+    /**
+     * By numeric level, so it reads the same under JUL and the JBoss log manager.
+     */
+    private static String levelTag(Level level) {
+        if (level == null) {
+            return "[INFO]";
+        }
+        if (level.intValue() >= Level.SEVERE.intValue()) {
+            return "[ERROR]";
+        }
+        return level.intValue() >= Level.WARNING.intValue() ? "[WARN]" : "[INFO]";
     }
 }
