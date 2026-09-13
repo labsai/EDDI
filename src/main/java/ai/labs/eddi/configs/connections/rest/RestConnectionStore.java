@@ -113,9 +113,13 @@ public class RestConnectionStore implements IRestConnectionStore {
         // resolve by scan order. Suffixed rather than refused, because refusing to
         // duplicate is a worse answer than producing an obviously-renamed copy.
         config.setName(nextFreeName(config));
-        // A copy is a new connection, so it faces the same gate: duplicating a
-        // pre-existing non-default-tenant document would mint a second one nobody
-        // can link or unlink.
+        // A copy is a new connection, so it faces every gate a create does. The
+        // deployment checks in particular: without them a PER_USER or OAuth
+        // document that predates OIDC or the vault being switched off could be
+        // duplicated into a second connection that saves and then fails every call.
+        validateForWrite(config);
+        // Duplicating a pre-existing non-default-tenant document would mint a
+        // second one nobody can link or unlink.
         requireDefaultTenant(config);
         Response response = restVersionInfo.create(config);
         connectionRegistry.invalidate();

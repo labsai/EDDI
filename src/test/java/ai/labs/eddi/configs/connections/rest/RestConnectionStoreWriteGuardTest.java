@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.connections.IConnectionStore;
 import ai.labs.eddi.configs.connections.model.AuthType;
 import ai.labs.eddi.configs.connections.model.Binding;
 import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
+import ai.labs.eddi.configs.connections.model.OAuthConfig;
 import ai.labs.eddi.configs.connections.model.StaticAuth;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
@@ -208,6 +209,59 @@ class RestConnectionStoreWriteGuardTest {
             when(connectionStore.create(any())).thenReturn(resourceId(1));
 
             rest().createConnection(callerSupplied());
+
+            verify(connectionStore).create(any());
+        }
+
+        private ConnectionConfiguration serviceOAuth() {
+            var connection = connection("analytics", null);
+            connection.setAuthType(AuthType.OAUTH2_CLIENT_CREDENTIALS);
+            connection.setStaticAuth(null);
+            var oauth = new OAuthConfig();
+            oauth.setTokenUrl("https://auth.example.com/token");
+            oauth.setClientId("client");
+            oauth.setClientSecret("${vault:client-secret}");
+            connection.setOauth(oauth);
+            return connection;
+        }
+
+        @Test
+        @DisplayName("duplicating an OAuth connection faces the vault check the create did")
+        void refusesDuplicatingOAuthWithoutVault() throws Exception {
+            // The duplicate endpoint skipped validateForWrite entirely, so a document
+            // that predated the vault being switched off could be copied into a second
+            // connection that saved and then failed every call.
+            when(connectionStore.read(ID, 1)).thenReturn(serviceOAuth());
+            when(secretProvider.isAvailable()).thenReturn(false);
+
+            var error = assertThrows(BadRequestException.class, () -> rest().duplicateConnection(ID, 1));
+
+            assertTrue(error.getMessage().contains("EDDI_VAULT_MASTER_KEY"), error.getMessage());
+            verify(connectionStore, never()).create(any());
+        }
+
+        @Test
+        @DisplayName("duplicating a PER_USER connection faces the identity check the create did")
+        void refusesDuplicatingPerUserWithoutAuthorization() throws Exception {
+            var perUser = serviceOAuth();
+            perUser.setAuthType(AuthType.OAUTH2_AUTHORIZATION_CODE);
+            perUser.setBinding(Binding.PER_USER);
+            perUser.getOauth().setAuthorizationUrl("https://auth.example.com/authorize");
+            when(connectionStore.read(ID, 1)).thenReturn(perUser);
+
+            var error = assertThrows(BadRequestException.class, () -> restWithoutAuthorization().duplicateConnection(ID, 1));
+
+            assertTrue(error.getMessage().contains("authorization.enabled"), error.getMessage());
+            verify(connectionStore, never()).create(any());
+        }
+
+        @Test
+        @DisplayName("a duplicate the deployment can honour is still created")
+        void duplicatesWhatTheDeploymentCanHonour() throws Exception {
+            when(connectionStore.read(ID, 1)).thenReturn(serviceOAuth());
+            when(connectionStore.create(any())).thenReturn(resourceId(1));
+
+            rest().duplicateConnection(ID, 1);
 
             verify(connectionStore).create(any());
         }
