@@ -17,7 +17,6 @@ import org.junit.jupiter.api.Test;
 
 import java.net.URI;
 import java.util.ArrayList;
-import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -151,32 +150,6 @@ class ConnectionStoreFindByNameTest {
         assertEquals(CONNECTION_ID, store.idOfName("default", "jira"), "the default tenant's own 'jira' must be the one that resolves");
         assertEquals(OTHER_TENANT_ID, store.idOfName("acme", "jira"), "and acme's 'jira' must be acme's");
         assertNull(store.idOfName("globex", "jira"), "a tenant holding no connection of that name must get nothing, not somebody else's");
-    }
-
-    @Test
-    @DisplayName("idsOfName lists every holder of a name, oldest descriptor first, the id breaking ties")
-    void listsEveryHolderOldestFirst() throws Exception {
-        // Indexed youngest first on purpose: the order the index happens to return is
-        // exactly what two replicas must NOT depend on to agree who won a name.
-        var young = descriptor(CONNECTION_ID, new Date(2_000L));
-        var old = descriptor(DANGLING_ID, new Date(1_000L));
-        var undated = descriptor(OTHER_TENANT_ID, null);
-        when(descriptorStore.readDescriptors(eq(ConnectionStore.RESOURCE_TYPE), any(), anyInt(), anyInt(), anyBoolean()))
-                .thenReturn(List.of(young, undated, old));
-        store.holding(CONNECTION_ID, connection("jira", "default"));
-        store.holding(DANGLING_ID, connection("jira", "default"));
-        store.holding(OTHER_TENANT_ID, connection("jira", "default"));
-
-        assertEquals(List.of(DANGLING_ID, CONNECTION_ID, OTHER_TENANT_ID), store.idsOfName("default", "jira"),
-                "oldest first, and a descriptor with no creation time sorts last");
-        assertEquals(List.of(), store.idsOfName("acme", "jira"), "a tenant nobody filed the name under holds nothing");
-    }
-
-    private static DocumentDescriptor descriptor(String id, Date createdOn) {
-        var descriptor = new DocumentDescriptor();
-        descriptor.setResource(URI.create("eddi://ai.labs.connection/connectionstore/connections/" + id + "?version=1"));
-        descriptor.setCreatedOn(createdOn);
-        return descriptor;
     }
 
     @Test

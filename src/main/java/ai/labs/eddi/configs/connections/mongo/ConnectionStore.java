@@ -18,7 +18,6 @@ import org.jboss.logging.Logger;
 
 import java.net.URI;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.Date;
 import java.util.List;
 
@@ -73,19 +72,6 @@ public class ConnectionStore extends AbstractResourceStore<ConnectionConfigurati
         Match match = findByName(tenantId, name);
         return match == null ? null : match.id();
     }
-
-    @Override
-    public List<String> idsOfName(String tenantId, String name) throws ResourceStoreException {
-        return findAllByName(tenantId, name).stream().sorted(OLDEST_FIRST).map(Match::id).toList();
-    }
-
-    /**
-     * Descriptor creation time first, then id. Both halves matter: the time is what
-     * "oldest" means, and the id breaks a tie the same way on every replica, which
-     * is what lets two of them reach the same verdict about one name.
-     */
-    private static final Comparator<Match> OLDEST_FIRST = Comparator
-            .comparing((Match match) -> match.createdOn(), Comparator.nullsLast(Comparator.naturalOrder())).thenComparing(Match::id);
 
     /**
      * One connection, the resource id it lives under, and when its descriptor was

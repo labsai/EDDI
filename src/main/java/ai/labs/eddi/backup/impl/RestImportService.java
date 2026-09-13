@@ -1202,13 +1202,13 @@ public class RestImportService extends AbstractBackupService implements IRestImp
      * <li><b>Same gate as REST.</b> The create goes through
      * {@code RestConnectionStore.createConnection}, so the structural validation,
      * the deployment checks (PER_USER and CALLER_SUPPLIED need OIDC, OAuth needs an
-     * active vault) and the name-uniqueness lock all apply. A refused connection is
-     * a skipped one with its reason in the log, not a failed import — the agent is
+     * active vault) and the durable name claim all apply. A refused connection is a
+     * skipped one with its reason in the log, not a failed import — the agent is
      * still worth having, and the refusal names what to fix.</li>
      * </ul>
      * Grants are never in an archive, so nothing here touches them. The descriptor
-     * is normally written by {@code RestConnectionStore} itself, inside its name
-     * lock; {@link #recordCreatedConnection} writes one only when it is missing,
+     * is normally written by {@code RestConnectionStore} itself, as part of the
+     * create; {@link #recordCreatedConnection} writes one only when it is missing,
      * for the same reason {@link #createResourceDirect} writes one: the filter that
      * otherwise does so runs on HTTP responses only, and a connection without a
      * descriptor is invisible to {@code ${connection:…}} resolution.
