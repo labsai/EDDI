@@ -236,6 +236,20 @@ public class ConnectionResolver {
         CallerIdentity caller = callerIdentityContext == null ? null : callerIdentityContext.current();
         String value = caller == null ? null : caller.connectionCredential(connection.getName());
         if (value == null) {
+            if (!authorizationEnabled) {
+                // The header may well have been sent. CallerIdentityContext.capture()
+                // drops every connection credential on an anonymous request, correctly:
+                // a caller that has not authenticated must not make EDDI spend a
+                // credential on its behalf. With authorization disabled EVERY request is
+                // anonymous, so "this request carried no credential" sends the operator
+                // to check a header that is going out fine.
+                throw new ConnectionException(ConnectionException.Reason.NO_CALLER_CREDENTIAL,
+                        "Connection '" + connection.getName() + "' is CALLER_SUPPLIED, but this deployment cannot accept a caller-supplied "
+                                + "credential: authorization.enabled=false, so no caller is authenticated and any '"
+                                + CallerIdentityContext.CONNECTION_CREDENTIAL_HEADER + "' header is dropped as unauthenticated input. "
+                                + "Enable OIDC (authorization.enabled=true) so the calling system is authenticated, or bind the "
+                                + "connection to a SERVICE credential instead.");
+            }
             throw new ConnectionException(ConnectionException.Reason.NO_CALLER_CREDENTIAL,
                     "Connection '" + connection.getName() + "' is CALLER_SUPPLIED, but this request carried no credential for it. "
                             + "The calling system must send a '" + CallerIdentityContext.CONNECTION_CREDENTIAL_HEADER + ": "

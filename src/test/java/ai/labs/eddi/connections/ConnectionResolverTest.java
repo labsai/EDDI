@@ -167,6 +167,26 @@ class ConnectionResolverTest {
         }
 
         @Test
+        @DisplayName("with authorization disabled the refusal names the deployment, not a header the caller did send")
+        void namesTheDisabledAuthorizationWhenNoCallerCanBeAuthenticated() {
+            // CallerIdentityContext.capture() drops every connection credential on an
+            // anonymous request, and with authorization.enabled=false every request is
+            // anonymous. The operator can see the header going out; a message saying
+            // the request carried none sends them to debug the wrong system.
+            register(gnowbeConnection());
+            when(callerIdentityContext.current()).thenReturn(null);
+
+            var error = assertThrows(ConnectionException.class, () -> resolver(false).resolve("${connection:gnowbe}", GNOWBE_TARGET, null));
+
+            assertEquals(ConnectionException.Reason.NO_CALLER_CREDENTIAL, error.getReason());
+            assertTrue(error.getMessage().contains("authorization.enabled=false"),
+                    "the message must name the deployment setting that drops the credential: " + error.getMessage());
+            assertTrue(error.getMessage().contains("authorization.enabled=true"), "and the fix: " + error.getMessage());
+            assertFalse(error.getMessage().contains("carried no credential"),
+                    "it must not claim the request carried nothing; it may well have: " + error.getMessage());
+        }
+
+        @Test
         @DisplayName("a credential for a different connection is not borrowed")
         void doesNotBorrowAnotherConnectionsCredential() {
             register(gnowbeConnection());
