@@ -23,7 +23,10 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class TurnAuditBufferTest {
 
-    private static final String SECRET = "sk-live_abc.123";
+    /**
+     * Low-entropy on purpose: a realistic-looking fake key trips Secret Scanning.
+     */
+    private static final String SECRET = "sk-aaaa_aaaa.1111";
 
     private ConversationMemory memory;
     private List<AuditEntry> ledger;

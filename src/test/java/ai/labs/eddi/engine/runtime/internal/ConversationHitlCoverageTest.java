@@ -208,7 +208,10 @@ class ConversationHitlCoverageTest {
     @DisplayName("audit entries of a turn")
     class TurnAudit {
 
-        private static final String SECRET = "sk-live_abc.123";
+        /**
+         * Low-entropy on purpose: a realistic-looking fake key trips Secret Scanning.
+         */
+        private static final String SECRET = "sk-aaaa_aaaa.1111";
 
         private AuditEntry parserEntry() {
             return new AuditEntry("e1", "conv1", "agent1", 1, "user1", null, 1, "ai.labs.parser", "parser", 0, 1L,
