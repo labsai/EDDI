@@ -149,7 +149,7 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
         state.setExpiresAt(Instant.now().plus(STATE_TTL));
         stateStore.create(state);
 
-        count("connection.oauth.authorize.count", "outcome", "issued", connection);
+        increment("eddi.connection.oauth.authorize.count", "outcome", "issued", connection);
         return Response.ok(Map.of("authorizationUrl", buildAuthorizationUrl(connection, state, codeVerifier)))
                 .cookie(bindingCookie(state.getState(), nonce, (int) STATE_TTL.toSeconds())).build();
     }
@@ -237,7 +237,7 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
             // Unknown, expired and already-used are answered identically. Telling them
             // apart is a state-guessing oracle, and none of the three is actionable by
             // the user beyond "start again".
-            count("connection.oauth.callback.count", "outcome", "bad_state", null);
+            increment("eddi.connection.oauth.callback.count", "outcome", "bad_state", null);
             LOGGER.warn("An OAuth callback arrived with a state that is unknown, expired or already used");
             return redirect(connectionsConfig.defaultReturnTo(), "error", "invalid_state");
         }
@@ -247,7 +247,7 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
         // After the claim, deliberately — the state is single-use whichever way this
         // check goes, so a failed binding cannot be retried with the same state.
         if (!bindingMatches(oauthState, headers, state)) {
-            count("connection.oauth.callback.count", "outcome", "binding_mismatch", null);
+            increment("eddi.connection.oauth.callback.count", "outcome", "binding_mismatch", null);
             LOGGER.warnf("An OAuth callback for connection '%s' arrived without the browser binding that started the flow. The state was "
                     + "valid, so this is either a link followed in a different browser or an attempt to file somebody else's tokens "
                     + "under another principal.", sanitize(oauthState.getConnectionName()));
@@ -259,13 +259,13 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
             // error_description is not bound at all, let alone echoed onward: it is
             // attacker-influenceable text heading for a browser. Only the short
             // error code is logged, sanitized.
-            count("connection.oauth.callback.count", "outcome", "provider_error", null);
+            increment("eddi.connection.oauth.callback.count", "outcome", "provider_error", null);
             LOGGER.warnf("The provider refused an authorization for connection '%s' (%s)", sanitize(oauthState.getConnectionName()),
                     sanitize(error));
             return redirect(oauthState.getReturnTo(), "error", "authorization_declined", expiredBindingCookie(state));
         }
         if (code == null || code.isBlank()) {
-            count("connection.oauth.callback.count", "outcome", "bad_state", null);
+            increment("eddi.connection.oauth.callback.count", "outcome", "bad_state", null);
             return redirect(oauthState.getReturnTo(), "error", "missing_code", expiredBindingCookie(state));
         }
 
@@ -273,7 +273,7 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
         try {
             connection = connectionRegistry.require(new ConnectionReference(oauthState.getTenantId(), oauthState.getConnectionName()));
         } catch (ConnectionException e) {
-            count("connection.oauth.callback.count", "outcome", "exchange_failed", null);
+            increment("eddi.connection.oauth.callback.count", "outcome", "exchange_failed", null);
             return redirect(oauthState.getReturnTo(), "error", "connection_removed", expiredBindingCookie(state));
         }
 
@@ -284,10 +284,10 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
             // parameter would let anyone who obtains a state install a grant under
             // somebody else's name.
             tokenService.persistNew(connection, oauthState.getTenantId(), oauthState.getPrincipal(), token, token.refreshToken());
-            count("connection.oauth.callback.count", "outcome", "success", connection);
+            increment("eddi.connection.oauth.callback.count", "outcome", "success", connection);
             return redirect(oauthState.getReturnTo(), "connected", connection.getName(), expiredBindingCookie(state));
         } catch (ConnectionException e) {
-            count("connection.oauth.callback.count", "outcome", "exchange_failed", connection);
+            increment("eddi.connection.oauth.callback.count", "outcome", "exchange_failed", connection);
             LOGGER.warnf("Token exchange failed for connection '%s': %s", connection.getName(), e.getReason());
             return redirect(oauthState.getReturnTo(), "error", "exchange_failed", expiredBindingCookie(state));
         } catch (RuntimeException e) {
@@ -298,7 +298,7 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
             // provider token possibly minted but never stored. The contract is a 303
             // in every outcome. Class name only — the message can quote the request,
             // and this is an ERROR line.
-            count("connection.oauth.callback.count", "outcome", "exchange_failed", connection);
+            increment("eddi.connection.oauth.callback.count", "outcome", "exchange_failed", connection);
             LOGGER.errorf("Token exchange for connection '%s' failed unexpectedly (%s); the user must start the link again",
                     sanitize(connection.getName()), e.getClass().getSimpleName());
             return redirect(oauthState.getReturnTo(), "error", "exchange_failed", expiredBindingCookie(state));
@@ -504,6 +504,12 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
     /**
      * Records one outcome.
      * <p>
+     * Named {@code increment} and called with the meter name as a string literal at
+     * every site, on purpose: {@code MetricsDashboardCoverageTest} discovers meters
+     * by scanning for {@code counter("…")}/{@code increment("…")} registrations,
+     * and a helper under any other name hid these four from it. Every meter carries
+     * the {@code eddi.} prefix for the same reason.
+     * <p>
      * The tag KEYS are fixed whether or not a connection is in hand, because a
      * meter name registered with two different tag shapes is a registration failure
      * and Quarkus builds the Prometheus registry with
@@ -516,7 +522,7 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
      * instrumentation failure may turn a completed link into a 500 the user cannot
      * retry — their state is consumed.
      */
-    private void count(String metric, String tagName, String tagValue, ConnectionConfiguration connection) {
+    private void increment(String metric, String tagName, String tagValue, ConnectionConfiguration connection) {
         if (meterRegistry == null) {
             return;
         }

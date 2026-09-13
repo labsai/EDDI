@@ -245,7 +245,7 @@ public class OAuthTokenService implements AccessTokenSupplier {
         Instant deadline = Instant.now().plus(AWAIT_TIMEOUT);
         while (true) {
             if (grantStore.claimRefresh(tenantId, connection.getName(), principal, claimantId, Instant.now().plus(REFRESH_LEASE))) {
-                count("connection.token.refresh.claim.count", "outcome", "claimed");
+                increment("eddi.connection.token.refresh.claim.count", "outcome", "claimed");
                 return refreshAsClaimant(connection, tenantId, principal);
             }
             // Somebody else is refreshing. Poll for their result rather than making a
@@ -253,7 +253,7 @@ public class OAuthTokenService implements AccessTokenSupplier {
             // is what kills the first one's token.
             AwaitOutcome awaited = awaitAnotherRefresh(connection, tenantId, principal, deadline);
             if (awaited.token() != null) {
-                count("connection.token.refresh.claim.count", "outcome", "awaited");
+                increment("eddi.connection.token.refresh.claim.count", "outcome", "awaited");
                 return awaited.token();
             }
             if (awaited.grantGone()) {
@@ -271,14 +271,14 @@ public class OAuthTokenService implements AccessTokenSupplier {
                 // one provider hiccup. Claim instead. The poll already paced this by an
                 // interval, and the deadline below still bounds a permanently contended
                 // grant, so this cannot spin.
-                count("connection.token.refresh.claim.count", "outcome", "lease_released");
+                increment("eddi.connection.token.refresh.claim.count", "outcome", "lease_released");
                 continue;
             }
             if (Instant.now().isAfter(deadline)) {
                 // The lease outlived its holder — a crashed replica, or one that hung.
                 // Retry the claim rather than refreshing blind, so exactly one caller
                 // proceeds even now.
-                count("connection.token.refresh.claim.count", "outcome", "lease_expired");
+                increment("eddi.connection.token.refresh.claim.count", "outcome", "lease_expired");
                 if (grantStore.claimRefresh(tenantId, connection.getName(), principal, claimantId, Instant.now().plus(REFRESH_LEASE))) {
                     return refreshAsClaimant(connection, tenantId, principal);
                 }
@@ -363,7 +363,7 @@ public class OAuthTokenService implements AccessTokenSupplier {
             }
             RefreshResult refreshed = requestNewToken(connection, tenantId, grant);
             persist(connection, tenantId, principal, refreshed.token(), refreshed.refreshToken(), grant.getVersion());
-            count("connection.token.refresh.count", "outcome", "success");
+            increment("eddi.connection.token.refresh.count", "outcome", "success");
             return refreshed.token().accessToken();
         } catch (ConnectionException e) {
             handleRefreshFailure(connection, grant, e);
@@ -477,11 +477,11 @@ public class OAuthTokenService implements AccessTokenSupplier {
      */
     private void handleRefreshFailure(ConnectionConfiguration connection, ConnectionGrant grant, ConnectionException failure) {
         if (failure.getReason() != ConnectionException.Reason.GRANT_UNUSABLE) {
-            count("connection.token.refresh.count", "outcome", "transient");
+            increment("eddi.connection.token.refresh.count", "outcome", "transient");
             LOGGER.warnf("Refresh for connection '%s' failed transiently; the grant is unchanged", connection.getName());
             return;
         }
-        count("connection.token.refresh.count", "outcome", "invalid_grant");
+        increment("eddi.connection.token.refresh.count", "outcome", "invalid_grant");
         grant.setStatus(ConnectionGrant.Status.REFRESH_FAILED);
         grantStore.completeRefresh(grant, grant.getVersion());
         LOGGER.warnf("Refresh for connection '%s' was rejected by the provider; the grant is marked REFRESH_FAILED", connection.getName());
@@ -496,7 +496,7 @@ public class OAuthTokenService implements AccessTokenSupplier {
     private String mintServiceGrant(ConnectionConfiguration connection, String tenantId, String principal) {
         TokenResponse token = tokenClient.clientCredentials(connection, resolveClientSecret(connection));
         persistNew(connection, tenantId, principal, token, token.refreshToken());
-        count("connection.token.refresh.count", "outcome", "minted");
+        increment("eddi.connection.token.refresh.count", "outcome", "minted");
         return token.accessToken();
     }
 
@@ -633,8 +633,12 @@ public class OAuthTokenService implements AccessTokenSupplier {
                 : connection.getTenantId();
     }
 
-    /** Bounded categoricals only — see {@code ConnectionResolver#record}. */
-    private void count(String metric, String tagName, String tagValue) {
+    /**
+     * Bounded categoricals only — see {@code ConnectionResolver#record}. Named
+     * {@code increment} and called with a literal meter name at every site so
+     * {@code MetricsDashboardCoverageTest} can see the registrations.
+     */
+    private void increment(String metric, String tagName, String tagValue) {
         if (meterRegistry != null) {
             meterRegistry.counter(metric, tagName, tagValue).increment();
         }

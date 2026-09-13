@@ -695,13 +695,19 @@ who can read the endpoint.
 
 | Metric | Tags | `outcome` values |
 | --- | --- | --- |
-| `connection.resolve.count` | `authType`, `binding`, `outcome` | `success`, plus the lower-cased refusal reason: `not_found`, `invalid_configuration`, `no_verified_principal`, `not_connected`, `grant_unusable`, `target_not_allowed`, `token_endpoint_unavailable` |
-| `connection.resolve.time` | `authType`, `binding` | — |
-| `connection.grant.missing.count` | `binding` | — (incremented alongside a `not_connected` resolve: the per-user "not connected yet" signal) |
-| `connection.oauth.authorize.count` | `outcome`, `authType` | `issued` |
-| `connection.oauth.callback.count` | `outcome`, `authType` | `success`, `bad_state`, `binding_mismatch`, `provider_error`, `exchange_failed` |
-| `connection.token.refresh.count` | `outcome` | `success`, `minted`, `invalid_grant`, `transient` |
-| `connection.token.refresh.claim.count` | `outcome` | `claimed`, `awaited`, `lease_released`, `lease_expired` |
+| `eddi.connection.resolve.count` | `authType`, `binding`, `outcome` | `success`, plus the lower-cased refusal reason: `not_found`, `invalid_configuration`, `no_verified_principal`, `not_connected`, `no_caller_credential`, `grant_unusable`, `target_not_allowed`, `token_endpoint_unavailable` |
+| `eddi.connection.resolve.time` | `authType`, `binding` | — |
+| `eddi.connection.grant.missing.count` | `binding` | — (incremented alongside a `not_connected` resolve: the per-user "not connected yet" signal) |
+| `eddi.connection.oauth.authorize.count` | `outcome`, `authType` | `issued` |
+| `eddi.connection.oauth.callback.count` | `outcome`, `authType` | `success`, `bad_state`, `binding_mismatch`, `provider_error`, `exchange_failed` |
+| `eddi.connection.token.refresh.count` | `outcome` | `success`, `minted`, `invalid_grant`, `transient` |
+| `eddi.connection.token.refresh.claim.count` | `outcome` | `claimed`, `awaited`, `lease_released`, `lease_expired` |
+
+All seven carry the `eddi.` prefix (scraped as `eddi_connection_…_total`), which is
+what lets `MetricsDashboardCoverageTest` see them: the four OAuth and refresh
+meters used to be registered unprefixed through a helper the guard could not read,
+and were absent from the full dashboard and the metrics reference on a green
+build.
 
 Three of those are worth knowing by name:
 
@@ -713,7 +719,7 @@ Three of those are worth knowing by name:
 * **`lease_released`** means a refresh claimant handed the lease back without
   writing a token — it failed transiently, or it died — so a waiter stopped polling
   and claimed instead. A rising count is a provider having a bad time, not a bug.
-* **`connection.resolve.count`** is emitted with `authType=unknown` and
+* **`eddi.connection.resolve.count`** is emitted with `authType=unknown` and
   `binding=unknown` when the *name* did not resolve, because at that point there is
   no connection to read either from. A deleted or misspelled connection therefore
   shows up rather than failing every turn behind a flat dashboard.

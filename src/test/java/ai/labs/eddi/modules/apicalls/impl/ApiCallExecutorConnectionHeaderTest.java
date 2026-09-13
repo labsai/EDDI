@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.apicalls.impl;
 import ai.labs.eddi.configs.apicalls.model.ApiCall;
 import ai.labs.eddi.configs.apicalls.model.Request;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
+import ai.labs.eddi.connections.ConnectionException;
 import ai.labs.eddi.connections.ConnectionResolver;
 import ai.labs.eddi.connections.ResolvedCredential;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
@@ -366,8 +367,11 @@ class ApiCallExecutorConnectionHeaderTest {
                     () -> executor.execute(call, memory, templateData("alice"), SERVER),
                     "a credential outside a header is recorded by every hop before the provider sees it, so it must "
                             + "never be built into the request");
-            assertInstanceOf(IllegalArgumentException.class, failure.getCause(),
-                    "the refusal must be the configuration error, not an incidental URI or template failure");
+            // UNSUPPORTED_PLACEMENT is the reason ConnectionExceptionMapper answers with
+            // 400, and it used to be the one reason nothing threw.
+            var refusal = assertInstanceOf(ConnectionException.class, failure.getCause(),
+                    "the refusal must be the connection placement error, not an incidental URI or template failure");
+            assertEquals(ConnectionException.Reason.UNSUPPORTED_PLACEMENT, refusal.getReason());
             assertTrue(failure.getMessage().contains("may only appear in a header, not in " + expectedLocation),
                     "the message must name where the reference was found so the author knows what to move; was: "
                             + failure.getMessage());

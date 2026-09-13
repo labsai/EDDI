@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.apicalls.model.*;
 import ai.labs.eddi.configs.apicalls.model.HttpPostResponse;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
+import ai.labs.eddi.connections.ConnectionException;
 import ai.labs.eddi.connections.ConnectionResolver;
 import ai.labs.eddi.connections.model.ConnectionReference;
 import ai.labs.eddi.engine.security.CallerIdentityResolver;
@@ -910,8 +911,15 @@ public class ApiCallExecutor implements IApiCallExecutor {
      */
     private static void rejectConnectionReference(String value, String where) {
         if (ConnectionResolver.containsReference(value)) {
-            throw new IllegalArgumentException("A ${connection:…} reference may only appear in a header, not in " + where
-                    + ". A credential in a URL or query string is recorded by every hop before the provider sees it.");
+            // A ConnectionException, not an IllegalArgumentException: UNSUPPORTED_PLACEMENT
+            // is the reason ConnectionExceptionMapper maps to 400, and it was the one
+            // reason nothing ever threw. execute() and resolve() wrap it in a
+            // LifecycleException either way, so the pipeline reports it as the same
+            // configuration error; only the type — and with it the REST status when it
+            // escapes a resource — changes.
+            throw new ConnectionException(ConnectionException.Reason.UNSUPPORTED_PLACEMENT,
+                    "A ${connection:…} reference may only appear in a header, not in " + where
+                            + ". A credential in a URL or query string is recorded by every hop before the provider sees it.");
         }
     }
 

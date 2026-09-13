@@ -93,7 +93,7 @@ class RestConnectionAuthorizationCallbackTest {
     private static final String CODE = "provider-authorization-code";
     private static final String CLIENT_SECRET = "resolved-client-secret";
     private static final String REFRESH_TOKEN = "refresh-token-value";
-    private static final String CALLBACK_METRIC = "connection.oauth.callback.count";
+    private static final String CALLBACK_METRIC = "eddi.connection.oauth.callback.count";
 
     private static final TokenResponse TOKEN = new TokenResponse("access-token-value", REFRESH_TOKEN, Duration.ofHours(1),
             List.of("https://www.googleapis.com/auth/drive.readonly"));
