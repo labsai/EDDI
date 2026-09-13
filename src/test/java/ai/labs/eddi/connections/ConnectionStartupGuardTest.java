@@ -498,6 +498,22 @@ class ConnectionStartupGuardTest {
         assertFalse(logged("plaintext http"), logRecords.toString());
     }
 
+    @Test
+    @DisplayName("an allowlist origin that cannot be parsed is reported and skipped, and the reports after it still run")
+    void malformedOriginDoesNotAbortTheReport() throws Exception {
+        // A stored document never re-ran validation, so "http://[" can be in the
+        // store — and URI parsing throws on it.
+        var broken = staticConnection();
+        broken.setBaseUrlAllowlist(List.of("http://[", "http://api.internal.example:8080"));
+        storedConnections(broken, perUserConnection());
+
+        assertDoesNotThrow(() -> start(enabledGuard(openAiCompatOff(), false)));
+
+        assertTrue(logged("could not be classified"), "the unparseable entry must be named, not silently dropped; saw: " + logRecords);
+        assertTrue(logged("http://api.internal.example:8080"), "the next entry of the same connection is still inspected; saw: " + logRecords);
+        assertTrue(logged(UNVERIFIED_IDENTITY_REPORT), "and so is every connection after it; saw: " + logRecords);
+    }
+
     // --- Enumerating the store ----------------------------------------------
 
     @Test

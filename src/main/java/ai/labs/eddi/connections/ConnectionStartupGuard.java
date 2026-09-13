@@ -232,7 +232,20 @@ public class ConnectionStartupGuard {
                 continue;
             }
             for (String origin : connection.getBaseUrlAllowlist()) {
-                if (ConnectionConfiguration.isPlaintextRemoteOrigin(origin)) {
+                // Per entry, because a stored document never re-ran validation: an
+                // origin such as "http://[" makes URI parsing throw, and one bad entry
+                // used to abort this report — and the startup observer with it — for
+                // every connection after it.
+                boolean plaintextRemote;
+                try {
+                    plaintextRemote = ConnectionConfiguration.isPlaintextRemoteOrigin(origin);
+                } catch (RuntimeException e) {
+                    LOGGER.warnf("[CONNECTIONS] Connection '%s' has a baseUrlAllowlist entry that could not be classified (%s): %s. It is "
+                            + "skipped by this report; resolution refuses a malformed entry as INVALID_CONFIGURATION. Re-save the "
+                            + "connection with a bare origin.", sanitize(connection.getName()), e.getClass().getSimpleName(), sanitize(origin));
+                    continue;
+                }
+                if (plaintextRemote) {
                     LOGGER.warnf("[CONNECTIONS] Connection '%s' allows its credential to be sent over plaintext http to %s; the credential "
                             + "crosses the network unencrypted. Prefer an https origin.", sanitize(connection.getName()), sanitize(origin));
                 }
