@@ -11,6 +11,9 @@ import ai.labs.eddi.configs.connections.model.Binding;
 import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
 import ai.labs.eddi.configs.connections.model.OAuthConfig;
 import ai.labs.eddi.configs.connections.model.StaticAuth;
+import ai.labs.eddi.configs.connections.names.IConnectionNameClaimStore;
+import ai.labs.eddi.configs.connections.names.IConnectionNameClaimStore.NameClaim;
+import ai.labs.eddi.configs.connections.names.InMemoryConnectionNameClaimStore;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.connections.ConnectionRegistry;
@@ -31,11 +34,13 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -44,9 +49,9 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * The three refusals on the connection write path, each of which exists because
- * letting the write through hands one connection's stored refresh tokens to a
- * different one.
+ * The refusals on the connection write path, each of which exists because
+ * letting the write through hands one connection's stored refresh tokens — or
+ * one system's credential — to a different one.
  * <p>
  * Every refusal here is paired with the write that must still succeed. A guard
  * tested only by what it rejects passes just as well when it rejects
@@ -56,12 +61,14 @@ import static org.mockito.Mockito.when;
 class RestConnectionStoreWriteGuardTest {
 
     private static final String ID = "68a1b2c3d4e5f60718293a4b";
+    private static final String TENANT = "default";
 
     private IConnectionStore connectionStore;
     private IDocumentDescriptorStore documentDescriptorStore;
     private IConnectionGrantStore grantStore;
     private ConnectionRegistry connectionRegistry;
     private ISecretProvider secretProvider;
+    private InMemoryConnectionNameClaimStore claims;
 
     @BeforeEach
     void setUp() {
@@ -70,12 +77,17 @@ class RestConnectionStoreWriteGuardTest {
         grantStore = mock(IConnectionGrantStore.class);
         connectionRegistry = mock(ConnectionRegistry.class);
         secretProvider = mock(ISecretProvider.class);
+        claims = new InMemoryConnectionNameClaimStore();
         lenient().when(secretProvider.isAvailable()).thenReturn(true);
     }
 
     private RestConnectionStore rest() {
+        return rest(claims);
+    }
+
+    private RestConnectionStore rest(IConnectionNameClaimStore nameClaimStore) {
         return new RestConnectionStore(connectionStore, documentDescriptorStore, mock(IJsonSchemaCreator.class), connectionRegistry, grantStore,
-                secretProvider, true, mock(ResourceAccessGuard.class));
+                secretProvider, true, mock(ResourceAccessGuard.class), nameClaimStore);
     }
 
     /** A document that passes every OTHER check, so a refusal is attributable. */
@@ -99,10 +111,14 @@ class RestConnectionStoreWriteGuardTest {
     }
 
     private static IResourceStore.IResourceId resourceId(int version) {
+        return resourceId(ID, version);
+    }
+
+    private static IResourceStore.IResourceId resourceId(String id, int version) {
         return new IResourceStore.IResourceId() {
             @Override
             public String getId() {
-                return ID;
+                return id;
             }
 
             @Override
@@ -171,112 +187,211 @@ class RestConnectionStoreWriteGuardTest {
     }
 
     @Nested
-    @DisplayName("name uniqueness across replicas")
+    @DisplayName("name uniqueness, enforced by a durable claim on (tenant, name)")
     class NameUniqueness {
 
-        private static final String OTHER_REPLICAS_ID = "68a1b2c3d4e5f60718293a4c";
+        private static final String OTHER_ID = "68a1b2c3d4e5f60718293a4c";
+
+        private void liveConnection(String id, String name) throws Exception {
+            when(connectionStore.getCurrentResourceId(id)).thenReturn(resourceId(id, 1));
+            when(connectionStore.read(id, 1)).thenReturn(connection(name, null));
+        }
+
+        private NameClaim claimOnJira() {
+            return claims.find(TENANT, "jira").orElseThrow(() -> new AssertionError("expected a claim on 'jira'"));
+        }
 
         @Test
-        @DisplayName("a create that finds another holder of the name after landing is rolled back and answered 409 naming the winner")
-        void losesToAConcurrentCreateOnAnotherReplica() throws Exception {
-            // The pre-create check is a check-then-act: both replicas found "jira" free.
-            // Ours landed second, and the other's descriptor is visible by the time we
-            // look again — so ours is the duplicate, and it must not survive to make
-            // ${connection:jira} resolve by scan order.
-            when(connectionStore.idOfName("default", "jira")).thenReturn(null);
-            when(connectionStore.create(any())).thenReturn(resourceId(1));
-            when(connectionStore.idsOfName("default", "jira")).thenReturn(List.of(OTHER_REPLICAS_ID));
+        @DisplayName("a name whose claim names a live connection is refused 409, before any document is written")
+        void refusesANameALiveConnectionHolds() throws Exception {
+            // The cross-replica case the descriptor scans could not close: the other
+            // replica's connection may not be visible to any scan yet, but its claim is.
+            claims.seed(TENANT, "jira", "other-replicas-token", OTHER_ID);
+            liveConnection(OTHER_ID, "jira");
 
             var error = assertThrows(ClientErrorException.class, () -> rest().createConnection(connection("jira", null)));
 
             assertEquals(409, error.getResponse().getStatus());
-            assertTrue(error.getMessage().contains(OTHER_REPLICAS_ID), "the refusal must name the other holder: " + error.getMessage());
-            verify(connectionStore).deleteAllPermanently(ID);
-            // The descriptor written inside the lock goes with it, or the name scan
-            // keeps finding a descriptor whose resource is gone.
-            verify(documentDescriptorStore).deleteAllDescriptor(ID);
+            assertTrue(error.getMessage().contains(OTHER_ID), "the refusal must name the holder: " + error.getMessage());
+            verify(connectionStore, never()).create(any());
+            assertEquals(new NameClaim(TENANT, "jira", "other-replicas-token", OTHER_ID), claimOnJira(), "the holder's claim is untouched");
         }
 
         @Test
-        @DisplayName("the descriptor is written inside the name lock, before the post-create scan and before the method returns")
-        void writesTheDescriptorBeforeReleasingTheLock() throws Exception {
-            // A name scan reads descriptors. Leaving the descriptor to the response
-            // filter meant the lock guarded nothing: the next create took it the moment
-            // this one let go, scanned, saw no descriptor for this document yet, and
-            // landed too.
-            when(connectionStore.idOfName("default", "jira")).thenReturn(null);
+        @DisplayName("a claim with no connection that has gone stale — a create that crashed — is taken over, and the create completes")
+        void takesOverAClaimACrashedCreateLeftBehind() throws Exception {
+            claims.seed(TENANT, "jira", "crashed-token", null);
+            claims.markStale(TENANT, "jira");
             when(connectionStore.create(any())).thenReturn(resourceId(1));
-            when(connectionStore.idsOfName("default", "jira")).thenReturn(List.of(ID));
 
-            rest().createConnection(connection("jira", null));
+            assertEquals(201, rest().createConnection(connection("jira", null)).getStatus());
 
-            var inOrder = inOrder(connectionStore, documentDescriptorStore);
-            inOrder.verify(connectionStore).create(any());
-            inOrder.verify(documentDescriptorStore).createDescriptor(eq(ID), eq(1), any());
-            inOrder.verify(connectionStore).idsOfName("default", "jira");
+            NameClaim claim = claimOnJira();
+            assertNotEquals("crashed-token", claim.token(), "the takeover must install this create's own token");
+            assertEquals(ID, claim.connectionId(), "and the create must record itself as the holder");
         }
 
         @Test
-        @DisplayName("a second create of the same name on the same node is refused even before any response filter has run")
-        void aSecondCreateOnTheSameNodeSeesTheFirst() throws Exception {
-            // The store answers name lookups from the descriptors it has been given —
-            // which is exactly what the real store does — so this fails when the
-            // descriptor is only written after createConnection returns.
-            var descriptors = new ArrayList<String>();
-            lenient().doAnswer(invocation -> {
-                descriptors.add(invocation.getArgument(0));
-                return null;
-            }).when(documentDescriptorStore).createDescriptor(any(), any(), any());
-            // The pre-check hands the store the document's raw tenantId (null here) and
-            // the real store normalises it to the default, so the stub accepts either.
-            when(connectionStore.idOfName(any(), eq("jira"))).thenAnswer(invocation -> descriptors.isEmpty() ? null : descriptors.get(0));
-            when(connectionStore.idsOfName("default", "jira")).thenAnswer(invocation -> List.copyOf(descriptors));
-            when(connectionStore.create(any())).thenReturn(resourceId(1));
-            var rest = rest();
+        @DisplayName("a fresh claim with no connection is a create in flight: refused 409, nothing written, claim untouched")
+        void refusesWhileAnotherCreateIsInFlight() throws Exception {
+            claims.seed(TENANT, "jira", "in-flight-token", null);
 
-            assertEquals(201, rest.createConnection(connection("jira", null)).getStatus());
-            var error = assertThrows(BadRequestException.class, () -> rest.createConnection(connection("jira", null)));
+            var error = assertThrows(ClientErrorException.class, () -> rest().createConnection(connection("jira", null)));
 
-            assertTrue(error.getMessage().contains("already exists"), error.getMessage());
-            verify(connectionStore, times(1)).create(any());
-            verify(connectionStore, never()).deleteAllPermanently(any());
+            assertEquals(409, error.getResponse().getStatus());
+            assertTrue(error.getMessage().contains("in progress"), error.getMessage());
+            verify(connectionStore, never()).create(any());
+            assertEquals("in-flight-token", claimOnJira().token(), "a live create must not have its claim taken from under it");
         }
 
         @Test
-        @DisplayName("a create nobody else raced is kept, and its own id in the scan does not count against it")
-        void winsWhenNoOtherReplicaCreatedTheName() throws Exception {
-            when(connectionStore.idOfName("default", "jira")).thenReturn(null);
+        @DisplayName("a claim naming a connection that no longer exists is taken over at once")
+        void takesOverAClaimWhoseConnectionIsGone() throws Exception {
+            // What a delete that failed to release, or an import rollback, leaves behind.
+            claims.seed(TENANT, "jira", "departed-token", OTHER_ID);
+            when(connectionStore.getCurrentResourceId(OTHER_ID)).thenThrow(new IResourceStore.ResourceNotFoundException("gone"));
             when(connectionStore.create(any())).thenReturn(resourceId(1));
-            when(connectionStore.idsOfName("default", "jira")).thenReturn(List.of(ID));
 
-            var response = rest().createConnection(connection("jira", null));
+            assertEquals(201, rest().createConnection(connection("jira", null)).getStatus());
 
-            assertEquals(201, response.getStatus());
-            verify(connectionStore, never()).deleteAllPermanently(any());
+            assertEquals(ID, claimOnJira().connectionId());
         }
 
         @Test
-        @DisplayName("a post-create scan that cannot run removes the document again and asks for a retry")
-        void failsClosedWhenThePostCreateScanCannotRun() throws Exception {
-            // A connection that MAY be a duplicate is a credential that may go to the
-            // wrong host; the pre-check fails closed on an unreadable store and this
-            // does the same.
-            when(connectionStore.idOfName("default", "jira")).thenReturn(null);
+        @DisplayName("a store that cannot say whether the holder still exists refuses the create rather than guessing")
+        void failsClosedWhenTheHoldersLivenessCannotBeRead() throws Exception {
+            claims.seed(TENANT, "jira", "other-token", OTHER_ID);
+            when(connectionStore.getCurrentResourceId(OTHER_ID)).thenReturn(resourceId(OTHER_ID, 1));
+            when(connectionStore.read(OTHER_ID, 1)).thenThrow(new IResourceStore.ResourceStoreException("blinked"));
+
+            var error = assertThrows(BadRequestException.class, () -> rest().createConnection(connection("jira", null)));
+
+            assertTrue(error.getMessage().contains("Retry"), error.getMessage());
+            verify(connectionStore, never()).create(any());
+            assertEquals(OTHER_ID, claimOnJira().connectionId(), "deciding 'gone' from no evidence would hand the name to a second connection");
+        }
+
+        @Test
+        @DisplayName("a soft delete releases the claim that names the deleted connection")
+        void softDeleteReleasesTheClaim() throws Exception {
+            deleteReleasesTheClaim(false);
+        }
+
+        @Test
+        @DisplayName("a permanent delete releases the claim that names the deleted connection")
+        void permanentDeleteReleasesTheClaim() throws Exception {
+            deleteReleasesTheClaim(true);
+        }
+
+        private void deleteReleasesTheClaim(boolean permanent) throws Exception {
+            storedAs(connection("jira", null), 1);
+            claims.seed(TENANT, "jira", "token", ID);
+
+            rest().deleteConnection(ID, 1, permanent);
+
+            assertTrue(claims.find(TENANT, "jira").isEmpty(), "the name must be free to create again once its connection is gone");
+        }
+
+        @Test
+        @DisplayName("a delete never releases a claim that names another connection")
+        void deleteLeavesAnotherConnectionsClaimAlone() throws Exception {
+            storedAs(connection("jira", null), 1);
+            claims.seed(TENANT, "jira", "token", OTHER_ID);
+
+            rest().deleteConnection(ID, 1, false);
+
+            assertEquals(OTHER_ID, claimOnJira().connectionId());
+        }
+
+        @Test
+        @DisplayName("a descriptor that cannot be written fails the create: document removed, claim released, error to the caller")
+        void aDescriptorThatCannotBeWrittenFailsTheCreate() throws Exception {
+            // It used to be logged and the create reported as a success: a connection
+            // no name lookup could see, holding a name nobody else could create.
             when(connectionStore.create(any())).thenReturn(resourceId(1));
-            when(connectionStore.idsOfName("default", "jira")).thenThrow(new IResourceStore.ResourceStoreException("blinked"));
+            doThrow(new IllegalStateException("descriptor store unreachable")).when(documentDescriptorStore).createDescriptor(anyString(), any(),
+                    any());
 
             var error = assertThrows(BadRequestException.class, () -> rest().createConnection(connection("jira", null)));
 
             assertTrue(error.getMessage().contains("removed again"), error.getMessage());
             verify(connectionStore).deleteAllPermanently(ID);
+            verify(documentDescriptorStore).deleteAllDescriptor(ID);
+            assertTrue(claims.find(TENANT, "jira").isEmpty(), "the claim must be released with the document, or the name stays blocked");
         }
 
         @Test
-        @DisplayName("creates of one name never overlap inside a node, so the single-node case cannot race at all")
+        @DisplayName("a connection that predates claims still holds its name: 409, and the claim is backfilled for it")
+        void refusesALegacyNameAndBackfillsItsClaim() throws Exception {
+            when(connectionStore.idOfName(TENANT, "jira")).thenReturn(OTHER_ID);
+
+            var first = assertThrows(ClientErrorException.class, () -> rest().createConnection(connection("jira", null)));
+
+            assertEquals(409, first.getResponse().getStatus());
+            assertTrue(first.getMessage().contains(OTHER_ID), first.getMessage());
+            verify(connectionStore, never()).create(any());
+            assertEquals(OTHER_ID, claimOnJira().connectionId(), "the claim must now name the connection that already held the name");
+
+            // Backfilled, so the next create is refused by the claim alone.
+            liveConnection(OTHER_ID, "jira");
+            assertThrows(ClientErrorException.class, () -> rest().createConnection(connection("jira", null)));
+            verify(connectionStore, times(1)).idOfName(TENANT, "jira");
+        }
+
+        @Test
+        @DisplayName("a create whose claim was taken over while it was in flight removes its own document and answers 409")
+        void aCreateThatLostItsClaimMidFlightRemovesItself() throws Exception {
+            when(connectionStore.create(any())).thenAnswer(invocation -> {
+                // Slower than the stale bound: another replica took the claim over.
+                claims.seed(TENANT, "jira", "usurping-token", null);
+                return resourceId(1);
+            });
+
+            var error = assertThrows(ClientErrorException.class, () -> rest().createConnection(connection("jira", null)));
+
+            assertEquals(409, error.getResponse().getStatus());
+            verify(connectionStore).deleteAllPermanently(ID);
+            verify(documentDescriptorStore, never()).createDescriptor(anyString(), any(), any());
+            assertEquals("usurping-token", claimOnJira().token(), "the loser must not disturb the winner's claim");
+        }
+
+        @Test
+        @DisplayName("a claim store that cannot be reached refuses the create before anything is written")
+        void failsClosedWhenTheClaimStoreIsUnreachable() throws Exception {
+            IConnectionNameClaimStore unreachable = mock(IConnectionNameClaimStore.class);
+            when(unreachable.claim(anyString(), anyString(), anyString())).thenThrow(new IllegalStateException("connection refused"));
+
+            var error = assertThrows(BadRequestException.class, () -> rest(unreachable).createConnection(connection("jira", null)));
+
+            assertTrue(error.getMessage().contains("Retry once the configuration store is reachable"), error.getMessage());
+            verify(connectionStore, never()).create(any());
+        }
+
+        @Test
+        @DisplayName("a second create of the same name on the same node is refused by the first one's claim")
+        void aSecondCreateOnTheSameNodeSeesTheFirst() throws Exception {
+            when(connectionStore.create(any())).thenReturn(resourceId(1));
+            liveConnection(ID, "jira");
+            var rest = rest();
+
+            assertEquals(201, rest.createConnection(connection("jira", null)).getStatus());
+            var error = assertThrows(ClientErrorException.class, () -> rest.createConnection(connection("jira", null)));
+
+            assertEquals(409, error.getResponse().getStatus());
+            verify(connectionStore, times(1)).create(any());
+            verify(connectionStore, never()).deleteAllPermanently(any());
+        }
+
+        @Test
+        @DisplayName("creates of one name never overlap inside a node, even against a claim store that would let them")
         void serialisesConcurrentCreatesOfOneName() throws Exception {
+            // A claim store that grants everything, so what is measured is the JVM lock
+            // alone rather than the claim doing the same job.
+            IConnectionNameClaimStore permissive = mock(IConnectionNameClaimStore.class);
+            when(permissive.claim(anyString(), anyString(), anyString())).thenReturn(true);
+            when(permissive.recordConnection(anyString(), anyString(), anyString(), anyString())).thenReturn(true);
             var inCreate = new AtomicInteger();
             var mostConcurrent = new AtomicInteger();
-            when(connectionStore.idOfName("default", "jira")).thenReturn(null);
             when(connectionStore.create(any())).thenAnswer(invocation -> {
                 int now = inCreate.incrementAndGet();
                 mostConcurrent.accumulateAndGet(now, Math::max);
@@ -284,7 +399,7 @@ class RestConnectionStoreWriteGuardTest {
                 inCreate.decrementAndGet();
                 return resourceId(1);
             });
-            var rest = rest();
+            var rest = rest(permissive);
 
             var workers = new ArrayList<Thread>();
             for (int worker = 0; worker < 4; worker++) {
@@ -306,7 +421,7 @@ class RestConnectionStoreWriteGuardTest {
 
         private RestConnectionStore restWithoutAuthorization() {
             return new RestConnectionStore(connectionStore, documentDescriptorStore, mock(IJsonSchemaCreator.class), connectionRegistry,
-                    grantStore, secretProvider, false, mock(ResourceAccessGuard.class));
+                    grantStore, secretProvider, false, mock(ResourceAccessGuard.class), claims);
         }
 
         private ConnectionConfiguration callerSupplied() {
@@ -461,6 +576,7 @@ class RestConnectionStoreWriteGuardTest {
             assertTrue(error.getMessage().contains("disconnected"),
                     "and say what would be impossible about the grant it would produce: " + error.getMessage());
             verify(connectionStore, never()).create(any());
+            assertTrue(claims.find("acme", "jira").isEmpty(), "a refused document must not take a name it would have to give back");
         }
 
         @Test

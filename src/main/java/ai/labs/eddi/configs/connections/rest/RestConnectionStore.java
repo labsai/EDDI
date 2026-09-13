@@ -9,6 +9,8 @@ import ai.labs.eddi.configs.connections.IConnectionStore;
 import ai.labs.eddi.configs.connections.IRestConnectionStore;
 import ai.labs.eddi.configs.connections.model.Binding;
 import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
+import ai.labs.eddi.configs.connections.names.IConnectionNameClaimStore;
+import ai.labs.eddi.configs.connections.names.IConnectionNameClaimStore.NameClaim;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
@@ -25,12 +27,18 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.ClientErrorException;
+import jakarta.ws.rs.InternalServerErrorException;
+import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.Response;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.net.URI;
+import java.time.Duration;
 import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
+import java.util.function.Supplier;
 
 import static ai.labs.eddi.configs.descriptors.ResourceUtilities.createDocumentDescriptor;
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
@@ -43,6 +51,17 @@ public class RestConnectionStore implements IRestConnectionStore {
 
     private static final Logger LOGGER = Logger.getLogger(RestConnectionStore.class);
 
+    /**
+     * How long a name claim with no connection recorded is presumed to belong to a
+     * create still in flight. Past it, that create is presumed to have crashed
+     * between claiming the name and creating the document, and the claim may be
+     * taken over. Judged by the claim store's database clock, never by a replica's
+     * own. A create that really is this slow is not duplicated by a takeover: it
+     * loses the compare-and-set that records its connection and removes its own
+     * document again.
+     */
+    static final Duration UNRECORDED_CLAIM_STALE_AFTER = Duration.ofMinutes(2);
+
     private final IConnectionStore connectionStore;
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final ResourceAccessGuard resourceAccessGuard;
@@ -51,6 +70,7 @@ public class RestConnectionStore implements IRestConnectionStore {
     private final ConnectionRegistry connectionRegistry;
     private final ISecretProvider secretProvider;
     private final boolean authorizationEnabled;
+    private final IConnectionNameClaimStore nameClaimStore;
     private final RestVersionInfo<ConnectionConfiguration> restVersionInfo;
 
     /**
@@ -72,7 +92,7 @@ public class RestConnectionStore implements IRestConnectionStore {
             IJsonSchemaCreator jsonSchemaCreator, ConnectionRegistry connectionRegistry, IConnectionGrantStore grantStore,
             ISecretProvider secretProvider,
             @ConfigProperty(name = "authorization.enabled", defaultValue = "false") boolean authorizationEnabled,
-            ResourceAccessGuard resourceAccessGuard) {
+            ResourceAccessGuard resourceAccessGuard, IConnectionNameClaimStore nameClaimStore) {
         this.restVersionInfo = new RestVersionInfo<>(resourceURI, connectionStore, documentDescriptorStore, resourceAccessGuard);
         this.connectionStore = connectionStore;
         this.documentDescriptorStore = documentDescriptorStore;
@@ -82,6 +102,7 @@ public class RestConnectionStore implements IRestConnectionStore {
         this.grantStore = grantStore;
         this.secretProvider = secretProvider;
         this.authorizationEnabled = authorizationEnabled;
+        this.nameClaimStore = nameClaimStore;
         for (int stripe = 0; stripe < nameLocks.length; stripe++) {
             nameLocks[stripe] = new Object();
         }
@@ -133,28 +154,31 @@ public class RestConnectionStore implements IRestConnectionStore {
     }
 
     /**
-     * The one path every new connection document takes, so that a name can be
-     * claimed only once.
+     * The one path every new connection document takes, so that a name is held by
+     * one connection only.
      * <p>
-     * {@link #requireNameIsFree} is a check-then-act: two creates of "jira" a few
-     * milliseconds apart both find the name free, both land, and
-     * {@code ${connection:jira}} then resolves by descriptor scan order — one
-     * system's credential to another system's allowlisted origin, intermittently.
-     * The store is a versioned document store, so no unique index can enforce the
-     * rule; two things close the window instead.
-     * <p>
-     * Inside one JVM, creates of the same (tenant, name) are serialised on a lock —
-     * and the descriptor, which is what a name scan reads, is written INSIDE that
-     * lock rather than left to {@code DocumentDescriptorFilter} after the method
-     * returns. Without that the lock closed nothing: the second create took the
-     * lock the moment the first released it, scanned, found no descriptor for the
-     * first document yet, and both landed. With it, the common single-node
-     * deployment never races at all. Across replicas,
-     * {@link #requireCreateWonTheName} re-asks the store who holds the name AFTER
-     * the write landed and rolls this one back if somebody else does. What remains
-     * is the interval between a replica's descriptor write and its becoming visible
-     * to the other's scan — replication lag, against a check that used to be
-     * absent.
+     * {@code ${connection:jira}} names ONE connection. Two creates of "jira" that
+     * both land make it resolve by descriptor scan order — one system's credential
+     * to another system's allowlisted origin, intermittently. The versioned
+     * document store cannot carry a unique index on a field inside the document,
+     * and the scans that used to stand in for one could not see across replicas:
+     * two replicas that each saw only their own descriptor both kept their create.
+     * The rule is therefore enforced by a durable, atomic claim on
+     * {@code (tenant, name)} in {@link IConnectionNameClaimStore}, in four steps:
+     * <ol>
+     * <li><b>Claim</b> the name with a fresh token. Exactly one create, on any
+     * replica, wins the insert. A loser reads the holder and answers 409 — unless
+     * the holder is stale, in which case it takes the claim over with a
+     * compare-and-set on the value it read ({@link #claimName}).</li>
+     * <li><b>Create</b> the document.</li>
+     * <li><b>Record</b> the connection id in the claim, conditional on still
+     * holding the token. A create slow enough to have had its claim taken over
+     * learns it here and removes its document again ({@link #recordHolder}).</li>
+     * <li><b>Write the descriptor</b>, which is what a name lookup reads. Failing
+     * that is a failed create ({@link #writeDescriptorOrRollBack}).</li>
+     * </ol>
+     * The JVM lock stays. It costs nothing, and it keeps two creates of one name on
+     * one node from contending on the claim store at all.
      */
     private Response createUnderNameLock(ConnectionConfiguration connectionConfiguration) {
         if (connectionConfiguration == null) {
@@ -162,48 +186,227 @@ public class RestConnectionStore implements IRestConnectionStore {
             return restVersionInfo.create(null);
         }
         String tenant = ConnectionConfiguration.effectiveTenant(connectionConfiguration);
-        synchronized (nameLock(tenant, connectionConfiguration.getName())) {
-            requireNameIsFree(connectionConfiguration, null);
-            // Last of the write checks, deliberately: it refuses a document that is not
-            // wrong, only ahead of the feature, so anything genuinely malformed gets to
-            // name its own field first.
+        String name = connectionConfiguration.getName();
+        synchronized (nameLock(tenant, name)) {
+            // Last of the checks on the document itself, deliberately: it refuses a
+            // document that is not wrong, only ahead of the feature, so anything
+            // genuinely malformed gets to name its own field first. It still runs before
+            // the claim, so a refused document never takes a name it must give back.
             requireDefaultTenant(connectionConfiguration);
-            Response response = restVersionInfo.create(connectionConfiguration);
+            String token = UUID.randomUUID().toString();
+            claimName(tenant, name, token);
+            requireNoUnclaimedHolder(tenant, name, token);
+
+            Response response;
+            try {
+                response = restVersionInfo.create(connectionConfiguration);
+            } catch (Exception e) {
+                releaseClaimQuietly(tenant, name, token);
+                throw e;
+            }
             URI createdUri = createdUriOf(response);
-            writeDescriptorNow(createdUri, connectionConfiguration.getName());
+            if (createdUri == null) {
+                releaseClaimQuietly(tenant, name, token);
+                throw new InternalServerErrorException("Created connection '" + name + "' but could not read its id back, so it cannot be "
+                        + "recorded as the holder of its name. Delete it by hand if it appears in the connection list, then retry.");
+            }
+            IResourceStore.IResourceId created = RestUtilities.extractResourceId(createdUri);
+            recordHolder(tenant, name, token, created);
+            writeDescriptorOrRollBack(tenant, name, token, createdUri, created);
             connectionRegistry.invalidate();
-            requireCreateWonTheName(tenant, connectionConfiguration.getName(), createdUri);
             return response;
         }
     }
 
     /**
-     * Writes the new document's descriptor before the name lock is released.
+     * Takes the durable claim on the name, or refuses the create with 409.
+     * <p>
+     * A claim somebody else holds is honoured when it names a connection that still
+     * exists under that name. It is taken over when it is stale: no connection
+     * recorded and older than {@link #UNRECORDED_CLAIM_STALE_AFTER} — a create that
+     * crashed between claiming and creating — or a recorded connection that is
+     * gone, which is what a delete that failed to release leaves behind, and what
+     * an import rollback leaves too. The takeover is a compare-and-set on exactly
+     * the value read, so two creates that both judged one claim stale cannot both
+     * win it. Anything else — a fresh claim with no connection yet — is a create in
+     * flight, and this one stands down.
+     */
+    private void claimName(String tenant, String name, String token) {
+        if (claimStore(name, () -> nameClaimStore.claim(tenant, name, token))) {
+            return;
+        }
+        Optional<NameClaim> holder = claimStore(name, () -> nameClaimStore.find(tenant, name));
+        if (holder.isEmpty()) {
+            // Released between our insert and our read. One more attempt; a name
+            // contended that hard is answered as busy rather than looped on.
+            if (claimStore(name, () -> nameClaimStore.claim(tenant, name, token))) {
+                return;
+            }
+            throw createInProgress(name);
+        }
+        NameClaim current = holder.get();
+        if (current.connectionId() != null && isLiveConnectionNamed(current.connectionId(), tenant, name)) {
+            throw nameTaken(name, current.connectionId());
+        }
+        if (claimStore(name, () -> nameClaimStore.takeOver(current, token, UNRECORDED_CLAIM_STALE_AFTER))) {
+            LOGGER.infof("Took over a stale claim on connection name '%s': %s", sanitize(name), current.connectionId() == null
+                    ? "no connection was ever recorded against it"
+                    : "connection " + sanitize(current.connectionId()) + " no longer exists");
+            return;
+        }
+        throw createInProgress(name);
+    }
+
+    /**
+     * Whether a connection id recorded in a claim still names a live connection of
+     * that (tenant, name).
+     * <p>
+     * Read by id at the current version, not through the descriptor index: a
+     * connection whose create is still between recording itself and writing its
+     * descriptor exists, and must count. A store that cannot answer fails closed —
+     * deciding "gone" from no evidence would hand the name to a second connection.
+     */
+    private boolean isLiveConnectionNamed(String connectionId, String tenant, String name) {
+        try {
+            IResourceStore.IResourceId current = connectionStore.getCurrentResourceId(connectionId);
+            ConnectionConfiguration connection = connectionStore.read(connectionId, current.getVersion());
+            return connection != null && name.equals(connection.getName()) && tenant.equals(ConnectionConfiguration.effectiveTenant(connection));
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            return false;
+        } catch (Exception e) {
+            throw new BadRequestException("Could not check whether connection " + connectionId + ", which holds the name '" + name
+                    + "', still exists (" + e.getClass().getSimpleName() + "). Retry once the configuration store is reachable.", e);
+        }
+    }
+
+    /**
+     * The legacy half of the rule, and the only reason a name scan is still made on
+     * create: connections created before name claims existed hold their names
+     * without one.
+     * <p>
+     * Winning the claim proves no other create that took a claim holds the name. It
+     * says nothing about a connection that predates the claim store, and the
+     * descriptor index does. When it finds one, the claim just taken is handed to
+     * that connection — a lazy backfill, done in place as one compare-and-set so
+     * the name is never unclaimed in between — and this create is answered 409. The
+     * next create of the name is then refused by the claim alone.
+     */
+    private void requireNoUnclaimedHolder(String tenant, String name, String token) {
+        String holder;
+        try {
+            holder = connectionStore.idOfName(tenant, name);
+        } catch (Exception e) {
+            releaseClaimQuietly(tenant, name, token);
+            // A store that cannot be read must not silently permit a duplicate: the
+            // damage from an ambiguous name is a credential sent to the wrong host.
+            throw new BadRequestException("Could not verify that the connection name is unique (" + e.getClass().getSimpleName()
+                    + "). Retry once the configuration store is reachable.", e);
+        }
+        if (holder == null) {
+            return;
+        }
+        try {
+            nameClaimStore.recordConnection(tenant, name, token, holder);
+        } catch (RuntimeException e) {
+            LOGGER.warnf("Connection '%s' (id %s) predates name claims, and its claim could not be backfilled (%s); the next create of the name "
+                    + "repeats this check.", sanitize(name), sanitize(holder), e.getClass().getSimpleName());
+            releaseClaimQuietly(tenant, name, token);
+        }
+        throw nameTaken(name, holder);
+    }
+
+    /**
+     * Records the new document as the holder of its name — step three of
+     * {@link #createUnderNameLock}.
+     * <p>
+     * Conditional on the claim still holding this create's token. If it does not,
+     * the create outlived {@link #UNRECORDED_CLAIM_STALE_AFTER} and another create
+     * took the name over; keeping this document would be the duplicate the claim
+     * exists to prevent, so it is removed and the caller answered 409.
+     */
+    private void recordHolder(String tenant, String name, String token, IResourceStore.IResourceId created) {
+        boolean recorded;
+        try {
+            recorded = nameClaimStore.recordConnection(tenant, name, token, created.getId());
+        } catch (RuntimeException e) {
+            removeCreatedConnection(created, name);
+            releaseClaimQuietly(tenant, name, token);
+            throw new BadRequestException("Created connection '" + name + "' but could not record it as the holder of its name ("
+                    + e.getClass().getSimpleName() + "), so it was removed again. Retry once the configuration store is reachable.", e);
+        }
+        if (!recorded) {
+            removeCreatedConnection(created, name);
+            throw new ClientErrorException("The claim on connection name '" + name + "' was taken over while this create was in flight: it "
+                    + "took longer than " + UNRECORDED_CLAIM_STALE_AFTER.toSeconds() + "s, so another create presumed it had crashed. This one "
+                    + "has been removed again. If ${connection:" + name + "} resolves, the other create landed; otherwise retry.",
+                    Response.Status.CONFLICT);
+        }
+    }
+
+    /**
+     * Writes the new document's descriptor, or undoes the create.
      * <p>
      * The same descriptor {@code DocumentDescriptorFilter} would write once the
      * response is on its way — it finds this one and leaves it alone — only
-     * earlier, because a name scan reads descriptors and a document without one is
-     * invisible to the next create of the same name. Also what lets an in-process
-     * caller such as the import service create a connection without writing a
-     * descriptor by hand.
-     * <p>
-     * A descriptor that cannot be written is logged and left to the filter to
-     * retry: the document is already there, and refusing the whole create for an
-     * index row the filter can still produce would be the worse outcome.
+     * earlier, because a name lookup reads descriptors. A connection without one
+     * resolves for nobody while its claim refuses the name to everybody else. That
+     * used to be logged and left to the filter, which never runs for an in-process
+     * caller such as the import, and the caller was told the create succeeded. It
+     * is a failed create: the document is removed, the claim released, and the
+     * caller gets the error.
      */
-    private void writeDescriptorNow(URI createdUri, String name) {
-        if (createdUri == null) {
-            return;
-        }
-        IResourceStore.IResourceId created = RestUtilities.extractResourceId(createdUri);
+    private void writeDescriptorOrRollBack(String tenant, String name, String token, URI createdUri, IResourceStore.IResourceId created) {
         try {
             documentDescriptorStore.createDescriptor(created.getId(), created.getVersion(),
                     resourceAccessGuard.stampNewDescriptor(createDocumentDescriptor(createdUri)));
         } catch (Exception e) {
-            LOGGER.warnf(e, "Created connection '%s' (id %s) but could not write its descriptor inside the name lock; the response "
-                    + "filter will retry, and until then a concurrent create of the same name cannot see this one.", sanitize(name),
-                    sanitize(created.getId()));
+            removeCreatedConnection(created, name);
+            releaseClaimQuietly(tenant, name, token);
+            throw new BadRequestException("Created connection '" + name + "' but could not write its descriptor (" + e.getClass().getSimpleName()
+                    + "), without which the name never resolves, so it was removed again. Retry once the configuration store is reachable.",
+                    e);
         }
+    }
+
+    /**
+     * Runs one claim-store call, turning a store failure into a refusal the author
+     * can retry. Nothing has been created when these run, so there is nothing to
+     * undo.
+     */
+    private static <T> T claimStore(String name, Supplier<T> call) {
+        try {
+            return call.get();
+        } catch (WebApplicationException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            throw new BadRequestException("Could not claim the connection name '" + name + "' (" + e.getClass().getSimpleName()
+                    + "), so its uniqueness cannot be guaranteed and nothing was created. Retry once the configuration store is reachable.", e);
+        }
+    }
+
+    /**
+     * Best-effort: a claim left behind with no live connection is taken over by the
+     * next create of the name once it is stale, so failing to release one delays
+     * that create rather than blocking the name for good.
+     */
+    private void releaseClaimQuietly(String tenant, String name, String token) {
+        try {
+            nameClaimStore.release(tenant, name, token);
+        } catch (RuntimeException e) {
+            LOGGER.warnf("Could not release the claim on connection name '%s' (%s); the next create of the name takes it over once it is stale.",
+                    sanitize(name), e.getClass().getSimpleName());
+        }
+    }
+
+    private static ClientErrorException nameTaken(String name, String holderId) {
+        return new ClientErrorException("A connection named '" + name + "' already exists in this tenant (" + holderId + "). Names are what "
+                + "${connection:…} refers to, so they must be unique — reference that one, or choose another name.", Response.Status.CONFLICT);
+    }
+
+    private static ClientErrorException createInProgress(String name) {
+        return new ClientErrorException("Another create of a connection named '" + name + "' is in progress. Names are what ${connection:…} "
+                + "refers to, so they must be unique. If ${connection:" + name + "} resolves in a moment, that create landed; otherwise retry.",
+                Response.Status.CONFLICT);
     }
 
     /**
@@ -212,54 +415,6 @@ public class RestConnectionStore implements IRestConnectionStore {
     private Object nameLock(String tenant, String name) {
         int stripe = Math.floorMod((tenant + "/" + name).hashCode(), nameLocks.length);
         return nameLocks[stripe];
-    }
-
-    /**
-     * The cross-replica half of the uniqueness rule.
-     * <p>
-     * Our own descriptor is visible by now — {@link #writeDescriptorNow} — so our
-     * own id is expected in the scan and filtered out; the rule is about everyone
-     * else: any OTHER holder of the name visible now completed its create
-     * concurrently with ours, and ours stands down. It is removed permanently,
-     * descriptor included (nothing has been told about it yet, so there is nothing
-     * to soft-delete for), and the caller is answered 409.
-     * <p>
-     * "Any other holder wins" rather than "the oldest wins", deliberately. When two
-     * replicas each see only themselves plus the other, both stand down and both
-     * callers are told to retry — an empty name, and a second request. The
-     * alternative, each keeping its own when it is the older, duplicates the name
-     * whenever one replica's scan runs before the other's descriptor has
-     * replicated, and a duplicate name is a credential that may go to the wrong
-     * host. A wasted request is the cheaper failure by a wide margin.
-     * <p>
-     * A store that cannot be scanned fails closed the same way the pre-check does:
-     * the document is removed again and the caller is asked to retry.
-     */
-    private void requireCreateWonTheName(String tenant, String name, URI createdUri) {
-        if (createdUri == null) {
-            LOGGER.warnf("Created connection '%s' but could not read its id back, so the cross-replica name check was skipped.",
-                    sanitize(name));
-            return;
-        }
-        IResourceStore.IResourceId created = RestUtilities.extractResourceId(createdUri);
-        List<String> holders;
-        try {
-            holders = connectionStore.idsOfName(tenant, name);
-        } catch (IResourceStore.ResourceStoreException e) {
-            removeLosingCreate(created, name);
-            throw new BadRequestException("Could not verify that the connection name '" + name + "' is still unique after creating it ("
-                    + e.getClass().getSimpleName() + "), so the new connection was removed again. Retry once the configuration store is "
-                    + "reachable.", e);
-        }
-        List<String> others = holders.stream().filter(holder -> !holder.equals(created.getId())).toList();
-        if (others.isEmpty()) {
-            return;
-        }
-        removeLosingCreate(created, name);
-        throw new ClientErrorException("A connection named '" + name + "' was created concurrently on another node: " + others.get(0)
-                + " also held the name when this one landed, so this one has been removed again. If ${connection:" + name
-                + "} resolves, that one survived — reference it. If it does not, the other node stood down for the same reason: retry "
-                + "the create.", Response.Status.CONFLICT);
     }
 
     private static URI createdUriOf(Response response) {
@@ -277,23 +432,23 @@ public class RestConnectionStore implements IRestConnectionStore {
     }
 
     /**
-     * Removes a create that lost the name — the document and the descriptor
-     * {@link #writeDescriptorNow} gave it, or the name scan would go on finding a
-     * descriptor whose resource is gone.
+     * Removes a create that did not complete — the document and any descriptor it
+     * was given, or the name scan would go on finding a descriptor whose resource
+     * is gone.
      */
-    private void removeLosingCreate(IResourceStore.IResourceId created, String name) {
+    private void removeCreatedConnection(IResourceStore.IResourceId created, String name) {
         try {
             connectionStore.deleteAllPermanently(created.getId());
             connectionRegistry.invalidate();
         } catch (Exception e) {
-            LOGGER.errorf(e, "Connection '%s' (id %s) lost a concurrent-create race but could not be removed; two connections now hold the "
-                    + "name and the loser must be deleted by hand.", sanitize(name), sanitize(created.getId()));
+            LOGGER.errorf(e, "Connection '%s' (id %s) did not complete its create but could not be removed; it must be deleted by hand.",
+                    sanitize(name), sanitize(created.getId()));
         }
         try {
             documentDescriptorStore.deleteAllDescriptor(created.getId());
         } catch (Exception e) {
-            LOGGER.warnf(e, "Connection '%s' (id %s) was removed after losing a concurrent-create race but its descriptor could not be; "
-                    + "the dangling descriptor is skipped by name lookups and can be deleted by hand.", sanitize(name), sanitize(created.getId()));
+            LOGGER.warnf(e, "Connection '%s' (id %s) was removed after an incomplete create but its descriptor could not be; the dangling "
+                    + "descriptor is skipped by name lookups and can be deleted by hand.", sanitize(name), sanitize(created.getId()));
         }
     }
 
@@ -325,8 +480,34 @@ public class RestConnectionStore implements IRestConnectionStore {
         // Invalidate BEFORE returning, not on a TTL: a deleted connection that keeps
         // resolving for another five minutes is a revocation that did not revoke.
         connectionRegistry.invalidate();
+        releaseNameClaim(identity, id);
         deleteOrphanedGrants(identity);
         return response;
+    }
+
+    /**
+     * Gives the name back once its connection is deleted, soft or permanently.
+     * <p>
+     * Only a claim that names THIS connection: one held by anything else — a create
+     * that already took a stale claim over, a connection that predates claims — is
+     * not this delete's to release. No liveness check is needed first: a soft
+     * delete succeeds only on the current version, so reaching this line means the
+     * connection no longer resolves under the name either way.
+     * <p>
+     * Failure is logged, not propagated: the connection IS deleted, and a claim
+     * naming a connection that no longer exists is taken over by the next create of
+     * the name.
+     */
+    private void releaseNameClaim(ConnectionIdentity identity, String id) {
+        if (identity == null) {
+            return;
+        }
+        try {
+            nameClaimStore.releaseConnection(identity.tenantId(), identity.name(), id);
+        } catch (RuntimeException e) {
+            LOGGER.warnf("Deleted connection '%s' but could not release its name claim (%s); the next create of the name takes it over.",
+                    sanitize(identity.name()), e.getClass().getSimpleName());
+        }
     }
 
     /**
@@ -494,18 +675,18 @@ public class RestConnectionStore implements IRestConnectionStore {
     }
 
     /**
-     * Refuses a name another connection already holds in the same tenant.
+     * Refuses a name another connection already holds in the same tenant, on
+     * update.
      * <p>
      * {@code ${connection:jira}} names ONE connection and has to keep naming the
-     * same one. Without this, a second connection called "jira" — a duplicate, or a
-     * staging variant someone forgot to rename — makes resolution depend on
-     * descriptor scan order, which changes after a delete or a re-index. The
-     * failure that produces is one system's credential going to another's
-     * allowlisted origin, silently and intermittently.
+     * same one. A rename is refused outright, so this only fires for a name that
+     * was already duplicated before uniqueness was enforced — and refuses to let an
+     * edit entrench it. Creates are guarded by the name claim instead; see
+     * {@link #createUnderNameLock}.
      *
      * @param currentId
      *            the resource being updated, so a connection does not collide with
-     *            itself; null on create
+     *            itself
      */
     private void requireNameIsFree(ConnectionConfiguration connectionConfiguration, String currentId) {
         if (connectionConfiguration == null || connectionConfiguration.getName() == null) {

@@ -4,6 +4,9 @@
  */
 package ai.labs.eddi.datastore;
 
+import ai.labs.eddi.configs.connections.names.IConnectionNameClaimStore;
+import ai.labs.eddi.configs.connections.names.MongoConnectionNameClaimStore;
+import ai.labs.eddi.configs.connections.names.PostgresConnectionNameClaimStore;
 import ai.labs.eddi.configs.deployment.IDeploymentStorage;
 import ai.labs.eddi.configs.deployment.mongo.MongoDeploymentStorage;
 import ai.labs.eddi.configs.migration.IMigrationLogStore;
@@ -146,6 +149,13 @@ public class DataStoreProducers {
     @ApplicationScoped
     public IConnectionGrantStore connectionGrantStore(Instance<MongoConnectionGrantStore> mongo,
                                                       Instance<PostgresConnectionGrantStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
+    public IConnectionNameClaimStore connectionNameClaimStore(Instance<MongoConnectionNameClaimStore> mongo,
+                                                              Instance<PostgresConnectionNameClaimStore> postgres) {
         return isPostgres() ? postgres.get() : mongo.get();
     }
 

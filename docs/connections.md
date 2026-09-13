@@ -725,7 +725,7 @@ possibly with linked accounts filed under that name — whatever the import stra
 create runs through the same gate as `POST /connectionstore/connections`: structural
 validation, the deployment checks (`PER_USER` and `CALLER_SUPPLIED` need OIDC, OAuth needs
 an active vault, a remote `http://` origin needs `eddi.connections.allow-plaintext-remote-origins`)
-and the name-uniqueness lock. A document the deployment refuses is
+and the name claim. A document the deployment refuses is
 **skipped with the reason logged**, not a failed import — the agent is still worth having,
 and the refusal names what to fix. Skips of both kinds are counted in an
 `X-Connections-Skipped` header on the import response.
@@ -779,16 +779,21 @@ treated as an administrator, exactly as `@RolesAllowed` is.
   logged. `/connections/mine` returns connection name, status, scopes and expiry,
   enumerated explicitly rather than serialised from the entity.
 * **A name is unique per tenant, case-sensitive.** `${connection:jira}` names
-  one connection and must keep naming the same one. The store is a versioned
-  document store with no unique index, so uniqueness is enforced on the write
-  path: creates of one name are serialised inside a node — the document *and* its
-  descriptor, which is what a name lookup reads, are both written before the lock
-  is released, so a second create on the same node always sees the first — and
-  after the write lands the store is asked again who holds the name. A create
-  that finds another holder is rolled back, descriptor included, and answered
-  **409**. What remains is replication lag between nodes: two replicas that each
-  see the other both stand down, and both callers are told to retry — a wasted
-  request, chosen over the alternative of two connections under one name.
+  one connection and must keep naming the same one. The connection document store
+  cannot carry a unique index on a field inside the document, so uniqueness is
+  enforced by a durable **name claim**: one row per `(tenant, name)` in
+  `connection_name_claims` — a MongoDB collection under a unique index, or a
+  PostgreSQL table under a unique constraint. A create claims the name before it
+  writes anything; exactly one create on any replica wins, and every other is
+  answered **409**. The claim records which connection holds the name, and a
+  delete, soft or permanent, gives it back. A claim left by a create that crashed
+  before recording its connection is taken over after two minutes by the
+  database's clock, and one naming a connection that no longer exists is taken
+  over at once — both by a compare-and-set, so two creates cannot both take it. A
+  connection created before claims existed is found by a name scan on the next
+  create of its name, which is answered **409** and backfills its claim. If the
+  descriptor a name lookup reads cannot be written, the create fails and the
+  document is removed again, rather than leaving a connection nobody can resolve.
 * **Deleting a connection deletes its grants**, decided by re-reading the
   connection's `(tenant, name)` at its *current* version rather than by the
   `permanent` flag or the version in the request — a soft delete already stops the
