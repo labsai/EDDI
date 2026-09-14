@@ -25,13 +25,13 @@ services:
       - "EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED=${EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED:-true}"
       - "QUARKUS_OIDC_TENANT_ENABLED=${QUARKUS_OIDC_TENANT_ENABLED:-false}"
       - "MONGODB_CONNECTIONSTRING=mongodb://${MONGO_INITDB_ROOT_USERNAME:-eddi}:${MONGO_INITDB_ROOT_PASSWORD:-changeme}@mongodb:27017/eddi?authSource=admin&retryWrites=true&w=majority&connectTimeoutMS=10000&socketTimeoutMS=30000"
-#      - "JAVA_OPTS_APPEND=-Dquarkus.http.cors.origins=http://localhost:3000"
+      # - "JAVA_OPTS_APPEND=-Dquarkus.http.cors.origins=http://localhost:3000"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
       - "${EDDI_PORT:-7070}:7070"
       - "${EDDI_HTTPS_PORT:-7443}:7443"
-#      - "5005:5005"
+      # - "5005:5005"
     depends_on:
       mongodb:
         condition: service_healthy
