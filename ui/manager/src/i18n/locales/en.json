@@ -3455,7 +3455,19 @@
     "placeholder": "API key or ${vault:key-name}",
     "vaultDown": "Vault is not configured — set up a secret provider in the EDDI backend",
     "referencePlaceholder": "${vault:key-name}",
-    "mustBeReference": "This field takes a reference — ${vault:key} or ${vars:key} — not the secret itself. Pick a key, or store the value in the vault first."
+    "mustBeReference": "This field takes a reference — ${vault:key} or ${vars:key} — not the secret itself. Pick a key, or store the value in the vault first.",
+    "connectionChip": "Connection",
+    "connectionChipTitle": "A connection reference — EDDI resolves it to the credential on every request",
+    "clearConnection": "Clear connection reference",
+    "pickConnection": "Insert a connection reference",
+    "connectionFilterPlaceholder": "Search connections…",
+    "connectionLoading": "Loading connections…",
+    "connectionEmpty": "No connections yet. An administrator creates them under Connections.",
+    "connectionNoMatch": "No connections matching \"{{filter}}\"",
+    "connectionForbidden": "Your role cannot list connections. If you know its name, type ${connection:name} by hand.",
+    "connectionUnavailable": "This backend does not offer connections.",
+    "connectionFailed": "Could not load connections.",
+    "connectionHint": "Inserts ${connection:name} as the whole value. EDDI resolves it to the credential on every request."
   },
   "snippetEditor": {
     "category": "Category",
@@ -4486,7 +4498,8 @@
     },
     "binding": {
       "perUser": "Per user",
-      "service": "Shared"
+      "service": "Shared",
+      "callerSupplied": "Caller-supplied"
     },
     "bindingPerUserTitle": "Resolves as each end user",
     "bindingServiceTitle": "Resolves as one shared account",
@@ -4592,7 +4605,16 @@
       "endpointNotHttps": "Must be https — the client secret is sent to this URL.",
       "endpointUserInfo": "Remove the credentials from the URL; they change where the request actually goes.",
       "endpointNotAbsolute": "Enter a full URL including the host, e.g. https://auth.example.com/oauth/token.",
-      "paramCredentialShaped": "One of these parameters is named like a credential. Only non-secret protocol parameters (prompt, audience, …) belong here."
+      "paramCredentialShaped": "One of these parameters is named like a credential. Only non-secret protocol parameters (prompt, audience, …) belong here.",
+      "bindingMismatch": "This binding does not go with this authentication type: caller-supplied needs an API key, per user needs an OAuth user login, and everything else is shared.",
+      "callerSuppliedRefused": "A caller-supplied connection stores no credential — the calling system sends it with every request. Clear this field.",
+      "nameTooLong": "A name is at most 64 characters.",
+      "timeoutRange": "The timeout must be a whole number between 1 and 60000 milliseconds. Leave it empty for the default.",
+      "templateLiteralCredential": "The text around the reference looks like a credential itself. Only a short scheme prefix such as “Bearer ” belongs outside ${vault:…} — store the rest in the vault.",
+      "paramReserved": "One of these parameters is set by EDDI itself (client_id, redirect_uri, response_type, state, code_challenge…). Overriding it would break the flow.",
+      "paramValueReference": "Parameter values are sent exactly as written — a ${…} reference here is not resolved, and would put a vault pointer in a URL. Use plain protocol values only.",
+      "paramValueTooLong": "A parameter value is at most 512 characters.",
+      "paramValueCredentialShaped": "One of these values looks like a key or a token. This map is stored in plain text and sent in a URL — only non-secret protocol parameters belong here."
     },
     "backToList": "Back to Connections",
     "headerSecret": "Stored secret",
@@ -4600,7 +4622,20 @@
     "discardNewBody": "What you have filled in so far will be lost. Nothing has been created yet.",
     "confirmReconnect": "Connect this account again?",
     "confirmReconnectDesc": "This account is working, so there is nothing to repair. Continuing takes you out of EDDI to the provider's sign-in page and replaces the access you granted before.",
-    "paramDuplicate": "Another parameter already uses this name. Only the last one is saved."
+    "paramDuplicate": "Another parameter already uses this name. Only the last one is saved.",
+    "bindingChooser": "Where the key comes from",
+    "bindingChoice": {
+      "serviceBody": "One key in the vault, sent for everyone. Simple — but the agent can reach everything that key can.",
+      "callerSuppliedBody": "EDDI stores nothing. The system calling EDDI sends each user's own credential with every request, so the agent can do only what that user can do — the target's own permissions are the boundary."
+    },
+    "callerSuppliedHeaderTitle": "What the calling system sends",
+    "callerSuppliedHeaderBody": "One header per request: the connection name, a space, then the whole value to send as {{header}} — scheme included, so “Bearer abc” needs no escaping. The credential lives for that request only and is never stored.",
+    "callerSuppliedNeedsAuth": "The caller must be signed in to EDDI. A request without the credential fails rather than going out unauthenticated — including when a paused tool call is resumed — and this connection is withheld from MCP and A2A discovery.",
+    "bindingCallerSuppliedTitle": "Resolves as whoever is calling",
+    "bindingCallerSuppliedBody": "The calling system hands over each user's own credential with the request and EDDI stores nothing. The agent can do only what that user can do at the target, and this connection is withheld from MCP and A2A discovery.",
+    "confirmAuthChange": "Change how this connection authenticates?",
+    "confirmAuthChangeDesc": "Accounts linked through this connection will stop resolving — a grant belongs to the flow that produced it. EDDI refuses the change while any account is still linked and says how many; unlink them first, or create a new connection and let people link that instead.",
+    "confirmAuthChangeAccept": "Change it"
   },
   "extensionTypes": {
     "parser": "Input Parser",
@@ -4696,5 +4731,11 @@
       "cascade_one": "Owner changed on {{count}} resource",
       "cascade_other": "Owner changed on {{count}} resources"
     }
+  },
+  "connectionRef": {
+    "wrapped": "A connection supplies the whole header value, scheme included. Use ${connection:name} on its own and put “Bearer ” in the connection's header value instead.",
+    "headerMismatch": "This connection sends its credential as “{{expected}}”, so the header must be named that — otherwise the config shows one name and the request carries another.",
+    "refusedInRequest": "${connection:…} is refused in a path, query parameter or body — a credential in a URL lands in every proxy log, and one in a body is not read. Reference the connection from a header instead.",
+    "refusedInModel": "Language models, embeddings and vector stores do not accept ${connection:…}: a connection resolves to a whole header, and these need a bare credential. Use ${vault:…} here."
   }
 }

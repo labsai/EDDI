@@ -50,7 +50,7 @@ export function TaskRagSection({ task, onChange, readOnly }: TaskSectionProps) {
             {t("llmEditor.knowledgeBasesHint", "Explicitly reference knowledge bases by name. Each name must match a RagConfiguration in the workflow.")}
           </p>
           {(task.knowledgeBases ?? []).map((kb, kbIdx) => (
-            <div key={kbIdx} className="rounded-md border border-border bg-background p-2.5 space-y-2">
+            <div key={kbIdx} className="rounded-md border border-border bg-background p-3 space-y-2">
               <div className="flex items-center gap-2">
                 <input
                   type="text"

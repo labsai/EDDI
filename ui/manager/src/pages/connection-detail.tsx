@@ -43,6 +43,7 @@ import {
   parseConnectionResourceUri,
   toStoredConnection,
   type AuthType,
+  type Binding,
   type ConnectionConfiguration,
   type OAuthConfig,
   type StaticAuth,
@@ -50,6 +51,8 @@ import {
 import {
   bindingFor,
   isOAuthType,
+  TIMEOUT_MS_MAX,
+  TIMEOUT_MS_MIN,
   validateConnection,
   type ValidationCode,
 } from "@/lib/connection-validation";
@@ -62,9 +65,12 @@ import {
  * fields. Three of this document's rules are ones a generated form could not
  * express anyway:
  *
- *  - **`binding` is derived, not chosen.** The backend couples it to `authType`
- *    in both directions, which leaves exactly one legal value per type. Offering
- *    it as a select would offer three broken combinations and one working one.
+ *  - **`binding` is derived for every type but one.** The backend couples it to
+ *    `authType` in both directions, which leaves exactly one legal value for
+ *    BASIC and both OAuth flows. Offering a select would offer broken
+ *    combinations beside the working one. STATIC is the exception — `SERVICE`
+ *    or `CALLER_SUPPLIED` is a real decision — and gets a two-way chooser
+ *    inside the credential fields instead.
  *  - **`name` is immutable.** Every grant is filed under `(tenant, name)`, so a
  *    rename orphans them — and the next connection created under the old name
  *    inherits them. The backend refuses; the input is disabled and says why.
@@ -93,6 +99,20 @@ export function ConnectionDetailPage() {
   const [draft, setDraft] = useState<ConnectionConfiguration | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [unverifiedConfirmOpen, setUnverifiedConfirmOpen] = useState(false);
+  /**
+   * A change of auth type or binding away from the STORED one, awaiting the
+   * user's confirmation.
+   *
+   * Either changes what a linked account means: a grant belongs to the flow
+   * that produced it, so accounts linked through this connection stop
+   * resolving, and the backend refuses the save with a 409 while any are
+   * still linked. Asking first is what turns that 409 from a surprise after
+   * ten minutes of edits into a decision made before them. Returning to the
+   * stored value needs no ceremony and is applied directly.
+   */
+  const [pendingAuthChange, setPendingAuthChange] = useState<
+    { authType: AuthType } | { binding: Binding } | null
+  >(null);
   const [rawOpen, setRawOpen] = useState(false);
   const [showErrors, setShowErrors] = useState(false);
   /** Chip text typed but not committed — held here so a save can fold it in. */
@@ -109,6 +129,8 @@ export function ConnectionDetailPage() {
    * it would feed its own seeding effect and loop.
    */
   const baselineRef = useRef<string | null>(null);
+  /** The same baseline, parsed — read by the confirm-on-change logic. */
+  const baselineDocRef = useRef<ConnectionConfiguration | null>(null);
   const draftRef = useRef<ConnectionConfiguration | null>(null);
   draftRef.current = draft;
 
@@ -137,10 +159,12 @@ export function ConnectionDetailPage() {
    */
   useEffect(() => {
     baselineRef.current = null;
+    baselineDocRef.current = null;
     setDraft(null);
     setShowErrors(false);
     setPendingScope("");
     setPendingOrigin("");
+    setPendingAuthChange(null);
   }, [id, version]);
 
   /**
@@ -170,6 +194,7 @@ export function ConnectionDetailPage() {
       JSON.stringify(current) !== baselineRef.current;
     if (dirty) return;
     baselineRef.current = JSON.stringify(config);
+    baselineDocRef.current = config;
     setDraft({ ...config });
   }, [config]);
 
@@ -236,22 +261,84 @@ export function ConnectionDetailPage() {
     setDraft((prev) => {
       if (!prev) return prev;
       const blank = emptyConnection(authType);
+      const stored = baselineDocRef.current;
+      // Returning to the STORED type restores the stored binding and flag;
+      // any other type derives them from the draft. The draft alone is not
+      // enough: a caller-supplied connection mis-clicked to BASIC is
+      // corrected to SERVICE there, and SERVICE is also legal for STATIC —
+      // so honouring the draft on the way back (which needs no
+      // confirmation, being the stored type) arrived as a shared-key
+      // connection with no key, and the save sent a binding nobody chose.
+      // The proxy-trust flag follows for the same reason: a detour through
+      // STATIC and back must not quietly switch off a setting that was
+      // saved on, which would stop every proxied user resolving on save.
+      const returningToStored = stored !== null && authType === stored.authType;
+      const binding = bindingFor(
+        authType,
+        returningToStored ? stored?.binding : prev.binding,
+      );
+      // Only legal on a per-user binding; the backend refuses it elsewhere
+      // rather than ignoring it — a relaxation sitting on a document where it
+      // does nothing reads as a decision already in force.
+      const allowUnverifiedPrincipal =
+        binding !== "PER_USER"
+          ? false
+          : returningToStored
+            ? (stored?.allowUnverifiedPrincipal ?? false)
+            : prev.allowUnverifiedPrincipal;
       return {
         ...prev,
         authType,
-        binding: bindingFor(authType),
-        // The flag is only legal on a per-user binding, and the backend refuses
-        // it elsewhere rather than ignoring it — a relaxation sitting on a
-        // document where it does nothing reads as a decision already in force.
-        allowUnverifiedPrincipal:
-          authType === "OAUTH2_AUTHORIZATION_CODE"
-            ? prev.allowUnverifiedPrincipal
-            : false,
+        binding,
+        allowUnverifiedPrincipal,
         staticAuth: prev.staticAuth ?? blank.staticAuth,
         oauth: prev.oauth ?? blank.oauth,
       };
     });
   }, []);
+
+  /** The STATIC-only choice between a shared key and a caller-supplied one. */
+  const changeBinding = useCallback((binding: Binding) => {
+    setDraft((prev) =>
+      prev ? { ...prev, binding: bindingFor(prev.authType, binding) } : prev,
+    );
+  }, []);
+
+  /**
+   * Route a type or binding change through the confirmation when it leaves
+   * the stored value, and straight through when it returns to it.
+   */
+  const requestAuthTypeChange = useCallback(
+    (authType: AuthType) => {
+      const stored = baselineDocRef.current;
+      if (!stored || authType === stored.authType) {
+        changeAuthType(authType);
+        return;
+      }
+      setPendingAuthChange({ authType });
+    },
+    [changeAuthType],
+  );
+
+  const requestBindingChange = useCallback(
+    (binding: Binding) => {
+      const stored = baselineDocRef.current;
+      if (!stored || binding === stored.binding) {
+        changeBinding(binding);
+        return;
+      }
+      setPendingAuthChange({ binding });
+    },
+    [changeBinding],
+  );
+
+  const confirmAuthChange = () => {
+    const pending = pendingAuthChange;
+    setPendingAuthChange(null);
+    if (!pending) return;
+    if ("authType" in pending) changeAuthType(pending.authType);
+    else changeBinding(pending.binding);
+  };
 
   const handleSave = async () => {
     if (!outgoing || !id) return;
@@ -276,6 +363,7 @@ export function ConnectionDetailPage() {
       setPendingScope("");
       setPendingOrigin("");
       baselineRef.current = JSON.stringify(outgoing);
+      baselineDocRef.current = outgoing;
 
       const location = (result as { location?: string })?.location;
       if (location) {
@@ -289,8 +377,9 @@ export function ConnectionDetailPage() {
     } catch (err) {
       // A 400 here names the field and the fix — a duplicate name, a token URL
       // the operator has not allowlisted, PER_USER on a deployment without
-      // OIDC, an OAuth connection with no vault. None of those are knowable
-      // from the browser, so the backend's sentence is the useful one.
+      // OIDC, an OAuth connection with no vault. A 409 names how many accounts
+      // are still linked and the route that unlinks them. None of those are
+      // knowable from the browser, so the backend's sentence is the useful one.
       toast.error(getErrorMessage(err));
     }
   };
@@ -357,6 +446,8 @@ export function ConnectionDetailPage() {
   }
 
   const perUser = draft.authType === "OAUTH2_AUTHORIZATION_CODE";
+  const callerSupplied =
+    draft.authType === "STATIC" && draft.binding === "CALLER_SUPPLIED";
   const fieldError = (field: keyof typeof errors) =>
     showErrors ? errors[field] : undefined;
 
@@ -461,7 +552,7 @@ export function ConnectionDetailPage() {
             data-testid="connection-auth-type-select"
             className="flex h-9 w-full rounded-lg border border-border bg-background px-3 text-sm"
             value={draft.authType}
-            onChange={(e) => changeAuthType(e.target.value as AuthType)}
+            onChange={(e) => requestAuthTypeChange(e.target.value as AuthType)}
           >
             {AUTH_TYPES.map((type) => (
               <option key={type} value={type}>
@@ -471,14 +562,23 @@ export function ConnectionDetailPage() {
           </select>
         </div>
 
-        {/* Binding is shown, not chosen — see the file comment. */}
-        <div className="flex items-start gap-2 rounded-lg border border-border bg-muted/30 p-3">
+        {/* Binding is shown, not chosen, except for STATIC — see the file
+            comment. The chooser itself sits inside the credential fields. */}
+        <div
+          className="flex items-start gap-2 rounded-lg border border-border bg-muted/30 p-3"
+          data-testid={`connection-binding-explainer-${draft.binding}`}
+        >
           <Info className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
           <div className="space-y-1 text-xs">
             <p className="font-medium text-foreground">
               {perUser
                 ? t("connections.bindingPerUserTitle", "Resolves as each end user")
-                : t("connections.bindingServiceTitle", "Resolves as one shared account")}
+                : callerSupplied
+                  ? t(
+                      "connections.bindingCallerSuppliedTitle",
+                      "Resolves as whoever is calling",
+                    )
+                  : t("connections.bindingServiceTitle", "Resolves as one shared account")}
             </p>
             <p className="text-muted-foreground">
               {perUser
@@ -486,10 +586,15 @@ export function ConnectionDetailPage() {
                     "connections.bindingPerUserBody",
                     "Everyone links their own account and the agent acts as them. This follows from the authentication type — a user login is the only flow that produces a grant per person.",
                   )
-                : t(
-                    "connections.bindingServiceBody",
-                    "One credential, the same for everybody. This follows from the authentication type — a fixed key is the same key for everyone however it is bound.",
-                  )}
+                : callerSupplied
+                  ? t(
+                      "connections.bindingCallerSuppliedBody",
+                      "The calling system hands over each user's own credential with the request and EDDI stores nothing. The agent can do only what that user can do at the target, and this connection is withheld from MCP and A2A discovery.",
+                    )
+                  : t(
+                      "connections.bindingServiceBody",
+                      "One credential, the same for everybody. This follows from the authentication type — a fixed key is the same key for everyone however it is bound.",
+                    )}
             </p>
             {perUser && (
               <p className="text-muted-foreground">
@@ -552,6 +657,7 @@ export function ConnectionDetailPage() {
           draft={draft}
           onPatchStatic={patchStatic}
           onPatchOAuth={patchOAuth}
+          onBindingChange={requestBindingChange}
           errors={showErrors ? errors : {}}
           idPrefix="connection"
           dense
@@ -665,7 +771,9 @@ export function ConnectionDetailPage() {
             id="connection-timeout"
             data-testid="connection-timeout"
             type="number"
-            min={0}
+            min={TIMEOUT_MS_MIN}
+            max={TIMEOUT_MS_MAX}
+            step={1}
             value={draft.timeoutMs ?? ""}
             onChange={(e) =>
               setDraft({
@@ -676,6 +784,13 @@ export function ConnectionDetailPage() {
               })
             }
             placeholder={t("connections.timeoutDefault", "Default")}
+            aria-invalid={fieldError("timeoutMs") !== undefined || undefined}
+            aria-describedby="connection-timeout-error"
+          />
+          <ValidationMessage
+            code={fieldError("timeoutMs")}
+            id="connection-timeout-error"
+            testId="connection-timeout-error"
           />
         </div>
       </section>
@@ -729,6 +844,25 @@ export function ConnectionDetailPage() {
           if (to) navigate(to);
         }}
         onCancel={() => setPendingExit(null)}
+      />
+
+      <AlertDialog
+        open={pendingAuthChange !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingAuthChange(null);
+        }}
+        variant="warning"
+        title={t(
+          "connections.confirmAuthChange",
+          "Change how this connection authenticates?",
+        )}
+        description={t(
+          "connections.confirmAuthChangeDesc",
+          "Accounts linked through this connection will stop resolving — a grant belongs to the flow that produced it. EDDI refuses the change while any account is still linked and says how many; unlink them first, or create a new connection and let people link that instead.",
+        )}
+        onConfirm={confirmAuthChange}
+        confirmLabel={t("connections.confirmAuthChangeAccept", "Change it")}
+        cancelLabel={t("common.cancel", "Cancel")}
       />
 
       <AlertDialog
@@ -849,11 +983,14 @@ function ExtraParamsField({
   );
 
   return (
-    <div className="space-y-2">
-      <label className="text-xs font-medium">
+    // A fieldset, not a <label> with nothing to point at: the rows below are
+    // several inputs, each with its own aria-label, so the group is named by
+    // its legend and the hint describes the whole of it.
+    <fieldset className="space-y-2" aria-describedby="connection-extra-params-hint">
+      <legend className="text-xs font-medium">
         {t("connections.extraAuthParams", "Extra authorization parameters")}
-      </label>
-      <p className="text-[11px] text-muted-foreground">
+      </legend>
+      <p id="connection-extra-params-hint" className="text-[11px] text-muted-foreground">
         {t(
           "connections.extraAuthParamsHint",
           "Non-secret protocol parameters the provider expects — prompt, audience, access_type. Never a key or a token: this map is stored in the connection document in plain text.",
@@ -918,6 +1055,6 @@ function ExtraParamsField({
         {t("connections.addParam", "Add parameter")}
       </Button>
       <ValidationMessage code={error} />
-    </div>
+    </fieldset>
   );
 }

@@ -401,7 +401,7 @@ export function CreateGroupDialog({ open, onClose, template: initialTemplate }: 
                   </div>
                 )}
                 {style === "CUSTOM" && (
-                  <div className="flex items-start gap-2 rounded-lg border border-muted-foreground/30 bg-muted/20 p-2 mt-2">
+                  <div className="flex items-start gap-2 rounded-lg border border-muted-foreground/30 bg-muted/20 p-3 mt-2">
                     <Info className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />
                     <p className="text-[11px] text-muted-foreground">
                       {t("groupWizard.hintCustom", "Define your own phases manually. Custom phases can be configured via the API after creation.")}

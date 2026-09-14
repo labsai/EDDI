@@ -34,6 +34,8 @@
  * guaranteed contract for one shared regex serving two different callers.
  */
 
+import { CONNECTION_NAME_SOURCE, isValidConnectionName } from "./connection-name";
+
 /**
  * Schemes EDDI resolves. `eddivault` is the legacy spelling of `vault`; both
  * are accepted by the backend's own pattern, so both are accepted here.
@@ -67,16 +69,90 @@ const CANONICAL = new RegExp(`^\\$\\{(${SCHEME_ALTERNATION}):([^}]{1,256})\\}$`)
 const UNBRACED = new RegExp(`^(${SCHEME_ALTERNATION}):([^}]{1,256})$`, "i");
 
 /**
+ * The connection scheme — a pointer to a *connection document*, never to a
+ * secret.
+ *
+ * Deliberately not in {@link REFERENCE_SCHEMES}. `isSecretReference` is what
+ * the backend accepts in `clientSecret` and `passwordRef`, and a
+ * `${connection:…}` there is refused — so widening that list would have the
+ * one component meant to help write a reference-only field accept a value the
+ * save then rejects. The picker recognises the scheme for *rendering*
+ * (unmasked, with no offer to store it in the vault, which would vault the
+ * literal string), and the editors whose fields may carry one wire it in.
+ *
+ * Only the braced spelling exists. The backend has no unbraced `connection:x`
+ * to canonicalise towards, so recognising one here would render a chip for a
+ * value that never resolves.
+ *
+ * The name inside the braces follows the backend's connection-name grammar,
+ * shared with `connection-validation.ts` through `connection-name.ts`. A body
+ * of "anything but a brace, up to 256" made `${connection:bad name}` look
+ * valid — a chip, no warning — for a name no connection can ever be saved under.
+ */
+export const CONNECTION_SCHEME = "connection";
+const CONNECTION_PREFIX = `\${${CONNECTION_SCHEME}:`;
+const CONNECTION_CANONICAL = new RegExp(
+  `^\\$\\{${CONNECTION_SCHEME}:(${CONNECTION_NAME_SOURCE})\\}$`,
+);
+const CONNECTION_ANYWHERE = new RegExp(`\\$\\{${CONNECTION_SCHEME}:`);
+
+/**
  * Anything heading *towards* a reference, including input that is not one yet.
  *
  * Prefix-based on purpose: `${vault:` is not a valid reference but is
  * unmistakably someone typing one, and a field that flips to "plaintext secret"
  * halfway through the word is worse than one that waits.
  */
-const PREFIXES = REFERENCE_SCHEMES.flatMap((scheme) => [
-  `${scheme}:`,
-  `\${${scheme}:`,
-]);
+const PREFIXES = [
+  ...REFERENCE_SCHEMES.flatMap((scheme) => [`${scheme}:`, `\${${scheme}:`]),
+  CONNECTION_PREFIX,
+];
+
+/** Whether `value` is exactly one `${connection:name}` — the only shape the backend resolves. */
+export function isConnectionReference(value: string | null | undefined): boolean {
+  return typeof value === "string" && CONNECTION_CANONICAL.test(value.trim());
+}
+
+/** The connection a canonical reference names, or null if it is not one. */
+export function parseConnectionReference(
+  value: string | null | undefined,
+): { name: string } | null {
+  if (typeof value !== "string") return null;
+  const match = CONNECTION_CANONICAL.exec(value.trim());
+  return match ? { name: match[1]! } : null;
+}
+
+/**
+ * Build a `${connection:name}` reference, or null when the name is not one the
+ * backend's grammar admits — so this can never produce a value
+ * {@link isConnectionReference} rejects.
+ */
+export function toConnectionReference(name: string): string | null {
+  return isValidConnectionName(name) ? `${CONNECTION_PREFIX}${name}}` : null;
+}
+
+/** Whether a `${connection:` appears anywhere in the value — the placement check. */
+export function containsConnectionReference(value: string | null | undefined): boolean {
+  return typeof value === "string" && CONNECTION_ANYWHERE.test(value);
+}
+
+/**
+ * Whether the value carries a connection reference with text around it —
+ * `Bearer ${connection:jira}`, or two references.
+ *
+ * The backend refuses this shape: a connection supplies the *whole* header
+ * value, scheme included, so anything wrapped around the reference is either
+ * doubled or silently dropped. The scheme belongs in the connection's own
+ * `valueTemplate`, where one connection's answer is the same on every path.
+ */
+export function wrapsConnectionReference(value: string | null | undefined): boolean {
+  return containsConnectionReference(value) && !isConnectionReference(value);
+}
+
+/** Whether `value` starts as a connection reference, finished or not. */
+export function hasConnectionPrefix(value: string | null | undefined): boolean {
+  return typeof value === "string" && value.trim().startsWith(CONNECTION_PREFIX);
+}
 
 /**
  * Every interpolated `${…}` segment in a template, in order.
@@ -168,6 +244,10 @@ export function referenceLabel(value: string): string {
   if (parsed) {
     return parsed.scheme === "vars" ? `vars:${parsed.body}` : parsed.body;
   }
+  // A connection keeps its scheme for the same reason `vars` does: the chip
+  // must not read as a vault key that happens not to exist.
+  const connection = parseConnectionReference(value);
+  if (connection) return `${CONNECTION_SCHEME}:${connection.name}`;
   // Not canonical — an unbraced or half-typed value. Show whatever follows the
   // scheme so the chip is still readable while it is being corrected.
   const trimmed = value.trim();
@@ -230,6 +310,8 @@ export function isAuthReference(value: string | null | undefined): boolean {
 export function isVaultScheme(value: string): boolean {
   const parsed = parseSecretReference(value);
   if (parsed) return parsed.scheme !== "vars";
+  // A connection resolves against the connection store, not the vault.
+  if (hasConnectionPrefix(value)) return false;
   const unbraced = UNBRACED.exec(value.trim());
   return unbraced ? unbraced[1]!.toLowerCase() !== "vars" : true;
 }

@@ -19,6 +19,7 @@ import {
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api-client";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
+import { ConnectionReferenceWarning } from "@/components/shared/connection-reference-warning";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -259,53 +260,62 @@ function KeyValueEditor({
       {pairs.map(([key, value], idx) => {
         const hint = hints?.find((h) => h.key === key);
         return (
-          <div key={idx} className="flex items-center gap-1.5">
-            <input
-              type="text"
-              value={key}
-              onChange={(e) => updateKey(e.target.value, idx)}
-              readOnly={readOnly}
-              placeholder="key"
-              className="h-7 w-32 rounded border border-input bg-background px-2 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-            />
-            <span className="text-muted-foreground/40">=</span>
-            {isSensitiveKey(key) ? (
-              <div className="flex-1">
-                <SecretKeyPicker
-                  value={value}
-                  onChange={(v) => updateValue(key, v)}
-                  readOnly={readOnly}
-                  placeholder={hint?.placeholder || "${vault:...}"}
-                  testId={`${testIdPrefix}-${key}`}
-                />
-              </div>
-            ) : (
-              <div className="relative flex-1">
-                <input
-                  type="text"
-                  value={value}
-                  onChange={(e) => updateValue(key, e.target.value)}
-                  readOnly={readOnly}
-                  placeholder={hint?.placeholder || "value"}
-                  className={cn(
-                    "h-7 w-full rounded border border-input bg-background px-2 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring",
-                    isVaultRef(value) && "pe-7",
+          <div key={idx}>
+            <div className="flex items-center gap-1.5">
+              <input
+                type="text"
+                value={key}
+                onChange={(e) => updateKey(e.target.value, idx)}
+                readOnly={readOnly}
+                placeholder="key"
+                className="h-7 w-32 rounded border border-input bg-background px-2 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+              />
+              <span className="text-muted-foreground/40">=</span>
+              {isSensitiveKey(key) ? (
+                <div className="flex-1">
+                  {/* No `connections` here: embedding models and vector stores
+                      need a bare credential and refuse ${connection:…}. */}
+                  <SecretKeyPicker
+                    value={value}
+                    onChange={(v) => updateValue(key, v)}
+                    readOnly={readOnly}
+                    placeholder={hint?.placeholder || "${vault:...}"}
+                    testId={`${testIdPrefix}-${key}`}
+                  />
+                </div>
+              ) : (
+                <div className="relative flex-1">
+                  <input
+                    type="text"
+                    value={value}
+                    onChange={(e) => updateValue(key, e.target.value)}
+                    readOnly={readOnly}
+                    placeholder={hint?.placeholder || "value"}
+                    className={cn(
+                      "h-7 w-full rounded border border-input bg-background px-2 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring",
+                      isVaultRef(value) && "pe-7",
+                    )}
+                  />
+                  {isVaultRef(value) && (
+                    <Lock className="absolute inset-e-2 top-1.5 h-3.5 w-3.5 text-amber-500" />
                   )}
-                />
-                {isVaultRef(value) && (
-                  <Lock className="absolute inset-e-2 top-1.5 h-3.5 w-3.5 text-amber-500" />
-                )}
-              </div>
-            )}
-            {!readOnly && (
-              <button
-                type="button"
-                onClick={() => removeEntry(key)}
-                className="rounded p-1 text-muted-foreground hover:text-destructive transition-colors"
-              >
-                <X className="h-3 w-3" />
-              </button>
-            )}
+                </div>
+              )}
+              {!readOnly && (
+                <button
+                  type="button"
+                  onClick={() => removeEntry(key)}
+                  className="rounded p-1 text-muted-foreground hover:text-destructive transition-colors"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              )}
+            </div>
+            <ConnectionReferenceWarning
+              value={value}
+              refused="model"
+              testId={`${testIdPrefix}-connection-warning-${idx}`}
+            />
           </div>
         );
       })}
@@ -879,7 +889,7 @@ export function RagEditor({ data, onChange, readOnly, resourceId, version = 1 }:
           </div>
 
           {/* Visual chunk preview */}
-          <div className="rounded-md border border-dashed border-muted-foreground/20 p-2.5">
+          <div className="rounded-md border border-dashed border-muted-foreground/20 p-3">
             <p className="text-[10px] font-semibold text-muted-foreground mb-1.5">
               {t("ragEditor.chunkPreview", "Preview (how a document gets split)")}
             </p>

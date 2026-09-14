@@ -310,3 +310,38 @@ describe("McpCallsEditor", () => {
     );
   });
 });
+
+describe("McpCallsEditor — connection references in the API key", () => {
+  const onChange = vi.fn();
+
+  it("offers the connection picker on the API key — one of the three places it resolves", () => {
+    renderWithProviders(<McpCallsEditor data={emptyConfig} onChange={onChange} />);
+    expect(screen.getByTestId("mcp-apikey-input-connection-btn")).toBeInTheDocument();
+  });
+
+  it("renders a connection reference as a chip rather than a masked secret", () => {
+    renderWithProviders(
+      <McpCallsEditor
+        data={{ ...populatedConfig, apiKey: "${connection:jira}" }}
+        onChange={onChange}
+      />
+    );
+    expect(screen.getByTestId("mcp-apikey-input-connection-chip")).toHaveTextContent("jira");
+    expect(screen.queryByTestId("mcp-apikey-connection-warning")).not.toBeInTheDocument();
+  });
+
+  it("warns when the reference is wrapped in text, which the backend refuses", () => {
+    // `Bearer ${connection:x}` used to work by accident against an OAuth
+    // connection and send a bare token against a STATIC one. The scheme
+    // belongs in the connection's own header value.
+    renderWithProviders(
+      <McpCallsEditor
+        data={{ ...populatedConfig, apiKey: "Bearer ${connection:jira}" }}
+        onChange={onChange}
+      />
+    );
+    expect(screen.getByTestId("mcp-apikey-connection-warning")).toHaveTextContent(
+      "whole header value"
+    );
+  });
+});

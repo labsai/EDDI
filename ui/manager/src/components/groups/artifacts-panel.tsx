@@ -91,7 +91,7 @@ export function ArtifactsPanel({ artifacts, className }: ArtifactsPanelProps) {
               </button>
 
               {isExpanded && (
-                <div className="border-t border-border p-2.5" data-testid={`artifact-content-${artifact.id}`}>
+                <div className="border-t border-border p-3" data-testid={`artifact-content-${artifact.id}`}>
                   {artifact.lastEditorAgentId && (
                     <p className="mb-1.5 text-[10px] text-muted-foreground">
                       {t("groups.artifactLastEdited", "Last edited by {{agent}}", { agent: artifact.lastEditorAgentId })}

@@ -774,6 +774,118 @@ describe("ApiCallsEditor", () => {
     expect(screen.getByDisplayValue("city")).toBeInTheDocument();
     expect(screen.getByDisplayValue("Vienna")).toBeInTheDocument();
   });
+
+  // ─── ${connection:…} placement ────────────────────────────────────
+
+  /** The populated call with one request field replaced. */
+  const withRequest = (patch: Partial<HttpCallsConfig["httpCalls"][number]["request"]>) => ({
+    ...populatedConfig,
+    httpCalls: [
+      {
+        ...populatedConfig.httpCalls[0]!,
+        request: { ...populatedConfig.httpCalls[0]!.request, ...patch },
+      },
+    ],
+  });
+
+  it("offers the connection insert on header values and nowhere else", () => {
+    renderWithProviders(
+      <ApiCallsEditor
+        data={withRequest({ headers: { "X-Auth": "" }, queryParams: { q: "" } })}
+        onChange={onChange}
+      />
+    );
+    expect(screen.getByTestId("header-connection-0")).toBeInTheDocument();
+    expect(screen.queryByTestId("query-connection-0")).not.toBeInTheDocument();
+  });
+
+  it("inserts the chosen connection as the whole header value", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(
+      <ApiCallsEditor
+        data={withRequest({ headers: { Authorization: "" } })}
+        onChange={onChange}
+      />
+    );
+
+    await user.click(screen.getByTestId("header-connection-0"));
+    await user.click(await screen.findByTestId("header-connection-0-option-amplitude"));
+
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        httpCalls: [
+          expect.objectContaining({
+            request: expect.objectContaining({
+              headers: { Authorization: "${connection:amplitude}" },
+            }),
+          }),
+        ],
+      })
+    );
+  });
+
+  it("warns when a header value wraps the reference in text", () => {
+    renderWithProviders(
+      <ApiCallsEditor
+        data={withRequest({ headers: { Authorization: "Bearer ${connection:amplitude}" } })}
+        onChange={onChange}
+      />
+    );
+    expect(screen.getByTestId("header-connection-warning-0")).toHaveTextContent(
+      "whole header value"
+    );
+  });
+
+  it("warns when the header is not named what the connection names", async () => {
+    // amplitude sends `Authorization`; gnowbe sends `x-api-key`. The first
+    // header disagrees and the second agrees (case-insensitively), so one
+    // warning and not two — and the second proves the lookup ran, since the
+    // absence of a warning before the descriptors arrive would look the same.
+    renderWithProviders(
+      <ApiCallsEditor
+        data={withRequest({
+          headers: {
+            "X-Auth": "${connection:amplitude}",
+            "X-API-KEY": "${connection:gnowbe}",
+          },
+        })}
+        onChange={onChange}
+      />
+    );
+
+    expect(await screen.findByTestId("header-connection-warning-0")).toHaveTextContent(
+      "Authorization"
+    );
+    expect(screen.queryByTestId("header-connection-warning-1")).not.toBeInTheDocument();
+  });
+
+  it("warns wherever a connection reference is refused outright: path, query, body", () => {
+    renderWithProviders(
+      <ApiCallsEditor
+        data={withRequest({
+          path: "/items?key=${connection:amplitude}",
+          queryParams: { token: "${connection:amplitude}" },
+          body: '{"key":"${connection:amplitude}"}',
+        })}
+        onChange={onChange}
+      />
+    );
+    expect(screen.getByTestId("httpcall-path-connection-warning")).toHaveTextContent(
+      "header instead"
+    );
+    expect(screen.getByTestId("query-connection-warning-0")).toBeInTheDocument();
+    expect(screen.getByTestId("request-body-connection-warning")).toBeInTheDocument();
+  });
+
+  it("is silent when a header carries a bare reference and nothing else", () => {
+    renderWithProviders(
+      <ApiCallsEditor
+        data={withRequest({ headers: { Authorization: "${connection:amplitude}" } })}
+        onChange={onChange}
+      />
+    );
+    expect(screen.queryByTestId("header-connection-warning-0")).not.toBeInTheDocument();
+  });
 });
 
 // ─── PropertyInstructionsEditor (standalone) ─────────────────────────

@@ -3415,7 +3415,19 @@
     "placeholder": "API 키 또는 ${vault:key-name}",
     "vaultDown": "볼트가 구성되지 않았습니다 — EDDI 백엔드에서 시크릿 제공자를 설정하세요",
     "referencePlaceholder": "${vault:key-name}",
-    "mustBeReference": "이 항목에는 비밀 값 자체가 아니라 참조 — ${vault:key} 또는 ${vars:key} — 를 넣습니다. 키를 고르거나, 값을 먼저 볼트에 저장하세요."
+    "mustBeReference": "이 항목에는 비밀 값 자체가 아니라 참조 — ${vault:key} 또는 ${vars:key} — 를 넣습니다. 키를 고르거나, 값을 먼저 볼트에 저장하세요.",
+    "connectionChip": "연결",
+    "connectionChipTitle": "연결 참조 — EDDI가 요청마다 자격 증명으로 확인합니다",
+    "clearConnection": "연결 참조 지우기",
+    "pickConnection": "연결 참조 삽입",
+    "connectionFilterPlaceholder": "연결 검색…",
+    "connectionLoading": "연결 불러오는 중…",
+    "connectionEmpty": "아직 연결이 없습니다. 관리자가 연결 메뉴에서 만듭니다.",
+    "connectionNoMatch": "“{{filter}}”과(와) 일치하는 연결이 없습니다",
+    "connectionForbidden": "현재 역할로는 연결 목록을 볼 수 없습니다. 이름을 안다면 ${connection:name}을 직접 입력하세요.",
+    "connectionUnavailable": "이 백엔드는 연결 기능을 제공하지 않습니다.",
+    "connectionFailed": "연결을 불러올 수 없습니다.",
+    "connectionHint": "${connection:name}을 전체 값으로 삽입합니다. EDDI가 요청마다 자격 증명으로 확인합니다."
   },
   "snippetEditor": {
     "category": "카테고리",
@@ -4486,7 +4498,8 @@
     },
     "binding": {
       "perUser": "사용자별",
-      "service": "공유"
+      "service": "공유",
+      "callerSupplied": "호출자 제공"
     },
     "bindingPerUserTitle": "사용자마다 따로 해석됩니다",
     "bindingServiceTitle": "공유 계정 하나로 해석됩니다",
@@ -4592,7 +4605,16 @@
       "endpointNotHttps": "https여야 합니다 — 클라이언트 시크릿이 이 URL로 전송됩니다.",
       "endpointUserInfo": "URL에서 자격 증명을 지우세요. 요청이 실제로 향하는 곳이 달라집니다.",
       "endpointNotAbsolute": "호스트를 포함한 전체 URL을 입력하세요. 예: https://auth.example.com/oauth/token.",
-      "paramCredentialShaped": "이 매개변수 중 하나가 자격 증명 같은 이름입니다. 여기에는 비밀이 아닌 프로토콜 매개변수(prompt, audience 등)만 넣을 수 있습니다."
+      "paramCredentialShaped": "이 매개변수 중 하나가 자격 증명 같은 이름입니다. 여기에는 비밀이 아닌 프로토콜 매개변수(prompt, audience 등)만 넣을 수 있습니다.",
+      "bindingMismatch": "이 바인딩은 이 인증 유형과 맞지 않습니다. “호출자 제공”은 API 키가, “사용자별”은 OAuth 사용자 로그인이 필요하며 나머지는 모두 공유입니다.",
+      "callerSuppliedRefused": "호출자 제공 연결은 자격 증명을 저장하지 않습니다. 호출 시스템이 요청마다 보냅니다. 이 필드를 비우세요.",
+      "nameTooLong": "이름은 최대 64자입니다.",
+      "timeoutRange": "시간 제한은 1에서 60000밀리초 사이의 정수여야 합니다. 기본값을 쓰려면 비워 두세요.",
+      "templateLiteralCredential": "참조 주변의 텍스트 자체가 자격 증명처럼 보입니다. ${vault:…} 바깥에는 “Bearer ” 같은 짧은 스킴 접두사만 두고 나머지는 볼트에 저장하세요.",
+      "paramReserved": "이 매개변수 중 하나는 EDDI가 직접 설정합니다(client_id, redirect_uri, response_type, state, code_challenge…). 덮어쓰면 흐름이 깨집니다.",
+      "paramValueReference": "매개변수 값은 쓴 그대로 전송됩니다. 여기의 ${…} 참조는 해석되지 않으며 볼트 포인터가 URL에 실리게 됩니다. 일반 프로토콜 값만 사용하세요.",
+      "paramValueTooLong": "매개변수 값은 최대 512자입니다.",
+      "paramValueCredentialShaped": "이 값 중 하나가 키나 토큰처럼 보입니다. 이 맵은 평문으로 저장되고 URL로 전송됩니다. 비밀이 아닌 프로토콜 매개변수만 여기에 둘 수 있습니다."
     },
     "backToList": "연결 목록으로 돌아가기",
     "headerSecret": "저장된 비밀 값",
@@ -4600,7 +4622,20 @@
     "discardNewBody": "지금까지 입력한 내용이 사라집니다. 아직 만들어진 것은 없습니다.",
     "confirmReconnect": "이 계정을 다시 연결할까요?",
     "confirmReconnectDesc": "이 계정은 정상 작동 중이라 고칠 것이 없습니다. 계속하면 EDDI를 벗어나 공급자의 로그인 페이지로 이동하고, 이전에 부여한 접근 권한이 대체됩니다.",
-    "paramDuplicate": "다른 매개변수가 이미 이 이름을 사용하고 있습니다. 마지막 항목만 저장됩니다."
+    "paramDuplicate": "다른 매개변수가 이미 이 이름을 사용하고 있습니다. 마지막 항목만 저장됩니다.",
+    "bindingChooser": "키의 출처",
+    "bindingChoice": {
+      "serviceBody": "볼트의 키 하나를 모두에게 보냅니다. 간단하지만 에이전트는 그 키가 닿는 모든 것에 접근할 수 있습니다.",
+      "callerSuppliedBody": "EDDI는 아무것도 저장하지 않습니다. EDDI를 호출하는 시스템이 요청마다 각 사용자의 자격 증명을 보내므로 에이전트는 그 사용자가 할 수 있는 일만 할 수 있습니다. 대상 시스템의 권한이 경계입니다."
+    },
+    "callerSuppliedHeaderTitle": "호출 시스템이 보내는 것",
+    "callerSuppliedHeaderBody": "요청당 헤더 하나: 연결 이름, 공백, 그리고 {{header}}로 보낼 전체 값입니다. 스킴도 포함하므로 “Bearer abc”에는 이스케이프가 필요 없습니다. 자격 증명은 해당 요청 동안만 존재하며 절대 저장되지 않습니다.",
+    "callerSuppliedNeedsAuth": "호출자는 EDDI에 로그인되어 있어야 합니다. 자격 증명이 없는 요청은 인증 없이 나가는 대신 실패하며(일시 중지된 도구 호출을 재개할 때도 마찬가지), 이 연결은 MCP 및 A2A 검색에서 제외됩니다.",
+    "bindingCallerSuppliedTitle": "호출하는 사람으로 확인됨",
+    "bindingCallerSuppliedBody": "호출 시스템이 요청과 함께 각 사용자의 자격 증명을 전달하며 EDDI는 아무것도 저장하지 않습니다. 에이전트는 대상 시스템에서 그 사용자가 할 수 있는 일만 할 수 있고, 이 연결은 MCP 및 A2A 검색에서 제외됩니다.",
+    "confirmAuthChange": "이 연결의 인증 방식을 변경할까요?",
+    "confirmAuthChangeDesc": "이 연결을 통해 연동된 계정은 더 이상 확인되지 않습니다. 권한 부여는 그것을 만든 흐름에 속하기 때문입니다. 계정이 하나라도 연동되어 있는 동안 EDDI는 변경을 거부하고 그 수를 알려줍니다. 먼저 연동을 해제하거나, 새 연결을 만들어 그쪽에 연동하게 하세요.",
+    "confirmAuthChangeAccept": "변경"
   },
   "extensionTypes": {
     "parser": "입력 파서",
@@ -4696,5 +4731,11 @@
       "cascade_other": "리소스 {{count}}개의 소유자를 변경했습니다",
       "cascade_one": "리소스 {{count}}개의 소유자를 변경했습니다"
     }
+  },
+  "connectionRef": {
+    "wrapped": "연결은 스킴을 포함한 전체 헤더 값을 제공합니다. ${connection:name}만 단독으로 쓰고 “Bearer ”는 연결의 헤더 값에 넣으세요.",
+    "headerMismatch": "이 연결은 자격 증명을 “{{expected}}”로 보내므로 헤더 이름도 그래야 합니다. 그렇지 않으면 설정에는 한 이름이, 요청에는 다른 이름이 실립니다.",
+    "refusedInRequest": "${connection:…}은 경로, 쿼리 매개변수, 본문에서는 거부됩니다. URL의 자격 증명은 모든 프록시 로그에 남고 본문의 것은 읽히지 않습니다. 대신 헤더에서 연결을 참조하세요.",
+    "refusedInModel": "언어 모델, 임베딩, 벡터 저장소는 ${connection:…}을 받지 않습니다. 연결은 전체 헤더로 확인되지만 이들은 순수 자격 증명이 필요합니다. 여기서는 ${vault:…}을 사용하세요."
   }
 }

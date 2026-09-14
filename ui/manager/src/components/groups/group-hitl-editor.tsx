@@ -111,7 +111,7 @@ export function GroupHitlEditor({
     "h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring";
 
   return (
-    <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-2.5 space-y-2.5" data-testid="group-hitl-editor">
+    <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 space-y-2.5" data-testid="group-hitl-editor">
       <label className="flex items-center gap-2 text-xs font-medium text-foreground">
         <input
           type="checkbox"

@@ -157,7 +157,7 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
         <h4 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
           {t("groups.discussionStyle", "Discussion Style")}
         </h4>
-        <div className={cn("rounded-lg border p-2.5", styleColors.border, styleColors.bg)}>
+        <div className={cn("rounded-lg border p-3", styleColors.border, styleColors.bg)}>
           <div className="flex items-center gap-2 mb-1">
             <span className="text-base">{styleInfo.icon}</span>
             <span className={cn("text-sm font-semibold", styleColors.text)}>{styleInfo.label}</span>
@@ -242,7 +242,7 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
             <Settings2 className="inline h-3 w-3 me-1" />
             {t("groups.protocolSettings", "Protocol")}
           </h4>
-          <div className="rounded-lg border border-border bg-secondary/30 p-2.5 space-y-1">
+          <div className="rounded-lg border border-border bg-secondary/30 p-3 space-y-1">
             <InfoRow label={t("groups.protocolTimeout", "Timeout")} value={`${config.protocol.agentTimeoutSeconds}s`} />
             <InfoRow label={t("groups.protocolOnFailure", "On Failure")} value={memberPolicyLabel(t, config.protocol.onAgentFailure)} />
             <InfoRow label={t("groups.protocolMaxRetries", "Max Retries")} value={String(config.protocol.maxRetries)} />
@@ -298,7 +298,7 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
               onDone={() => setEditingPhases(false)}
             />
           ) : (
-            <div className="space-y-1 rounded-lg border border-border bg-secondary/30 p-2.5">
+            <div className="space-y-1 rounded-lg border border-border bg-secondary/30 p-3">
               {phaseBehaviourSummary.length > 0 ? (
                 phaseBehaviourSummary.map((row) => (
                   <InfoRow key={row.name} label={row.name} value={row.value} />
@@ -324,7 +324,7 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
             <MessagesSquare className="inline h-3 w-3 me-1" />
             {t("groups.deliberationSection", "Deliberation")}
           </h4>
-          <div className="space-y-1 rounded-lg border border-border bg-secondary/30 p-2.5">
+          <div className="space-y-1 rounded-lg border border-border bg-secondary/30 p-3">
             {config.recordDissents && (
               <InfoRow
                 label={t("groups.recordDissents", "Minority report")}
@@ -495,7 +495,7 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
             <Bot className="inline h-3 w-3 me-1" />
             {t("groups.dynamicAgents", "Dynamic Agents")}
           </h4>
-          <div className="rounded-lg border border-border bg-secondary/30 p-2.5 space-y-1">
+          <div className="rounded-lg border border-border bg-secondary/30 p-3 space-y-1">
             {config.dynamicAgents.allowCreation && (
               <InfoRow
                 label={t("groups.dynamicCreation", "Creation")}
@@ -597,7 +597,7 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
             />
           ) : !hasAdvanced ? (
             <p
-              className="rounded-lg border border-border bg-secondary/30 p-2.5 text-[11px] text-muted-foreground"
+              className="rounded-lg border border-border bg-secondary/30 p-3 text-[11px] text-muted-foreground"
               data-testid="group-advanced-none"
             >
               {t(
@@ -606,7 +606,7 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
               )}
             </p>
           ) : (
-          <div className="space-y-1 rounded-lg border border-border bg-secondary/30 p-2.5">
+          <div className="space-y-1 rounded-lg border border-border bg-secondary/30 p-3">
             {config.humanMemberConfig && (
               <InfoRow
                 label={t("groups.humanMemberConfigLabel", "Human turn timeout")}

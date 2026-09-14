@@ -213,7 +213,7 @@ export function GroupPhaseEditor({
         const convergenceInert = !canConverge && !!convergence?.enabled;
         const convergenceUnavailable = !canConverge && !convergence?.enabled;
         return (
-          <div key={`${phase.name}-${idx}`} className="rounded-md border border-border bg-background/60 p-2">
+          <div key={`${phase.name}-${idx}`} className="rounded-md border border-border bg-background/60 p-3">
             <div className="mb-1.5 flex items-center gap-1.5">
               <span className="text-xs font-semibold text-foreground">{phase.name}</span>
               {repeats > 1 && (

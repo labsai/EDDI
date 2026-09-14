@@ -1,5 +1,5 @@
 import type { TFunction } from "i18next";
-import type { AuthType, GrantStatus } from "./api/connections";
+import type { AuthType, Binding, GrantStatus } from "./api/connections";
 
 /**
  * The words the UI uses for a connection's enums, in one place.
@@ -57,6 +57,23 @@ export function authTypeDescription(t: TFunction, authType: AuthType): string {
         "connections.choice.authorizationCodeBody",
         "Each person connects their own account and the agent acts as them. Needs sign-in to be switched on, and a vault.",
       );
+  }
+}
+
+/**
+ * Whose credential a connection resolves, as a chip or a choice would name it.
+ *
+ * Shared by the badge on the list and the chooser in the editor, so the word
+ * an admin picks is the word the list shows back.
+ */
+export function bindingLabel(t: TFunction, binding: Binding): string {
+  switch (binding) {
+    case "SERVICE":
+      return t("connections.binding.service", "Shared");
+    case "PER_USER":
+      return t("connections.binding.perUser", "Per user");
+    case "CALLER_SUPPLIED":
+      return t("connections.binding.callerSupplied", "Caller-supplied");
   }
 }
 

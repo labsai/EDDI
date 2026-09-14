@@ -46,7 +46,7 @@ export function NegotiationLedger({ negotiation, memberDisplayNames, className }
             <div
               key={p.id}
               className={cn(
-                "rounded-lg border bg-background/60 p-2.5",
+                "rounded-lg border bg-background/60 p-3",
                 p.status === "OPEN" ? "border-emerald-500/30" : "border-border opacity-70",
               )}
               data-testid={`negotiation-proposal-${p.id}`}

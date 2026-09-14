@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { http, HttpResponse } from "msw";
 import { server } from "@/test/mocks/server";
 import {
@@ -144,6 +144,56 @@ describe("toStoredConnection — the document sent, built from the type", () => 
     });
     expect(stored.allowUnverifiedPrincipal).toBe(false);
   });
+
+  it("trims the name, so a trailing space typed into the wizard is not sent to be refused", () => {
+    // The backend judges the name untrimmed and refuses whitespace; a stored
+    // name never carries any, so this is a no-op on every loaded document.
+    expect(toStoredConnection({ ...base, name: "  jira " }).name).toBe("jira");
+    expect(toStoredConnection({ ...base, name: "jira" }).name).toBe("jira");
+  });
+
+  it("keeps a loaded CALLER_SUPPLIED binding and sends only the header name", () => {
+    // The drift this pins: deriving the binding from the type alone rewrote
+    // every caller-supplied document to SERVICE — and then sent an empty
+    // valueTemplate the backend refuses on that binding.
+    const stored = toStoredConnection({
+      ...base,
+      authType: "STATIC",
+      binding: "CALLER_SUPPLIED",
+      staticAuth: {
+        headerName: "x-api-key",
+        valueTemplate: null,
+        username: null,
+        passwordRef: null,
+      },
+    });
+    expect(stored.binding).toBe("CALLER_SUPPLIED");
+    expect(stored.staticAuth).toEqual({ headerName: "x-api-key" });
+    expect(stored.staticAuth).not.toHaveProperty("valueTemplate");
+    expect(stored.oauth).toBeNull();
+  });
+
+  it("drops a template the draft still holds once the binding is caller-supplied", () => {
+    // The editor keeps the typed template so a mis-click is reversible; the
+    // document must not carry it.
+    const stored = toStoredConnection({
+      ...base,
+      authType: "STATIC",
+      binding: "CALLER_SUPPLIED",
+      staticAuth: { headerName: "x-api-key", valueTemplate: "Bearer ${vault:k}" },
+    });
+    expect(stored.staticAuth).toEqual({ headerName: "x-api-key" });
+  });
+
+  it("corrects CALLER_SUPPLIED to SERVICE on a type that cannot carry it", () => {
+    const stored = toStoredConnection({
+      ...base,
+      authType: "BASIC",
+      binding: "CALLER_SUPPLIED",
+      staticAuth: { headerName: "A", username: "svc", passwordRef: "${vault:pw}" },
+    });
+    expect(stored.binding).toBe("SERVICE");
+  });
 });
 
 describe("emptyConnection", () => {
@@ -152,6 +202,14 @@ describe("emptyConnection", () => {
     expect(emptyConnection("OAUTH2_CLIENT_CREDENTIALS").binding).toBe("SERVICE");
     expect(emptyConnection("STATIC").binding).toBe("SERVICE");
     expect(emptyConnection("BASIC").binding).toBe("SERVICE");
+  });
+
+  it("builds a caller-supplied STATIC connection with a header name and no value slot", () => {
+    const conn = emptyConnection("STATIC", "CALLER_SUPPLIED");
+    expect(conn.binding).toBe("CALLER_SUPPLIED");
+    expect(conn.staticAuth).toEqual({ headerName: "Authorization" });
+    // And refuses the pairing on a type that cannot carry it.
+    expect(emptyConnection("BASIC", "CALLER_SUPPLIED").binding).toBe("SERVICE");
   });
 
   it("carries only the auth block its type uses", () => {
@@ -265,12 +323,21 @@ describe("the per-user routes translate their refusals into codes", () => {
     });
   });
 
-  it("treats a 503 the same way, for a deployment that answers with one", async () => {
+  it("passes a 503 through as an outage — never as the feature being off", async () => {
+    // These routes do not answer 503 on purpose (the backend switched to 404
+    // precisely because a 503 body never arrived). One that does arrive is a
+    // proxy or a store that is down, and calling that "switched off" rendered
+    // a definitive statement about the deployment over a transient failure.
     server.use(
-      http.get("*/connections/mine", () => new HttpResponse(null, { status: 503 })),
+      http.get(
+        "*/connections/mine",
+        () => new HttpResponse("upstream unavailable", { status: 503 }),
+      ),
     );
     await expect(listMyConnections()).rejects.toMatchObject({
-      code: CONNECTIONS_DISABLED,
+      code: undefined,
+      status: 503,
+      message: "upstream unavailable",
     });
   });
 
@@ -337,7 +404,7 @@ describe("authorizeConnection", () => {
     });
   });
 
-  it("still reports a 503 as the feature being unavailable", async () => {
+  it("passes a 503 through with its status, so the caller can offer a retry", async () => {
     server.use(
       http.post(
         "*/connections/:name/authorize",
@@ -345,8 +412,36 @@ describe("authorizeConnection", () => {
       ),
     );
     await expect(authorizeConnection("jira", "/x")).rejects.toMatchObject({
-      code: CONNECTIONS_DISABLED,
+      code: undefined,
+      status: 503,
     });
+  });
+
+  it("never sends the authorize request with credentials omitted — the nonce cookie depends on it", async () => {
+    // The response carries a `Set-Cookie` nonce binding the flow to this
+    // browser, and the callback refuses without it. `fetch` stores that cookie
+    // under the default "same-origin" mode (or "include"); a `credentials:
+    // "omit"` added to the shared client for any other reason would drop it
+    // silently, and every link attempt would then fail at the callback with
+    // `invalid_state` and nothing explaining why. Pinned here rather than in
+    // the client's own tests because this is the one call that cares.
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    server.use(
+      http.post("*/connections/:name/authorize", () =>
+        HttpResponse.json({ authorizationUrl: "https://provider.example/auth" }),
+      ),
+    );
+    try {
+      await authorizeConnection("jira", "/manage/connections");
+      const call = fetchSpy.mock.calls.find(([input]) =>
+        String(input).includes("/connections/jira/authorize"),
+      );
+      expect(call).toBeDefined();
+      const init = call![1] as RequestInit | undefined;
+      expect(init?.credentials ?? "same-origin").not.toBe("omit");
+    } finally {
+      fetchSpy.mockRestore();
+    }
   });
 
   it("encodes a connection name that needs it", async () => {

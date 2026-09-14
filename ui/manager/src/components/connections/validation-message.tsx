@@ -55,6 +55,51 @@ function messageFor(
         "connections.validation.nameFormat",
         "Use letters, digits, dots, dashes or underscores. Other characters make ${connection:…} silently fail to resolve.",
       );
+    case "nameTooLong":
+      return t(
+        "connections.validation.nameTooLong",
+        "A name is at most 64 characters.",
+      );
+    case "timeoutRange":
+      return t(
+        "connections.validation.timeoutRange",
+        "The timeout must be a whole number between 1 and 60000 milliseconds. Leave it empty for the default.",
+      );
+    case "templateLiteralCredential":
+      return t(
+        "connections.validation.templateLiteralCredential",
+        "The text around the reference looks like a credential itself. Only a short scheme prefix such as “Bearer ” belongs outside ${vault:…} — store the rest in the vault.",
+      );
+    case "paramReserved":
+      return t(
+        "connections.validation.paramReserved",
+        "One of these parameters is set by EDDI itself (client_id, redirect_uri, response_type, state, code_challenge…). Overriding it would break the flow.",
+      );
+    case "paramValueReference":
+      return t(
+        "connections.validation.paramValueReference",
+        "Parameter values are sent exactly as written — a ${…} reference here is not resolved, and would put a vault pointer in a URL. Use plain protocol values only.",
+      );
+    case "paramValueTooLong":
+      return t(
+        "connections.validation.paramValueTooLong",
+        "A parameter value is at most 512 characters.",
+      );
+    case "paramValueCredentialShaped":
+      return t(
+        "connections.validation.paramValueCredentialShaped",
+        "One of these values looks like a key or a token. This map is stored in plain text and sent in a URL — only non-secret protocol parameters belong here.",
+      );
+    case "bindingMismatch":
+      return t(
+        "connections.validation.bindingMismatch",
+        "This binding does not go with this authentication type: caller-supplied needs an API key, per user needs an OAuth user login, and everything else is shared.",
+      );
+    case "callerSuppliedRefused":
+      return t(
+        "connections.validation.callerSuppliedRefused",
+        "A caller-supplied connection stores no credential — the calling system sends it with every request. Clear this field.",
+      );
     case "allowlistRequired":
       return t(
         "connections.validation.allowlistRequired",

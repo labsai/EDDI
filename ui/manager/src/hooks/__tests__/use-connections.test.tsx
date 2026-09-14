@@ -4,7 +4,12 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { http, HttpResponse } from "msw";
 import { type ReactNode } from "react";
 import { server } from "@/test/mocks/server";
-import { useUpdateConnection, MINE_KEY } from "@/hooks/use-connections";
+import {
+  useConnectionDescriptors,
+  useMyConnections,
+  useUpdateConnection,
+  MINE_KEY,
+} from "@/hooks/use-connections";
 import type { ConnectionConfiguration } from "@/lib/api/connections";
 
 /**
@@ -28,6 +33,102 @@ function createWrapper() {
   );
   return { queryClient, Wrapper };
 }
+
+/**
+ * A client that leaves retrying to the hook under test.
+ *
+ * `retry` stays unset at the client level, so the hook's own predicate is the
+ * only thing deciding; `retryDelay: 0` keeps a retried query from spending the
+ * default exponential back-off in wall-clock time.
+ */
+function createRetryWrapper() {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retryDelay: 0 } },
+  });
+  const Wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+  );
+  return Wrapper;
+}
+
+type Failure = { status: number } | "network";
+
+function respond(failure: Failure) {
+  return failure === "network"
+    ? HttpResponse.error()
+    : new HttpResponse(null, { status: failure.status });
+}
+
+describe("retrying the connection queries", () => {
+  // Only a failure that can improve on a second attempt is retried: the
+  // network, or a 5xx. A 400 or 409 is the server's definitive answer, and
+  // replaying it only delays the error the user needs to read.
+  describe("useMyConnections — one retry for a transient failure", () => {
+    async function requestsFor(failure: Failure): Promise<number> {
+      let requests = 0;
+      server.use(
+        http.get("*/connections/mine", () => {
+          requests += 1;
+          return respond(failure);
+        }),
+      );
+      const { result } = renderHook(() => useMyConnections(), {
+        wrapper: createRetryWrapper(),
+      });
+      await waitFor(() => expect(result.current.isError).toBe(true));
+      return requests;
+    }
+
+    it("does not retry a 400", async () => {
+      expect(await requestsFor({ status: 400 })).toBe(1);
+    });
+
+    it("does not retry a 409", async () => {
+      expect(await requestsFor({ status: 409 })).toBe(1);
+    });
+
+    it("retries a 503 once", async () => {
+      expect(await requestsFor({ status: 503 })).toBe(2);
+    });
+
+    it("retries a network error once", async () => {
+      expect(await requestsFor("network")).toBe(2);
+    });
+  });
+
+  describe("useConnectionDescriptors — two retries for a transient failure", () => {
+    async function requestsFor(failure: Failure): Promise<number> {
+      let requests = 0;
+      server.use(
+        http.get("*/connectionstore/connections/descriptors", () => {
+          requests += 1;
+          return respond(failure);
+        }),
+      );
+      const { result } = renderHook(() => useConnectionDescriptors(), {
+        wrapper: createRetryWrapper(),
+      });
+      await waitFor(() => expect(result.current.isError).toBe(true));
+      return requests;
+    }
+
+    it("does not retry a 400", async () => {
+      expect(await requestsFor({ status: 400 })).toBe(1);
+    });
+
+    it("does not retry a 409", async () => {
+      expect(await requestsFor({ status: 409 })).toBe(1);
+    });
+
+    it("retries a 503 twice", async () => {
+      expect(await requestsFor({ status: 503 })).toBe(3);
+    });
+
+    it("retries a network error twice", async () => {
+      expect(await requestsFor("network")).toBe(3);
+    });
+  });
+});
 
 const DRAFT: ConnectionConfiguration = {
   name: "jira",

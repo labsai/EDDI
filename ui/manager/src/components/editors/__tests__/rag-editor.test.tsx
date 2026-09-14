@@ -653,5 +653,32 @@ describe("RagEditor", () => {
     expect(screen.getByText("+ connectionString")).toBeInTheDocument();
     expect(screen.getByText("+ databaseName")).toBeInTheDocument();
   });
+
+  // ── ${connection:…} is refused by embedding models and vector stores ──────
+
+  it("warns about a connection reference in an embedding parameter", () => {
+    // A connection resolves to a whole header; an embedding model needs a bare
+    // credential, and there is no honest way to derive one. The backend
+    // refuses it at build time; the editor says so beside the field.
+    const config: RagConfig = {
+      ...populatedConfig,
+      embeddingParameters: { model: "text-embedding-3-small", apiKey: "${connection:openai}" },
+    };
+    renderWithProviders(<RagEditor data={config} onChange={onChange} />);
+
+    expect(screen.getByTestId("embed-connection-warning-1")).toHaveTextContent("${vault:");
+    expect(screen.queryByTestId("embed-connection-warning-0")).not.toBeInTheDocument();
+  });
+
+  it("warns about one in a vector-store parameter too, and offers no connection picker", () => {
+    const config: RagConfig = {
+      storeType: "qdrant",
+      storeParameters: { apiKey: "${connection:qdrant}" },
+    };
+    renderWithProviders(<RagEditor data={config} onChange={onChange} />);
+
+    expect(screen.getByTestId("store-connection-warning-0")).toBeInTheDocument();
+    expect(screen.queryByTestId("store-apiKey-connection-btn")).not.toBeInTheDocument();
+  });
 });
 

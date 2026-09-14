@@ -317,7 +317,7 @@ function OutputConfigEditor({
             </h5>
             <div className="space-y-3">
               {config.outputs.map((output, oi) => (
-                <div key={oi} className="rounded-lg border border-dashed border-muted-foreground/30 p-2 space-y-1.5">
+                <div key={oi} className="rounded-lg border border-dashed border-muted-foreground/30 p-3 space-y-1.5">
                   <div className="flex items-center justify-between">
                     <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                       {t("outputEditor.alternativeGroup", "Alternative Group")} {oi + 1}

@@ -3415,7 +3415,19 @@
     "placeholder": "API 密钥或 ${vault:key-name}",
     "vaultDown": "保管库尚未配置——请在 EDDI 后端设置 Secret 提供程序",
     "referencePlaceholder": "${vault:key-name}",
-    "mustBeReference": "此字段接受引用 —— ${vault:key} 或 ${vars:key} —— 而不是密钥本身。请选择一个密钥，或先把值存入保险库。"
+    "mustBeReference": "此字段接受引用 —— ${vault:key} 或 ${vars:key} —— 而不是密钥本身。请选择一个密钥，或先把值存入保险库。",
+    "connectionChip": "连接",
+    "connectionChipTitle": "连接引用——EDDI 在每个请求中将其解析为凭据",
+    "clearConnection": "清除连接引用",
+    "pickConnection": "插入连接引用",
+    "connectionFilterPlaceholder": "搜索连接…",
+    "connectionLoading": "正在加载连接…",
+    "connectionEmpty": "还没有连接。管理员可在“连接”下创建。",
+    "connectionNoMatch": "没有匹配“{{filter}}”的连接",
+    "connectionForbidden": "您的角色无法列出连接。如果知道名称，请手动输入 ${connection:name}。",
+    "connectionUnavailable": "此后端不提供连接功能。",
+    "connectionFailed": "无法加载连接。",
+    "connectionHint": "将 ${connection:name} 作为完整值插入。EDDI 在每个请求中将其解析为凭据。"
   },
   "snippetEditor": {
     "category": "类别",
@@ -4486,7 +4498,8 @@
     },
     "binding": {
       "perUser": "按用户",
-      "service": "共享"
+      "service": "共享",
+      "callerSupplied": "由调用方提供"
     },
     "bindingPerUserTitle": "为每个最终用户分别解析",
     "bindingServiceTitle": "按一个共享账户解析",
@@ -4592,7 +4605,16 @@
       "endpointNotHttps": "必须使用 https —— 客户端密钥会发送到此 URL。",
       "endpointUserInfo": "请从 URL 中删除凭据；它们会改变请求的真实去向。",
       "endpointNotAbsolute": "请填写包含主机的完整 URL，例如 https://auth.example.com/oauth/token。",
-      "paramCredentialShaped": "其中一个参数的名称像是凭据。这里只能放非机密的协议参数（prompt、audience 等）。"
+      "paramCredentialShaped": "其中一个参数的名称像是凭据。这里只能放非机密的协议参数（prompt、audience 等）。",
+      "bindingMismatch": "此绑定与该认证类型不匹配：“由调用方提供”需要 API 密钥，“按用户”需要 OAuth 用户登录，其余均为共享。",
+      "callerSuppliedRefused": "由调用方提供的连接不存储任何凭据——调用系统在每个请求中发送它。请清空此字段。",
+      "nameTooLong": "名称最多 64 个字符。",
+      "timeoutRange": "超时必须是 1 到 60000 毫秒之间的整数。留空则使用默认值。",
+      "templateLiteralCredential": "引用周围的文本本身看起来像凭据。${vault:…} 之外只应有简短的方案前缀（如“Bearer ”）——其余内容请存入保险库。",
+      "paramReserved": "其中一个参数由 EDDI 自行设置（client_id、redirect_uri、response_type、state、code_challenge……）。覆盖它会破坏流程。",
+      "paramValueReference": "参数值按原样发送——这里的 ${…} 引用不会被解析，而且会把保险库指针放进 URL。请只使用普通协议值。",
+      "paramValueTooLong": "参数值最多 512 个字符。",
+      "paramValueCredentialShaped": "其中一个值看起来像密钥或令牌。此映射以明文存储并通过 URL 发送——这里只应放非机密的协议参数。"
     },
     "backToList": "返回连接列表",
     "headerSecret": "已存密钥",
@@ -4600,7 +4622,20 @@
     "discardNewBody": "你目前填写的内容将会丢失。目前尚未创建任何内容。",
     "confirmReconnect": "重新关联此账户？",
     "confirmReconnectDesc": "该账户运行正常，无需修复。继续将带你离开 EDDI 前往服务商的登录页面，并替换你此前授予的访问权限。",
-    "paramDuplicate": "已有另一个参数使用此名称。只会保存最后一个。"
+    "paramDuplicate": "已有另一个参数使用此名称。只会保存最后一个。",
+    "bindingChooser": "密钥的来源",
+    "bindingChoice": {
+      "serviceBody": "保险库中的一把密钥，为所有人发送。简单——但代理可以访问该密钥能访问的一切。",
+      "callerSuppliedBody": "EDDI 不存储任何内容。调用 EDDI 的系统在每个请求中发送各用户自己的凭据，因此代理只能做该用户能做的事——目标系统自身的权限即是边界。"
+    },
+    "callerSuppliedHeaderTitle": "调用系统需要发送的内容",
+    "callerSuppliedHeaderBody": "每个请求一个标头：连接名称、一个空格，然后是作为 {{header}} 发送的完整值——包含方案，因此“Bearer abc”无需转义。凭据仅在该请求期间存在，从不存储。",
+    "callerSuppliedNeedsAuth": "调用方必须已登录 EDDI。没有凭据的请求会失败，而不是以未认证方式发出——包括恢复已暂停的工具调用时——并且此连接不会出现在 MCP 和 A2A 发现中。",
+    "bindingCallerSuppliedTitle": "以调用者身份解析",
+    "bindingCallerSuppliedBody": "调用系统随请求交付各用户自己的凭据，EDDI 不存储任何内容。代理只能做该用户在目标系统能做的事，并且此连接不会出现在 MCP 和 A2A 发现中。",
+    "confirmAuthChange": "更改此连接的认证方式？",
+    "confirmAuthChangeDesc": "通过此连接关联的账户将无法再解析——授权属于产生它的流程。只要仍有账户关联，EDDI 就会拒绝更改并说明数量；请先取消关联，或新建一个连接并让用户改为关联它。",
+    "confirmAuthChangeAccept": "更改"
   },
   "extensionTypes": {
     "parser": "输入解析器",
@@ -4696,5 +4731,11 @@
       "cascade_other": "已更改 {{count}} 项资源的所有者",
       "cascade_one": "已更改 {{count}} 项资源的所有者"
     }
+  },
+  "connectionRef": {
+    "wrapped": "连接提供完整的标头值（含方案）。请单独使用 ${connection:name}，并把“Bearer ”放到连接的标头值中。",
+    "headerMismatch": "此连接以“{{expected}}”发送其凭据，因此标头必须使用该名称——否则配置显示一个名称而请求携带另一个。",
+    "refusedInRequest": "${connection:…} 在路径、查询参数或请求体中会被拒绝——URL 中的凭据会进入每个代理日志，请求体中的凭据不会被读取。请改为在标头中引用连接。",
+    "refusedInModel": "语言模型、嵌入和向量存储不接受 ${connection:…}：连接会解析为完整标头，而它们需要裸凭据。请在此使用 ${vault:…}。"
   }
 }

@@ -274,7 +274,7 @@ export function GroupAdvancedEditor({
 
   return (
     <div
-      className="rounded-lg border border-border bg-secondary/30 p-2.5 space-y-3"
+      className="rounded-lg border border-border bg-secondary/30 p-3 space-y-3"
       data-testid="group-advanced-editor"
     >
       {/* ---- I9 transcript window ---- */}

@@ -356,6 +356,50 @@ describe("LlmEditor", () => {
     expect(screen.getByTestId("add-a2a-agent")).toBeInTheDocument();
   });
 
+  it("offers the connection picker on an A2A agent's API key", () => {
+    // One of the three places the backend resolves ${connection:…}.
+    renderWithProviders(<LlmEditor data={agentConfig} onChange={onChange} />);
+    expect(screen.getByTestId("a2a-apikey-0-connection-btn")).toBeInTheDocument();
+  });
+
+  it("warns when an A2A API key wraps the reference in text", () => {
+    const task = agentConfig.tasks[0]!;
+    const config: LlmConfig = {
+      tasks: [
+        {
+          ...task,
+          a2aAgents: [{ ...task.a2aAgents![0]!, apiKey: "Bearer ${connection:remote}" }],
+        },
+      ],
+    };
+    renderWithProviders(<LlmEditor data={config} onChange={onChange} />);
+    expect(screen.getByTestId("a2a-apikey-connection-warning-0")).toHaveTextContent(
+      "whole header value"
+    );
+  });
+
+  it("warns about a connection reference in a model parameter, and offers no picker there", async () => {
+    // A language model needs a bare credential; the backend refuses a
+    // connection reference in every model parameter.
+    const user = userEvent.setup();
+    const withConnection: LlmConfig = {
+      tasks: [
+        {
+          ...populatedConfig.tasks[0]!,
+          parameters: { ...populatedConfig.tasks[0]!.parameters, apiKey: "${connection:openai}" },
+        },
+      ],
+    };
+    renderWithProviders(<LlmEditor data={withConnection} onChange={onChange} />);
+    await user.click(screen.getByRole("button", { name: /Model Parameters/i }));
+
+    expect(screen.getByTestId("llm-param-connection-warning-apiKey")).toHaveTextContent(
+      "${vault:"
+    );
+    // The picker must not offer one here.
+    expect(screen.queryByTestId("llm-param-apiKey-connection-btn")).not.toBeInTheDocument();
+  });
+
   it("adds a new A2A agent", async () => {
     const user = userEvent.setup();
     renderWithProviders(

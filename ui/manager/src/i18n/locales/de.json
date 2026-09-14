@@ -3415,7 +3415,19 @@
     "placeholder": "API-Schlüssel oder ${vault:key-name}",
     "vaultDown": "Vault ist nicht konfiguriert — richten Sie einen Secret-Provider im EDDI-Backend ein",
     "referencePlaceholder": "${vault:key-name}",
-    "mustBeReference": "Dieses Feld nimmt eine Referenz auf — ${vault:key} oder ${vars:key} —, nicht das Geheimnis selbst. Wählen Sie einen Schlüssel oder legen Sie den Wert zuerst im Vault ab."
+    "mustBeReference": "Dieses Feld nimmt eine Referenz auf — ${vault:key} oder ${vars:key} —, nicht das Geheimnis selbst. Wählen Sie einen Schlüssel oder legen Sie den Wert zuerst im Vault ab.",
+    "connectionChip": "Verbindung",
+    "connectionChipTitle": "Eine Verbindungsreferenz – EDDI löst sie bei jeder Anfrage in die Zugangsdaten auf",
+    "clearConnection": "Verbindungsreferenz entfernen",
+    "pickConnection": "Verbindungsreferenz einfügen",
+    "connectionFilterPlaceholder": "Verbindungen durchsuchen …",
+    "connectionLoading": "Verbindungen werden geladen …",
+    "connectionEmpty": "Noch keine Verbindungen. Ein Administrator legt sie unter „Verbindungen“ an.",
+    "connectionNoMatch": "Keine Verbindungen passen zu „{{filter}}“",
+    "connectionForbidden": "Ihre Rolle darf keine Verbindungen auflisten. Wenn Sie den Namen kennen, tippen Sie ${connection:name} von Hand ein.",
+    "connectionUnavailable": "Dieses Backend bietet keine Verbindungen an.",
+    "connectionFailed": "Verbindungen konnten nicht geladen werden.",
+    "connectionHint": "Fügt ${connection:name} als gesamten Wert ein. EDDI löst ihn bei jeder Anfrage in die Zugangsdaten auf."
   },
   "snippetEditor": {
     "category": "Kategorie",
@@ -4486,7 +4498,8 @@
     },
     "binding": {
       "perUser": "Pro Person",
-      "service": "Gemeinsam"
+      "service": "Gemeinsam",
+      "callerSupplied": "Vom Aufrufer mitgegeben"
     },
     "bindingPerUserTitle": "Gilt für jede Person einzeln",
     "bindingServiceTitle": "Gilt für ein gemeinsames Konto",
@@ -4592,7 +4605,16 @@
       "endpointNotHttps": "Muss https sein — das Client-Secret wird an diese URL gesendet.",
       "endpointUserInfo": "Entfernen Sie die Zugangsdaten aus der URL; sie verändern, wohin die Anfrage tatsächlich geht.",
       "endpointNotAbsolute": "Geben Sie eine vollständige URL samt Host an, z. B. https://auth.example.com/oauth/token.",
-      "paramCredentialShaped": "Einer dieser Parameter ist wie Zugangsdaten benannt. Hierher gehören nur nicht geheime Protokollparameter (prompt, audience, …)."
+      "paramCredentialShaped": "Einer dieser Parameter ist wie Zugangsdaten benannt. Hierher gehören nur nicht geheime Protokollparameter (prompt, audience, …).",
+      "bindingMismatch": "Diese Bindung passt nicht zum Authentifizierungstyp: „Vom Aufrufer mitgegeben“ braucht einen API-Schlüssel, „Pro Person“ eine OAuth-Nutzeranmeldung, alles andere ist gemeinsam.",
+      "callerSuppliedRefused": "Eine vom Aufrufer mitgegebene Verbindung speichert keine Zugangsdaten – das aufrufende System sendet sie mit jeder Anfrage. Leeren Sie dieses Feld.",
+      "nameTooLong": "Ein Name hat höchstens 64 Zeichen.",
+      "timeoutRange": "Das Timeout muss eine ganze Zahl zwischen 1 und 60000 Millisekunden sein. Leer lassen für den Standardwert.",
+      "templateLiteralCredential": "Der Text um die Referenz herum sieht selbst wie ein Geheimnis aus. Außerhalb von ${vault:…} gehört nur ein kurzes Schema-Präfix wie „Bearer “ – speichern Sie den Rest im Tresor.",
+      "paramReserved": "Einen dieser Parameter setzt EDDI selbst (client_id, redirect_uri, response_type, state, code_challenge …). Ihn zu überschreiben würde den Ablauf zerstören.",
+      "paramValueReference": "Parameterwerte werden genau so gesendet, wie sie geschrieben sind – eine ${…}-Referenz wird hier nicht aufgelöst und würde einen Tresorverweis in eine URL setzen. Verwenden Sie nur einfache Protokollwerte.",
+      "paramValueTooLong": "Ein Parameterwert hat höchstens 512 Zeichen.",
+      "paramValueCredentialShaped": "Einer dieser Werte sieht wie ein Schlüssel oder Token aus. Diese Zuordnung wird im Klartext gespeichert und in einer URL gesendet – hierher gehören nur nicht geheime Protokollparameter."
     },
     "backToList": "Zurück zu den Verbindungen",
     "headerSecret": "Gespeichertes Geheimnis",
@@ -4600,7 +4622,20 @@
     "discardNewBody": "Was Sie bisher eingetragen haben, geht verloren. Es wurde noch nichts angelegt.",
     "confirmReconnect": "Dieses Konto erneut verknüpfen?",
     "confirmReconnectDesc": "Dieses Konto funktioniert, es gibt also nichts zu reparieren. Wenn Sie fortfahren, verlassen Sie EDDI und gelangen zur Anmeldeseite des Anbieters; der zuvor erteilte Zugriff wird ersetzt.",
-    "paramDuplicate": "Ein anderer Parameter verwendet diesen Namen bereits. Nur der letzte wird gespeichert."
+    "paramDuplicate": "Ein anderer Parameter verwendet diesen Namen bereits. Nur der letzte wird gespeichert.",
+    "bindingChooser": "Woher der Schlüssel kommt",
+    "bindingChoice": {
+      "serviceBody": "Ein Schlüssel im Tresor, der für alle gesendet wird. Einfach – aber der Agent erreicht alles, was dieser Schlüssel erreicht.",
+      "callerSuppliedBody": "EDDI speichert nichts. Das aufrufende System sendet mit jeder Anfrage die Zugangsdaten des jeweiligen Nutzers, sodass der Agent nur tun kann, was dieser Nutzer tun darf – die Berechtigungen des Zielsystems sind die Grenze."
+    },
+    "callerSuppliedHeaderTitle": "Was das aufrufende System sendet",
+    "callerSuppliedHeaderBody": "Ein Header pro Anfrage: der Verbindungsname, ein Leerzeichen, dann der vollständige Wert, der als {{header}} gesendet wird – inklusive Schema, sodass „Bearer abc“ kein Escaping braucht. Die Zugangsdaten gelten nur für diese Anfrage und werden nie gespeichert.",
+    "callerSuppliedNeedsAuth": "Der Aufrufer muss bei EDDI angemeldet sein. Eine Anfrage ohne Zugangsdaten schlägt fehl, statt unauthentifiziert hinauszugehen – auch beim Fortsetzen eines pausierten Tool-Aufrufs – und diese Verbindung wird bei der MCP- und A2A-Erkennung zurückgehalten.",
+    "bindingCallerSuppliedTitle": "Wird als der jeweilige Aufrufer aufgelöst",
+    "bindingCallerSuppliedBody": "Das aufrufende System übergibt mit der Anfrage die Zugangsdaten des jeweiligen Nutzers, und EDDI speichert nichts. Der Agent kann nur tun, was dieser Nutzer im Zielsystem tun darf, und diese Verbindung wird bei der MCP- und A2A-Erkennung zurückgehalten.",
+    "confirmAuthChange": "Ändern, wie sich diese Verbindung authentifiziert?",
+    "confirmAuthChangeDesc": "Über diese Verbindung verknüpfte Konten werden nicht mehr aufgelöst – eine Berechtigung gehört zu dem Ablauf, der sie erzeugt hat. EDDI lehnt die Änderung ab, solange noch ein Konto verknüpft ist, und nennt die Anzahl; heben Sie die Verknüpfungen zuerst auf, oder legen Sie eine neue Verbindung an und lassen Sie die Leute stattdessen diese verknüpfen.",
+    "confirmAuthChangeAccept": "Ändern"
   },
   "extensionTypes": {
     "parser": "Eingabe-Parser",
@@ -4696,5 +4731,11 @@
       "cascade_one": "Eigentümer bei {{count}} Ressource geändert",
       "cascade_other": "Eigentümer bei {{count}} Ressourcen geändert"
     }
+  },
+  "connectionRef": {
+    "wrapped": "Eine Verbindung liefert den gesamten Header-Wert inklusive Schema. Verwenden Sie ${connection:name} allein und setzen Sie „Bearer “ stattdessen in den Header-Wert der Verbindung.",
+    "headerMismatch": "Diese Verbindung sendet ihre Zugangsdaten als „{{expected}}“, also muss der Header so heißen – sonst zeigt die Konfiguration einen Namen und die Anfrage trägt einen anderen.",
+    "refusedInRequest": "${connection:…} wird in Pfad, Query-Parameter oder Body abgelehnt – Zugangsdaten in einer URL landen in jedem Proxy-Log, und im Body werden sie nicht gelesen. Verweisen Sie stattdessen aus einem Header auf die Verbindung.",
+    "refusedInModel": "Sprachmodelle, Embeddings und Vektorspeicher akzeptieren kein ${connection:…}: Eine Verbindung wird in einen ganzen Header aufgelöst, diese brauchen aber ein nacktes Geheimnis. Verwenden Sie hier ${vault:…}."
   }
 }

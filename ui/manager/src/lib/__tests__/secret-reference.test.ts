@@ -1,15 +1,21 @@
 import { describe, it, expect } from "vitest";
 import {
   canonicalizeReference,
+  containsConnectionReference,
+  hasConnectionPrefix,
   hasReferencePrefix,
   interpolatedSegments,
+  isConnectionReference,
   isSecretReference,
   isVaultScheme,
+  parseConnectionReference,
   parseSecretReference,
   referenceLabel,
   splitTemplate,
+  toConnectionReference,
   toReference,
   toVaultReference,
+  wrapsConnectionReference,
   REFERENCE_SCHEMES,
 } from "@/lib/secret-reference";
 
@@ -202,5 +208,86 @@ describe("builders", () => {
       expect(isSecretReference(built)).toBe(true);
       expect(parseSecretReference(built)).toEqual({ scheme, body: "round-trip" });
     }
+  });
+});
+
+describe("connection references — a pointer to a document, not to a secret", () => {
+  it("is recognised as a reference for rendering, so it is never masked or vaulted", () => {
+    // The bug this pins: the picker treated `${connection:jira}` as a raw
+    // secret — masked it, and offered to store the literal string in the vault.
+    expect(hasReferencePrefix("${connection:jira}")).toBe(true);
+    expect(hasConnectionPrefix("${connection:jir")).toBe(true);
+    expect(isVaultScheme("${connection:jira}")).toBe(false);
+    expect(referenceLabel("${connection:jira}")).toBe("connection:jira");
+  });
+
+  it("is NOT a secret reference — clientSecret and passwordRef refuse it", () => {
+    expect(isSecretReference("${connection:jira}")).toBe(false);
+    expect(parseSecretReference("${connection:jira}")).toBeNull();
+    expect(REFERENCE_SCHEMES).not.toContain("connection");
+  });
+
+  it("only exists braced — there is no unbraced spelling to correct towards", () => {
+    expect(hasReferencePrefix("connection:jira")).toBe(false);
+    expect(canonicalizeReference("connection:jira")).toBeNull();
+  });
+
+  it("parses and builds the canonical form", () => {
+    expect(isConnectionReference("${connection:jira}")).toBe(true);
+    expect(isConnectionReference("  ${connection:jira}\n")).toBe(true);
+    expect(parseConnectionReference("${connection:jira}")).toEqual({ name: "jira" });
+    expect(toConnectionReference("jira")).toBe("${connection:jira}");
+    expect(isConnectionReference(toConnectionReference("google-drive"))).toBe(true);
+  });
+
+  it("carries only a name the backend's connection-name grammar accepts", () => {
+    // `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$` — the grammar a connection is saved
+    // under. A reference naming anything else resolves for nobody, so it must
+    // not look valid here either.
+    const longest = `a${"b".repeat(63)}`;
+    for (const name of ["jira", "google-drive", "team.jira_prod", "7eleven", longest]) {
+      expect(isConnectionReference(`\${connection:${name}}`)).toBe(true);
+      expect(parseConnectionReference(`\${connection:${name}}`)).toEqual({ name });
+      expect(toConnectionReference(name)).toBe(`\${connection:${name}}`);
+    }
+    for (const name of [
+      "bad name",
+      "jira/prod",
+      "jira:prod",
+      "-jira",
+      ".jira",
+      "jira$",
+      "jíra",
+      `${longest}c`,
+      "a".repeat(256),
+      "",
+    ]) {
+      expect(isConnectionReference(`\${connection:${name}}`)).toBe(false);
+      expect(parseConnectionReference(`\${connection:${name}}`)).toBeNull();
+      expect(toConnectionReference(name)).toBeNull();
+    }
+  });
+
+  it("sends a malformed reference down the warning path, not the chip path", () => {
+    // Still recognisably a connection reference being written, so the picker
+    // keeps it as editable text and the editor's placement warning speaks up.
+    expect(hasConnectionPrefix("${connection:bad name}")).toBe(true);
+    expect(containsConnectionReference("${connection:bad name}")).toBe(true);
+    expect(wrapsConnectionReference("${connection:bad name}")).toBe(true);
+  });
+
+  it("tells a bare reference from one wrapped in text — the shape the backend refuses", () => {
+    expect(wrapsConnectionReference("Bearer ${connection:jira}")).toBe(true);
+    expect(wrapsConnectionReference("${connection:a} ${connection:b}")).toBe(true);
+    expect(wrapsConnectionReference("${connection:jira}")).toBe(false);
+    expect(wrapsConnectionReference("Bearer ${vault:jira}")).toBe(false);
+    expect(wrapsConnectionReference("")).toBe(false);
+  });
+
+  it("finds a reference anywhere, for the placements that refuse it outright", () => {
+    expect(containsConnectionReference("/v1/items?key=${connection:jira}")).toBe(true);
+    expect(containsConnectionReference('{"token":"${connection:jira}"}')).toBe(true);
+    expect(containsConnectionReference("${vault:jira}")).toBe(false);
+    expect(containsConnectionReference(null)).toBe(false);
   });
 });

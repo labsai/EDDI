@@ -183,162 +183,164 @@ export function ShareDialog({ open, onClose, resourceId, resourceName }: ShareDi
 
   return (
     <AccessibleDialog open={open} onClose={onClose} title={title} maxWidth="max-w-lg" testId="share-dialog">
-      {isLoading && (
-        <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-          {t("common.loading", "Loading…")}
-        </div>
-      )}
+      <div className="p-5">
+        {isLoading && (
+          <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            {t("common.loading", "Loading…")}
+          </div>
+        )}
 
-      {error && (
-        <p className="py-4 text-sm text-destructive" role="alert">
-          {friendlyError(t, error)}
-        </p>
-      )}
+        {error && (
+          <p className="py-4 text-sm text-destructive" role="alert">
+            {friendlyError(t, error)}
+          </p>
+        )}
 
-      {/* `info` deliberately does not render alongside an error. TanStack keeps
-          the last good data through a failed refetch, so rendering both showed
-          a live-looking grant list and working buttons underneath the message
-          saying the request had failed — reachable whenever a revoke or a
-          visibility change strips the caller's own access mid-session. */}
-      {info && !error && (
-        <div className="space-y-5">
-          <OwnerLine ownerId={info.ownerId ?? null} spaceId={info.spaceId ?? null} />
+        {/* `info` deliberately does not render alongside an error. TanStack keeps
+            the last good data through a failed refetch, so rendering both showed
+            a live-looking grant list and working buttons underneath the message
+            saying the request had failed — reachable whenever a revoke or a
+            visibility change strips the caller's own access mid-session. */}
+        {info && !error && (
+          <div className="space-y-5">
+            <OwnerLine ownerId={info.ownerId ?? null} spaceId={info.spaceId ?? null} />
 
-          {!isOwner && (
-            <p className="rounded-md border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
-              {t(
-                "workspaces.share.notOwner",
-                "Only the owner can change who has access. Ask them if you need this shared more widely."
-              )}
-            </p>
-          )}
-
-          {isAdmin && (
-            <TransferOwnership
-              resourceId={resourceId}
-              currentOwner={info.ownerId ?? null}
-              busy={busy}
-              onBusy={setBusy}
-              onTransferred={afterChange}
-            />
-          )}
-
-          {isOwner && (
-            <>
-              <VisibilityChooser current={info.visibility} busy={busy} onChange={handleVisibility} />
-
-              <section className="space-y-2">
-                <h3 className="text-sm font-medium">
-                  {t("workspaces.share.peopleAndTeams", "People and teams")}
-                </h3>
-
-                <div className="flex flex-col gap-2 sm:flex-row">
-                  <Input
-                    value={subjectInput}
-                    onChange={(e) => {
-                      setSubjectInput(e.target.value);
-                      setConfirmedSubject(null);
-                    }}
-                    placeholder={t("workspaces.share.subjectPlaceholder", "name@example.com or team:engineering")}
-                    aria-label={t("workspaces.share.subjectLabel", "Person or team")}
-                    data-testid="share-subject-input"
-                    onKeyDown={(e) => {
-                      if (e.key !== "Enter" || busy) return;
-                      e.preventDefault();
-                      // Enter arms an ownership transfer but never completes
-                      // one: two quick presses would otherwise sail straight
-                      // through the confirmation the second press is meant to
-                      // read. Confirming takes a deliberate click.
-                      if (level === "OWN" && confirmedSubject) return;
-                      void handleShare();
-                    }}
-                  />
-                  <select
-                    value={level}
-                    onChange={(e) => {
-                      setLevel(e.target.value as AccessLevel);
-                      setConfirmedSubject(null);
-                    }}
-                    aria-label={t("workspaces.share.levelLabel", "Access level")}
-                    data-testid="share-level-select"
-                    className="h-9 rounded-md border border-border bg-background px-2 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  >
-                    {ACCESS_LEVELS.map((l) => (
-                      <option key={l} value={l}>
-                        {levelLabel(t, l)}
-                      </option>
-                    ))}
-                  </select>
-                  <Button
-                    onClick={() => void handleShare()}
-                    disabled={busy}
-                    variant={awaitingOwnerConfirmation ? "destructive" : "primary"}
-                    data-testid="share-submit"
-                  >
-                    <UserPlus className="me-2 h-4 w-4" aria-hidden="true" />
-                    {awaitingOwnerConfirmation
-                      ? t("workspaces.share.confirmOwner", "Confirm transfer")
-                      : t("workspaces.share.add", "Share")}
-                  </Button>
-                </div>
-
-                <p className="text-xs text-muted-foreground">{levelHint(t, level)}</p>
-
-                {awaitingOwnerConfirmation && (
-                  <p className="text-xs text-destructive" role="alert" data-testid="share-owner-warning">
-                    {t(
-                      "workspaces.share.ownerWarning",
-                      "They will be able to delete this and share it with anyone. You cannot take that back on your own."
-                    )}
-                  </p>
+            {!isOwner && (
+              <p className="rounded-md border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
+                {t(
+                  "workspaces.share.notOwner",
+                  "Only the owner can change who has access. Ask them if you need this shared more widely."
                 )}
+              </p>
+            )}
 
-                {grants.length === 0 ? (
-                  <p className="py-2 text-sm text-muted-foreground">
-                    {t("workspaces.share.noGrants", "Not shared with anyone yet.")}
-                  </p>
-                ) : (
-                  <ul className="divide-y divide-border rounded-md border border-border">
-                    {grants.map((grant) => (
-                      <li key={grant.subject} className="flex items-center gap-3 px-3 py-2">
-                        {isUserSubject(grant.subject) ? (
-                          <UserPlus className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                        ) : (
-                          <Users className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                        )}
-                        {/* The person/team distinction was icon-only, and the icon
-                            is aria-hidden — so a screen reader heard two identical
-                            rows. */}
-                        <span className="sr-only">
-                          {isUserSubject(grant.subject)
-                            ? t("workspaces.share.subjectIsPerson", "Person")
-                            : t("workspaces.share.subjectIsTeam", "Team")}
-                        </span>
-                        <span className="flex-1 truncate text-sm">{describeSpace(grant.subject)}</span>
-                        <Badge variant="secondary">{levelLabel(t, grant.level)}</Badge>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          disabled={busy}
-                          onClick={() => void handleRevoke(grant.subject)}
-                          aria-label={t("workspaces.share.revokeFor", "Stop sharing with {{subject}}", {
-                            subject: describeSpace(grant.subject) ?? grant.subject,
-                          })}
-                        >
-                          <Trash2 className="h-4 w-4" aria-hidden="true" />
-                        </Button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </section>
-            </>
-          )}
+            {isAdmin && (
+              <TransferOwnership
+                resourceId={resourceId}
+                currentOwner={info.ownerId ?? null}
+                busy={busy}
+                onBusy={setBusy}
+                onTransferred={afterChange}
+              />
+            )}
 
-          {lastResult && <CascadeSummary result={lastResult.result} action={lastResult.action} />}
-        </div>
-      )}
+            {isOwner && (
+              <>
+                <VisibilityChooser current={info.visibility} busy={busy} onChange={handleVisibility} />
+
+                <section className="space-y-2">
+                  <h3 className="text-sm font-medium">
+                    {t("workspaces.share.peopleAndTeams", "People and teams")}
+                  </h3>
+
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <Input
+                      value={subjectInput}
+                      onChange={(e) => {
+                        setSubjectInput(e.target.value);
+                        setConfirmedSubject(null);
+                      }}
+                      placeholder={t("workspaces.share.subjectPlaceholder", "name@example.com or team:engineering")}
+                      aria-label={t("workspaces.share.subjectLabel", "Person or team")}
+                      data-testid="share-subject-input"
+                      onKeyDown={(e) => {
+                        if (e.key !== "Enter" || busy) return;
+                        e.preventDefault();
+                        // Enter arms an ownership transfer but never completes
+                        // one: two quick presses would otherwise sail straight
+                        // through the confirmation the second press is meant to
+                        // read. Confirming takes a deliberate click.
+                        if (level === "OWN" && confirmedSubject) return;
+                        void handleShare();
+                      }}
+                    />
+                    <select
+                      value={level}
+                      onChange={(e) => {
+                        setLevel(e.target.value as AccessLevel);
+                        setConfirmedSubject(null);
+                      }}
+                      aria-label={t("workspaces.share.levelLabel", "Access level")}
+                      data-testid="share-level-select"
+                      className="h-9 rounded-md border border-border bg-background px-2 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      {ACCESS_LEVELS.map((l) => (
+                        <option key={l} value={l}>
+                          {levelLabel(t, l)}
+                        </option>
+                      ))}
+                    </select>
+                    <Button
+                      onClick={() => void handleShare()}
+                      disabled={busy}
+                      variant={awaitingOwnerConfirmation ? "destructive" : "primary"}
+                      data-testid="share-submit"
+                    >
+                      <UserPlus className="me-2 h-4 w-4" aria-hidden="true" />
+                      {awaitingOwnerConfirmation
+                        ? t("workspaces.share.confirmOwner", "Confirm transfer")
+                        : t("workspaces.share.add", "Share")}
+                    </Button>
+                  </div>
+
+                  <p className="text-xs text-muted-foreground">{levelHint(t, level)}</p>
+
+                  {awaitingOwnerConfirmation && (
+                    <p className="text-xs text-destructive" role="alert" data-testid="share-owner-warning">
+                      {t(
+                        "workspaces.share.ownerWarning",
+                        "They will be able to delete this and share it with anyone. You cannot take that back on your own."
+                      )}
+                    </p>
+                  )}
+
+                  {grants.length === 0 ? (
+                    <p className="py-2 text-sm text-muted-foreground">
+                      {t("workspaces.share.noGrants", "Not shared with anyone yet.")}
+                    </p>
+                  ) : (
+                    <ul className="divide-y divide-border rounded-md border border-border">
+                      {grants.map((grant) => (
+                        <li key={grant.subject} className="flex items-center gap-3 px-3 py-2">
+                          {isUserSubject(grant.subject) ? (
+                            <UserPlus className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                          ) : (
+                            <Users className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                          )}
+                          {/* The person/team distinction was icon-only, and the icon
+                              is aria-hidden — so a screen reader heard two identical
+                              rows. */}
+                          <span className="sr-only">
+                            {isUserSubject(grant.subject)
+                              ? t("workspaces.share.subjectIsPerson", "Person")
+                              : t("workspaces.share.subjectIsTeam", "Team")}
+                          </span>
+                          <span className="flex-1 truncate text-sm">{describeSpace(grant.subject)}</span>
+                          <Badge variant="secondary">{levelLabel(t, grant.level)}</Badge>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={busy}
+                            onClick={() => void handleRevoke(grant.subject)}
+                            aria-label={t("workspaces.share.revokeFor", "Stop sharing with {{subject}}", {
+                              subject: describeSpace(grant.subject) ?? grant.subject,
+                            })}
+                          >
+                            <Trash2 className="h-4 w-4" aria-hidden="true" />
+                          </Button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </section>
+              </>
+            )}
+
+            {lastResult && <CascadeSummary result={lastResult.result} action={lastResult.action} />}
+          </div>
+        )}
+      </div>
     </AccessibleDialog>
   );
 }

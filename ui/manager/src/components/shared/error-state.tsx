@@ -14,7 +14,7 @@ export function ErrorState({
 }: ErrorStateProps) {
   return (
     <div
-      className="flex flex-col items-center justify-center rounded-xl border border-destructive/30 bg-destructive/5 py-16"
+      className="flex flex-col items-center justify-center rounded-xl border border-destructive/30 bg-destructive/5 px-6 py-16 text-center"
       data-testid="error-state"
     >
       <AlertCircle className="h-12 w-12 text-destructive" />

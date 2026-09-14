@@ -23,6 +23,22 @@ const CONNECTIONS_KEY = ["connections"] as const;
  */
 export const MINE_KEY = [...CONNECTIONS_KEY, "mine"] as const;
 
+/**
+ * Whether a failed query might succeed on a second attempt.
+ *
+ * Only two failures can: the network (`ApiClient` reports it as status 0) and a
+ * 5xx, a proxy or store that is down. Every 4xx is the server's definitive
+ * answer — a 400 or 409 replayed is the same 400 or 409, later — so an
+ * allow-list of transient failures, not a deny-list of final ones. The deny-list
+ * this replaced (401/403/404) retried every other 4xx.
+ *
+ * An error that is not an API error at all (a response that did not parse)
+ * is a bug, not a blip, and is not retried either.
+ */
+function isTransientFailure(error: unknown): boolean {
+  return isApiError(error) && (error.status === 0 || error.status >= 500);
+}
+
 // ─── Admin CRUD ─────────────────────────────────────────────────
 
 /**
@@ -68,14 +84,10 @@ export function useConnectionDescriptors(
     /**
      * A 403 is an answer, not a failure to retry. Retrying it three times
      * delays the "you are not an eddi-admin" screen by several seconds and
-     * puts three refusals in the server's audit log for one page view.
-     *
-     * Uses the shared `isApiError` guard rather than an inline shape check, so
-     * a change to how api-client surfaces status cannot leave this silently
-     * evaluating false while the page beside it keeps working.
+     * puts three refusals in the server's audit log for one page view. The same
+     * is true of every other 4xx, so only a network failure or a 5xx is retried.
      */
-    retry: (failureCount, error) =>
-      failureCount < 2 && !(isApiError(error) && [401, 403, 404].includes(error.status)),
+    retry: (failureCount, error) => failureCount < 2 && isTransientFailure(error),
   });
 }
 
@@ -194,17 +206,23 @@ export function useDuplicateConnection() {
 /**
  * The calling user's linked accounts.
  *
- * `retry: false` because both of its interesting failures are final answers:
- * a 404 means the feature is off and a 403 means there is no verified
- * identity. Neither improves on a second attempt, and both are states the page
- * renders deliberately rather than errors it hides.
+ * Its 4xx failures are final answers and are not retried: a 404 means the
+ * feature is off, a 403 means there is no verified identity, and a 400 or 409
+ * is the server refusing the request as sent. None improves on a second
+ * attempt; the first two are states the page renders deliberately rather than
+ * errors it hides.
+ *
+ * A 5xx or a network failure is an outage, and gets one retry before the panel
+ * shows its error state with a Retry button. Retrying the definitive answers
+ * would only delay them; not retrying the transient ones turned a proxy blip
+ * into a page that looked deliberately broken.
  */
 export function useMyConnections(enabled = true) {
   return useQuery({
     queryKey: MINE_KEY,
     queryFn: listMyConnections,
     enabled,
-    retry: false,
+    retry: (failureCount, error) => failureCount < 1 && isTransientFailure(error),
   });
 }
 

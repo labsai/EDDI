@@ -25,6 +25,7 @@ import {
   Code2,
 } from "lucide-react";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
+import { ConnectionReferenceWarning } from "@/components/shared/connection-reference-warning";
 import {
   discoverMcpTools,
   type McpToolInfo,
@@ -319,7 +320,7 @@ function McpRetryEditor({
 
   return (
     <div
-      className="rounded-lg border border-border/60 bg-card/50 p-2.5 space-y-2"
+      className="rounded-lg border border-border/60 bg-card/50 p-3 space-y-2"
       data-testid="mcp-retry-editor"
     >
       <div className="grid grid-cols-2 gap-2">
@@ -952,12 +953,20 @@ export function McpCallsEditor({
             <label className="mb-1 block text-xs font-medium text-muted-foreground">
               {t("mcpcallsEditor.apiKey", "API Key / Vault Reference")}
             </label>
+            {/* One of the three places the backend resolves ${connection:…}:
+                the reference must be the whole value, and a PER_USER or
+                CALLER_SUPPLIED connection is withheld from discovery. */}
             <SecretKeyPicker
               value={data.apiKey ?? ""}
               onChange={(v) => update({ apiKey: v })}
               readOnly={readOnly}
               placeholder="${vault:my-mcp-key}"
               testId="mcp-apikey-input"
+              connections
+            />
+            <ConnectionReferenceWarning
+              value={data.apiKey}
+              testId="mcp-apikey-connection-warning"
             />
           </div>
         </div>

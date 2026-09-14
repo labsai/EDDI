@@ -5719,6 +5719,25 @@ const mockConnections: Record<string, Record<string, unknown>> = {
     baseUrlAllowlist: ["https://crm.internal.example.com:8443"],
     timeoutMs: null,
   },
+  // EDDI stores nothing for this one: the calling system attaches each user's
+  // own key per request, so the document carries a header name and nowhere to
+  // send it — and no valueTemplate, which the backend refuses on this binding.
+  conn6: {
+    name: "gnowbe",
+    description: "Each caller brings their own Gnowbe key",
+    authType: "STATIC",
+    binding: "CALLER_SUPPLIED",
+    allowUnverifiedPrincipal: false,
+    oauth: null,
+    staticAuth: {
+      headerName: "x-api-key",
+      valueTemplate: null,
+      username: null,
+      passwordRef: null,
+    },
+    baseUrlAllowlist: ["https://api.gnowbe.com"],
+    timeoutMs: null,
+  },
 };
 
 export const connectionHandlers = [
@@ -5750,7 +5769,10 @@ export const connectionHandlers = [
             "OAUTH2_AUTHORIZATION_CODE",
           ],
         },
-        binding: { type: "string", enum: ["SERVICE", "PER_USER"] },
+        binding: {
+          type: "string",
+          enum: ["SERVICE", "PER_USER", "CALLER_SUPPLIED"],
+        },
         baseUrlAllowlist: { type: "array", items: { type: "string" } },
       },
     });

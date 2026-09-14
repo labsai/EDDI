@@ -45,7 +45,7 @@ export function AlertDialog({
         <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/50 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0" />
         <DialogPrimitive.Content
           className={cn(
-            "fixed inset-x-0 top-[50%] z-50 mx-auto w-full max-w-md translate-y-[-50%]",
+            "fixed inset-x-0 top-[50%] z-50 mx-auto w-[calc(100%-2rem)] max-w-md translate-y-[-50%]",
             "rounded-xl border border-border bg-card p-6 shadow-lg",
             "data-[state=open]:animate-in data-[state=closed]:animate-out",
             "data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",

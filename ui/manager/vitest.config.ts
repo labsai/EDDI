@@ -21,7 +21,19 @@ export default mergeConfig(
       // as well, which measured 2,320 files and 28,223 tests against a real
       // 358 and 5,543, with 261 files failing because a mutated copy of the
       // source was still in place.
-      exclude: ["e2e/**", "node_modules/**", ".claude/**", ".stryker-tmp/**"],
+      //
+      // `.worktrees/**` is the trap a third time: `git worktree add
+      // .worktrees/<branch>` inside the main checkout puts a whole second tree
+      // under the repo root, and a stale one — a branch merged and forgotten —
+      // is swept by every `vitest run` from then on, failing on whatever the
+      // two branches disagree about.
+      exclude: [
+        "e2e/**",
+        "node_modules/**",
+        ".claude/**",
+        ".stryker-tmp/**",
+        ".worktrees/**",
+      ],
       server: {
         deps: {
           // monaco-editor is ~40 MB; tests mock @monaco-editor/react so

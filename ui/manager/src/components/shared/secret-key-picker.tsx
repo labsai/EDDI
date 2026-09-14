@@ -6,6 +6,7 @@ import {
   EyeOff,
   AlertTriangle,
   Plus,
+  Plug,
   X,
   Loader2,
   Search,
@@ -16,11 +17,14 @@ import { toast } from "sonner";
 import { createPortal } from "react-dom";
 import {
   canonicalizeReference,
+  hasConnectionPrefix,
   hasReferencePrefix,
   isSecretReference,
   isVaultScheme,
+  parseConnectionReference,
   referenceLabel,
 } from "@/lib/secret-reference";
+import { ConnectionReferenceButton } from "@/components/shared/connection-reference-picker";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -75,6 +79,18 @@ interface SecretKeyPickerProps {
    *  - `${vars:…}` counts as a reference, because the backend accepts it.
    */
   referenceOnly?: boolean;
+  /**
+   * Offer `${connection:name}` beside the vault, from the deployment's
+   * connection list.
+   *
+   * Opt-in per field, because the backend resolves a connection reference in
+   * exactly three places — an httpcall header, an MCP server's `apiKey`, an
+   * A2A agent's `apiKey` — and refuses it everywhere else a secret goes. A
+   * picker that offered it in a language-model parameter would be offering a
+   * value that fails at build time. Ignored in `referenceOnly` mode, where a
+   * connection reference is never admissible.
+   */
+  connections?: boolean;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -523,8 +539,10 @@ export function SecretKeyPicker({
   "aria-describedby": ariaDescribedBy,
   ariaLabel,
   referenceOnly = false,
+  connections = false,
 }: SecretKeyPickerProps) {
   const { t } = useTranslation();
+  const offerConnections = connections && !referenceOnly;
 
   // UI state
   const [showPassword, setShowPassword] = useState(false);
@@ -563,7 +581,25 @@ export function SecretKeyPicker({
   // Showing it for `vault:key` would tell the user the field is fine and then
   // fail the save.
   const isCanonicalRef = isSecretReference(value);
-  const hasVaultRef = referenceOnly ? isCanonicalRef : isVaultRef(value);
+  /**
+   * A connection reference is a reference, but not a vault one: there is no
+   * key to look up, no secret to mask, and nothing to offer storing. It gets
+   * its own chip below. In reference-only mode it is not admissible at all
+   * and falls through to the literal warning like any other non-secret.
+   *
+   * The chip is for a *finished* reference only. Keying it off the prefix
+   * swapped the input for a chip the moment `${connection:` was typed, so the
+   * name and the closing brace could never be typed after it. An unfinished or
+   * malformed one (`${connection:bad name}`) stays an editable input, unmasked.
+   */
+  const connectionPrefix = !referenceOnly && hasConnectionPrefix(value);
+  const connection = connectionPrefix ? parseConnectionReference(value) : null;
+  const connectionRef = connection !== null;
+  const connectionInProgress = connectionPrefix && !connectionRef;
+  const connectionName = connection?.name ?? "";
+  // `hasReferencePrefix` also matches the connection prefix, so an unfinished
+  // connection reference must be excluded here or it lands in the vault chip.
+  const hasVaultRef = referenceOnly ? isCanonicalRef : isVaultRef(value) && !connectionPrefix;
   const currentVaultKey = hasVaultRef ? referenceLabel(value) : "";
   /** A non-empty value that is not (yet) an admissible reference. */
   const literalRejected = referenceOnly && value.trim() !== "" && !isCanonicalRef;
@@ -748,6 +784,50 @@ export function SecretKeyPicker({
 
   // ─── Render ────────────────────────────────────────────────────────────────
 
+  // State B′: a connection reference — a pointer to a connection document,
+  // resolved to a credential per request. Its own chip, not the vault's: "not
+  // found in the vault" would be wrong, and so would masking it.
+  if (connectionRef) {
+    return (
+      <div ref={containerRef} className="relative" data-testid={testId}>
+        <div
+          id={id}
+          role="group"
+          aria-label={ariaLabel}
+          aria-invalid={ariaInvalid}
+          aria-describedby={describedBy}
+          className={`flex h-7 items-center gap-1.5 rounded-md border px-2 ${
+            readOnly ? "border-primary/30 bg-primary/5" : "border-primary/50 bg-primary/10"
+          }`}
+          title={t(
+            "secretPicker.connectionChipTitle",
+            "A connection reference — EDDI resolves it to the credential on every request",
+          )}
+          data-testid={`${testId}-connection-chip`}
+        >
+          <Plug className="h-3 w-3 shrink-0 text-primary" aria-hidden="true" />
+          <span className="shrink-0 text-[10px] font-medium uppercase tracking-wide text-primary/80">
+            {t("secretPicker.connectionChip", "Connection")}
+          </span>
+          <span className="flex-1 truncate font-mono text-xs font-medium text-foreground">
+            {connectionName}
+          </span>
+          {!readOnly && (
+            <button
+              type="button"
+              onClick={handleClearVault}
+              className="rounded p-0.5 text-primary/70 transition-colors hover:text-primary"
+              aria-label={t("secretPicker.clearConnection", "Clear connection reference")}
+              data-testid={`${testId}-clear`}
+            >
+              <X className="h-3 w-3" />
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   // State B: Vault reference selected — show chip
   if (hasVaultRef) {
     return (
@@ -811,7 +891,8 @@ export function SecretKeyPicker({
             id={id}
             // Nothing to mask: in reference-only mode the only admissible value
             // is a pointer, and masking it hides the one thing worth reading.
-            type={referenceOnly || showPassword ? "text" : "password"}
+            // The same holds for a connection reference still being typed.
+            type={referenceOnly || connectionInProgress || showPassword ? "text" : "password"}
             value={value}
             onChange={(e) => handleDirectChange(e.target.value)}
             onKeyDown={handleInputKeyDown}
@@ -834,7 +915,7 @@ export function SecretKeyPicker({
             className={`h-7 w-full border bg-background ps-2 font-mono text-xs text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-ring ${
               referenceOnly ? "pe-2" : "pe-14"
             } ${literalRejected ? "border-destructive" : "border-input"} ${
-              vaultAvailable && !readOnly
+              (vaultAvailable || offerConnections) && !readOnly
                 ? "rounded-s-md rounded-e-none"
                 : "rounded-md"
             }`}
@@ -871,9 +952,11 @@ export function SecretKeyPicker({
             onClick={() => (popupOpen ? closePopup() : openPopup())}
             title={t("secretPicker.pickFromVault", "Pick from vault")}
             className={`flex h-7 items-center gap-0.5 border border-s-0 border-input px-1.5 text-xs transition-colors ${
+              offerConnections ? "" : "rounded-e-md"
+            } ${
               popupOpen
-                ? "rounded-e-md bg-primary/10 text-primary"
-                : "rounded-e-md bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground"
+                ? "bg-primary/10 text-primary"
+                : "bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground"
             }`}
             data-testid={`${testId}-vault-btn`}
           >
@@ -882,6 +965,17 @@ export function SecretKeyPicker({
               className={`h-2.5 w-2.5 transition-transform ${popupOpen ? "rotate-180" : ""}`}
             />
           </button>
+        )}
+
+        {/* Connection opener — only where the backend resolves one. */}
+        {offerConnections && !readOnly && (
+          <ConnectionReferenceButton
+            onInsert={(reference) => {
+              closePopup();
+              onChange(reference);
+            }}
+            testId={`${testId}-connection-btn`}
+          />
         )}
       </div>
 

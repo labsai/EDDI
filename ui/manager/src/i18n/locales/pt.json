@@ -3449,7 +3449,19 @@
     "placeholder": "Chave de API ou ${vault:key-name}",
     "vaultDown": "O cofre não está configurado — configure um provedor de segredos no backend do EDDI",
     "referencePlaceholder": "${vault:key-name}",
-    "mustBeReference": "Este campo aceita uma referência — ${vault:chave} ou ${vars:chave} — e não o segredo em si. Escolha uma chave ou guarde o valor no cofre primeiro."
+    "mustBeReference": "Este campo aceita uma referência — ${vault:chave} ou ${vars:chave} — e não o segredo em si. Escolha uma chave ou guarde o valor no cofre primeiro.",
+    "connectionChip": "Ligação",
+    "connectionChipTitle": "Uma referência de ligação — o EDDI resolve-a na credencial em cada pedido",
+    "clearConnection": "Limpar referência de ligação",
+    "pickConnection": "Inserir uma referência de ligação",
+    "connectionFilterPlaceholder": "Pesquisar ligações…",
+    "connectionLoading": "A carregar ligações…",
+    "connectionEmpty": "Ainda não há ligações. Um administrador cria-as em Ligações.",
+    "connectionNoMatch": "Nenhuma ligação corresponde a \"{{filter}}\"",
+    "connectionForbidden": "A sua função não pode listar ligações. Se souber o nome, escreva ${connection:name} à mão.",
+    "connectionUnavailable": "Este backend não oferece ligações.",
+    "connectionFailed": "Não foi possível carregar as ligações.",
+    "connectionHint": "Insere ${connection:name} como valor completo. O EDDI resolve-o na credencial em cada pedido."
   },
   "snippetEditor": {
     "category": "Categoria",
@@ -4526,7 +4538,8 @@
     },
     "binding": {
       "perUser": "Por pessoa",
-      "service": "Compartilhada"
+      "service": "Compartilhada",
+      "callerSupplied": "Fornecido pelo chamador"
     },
     "bindingPerUserTitle": "Resolvida para cada usuário",
     "bindingServiceTitle": "Resolvida com uma conta compartilhada",
@@ -4632,7 +4645,16 @@
       "endpointNotHttps": "Precisa ser https — o segredo do cliente é enviado para esta URL.",
       "endpointUserInfo": "Remova as credenciais da URL; elas mudam para onde a requisição realmente vai.",
       "endpointNotAbsolute": "Informe uma URL completa com o host, por ex. https://auth.example.com/oauth/token.",
-      "paramCredentialShaped": "Um destes parâmetros tem nome de credencial. Aqui só cabem parâmetros de protocolo não secretos (prompt, audience, …)."
+      "paramCredentialShaped": "Um destes parâmetros tem nome de credencial. Aqui só cabem parâmetros de protocolo não secretos (prompt, audience, …).",
+      "bindingMismatch": "Esta vinculação não combina com este tipo de autenticação: «fornecido pelo chamador» precisa de uma chave de API, «por utilizador» precisa de um início de sessão OAuth de utilizador, e tudo o resto é partilhado.",
+      "callerSuppliedRefused": "Uma ligação fornecida pelo chamador não armazena credenciais — o sistema chamador envia-a com cada pedido. Limpe este campo.",
+      "nameTooLong": "Um nome tem no máximo 64 caracteres.",
+      "timeoutRange": "O tempo limite tem de ser um número inteiro entre 1 e 60000 milissegundos. Deixe vazio para o valor predefinido.",
+      "templateLiteralCredential": "O texto à volta da referência parece ele próprio uma credencial. Fora de ${vault:…} só cabe um prefixo de esquema curto como “Bearer ” — guarde o resto no cofre.",
+      "paramReserved": "Um destes parâmetros é definido pelo próprio EDDI (client_id, redirect_uri, response_type, state, code_challenge…). Substituí-lo quebraria o fluxo.",
+      "paramValueReference": "Os valores dos parâmetros são enviados exatamente como escritos — uma referência ${…} aqui não é resolvida e colocaria um ponteiro do cofre num URL. Use apenas valores de protocolo simples.",
+      "paramValueTooLong": "Um valor de parâmetro tem no máximo 512 caracteres.",
+      "paramValueCredentialShaped": "Um destes valores parece uma chave ou um token. Este mapa é guardado em texto simples e enviado num URL — só parâmetros de protocolo não secretos pertencem aqui."
     },
     "backToList": "Voltar para Conexões",
     "headerSecret": "Segredo guardado",
@@ -4640,7 +4662,20 @@
     "discardNewBody": "O que você preencheu até aqui será perdido. Nada foi criado ainda.",
     "confirmReconnect": "Conectar esta conta de novo?",
     "confirmReconnectDesc": "Esta conta está funcionando, então não há nada a reparar. Continuar leva você para fora do EDDI, até a página de login do provedor, e substitui o acesso que você concedeu antes.",
-    "paramDuplicate": "Outro parâmetro já usa este nome. Apenas o último é guardado."
+    "paramDuplicate": "Outro parâmetro já usa este nome. Apenas o último é guardado.",
+    "bindingChooser": "De onde vem a chave",
+    "bindingChoice": {
+      "serviceBody": "Uma chave no cofre, enviada para todos. Simples — mas o agente alcança tudo o que essa chave alcança.",
+      "callerSuppliedBody": "O EDDI não armazena nada. O sistema que chama o EDDI envia a credencial de cada utilizador com cada pedido, por isso o agente só pode fazer o que esse utilizador pode fazer — as permissões do destino são o limite."
+    },
+    "callerSuppliedHeaderTitle": "O que o sistema chamador envia",
+    "callerSuppliedHeaderBody": "Um cabeçalho por pedido: o nome da ligação, um espaço e depois o valor completo a enviar como {{header}} — esquema incluído, por isso “Bearer abc” não precisa de escape. A credencial existe apenas durante esse pedido e nunca é armazenada.",
+    "callerSuppliedNeedsAuth": "O chamador tem de ter sessão iniciada no EDDI. Um pedido sem a credencial falha em vez de sair sem autenticação — inclusive ao retomar uma chamada de ferramenta em pausa — e esta ligação é excluída da descoberta MCP e A2A.",
+    "bindingCallerSuppliedTitle": "Resolve-se como quem está a chamar",
+    "bindingCallerSuppliedBody": "O sistema chamador entrega a credencial de cada utilizador com o pedido e o EDDI não armazena nada. O agente só pode fazer o que esse utilizador pode fazer no destino, e esta ligação é excluída da descoberta MCP e A2A.",
+    "confirmAuthChange": "Alterar a forma como esta ligação se autentica?",
+    "confirmAuthChangeDesc": "As contas ligadas através desta ligação deixarão de se resolver — uma concessão pertence ao fluxo que a produziu. O EDDI recusa a alteração enquanto alguma conta continuar ligada e diz quantas; desligue-as primeiro, ou crie uma nova ligação e deixe as pessoas ligarem essa.",
+    "confirmAuthChangeAccept": "Alterar"
   },
   "extensionTypes": {
     "parser": "Analisador de entrada",
@@ -4741,5 +4776,11 @@
       "cascade_other": "Proprietário alterado em {{count}} recursos",
       "cascade_many": "Proprietário alterado em {{count}} recursos"
     }
+  },
+  "connectionRef": {
+    "wrapped": "Uma ligação fornece o valor completo do cabeçalho, esquema incluído. Use ${connection:name} sozinho e coloque “Bearer ” no valor de cabeçalho da ligação.",
+    "headerMismatch": "Esta ligação envia a credencial como “{{expected}}”, por isso o cabeçalho tem de ter esse nome — caso contrário a configuração mostra um nome e o pedido leva outro.",
+    "refusedInRequest": "${connection:…} é recusado num caminho, parâmetro de consulta ou corpo — uma credencial num URL acaba em todos os registos de proxy, e num corpo não é lida. Referencie a ligação a partir de um cabeçalho.",
+    "refusedInModel": "Modelos de linguagem, embeddings e armazenamentos vetoriais não aceitam ${connection:…}: uma ligação resolve-se num cabeçalho completo, e estes precisam de uma credencial simples. Use ${vault:…} aqui."
   }
 }

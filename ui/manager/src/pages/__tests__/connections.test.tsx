@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { server } from "@/test/mocks/server";
 import { useLocation } from "react-router-dom";
@@ -160,5 +160,19 @@ describe("ConnectionsPage", () => {
     // amplitude is SERVICE-bound: there is no per-user account to link.
     await screen.findByTestId("connection-card-conn3");
     expect(screen.queryByTestId("connect-amplitude")).not.toBeInTheDocument();
+  });
+
+  it("gives a caller-supplied connection its own badge, not 'Shared'", async () => {
+    // Nothing is stored for it and nothing is shared by it: the one word that
+    // would have described it under a two-value binding was the wrong word.
+    renderConnections();
+
+    const card = await screen.findByTestId("connection-card-conn6");
+    expect(within(card).getByTestId("binding-CALLER_SUPPLIED")).toHaveTextContent(
+      "Caller-supplied",
+    );
+    expect(within(card).queryByTestId("binding-SERVICE")).not.toBeInTheDocument();
+    // And no account to link — the caller brings the credential each time.
+    expect(screen.queryByTestId("connect-gnowbe")).not.toBeInTheDocument();
   });
 });

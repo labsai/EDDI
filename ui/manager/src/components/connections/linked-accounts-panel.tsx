@@ -260,6 +260,10 @@ export function LinkedAccountsPanel({
       );
     }
 
+    // Anything else — a 5xx, a network failure — is an outage rather than a
+    // state. These routes never answer 503 on purpose, so one is a proxy or a
+    // store that is down, and the honest rendering is an error with Retry, not
+    // a sentence claiming the feature is switched off.
     if (showFailureState) {
       return (
         <ErrorState
@@ -474,22 +478,25 @@ function LinkedAccountRow({
           </span>
           <GrantStatusBadge status={account.status} />
         </div>
-        <p
-          className="mt-1 text-xs text-muted-foreground"
-          // The raw expiry is real information an operator occasionally wants,
-          // and a terrible headline: an access token that expires in forty
-          // minutes and renews itself reads as a countdown to a problem.
-          title={
-            expiresAt
-              ? t("connections.detail.expiresAt", {
-                  date: expiresAt,
-                  defaultValue: "Access token valid until {{date}}",
-                })
-              : undefined
-          }
-        >
+        <p className="mt-1 text-xs text-muted-foreground">
           {statusDetail(t, account, locale)}
         </p>
+        {/* The raw expiry is real information an operator occasionally wants,
+            and a terrible headline: an access token that expires in forty
+            minutes and renews itself reads as a countdown to a problem. So it
+            is a second, quieter line — visible, not a hover-only title that a
+            keyboard or touch user never reaches. */}
+        {expiresAt && (
+          <p
+            className="mt-0.5 text-[11px] text-muted-foreground/80"
+            data-testid={`linked-account-expiry-${account.connection}`}
+          >
+            {t("connections.detail.expiresAt", {
+              date: expiresAt,
+              defaultValue: "Access token valid until {{date}}",
+            })}
+          </p>
+        )}
         {account.scopes && account.scopes.length > 0 && (
           <div className="mt-2 flex flex-wrap gap-1">
             {account.scopes.map((scope) => (

@@ -3415,7 +3415,19 @@
     "placeholder": "API キーまたは ${vault:key-name}",
     "vaultDown": "Vault が設定されていません — EDDI バックエンドでシークレットプロバイダーを設定してください",
     "referencePlaceholder": "${vault:key-name}",
-    "mustBeReference": "この項目にはシークレットそのものではなく参照 — ${vault:key} または ${vars:key} — を入力します。キーを選ぶか、先に値を Vault に保存してください。"
+    "mustBeReference": "この項目にはシークレットそのものではなく参照 — ${vault:key} または ${vars:key} — を入力します。キーを選ぶか、先に値を Vault に保存してください。",
+    "connectionChip": "接続",
+    "connectionChipTitle": "接続参照 — EDDI がリクエストごとに資格情報へ解決します",
+    "clearConnection": "接続参照をクリア",
+    "pickConnection": "接続参照を挿入",
+    "connectionFilterPlaceholder": "接続を検索…",
+    "connectionLoading": "接続を読み込み中…",
+    "connectionEmpty": "接続はまだありません。管理者が「接続」で作成します。",
+    "connectionNoMatch": "「{{filter}}」に一致する接続はありません",
+    "connectionForbidden": "あなたのロールでは接続を一覧できません。名前が分かる場合は ${connection:name} を手入力してください。",
+    "connectionUnavailable": "このバックエンドは接続機能を提供していません。",
+    "connectionFailed": "接続を読み込めませんでした。",
+    "connectionHint": "${connection:name} を値全体として挿入します。EDDI がリクエストごとに資格情報へ解決します。"
   },
   "snippetEditor": {
     "category": "カテゴリ",
@@ -4486,7 +4498,8 @@
     },
     "binding": {
       "perUser": "ユーザーごと",
-      "service": "共有"
+      "service": "共有",
+      "callerSupplied": "呼び出し元が提供"
     },
     "bindingPerUserTitle": "利用者ごとに解決されます",
     "bindingServiceTitle": "共有アカウント 1 つで解決されます",
@@ -4592,7 +4605,16 @@
       "endpointNotHttps": "https である必要があります — クライアントシークレットがこの URL に送られます。",
       "endpointUserInfo": "URL から資格情報を取り除いてください。リクエストの実際の送信先が変わってしまいます。",
       "endpointNotAbsolute": "ホストを含む完全な URL を入力してください。例：https://auth.example.com/oauth/token。",
-      "paramCredentialShaped": "これらのパラメーターの 1 つが資格情報のような名前です。ここに置けるのは秘密でないプロトコルパラメーター（prompt、audience など）だけです。"
+      "paramCredentialShaped": "これらのパラメーターの 1 つが資格情報のような名前です。ここに置けるのは秘密でないプロトコルパラメーター（prompt、audience など）だけです。",
+      "bindingMismatch": "このバインディングはこの認証タイプと組み合わせられません。「呼び出し元が提供」には API キー、「ユーザーごと」には OAuth ユーザーログインが必要で、それ以外はすべて共有です。",
+      "callerSuppliedRefused": "呼び出し元が提供する接続は資格情報を保存しません。呼び出し元システムがリクエストごとに送ります。このフィールドを空にしてください。",
+      "nameTooLong": "名前は 64 文字以内です。",
+      "timeoutRange": "タイムアウトは 1 ～ 60000 ミリ秒の整数で指定してください。デフォルトにするには空のままにします。",
+      "templateLiteralCredential": "参照の前後のテキスト自体が資格情報のように見えます。${vault:…} の外に置けるのは「Bearer 」のような短いスキーム接頭辞だけです。残りはボールトに保存してください。",
+      "paramReserved": "これらのパラメーターのいずれかは EDDI 自身が設定します（client_id、redirect_uri、response_type、state、code_challenge…）。上書きするとフローが壊れます。",
+      "paramValueReference": "パラメーター値は書かれたとおりに送信されます。ここでの ${…} 参照は解決されず、ボールトへのポインターが URL に載ってしまいます。プレーンなプロトコル値のみを使用してください。",
+      "paramValueTooLong": "パラメーター値は 512 文字以内です。",
+      "paramValueCredentialShaped": "これらの値のいずれかがキーまたはトークンのように見えます。このマップは平文で保存され URL で送信されます。ここに置けるのは秘密でないプロトコルパラメーターだけです。"
     },
     "backToList": "接続一覧に戻る",
     "headerSecret": "保存済みシークレット",
@@ -4600,7 +4622,20 @@
     "discardNewBody": "ここまで入力した内容は失われます。まだ何も作成されていません。",
     "confirmReconnect": "このアカウントを連携し直しますか？",
     "confirmReconnectDesc": "このアカウントは正常に動作しているため、直すものはありません。続けると EDDI を離れてプロバイダーのサインイン画面に移動し、以前許可したアクセスが置き換わります。",
-    "paramDuplicate": "この名前は別のパラメーターがすでに使用しています。保存されるのは最後の 1 つだけです。"
+    "paramDuplicate": "この名前は別のパラメーターがすでに使用しています。保存されるのは最後の 1 つだけです。",
+    "bindingChooser": "キーの出どころ",
+    "bindingChoice": {
+      "serviceBody": "ボールト内の 1 つのキーを全員に送信します。シンプルですが、エージェントはそのキーで届く範囲すべてにアクセスできます。",
+      "callerSuppliedBody": "EDDI は何も保存しません。EDDI を呼び出すシステムがリクエストごとに各ユーザー自身の資格情報を送るため、エージェントはそのユーザーができることしかできません。境界となるのは送信先の権限です。"
+    },
+    "callerSuppliedHeaderTitle": "呼び出し元システムが送るもの",
+    "callerSuppliedHeaderBody": "リクエストごとにヘッダーを 1 つ: 接続名、スペース、続いて {{header}} として送る値全体です。スキームも含めるので「Bearer abc」にエスケープは不要です。資格情報はそのリクエストの間だけ存在し、保存されることはありません。",
+    "callerSuppliedNeedsAuth": "呼び出し元は EDDI にサインインしている必要があります。資格情報のないリクエストは、未認証のまま送信されるのではなく失敗します。一時停止したツール呼び出しの再開時も同様で、この接続は MCP と A2A の検出からは除外されます。",
+    "bindingCallerSuppliedTitle": "呼び出している本人として解決",
+    "bindingCallerSuppliedBody": "呼び出し元システムがリクエストと一緒に各ユーザー自身の資格情報を渡し、EDDI は何も保存しません。エージェントは送信先でそのユーザーができることしかできず、この接続は MCP と A2A の検出からは除外されます。",
+    "confirmAuthChange": "この接続の認証方法を変更しますか？",
+    "confirmAuthChangeDesc": "この接続を通じてリンクされたアカウントは解決されなくなります。付与された権限はそれを生んだフローに属するためです。アカウントがリンクされている間、EDDI は変更を拒否し、その数を伝えます。先にリンクを解除するか、新しい接続を作成してそちらをリンクしてもらってください。",
+    "confirmAuthChangeAccept": "変更する"
   },
   "extensionTypes": {
     "parser": "入力パーサー",
@@ -4696,5 +4731,11 @@
       "cascade_other": "{{count}} 件のリソースの所有者を変更しました",
       "cascade_one": "{{count}} 件のリソースの所有者を変更しました"
     }
+  },
+  "connectionRef": {
+    "wrapped": "接続はスキームを含むヘッダー値全体を供給します。${connection:name} を単独で使い、「Bearer 」は接続のヘッダー値側に置いてください。",
+    "headerMismatch": "この接続は資格情報を「{{expected}}」として送るため、ヘッダー名もそれにする必要があります。そうでないと設定上の名前と実際のリクエストのヘッダーが食い違います。",
+    "refusedInRequest": "${connection:…} はパス、クエリパラメーター、ボディでは拒否されます。URL 内の資格情報はすべてのプロキシログに残り、ボディ内のものは読まれません。代わりにヘッダーから接続を参照してください。",
+    "refusedInModel": "言語モデル、埋め込み、ベクターストアは ${connection:…} を受け付けません。接続はヘッダー全体に解決されますが、これらには生の資格情報が必要です。ここでは ${vault:…} を使ってください。"
   }
 }

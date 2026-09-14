@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next";
-import { KeyRound, Lock, Server, UserCheck, HelpCircle } from "lucide-react";
+import { KeyRound, Lock, Server, UserCheck, HelpCircle, Hand } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { authTypeLabel, grantStatusLabel } from "@/lib/connection-labels";
+import { authTypeLabel, bindingLabel, grantStatusLabel } from "@/lib/connection-labels";
 import type { AuthType, Binding, GrantStatus } from "@/lib/api/connections";
 
 /**
@@ -61,19 +61,26 @@ interface BindingBadgeProps {
 /**
  * Whose credential this resolves — the field that makes "an org-wide API key"
  * and "each person's own Google Drive" the same feature.
+ *
+ * Three values, three looks. `CALLER_SUPPLIED` gets its own chip rather than
+ * folding into "Shared": nothing is stored for it and nothing is shared by it,
+ * so the one word that would have described it was the one word that was wrong.
  */
 export function BindingBadge({ binding, className }: BindingBadgeProps) {
   const { t } = useTranslation();
   if (binding === "unknown") return null;
+  const variant =
+    binding === "PER_USER"
+      ? "warning"
+      : binding === "CALLER_SUPPLIED"
+        ? "outline"
+        : "secondary";
   return (
-    <Badge
-      variant={binding === "PER_USER" ? "warning" : "secondary"}
-      className={className}
-      data-testid={`binding-${binding}`}
-    >
-      {binding === "PER_USER"
-        ? t("connections.binding.perUser", "Per user")
-        : t("connections.binding.service", "Shared")}
+    <Badge variant={variant} className={className} data-testid={`binding-${binding}`}>
+      {binding === "CALLER_SUPPLIED" && (
+        <Hand className="me-1 h-3 w-3" aria-hidden="true" />
+      )}
+      {bindingLabel(t, binding)}
     </Badge>
   );
 }

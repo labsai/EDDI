@@ -13,6 +13,7 @@ export const MODEL_SUGGESTIONS: Record<string, string[]> = {
     // datalist's first entry is what an admin sees before typing, so it should
     // match the placeholder they were already shown.
     "claude-sonnet-5",
+    "claude-fable-5-1",
     "claude-fable-5",
     "claude-opus-5",
     "claude-opus-4-8",
@@ -22,6 +23,7 @@ export const MODEL_SUGGESTIONS: Record<string, string[]> = {
     "claude-haiku-4-5",
   ],
   openai: [
+    "gpt-6-astra",
     "gpt-5.6-sol",
     "gpt-5.6-terra",
     "gpt-5.6-luna",
@@ -38,6 +40,8 @@ export const MODEL_SUGGESTIONS: Record<string, string[]> = {
     "o3-mini",
   ],
   gemini: [
+    "gemini-3.8-flash",
+    "gemini-3.7-flash",
     "gemini-3.6-flash",
     "gemini-3.5-flash",
     "gemini-3.5-flash-lite",
@@ -51,6 +55,8 @@ export const MODEL_SUGGESTIONS: Record<string, string[]> = {
   ],
   "gemini-vertex": [
     // Gemini models
+    "gemini-3.8-flash",
+    "gemini-3.7-flash",
     "gemini-3.6-flash",
     "gemini-3.5-flash",
     "gemini-3.5-flash-lite",

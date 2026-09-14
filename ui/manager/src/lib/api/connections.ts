@@ -54,11 +54,17 @@ export type AuthType = (typeof AUTH_TYPES)[number];
 /**
  * Whose credential a connection resolves.
  *
- * Not offered as a choice in the UI: the backend couples it to `authType` in
- * both directions, which leaves exactly one legal value per type. See
- * `bindingFor` in `connection-validation.ts`.
+ * - `SERVICE` — one grant, shared by everyone.
+ * - `PER_USER` — the calling user's own grant, stored after an OAuth consent.
+ * - `CALLER_SUPPLIED` — the calling user's own credential, handed to EDDI on
+ *   the request itself (`X-EDDI-Connection-Credential: <name> <value>`) and
+ *   never stored.
+ *
+ * The backend couples this to `authType`, which leaves exactly one legal value
+ * for every type but `STATIC` — where `SERVICE` and `CALLER_SUPPLIED` are a
+ * real choice. See `legalBindings` in `connection-validation.ts`.
  */
-export const BINDINGS = ["SERVICE", "PER_USER"] as const;
+export const BINDINGS = ["SERVICE", "PER_USER", "CALLER_SUPPLIED"] as const;
 export type Binding = (typeof BINDINGS)[number];
 
 export const CLIENT_AUTH_METHODS = [
@@ -68,9 +74,16 @@ export const CLIENT_AUTH_METHODS = [
 export type ClientAuthMethod = (typeof CLIENT_AUTH_METHODS)[number];
 
 export interface StaticAuth {
-  /** `Authorization`, `X-Api-Key`, … Non-secret by nature. */
+  /**
+   * `Authorization`, `X-Api-Key`, … Non-secret by nature. The one field a
+   * `CALLER_SUPPLIED` connection carries: it owns the header name whoever
+   * supplies its value.
+   */
   headerName: string;
-  /** e.g. `Bearer ${vault:jira-token}`. STATIC only. */
+  /**
+   * e.g. `Bearer ${vault:jira-token}`. STATIC only — and refused outright on a
+   * `CALLER_SUPPLIED` binding, where a stored value would race the caller's.
+   */
   valueTemplate?: string | null;
   /** BASIC only. An identifier, not a secret. */
   username?: string | null;
@@ -214,6 +227,12 @@ export class ConnectionsError extends Error {
  * would otherwise render as "not found" on a page that is very much found. The
  * same code covers a backend too old to have these routes at all, which is the
  * same fact from the user's side.
+ *
+ * A 503 is deliberately NOT converted. These routes never answer one; a 503
+ * here is a proxy or a store that is down — an outage, which passes through
+ * with its status so the panel can offer Retry. Mapping it to "linking is
+ * switched off" rendered a definitive statement about the deployment's
+ * configuration over what was a transient failure, with no way to retry.
  */
 function asConnectionsError(
   error: unknown,
@@ -221,7 +240,7 @@ function asConnectionsError(
   { notFoundMeansDisabled = true }: { notFoundMeansDisabled?: boolean } = {},
 ): never {
   if (isApiError(error)) {
-    if ((error.status === 404 && notFoundMeansDisabled) || error.status === 503) {
+    if (error.status === 404 && notFoundMeansDisabled) {
       throw new ConnectionsError(
         "Account linking is not enabled on this deployment.",
         CONNECTIONS_DISABLED,
@@ -480,20 +499,36 @@ export async function getEnrichedConnectionDescriptors(
 export function toStoredConnection(
   draft: ConnectionConfiguration,
 ): ConnectionConfiguration {
+  // The draft's binding is honoured where the type allows it — which is how a
+  // loaded CALLER_SUPPLIED document keeps its binding across an unrelated
+  // edit — and corrected to the one legal value everywhere else.
+  const binding = bindingFor(draft.authType, draft.binding);
   const base: ConnectionConfiguration = {
     ...draft,
-    binding: bindingFor(draft.authType),
+    // The backend matches the name against its grammar UNTRIMMED and refuses
+    // surrounding whitespace outright; a stored name therefore never has any,
+    // so trimming is a no-op on a loaded document and the only thing that
+    // keeps a wizard user's trailing space from becoming a 400.
+    name: draft.name.trim(),
+    binding,
     // Only legal on a per-user binding; the backend refuses it elsewhere rather
     // than ignoring it.
     allowUnverifiedPrincipal:
-      draft.authType === "OAUTH2_AUTHORIZATION_CODE"
-        ? draft.allowUnverifiedPrincipal
-        : false,
+      binding === "PER_USER" ? draft.allowUnverifiedPrincipal : false,
     staticAuth: null,
     oauth: null,
   };
 
   if (draft.authType === "STATIC") {
+    if (binding === "CALLER_SUPPLIED") {
+      // EDDI stores nothing for this binding: the caller supplies the value on
+      // every request, and the backend refuses a stored template, username or
+      // password reference rather than leave it to race theirs.
+      return {
+        ...base,
+        staticAuth: { headerName: draft.staticAuth?.headerName ?? "" },
+      };
+    }
     return {
       ...base,
       staticAuth: {
@@ -522,6 +557,11 @@ export function toStoredConnection(
     extraAuthParams: oauth.extraAuthParams ?? {},
     clientAuthMethod: oauth.clientAuthMethod ?? "client_secret_basic",
     discoveryUrl: oauth.discoveryUrl ?? null,
+    // Inert on a client-credentials connection, but part of the document the
+    // backend stores (its default is true) and reads back. Round-tripped so
+    // an unrelated edit does not send a document that differs from the one
+    // loaded; the user-login branch below overrides it to true regardless.
+    usePkce: oauth.usePkce ?? true,
   };
 
   if (draft.authType === "OAUTH2_AUTHORIZATION_CODE") {
@@ -545,19 +585,30 @@ export function toStoredConnection(
  *
  * `binding` is derived, never defaulted independently — a `SERVICE` binding on
  * an authorization-code connection saves cleanly and then resolves every call
- * against a principal no flow can ever produce a grant for.
+ * against a principal no flow can ever produce a grant for. A `STATIC`
+ * connection may ask for `CALLER_SUPPLIED`; anything else gets the one value
+ * its type allows.
  */
-export function emptyConnection(authType: AuthType): ConnectionConfiguration {
+export function emptyConnection(
+  authType: AuthType,
+  binding?: Binding,
+): ConnectionConfiguration {
+  const resolved = bindingFor(authType, binding);
   const base: ConnectionConfiguration = {
     name: "",
     description: "",
     authType,
-    binding: bindingFor(authType),
+    binding: resolved,
     allowUnverifiedPrincipal: false,
     baseUrlAllowlist: [],
     staticAuth: null,
     oauth: null,
   };
+  if (resolved === "CALLER_SUPPLIED") {
+    // No value slot at all: the caller brings the value, and an empty template
+    // here would read as a field waiting to be filled in.
+    return { ...base, staticAuth: { headerName: "Authorization" } };
+  }
   if (authType === "STATIC" || authType === "BASIC") {
     return {
       ...base,
