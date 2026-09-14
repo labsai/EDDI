@@ -210,7 +210,7 @@ as "not connected". Use `OAUTH2_CLIENT_CREDENTIALS` for a service account.
 | `allowUnverifiedPrincipal` | `PER_USER` only. Accept a user id EDDI never authenticated, on the grounds that a front proxy did. Default `false` — see [Whose identity counts](#whose-identity-counts) |
 | `staticAuth` | Header name plus a reference-only value template |
 | `oauth` | Endpoints, client id, a **vaulted** client secret, scopes |
-| `baseUrlAllowlist` | The origins this credential may be sent to. **Required.** Bare origins (`scheme://host[:port]`). `http://` to a loopback host (`localhost`, `127.0.0.1`, `[::1]`) is always accepted. `http://` to any other host sends the credential across the network unencrypted, so it is **refused** unless the deployment sets `eddi.connections.allow-plaintext-remote-origins=true` — see [Plaintext origins](#plaintext-origins) |
+| `baseUrlAllowlist` | The origins this credential may be sent to. **Required.** Bare origins (`scheme://host[:port]`). `http://` to a loopback host (`localhost`, `127.0.0.1`, `[::1]`) is always accepted. `http://` to any other host sends the credential across the network unencrypted, so it is **refused** unless the deployment allows it — `allowPlaintextRemoteOrigins` in the [connection settings](#enabling-connections), or the `eddi.connections.allow-plaintext-remote-origins` property; see [Plaintext origins](#plaintext-origins) |
 | `timeoutMs` | Token-endpoint timeout in milliseconds, **1–60000**; refused outside that range at save time. Unset means the resolver's default. The token client applies its own lower ceiling at use so the refresh lease always outlasts the request |
 
 `binding` is the field that makes Amplitude and Google Drive the same system.
@@ -324,22 +324,99 @@ explanation.
 
 ## Enabling connections
 
+The four deployment settings are changed **at runtime**, without a restart — from
+the Manager's Connections page, or directly:
+
+```http
+PUT /connectionstore/settings
+{
+  "enabled": true,
+  "publicBaseUrl": "https://eddi.example.com",
+  "credentialEndpointAllowlist": ["https://auth.atlassian.com", "https://oauth2.googleapis.com"],
+  "allowPlaintextRemoteOrigins": false
+}
+```
+
+`GET /connectionstore/settings` answers with the **effective** values, where each
+came from, the `redirectUri` to register at each OAuth provider, and warnings for
+a configuration that saves cleanly but leaves part of the feature unable to work:
+
+```json
+{
+  "enabled": { "value": true, "source": "STORED", "property": "eddi.connections.enabled" },
+  "publicBaseUrl": { "value": "https://eddi.example.com", "source": "PINNED", "property": "eddi.connections.public-base-url" },
+  "credentialEndpointAllowlist": { "value": ["https://auth.atlassian.com"], "source": "STORED", "property": "eddi.connections.credential-endpoint-allowlist" },
+  "allowPlaintextRemoteOrigins": { "value": false, "source": "DEFAULT", "property": "eddi.connections.allow-plaintext-remote-origins" },
+  "redirectUri": "https://eddi.example.com/connections/callback",
+  "updatedAt": "2026-09-14T16:40:00Z",
+  "updatedBy": "alice",
+  "warnings": []
+}
+```
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `enabled` | `false` | Master switch. Off by default, matching the `openai-compat` precedent: a surface that stores refresh tokens is one somebody turns on deliberately. |
+| `publicBaseUrl` | none | EDDI's own public origin. The OAuth `redirect_uri` is built from it, and the provider matches that **exactly** — so it is configured rather than derived from an inbound request, where a `Host` header could steer it. |
+| `credentialEndpointAllowlist` | empty | Origins a **client secret** may be sent to. Empty means no OAuth connection resolves. See [Two allowlists](#two-allowlists-and-why-they-are-separate). |
+| `allowPlaintextRemoteOrigins` | `false` | See [Plaintext origins](#plaintext-origins). |
+
+A `null` or absent field **unsets** the stored value, and its default applies.
+Every default fails closed.
+
+### Who may change them, and pinning
+
+The endpoint is `eddi-admin` only — the role that already writes connections and
+the vault. It is deliberately **absent** from the MCP tools, from the Platform
+Operator's write scope, from agent export and import, and from Agent Sync: it is
+deployment topology, and an LLM must never be able to widen where a client secret
+may go.
+
+These settings used to be properties only, on the argument that an *operator*, not
+an administrator, approves where a client secret may go. That separation does not
+hold anywhere else: an administrator writes the vault, and an httpcall header can
+already send any `${vault:…}` value to any host. So the restart bought no
+protection against an administrator.
+
+A deployment that genuinely does separate the two roles still can. **Setting a
+property — or its environment variable — pins that value:**
+
 ```properties
 eddi.connections.enabled=true
 eddi.connections.public-base-url=https://eddi.example.com
 eddi.connections.credential-endpoint-allowlist=https://auth.atlassian.com,https://oauth2.googleapis.com
+eddi.connections.allow-plaintext-remote-origins=false
 ```
 
-Disabled by default, matching the `openai-compat` precedent: a surface that
-stores refresh tokens is one an operator turns on deliberately.
+A pinned value wins over the stored one, reads as `"source": "PINNED"`, and a `PUT`
+that would **change** it answers **409** naming the property. Restating the pinned
+value, or leaving the field out, is accepted — so a settings page can send back what
+it read. A pinned value is **never copied into the store**: removing the property
+later falls back to whatever an administrator stored, not to a silent copy of the
+old pin.
 
-`ConnectionStartupGuard` **refuses to boot** on two states, both properties of the
-deployment rather than of any stored document:
+### Validation, and when a change takes effect
 
-| Refusal | Why |
+A `PUT` is validated where the administrator making it can see the answer:
+
+| Refused with 400 | Why |
 | --- | --- |
-| enabled with no `public-base-url` | It becomes the OAuth `redirect_uri`, which the provider matches **exactly**. Deriving it from an inbound request would let a `Host` header steer it. |
-| `public-base-url` that is not a bare https origin | `startsWith("https://")` accepts a path, query, fragment and userinfo — each produces a redirect URI the provider will not match, and the failure surfaces as a user-facing OAuth error rather than a config problem. The scheme is compared case-insensitively. Dev and test also accept `http://localhost[:port]` and `http://127.0.0.1[:port]` — loopback only, and still a bare origin. |
+| a `publicBaseUrl` that is not a bare https origin | `startsWith("https://")` accepts a path, query, fragment and userinfo — each produces a redirect URI the provider will not match, and the failure surfaces as a user-facing OAuth error rather than a config problem. The scheme is compared case-insensitively. Dev and test also accept `http://localhost[:port]` and `http://127.0.0.1[:port]` — loopback only, and still a bare origin. |
+| a `credentialEndpointAllowlist` entry that is not a bare origin | It would never match a token URL, and would look like an approval. Entries are canonicalised (lower-cased, default port folded) and de-duplicated. |
+| a `credentialEndpointAllowlist` entry that is plaintext `http://` to a remote host | A token or authorization endpoint must be `https` — or `http` on loopback — before a client secret is sent to it, so such an entry could never approve anything. |
+
+The change applies **immediately** on the instance that took the write, and on
+every other instance within **five seconds** (stored settings are cached that long,
+because they are read on hot paths). If the store cannot be read, an instance keeps
+the values it last read; before its first successful read, only pinned values and
+defaults apply — so connections stay off unless `eddi.connections.enabled` is pinned.
+
+A **pinned** `public-base-url` that is not a bare https origin still **refuses the
+boot** — it is operator configuration, and a restart is the only way to change it.
+A **missing** base URL no longer does: every connection type except per-user OAuth
+works without one, so `ConnectionStartupGuard` logs a warning and
+`POST /connections/{name}/authorize` answers **400** naming the setting until it
+is set.
 
 ### The states the guard reports rather than refuses
 
@@ -358,7 +435,7 @@ console; none of them stops the boot.
 
 A connection whose `baseUrlAllowlist` sends its credential over plaintext `http://`
 to a non-loopback host is reported at **ERROR** while
-`eddi.connections.allow-plaintext-remote-origins=false` (the default), because every
+`allowPlaintextRemoteOrigins` is off (the default), because every
 call through it to that origin is refused, and at **WARN** when the property is
 `true` — see [Plaintext origins](#plaintext-origins).
 
@@ -378,7 +455,7 @@ who can act:
   `POST /connectionstore/connections/{id}` answer **400** for a `PER_USER` or
   `CALLER_SUPPLIED` connection when `authorization.enabled=false`, **400** for
   an OAuth connection when the vault is inert, and **400** for a remote `http://`
-  origin while `eddi.connections.allow-plaintext-remote-origins=false`. The
+  origin while `allowPlaintextRemoteOrigins` is off. The
   administrator who wrote it is still looking at it.
 * **Per request.** `ConnectionResolver` refuses, and never falls back to the service
   grant. Sending the wrong authority is how one user reads another's data.
@@ -393,9 +470,8 @@ an OAuth connection is below.
 
 ### Plaintext origins
 
-```properties
-eddi.connections.allow-plaintext-remote-origins=false
-```
+Set with `allowPlaintextRemoteOrigins` in the [connection settings](#enabling-connections),
+or pin it with the `eddi.connections.allow-plaintext-remote-origins` property.
 
 A `baseUrlAllowlist` entry is where a connection's credential is delivered, so an
 `http://` origin on anything but loopback puts that credential on the network
@@ -417,13 +493,13 @@ they never leave the machine.
 > After upgrading, **existing connections with a remote `http://` origin stop
 > resolving** — every call to that origin is refused as `TARGET_NOT_ALLOWED`, and
 > re-saving the connection answers 400 — until the origin is changed to `https://`
-> or `eddi.connections.allow-plaintext-remote-origins=true` is set. The first boot
+> or `allowPlaintextRemoteOrigins` is turned on. The first boot
 > names each affected connection at ERROR.
 
 ### Two allowlists, and why they are separate
 
 `baseUrlAllowlist` (per connection) says where the **access token** may go.
-`eddi.connections.credential-endpoint-allowlist` (per deployment) says where the
+`credentialEndpointAllowlist` (per deployment, in the [connection settings](#enabling-connections)) says where the
 **client secret** may go — the token and authorization endpoints, and only those.
 (RFC 9728 resource-metadata discovery is **not implemented**: `McpAuthChallengeParser`
 can read a `WWW-Authenticate` challenge, but nothing fetches the metadata document
@@ -480,8 +556,9 @@ What the four routes answer:
 
 | Situation | Status |
 | --- | --- |
-| `eddi.connections.enabled=false` on `authorize`, `mine` or `disconnect` | **404**, with a body naming the setting to turn on |
-| `eddi.connections.enabled=false` on the callback | **404**, empty — there is no caller to advise, only a browser the provider redirected |
+| connections disabled (`enabled` off) on `authorize`, `mine` or `disconnect` | **404**, with a body naming the setting to turn on |
+| connections disabled on the callback | **404**, empty — there is no caller to advise, only a browser the provider redirected |
+| `authorize` while `publicBaseUrl` is unset or not a bare https origin | **400**, naming the setting — the redirect URI cannot be built |
 | `authorize` or `disconnect` or `mine` without a verified identity | **403** |
 | `authorize` for a connection that does not exist | **404** |
 | `authorize` for a connection that is not `OAUTH2_AUTHORIZATION_CODE` | **400** — nothing else is linked by a user |
@@ -517,7 +594,7 @@ Copying the message through is safe here in a way it is not for a store failure 
 these messages are written for the agent designer or end user who has to act on
 them and never quote a credential. Without that, every escaping refusal was a bare
 **500** with an empty body, and the sentence saying exactly what to fix ("add this
-origin to `eddi.connections.credential-endpoint-allowlist`", "connect your account
+origin to the credential endpoint allowlist", "connect your account
 first") reached the server log only. The person who has to act on it is the one
 who never saw it.
 
@@ -737,7 +814,7 @@ name**. An existing one is **never overwritten** — it is a live credential con
 possibly with linked accounts filed under that name — whatever the import strategy. The
 create runs through the same gate as `POST /connectionstore/connections`: structural
 validation, the deployment checks (`PER_USER` and `CALLER_SUPPLIED` need OIDC, OAuth needs
-an active vault, a remote `http://` origin needs `eddi.connections.allow-plaintext-remote-origins`)
+an active vault, a remote `http://` origin needs `allowPlaintextRemoteOrigins`)
 and the name claim. A document the deployment refuses is
 **skipped with the reason logged**, not a failed import — the agent is still worth having,
 and the refusal names what to fix. Skips of both kinds are counted in an

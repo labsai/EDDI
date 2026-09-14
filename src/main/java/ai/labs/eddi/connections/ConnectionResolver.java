@@ -496,9 +496,9 @@ public class ConnectionResolver {
         }
         throw new ConnectionException(ConnectionException.Reason.TARGET_NOT_ALLOWED, "Connection '" + connection.getName() + "' may not be sent to "
                 + canonicalOrigin + ": that is plaintext http to a host other than this one, so the credential would cross the network "
-                + "unencrypted. The origin is on the connection's baseUrlAllowlist, but " + ConnectionsConfig.ALLOW_PLAINTEXT_REMOTE_ORIGINS
-                + "=false. Use an https origin, or set " + ConnectionsConfig.ALLOW_PLAINTEXT_REMOTE_ORIGINS + "=true to accept an "
-                + "unencrypted credential deliberately.");
+                + "unencrypted. The origin is on the connection's baseUrlAllowlist, but allowPlaintextRemoteOrigins is off — "
+                + ConnectionsConfig.describe("allowPlaintextRemoteOrigins", ConnectionsConfig.ALLOW_PLAINTEXT_REMOTE_ORIGINS)
+                + ". Use an https origin, or turn it on to accept an unencrypted credential deliberately.");
     }
 
     private static String originOf(URI targetUrl, ConnectionConfiguration connection) {

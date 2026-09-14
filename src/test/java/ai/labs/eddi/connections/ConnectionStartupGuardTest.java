@@ -33,6 +33,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.logging.Handler;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
@@ -164,13 +165,18 @@ class ConnectionStartupGuardTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"", "   "})
-    @DisplayName("enabling connections without a public base URL refuses the boot and names the property")
-    void blankPublicBaseUrlRefusesStartup(String publicBaseUrl) {
+    @DisplayName("enabling connections without a public base URL warns and names both ways to set it, instead of refusing the boot")
+    void blankPublicBaseUrlOnlyWarns(String publicBaseUrl) {
+        // The base URL is a runtime setting now, and only per-user OAuth linking needs
+        // it — which answers 400 naming the setting. Refusing the boot over it turned
+        // one missing value into an outage for every other connection type.
         var guard = guardWithBaseUrl(publicBaseUrl);
 
-        var failure = assertThrows(IllegalStateException.class, () -> start(guard));
+        assertDoesNotThrow(() -> start(guard));
 
-        assertTrue(failure.getMessage().contains("eddi.connections.public-base-url"), failure.getMessage());
+        assertTrue(logged("publicBaseUrl"), logRecords.toString());
+        assertTrue(logged(ConnectionsConfig.SETTINGS_PATH), "the administrator's handle must be named; saw: " + logRecords);
+        assertTrue(logged("eddi.connections.public-base-url"), "the operator's handle must be named; saw: " + logRecords);
     }
 
     @Test
@@ -268,7 +274,10 @@ class ConnectionStartupGuardTest {
 
         assertDoesNotThrow(() -> start(guard));
 
-        assertTrue(logged("eddi.connections.credential-endpoint-allowlist is empty"), logRecords.toString());
+        assertTrue(logged("credential endpoint allowlist"), logRecords.toString());
+        assertTrue(logged("is empty"), logRecords.toString());
+        assertTrue(logged(ConnectionsConfig.SETTINGS_PATH), "the runtime handle must be named; saw: " + logRecords);
+        assertTrue(logged("eddi.connections.credential-endpoint-allowlist"), "the pinning property must be named; saw: " + logRecords);
     }
 
     @Test
@@ -695,11 +704,11 @@ class ConnectionStartupGuardTest {
     }
 
     private static CredentialEndpointAllowlist approvedEndpoints() {
-        return new CredentialEndpointAllowlist(Optional.of(APPROVED_ENDPOINT));
+        return new CredentialEndpointAllowlist(Set.of(APPROVED_ENDPOINT));
     }
 
     private static CredentialEndpointAllowlist noApprovedEndpoints() {
-        return new CredentialEndpointAllowlist(Optional.empty());
+        return new CredentialEndpointAllowlist(Set.of());
     }
 
     private static OpenAiCompatConfig openAiCompat(boolean enabled, String httpPolicy, boolean trustUserHeaders) {

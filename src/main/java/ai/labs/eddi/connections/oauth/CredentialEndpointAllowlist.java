@@ -6,19 +6,15 @@ package ai.labs.eddi.connections.oauth;
 
 import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
 import ai.labs.eddi.connections.ConnectionException;
+import ai.labs.eddi.connections.ConnectionsConfig;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 import java.net.URI;
-import java.util.Arrays;
-import java.util.LinkedHashSet;
-import java.util.Optional;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 /**
- * The origins an <em>operator</em> is willing to send a client secret to.
+ * The origins a client secret may be sent to.
  * <p>
  * Separate from a connection's {@code baseUrlAllowlist}, and deliberately not
  * settable per connection. {@code baseUrlAllowlist} says where the ACCESS TOKEN
@@ -36,48 +32,49 @@ import java.util.stream.Collectors;
  * nothing fetches the document or selects a server from it. If that ever lands,
  * this allowlist is where the selected server has to be checked.
  * <p>
- * Configured as {@code eddi.connections.credential-endpoint-allowlist}, a
- * comma-separated list of bare origins. Empty means <b>no OAuth connection can
+ * Set through {@code PUT /connectionstore/settings}
+ * ({@code credentialEndpointAllowlist}), or pinned with
+ * {@code eddi.connections.credential-endpoint-allowlist}; see
+ * {@link ConnectionsConfig}. Read per call, so a change applies to the next
+ * token exchange without a restart. Empty means <b>no OAuth connection can
  * resolve</b> — fail closed, not open: an empty allowlist is far more likely to
- * be an operator who has not configured it yet than one who meant "anywhere".
+ * be one nobody has configured yet than one somebody meant as "anywhere".
  */
 @ApplicationScoped
 public class CredentialEndpointAllowlist {
 
-    private final Set<String> allowedOrigins;
+    private static final String SETTING = ConnectionsConfig.describe("credentialEndpointAllowlist", ConnectionsConfig.CREDENTIAL_ENDPOINT_ALLOWLIST);
+
+    /** Null when constructed with fixed origins. */
+    private final ConnectionsConfig connectionsConfig;
+
+    /** Null when backed by {@link #connectionsConfig}. */
+    private final Set<String> fixedOrigins;
 
     @Inject
-    public CredentialEndpointAllowlist(
-            @ConfigProperty(name = "eddi.connections.credential-endpoint-allowlist") Optional<String> configuredOrigins) {
-        this.allowedOrigins = parse(configuredOrigins.orElse(""));
+    public CredentialEndpointAllowlist(ConnectionsConfig connectionsConfig) {
+        this.connectionsConfig = connectionsConfig;
+        this.fixedOrigins = null;
     }
 
-    /** Test seam. */
-    CredentialEndpointAllowlist(Set<String> allowedOrigins) {
-        this.allowedOrigins = Set.copyOf(allowedOrigins);
-    }
-
-    private static Set<String> parse(String configured) {
-        if (configured == null || configured.isBlank()) {
-            return Set.of();
-        }
-        return Arrays.stream(configured.split(",")).map(String::trim).filter(entry -> !entry.isEmpty())
-                .map(entry -> ConnectionConfiguration.requireCanonicalOrigin(entry, "eddi.connections.credential-endpoint-allowlist"))
-                .collect(Collectors.toCollection(LinkedHashSet::new));
+    /** A fixed allowlist. Test seam. */
+    public CredentialEndpointAllowlist(Set<String> allowedOrigins) {
+        this.connectionsConfig = null;
+        this.fixedOrigins = Set.copyOf(allowedOrigins);
     }
 
     /** Whether anything at all is allowed. */
     public boolean isEmpty() {
-        return allowedOrigins.isEmpty();
+        return origins().isEmpty();
     }
 
-    /** The configured origins, for a startup log line. */
+    /** The approved origins, for a log line or the settings view. */
     public Set<String> origins() {
-        return allowedOrigins;
+        return fixedOrigins != null ? fixedOrigins : connectionsConfig.credentialEndpointOrigins();
     }
 
     /**
-     * Refuses a credential endpoint the operator has not approved.
+     * Refuses a credential endpoint that has not been approved.
      *
      * @param url
      *            a token or authorization URL
@@ -98,15 +95,16 @@ public class CredentialEndpointAllowlist {
             throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION, what + " must be an absolute URL: " + url);
         }
         String origin = ConnectionConfiguration.canonicalOrigin(parsed);
-        if (allowedOrigins.isEmpty()) {
-            throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION,
-                    "eddi.connections.credential-endpoint-allowlist is empty, so no OAuth credential endpoint may be contacted. Add "
-                            + origin + " to it if that is intended.");
+        // Read once: the allowlist can change between two reads now.
+        Set<String> allowed = origins();
+        if (allowed.isEmpty()) {
+            throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION, "The credential endpoint allowlist, " + SETTING
+                    + ", is empty, so no OAuth credential endpoint may be contacted. Add " + origin + " to it if that is intended.");
         }
-        if (!allowedOrigins.contains(origin)) {
+        if (!allowed.contains(origin)) {
             throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION, what + " points at " + origin
-                    + ", which is not in eddi.connections.credential-endpoint-allowlist. The client secret is sent to this origin, so it "
-                    + "must be approved by an operator rather than by the connection document.");
+                    + ", which is not in the credential endpoint allowlist, " + SETTING + ". The client secret is sent to this origin, so it "
+                    + "must be approved in the deployment's connection settings rather than by the connection document.");
         }
     }
 }

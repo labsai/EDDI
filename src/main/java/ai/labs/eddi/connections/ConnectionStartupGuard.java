@@ -12,10 +12,10 @@ import ai.labs.eddi.configs.connections.mongo.ConnectionStore;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.connections.oauth.CredentialEndpointAllowlist;
+import ai.labs.eddi.connections.settings.ConnectionSettingsRules;
 import ai.labs.eddi.datastore.serialization.IDescriptorStore;
 import ai.labs.eddi.integrations.openai.OpenAiCompatConfig;
 import ai.labs.eddi.secrets.ISecretProvider;
-import io.quarkus.runtime.LaunchMode;
 import io.quarkus.runtime.StartupEvent;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.annotation.Priority;
@@ -28,7 +28,6 @@ import org.jboss.logging.Logger;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -93,53 +92,44 @@ public class ConnectionStartupGuard {
         requireStoredConnectionsAreSupportable();
 
         if (endpointAllowlist.isEmpty()) {
-            LOGGER.warn("[CONNECTIONS] eddi.connections.credential-endpoint-allowlist is empty, so no OAuth connection can resolve. "
-                    + "STATIC and BASIC connections are unaffected.");
+            LOGGER.warnf("[CONNECTIONS] The credential endpoint allowlist, %s, is empty, so no OAuth connection can resolve. "
+                    + "STATIC and BASIC connections are unaffected.",
+                    ConnectionsConfig.describe("credentialEndpointAllowlist", ConnectionsConfig.CREDENTIAL_ENDPOINT_ALLOWLIST));
         } else {
             LOGGER.infof("[CONNECTIONS] Enabled. Credential endpoints allowed: %s", endpointAllowlist.origins());
         }
     }
 
     /**
+     * Refuses a <em>pinned</em> base URL a provider would not match; reports a
+     * missing or unusable stored one.
+     * <p>
      * {@code redirect_uri} must match the provider's registration exactly, so EDDI
      * has to know its own public base URL — it cannot derive one from an inbound
-     * request without letting a {@code Host} header steer it.
+     * request without letting a {@code Host} header steer it. The shape rules live
+     * in {@link ConnectionSettingsRules#requireBarePublicOrigin}.
      * <p>
-     * Parsed rather than prefix-matched. {@code startsWith("https://")} accepts a
-     * path, a query, a fragment, userinfo and a malformed authority, every one of
-     * which produces a redirect URI the provider will not match — and the failure
-     * surfaces as a user-facing OAuth error, not as a config problem.
+     * The two sources are treated differently on purpose. A pinned value is
+     * operator configuration that only a restart changes, so the boot is where its
+     * author is looking. A stored value is an administrator's, validated at the
+     * write boundary and changeable at runtime; refusing the boot over it — or over
+     * its absence — turned one missing setting into an outage for every connection
+     * type, when only authorization-code linking needs it, and that route already
+     * answers 400 naming the setting.
      */
     private void requirePublicBaseUrl() {
-        String publicBaseUrl = connectionsConfig.getPublicBaseUrl();
-        if (publicBaseUrl.isBlank()) {
-            throw new IllegalStateException("eddi.connections.enabled=true requires eddi.connections.public-base-url. It becomes the OAuth "
-                    + "redirect_uri, which the provider matches exactly, so it cannot be inferred from an inbound request.");
+        String pinnedBaseUrl = connectionsConfig.pinnedSettings().getPublicBaseUrl();
+        if (pinnedBaseUrl != null) {
+            try {
+                ConnectionSettingsRules.requireBarePublicOrigin(pinnedBaseUrl, ConnectionsConfig.PUBLIC_BASE_URL, isDevOrTest());
+            } catch (IllegalArgumentException e) {
+                throw new IllegalStateException(e.getMessage(), e);
+            }
+            return;
         }
-        URI base;
-        try {
-            base = new URI(publicBaseUrl);
-        } catch (Exception e) {
-            throw new IllegalStateException("eddi.connections.public-base-url is not a valid URL: " + publicBaseUrl, e);
-        }
-        // Case-insensitive, like the model's own canonicalisation: "HTTPS://…" is the
-        // same scheme, and refusing it here while ConnectionConfiguration accepted it
-        // in an allowlist was two rules for one thing.
-        String scheme = base.getScheme() == null ? "" : base.getScheme().toLowerCase(Locale.ROOT);
-        boolean bareOrigin = base.getUserInfo() == null && base.getQuery() == null && base.getFragment() == null
-                && (base.getPath() == null || base.getPath().isEmpty() || "/".equals(base.getPath())) && base.getHost() != null;
-        // http://localhost is the normal shape while developing, and refusing it
-        // would make the feature untestable outside a TLS-terminating proxy. Only
-        // loopback, though, and only a bare origin: dev and test used to accept any
-        // parseable URL, so a path or a remote http host that would fail the
-        // provider's redirect_uri match in production sailed through every test.
-        boolean loopbackHttpWhileDeveloping = isDevOrTest() && "http".equals(scheme) && base.getHost() != null
-                && ConnectionConfiguration.isLoopbackHost(base.getHost());
-        if (!bareOrigin || !("https".equals(scheme) || loopbackHttpWhileDeveloping)) {
-            throw new IllegalStateException("eddi.connections.public-base-url must be a bare https origin (scheme://host[:port])"
-                    + (isDevOrTest() ? ", or http://localhost[:port] / http://127.0.0.1[:port] while developing or testing" : "") + " — got: "
-                    + publicBaseUrl);
-        }
+        connectionsConfig.publicBaseUrlProblem()
+                .ifPresent(problem -> LOGGER.warnf("[CONNECTIONS] %s Linking an account to an OAUTH2_AUTHORIZATION_CODE connection is "
+                        + "refused until it is set; every other connection type is unaffected.", problem));
     }
 
     /**
@@ -336,7 +326,6 @@ public class ConnectionStartupGuard {
 
     /** Package-private so a test can drive production mode without a container. */
     boolean isDevOrTest() {
-        LaunchMode mode = LaunchMode.current();
-        return mode == LaunchMode.DEVELOPMENT || mode == LaunchMode.TEST;
+        return ConnectionSettingsRules.isDevOrTest();
     }
 }

@@ -302,8 +302,9 @@ public class ConnectionConfiguration {
             // other way.
             if (isPlaintextRemoteOrigin(canonical)) {
                 LOGGER.warnf("[CONNECTIONS] Connection '%s' allows its credential to be sent over plaintext http to %s; the credential "
-                        + "crosses the network unencrypted. It is refused unless eddi.connections.allow-plaintext-remote-origins=true; "
-                        + "prefer an https origin.", sanitize(name), sanitize(canonical));
+                        + "crosses the network unencrypted. It is refused unless allowPlaintextRemoteOrigins is on "
+                        + "(/connectionstore/settings, or the eddi.connections.allow-plaintext-remote-origins property); prefer an https "
+                        + "origin.", sanitize(name), sanitize(canonical));
             }
         }
     }

@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.connections.model.Binding;
 import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
 import ai.labs.eddi.configs.connections.model.OAuthConfig;
 import ai.labs.eddi.connections.ConnectionsConfig;
+import io.quarkus.runtime.LaunchMode;
 import ai.labs.eddi.connections.CredentialReferenceResolver;
 import ai.labs.eddi.connections.grants.IConnectionGrantStore;
 import ai.labs.eddi.connections.model.ConnectionReference;
@@ -607,10 +608,17 @@ class RestConnectionAuthorizationCallbackTest {
 
         // Secure follows the deployment's own base URL rather than being hardcoded,
         // or a plain-HTTP development instance never receives the cookie at all and
-        // account linking cannot be tried locally.
-        var devResource = resource(new SimpleMeterRegistry(), new ConnectionsConfig(true, Optional.of("http://localhost:7070")));
-        assertFalse(startFlow(devResource, "/manage/connections").cookie().isSecure(),
-                "a plain-HTTP development deployment must still be able to complete a flow");
+        // account linking cannot be tried locally. In development mode, because that
+        // is the only mode in which authorize accepts a plain-http base URL at all.
+        LaunchMode previousLaunchMode = LaunchMode.current();
+        LaunchMode.set(LaunchMode.DEVELOPMENT);
+        try {
+            var devResource = resource(new SimpleMeterRegistry(), new ConnectionsConfig(true, Optional.of("http://localhost:7070")));
+            assertFalse(startFlow(devResource, "/manage/connections").cookie().isSecure(),
+                    "a plain-HTTP development deployment must still be able to complete a flow");
+        } finally {
+            LaunchMode.set(previousLaunchMode);
+        }
     }
 
     @Test

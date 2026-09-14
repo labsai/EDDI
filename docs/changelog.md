@@ -49,6 +49,78 @@ bottom of this file and are never archived.
 
 ---
 
+## ⚙️ feat(connections): runtime connection settings — no restart, properties pin (2026-09-14)
+
+**Repo:** EDDI (`fix/connections-review-findings`, PR #751) · Manager counterpart on `feat/connection-settings`
+
+The four deployment settings of the connections feature — `enabled`, `publicBaseUrl`,
+`credentialEndpointAllowlist`, `allowPlaintextRemoteOrigins` — were properties only, so
+turning the feature on or approving one more OAuth provider meant a restart, and enabling
+it without a base URL refused the boot outright. They are runtime settings now, written
+through `PUT /connectionstore/settings` and read back with their provenance.
+
+**Why the properties-only argument did not hold.** It rested on "an operator, not an
+administrator, approves where a client secret may go". Nothing else in EDDI draws that
+line: `eddi-admin` writes the vault, and an httpcall header resolves any `${vault:…}` and
+sends it to any host (`ApiCallExecutor` resolves vault references in headers, query, body
+and URL with no destination binding), which `eddi-editor` may also author. A properties-only
+allowlist therefore cost a restart and protected nothing from an administrator. What it
+*does* still need protecting from — an LLM, an imported agent, a connection document
+vouching for itself — is kept out by where the endpoint is exposed, not by a restart.
+
+**Design.**
+
+- **Precedence: pinned → stored → default.** A property or environment variable that is
+  set *pins* its value: it wins, reads as `PINNED`, and a `PUT` that would change it is a
+  **409** naming the property. That keeps the operator/administrator split available to a
+  deployment that genuinely has one. Restating the pinned value, or omitting it, is
+  accepted. Every default fails closed. The four property lines in
+  `application.properties` are now commented out, because an uncommented line would pin.
+- **No seeding.** A pinned value is never copied into the store, and a pinned field's
+  previously stored value is carried forward untouched — so removing the property later
+  falls back to what an administrator stored, not to a silent copy of the old pin.
+- **Freshness.** `ConnectionsConfig` caches the stored document for 5 s (it is read on hot
+  paths — every resolution asks about plaintext origins). The writing instance adopts its
+  own write immediately; others see it within the TTL. A store read failure keeps the last
+  values; before the first successful read only pins and defaults apply.
+- **Validation at the write boundary** (`RestConnectionSettings`): the base URL must be a
+  bare https origin (dev/test: loopback http), allowlist entries are canonicalised and
+  de-duplicated, and a *remote plaintext* allowlist entry is refused — a credential endpoint
+  must be https or loopback before a secret is sent, so it would approve nothing. The shape
+  rules live once in `ConnectionSettingsRules`, shared with the boot and request-time checks.
+- **The boot no longer refuses a missing base URL.** Only per-user OAuth linking needs it,
+  and `POST /connections/{name}/authorize` now answers **400** naming the setting. A
+  *pinned* base URL of the wrong shape still refuses the boot — it is operator configuration
+  that only a restart changes.
+- **Exposure.** `eddi-admin` only (`IRestConnectionSettingsRoleGateTest`). Not an MCP tool,
+  not in export/import or Agent Sync, and excluded from the Platform Operator's write scope
+  (pinned by a Manager test). The response carries the `redirectUri` to register at each
+  provider and warnings for a configuration that saves but will not fully work. Each change
+  is logged at INFO with the principal and the before/after values (none is a secret).
+- **One document per tenant**, Mongo `connection_settings` (`_id = tenantId`) and Postgres
+  `connection_settings` (nullable columns, `TEXT[]` allowlist); `tenantId` is `"default"`
+  until multi-tenancy supplies one. Whole-document replace, last write wins.
+
+**Files.** New: `connections/settings/` — `ConnectionSettings`, `ConnectionSettingsRules`,
+`ConnectionSettingsView`, `IConnectionSettingsStore`, `MongoConnectionSettingsStore`,
+`PostgresConnectionSettingsStore`, `IRestConnectionSettings`, `RestConnectionSettings`.
+Changed: `ConnectionsConfig` (pinned/stored/default resolution, cache), `CredentialEndpointAllowlist`
+(reads the effective allowlist per call), `ConnectionStartupGuard` (pinned-only refusal,
+warning otherwise), `RestConnectionAuthorization` (`requirePublicBaseUrl`), messages in
+`ConnectionResolver`, `RestConnectionStore` and `ConnectionConfiguration` naming both
+handles, `DataStoreProducers`, `application.properties`, `docs/connections.md`,
+`docs/configuration-reference.md`. Tests: `ConnectionsConfigStoredSettingsTest`,
+`RestConnectionSettingsTest`, `ConnectionSettingsRulesTest`, both store tests, the role gate;
+`ConnectionStartupGuardTest` and `RestConnectionAuthorizationCallbackTest` updated for the
+new boot and authorize behaviour.
+
+**Not done / open.** Cross-replica invalidation is TTL-only (no event bus). Changes are
+logged, not written to the audit ledger — the ledger is conversation-task shaped. The
+Manager's OpenAPI snapshot exempts the two new operations until it is refreshed against a
+backend that has them.
+
+---
+
 ## 🔁 fix(connections): the PR #751 review round — claims, clocks, export, plaintext and redaction (2026-09-13)
 
 **Repo:** EDDI (`fix/connections-review-findings`)
@@ -4024,6 +4096,7 @@ _For recording decisions that come up during implementation that aren't in the p
 | 2026-03-05 | Use Astro (not Expo) for website                                      | Static site on GitHub Pages           | Expo would add unnecessary abstraction for a marketing site |
 | 2026-03-05 | Use AI complexity scale (🟢/🟡/🔴/⚫) instead of human time estimates | AI will do all implementation work    | Human hours are meaningless for AI execution                |
 | 2026-03-05 | Docs already published at docs.labs.ai                                | Third-party tool reads `docs/` folder | Could migrate to Astro Content Collections later            |
+| 2026-09-14 | Connection deployment settings are runtime-writable; a set property pins its value (409 on change) | Properties-only meant a restart per change and protected nothing from `eddi-admin`, who already writes the vault and can send any `${vault:}` value anywhere via an httpcall | Keep properties only (restart, no real protection); store without pinning (removes the operator/admin split for deployments that have one); seed the store from properties (a removed property would be silently replaced by its copy) |
 |            |                                                                       |                                       |                                                             |
 
 ---

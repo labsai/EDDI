@@ -878,9 +878,10 @@ public class RestConnectionStore implements IRestConnectionStore {
             String canonical = ConnectionConfiguration.requireCanonicalOrigin(origin, "baseUrlAllowlist");
             if (ConnectionConfiguration.isPlaintextRemoteOrigin(canonical)) {
                 throw new BadRequestException("baseUrlAllowlist entry " + canonical + " would send this connection's credential over plaintext "
-                        + "http to a remote host, and " + ConnectionsConfig.ALLOW_PLAINTEXT_REMOTE_ORIGINS + "=false, so every call to it "
-                        + "would be refused. Use an https origin, or set " + ConnectionsConfig.ALLOW_PLAINTEXT_REMOTE_ORIGINS + "=true on "
-                        + "this deployment to accept an unencrypted credential deliberately. Loopback hosts are always allowed.");
+                        + "http to a remote host, and allowPlaintextRemoteOrigins is off — "
+                        + ConnectionsConfig.describe("allowPlaintextRemoteOrigins", ConnectionsConfig.ALLOW_PLAINTEXT_REMOTE_ORIGINS)
+                        + " — so every call to it would be refused. Use an https origin, or turn it on to accept an unencrypted credential "
+                        + "deliberately. Loopback hosts are always allowed.");
             }
         }
     }

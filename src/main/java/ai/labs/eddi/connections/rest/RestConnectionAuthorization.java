@@ -129,6 +129,7 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
     public Response authorize(String name, String returnTo) {
         requireEnabled();
         String principal = requirePrincipal();
+        requirePublicBaseUrl();
         CurrentConnection current = requireCurrentConnection(name);
         ConnectionConfiguration connection = current.configuration();
 
@@ -525,8 +526,25 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
      */
     private void requireEnabled() {
         if (!connectionsConfig.isEnabled()) {
-            throw new NotFoundException("Connections are disabled. Set eddi.connections.enabled=true to use them.");
+            throw new NotFoundException(
+                    "Connections are disabled. Turn them on with " + ConnectionsConfig.describe("enabled", ConnectionsConfig.ENABLED) + ".");
         }
+    }
+
+    /**
+     * Refuses to start a flow whose {@code redirect_uri} the provider could not
+     * match.
+     * <p>
+     * Checked here rather than at boot. The base URL is a runtime setting now, and
+     * refusing the boot over it turned one missing value into an outage — although
+     * every connection type except this one works without it. A 400 rather than the
+     * disabled feature's 404: the feature is on, the deployment's configuration is
+     * incomplete, and the message names the setting that completes it.
+     */
+    private void requirePublicBaseUrl() {
+        connectionsConfig.publicBaseUrlProblem().ifPresent(problem -> {
+            throw new BadRequestException(problem + " Linking an account needs it: it becomes the OAuth redirect_uri.");
+        });
     }
 
     /**
