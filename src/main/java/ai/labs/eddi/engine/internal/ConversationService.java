@@ -123,6 +123,17 @@ public class ConversationService implements IConversationService {
     int maxAttachmentsPerTurn;
 
     /**
+     * Longest turn input, in characters, accepted from a caller. {@code <= 0}
+     * disables the limit (which is also what a directly constructed instance in a
+     * unit test gets). Enforced on the conversationId entry points — REST,
+     * streaming, managed conversations, MCP, the OpenAI adapter, Slack — and on
+     * A2A, but not on the agent-id overloads the engine itself drives for group
+     * members and sub-agents, whose input legitimately carries whole transcripts.
+     */
+    @ConfigProperty(name = "eddi.conversations.max-input-chars", defaultValue = "200000")
+    int maxInputChars;
+
+    /**
      * Conversation-ownership gate for the conversationId-only entry points — the
      * ones every external adapter (REST, streaming SSE, MCP) funnels through.
      * <p>
@@ -1069,9 +1080,21 @@ public class ConversationService implements IConversationService {
             throws Exception {
 
         requireConversationAccess(conversationId);
+        requireInputWithinLimit(inputData);
         var snapshot = requireSnapshot(conversationId);
         say(snapshot.getEnvironment(), snapshot.getAgentId(), conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData,
                 rerunOnly, responseHandler);
+    }
+
+    @Override
+    public void requireInputWithinLimit(InputData inputData) {
+        if (maxInputChars <= 0 || inputData == null || inputData.getInput() == null) {
+            return;
+        }
+        int length = inputData.getInput().length();
+        if (length > maxInputChars) {
+            throw new InputTooLargeException(length, maxInputChars);
+        }
     }
 
     @Override
@@ -1080,6 +1103,7 @@ public class ConversationService implements IConversationService {
             throws Exception {
 
         requireConversationAccess(conversationId);
+        requireInputWithinLimit(inputData);
         var snapshot = requireSnapshot(conversationId);
         sayStreaming(snapshot.getEnvironment(), snapshot.getAgentId(), conversationId, returnDetailed, returnCurrentStepOnly, returningFields,
                 inputData, streamingHandler);

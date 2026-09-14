@@ -71,8 +71,22 @@ public final class McpApiToolBuilder {
      *            human-readable summary of available endpoints for LLM context
      * @param endpointCount
      *            total number of endpoints processed
+     * @param unmatchedEndpoints
+     *            endpoint-filter entries that matched no operation in the spec and
+     *            were therefore ignored — a typo'd path or method used to vanish
+     *            without a trace
      */
-    public record ApiBuildResult(String title, Map<String, ApiCallsConfiguration> configsByGroup, String apiSummary, int endpointCount) {
+    public record ApiBuildResult(String title, Map<String, ApiCallsConfiguration> configsByGroup, String apiSummary, int endpointCount,
+            List<String> unmatchedEndpoints) {
+
+        public ApiBuildResult {
+            unmatchedEndpoints = unmatchedEndpoints == null ? List.of() : List.copyOf(unmatchedEndpoints);
+        }
+
+        /** A result whose filter (if any) matched in full. */
+        public ApiBuildResult(String title, Map<String, ApiCallsConfiguration> configsByGroup, String apiSummary, int endpointCount) {
+            this(title, configsByGroup, apiSummary, endpointCount, List.of());
+        }
     }
 
     /**
@@ -138,6 +152,7 @@ public final class McpApiToolBuilder {
         Map<String, List<ApiCall>> callsByGroup = new LinkedHashMap<>();
         int endpointCount = 0;
         var summaryLines = new ArrayList<String>();
+        var matchedFilters = new ArrayList<String>();
 
         if (openAPI.getPaths() != null) {
             for (var pathEntry : openAPI.getPaths().entrySet()) {
@@ -160,6 +175,7 @@ public final class McpApiToolBuilder {
                         if (!allowedEndpoints.contains(filterKey)) {
                             continue;
                         }
+                        matchedFilters.add(filterKey);
                     }
 
                     // Determine group (first tag, or "General")
@@ -175,9 +191,15 @@ public final class McpApiToolBuilder {
             }
         }
 
+        List<String> unmatchedEndpoints = allowedEndpoints.stream().filter(filter -> !matchedFilters.contains(filter)).sorted().toList();
         if (endpointCount == 0) {
             throw new IllegalArgumentException(
-                    "No valid endpoints found in the OpenAPI spec" + (allowedEndpoints.isEmpty() ? "" : " matching the filter"));
+                    "No valid endpoints found in the OpenAPI spec"
+                            + (allowedEndpoints.isEmpty() ? "" : " matching the filter " + unmatchedEndpoints));
+        }
+        if (!unmatchedEndpoints.isEmpty()) {
+            LOGGER.warnf("Endpoint filter entries matched no (non-deprecated) operation in the OpenAPI spec and were ignored: %s",
+                    unmatchedEndpoints);
         }
 
         // Build ApiCallsConfiguration per group
@@ -198,7 +220,7 @@ public final class McpApiToolBuilder {
 
         String title = (openAPI.getInfo() != null && openAPI.getInfo().getTitle() != null) ? openAPI.getInfo().getTitle() : "API";
 
-        return new ApiBuildResult(title, configsByGroup, apiSummary, endpointCount);
+        return new ApiBuildResult(title, configsByGroup, apiSummary, endpointCount, unmatchedEndpoints);
     }
 
     /**

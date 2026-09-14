@@ -23,6 +23,7 @@ import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
 import java.net.URI;
+import java.util.Date;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
@@ -429,32 +430,73 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
                                 ChannelIntegrationConfiguration config) {
         try {
             var currentResourceId = channelStore.getCurrentResourceId(resourceId);
-            var descriptor = documentDescriptorStore.readDescriptor(
-                    resourceId, currentResourceId.getVersion());
-            boolean changed = false;
+            int version = currentResourceId.getVersion();
+            // Use channelType as description for quick identification in lists
+            String desc = config.getChannelType() != null
+                    ? config.getChannelType() + " integration"
+                    : null;
 
+            // Same lookup as RestAgentGroupStore.syncDescriptor. On CREATE the
+            // descriptor does not exist yet — DocumentDescriptorFilter writes it after
+            // this method runs — and on UPDATE it still lives at version-1 until the
+            // filter promotes it. Reading only the current version failed on both paths,
+            // the catch below swallowed that, and every channel descriptor kept an empty
+            // name, so list_channel_integrations' name filter could never match.
+            DocumentDescriptor descriptor = readDescriptorOrNull(resourceId, version);
+            int descriptorVersion = version;
+            if (descriptor == null && version > 1) {
+                descriptor = readDescriptorOrNull(resourceId, version - 1);
+                descriptorVersion = version - 1;
+            }
+
+            if (descriptor == null) {
+                descriptor = new DocumentDescriptor();
+                descriptor.setResource(RestUtilities.createURI(resourceURI, resourceId, versionQueryParam, version));
+                Date now = new Date(System.currentTimeMillis());
+                descriptor.setCreatedOn(now);
+                descriptor.setLastModifiedOn(now);
+                descriptor.setName(config.getName());
+                descriptor.setDescription(desc);
+                // Stamped like any newly created resource, or the channel is left unowned.
+                resourceAccessGuard.stampNewDescriptor(descriptor);
+                try {
+                    documentDescriptorStore.createDescriptor(resourceId, version, descriptor);
+                } catch (IResourceStore.ResourceStoreException raced) {
+                    // The descriptor filter created it between our lookup and this write.
+                    documentDescriptorStore.setDescriptor(resourceId, version, descriptor);
+                }
+                return;
+            }
+
+            boolean changed = false;
             if (config.getName() != null
                     && !config.getName().equals(descriptor.getName())) {
                 descriptor.setName(config.getName());
                 changed = true;
             }
-
-            // Use channelType as description for quick identification in lists
-            String desc = config.getChannelType() != null
-                    ? config.getChannelType() + " integration"
-                    : null;
             if (desc != null && !desc.equals(descriptor.getDescription())) {
                 descriptor.setDescription(desc);
                 changed = true;
             }
 
             if (changed) {
-                documentDescriptorStore.setDescriptor(
-                        resourceId, currentResourceId.getVersion(), descriptor);
+                descriptor.setLastModifiedOn(new Date(System.currentTimeMillis()));
+                documentDescriptorStore.setDescriptor(resourceId, descriptorVersion, descriptor);
             }
         } catch (Exception e) {
             LOG.warnf(e, "Failed to sync channel descriptor for id=%s",
                     sanitizeForLog(resourceId));
+        }
+    }
+
+    /**
+     * The descriptor at {@code version}, or {@code null} when there is none yet.
+     */
+    private DocumentDescriptor readDescriptorOrNull(String resourceId, int version) throws IResourceStore.ResourceStoreException {
+        try {
+            return documentDescriptorStore.readDescriptor(resourceId, version);
+        } catch (IResourceStore.ResourceNotFoundException notYet) {
+            return null;
         }
     }
 

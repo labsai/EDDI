@@ -77,7 +77,12 @@ public class SecretScrubber {
      * heuristic; see {@link #isStructuralFieldName(String)} for why.
      */
     private static final Set<String> STRUCTURAL_FIELD_NAMES = Set.of("type", "subtype", "name", "action", "actions", "expressions",
-            "fromobjectpath", "toobjectpath", "behaviorrulename", "scope", "uri", "occurrence");
+            "fromobjectpath", "toobjectpath", "behaviorrulename", "scope", "uri", "occurrence",
+            // Model identifiers. "claude-sonnet-5" scores over the entropy threshold, so an
+            // export rewrote modelName to ${vault:REDACTED} and the imported agent failed
+            // every turn with "model not found". Credential-shaped names (apiKey, token,
+            // ...) are still caught by the name checks, which run before this exemption.
+            "modelname", "model", "modelid", "deploymentname", "embeddingmodel", "embeddingmodelname");
 
     /** Known secret field names (case-insensitive matching) */
     private static final Set<String> SECRET_FIELD_NAMES = Set.of("apikey", "api_key", "apitoken", "api_token", "password", "passwd", "secret",

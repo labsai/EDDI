@@ -8,6 +8,7 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
+import ai.labs.eddi.engine.lifecycle.exceptions.ConversationPauseException;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
@@ -196,12 +197,17 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
     public List<ConversationMemorySnapshot> loadActiveConversationMemorySnapshot(String agentId, Integer agentVersion)
             throws IResourceStore.ResourceStoreException {
         ensureSchema();
-        String sql = "SELECT conversation_state, data FROM conversation_memories "
-                + "WHERE AGENT_ID = ? AND AGENT_VERSION = ? AND conversation_state != ?";
+        // A null agentVersion means every version. setInt would unbox it into an NPE.
+        String sql = agentVersion != null
+                ? "SELECT conversation_state, data FROM conversation_memories WHERE AGENT_ID = ? AND AGENT_VERSION = ? AND conversation_state != ?"
+                : "SELECT conversation_state, data FROM conversation_memories WHERE AGENT_ID = ? AND conversation_state != ?";
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, agentId);
-            ps.setInt(2, agentVersion);
-            ps.setString(3, ENDED.toString());
+            int index = 1;
+            ps.setString(index++, agentId);
+            if (agentVersion != null) {
+                ps.setInt(index++, agentVersion);
+            }
+            ps.setString(index, ENDED.toString());
             try (ResultSet rs = ps.executeQuery()) {
                 List<ConversationMemorySnapshot> results = new ArrayList<>();
                 while (rs.next()) {
@@ -430,7 +436,10 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
                         parseInstantJson(id, rs.getString("paused_at_json")),
                         rs.getString("pause_reason"), rs.getString("timeout_policy"));
                 summary.setApprovalTimeout(rs.getString("approval_timeout"));
-                summary.setPauseType(rs.getString("pause_type"));
+                // Null for a rule pause stored before the type was kept — see
+                // ConversationMemoryStore.collectPendingSummaries.
+                String pauseType = rs.getString("pause_type");
+                summary.setPauseType(pauseType != null ? pauseType : ConversationPauseException.PauseOrigin.RULE.name());
                 summary.setToolNames(parsePendingToolNamesJson(id, rs.getString("pending_calls_json")));
                 out.add(summary);
             }

@@ -131,6 +131,24 @@ class VoteTallyEngineTest {
     }
 
     @Test
+    @DisplayName("LAST_SYNTHESIS also reads the shapes models write: emphasis, list markers, other separators, any case")
+    void resolveOptions_lastSynthesis_markdownShapes() {
+        var synthesis = new TranscriptEntry("mod", "Mod", """
+                ## Recommendation
+                1. **Option A:** Adopt PostgreSQL
+                - **Option B**: Stay on MongoDB
+                * option c) Run both behind a flag
+                Option D. Defer the decision **
+                We considered Option E but rejected it.
+                """, 0, "S", TranscriptEntryType.SYNTHESIS, Instant.now(), null, null);
+        var config = new VoteConfig(VoteMethod.MAJORITY, OptionsSource.LAST_SYNTHESIS, List.of(), 0.5, Map.of(), false,
+                TiePolicy.NO_DECISION);
+
+        assertEquals(List.of("Adopt PostgreSQL", "Stay on MongoDB", "Run both behind a flag", "Defer the decision"),
+                VoteTallyEngine.resolveOptions(config, List.of(synthesis)));
+    }
+
+    @Test
     @DisplayName("no synthesis on the transcript → no options → the vote cannot run")
     void resolveOptions_noSynthesis() {
         var config = new VoteConfig(VoteMethod.MAJORITY, OptionsSource.LAST_SYNTHESIS, List.of(), 0.5, Map.of(), false,

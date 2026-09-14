@@ -217,7 +217,7 @@ public class ChatModelRegistry {
         // after Qute, before builder.build())
         var resolvedParams = globalVariableResolver.resolveAll(builderParams(filteredParams));
         ConnectionParameterGuard.rejectConnectionReferences(resolvedParams);
-        resolvedParams = secretResolver.resolveSecrets(resolvedParams);
+        resolvedParams = SecretResolver.requireResolved(secretResolver.resolveSecrets(resolvedParams), "LLM provider '" + type + "'");
         var modelBuilder = languageModelApiConnectorBuilders.get(type).get();
         modelBuilder.warnAboutUnrecognisedParameters(type, resolvedParams);
         var rawModel = modelBuilder.build(resolvedParams);
@@ -270,7 +270,7 @@ public class ChatModelRegistry {
             // after Qute, before builder.build())
             var resolvedParams = globalVariableResolver.resolveAll(builderParams(filteredParams));
             ConnectionParameterGuard.rejectConnectionReferences(resolvedParams);
-            resolvedParams = secretResolver.resolveSecrets(resolvedParams);
+            resolvedParams = SecretResolver.requireResolved(secretResolver.resolveSecrets(resolvedParams), "LLM provider '" + type + "'");
             var modelBuilder = languageModelApiConnectorBuilders.get(type).get();
             modelBuilder.warnAboutUnrecognisedParameters(type, resolvedParams);
             var rawModel = modelBuilder.buildStreaming(resolvedParams);

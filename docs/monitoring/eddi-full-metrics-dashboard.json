@@ -448,7 +448,7 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "`eddi_tool_costs_total` gauge — dollars accrued since process start.",
+      "description": "`eddi_tool_costs_accrued` gauge — dollars accrued since process start.",
       "gridPos": {
         "h": 5,
         "w": 3,
@@ -458,7 +458,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(eddi_tool_costs_total{job=~\"$job\"})",
+          "expr": "sum(eddi_tool_costs_accrued{job=~\"$job\"})",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
@@ -2354,7 +2354,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_tool_costs_total` gauge.",
+          "description": "`eddi_tool_costs_accrued` gauge — dollars accrued since process start.",
           "gridPos": {
             "h": 7,
             "w": 8,
@@ -2364,7 +2364,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(eddi_tool_costs_total{job=~\"$job\"})",
+              "expr": "sum(eddi_tool_costs_accrued{job=~\"$job\"})",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"

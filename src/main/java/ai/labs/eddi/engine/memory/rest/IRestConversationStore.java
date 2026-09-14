@@ -95,7 +95,8 @@ public interface IRestConversationStore {
     @Path("/active/{agentId}")
     @Produces(MediaType.APPLICATION_JSON)
     List<ConversationStatus> getActiveConversations(@PathParam("agentId") String agentId,
-                                                    @Parameter(name = "agentVersion", required = true, example = "1")
+                                                    @Parameter(name = "agentVersion", required = false, example = "1",
+                                                               description = "Restrict to one agent version; omit for every version")
                                                     @QueryParam("agentVersion") Integer agentVersion)
             throws ResourceStoreException, ResourceNotFoundException;
 

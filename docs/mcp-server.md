@@ -10,6 +10,18 @@ EDDI uses **Streamable HTTP** transport, served by the Quarkus MCP Server extens
 | --------------------------- | ------------------------------------- |
 | `http://localhost:7070/mcp` | MCP server endpoint (default + admin) |
 
+**Client notes**
+
+- **Protocol version warnings.** A client that announces an `MCP-Protocol-Version`
+  newer than the bundled Quarkus MCP server knows makes the server log
+  `Invalid MCP protocol header: <version>` on every call. The call still succeeds
+  on the negotiated version; the line is noise until the extension is upgraded.
+- **Retries are not idempotent.** Most tools that create things — `setup_agent`,
+  `create_api_agent`, `create_group`, `create_schedule` — are not idempotent. If a
+  call fails with a transport error such as "session expired", it may still have
+  completed on the server. Check first (`list_agents`, `list_groups`, …) before
+  retrying, or you get a duplicate.
+
 ## Available Tools (84)
 
 ### Conversation Tools (11)

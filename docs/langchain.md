@@ -884,7 +884,7 @@ For production workloads where token costs matter, EDDI supports **token-budget 
 | Parameter          | Type    | Description                                                                                    | Default |
 | ------------------ | ------- | ---------------------------------------------------------------------------------------------- | ------- |
 | `maxContextTokens` | int     | Maximum token budget for conversation history (excluding system prompt). -1 = use step count. | -1      |
-| `anchorFirstSteps` | int     | Number of opening conversation steps to always include regardless of window position.          | 2       |
+| `anchorFirstSteps` | int     | Number of opening conversation steps to always include regardless of window position. **Token-aware windowing only** — it takes effect when `maxContextTokens > 0` and is ignored by the step-count window (`conversationHistoryLimit`). | 2       |
 
 #### Example
 

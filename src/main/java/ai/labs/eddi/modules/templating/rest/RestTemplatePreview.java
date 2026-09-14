@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.templating.rest;
 
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.memory.ConversationMemoryUtilities;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
@@ -46,13 +47,17 @@ public class RestTemplatePreview implements IRestTemplatePreview {
     /** Stand-in for a snippet body the caller may not read. */
     private static final String REDACTED = "<redacted>";
 
+    private final GlobalVariableResolver globalVariableResolver;
+
     @Inject
     public RestTemplatePreview(ITemplatingEngine templatingEngine,
             IConversationMemoryStore conversationMemoryStore,
             IMemoryItemConverter memoryItemConverter,
             PromptSnippetService promptSnippetService,
             ConversationAccessGuard conversationAccessGuard,
-            ResourceAccessGuard resourceAccessGuard) {
+            ResourceAccessGuard resourceAccessGuard,
+            GlobalVariableResolver globalVariableResolver) {
+        this.globalVariableResolver = globalVariableResolver;
         this.resourceAccessGuard = resourceAccessGuard;
         this.templatingEngine = templatingEngine;
         this.conversationMemoryStore = conversationMemoryStore;
@@ -77,6 +82,14 @@ public class RestTemplatePreview implements IRestTemplatePreview {
             }
         } else {
             templateData = buildDefaultSampleData();
+        }
+
+        // Global variables — deployment-wide values, not sample data, so they are real
+        // on both paths. The conversation path gets them from MemoryItemConverter; the
+        // sample path had none, so every {vars.x} previewed as empty.
+        Map<String, Object> globalVars = globalVariableResolver.getTemplateData();
+        if (globalVars != null && !globalVars.isEmpty()) {
+            templateData.putIfAbsent("vars", globalVars);
         }
 
         // Inject prompt snippets — same as LlmTask.execute(), except that a caller

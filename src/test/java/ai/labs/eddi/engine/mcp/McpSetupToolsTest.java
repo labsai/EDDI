@@ -406,6 +406,20 @@ class McpSetupToolsTest {
         assertEquals(List.of("calculator", "websearch"), task.getBuiltInToolsWhitelist());
     }
 
+    /**
+     * The 60s timeout bounds time-to-first-response; left without an explicit
+     * streaming backstop, every created agent's first streamed turn logged that the
+     * timeout is shorter than the backstop and does not lower it.
+     */
+    @Test
+    void createLlmConfig_statesTheStreamingBackstopExplicitly() {
+        var config = service.createLlmConfig("anthropic", "claude-sonnet-5", "key", "prompt", false, null, null, null, false, false, null);
+
+        var task = config.tasks().get(0);
+        assertEquals("60000", task.getParameters().get("timeout"));
+        assertEquals(120, task.getStreamingTimeoutSeconds());
+    }
+
     @Test
     void createLlmConfig_ollama_usesModelParam() {
         var config = service.createLlmConfig("ollama", "llama3.2:1b", null, "prompt", false, null, "http://host.docker.internal:11434", null, false,

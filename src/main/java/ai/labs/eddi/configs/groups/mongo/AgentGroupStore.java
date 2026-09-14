@@ -22,9 +22,12 @@ import org.jboss.logging.Logger;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * DB-agnostic store for group configurations. Extends
@@ -47,6 +50,7 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
     public IResourceStore.IResourceId create(AgentGroupConfiguration groupConfiguration)
             throws IResourceStore.ResourceStoreException {
         HitlConfigValidation.validate(groupConfiguration.getHitlConfig());
+        validateMembersAndLimits(groupConfiguration);
         validateVotePhases(groupConfiguration);
         validateHumanMembers(groupConfiguration);
         validateFacilitator(groupConfiguration);
@@ -55,6 +59,7 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
         warnCostCeilingNeedsPricedMembers(groupConfiguration);
         warnOnModeratorlessPhases(groupConfiguration);
         warnOnSummarizerlessWindow(groupConfiguration);
+        noteBuiltInToolPrerequisite(groupConfiguration);
         return super.create(groupConfiguration);
     }
 
@@ -64,6 +69,8 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceModifiedException,
             IResourceStore.ResourceNotFoundException {
         HitlConfigValidation.validate(groupConfiguration.getHitlConfig());
+        validateMembersAndLimits(groupConfiguration);
+        rejectNestingCycle(id, groupConfiguration);
         validateVotePhases(groupConfiguration);
         validateHumanMembers(groupConfiguration);
         validateFacilitator(groupConfiguration);
@@ -72,7 +79,174 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
         warnCostCeilingNeedsPricedMembers(groupConfiguration);
         warnOnModeratorlessPhases(groupConfiguration);
         warnOnSummarizerlessWindow(groupConfiguration);
+        noteBuiltInToolPrerequisite(groupConfiguration);
         return super.update(id, version, groupConfiguration);
+    }
+
+    /**
+     * B15: values that saved without complaint and then misbehaved at discussion
+     * time — a member with no agent to call, negative turn/retry/timeout budgets,
+     * negative dynamic-agent caps and repeat counts, and preset styles missing the
+     * roles they are built on. All are new-field-shaped mistakes rather than legacy
+     * data, so they are hard errors (same rationale as
+     * {@link #validateVotePhases}).
+     */
+    static void validateMembersAndLimits(AgentGroupConfiguration config) {
+        List<String> problems = memberAndLimitProblems(config);
+        if (!problems.isEmpty()) {
+            throw new IllegalArgumentException(String.join("; ", problems));
+        }
+    }
+
+    /** The assertable half of {@link #validateMembersAndLimits}. Empty = valid. */
+    public static List<String> memberAndLimitProblems(AgentGroupConfiguration config) {
+        List<String> problems = new ArrayList<>();
+        List<AgentGroupConfiguration.GroupMember> members = config.getMembers() != null ? config.getMembers() : List.of();
+        for (int i = 0; i < members.size(); i++) {
+            var member = members.get(i);
+            if (member == null) {
+                problems.add("members[" + i + "] is null");
+            } else if (member.memberType() != AgentGroupConfiguration.MemberType.HUMAN
+                    && (member.agentId() == null || member.agentId().isBlank())) {
+                problems.add("members[" + i + "] needs an agentId (the " + (member.memberType() == AgentGroupConfiguration.MemberType.GROUP
+                        ? "group"
+                        : "agent") + " it stands for)");
+            }
+        }
+        if (config.getMaxRounds() < 0) {
+            problems.add("maxRounds must not be negative");
+        }
+        var protocol = config.getProtocol();
+        if (protocol != null) {
+            if (protocol.agentTimeoutSeconds() < 0) {
+                problems.add("protocol.agentTimeoutSeconds must not be negative");
+            }
+            if (protocol.maxRetries() < 0) {
+                problems.add("protocol.maxRetries must not be negative");
+            }
+            if (protocol.maxTurns() < 0) {
+                problems.add("protocol.maxTurns must not be negative (0 selects the engine default)");
+            }
+        }
+        var dynamic = config.getDynamicAgents();
+        if (dynamic != null) {
+            if (dynamic.getMaxCreatedAgentsPerDiscussion() < 0) {
+                problems.add("dynamicAgents.maxCreatedAgentsPerDiscussion must not be negative");
+            }
+            if (dynamic.getMaxRecruitedAgentsPerDiscussion() < 0) {
+                problems.add("dynamicAgents.maxRecruitedAgentsPerDiscussion must not be negative");
+            }
+            if (dynamic.getMaxDelegationsPerTask() < 0) {
+                problems.add("dynamicAgents.maxDelegationsPerTask must not be negative");
+            }
+            if (dynamic.getMaxDelegationDepth() < 0) {
+                problems.add("dynamicAgents.maxDelegationDepth must not be negative");
+            }
+        }
+        List<DiscussionPhase> phases = config.getPhases() != null ? config.getPhases() : List.of();
+        for (int i = 0; i < phases.size(); i++) {
+            if (phases.get(i) != null && phases.get(i).repeats() < 0) {
+                problems.add("phases[" + i + "].repeats must not be negative");
+            }
+        }
+        problems.addAll(presetRoleProblems(config));
+        return problems;
+    }
+
+    /**
+     * W6: the DEBATE and DEVIL_ADVOCATE presets address members by role
+     * ({@code ROLE:PRO}, {@code ROLE:CON}, {@code ROLE:DEVIL_ADVOCATE}). With
+     * nobody holding the role the engine falls back to ALL — every member argues
+     * both sides, or everyone plays the challenger — so the style silently becomes
+     * something else. Checked for preset-expanded groups only: explicit phases may
+     * route roles however they like, and shipped templates set no such style.
+     */
+    static List<String> presetRoleProblems(AgentGroupConfiguration config) {
+        if (config.getPhases() != null && !config.getPhases().isEmpty()) {
+            return List.of();
+        }
+        Set<String> roles = new HashSet<>();
+        if (config.getMembers() != null) {
+            config.getMembers().stream()
+                    .filter(m -> m != null && m.role() != null)
+                    .forEach(m -> roles.add(m.role().trim().toUpperCase(Locale.ROOT)));
+        }
+        List<String> problems = new ArrayList<>();
+        if (config.getStyle() == DiscussionStyle.DEBATE && (!roles.contains("PRO") || !roles.contains("CON"))) {
+            problems.add("style DEBATE needs at least one member with role PRO and one with role CON — without them every member "
+                    + "argues both sides");
+        }
+        if (config.getStyle() == DiscussionStyle.DEVIL_ADVOCATE && !roles.contains("DEVIL_ADVOCATE")) {
+            problems.add("style DEVIL_ADVOCATE needs a member with role DEVIL_ADVOCATE — without one every member plays the challenger");
+        }
+        return problems;
+    }
+
+    /**
+     * W5: a group that reaches itself through its GROUP members. The runtime depth
+     * limit bounded the recursion, so this used to "work" — as
+     * {@code eddi.groups.max-depth} nested copies of the same discussion, paid for
+     * in full. Only an update can close a cycle: a group being created has no id
+     * anything could reference yet.
+     */
+    void rejectNestingCycle(String groupId, AgentGroupConfiguration config) {
+        if (groupId != null && reachesGroup(groupId, config, new HashSet<>(), 0)) {
+            throw new IllegalArgumentException("group '" + groupId + "' contains itself through its GROUP members — nested "
+                    + "groups must not form a cycle");
+        }
+    }
+
+    private boolean reachesGroup(String targetGroupId, AgentGroupConfiguration config, Set<String> visited, int depth) {
+        if (config == null || config.getMembers() == null || depth > MAX_CYCLE_SEARCH_DEPTH) {
+            return false;
+        }
+        for (var member : config.getMembers()) {
+            if (member == null || member.memberType() != AgentGroupConfiguration.MemberType.GROUP || member.agentId() == null) {
+                continue;
+            }
+            if (targetGroupId.equals(member.agentId())) {
+                return true;
+            }
+            if (visited.add(member.agentId()) && reachesGroup(targetGroupId, readChildConfig(member.agentId()), visited, depth + 1)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Bounds the cycle search; far beyond any nesting the engine will run. */
+    private static final int MAX_CYCLE_SEARCH_DEPTH = 32;
+
+    /**
+     * W1/W7: artifact, task-list and dynamic-agent tools are only assembled for a
+     * member whose LLM task sets {@code enableBuiltInTools: true} — and whether
+     * they do cannot be answered here without reading every member's LLM
+     * configuration. State the prerequisite once, at the moment someone enables the
+     * feature, which is where it is actionable (same shape as
+     * {@link #warnCostCeilingNeedsPricedMembers}).
+     */
+    private void noteBuiltInToolPrerequisite(AgentGroupConfiguration config) {
+        List<String> features = builtInToolFeatures(config);
+        if (!features.isEmpty()) {
+            LOGGER.infof("Group '%s' enables %s. Members only receive these tools when their LLM task sets "
+                    + "enableBuiltInTools: true — a member without it takes part without them, silently.",
+                    LogSanitizer.sanitize(config.getName()), String.join(", ", features));
+        }
+    }
+
+    /** The tool-backed group features {@code config} turns on. */
+    static List<String> builtInToolFeatures(AgentGroupConfiguration config) {
+        List<String> features = new ArrayList<>();
+        if (config.getArtifactConfig() != null && config.getArtifactConfig().allowArtifactTools()) {
+            features.add("shared artifacts");
+        }
+        if (config.getTaskListConfig() != null && config.getTaskListConfig().allowAgentTaskCreation()) {
+            features.add("agent task creation");
+        }
+        if (config.getDynamicAgents() != null) {
+            features.add("dynamic agents");
+        }
+        return features;
     }
 
     /**
@@ -196,7 +370,7 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
     }
 
     /** Latest version of a (possible) child group config, or null if unreadable. */
-    private AgentGroupConfiguration readChildConfig(String groupId) {
+    AgentGroupConfiguration readChildConfig(String groupId) {
         try {
             IResourceStore.IResourceId resId = getCurrentResourceId(groupId);
             return resId != null ? read(groupId, resId.getVersion()) : null;

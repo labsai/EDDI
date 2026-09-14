@@ -22,6 +22,8 @@ import ai.labs.eddi.engine.runtime.internal.SchedulePollerService;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.ArgumentCaptor;
 
 import java.io.IOException;
@@ -105,6 +107,18 @@ class McpAdminToolsTest {
 
         assertTrue(result.contains("error"));
         assertTrue(result.contains("Failed to deploy agent"));
+    }
+
+    // --- uriToResourceType ---
+
+    @ParameterizedTest
+    @CsvSource({"eddi://ai.labs.rules, behavior", "eddi://ai.labs.behavior, behavior", "eddi://ai.labs.llm, langchain",
+            "eddi://ai.labs.langchain, langchain", "eddi://ai.labs.apicalls, httpcalls", "eddi://ai.labs.httpcalls, httpcalls",
+            "eddi://ai.labs.mcpcalls, mcpcalls", "eddi://ai.labs.output, output", "eddi://ai.labs.property, propertysetter",
+            "eddi://ai.labs.parser, dictionaries", "eddi://ai.labs.dictionary, dictionaries", "eddi://ai.labs.templating, unknown",
+            "eddi://ai.labs.rag, unknown", "eddi://ai.labs.outputsomething, unknown"})
+    void uriToResourceType_mapsEveryStepTypeExactly(String stepType, String expected) {
+        assertEquals(expected, McpAdminTools.uriToResourceType(stepType));
     }
 
     // --- undeployAgent ---

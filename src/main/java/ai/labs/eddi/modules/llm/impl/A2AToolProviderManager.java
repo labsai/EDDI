@@ -331,6 +331,8 @@ public class A2AToolProviderManager {
 
         if (ssrfProtectionEnabled) {
             UrlValidationUtils.validateUrl(cardUrl);
+        } else {
+            UrlValidationUtils.rejectCloudMetadataTarget(cardUrl);
         }
 
         HttpRequest.Builder requestBuilder = HttpRequest.newBuilder().uri(URI.create(cardUrl))
@@ -399,6 +401,8 @@ public class A2AToolProviderManager {
 
         if (ssrfProtectionEnabled) {
             UrlValidationUtils.validateUrl(agentUrl);
+        } else {
+            UrlValidationUtils.rejectCloudMetadataTarget(agentUrl);
         }
 
         HttpRequest.Builder requestBuilder = HttpRequest.newBuilder().uri(URI.create(agentUrl))

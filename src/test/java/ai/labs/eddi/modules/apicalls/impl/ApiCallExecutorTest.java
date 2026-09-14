@@ -986,11 +986,22 @@ class ApiCallExecutorTest {
 
     @Test
     void execute_ssrfProtectionDisabled_allowsInternalUrlAndKeepsRedirects() throws Exception {
-        // Default executor (protection off): no validation, no redirect override.
+        // Default executor (protection off): private targets pass, no redirect
+        // override.
         ApiCall call = createSimpleApiCall("internal-call", false);
         setupSuccessResponse(200, "ok", "text/plain");
-        executor.execute(call, memory, new HashMap<>(), "http://169.254.169.254");
+        executor.execute(call, memory, new HashMap<>(), "http://10.0.0.5");
         verify(mockRequest, never()).setFollowRedirects(anyBoolean());
+    }
+
+    @Test
+    void execute_ssrfProtectionDisabled_stillBlocksCloudMetadata() {
+        // Protection off keeps configured internal APIs reachable — never the
+        // instance-metadata service, which hands out the VM's cloud credentials.
+        ApiCall call = createSimpleApiCall("metadata-call", false);
+        assertThrows(LifecycleException.class,
+                () -> executor.execute(call, memory, new HashMap<>(), "http://169.254.169.254/latest/meta-data/"));
+        verify(httpClient, never()).newRequest(any(), any());
     }
 
     // ==================== Exponential Backoff Curve ====================

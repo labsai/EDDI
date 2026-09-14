@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.templating.rest;
 
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
@@ -44,6 +45,7 @@ class RestTemplatePreviewTest {
     private PromptSnippetService promptSnippetService;
     private ConversationAccessGuard conversationAccessGuard;
     private ResourceAccessGuard resourceAccessGuard;
+    private GlobalVariableResolver globalVariableResolver;
     private RestTemplatePreview restTemplatePreview;
 
     @BeforeEach
@@ -55,10 +57,50 @@ class RestTemplatePreviewTest {
         conversationAccessGuard = mock(ConversationAccessGuard.class);
         resourceAccessGuard = mock(ResourceAccessGuard.class);
         when(promptSnippetService.getAll()).thenReturn(Map.of());
+        globalVariableResolver = mock(GlobalVariableResolver.class);
+        when(globalVariableResolver.getTemplateData()).thenReturn(Map.of());
 
         restTemplatePreview = new RestTemplatePreview(
                 templatingEngine, conversationMemoryStore,
-                memoryItemConverter, promptSnippetService, conversationAccessGuard, resourceAccessGuard);
+                memoryItemConverter, promptSnippetService, conversationAccessGuard, resourceAccessGuard, globalVariableResolver);
+    }
+
+    // ==================== Global variables ====================
+
+    @Nested
+    class GlobalVariables {
+
+        @Test
+        @DisplayName("sample-data preview resolves {vars.*} from the deployment's global variables")
+        @SuppressWarnings("unchecked")
+        void sampleDataIncludesGlobalVariables() throws Exception {
+            when(globalVariableResolver.getTemplateData()).thenReturn(Map.of("default-model", "claude-sonnet-5"));
+            when(templatingEngine.processTemplate(anyString(), anyMap())).thenReturn("resolved");
+
+            var response = restTemplatePreview.previewTemplate(new TemplatePreviewRequest("{vars.default-model}", null));
+
+            assertNull(response.error());
+            assertTrue(response.availableVariables().contains("vars.default-model"), String.valueOf(response.availableVariables()));
+            verify(templatingEngine).processTemplate(eq("{vars.default-model}"),
+                    argThat(data -> Map.of("default-model", "claude-sonnet-5").equals(((Map<String, Object>) data).get("vars"))));
+        }
+
+        @Test
+        @DisplayName("vars already present in conversation data are not overwritten")
+        void conversationVarsWin() throws Exception {
+            var conversationData = new LinkedHashMap<String, Object>();
+            conversationData.put("vars", Map.of("default-model", "from-conversation"));
+            var snapshot = new ConversationMemorySnapshot();
+            snapshot.setConversationId("conv-1");
+            when(conversationMemoryStore.loadConversationMemorySnapshot("conv-1")).thenReturn(snapshot);
+            when(memoryItemConverter.convert(any(IConversationMemory.class))).thenReturn(conversationData);
+            when(globalVariableResolver.getTemplateData()).thenReturn(Map.of("default-model", "global"));
+            when(templatingEngine.processTemplate(anyString(), anyMap())).thenReturn("resolved");
+
+            restTemplatePreview.previewTemplate(new TemplatePreviewRequest("{vars.default-model}", "conv-1"));
+
+            assertEquals(Map.of("default-model", "from-conversation"), conversationData.get("vars"));
+        }
     }
 
     // ==================== Null / Blank Input ====================

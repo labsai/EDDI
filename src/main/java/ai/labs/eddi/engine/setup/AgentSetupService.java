@@ -15,7 +15,11 @@ import ai.labs.eddi.configs.apicalls.model.OutputBuildingInstruction;
 import ai.labs.eddi.configs.apicalls.model.PostResponse;
 import ai.labs.eddi.configs.apicalls.model.QuickRepliesBuildingInstruction;
 
+import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.llm.ILlmStore;
+import ai.labs.eddi.configs.workflows.IWorkflowStore;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.IRestDocumentDescriptorStore;
 import ai.labs.eddi.configs.hitl.HitlConfigValidation;
@@ -158,6 +162,27 @@ public class AgentSetupService {
      */
     @Inject
     SecretResolver secretResolver;
+
+    /**
+     * The streaming backstop written into generated LLM tasks: the engine default
+     * ({@code StreamingLegacyChatExecutor}), stated explicitly.
+     */
+    static final int STREAMING_BACKSTOP_SECONDS = 120;
+
+    /**
+     * In-process stores {@link #resolveParentLlmProfile} reads through.
+     * Field-injected for the same reason as {@link #secretResolver}: a directly
+     * constructed instance (tests, non-CDI callers) has none and falls back to the
+     * REST stores.
+     */
+    @Inject
+    IAgentStore agentStore;
+
+    @Inject
+    IWorkflowStore workflowStore;
+
+    @Inject
+    ILlmStore llmStore;
 
     /**
      * Strict parse, same reasoning as {@code VaultGrantGate.Mode.parseStrict}: an
@@ -519,6 +544,10 @@ public class AgentSetupService {
             }
             createdResources.put("httpCallsGroups", groupNames);
             createdResources.put("httpCallsLocations", httpCallsLocations);
+            // Filter entries that matched nothing were silently ignored — report them.
+            if (!buildResult.unmatchedEndpoints().isEmpty()) {
+                createdResources.put("unmatchedEndpoints", buildResult.unmatchedEndpoints());
+            }
 
             // --- Step 3: Create Parser ---
             var parserConfig = createParserConfig();
@@ -865,6 +894,11 @@ public class AgentSetupService {
         }
 
         task.setConversationHistoryLimit(10);
+        // The 60s "timeout" parameter bounds the provider's time to first response; the
+        // streaming backstop is a separate whole-stream bound. Left unset, every
+        // created agent's first streamed turn logged that the timeout is shorter than
+        // the backstop and does not lower it. State the backstop explicitly instead.
+        task.setStreamingTimeoutSeconds(STREAMING_BACKSTOP_SECONDS);
 
         if (promptResponseJson != null) {
             task.setPostResponse(buildPostResponse(quickReplies, sentiment));
@@ -943,23 +977,23 @@ public class AgentSetupService {
         if (parentAgentId == null || parentAgentId.isBlank()) {
             return null;
         }
+        ParentConfigReader reader = parentConfigReader();
         try {
             // The version must be resolved first. RestVersionInfo.read does
             // checkNotNull(version), so readAgent(id, null) ALWAYS throws — which this
             // method's catch swallowed, making inheritance silently return null and
             // leaving create_sub_agent failing with "API key is required", i.e. the
             // exact defect it was written to fix.
-            IRestAgentStore agentRestStore = getRestStore(IRestAgentStore.class);
-            Integer currentVersion = agentRestStore.getCurrentVersion(parentAgentId);
+            Integer currentVersion = reader.currentAgentVersion(parentAgentId);
             if (currentVersion == null) {
                 return null;
             }
-            AgentConfiguration parent = agentRestStore.readAgent(parentAgentId, currentVersion);
+            AgentConfiguration parent = reader.agent(parentAgentId, currentVersion);
             if (parent == null || parent.getWorkflows() == null) {
                 return null;
             }
             for (URI workflowUri : parent.getWorkflows()) {
-                LlmConfiguration.Task task = firstLlmTaskOf(workflowUri);
+                LlmConfiguration.Task task = firstLlmTaskOf(reader, workflowUri);
                 if (task == null) {
                     continue;
                 }
@@ -991,15 +1025,89 @@ public class AgentSetupService {
         return null;
     }
 
+    /**
+     * How {@link #resolveParentLlmProfile} reads the parent's agent, workflow and
+     * LLM documents.
+     */
+    private interface ParentConfigReader {
+        Integer currentAgentVersion(String agentId) throws Exception;
+
+        AgentConfiguration agent(String agentId, int version) throws Exception;
+
+        WorkflowConfiguration workflow(String workflowId, int version) throws Exception;
+
+        LlmConfiguration llm(String llmId, int version) throws Exception;
+    }
+
+    /**
+     * The in-process stores when the container provides them; the REST stores
+     * otherwise (a directly constructed instance).
+     * <p>
+     * The REST stores are an HTTP loopback. {@code create_sub_agent} calls
+     * inheritance on the LLM tool-execution thread, which has no inbound request —
+     * so the loopback's caller-auth filter has nothing to forward, a read that
+     * fails for that (or any transport) reason was swallowed by the catch, and the
+     * sub-agent failed with "API key is required": the inheritance this exists for
+     * silently did not happen. The stores have no request, hop or serialization in
+     * between. There is no access decision to lose either: the parent is the agent
+     * running the tool.
+     */
+    private ParentConfigReader parentConfigReader() {
+        if (agentStore != null && workflowStore != null && llmStore != null) {
+            return new ParentConfigReader() {
+                @Override
+                public Integer currentAgentVersion(String agentId) throws Exception {
+                    IResourceStore.IResourceId current = agentStore.getCurrentResourceId(agentId);
+                    return current != null ? current.getVersion() : null;
+                }
+
+                @Override
+                public AgentConfiguration agent(String agentId, int version) throws Exception {
+                    return agentStore.read(agentId, version);
+                }
+
+                @Override
+                public WorkflowConfiguration workflow(String workflowId, int version) throws Exception {
+                    return workflowStore.read(workflowId, version);
+                }
+
+                @Override
+                public LlmConfiguration llm(String llmId, int version) throws Exception {
+                    return llmStore.read(llmId, version);
+                }
+            };
+        }
+        return new ParentConfigReader() {
+            @Override
+            public Integer currentAgentVersion(String agentId) {
+                return getRestStore(IRestAgentStore.class).getCurrentVersion(agentId);
+            }
+
+            @Override
+            public AgentConfiguration agent(String agentId, int version) {
+                return getRestStore(IRestAgentStore.class).readAgent(agentId, version);
+            }
+
+            @Override
+            public WorkflowConfiguration workflow(String workflowId, int version) {
+                return getRestStore(IRestWorkflowStore.class).readWorkflow(workflowId, version);
+            }
+
+            @Override
+            public LlmConfiguration llm(String llmId, int version) {
+                return getRestStore(IRestLlmStore.class).readLlm(llmId, version);
+            }
+        };
+    }
+
     /** The first LLM task reachable from a workflow, or {@code null}. */
-    private LlmConfiguration.Task firstLlmTaskOf(URI workflowUri) {
+    private LlmConfiguration.Task firstLlmTaskOf(ParentConfigReader reader, URI workflowUri) {
         try {
             String workflowId = extractIdFromLocation(workflowUri.toString());
             if (workflowId == null) {
                 return null;
             }
-            WorkflowConfiguration workflow = getRestStore(IRestWorkflowStore.class).readWorkflow(workflowId,
-                    extractVersionFromLocation(workflowUri.toString()));
+            WorkflowConfiguration workflow = reader.workflow(workflowId, extractVersionFromLocation(workflowUri.toString()));
             if (workflow == null || workflow.getWorkflowSteps() == null) {
                 return null;
             }
@@ -1015,7 +1123,7 @@ public class AgentSetupService {
                 if (llmId == null) {
                     continue;
                 }
-                LlmConfiguration llm = getRestStore(IRestLlmStore.class).readLlm(llmId, extractVersionFromLocation(uri.toString()));
+                LlmConfiguration llm = reader.llm(llmId, extractVersionFromLocation(uri.toString()));
                 if (llm != null && llm.tasks() != null && !llm.tasks().isEmpty()) {
                     return llm.tasks().getFirst();
                 }

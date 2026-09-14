@@ -264,6 +264,20 @@ class McpApiToolBuilderTest {
     }
 
     @Test
+    @DisplayName("filter entries that match no operation are reported, not silently dropped")
+    void parseAndBuild_reportsUnmatchedFilterEntries() {
+        var result = McpApiToolBuilder.parseAndBuild(PETSTORE_SPEC, "GET /pets,GET /no-such-path", null, null);
+
+        assertEquals(1, result.endpointCount());
+        assertEquals(1, result.unmatchedEndpoints().size(), String.valueOf(result.unmatchedEndpoints()));
+        assertTrue(result.unmatchedEndpoints().getFirst().contains("/no-such-path"), String.valueOf(result.unmatchedEndpoints()));
+
+        var fullyMatched = McpApiToolBuilder.parseAndBuild(PETSTORE_SPEC, "GET /pets,POST /store/order", null, null);
+        assertTrue(fullyMatched.unmatchedEndpoints().isEmpty());
+        assertTrue(McpApiToolBuilder.parseAndBuild(PETSTORE_SPEC, null, null, null).unmatchedEndpoints().isEmpty());
+    }
+
+    @Test
     void parseAndBuild_filtersEndpoints() {
         var result = McpApiToolBuilder.parseAndBuild(PETSTORE_SPEC, "GET /pets,POST /store/order", null, null);
 

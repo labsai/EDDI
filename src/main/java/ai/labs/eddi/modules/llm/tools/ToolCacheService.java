@@ -6,6 +6,9 @@ package ai.labs.eddi.modules.llm.tools;
 
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
+import ai.labs.eddi.modules.llm.tools.impl.ArtifactTools;
+import ai.labs.eddi.modules.llm.tools.impl.GroupTaskTools;
+import dev.langchain4j.agent.tool.Tool;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -15,8 +18,11 @@ import org.jboss.logging.Logger;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -92,6 +98,43 @@ public class ToolCacheService {
     );
 
     private static final long DEFAULT_TTL_SECONDS = 300L; // 5 minutes default
+
+    /**
+     * Tools whose result depends on state they or their peers change, so a cached
+     * answer is a wrong answer. Derived from the {@code @Tool} methods of the
+     * classes themselves, so a tool added to one of them is covered without anyone
+     * remembering this list.
+     * <p>
+     * The defect this closes: every member of a group discussion runs as the same
+     * user, so under the default USER scope {@code listArtifacts()} — no arguments,
+     * identical cache key — served one member's earlier "No artifacts yet" to the
+     * next member for five minutes, right after a third member had created one.
+     * Creating, updating, recruiting, delegating and remembering are side effects;
+     * serving them from cache skips the side effect entirely.
+     */
+    private static final Set<String> STATEFUL_TOOL_NAMES = toolNamesOf(ArtifactTools.class, GroupTaskTools.class,
+            CreateSubAgentTool.class, ConverseWithAgentTool.class, RecruitAgentTool.class, TeardownAgentTool.class,
+            FindAgentsByCapabilityTool.class, UserMemoryTool.class, ConversationRecallTool.class);
+
+    private static Set<String> toolNamesOf(Class<?>... toolClasses) {
+        return Arrays.stream(toolClasses)
+                .flatMap(toolClass -> Arrays.stream(toolClass.getMethods()))
+                .filter(method -> method.isAnnotationPresent(Tool.class))
+                .map(method -> {
+                    String declared = method.getAnnotation(Tool.class).name();
+                    return declared == null || declared.isBlank() ? method.getName() : declared;
+                })
+                .collect(Collectors.toUnmodifiableSet());
+    }
+
+    /**
+     * Whether a call's result may be served from, or stored in, the cache. False
+     * for the stateful tools above, whatever the task's caching setting says.
+     */
+    public static boolean isCacheable(ToolInvocation invocation) {
+        return invocation != null && !STATEFUL_TOOL_NAMES.contains(invocation.dispatchName())
+                && !STATEFUL_TOOL_NAMES.contains(invocation.canonicalName());
+    }
 
     @Inject
     ICacheFactory cacheFactory;

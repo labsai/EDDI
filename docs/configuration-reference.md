@@ -76,6 +76,7 @@ applies in dev mode only.
 |---|---|---|
 | `eddi.conversations.maximumLifeTimeOfIdleConversationsInDays` | `90` | Idle conversations are closed after this many days |
 | `eddi.conversations.deleteEndedConversationsOnceOlderThanDays` | `365` | Ended conversations are permanently deleted after this many days |
+| `eddi.conversations.max-input-chars` | `200000` | Longest turn input, in characters, a caller may send to an existing conversation. Longer input is refused before anything reaches the model: **413** `input_too_large` on the REST and streaming conversation endpoints, **400** `input_too_large` on the OpenAI-compatible API, invalid params over A2A; other surfaces built on those entry points report the refusal as an error. `0` or negative disables the limit. Turns the engine drives itself for group members and sub-agents are exempt |
 | `eddi.usermemories.deleteOlderThanDays` | `-1` | Persistent user memories older than this are deleted. **`-1` disables the sweep** — memories are kept forever until you set a positive number. Relevant to [GDPR](gdpr-compliance.md) and [HIPAA](hipaa-compliance.md) |
 | `eddi.coordinator.max-active-conversations` | `10000` | Ceiling on concurrently tracked conversations |
 | `eddi.coordinator.max-dead-letters` | `1000` | Retained dead-letter entries. `-1` unbounded, `0` retain none |
@@ -132,7 +133,7 @@ Full narrative and metrics: [scheduling.md → Deployment Configuration](schedul
 | Property | Default | Description |
 |---|---|---|
 | `eddi.security.allow-unauthenticated` | `false` | Permits running with OIDC disabled outside dev. `AuthStartupGuard` refuses a production boot without it |
-| `eddi.security.ssrf-protection.enabled` | `false` | **Opt-in.** Validates the fully resolved target of httpCalls, MCP and A2A calls and stops following redirects. Off by default because configured targets legitimately reach internal hosts — **turn it on if any outbound URL is influenced by conversation input.** See [security.md → SSRF Protection](security.md#ssrf-protection--urlvalidationutils) |
+| `eddi.security.ssrf-protection.enabled` | `false` | **Opt-in.** Validates the fully resolved target of httpCalls, MCP and A2A calls and stops following redirects. Off by default because configured targets legitimately reach internal hosts — **turn it on if any outbound URL is influenced by conversation input.** The cloud instance-metadata service (and the link-local range it lives in) is refused regardless of this setting. See [security.md → SSRF Protection](security.md#ssrf-protection--urlvalidationutils) |
 | `eddi.mcp.allow-unauthenticated` | `false` | Exposes the MCP server without auth. Needs its own opt-in on top of `eddi.security.allow-unauthenticated` — inheriting one flag must not be enough to open agent CRUD |
 | `eddi.secretstore.allow-unauthenticated` | `false` | Same, for the secrets vault REST surface |
 | `eddi.caller-identity.enabled` | `true` | Enables `${caller:token}` / `${caller:userId}` in httpCall headers. See [httpcalls.md](httpcalls.md) |

@@ -4,6 +4,10 @@
  */
 package ai.labs.eddi.engine.mcp;
 
+import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
+import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IRestAgentAdministration;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
@@ -21,9 +25,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 
+import java.net.URI;
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -572,6 +579,83 @@ class McpAdminToolsBranchCoverageTest {
         @DisplayName("blank resourceMappings → error")
         void blankMappings() {
             assertTrue(tools.applyAgentChanges("id", 1, "  ", null, null).contains("error"));
+        }
+
+        private static final String WORKFLOW_ID = "aabbccddeeff001122334455";
+        private static final String OLD_LLM_URI = "eddi://ai.labs.llm/llmstore/llms/112233445566778899aabbcc?version=1";
+        private static final String NEW_LLM_URI = "eddi://ai.labs.llm/llmstore/llms/112233445566778899aabbcc?version=2";
+
+        /** One agent → one workflow → one LLM step whose URI the mapping replaces. */
+        private void cascadeThatUpdatesOneWorkflow() throws Exception {
+            var agentStore = mock(IRestAgentStore.class);
+            var workflowStore = mock(IRestWorkflowStore.class);
+            when(restInterfaceFactory.get(IRestAgentStore.class)).thenReturn(agentStore);
+            when(restInterfaceFactory.get(IRestWorkflowStore.class)).thenReturn(workflowStore);
+            when(jsonSerialization.deserialize(anyString(), eq(List.class)))
+                    .thenReturn(List.of(Map.of("oldUri", OLD_LLM_URI, "newUri", NEW_LLM_URI)));
+
+            var agent = new AgentConfiguration();
+            agent.setWorkflows(List.of(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + WORKFLOW_ID + "?version=1")));
+            when(agentStore.readAgent("agent1", 1)).thenReturn(agent);
+
+            var step = new WorkflowConfiguration.WorkflowStep();
+            step.setType(URI.create("eddi://ai.labs.llm"));
+            step.setConfig(new HashMap<>(Map.of("uri", OLD_LLM_URI)));
+            var workflow = new WorkflowConfiguration();
+            workflow.setWorkflowSteps(List.of(step));
+            when(workflowStore.readWorkflow(WORKFLOW_ID, 1)).thenReturn(workflow);
+
+            Response workflowResponse = mock(Response.class);
+            when(workflowResponse.getHeaderString("Location"))
+                    .thenReturn("eddi://ai.labs.workflow/workflowstore/workflows/" + WORKFLOW_ID + "?version=2");
+            when(workflowStore.updateWorkflow(eq(WORKFLOW_ID), eq(1), any())).thenReturn(workflowResponse);
+            Response agentResponse = mock(Response.class);
+            when(agentResponse.getHeaderString("Location")).thenReturn("eddi://ai.labs.agent/agentstore/agents/agent1?version=2");
+            when(agentStore.updateAgent(eq("agent1"), eq(1), any())).thenReturn(agentResponse);
+            when(jsonSerialization.serialize(any())).thenReturn("{}");
+        }
+
+        @SuppressWarnings("unchecked")
+        private Map<String, Object> lastSerializedResult() throws Exception {
+            var captor = ArgumentCaptor.forClass(Object.class);
+            verify(jsonSerialization, atLeastOnce()).serialize(captor.capture());
+            return (Map<String, Object>) captor.getValue();
+        }
+
+        @Test
+        @DisplayName("redeploy: a waited deploy that answers 200 with an ERROR body is not reported as redeployed")
+        void redeployFailureInBodyIsNotRedeployed() throws Exception {
+            cascadeThatUpdatesOneWorkflow();
+            Response deployResponse = mock(Response.class);
+            when(deployResponse.getStatus()).thenReturn(200);
+            when(deployResponse.getEntity()).thenReturn(Map.of("status", "ERROR", "error", "Deployment failed. Check server logs for details."));
+            when(agentAdmin.deployAgent(any(), eq("agent1"), eq(2), eq(true), eq(true))).thenReturn(deployResponse);
+
+            tools.applyAgentChanges("agent1", 1, "[...]", true, "production");
+            var result = lastSerializedResult();
+
+            assertEquals(false, result.get("redeployed"));
+            assertEquals("ERROR", result.get("deploymentStatus"));
+            assertEquals("Deployment failed. Check server logs for details.", result.get("deployError"));
+            assertEquals(false, result.get("previousVersionStillDeployed"));
+        }
+
+        @Test
+        @DisplayName("redeploy: READY with no error is redeployed, and the superseded version is flagged as still deployed")
+        void redeploySuccess() throws Exception {
+            cascadeThatUpdatesOneWorkflow();
+            Response deployResponse = mock(Response.class);
+            when(deployResponse.getStatus()).thenReturn(200);
+            when(deployResponse.getEntity()).thenReturn(Map.of("status", "READY"));
+            when(agentAdmin.deployAgent(any(), eq("agent1"), eq(2), eq(true), eq(true))).thenReturn(deployResponse);
+
+            tools.applyAgentChanges("agent1", 1, "[...]", true, "production");
+            var result = lastSerializedResult();
+
+            assertEquals(true, result.get("redeployed"));
+            assertEquals("READY", result.get("deploymentStatus"));
+            assertNull(result.get("deployError"));
+            assertEquals(true, result.get("previousVersionStillDeployed"));
         }
     }
 

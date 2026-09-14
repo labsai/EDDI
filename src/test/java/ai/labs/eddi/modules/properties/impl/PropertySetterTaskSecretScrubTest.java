@@ -15,6 +15,7 @@ import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
+import ai.labs.eddi.modules.nlp.expressions.Expressions;
 import ai.labs.eddi.modules.nlp.expressions.utilities.IExpressionProvider;
 import ai.labs.eddi.modules.properties.IPropertySetter;
 import ai.labs.eddi.modules.properties.model.SetOnActions;
@@ -32,6 +33,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyMap;
@@ -74,6 +76,7 @@ class PropertySetterTaskSecretScrubTest {
     @BeforeEach
     void setUp() throws Exception {
         var expressionProvider = mock(IExpressionProvider.class);
+        when(expressionProvider.parseExpressions(anyString())).thenReturn(new Expressions());
         var memoryItemConverter = mock(IMemoryItemConverter.class);
         var templatingEngine = mock(ITemplatingEngine.class);
         var resourceClientLibrary = mock(IResourceClientLibrary.class);
@@ -160,6 +163,45 @@ class PropertySetterTaskSecretScrubTest {
                 "the raw input must be scrubbed even though it differs from the resolved secret");
         assertEquals(PLACEHOLDER, step.getConversationOutput().get("input"));
         assertNoPlaintextAnywhere(step);
+    }
+
+    @Test
+    @DisplayName("what the parser derived from the secret — expressions, matches, intents — is dropped, not patched")
+    void parserDerivedFormsAreDropped() throws Exception {
+        IWritableConversationStep step = stepWithParsedInput();
+        // The shapes InputParserTask really produces: tokenized and wrapped, so the
+        // resolved secret is not a substring of any of them.
+        step.storeData(new Data<>("expressions:parsed", "unknown(sk), unknown(live_abc), unknown(123)"));
+        step.addConversationOutputString("expressions", "unknown(sk), unknown(live_abc), unknown(123)");
+        step.storeData(new Data<>("expressions:matches", List.of("\"sk\" → unknown(sk)", "\"live_abc\" → unknown(live_abc)")));
+        step.storeData(new Data<>("intents", List.of("unknown")));
+        step.addConversationOutputList("intents", List.of("unknown"));
+
+        task.execute(memory, secretPropertySetter(NORMALIZED_INPUT));
+
+        assertEquals("", step.<String>getData("expressions:parsed").getResult());
+        assertEquals(List.of(), step.getData("expressions:matches").getResult());
+        assertEquals(List.of(), step.getData("intents").getResult());
+        assertFalse(step.getConversationOutput().containsKey("expressions"));
+        assertFalse(step.getConversationOutput().containsKey("intents"));
+        for (IData<?> data : step.getAllElements()) {
+            assertFalse(String.valueOf(data.getResult()).contains("live_abc"), "a token of the secret survived in '" + data.getKey() + "'");
+        }
+    }
+
+    @Test
+    @DisplayName("an ordinary property write leaves the parser's expressions alone")
+    void parsedFormsKeptWhenNoSecretWasScrubbed() throws Exception {
+        IWritableConversationStep step = memory.getCurrentStep();
+        step.storeData(new Data<>("input:initial", "hello"));
+        step.storeData(new Data<>("expressions:parsed", "greeting(hello)"));
+        step.addConversationOutputString("expressions", "greeting(hello)");
+        step.storeData(new Data<>("actions", List.of("store_secret")));
+
+        task.execute(memory, secretPropertySetter("static-config-literal-key"));
+
+        assertEquals("greeting(hello)", step.<String>getData("expressions:parsed").getResult());
+        assertTrue(step.getConversationOutput().containsKey("expressions"));
     }
 
     @Test

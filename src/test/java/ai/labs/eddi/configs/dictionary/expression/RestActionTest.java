@@ -12,6 +12,7 @@ import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration.WorkflowStep;
 import ai.labs.eddi.datastore.IResourceStore;
+import jakarta.ws.rs.BadRequestException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -148,6 +149,33 @@ class RestActionTest {
         List<String> result = restAction.readActions("wf-1", 1, "", 20);
 
         assertTrue(result.isEmpty());
+    }
+
+    @Test
+    @DisplayName("steps without a resource URI (parser, templating) are skipped, not a NullPointerException")
+    void stepsWithoutUriAreSkipped() throws Exception {
+        var parserStep = new WorkflowStep();
+        parserStep.setType(URI.create("eddi://ai.labs.parser"));
+        parserStep.setConfig(Map.of());
+        var templatingStep = new WorkflowStep();
+        templatingStep.setType(URI.create("eddi://ai.labs.templating"));
+        var rulesStep = createStep("eddi://ai.labs.rules", "rulesstore/rules");
+
+        var wfConfig = new WorkflowConfiguration();
+        wfConfig.setWorkflowSteps(List.of(parserStep, rulesStep, templatingStep));
+        when(workflowStore.read("wf-1", 1)).thenReturn(wfConfig);
+        when(behaviorStore.readActions(VALID_ID, 1, "", 20)).thenReturn(List.of("greet"));
+
+        assertEquals(List.of("greet"), restAction.readActions("wf-1", 1, "", 20));
+    }
+
+    @Test
+    @DisplayName("a missing workflowId is a 400 naming workflowId")
+    void missingWorkflowIdIsBadRequest() {
+        var nullId = assertThrows(BadRequestException.class, () -> restAction.readActions(null, 1, "", 20));
+        assertTrue(nullId.getMessage().contains("workflowId"), nullId.getMessage());
+        assertThrows(BadRequestException.class, () -> restAction.readActions(" ", 1, "", 20));
+        verifyNoInteractions(workflowStore);
     }
 
     // ==================== Helpers ====================
