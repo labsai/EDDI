@@ -1,14 +1,40 @@
-import { memo, useState, useCallback } from "react";
+import { memo, useState, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
 import type { ChatMessage as ChatMessageType, MessageAttachment } from "@/lib/api/chat";
-import { formatMarkdownText } from "@/components/groups/group-utils";
+import type { DecisionRecord } from "@/lib/api/groups";
+import {
+  formatMarkdownText,
+  parseVerdictJson,
+  type VerdictJson,
+} from "@/components/groups/group-utils";
+import { DecisionRecordCard } from "@/components/groups/decision-record-card";
+import { StructuredEntryBody } from "@/components/groups/structured-entry-body";
+import { entryBodyToMarkdown, isStructuredBody, readMessageBody } from "@/lib/group-entry-body";
 import { isImageMime, formatBytes } from "@/lib/api/attachments";
 import { Bot, User, Copy, Check, FileText, AlertTriangle } from "lucide-react";
 
 // ==================== Helpers ====================
+
+/**
+ * A judge's verdict in the shape `DecisionRecordCard` renders. The judge names a
+ * tie as a side ("TIE"); the card's contract is `winner: null` for a tie.
+ */
+function verdictToDecision(verdict: VerdictJson): DecisionRecord {
+  const winner =
+    verdict.winner && verdict.winner.trim().toUpperCase() !== "TIE" ? verdict.winner : null;
+  return {
+    type: "VERDICT",
+    outcome: null,
+    winner,
+    tally: verdict.scores,
+    dissents: [],
+    method: null,
+    decidedAtPhase: null,
+  };
+}
 
 function formatShortTime(ts: number): string {
   return new Date(ts).toLocaleTimeString(undefined, {
@@ -39,6 +65,45 @@ export const ChatMessage = memo(function ChatMessage({
 }: ChatMessageProps) {
   const isUser = message.role === "user";
   const [hovered, setHovered] = useState(false);
+  const { t } = useTranslation();
+
+  // An agent that serves as a debate judge answers with a `{winner, scores,
+  // reasoning}` object, and chatting with it directly printed that object
+  // verbatim — escaped newlines and all. Not parsed mid-stream: the JSON is
+  // incomplete until the last token, and re-parsing on every token is waste.
+  const verdict = useMemo(
+    () => (isUser || message.isStreaming ? null : parseVerdictJson(message.content)),
+    [isUser, message.isStreaming, message.content]
+  );
+
+  // A group member agent's own conversation holds its ballots, bid sheets,
+  // bargaining moves and task plans as ordinary replies — the same contracts
+  // the group transcripts render as cards, and the same reader.
+  const structured = useMemo(
+    () => (isUser || message.isStreaming || verdict ? null : readMessageBody(message.content)),
+    [isUser, message.isStreaming, message.content, verdict]
+  );
+
+  // Copy what is on screen, not the wire format.
+  const copyContent = useMemo(() => {
+    if (structured) {
+      const text = entryBodyToMarkdown(structured, (key, fallback, options) =>
+        t(key, { ...options, defaultValue: fallback })
+      );
+      return text || message.content;
+    }
+    if (!verdict) return message.content;
+    const decision = verdictToDecision(verdict);
+    const outcome = decision.winner
+      ? t("groups.decisionWinner", "Winner: {{winner}}", { winner: decision.winner })
+      : t("groups.decisionTie", "Tie");
+    const scores = Object.entries(verdict.scores ?? {})
+      .map(([side, score]) => `${side}: ${score}`)
+      .join(" · ");
+    return [scores ? `${outcome} (${scores})` : outcome, verdict.reasoning]
+      .filter(Boolean)
+      .join("\n\n");
+  }, [structured, verdict, message.content, t]);
 
   return (
     <div
@@ -88,11 +153,26 @@ export const ChatMessage = memo(function ChatMessage({
             </div>
           ) : (
             <div className="prose prose-sm dark:prose-invert max-w-none overflow-hidden [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs">
-              {message.content ? (
+              {verdict ? (
+                <div className="flex flex-col gap-3" data-testid="chat-verdict">
+                  <DecisionRecordCard decision={verdictToDecision(verdict)} className="not-prose" />
+                  {verdict.reasoning && (
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {formatMarkdownText(verdict.reasoning)}
+                    </ReactMarkdown>
+                  )}
+                </div>
+              ) : structured && isStructuredBody(structured) ? (
+                <div className="not-prose">
+                  <StructuredEntryBody body={structured} />
+                </div>
+              ) : message.content ? (
                 /* Deliberately NO rehypeRaw: bot/LLM output is untrusted, so
                    raw HTML stays escaped rather than being injected live. */
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                  {formatMarkdownText(message.content)}
+                  {structured?.kind === "markdown"
+                    ? structured.text
+                    : formatMarkdownText(message.content)}
                 </ReactMarkdown>
               ) : message.isStreaming ? (
                 <TypingIndicator />
@@ -119,7 +199,7 @@ export const ChatMessage = memo(function ChatMessage({
           {/* Hover actions — only for agent messages with content */}
           {!isUser && message.content && (
             <div className={cn("transition-opacity duration-150", hovered ? "opacity-100" : "opacity-0 focus-within:opacity-100")}>
-              <CopyMessageButton content={message.content} />
+              <CopyMessageButton content={copyContent} />
             </div>
           )}
         </div>

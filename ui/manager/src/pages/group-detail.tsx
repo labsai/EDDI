@@ -449,6 +449,9 @@ export function GroupDetailPage() {
   const safeConfig: AgentGroupConfiguration = groupConfig.members
     ? groupConfig
     : { ...groupConfig, members: [] };
+  // For a live stream's planned tasks, which name their assignee by agent id
+  // before any conversation document exists to map it.
+  const rosterDisplayNames = Object.fromEntries(safeConfig.members.map((m) => [m.agentId, m.displayName]));
 
   // Determine whether to show streaming or static transcript
   const isStreamActive = streamState.isStreaming || (streamState.state !== "CREATED" && !selectedConvId);
@@ -591,16 +594,19 @@ export function GroupDetailPage() {
         : "h-full min-h-0"
     )}>
       {/* Header */}
-      <div className="flex items-center gap-3 pb-3 border-b border-border shrink-0">
+      {/* Wraps rather than squeezes: on a phone the five action buttons used to
+          crush the group's name to a single visible letter. The title keeps a
+          minimum width and the actions drop to their own row instead. */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 pb-3 border-b border-border shrink-0">
         {!isFullscreen && <BackLink to="/manage/groups" label="" />}
         <Users className="h-6 w-6 text-primary shrink-0" />
-        <div className="flex-1 min-w-0">
+        <div className="flex-1 min-w-[10rem]">
           <h1 className="text-xl font-bold text-foreground truncate">{groupConfig.name}</h1>
           {groupConfig.description && (
             <p className="text-xs text-muted-foreground truncate">{groupConfig.description}</p>
           )}
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="ms-auto flex flex-wrap items-center gap-2">
           {styleInfo && (
             <Badge variant="outline" className={cn("hidden sm:inline-flex", styleTheme.flowText)} title={styleInfo.flow}>
               {styleInfo.icon} {styleInfo.label}
@@ -766,6 +772,7 @@ export function GroupDetailPage() {
               isLoading={convLoading && !!selectedConvId && !showStreamFallback}
               discussionStyle={groupConfig.style as DiscussionStyle}
               preConfiguredTasks={groupConfig.tasks}
+              rosterDisplayNames={rosterDisplayNames}
               onApprove={handleApproveDiscussion}
               onCancelDiscussion={handleCancelDiscussion}
               isDeciding={cancelDiscussionMutation.isPending}

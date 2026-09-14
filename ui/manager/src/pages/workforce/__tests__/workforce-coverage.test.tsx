@@ -142,6 +142,21 @@ describe("Workforce Coverage Tests", () => {
       expect(screen.getByText(/Another Q/i)).toBeInTheDocument();
     });
 
+    it("opens the conversation a link names, instead of leaving a phone on the list", () => {
+      // Below `lg` the list and the viewer take turns. The viewer started closed
+      // even when `?conversation=` named one, so a shared history link on a
+      // phone showed the list with the row highlighted and nothing to read.
+      vi.spyOn(useGroupsHook, "useGroupConversations").mockReturnValue({
+        data: [{ id: "conv1", originalQuestion: "Test Question 1", state: "COMPLETED", created: Date.now() }],
+        isLoading: false,
+        isError: false,
+      } as any);
+
+      renderPage("/workforce/board1/history?conversation=conv1", <WorkforceHistory />, "/workforce/:boardId/history");
+
+      expect(screen.getByRole("button", { name: /Back to list/i })).toBeInTheDocument();
+    });
+
     it("allows deleting a conversation", async () => {
       const user = userEvent.setup();
       const deleteMock = vi.fn();

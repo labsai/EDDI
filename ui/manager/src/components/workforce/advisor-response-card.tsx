@@ -7,10 +7,10 @@ import { Check, Clipboard, Star, MessageCircle, AlertCircle, ChevronDown, Chevro
 import { cn, getInitials } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { parseTranscriptContent, truncateContent } from "@/components/groups/group-utils";
-import { StructuredTurnCard } from "@/components/groups/structured-turn-card";
-import { parseStructuredPayload } from "@/lib/group-payloads";
-import type { TranscriptEntryType } from "@/lib/api/groups";
+import { truncateContent } from "@/components/groups/group-utils";
+import { StructuredEntryBody } from "@/components/groups/structured-entry-body";
+import { entryBodyToMarkdown, isStructuredBody, readEntryBody } from "@/lib/group-entry-body";
+import type { TaskDefinition, TranscriptEntryType } from "@/lib/api/groups";
 
 // ─── Pin Types & Hook ────────────────────────────────────────────
 
@@ -84,6 +84,10 @@ interface AdvisorResponseCardProps {
    * message) keeps the prose path.
    */
   entryType?: TranscriptEntryType | string | null;
+  /** agentId → display name, so a planned task names its assignee rather than an id. */
+  memberDisplayNames?: Record<string, string>;
+  /** The group's configured tasks, which a pre-configured PLAN entry's one-line summary stands for. */
+  preConfiguredTasks?: TaskDefinition[];
 
   boardId: string;
   /** Optional session ID for pin storage */
@@ -160,6 +164,8 @@ const AdvisorResponseCard = memo(function AdvisorResponseCard({
   roleBadgeVariant = "secondary",
   content,
   entryType,
+  memberDisplayNames,
+  preConfiguredTasks,
   boardId,
   sessionId = "",
   timestamp,
@@ -176,14 +182,19 @@ const AdvisorResponseCard = memo(function AdvisorResponseCard({
    * four phase types store a JSON contract verbatim, so the unparsed path put a
    * JSON document on screen in the middle of a discussion — and copied it.
    */
-  const structuredPayload = useMemo(
-    () => parseStructuredPayload(entryType, content),
-    [entryType, content],
+  const body = useMemo(
+    () => readEntryBody({ type: entryType, content }, { memberNames: memberDisplayNames, preConfiguredTasks }),
+    [entryType, content, memberDisplayNames, preConfiguredTasks],
   );
-  const readable = useMemo(
-    () => (content !== null ? parseTranscriptContent(content) : null),
-    [content],
+  const readable = body.kind === "markdown" ? body.text : null;
+  // The body as markdown — what Copy and the "Ask more" hand-off carry, so a
+  // ballot or a task plan leaves this card as the list it shows, not as JSON.
+  const bodyT = useCallback(
+    (key: string, fallback: string, options?: Record<string, unknown>) =>
+      t(key, { ...options, defaultValue: fallback }),
+    [t],
   );
+  const shareable = useMemo(() => entryBodyToMarkdown(body, bodyT), [body, bodyT]);
 
   // ── Copy to clipboard ────────────────────────────────────────
   const [copied, setCopied] = useState(false);
@@ -194,7 +205,7 @@ const AdvisorResponseCard = memo(function AdvisorResponseCard({
     if (!content) return;
     try {
       // What is on screen, not the wire format behind it.
-      await navigator.clipboard.writeText(readable?.trim() ? readable : content);
+      await navigator.clipboard.writeText(shareable.trim() ? shareable : content);
       setCopied(true);
       copyTimerRef.current = setTimeout(() => setCopied(false), 2000);
     } catch {
@@ -221,7 +232,7 @@ const AdvisorResponseCard = memo(function AdvisorResponseCard({
   // Emptiness is judged on what will actually be shown: a response envelope that
   // carried no text parses to "" and must read as "no response generated",
   // not as a card with an invisible body.
-  const isEmpty = !isStreaming && !structuredPayload && !readable?.trim();
+  const isEmpty = !isStreaming && body.kind === "empty";
   const { contentRef, isCollapsible, isExpanded, setIsExpanded } = useCollapsibleContent(readable);
 
   return (
@@ -322,8 +333,8 @@ const AdvisorResponseCard = memo(function AdvisorResponseCard({
                 {t("Workforce.board.noResponseGenerated", "No response generated")}
               </span>
             </div>
-          ) : structuredPayload ? (
-            <StructuredTurnCard payload={structuredPayload} />
+          ) : isStructuredBody(body) ? (
+            <StructuredEntryBody body={body} />
           ) : (
             <>
               <div
@@ -375,7 +386,7 @@ const AdvisorResponseCard = memo(function AdvisorResponseCard({
             >
               <Link
                 to={`/workforce/${boardId}/thread/${agentId}`}
-                state={{ fromGroup: true, question: "", response: content }}
+                state={{ fromGroup: true, question: "", response: shareable || content }}
               >
                 <MessageCircle className="h-3 w-3" />
                 {t("Workforce.board.askMore", "Ask {{name}} more →", { name: displayName })}

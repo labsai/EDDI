@@ -50,6 +50,59 @@ describe("ChatMessage — untrusted HTML", () => {
   });
 });
 
+describe("ChatMessage — judge verdicts", () => {
+  // Exactly what a debate judge agent stores: a bare JSON object whose
+  // reasoning is markdown with escaped newlines. Chatting with that agent
+  // directly used to print the object verbatim.
+  const verdictContent = JSON.stringify({
+    winner: "CON",
+    scores: { PRO: 6, CON: 8 },
+    reasoning: "### Verdict\nCON built the stronger case.\n\n### Teaching notes\n- **Unit economics** matter.",
+  });
+
+  it("renders the verdict as a decision card plus markdown, never as raw JSON", () => {
+    const { container } = renderWithProviders(
+      <ChatMessage message={{ ...agentMessage, content: verdictContent }} />
+    );
+    expect(screen.getByTestId("decision-record")).toBeInTheDocument();
+    expect(screen.getByTestId("decision-winner")).toHaveTextContent("CON");
+    expect(screen.getByTestId("decision-tally")).toHaveTextContent("PRO6");
+    expect(screen.getByRole("heading", { name: "Teaching notes" })).toBeInTheDocument();
+    expect(screen.getByText("Unit economics").tagName).toBe("STRONG");
+    expect(container.textContent).not.toContain('"winner"');
+    expect(container.textContent).not.toContain("\\n");
+  });
+
+  it("shows a TIE as a tie, not as a winner named TIE", () => {
+    renderWithProviders(
+      <ChatMessage
+        message={{
+          ...agentMessage,
+          content: JSON.stringify({ winner: "TIE", scores: { PRO: 7, CON: 7 }, reasoning: "Even." }),
+        }}
+      />
+    );
+    expect(screen.getByTestId("decision-tie")).toBeInTheDocument();
+    expect(screen.queryByTestId("decision-winner")).toBeNull();
+  });
+
+  it("leaves JSON that is not a verdict alone", () => {
+    const content = '{"position": "PRO", "reasoning": "because"}';
+    const { container } = renderWithProviders(
+      <ChatMessage message={{ ...agentMessage, content }} />
+    );
+    expect(screen.queryByTestId("decision-record")).toBeNull();
+    expect(container.textContent).toContain('"position"');
+  });
+
+  it("does not parse a verdict while it is still streaming", () => {
+    renderWithProviders(
+      <ChatMessage message={{ ...agentMessage, content: verdictContent, isStreaming: true }} />
+    );
+    expect(screen.queryByTestId("decision-record")).toBeNull();
+  });
+});
+
 describe("ChatMessage", () => {
   it("renders user message content", () => {
     renderWithProviders(<ChatMessage message={userMessage} />);

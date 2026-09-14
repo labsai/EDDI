@@ -74,6 +74,12 @@ export interface BargainPayload {
   /** Terms of a counter-proposal, which supersedes an accept in the same turn. */
   proposalTerms: string | null;
   concessions: Concession[];
+  /**
+   * The free-text reasoning `TEMPLATE_BARGAIN` asks for AFTER the JSON. Reading
+   * only the object dropped it on every surface, so a move's "why" never
+   * reached the screen.
+   */
+  reasoning: string | null;
 }
 
 export interface Lesson {
@@ -100,12 +106,22 @@ export type StructuredPayload = VotePayload | BidPayload | BargainPayload | Retr
  * `{"statement": "we agreed }"}` into something unparseable.
  */
 function readJson(content: string | null | undefined): Record<string, unknown> | null {
+  return readJsonWithRest(content)?.node ?? null;
+}
+
+interface JsonRead {
+  node: Record<string, unknown>;
+  /** Whatever followed the object — the prose a BARGAIN turn is asked to add. */
+  rest: string;
+}
+
+function readJsonWithRest(content: string | null | undefined): JsonRead | null {
   if (!content) return null;
   const body = content.trim();
   if (!body) return null;
 
   const direct = tryParseObject(body);
-  if (direct) return direct;
+  if (direct) return { node: direct, rest: "" };
 
   const start = body.indexOf("{");
   if (start < 0) return null;
@@ -130,7 +146,10 @@ function readJson(content: string | null | undefined): Record<string, unknown> |
     if (ch === "{") depth++;
     else if (ch === "}") {
       depth--;
-      if (depth === 0) return tryParseObject(body.slice(start, i + 1));
+      if (depth === 0) {
+        const node = tryParseObject(body.slice(start, i + 1));
+        return node ? { node, rest: body.slice(i + 1) } : null;
+      }
     }
   }
   return null;
@@ -220,8 +239,10 @@ export function parseBidPayload(content: string | null | undefined): BidPayload 
 }
 
 export function parseBargainPayload(content: string | null | undefined): BargainPayload | null {
-  const node = readJson(content);
-  if (!node) return null;
+  const read = readJsonWithRest(content);
+  if (!read) return null;
+  const node = read.node;
+  const reasoning = trailingProse(read.rest);
 
   const proposal = node.proposal;
   const proposalTerms =
@@ -239,8 +260,16 @@ export function parseBargainPayload(content: string | null | undefined): Bargain
   }
 
   const accept = str(node.accept);
-  if (!accept && !proposalTerms && concessions.length === 0) return null;
-  return { kind: "BARGAIN", accept, proposalTerms, concessions };
+  // A move that settles nothing but explains itself is still a move worth
+  // showing; one with neither is not a bargaining turn at all.
+  if (!accept && !proposalTerms && concessions.length === 0 && !reasoning) return null;
+  return { kind: "BARGAIN", accept, proposalTerms, concessions, reasoning };
+}
+
+/** The prose after a JSON object, minus the fence that closed it. */
+function trailingProse(rest: string): string | null {
+  const text = rest.replace(/^\s*(?:```|~~~)/, "").trim();
+  return text.length > 0 ? text : null;
 }
 
 export function parseRetroPayload(content: string | null | undefined): RetroPayload | null {
@@ -276,4 +305,38 @@ export function parseStructuredPayload(
     default:
       return null;
   }
+}
+
+/** A body that is nothing but one fenced block, unwrapped. */
+const LONE_FENCE = /^\s*(?:```|~~~)[^\n]*\n([\s\S]*?)\n?(?:```|~~~)\s*$/;
+
+/**
+ * The same readers for a message that has no entry type to go on — a member
+ * agent's own conversation opened in the 1:1 chat, where its ballots, bids and
+ * bargaining moves are ordinary replies.
+ *
+ * Stricter than the typed path on purpose: the whole body (bare or fenced) must
+ * be one object carrying the contract's distinguishing key. A typed VOTE entry
+ * is known to be a ballot; an untyped reply that merely quotes JSON is an answer.
+ */
+export function detectStructuredPayload(content: string | null | undefined): StructuredPayload | null {
+  if (!content) return null;
+  const body = (LONE_FENCE.exec(content)?.[1] ?? content).trim();
+  if (!body.startsWith("{")) return null;
+
+  const node = tryParseObject(body);
+  if (node) {
+    if (Array.isArray(node.bids)) return parseBidPayload(body);
+    if (Array.isArray(node.lessons)) return parseRetroPayload(body);
+    if ("vote" in node || "votes" in node) return parseVotePayload(body);
+  }
+
+  // A bargaining move is the one contract whose reply is JSON FOLLOWED by prose
+  // (`TEMPLATE_BARGAIN`), so it cannot be held to the whole-body rule — but the
+  // object must still open the reply.
+  const lead = node ?? readJsonWithRest(body)?.node;
+  if (lead && ("accept" in lead || "proposal" in lead || "concessions" in lead)) {
+    return parseBargainPayload(body);
+  }
+  return null;
 }

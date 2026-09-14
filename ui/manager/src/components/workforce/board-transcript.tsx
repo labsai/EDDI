@@ -7,10 +7,11 @@ import { cn, getInitials } from "@/lib/utils";
 import { AdvisorResponseCard } from "@/components/workforce/advisor-response-card";
 import { DecisionRecordCard } from "@/components/groups/decision-record-card";
 import { hasDisplayableDecision } from "@/lib/group-config";
-import type { DecisionRecord, TranscriptEntry, TranscriptEntryType } from "@/lib/api/groups";
+import type { DecisionRecord, TaskDefinition, TranscriptEntry, TranscriptEntryType } from "@/lib/api/groups";
 import { entryTypeInfo } from "@/lib/api/groups";
 import type { ConvergenceProgress } from "@/hooks/use-group-discussion-stream";
-import { parseTranscriptContent } from "@/components/groups/group-utils";
+import { isAgentFailurePlaceholder, parseTranscriptContent } from "@/components/groups/group-utils";
+import { AgentFailedNotice } from "@/components/groups/structured-entry-body";
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -41,6 +42,10 @@ interface BoardTranscriptProps {
    * state only — no persisted field carries it — so history views pass nothing.
    */
   convergence?: Map<number, ConvergenceProgress> | null;
+  /** agentId → display name, so a planned task names its assignee rather than an id. */
+  memberDisplayNames?: Record<string, string>;
+  /** The group's configured tasks, which a pre-configured PLAN entry's one-line summary stands for. */
+  preConfiguredTasks?: TaskDefinition[];
 
   className?: string;
 }
@@ -303,7 +308,11 @@ function SynthesisCard({ content, delay }: { content: string; delay: number }) {
         )}
       >
         <div className="prose prose-sm dark:prose-invert max-w-none overflow-hidden text-foreground [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{body}</ReactMarkdown>
+          {isAgentFailurePlaceholder(content) ? (
+            <AgentFailedNotice />
+          ) : (
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{body}</ReactMarkdown>
+          )}
         </div>
         {collapsible && !expanded && (
           <div className="absolute bottom-0 inset-x-0 h-12 bg-gradient-to-t from-card to-transparent pointer-events-none" />
@@ -364,15 +373,61 @@ function SkippedCard({
   );
 }
 
+/**
+ * A turn that contributed nothing — an error, or a deliberate abstention — as
+ * one line. Both used to fall through to the response card, which judged them
+ * on their empty body and said "No response generated": an error lost its
+ * reason, and a pass read as a failure.
+ */
+function NoticeCard({
+  entry,
+  tone,
+  delay,
+}: {
+  entry: TranscriptEntry;
+  tone: "error" | "abstained";
+  delay: number;
+}) {
+  const { t } = useTranslation();
+  const text =
+    tone === "abstained"
+      ? t("groups.abstainedBody", "Declined to add anything new this round.")
+      : entry.errorReason || parseTranscriptContent(entry.content ?? "").trim() || t("common.error", "Error");
+
+  return (
+    <div
+      className={cn(
+        "flex items-center gap-3 rounded-xl border p-3",
+        tone === "error" ? "border-destructive/30 bg-destructive/5" : "border-border/30 bg-muted/20 opacity-70",
+      )}
+      style={{ animation: "br-message-in 250ms ease-out both", animationDelay: `${delay}ms` }}
+      data-testid={tone === "error" ? "board-error-entry" : "board-abstained-entry"}
+    >
+      <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-bold text-muted-foreground">
+        {getInitials(entry.speakerDisplayName)}
+      </div>
+      <p className={cn("text-xs", tone === "error" ? "text-destructive" : "italic text-muted-foreground")}>
+        <span className="font-medium not-italic">{entry.speakerDisplayName}</span>
+        <span className="mx-1" aria-hidden="true">·</span>
+        {text}
+      </p>
+    </div>
+  );
+}
+
 /** Enhanced response card wrapper — adds entry-type badge and timestamp */
 function EnhancedResponseEntry({
   entry,
   boardId,
   delay,
+  memberDisplayNames,
+  preConfiguredTasks,
 }: {
   entry: TranscriptEntry;
   boardId: string;
   delay: number;
+  memberDisplayNames?: Record<string, string>;
+  preConfiguredTasks?: TaskDefinition[];
 }) {
   const { t } = useTranslation();
   // `entryTypeInfo`, not a raw ENTRY_TYPE_INFO lookup: the backend's entry-type
@@ -394,6 +449,8 @@ function EnhancedResponseEntry({
         roleBadgeVariant={variant}
         content={entry.content}
         entryType={entry.type}
+        memberDisplayNames={memberDisplayNames}
+        preConfiguredTasks={preConfiguredTasks}
         boardId={boardId}
         timestamp={time}
       />
@@ -432,6 +489,8 @@ function BoardTranscript({
   header,
   decision,
   convergence,
+  memberDisplayNames,
+  preConfiguredTasks,
   className,
 }: BoardTranscriptProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -534,6 +593,32 @@ function BoardTranscript({
               </div>
             );
 
+          case "ERROR":
+            return (
+              <div key={`e-${idx}`}>
+                {phaseHeader}
+                <NoticeCard entry={entry} tone="error" delay={delay} />
+              </div>
+            );
+
+          case "ABSTAINED":
+            return (
+              <div key={`a-${idx}`}>
+                {phaseHeader}
+                {entry.content?.trim() ? (
+                  <EnhancedResponseEntry
+                    entry={entry}
+                    boardId={boardId}
+                    delay={delay}
+                    memberDisplayNames={memberDisplayNames}
+                    preConfiguredTasks={preConfiguredTasks}
+                  />
+                ) : (
+                  <NoticeCard entry={entry} tone="abstained" delay={delay} />
+                )}
+              </div>
+            );
+
           case "SYNTHESIS":
             return (
               <div key={`syn-${idx}`} className="space-y-2">
@@ -551,6 +636,8 @@ function BoardTranscript({
                   entry={entry}
                   boardId={boardId}
                   delay={delay}
+                  memberDisplayNames={memberDisplayNames}
+                  preConfiguredTasks={preConfiguredTasks}
                 />
               </div>
             );

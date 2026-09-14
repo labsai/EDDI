@@ -26,7 +26,8 @@ function ExportMenu({ conversation, groupName, className }: ExportMenuProps) {
   // `generateMarkdown` is a plain module with no React context, so it takes the
   // translator rather than reaching for one — same shape as `CronDescribeT`.
   const exportT = useCallback(
-    (key: string, fallback: string) => t(key, { defaultValue: fallback }),
+    (key: string, fallback: string, options?: Record<string, unknown>) =>
+      t(key, { ...options, defaultValue: fallback }),
     [t],
   );
 

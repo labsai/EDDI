@@ -1,5 +1,8 @@
 import { useTranslation } from "react-i18next";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { Scale, Gavel, HandCoins, Lightbulb } from "lucide-react";
+import { formatMarkdownText } from "./group-utils";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import type {
@@ -227,6 +230,16 @@ function BargainBody({ payload, className }: { payload: BargainPayload; classNam
             </li>
           ))}
         </ul>
+      )}
+
+      {payload.reasoning && (
+        <div
+          className="prose prose-sm dark:prose-invert max-w-none text-foreground"
+          data-testid="bargain-reasoning"
+        >
+          {/* No rehypeRaw: member output is untrusted, so raw HTML stays escaped. */}
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{formatMarkdownText(payload.reasoning)}</ReactMarkdown>
+        </div>
       )}
     </div>
   );

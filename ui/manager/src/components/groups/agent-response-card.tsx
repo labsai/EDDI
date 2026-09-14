@@ -3,15 +3,14 @@ import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import DOMPurify from "dompurify";
-import { ChevronDown, ChevronUp, ClipboardList, CheckCircle2, ListOrdered, User2, XCircle, Fingerprint } from "lucide-react";
+import { ChevronDown, ChevronUp, ClipboardList, CheckCircle2, Fingerprint } from "lucide-react";
 import { cn, hashColor, getInitials } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import type { TranscriptEntry, TranscriptEntryType, DiscussionStyle, TaskDefinition } from "@/lib/api/groups";
 import { entryTypeInfo, hasEnvelopeData } from "@/lib/api/groups";
-import { parseTranscriptContent, formatMarkdownText, parseEmojiVerification, truncateContent, safeFormatDate } from "./group-utils";
-import type { StructuredItem } from "./group-utils";
-import { parseStructuredPayload } from "@/lib/group-payloads";
-import { StructuredTurnCard } from "./structured-turn-card";
+import { truncateContent, safeFormatDate } from "./group-utils";
+import { isStructuredBody, readEntryBody } from "@/lib/group-entry-body";
+import { StructuredEntryBody } from "./structured-entry-body";
 
 /** Style-aware badge colors for different discussion roles */
 const STYLE_BADGE_OVERRIDES: Partial<Record<DiscussionStyle, Partial<Record<TranscriptEntryType, "default" | "secondary" | "success" | "warning" | "destructive" | "outline">>>> = {
@@ -89,54 +88,6 @@ function signatureTooltip(entry: TranscriptEntry): string {
 /** Height in px above which we collapse a message (~6 lines of text) */
 const COLLAPSE_THRESHOLD = 144;
 
-// StructuredItem is now imported from ./group-utils
-
-/** Validate parsed array has structured items with 'subject' field */
-function validateStructuredArray(arr: unknown): StructuredItem[] | null {
-  if (!Array.isArray(arr) || arr.length === 0) return null;
-  if (typeof (arr[0] as Record<string, unknown>)?.subject !== "string") return null;
-  return arr as StructuredItem[];
-}
-
-/** Extract a JSON array substring from content (finds first `[` to last `]`) */
-function extractJsonArray(content: string): string | null {
-  const start = content.indexOf("[");
-  const end = content.lastIndexOf("]");
-  if (start === -1 || end === -1 || end <= start) return null;
-  return content.slice(start, end + 1);
-}
-
-/** Try to parse content as a JSON array of structured items.
- *  Handles multiple scenarios:
- *  1. Clean JSON array
- *  2. JSON with unescaped newlines in string values (LLM output)
- *  3. JSON array embedded within wrapper text
- */
-function tryParseStructuredItems(content: string | null): StructuredItem[] | null {
-  if (!content) return null;
-
-  // 1. Try to extract a JSON array substring from the content
-  const jsonStr = extractJsonArray(content);
-  if (!jsonStr) return null;
-
-  // 2. Fast path: try standard JSON.parse
-  try {
-    return validateStructuredArray(JSON.parse(jsonStr));
-  } catch { /* continue to fallback */ }
-
-  // 3. Fallback: repair by escaping unescaped newlines within JSON string values
-  //    (LLMs sometimes produce unescaped newlines in strings)
-  try {
-    const repaired = jsonStr.replace(
-      /"(?:[^"\\]|\\.)*"/g,
-      (match) => match.replace(/\n/g, "\\n").replace(/\r/g, "\\r").replace(/\t/g, "\\t"),
-    );
-    return validateStructuredArray(JSON.parse(repaired));
-  } catch {
-    return null;
-  }
-}
-
 interface AgentResponseCardProps {
   entry: TranscriptEntry;
   isSpeaking?: boolean;
@@ -144,10 +95,12 @@ interface AgentResponseCardProps {
   discussionStyle?: DiscussionStyle;
   /** Pre-configured tasks from group config (for TASK_FORCE style PLAN entries) */
   preConfiguredTasks?: TaskDefinition[];
+  /** agentId → display name, so a planned task names its assignee rather than an id. */
+  memberDisplayNames?: Record<string, string>;
   className?: string;
 }
 
-export function AgentResponseCard({ entry, isSpeaking, allowHtml, discussionStyle, preConfiguredTasks, className }: AgentResponseCardProps) {
+export function AgentResponseCard({ entry, isSpeaking, allowHtml, discussionStyle, preConfiguredTasks, memberDisplayNames, className }: AgentResponseCardProps) {
   const { t } = useTranslation();
   const info = entryTypeInfo(entry.type);
   const isSynthesis = entry.type === "SYNTHESIS";
@@ -171,38 +124,12 @@ export function AgentResponseCard({ entry, isSpeaking, allowHtml, discussionStyl
   const badgeVar = (discussionStyle && STYLE_BADGE_OVERRIDES[discussionStyle]?.[entry.type])
     || defaultBadgeVariant(entry.type);
 
-  // A ballot, bid sheet, bargaining move or retro harvest — the four turns whose
-  // stored body is a JSON contract rather than prose. Read first, because the
-  // generic readers below would each mangle them: `tryParseStructuredItems`
-  // matches a BID's `bids` array on its `subject` field and renders the subjects
-  // as a bare numbered list, silently dropping every confidence, complexity and
-  // rationale in it; the prose path prints the object's fields under the
-  // backend's own English key names.
-  const structuredPayload = parseStructuredPayload(entry.type, entry.content);
-
-  const rawParsed = entry.content ? parseTranscriptContent(entry.content) : null;
-  // Guard: treat whitespace-only content as empty and auto-format markdown syntax
-  const parsedContent = rawParsed?.trim() ? formatMarkdownText(rawParsed) : null;
-  // Try parsing as structured JSON array — check both raw and unwrapped content (no type gate)
-  let structuredItems = structuredPayload
-    ? null
-    : tryParseStructuredItems(entry.content) ?? tryParseStructuredItems(parsedContent);
-
-  // For VERIFICATION entries, also try emoji-based text parsing (✅/❌ format from backend)
-  if (!structuredItems && isVerification) {
-    structuredItems = (entry.content ? parseEmojiVerification(entry.content) : null)
-      ?? (parsedContent ? parseEmojiVerification(parsedContent) : null);
-  }
-
-  // For PLAN entries with pre-configured tasks: convert TaskDefinition[] → StructuredItem[]
-  if (!structuredItems && isPlan && preConfiguredTasks && preConfiguredTasks.length > 0) {
-    structuredItems = preConfiguredTasks.map((task) => ({
-      subject: task.subject,
-      description: task.description,
-      assignedTo: task.assignToRole,
-      priority: task.priority,
-    }));
-  }
+  // What this turn is — a contract card (ballot, bid sheet, bargaining move,
+  // retro harvest), a task plan or verification sheet, a failure notice, or
+  // prose. Read by the same function the Workforce board and the history viewer
+  // use, so the three transcripts cannot show one entry three ways again.
+  const body = readEntryBody(entry, { preConfiguredTasks, memberNames: memberDisplayNames });
+  const parsedContent = body.kind === "markdown" ? body.text : null;
   // Only render as HTML if opt-in is enabled AND content actually contains HTML tags
   const renderAsHtml = allowHtml && parsedContent ? hasHtml(parsedContent) : false;
 
@@ -300,68 +227,8 @@ export function AgentResponseCard({ entry, isSpeaking, allowHtml, discussionStyl
             <span className="h-1.5 w-1.5 rounded-full bg-primary animate-bounce [animation-delay:300ms]" />
             <span className="text-xs text-muted-foreground ms-1">{t("groups.responding", "responding…")}</span>
           </div>
-        ) : structuredPayload ? (
-          <StructuredTurnCard payload={structuredPayload} />
-        ) : structuredItems ? (
-          /* Render structured items (plans, verifications, etc.) instead of raw JSON */
-          <div className="space-y-2">
-            <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground mb-2">
-              {isVerification ? (
-                <CheckCircle2 className="h-3.5 w-3.5" />
-              ) : (
-                <ListOrdered className="h-3.5 w-3.5" />
-              )}
-              {structuredItems.length} {structuredItems.length === 1 ? t("groups.item", "item") : t("groups.items", "items")}
-            </div>
-            {structuredItems.map((item, i) => {
-              const hasVerdict = item.passed !== undefined;
-              return (
-                <div
-                  key={i}
-                  className={cn(
-                    "flex items-start gap-3 rounded-lg border px-3 py-2.5",
-                    hasVerdict && item.passed && "border-emerald-500/30 bg-emerald-500/5",
-                    hasVerdict && !item.passed && "border-destructive/30 bg-destructive/5",
-                    !hasVerdict && "border-border/50 bg-secondary/30",
-                  )}
-                >
-                  {hasVerdict ? (
-                    item.passed ? (
-                      <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500 mt-0.5" />
-                    ) : (
-                      <XCircle className="h-4 w-4 shrink-0 text-destructive mt-0.5" />
-                    )
-                  ) : (
-                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-sky-500/20 text-sky-400 text-[10px] font-bold mt-0.5">
-                      {i + 1}
-                    </span>
-                  )}
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-foreground leading-snug">{item.subject}</p>
-                    {item.description && (
-                      <ExpandableText text={item.description} className="mt-0.5" />
-                    )}
-                    {item.feedback && (
-                      <ExpandableText text={item.feedback} className="mt-0.5" />
-                    )}
-                    {item.assignedTo && (
-                      <div className="flex items-center gap-1 mt-1.5">
-                        <User2 className="h-3 w-3 text-muted-foreground" />
-                        <span className="text-[10px] text-muted-foreground font-medium truncate max-w-[200px]" title={item.assignedTo}>
-                          {item.assignedTo.length > 12 ? `${item.assignedTo.slice(0, 12)}…` : item.assignedTo}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                  {item.priority != null && (
-                    <Badge variant="outline" className="text-[9px] px-1.5 py-0 shrink-0">
-                      P{item.priority}
-                    </Badge>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+        ) : isStructuredBody(body) ? (
+          <StructuredEntryBody body={body} />
         ) : parsedContent ? (
           <>
             <div
@@ -438,32 +305,6 @@ export function AgentResponseCard({ entry, isSpeaking, allowHtml, discussionStyl
           </div>
         )}
       </div>
-    </div>
-  );
-}
-
-/** Clamped text with show more/less toggle for long content */
-function ExpandableText({ text, className }: { text: string; className?: string }) {
-  const { t } = useTranslation();
-  const [expanded, setExpanded] = useState(false);
-  const isLong = text.length > 100;
-
-  return (
-    <div className={className}>
-      <p className={cn("text-xs text-muted-foreground leading-relaxed", !expanded && isLong && "line-clamp-2")}>
-        {text}
-      </p>
-      {isLong && (
-        <button
-          type="button"
-          onClick={() => setExpanded(!expanded)}
-          className="text-[10px] text-primary/70 hover:text-primary font-medium mt-0.5 transition-colors"
-        >
-          {expanded
-            ? t("common.showLess", "Show less")
-            : t("common.showMore", "Show more")}
-        </button>
-      )}
     </div>
   );
 }

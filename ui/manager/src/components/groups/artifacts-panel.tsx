@@ -63,7 +63,7 @@ export function ArtifactsPanel({ artifacts, className }: ArtifactsPanelProps) {
                 </span>
                 <Badge
                   variant={artifact.status === "FINAL" ? "success" : "secondary"}
-                  className="shrink-0 text-[9px] px-1.5 py-0"
+                  className="shrink-0 text-[10px] px-1.5 py-0"
                 >
                   {artifact.status === "FINAL"
                     ? t("groups.artifactFinal", "Final")

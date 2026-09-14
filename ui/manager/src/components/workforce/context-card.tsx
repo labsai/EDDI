@@ -1,6 +1,9 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
+import { entryBodyToMarkdown, readEntryBody, readMessageBody } from "@/lib/group-entry-body";
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -38,6 +41,15 @@ function ChevronIcon({ expanded }: { expanded: boolean }) {
 function ContextCard({ boardName, question, response, className }: ContextCardProps) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(true);
+  // The "Ask more" hand-off passes the card's markdown, but a stored body (a
+  // ballot, a fenced verdict) is read the same way the transcript reads it
+  // rather than printed as the wire format.
+  const readableResponse = useMemo(() => {
+    const body = readMessageBody(response) ?? readEntryBody({ content: response });
+    return entryBodyToMarkdown(body, (key, fallback, options) =>
+      t(key, { ...options, defaultValue: fallback }),
+    );
+  }, [response, t]);
 
   // Don't render if there's no context to show
   if (!question && !response) return null;
@@ -100,9 +112,10 @@ function ContextCard({ boardName, question, response, className }: ContextCardPr
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   {t("Workforce.thread.responseLabel", "Response")}
                 </p>
-                <p className="mt-1 max-h-32 overflow-y-auto text-sm text-foreground/80">
-                  {response}
-                </p>
+                <div className="prose prose-sm dark:prose-invert mt-1 max-h-32 max-w-none overflow-y-auto text-foreground/80">
+                  {/* No rehypeRaw: agent output is untrusted, so raw HTML stays escaped. */}
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{readableResponse}</ReactMarkdown>
+                </div>
               </div>
             )}
           </div>

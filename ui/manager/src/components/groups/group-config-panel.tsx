@@ -208,24 +208,24 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
               </div>
               <div className="flex items-center gap-1 shrink-0">
                 {member.role && (
-                  <Badge variant="outline" className="text-[9px] px-1 py-0">
+                  <Badge variant="outline" className="text-[10px] px-1 py-0">
                     {member.role}
                   </Badge>
                 )}
                 {member.memberType === "GROUP" && (
-                  <Badge variant="secondary" className="text-[9px] px-1 py-0">
+                  <Badge variant="secondary" className="text-[10px] px-1 py-0">
                     <Users className="h-2 w-2 me-0.5" />
                     {t("groups.memberTypeGroup", "Group")}
                   </Badge>
                 )}
                 {member.memberType === "HUMAN" && (
-                  <Badge variant="secondary" className="text-[9px] px-1 py-0">
+                  <Badge variant="secondary" className="text-[10px] px-1 py-0">
                     <UserCheck className="h-2 w-2 me-0.5" />
                     {t("groups.memberTypeHuman", "Human")}
                   </Badge>
                 )}
                 {config.moderatorAgentId === member.agentId && (
-                  <Badge variant="default" className="text-[9px] px-1 py-0">
+                  <Badge variant="default" className="text-[10px] px-1 py-0">
                     {t("groups.moderatorBadge", "⭐ Mod")}
                   </Badge>
                 )}
@@ -466,7 +466,7 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
               >
                 <div className="flex items-center gap-1.5">
                   <span className="text-xs font-medium text-foreground">{task.subject}</span>
-                  <Badge variant="outline" className="text-[9px] px-1 py-0 ms-auto">
+                  <Badge variant="outline" className="text-[10px] px-1 py-0 ms-auto">
                     P{task.priority}
                   </Badge>
                 </div>
@@ -541,16 +541,19 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
                 return t(`groups.lifecycle.${policy}`, policy.replace(/_/g, " ").toLowerCase());
               })()}
             />
-            {config.dynamicAgents.allowedProviders.length > 0 && (
+            {/* Both can be absent: a group created from EDDI's `ops-task-force`
+                template stores `dynamicAgents` without either, and reading
+                them unguarded took the whole group page down. */}
+            {(config.dynamicAgents.allowedProviders?.length ?? 0) > 0 && (
               <InfoRow
                 label={t("groups.allowedProviders", "Providers")}
-                value={config.dynamicAgents.allowedProviders.join(", ")}
+                value={config.dynamicAgents.allowedProviders!.join(", ")}
               />
             )}
-            {Object.keys(config.dynamicAgents.allowedModels).length > 0 && (
+            {Object.keys(config.dynamicAgents.allowedModels ?? {}).length > 0 && (
               <InfoRow
                 label={t("groups.allowedModels", "Models")}
-                value={formatAllowedModels(config.dynamicAgents.allowedModels)}
+                value={formatAllowedModels(config.dynamicAgents.allowedModels!)}
               />
             )}
             <InfoRow
@@ -791,7 +794,7 @@ function PhaseFlowPreview({ flow, phases }: { flow: string; phases: DiscussionPh
                     <span className="opacity-60" aria-label={turnLabel}>{turnIcon}</span>
                     {phase.name}
                   </span>
-                  <span className="text-[8px] text-muted-foreground font-normal leading-none">
+                  <span className="text-[10px] text-muted-foreground font-normal leading-none">
                     {scopeLabel}
                   </span>
                 </div>

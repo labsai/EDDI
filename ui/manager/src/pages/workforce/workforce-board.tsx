@@ -269,6 +269,9 @@ function WorkforceBoard() {
     : selectedConversation?.decision ?? null;
 
   const members = groupConfig?.members ?? [];
+  // For a live stream's planned tasks, which name their assignee by agent id
+  // before any conversation document exists to map it.
+  const rosterDisplayNames = Object.fromEntries(members.map((m) => [m.agentId, m.displayName]));
   const style = groupConfig?.style;
 
   // ─── Task board (TASK_FORCE, or any style with agent-filed tasks) ──
@@ -659,6 +662,10 @@ function WorkforceBoard() {
               className="flex-1 min-h-0 ps-4 pe-4 pt-4 pb-4"
               // Debate verdict / vote tally / agreement, with minority report.
               decision={displayDecision}
+              memberDisplayNames={selectedConversation?.memberDisplayNames ?? rosterDisplayNames}
+              // A pre-configured plan is recorded as a one-line summary; the
+              // tasks it stands for live in the group's config.
+              preConfiguredTasks={groupConfig?.tasks}
               // Per-phase convergence checks (I2) — live-stream state only.
               convergence={viewingStream ? streamState.convergence : undefined}
               // Task board + artifacts / negotiation ledger / windowing summary,

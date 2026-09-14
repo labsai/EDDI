@@ -1,8 +1,14 @@
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Gavel, MessageSquareWarning, Scale } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { ChevronDown, ChevronUp, Gavel, MessageSquareWarning, Scale } from "lucide-react";
 import { cn, hashColor, getInitials } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import type { DecisionRecord, DecisionType } from "@/lib/api/groups";
+import { describeDecision } from "@/lib/group-decision";
+import { formatMarkdownText } from "./group-utils";
 
 /**
  * The structured conclusion of a discussion (EDDI Wave 0, F3), rendered next to
@@ -11,8 +17,9 @@ import type { DecisionRecord, DecisionType } from "@/lib/api/groups";
  * A discussion's only conclusion used to be `synthesizedAnswer`, which is always
  * prose — so "who won the debate" was something a reader had to infer from
  * English. `decision` is the machine-readable answer, and this card is its
- * display: the outcome sentence, the winning side, the per-side tally, and the
- * minority report of everyone who disagreed.
+ * display: the outcome, the winning side, the per-side tally, and the minority
+ * report of everyone who disagreed. What each engine puts in `outcome` and
+ * `tally` differs, and `describeDecision` owns reading it.
  */
 
 interface DecisionRecordCardProps {
@@ -28,12 +35,21 @@ const TYPE_ICON: Record<DecisionType, typeof Gavel> = {
   NONE: MessageSquareWarning,
 };
 
+/** An outcome body longer than this starts collapsed. */
+const BODY_COLLAPSE_CHARS = 400;
+
+/** Tally labels up to this length ("PRO", "Ship it") fit the compact grid. */
+const SHORT_LABEL_CHARS = 20;
+
 export function DecisionRecordCard({ decision, className }: DecisionRecordCardProps) {
   const { t } = useTranslation();
+  const [bodyExpanded, setBodyExpanded] = useState(false);
   const Icon = TYPE_ICON[decision.type] ?? MessageSquareWarning;
-  const tally = normalizeTally(decision.tally);
+  const view = describeDecision(decision);
   const dissents = decision.dissents ?? [];
   const unparsed = decision.type === "NONE" && !!decision.raw?.trim();
+  const bodyCollapsible = !!view.body && view.body.length > BODY_COLLAPSE_CHARS;
+  const scoresAreSentences = view.scores.some(([label]) => label.length > SHORT_LABEL_CHARS);
 
   return (
     <div
@@ -51,12 +67,12 @@ export function DecisionRecordCard({ decision, className }: DecisionRecordCardPr
         <h3 className="text-sm font-semibold text-foreground">
           {t(`groups.decisionType.${decision.type}`, DEFAULT_TYPE_LABELS[decision.type] ?? decision.type)}
         </h3>
-        {decision.winner ? (
+        {view.showWinner ? (
           <Badge variant="success" data-testid="decision-winner">
             {t("groups.decisionWinner", "Winner: {{winner}}", { winner: decision.winner })}
           </Badge>
         ) : (
-          decision.type === "VERDICT" && (
+          view.showTie && (
             <Badge variant="secondary" data-testid="decision-tie">
               {t("groups.decisionTie", "Tie")}
             </Badge>
@@ -69,10 +85,45 @@ export function DecisionRecordCard({ decision, className }: DecisionRecordCardPr
         )}
       </div>
 
-      {decision.outcome && (
+      {view.headline && (
         <p className="text-sm text-foreground" data-testid="decision-outcome">
-          {decision.outcome}
+          {view.headline}
         </p>
+      )}
+
+      {view.body && (
+        <div data-testid="decision-outcome">
+          <div
+            className={cn(
+              "prose prose-sm dark:prose-invert max-w-none overflow-hidden text-foreground",
+              bodyCollapsible && !bodyExpanded && "max-h-40",
+            )}
+          >
+            {/* No rehypeRaw: an arbitrator's ruling is model output, so raw HTML stays escaped. */}
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{formatMarkdownText(view.body)}</ReactMarkdown>
+          </div>
+          {bodyCollapsible && (
+            <Button
+              type="button"
+              variant="link"
+              size="sm"
+              onClick={() => setBodyExpanded((v) => !v)}
+              className="mt-1 h-auto gap-1 px-0 py-0 text-xs hover:text-primary/80 [&_svg]:h-3 [&_svg]:w-3"
+            >
+              {bodyExpanded ? (
+                <>
+                  <ChevronUp className="h-3 w-3" />
+                  {t("common.showLess", "Show less")}
+                </>
+              ) : (
+                <>
+                  <ChevronDown className="h-3 w-3" />
+                  {t("common.showMore", "Show more")}
+                </>
+              )}
+            </Button>
+          )}
+        </div>
       )}
 
       {decision.decidedAtPhase && (
@@ -81,9 +132,28 @@ export function DecisionRecordCard({ decision, className }: DecisionRecordCardPr
         </p>
       )}
 
-      {tally.length > 0 && (
+      {view.scores.length > 0 && scoresAreSentences && (
+        // A ballot's options are whatever the chair distilled — often whole
+        // sentences, which the grid below uppercased and truncated to nothing.
+        <dl className="mt-3 space-y-1.5" data-testid="decision-tally">
+          {view.scores.map(([key, value]) => (
+            <div
+              key={key}
+              className={cn(
+                "flex items-start justify-between gap-3 rounded-lg border bg-background/60 px-2.5 py-1.5",
+                key === decision.winner ? "border-primary/40" : "border-border",
+              )}
+            >
+              <dt className="min-w-0 text-xs text-foreground">{key}</dt>
+              <dd className="shrink-0 text-sm font-semibold tabular-nums text-foreground">{value}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+
+      {view.scores.length > 0 && !scoresAreSentences && (
         <dl className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3" data-testid="decision-tally">
-          {tally.map(([key, value]) => (
+          {view.scores.map(([key, value]) => (
             <div key={key} className="rounded-lg border border-border bg-background/60 px-2.5 py-1.5">
               <dt className="truncate text-[10px] uppercase tracking-wider text-muted-foreground" title={key}>
                 {key}
@@ -92,6 +162,55 @@ export function DecisionRecordCard({ decision, className }: DecisionRecordCardPr
             </div>
           ))}
         </dl>
+      )}
+
+      {view.ballots && (
+        <p className="mt-2 text-[11px] text-muted-foreground" data-testid="decision-ballots">
+          {t("groups.decisionBallots", "{{valid}} of {{participants}} ballots valid", view.ballots)}
+        </p>
+      )}
+
+      {view.terms && (
+        <div className="mt-3 rounded-lg border border-border bg-background/60 p-2.5" data-testid="decision-terms">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            {t("groups.decisionTerms", "Agreed terms")}
+          </p>
+          {/* Terms are a party's own words, markdown and all. No rehypeRaw: untrusted. */}
+          <div className="prose prose-sm dark:prose-invert mt-0.5 max-w-none text-foreground">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{formatMarkdownText(view.terms)}</ReactMarkdown>
+          </div>
+        </div>
+      )}
+
+      {view.concessions.length > 0 && (
+        <ul className="mt-2 space-y-1" data-testid="decision-concessions">
+          {view.concessions.map((concession, idx) => (
+            <li
+              key={`${concession.gaveUp}-${idx}`}
+              className="rounded-lg border border-border bg-background/60 p-2 text-xs"
+            >
+              <span className="text-foreground">{concession.gaveUp}</span>
+              {/* Flipped with the writing direction — U+2192 is not bidi-mirrored. */}
+              <span className="mx-1.5 inline-block text-muted-foreground rtl:-scale-x-100" aria-hidden="true">
+                →
+              </span>
+              <span className="text-muted-foreground">
+                {t("groups.payload.inReturnFor", "in return for {{received}}", {
+                  received: concession.inReturnFor,
+                })}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {view.details && (
+        <div
+          className="prose prose-sm dark:prose-invert mt-3 max-w-none text-muted-foreground"
+          data-testid="decision-details"
+        >
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{view.details}</ReactMarkdown>
+        </div>
       )}
 
       {unparsed && (
@@ -148,22 +267,3 @@ const DEFAULT_TYPE_LABELS: Record<DecisionType, string> = {
   AWARD: "Award",
   NONE: "No structured decision",
 };
-
-/**
- * `tally` is `Map<String, Object>` on the backend — its shape is defined by
- * whichever feature produced the decision (side→score for a verdict,
- * option→weight for a vote), so it is rendered generically. Numbers are shown at
- * a sane precision; anything else is stringified rather than dropped, because a
- * tally entry this build does not understand is still evidence.
- */
-function normalizeTally(tally: Record<string, unknown> | null | undefined): [string, string][] {
-  if (!tally || typeof tally !== "object") return [];
-  return Object.entries(tally).map(([key, value]) => {
-    if (typeof value === "number" && Number.isFinite(value)) {
-      return [key, Number.isInteger(value) ? String(value) : value.toFixed(2)];
-    }
-    if (value == null) return [key, "—"];
-    if (typeof value === "object") return [key, JSON.stringify(value)];
-    return [key, String(value)];
-  });
-}

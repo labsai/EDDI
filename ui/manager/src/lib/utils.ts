@@ -65,7 +65,13 @@ const AVATAR_COLORS = [
 ];
 
 /** Deterministic Tailwind bg-color class from a string hash (for avatars) */
-export function hashColor(str: string): string {
+/**
+ * Tolerates a missing value on purpose: EDDI writes engine-authored transcript
+ * entries (a CONVERGENCE check) with no `speakerAgentId` at all, and reading
+ * `.length` of that crashed the whole group transcript.
+ */
+export function hashColor(str: string | null | undefined): string {
+  str = str ?? "";
   let hash = 0;
   for (let i = 0; i < str.length; i++) {
     hash = str.charCodeAt(i) + ((hash << 5) - hash);
@@ -74,8 +80,8 @@ export function hashColor(str: string): string {
 }
 
 /** Extract up to 2 initials from a display name */
-export function getInitials(name: string): string {
-  return name
+export function getInitials(name: string | null | undefined): string {
+  return (name ?? "")
     .split(/\s+/)
     .map((w) => w[0])
     .filter(Boolean)

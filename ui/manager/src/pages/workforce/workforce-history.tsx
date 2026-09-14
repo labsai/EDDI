@@ -227,7 +227,11 @@ function WorkforceHistory() {
   const [selectedId, setSelectedId] = useState<string | null>(
     searchParams.get("conversation") ?? null,
   );
-  const [showViewer, setShowViewer] = useState(false);
+  // Open when the URL names a conversation. Below `lg` the list and the viewer
+  // take turns, and starting closed meant a shared or bookmarked history link on
+  // a phone landed on the list with the right row highlighted and nothing to
+  // read — the conversation it pointed at never opened.
+  const [showViewer, setShowViewer] = useState(() => searchParams.get("conversation") != null);
   const [filterText, setFilterText] = useState("");
   const [page, setPage] = useState(0);
   const [deleteTarget, setDeleteTarget] = useState<GroupConversation | null>(
@@ -503,6 +507,7 @@ function WorkforceHistory() {
               groupId={boardId}
               conversationId={selectedId}
               groupName={boardConfig?.name}
+              preConfiguredTasks={boardConfig?.tasks}
               onClose={() => {
                 setSelectedId(null);
                 setShowViewer(false);

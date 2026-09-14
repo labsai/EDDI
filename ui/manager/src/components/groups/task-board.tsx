@@ -208,11 +208,18 @@ function TaskCard({
           title={task.awardedBid.rationale}
         >
           <Gavel className="mt-0.5 h-2.5 w-2.5 shrink-0" aria-hidden="true" />
-          <span>
+          <span className="min-w-0">
             {t("taskBoard.wonByBid", "Won by bid — {{confidence}}% confidence, {{complexity}}", {
               confidence: Math.round(task.awardedBid.confidence * 100),
               complexity: task.awardedBid.estimatedComplexity,
             })}
+            {/* The rationale is why this member got the task — it used to live
+                only in a hover tooltip, invisible on touch and to most readers. */}
+            {task.awardedBid.rationale && (
+              <span className="mt-0.5 block line-clamp-2 text-muted-foreground" data-testid={`task-award-rationale-${task.id}`}>
+                {task.awardedBid.rationale}
+              </span>
+            )}
           </span>
         </div>
       )}
@@ -448,7 +455,16 @@ export function TaskBoard({
   //  Render
   // ------------------------------------------------------------------
   return (
-    <div data-testid="task-board" role="region" aria-label={t("taskBoard.title", "Task Board")}>
+    // A container, because the board never gets the viewport's width: it sits in
+    // a transcript column between two side panels. Keyed off the viewport, the
+    // five-column kanban turned on at 768px and squeezed each column to ~75px —
+    // a task card one word wide — on tablets and even on a 1440px desktop.
+    <div
+      className="@container/taskboard"
+      data-testid="task-board"
+      role="region"
+      aria-label={t("taskBoard.title", "Task Board")}
+    >
       {/* Section heading — clickable to toggle */}
       <button
         onClick={() => {
@@ -480,7 +496,7 @@ export function TaskBoard({
 
       {/* ---- Desktop: 4-column kanban ---- */}
       {!collapsed && (
-      <div className="hidden md:grid md:grid-cols-5 gap-3" id="task-board-content">
+      <div className="hidden @3xl/taskboard:grid @3xl/taskboard:grid-cols-5 gap-3" id="task-board-content">
         {columns.map((col) => (
           <div
             key={col.key}
@@ -521,7 +537,7 @@ export function TaskBoard({
 
       {/* ---- Mobile: vertical list with status indicators ---- */}
       {!collapsed && (
-      <div className="md:hidden space-y-2">
+      <div className="@3xl/taskboard:hidden space-y-2">
         {columns.map((col) =>
           col.tasks.length > 0 ? (
             <div key={col.key}>

@@ -65,7 +65,7 @@ export function NegotiationLedger({ negotiation, memberDisplayNames, className }
                 <span className="font-mono text-[10px] text-muted-foreground">{p.id}</span>
                 <Badge
                   variant={p.status === "OPEN" ? "success" : "secondary"}
-                  className="text-[9px] px-1.5 py-0"
+                  className="text-[10px] px-1.5 py-0"
                   data-testid={`negotiation-proposal-status-${p.id}`}
                 >
                   {p.status === "OPEN"

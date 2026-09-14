@@ -230,6 +230,21 @@ describe("GroupConfigPanel", () => {
       expect(screen.getByText("90s")).toBeInTheDocument();
     });
 
+    it("renders a template group whose dynamic-agent block has no provider or model lists", () => {
+      // Exactly what EDDI's `ops-task-force` template stores. Reading
+      // `allowedProviders.length` on it took the whole group page down.
+      const templateDynamicAgents = {
+        enabled: true, allowCreation: false, allowRecruitment: true, allowDelegation: true,
+        maxCreatedAgentsPerDiscussion: 5, maxRecruitedAgentsPerDiscussion: 3,
+        maxDelegationsPerTask: 3, maxDelegationDepth: 3, delegationTimeoutSeconds: 60,
+        inheritParentModel: true, lifecyclePolicy: "ephemeral",
+      } as unknown as NonNullable<AgentGroupConfiguration["dynamicAgents"]>;
+      renderWithProviders(<GroupConfigPanel config={{ ...mockConfig, dynamicAgents: templateDynamicAgents }} />);
+      expect(screen.getByText("Product Design Council")).toBeInTheDocument();
+      expect(screen.queryByText("Providers")).not.toBeInTheDocument();
+      expect(screen.queryByText("Models")).not.toBeInTheDocument();
+    });
+
     /** Both inline editors write the whole config at the same version. */
     it("closes the approval editor when the phase editor is opened", async () => {
       const user = userEvent.setup();

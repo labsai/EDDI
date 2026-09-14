@@ -297,7 +297,7 @@ export interface VerdictJson {
 }
 
 /** Unwrap a body that is nothing but one fenced code block. */
-function stripLoneCodeFence(content: string): string {
+export function stripLoneCodeFence(content: string): string {
   const match = /^\s*(?:```|~~~)[^\n]*\n([\s\S]*?)\n?(?:```|~~~)\s*$/.exec(content);
   return match?.[1] ?? content;
 }
@@ -492,7 +492,7 @@ function renderJsonRecord(
  * transcript, which is the exact thing this function exists to prevent.
  * Nesting now recurses into a sub-list instead.
  */
-function readableJsonObject(record: Record<string, unknown>): string {
+export function readableJsonObject(record: Record<string, unknown>): string {
   return renderJsonRecord(record, 0, 0).join("\n");
 }
 
@@ -608,7 +608,114 @@ export function parseTranscriptContent(content: string): string {
     }
   }
 
+  // A debate's rendered outcome — see `splitVerdictOutcome`. The headline
+  // becomes a bold lead line and the reasoning starts on a line of its own, so
+  // its first heading is a heading rather than "— ### Verdict" mid-sentence.
+  const outcome = splitVerdictOutcome(extracted);
+  if (outcome?.body) extracted = `**${outcome.headline}**\n\n${outcome.body}`;
+
   return formatMarkdownText(extracted);
+}
+
+// ─── Verdict Outcome ─────────────────────────────────────────────
+
+/**
+ * The headline EDDI's `DebateVerdictParser.renderOutcome` puts in front of a
+ * judge's reasoning: `CON wins (PRO 6/10, CON 8/10) — <reasoning>`.
+ *
+ * That one string is both the decision's `outcome` and the discussion's
+ * `synthesizedAnswer`, and the reasoning is a multi-section markdown document.
+ * Glued to the headline, its first heading rendered as a literal "### Verdict"
+ * mid-line; printed whole on the verdict card, the entire analysis became one
+ * plain-text paragraph directly above the synthesis that already shows it.
+ *
+ * Anchored to the exact shape the backend writes (the winner is normalized to
+ * PRO/CON/TIE before rendering), so ordinary prose is never split.
+ */
+const VERDICT_OUTCOME =
+  /^((?:PRO|CON) wins|Tie)((?: \(PRO -?\d+(?:\.\d+)?\/10, CON -?\d+(?:\.\d+)?\/10\))?)(?: — ([\s\S]*))?$/;
+
+export interface VerdictOutcome {
+  /** The finding alone: "CON wins (PRO 6/10, CON 8/10)". */
+  headline: string;
+  /** The judge's reasoning; `""` when the judge sent only a tally. */
+  body: string;
+}
+
+export function splitVerdictOutcome(text: string | null | undefined): VerdictOutcome | null {
+  if (!text) return null;
+  const match = VERDICT_OUTCOME.exec(text.trim());
+  if (!match) return null;
+  return { headline: `${match[1]}${match[2]}`, body: (match[3] ?? "").trim() };
+}
+
+// ─── Agent Failure ───────────────────────────────────────────────
+
+/**
+ * What EDDI stores as a member's turn when that member's own conversation ended
+ * in ERROR (`MemberTurnExecutor`, `GroupLifecycleOps`). It is a status, not
+ * something the agent said, and rendered as prose it read as the agent's answer
+ * — including as a discussion's synthesis.
+ */
+const AGENT_FAILURE_PLACEHOLDER = "[Agent failed to produce output — conversation entered ERROR state]";
+
+export function isAgentFailurePlaceholder(text: string | null | undefined): boolean {
+  return !!text && text.trim() === AGENT_FAILURE_PLACEHOLDER;
+}
+
+// ─── Structured Item Lists (PLAN / VERIFICATION) ─────────────────
+
+/** A parsed array whose items carry a `subject` — a task plan or a verification sheet. */
+function validateStructuredArray(arr: unknown): StructuredItem[] | null {
+  if (!Array.isArray(arr) || arr.length === 0) return null;
+  if (typeof (arr[0] as Record<string, unknown>)?.subject !== "string") return null;
+  return arr as StructuredItem[];
+}
+
+/** Extract a JSON array substring from content (first `[` to last `]`). */
+function extractJsonArray(content: string): string | null {
+  const start = content.indexOf("[");
+  const end = content.lastIndexOf("]");
+  if (start === -1 || end === -1 || end <= start) return null;
+  return content.slice(start, end + 1);
+}
+
+/**
+ * A moderator's task plan or a verifier's pass/fail sheet, read out of the JSON
+ * array EDDI asks for (`TEMPLATE_PLAN`, `TEMPLATE_VERIFY`). Handles a clean
+ * array, one embedded in wrapper text or a fence, and one whose string values
+ * carry the unescaped newlines LLMs emit.
+ *
+ * `wholeBody` requires the array to BE the message, bare or fenced, rather than
+ * sit somewhere inside it — what a free-form chat reply needs, where an array
+ * quoted mid-answer is part of the answer.
+ */
+export function parseStructuredItems(
+  content: string | null | undefined,
+  options: { wholeBody?: boolean } = {},
+): StructuredItem[] | null {
+  if (!content) return null;
+  if (options.wholeBody) {
+    const body = stripLoneCodeFence(content).trim();
+    if (!body.startsWith("[") || !body.endsWith("]")) return null;
+  }
+
+  const jsonStr = extractJsonArray(content);
+  if (!jsonStr) return null;
+
+  try {
+    return validateStructuredArray(JSON.parse(jsonStr));
+  } catch { /* continue to the repair below */ }
+
+  try {
+    const repaired = jsonStr.replace(
+      /"(?:[^"\\]|\\.)*"/g,
+      (match) => match.replace(/\n/g, "\\n").replace(/\r/g, "\\r").replace(/\t/g, "\\t"),
+    );
+    return validateStructuredArray(JSON.parse(repaired));
+  } catch {
+    return null;
+  }
 }
 
 // ─── Emoji Verification Parser ───────────────────────────────────

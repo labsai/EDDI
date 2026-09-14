@@ -96,6 +96,7 @@ describe("group payload readers", () => {
         accept: "p-1",
         proposalTerms: null,
         concessions: [],
+        reasoning: null,
       });
     });
 

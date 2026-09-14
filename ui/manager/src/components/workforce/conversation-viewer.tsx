@@ -9,16 +9,17 @@ import { AdvisorAvatar } from "@/components/workforce/advisor-avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { parseTranscriptContent, truncateContent } from "@/components/groups/group-utils";
+import { isAgentFailurePlaceholder, parseTranscriptContent, truncateContent } from "@/components/groups/group-utils";
 import { downloadFile, generateMarkdown } from "@/lib/group-transcript-export";
-import { StructuredTurnCard } from "@/components/groups/structured-turn-card";
-import { parseStructuredPayload } from "@/lib/group-payloads";
+import { AgentFailedNotice, StructuredEntryBody } from "@/components/groups/structured-entry-body";
+import { isStructuredBody, readEntryBody } from "@/lib/group-entry-body";
 import { DiscussionInsights } from "@/components/groups/discussion-insights";
 import { PersistedTaskBoard } from "@/components/groups/task-board";
 import { DecisionRecordCard } from "@/components/groups/decision-record-card";
 import { hasDisplayableDecision } from "@/lib/group-config";
 import {
   entryTypeInfo,
+  type TaskDefinition,
   type TranscriptEntry,
   type GroupConversationState,
 } from "@/lib/api/groups";
@@ -30,6 +31,8 @@ interface ConversationViewerProps {
   conversationId: string;
   /** Titles the exported file. Without it the export is headed "Discussion". */
   groupName?: string;
+  /** The group's configured tasks, which a pre-configured PLAN entry's one-line summary stands for. */
+  preConfiguredTasks?: TaskDefinition[];
   onClose?: () => void;
   className?: string;
 }
@@ -173,7 +176,7 @@ function PhaseSeparator({
         <span>
           {phaseName ?? t("Workforce.history.phase", "Phase")}
         </span>
-        <Badge variant="secondary" className="text-[9px] px-1.5 py-0">
+        <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
           {typeInfo.label}
         </Badge>
       </div>
@@ -210,18 +213,22 @@ function QuestionBubble({ content, index }: { content: string | null; index: num
 function AgentEntryCard({
   entry,
   index,
+  memberDisplayNames,
+  preConfiguredTasks,
 }: {
   entry: TranscriptEntry;
   index: number;
+  memberDisplayNames?: Record<string, string>;
+  preConfiguredTasks?: TaskDefinition[];
 }) {
   const { t } = useTranslation();
   const typeInfo = entryTypeInfo(entry.type);
   const borderClass = agentBorderClass(entry.speakerAgentId);
-  // A ballot, bid sheet, bargaining move or retro harvest stores the member's
-  // raw JSON reply rather than prose, and gets a typed card — see
-  // `lib/group-payloads.ts`. Everything else takes the markdown path below.
-  const structuredPayload = parseStructuredPayload(entry.type, entry.content);
-  const parsedContent = parseTranscriptContent(entry.content ?? "");
+  // The same reading the Manager transcript and the Workforce board do — a
+  // contract card, a task plan or verification sheet, a failure notice, or
+  // prose. See `readEntryBody`.
+  const body = readEntryBody(entry, { memberNames: memberDisplayNames, preConfiguredTasks });
+  const parsedContent = body.kind === "markdown" ? body.text : "";
   const hasContent = parsedContent.trim().length > 0;
   const { contentRef, isCollapsible, isExpanded, setIsExpanded } = useCollapsibleContent(parsedContent);
 
@@ -259,8 +266,8 @@ function AgentEntryCard({
 
       {/* Content */}
       <div className="ps-10">
-        {structuredPayload ? (
-          <StructuredTurnCard payload={structuredPayload} />
+        {isStructuredBody(body) ? (
+          <StructuredEntryBody body={body} />
         ) : hasContent ? (
           <>
             <div
@@ -303,7 +310,10 @@ function AgentEntryCard({
           </>
         ) : (
           <p className="text-sm text-muted-foreground italic">
-            {t("Workforce.history.noContent", "No content")}
+            {/* An abstention carries no body by design — the type is the message. */}
+            {entry.type === "ABSTAINED"
+              ? t("groups.abstainedBody", "Declined to add anything new this round.")
+              : t("Workforce.history.noContent", "No content")}
           </p>
         )}
       </div>
@@ -362,7 +372,9 @@ function SynthesisEntryCard({
           isCollapsible && !isExpanded && "max-h-36",
         )}
       >
-        {hasContent ? (
+        {isAgentFailurePlaceholder(entry.content) ? (
+          <AgentFailedNotice className="ps-6" />
+        ) : hasContent ? (
           <div className="prose prose-sm dark:prose-invert max-w-none text-foreground/80 ps-6 [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>
               {truncateContent(
@@ -508,9 +520,13 @@ function SynthesizedAnswerFooter({ content }: { content: string }) {
         )}
       >
         <div className="prose prose-sm dark:prose-invert max-w-none text-foreground/80 [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>
-            {truncateContent(parsedContent, t("groups.contentTruncated", "[Content truncated]"))}
-          </ReactMarkdown>
+          {isAgentFailurePlaceholder(content) ? (
+            <AgentFailedNotice />
+          ) : (
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {truncateContent(parsedContent, t("groups.contentTruncated", "[Content truncated]"))}
+            </ReactMarkdown>
+          )}
         </div>
         {isCollapsible && !isExpanded && (
           <div className="absolute bottom-0 inset-x-0 h-10 bg-gradient-to-t from-amber-100/50 dark:from-amber-500/5 to-transparent pointer-events-none" />
@@ -565,6 +581,7 @@ function ConversationViewer({
   groupId,
   conversationId,
   groupName,
+  preConfiguredTasks,
   onClose,
   className,
 }: ConversationViewerProps) {
@@ -593,8 +610,8 @@ function ConversationViewer({
   const handleExport = useCallback(() => {
     if (!conversation) return;
     downloadFile(
-      generateMarkdown(conversation, groupName, (key, fallback) =>
-        t(key, { defaultValue: fallback }),
+      generateMarkdown(conversation, groupName, (key, fallback, options) =>
+        t(key, { ...options, defaultValue: fallback }),
       ),
       `discussion-${conversationId.slice(0, 8)}.md`,
       "text/markdown",
@@ -814,7 +831,12 @@ function ConversationViewer({
               return (
                 <div key={`r-${idx}`}>
                   {phaseHeader}
-                  <AgentEntryCard entry={entry} index={idx} />
+                  <AgentEntryCard
+                    entry={entry}
+                    index={idx}
+                    memberDisplayNames={conversation.memberDisplayNames}
+                    preConfiguredTasks={preConfiguredTasks}
+                  />
                 </div>
               );
           }
