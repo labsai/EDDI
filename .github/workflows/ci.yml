@@ -46,7 +46,7 @@ jobs:
         # Skipped on tag pushes — a release must run the FULL pipeline no matter
         # what the tagged commit happens to touch (see "Resolve" below).
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
-        uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v3
         with:
           filters: |
             # Everything the build, the image or the scanners are GOVERNED by has
