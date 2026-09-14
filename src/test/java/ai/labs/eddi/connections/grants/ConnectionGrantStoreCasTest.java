@@ -162,4 +162,19 @@ class ConnectionGrantStoreCasTest {
         assertTrue(store.claimRefresh(TENANT, CONNECTION, PRINCIPAL, "replica-b", Duration.ofSeconds(30)),
                 "the grant is still claimable, which a leaked claim without an expiry would have prevented");
     }
+
+    @Test
+    @DisplayName("deleteIfSealedWith removes the write it names and spares a later write under the same key")
+    void deleteIfSealedWithSparesALaterWrite() {
+        store.upsert(grant("gen-1", "first-link"));
+        store.upsert(grant("gen-2", "second-link"));
+
+        assertFalse(store.deleteIfSealedWith(TENANT, CONNECTION, PRINCIPAL, "iv-gen-1"),
+                "a callback taking back the first link must not remove the second one that replaced it");
+        assertEquals("gen-2:access-second-link", stored().getEncryptedAccessToken());
+        assertFalse(store.deleteIfSealedWith(TENANT, CONNECTION, PRINCIPAL, null), "a null IV names no write");
+
+        assertTrue(store.deleteIfSealedWith(TENANT, CONNECTION, PRINCIPAL, "iv-gen-2"));
+        assertTrue(store.find(TENANT, CONNECTION, PRINCIPAL).isEmpty());
+    }
 }

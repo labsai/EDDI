@@ -455,8 +455,8 @@ console; none of them stops the boot.
 A connection whose `baseUrlAllowlist` sends its credential over plaintext `http://`
 to a non-loopback host is reported at **ERROR** while
 `allowPlaintextRemoteOrigins` is off (the default), because every
-call through it to that origin is refused, and at **WARN** when the property is
-`true` — see [Plaintext origins](#plaintext-origins).
+call through it to that origin is refused, and at **WARN** when the effective
+`allowPlaintextRemoteOrigins` setting is `true` — see [Plaintext origins](#plaintext-origins).
 
 **Reporting, not refusing, is deliberate**, and the reason is worth stating because
 it looks like a weakened control and is not. Refusing meant that an administrator
@@ -494,8 +494,9 @@ or pin it with the `eddi.connections.allow-plaintext-remote-origins` property.
 
 A `baseUrlAllowlist` entry is where a connection's credential is delivered, so an
 `http://` origin on anything but loopback puts that credential on the network
-unencrypted. While the property is `false` — the default — such an origin is
-refused in three places:
+unencrypted. While the effective `allowPlaintextRemoteOrigins` setting is `false`
+— the default, whether the value comes from the stored connection settings or the
+pinning property — such an origin is refused in three places:
 
 | Where | What happens |
 | --- | --- |

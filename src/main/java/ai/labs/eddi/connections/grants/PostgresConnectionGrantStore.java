@@ -277,6 +277,24 @@ public class PostgresConnectionGrantStore implements IConnectionGrantStore {
     }
 
     @Override
+    public boolean deleteIfSealedWith(String tenantId, String connectionName, String principal, String accessTokenIv) {
+        if (accessTokenIv == null) {
+            return false;
+        }
+        createSchema();
+        String sql = "DELETE FROM connection_grants WHERE tenant_id = ? AND connection_name = ? AND principal = ? AND access_token_iv = ?";
+        try (Connection connection = dataSourceInstance.get().getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, tenantId);
+            statement.setString(2, connectionName);
+            statement.setString(3, principal);
+            statement.setString(4, accessTokenIv);
+            return statement.executeUpdate() > 0;
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to delete a connection grant", e);
+        }
+    }
+
+    @Override
     public int deleteByConnection(String tenantId, String connectionName) {
         createSchema();
         String sql = "DELETE FROM connection_grants WHERE tenant_id = ? AND connection_name = ?";

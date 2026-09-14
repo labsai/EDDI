@@ -143,6 +143,17 @@ public class InMemoryConnectionGrantStore implements IConnectionGrantStore {
     }
 
     @Override
+    public synchronized boolean deleteIfSealedWith(String tenantId, String connectionName, String principal, String accessTokenIv) {
+        String mapKey = key(tenantId, connectionName, principal);
+        ConnectionGrant stored = grants.get(mapKey);
+        if (accessTokenIv == null || stored == null || !accessTokenIv.equals(stored.getAccessTokenIv())) {
+            return false;
+        }
+        grants.remove(mapKey);
+        return true;
+    }
+
+    @Override
     public synchronized int deleteByConnection(String tenantId, String connectionName) {
         String prefix = tenantId + "|" + connectionName + "|";
         var toRemove = grants.keySet().stream().filter(k -> k.startsWith(prefix)).toList();

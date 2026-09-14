@@ -528,6 +528,37 @@ class MongoConnectionGrantStoreTest {
         assertFalse(store.delete(TENANT, CONNECTION, PRINCIPAL));
     }
 
+    // ==================== deleteIfSealedWith ====================
+
+    @Test
+    @DisplayName("deleteIfSealedWith — keyed on the triple AND the IV of the write being taken back")
+    void deleteIfSealedWithAlsoMatchesTheIv() {
+        deleteOneRemoves(1L);
+
+        assertTrue(store.deleteIfSealedWith(TENANT, CONNECTION, PRINCIPAL, "iv-of-this-write"));
+
+        Map<String, BsonValue> filter = capturedDeleteOneFilter();
+        assertEquals(4, filter.size(), "without the IV a callback taking back its grant deletes a later link that replaced it");
+        assertKeyedOnTheGrantTriple(filter);
+        assertEquals("iv-of-this-write", filter.get("accessTokenIv").asString().getValue());
+    }
+
+    @Test
+    @DisplayName("deleteIfSealedWith — reports false when the row was already replaced")
+    void deleteIfSealedWithFindsNothing() {
+        deleteOneRemoves(0L);
+
+        assertFalse(store.deleteIfSealedWith(TENANT, CONNECTION, PRINCIPAL, "iv-of-an-older-write"));
+    }
+
+    @Test
+    @DisplayName("deleteIfSealedWith — a null IV names no write and sends no delete, since eq(null) would match a row without the field")
+    void deleteIfSealedWithNullIvDeletesNothing() {
+        assertFalse(store.deleteIfSealedWith(TENANT, CONNECTION, PRINCIPAL, null));
+
+        verify(grants, never()).deleteOne(any(Bson.class));
+    }
+
     // ==================== deleteByConnection ====================
 
     @Test

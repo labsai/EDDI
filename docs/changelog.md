@@ -49,6 +49,49 @@ bottom of this file and are never archived.
 
 ---
 
+## 🔁 fix(connections): the fourth PR #751 review round, with main merged in (2026-09-14)
+
+**Repo:** EDDI (`fix/connections-review-findings`)
+
+**Merge.** `origin/main` @ `52d031940` (PR #750, the 6.4.0 E2E fixes, and PR #746) merged in. Only this
+file conflicted: both sides' entries are kept, as are both sides' Decision Log rows. The merged file
+was over the 250 KB cap, so `scripts/rotate-changelog.py` moved 12 entries into the existing
+`docs/changelog/2026-08.md` (no new archive, so `docs/SUMMARY.md` is unchanged).
+
+**Review findings** — the open thread and the two outside-diff findings from the round-3 review body:
+
+- **A reshaped connection still had its code redeemed.** `boundConnection` checked only that the
+  name still belonged to the bound id, so a connection switched to `OAUTH2_CLIENT_CREDENTIALS` or
+  `SERVICE` while the user sat on the consent screen had the authorization code exchanged, a refresh
+  token minted and stored, and only then discarded by the post-write re-read.
+  `RestConnectionAuthorization.callback` now refuses with `exchange_failed` before the exchange
+  unless the document is still a `PER_USER` authorization-code connection
+  (`takesPerUserGrants`, shared with `connectionStillTakesTheGrant`). The post-write re-read stays
+  for an update landing after that check. Tests: `shapeChangedBeforeTheExchangeRedeemsNothing`;
+  `grantStoredUnderAShapeTheConnectionNoLongerHasIsDeleted` now reshapes the connection inside the
+  write window.
+- **A stale callback's discard could delete a newer grant.** `discardGrant` deleted by
+  `(tenant, name, principal)`, so a later link of the same account that replaced the grant between
+  the write and the discard was removed with it. New `IConnectionGrantStore.deleteIfSealedWith`
+  deletes only while the row still carries the access-token IV of the write being taken back
+  (Mongo: filter on `accessTokenIv`; Postgres: `AND access_token_iv = ?`; the in-memory double
+  mirrors it). `OAuthTokenService.persistNew` now returns the grant it wrote so the callback can
+  name it. A `null` IV matches nothing — in Mongo `eq(field, null)` would also match a row without
+  the field. Tests in `MongoConnectionGrantStoreTest`, `PostgresConnectionGrantStoreUnitTest`,
+  `ConnectionGrantStoreCasTest` and every discard test in `RestConnectionAuthorizationCallbackTest`
+  (which now also assert no keyed `delete`).
+- **Docs:** `docs/connections.md` described plaintext-origin enforcement in terms of the property,
+  which a stored `allowPlaintextRemoteOrigins: true` makes wrong. Both places now say "the effective
+  `allowPlaintextRemoteOrigins` setting".
+
+**Decision:** the discard is keyed on the IV rather than on `version`. `upsert` does not report the
+version it wrote, and making it do so means `findOneAndUpdate` / `RETURNING` on both backends for
+one caller. The IV is random per seal, so it names the write; its one blind spot is a DEK re-seal in
+the milliseconds between write and discard, where the delete misses and the grant stays until
+disconnect or connection deletion — the safe direction.
+
+---
+
 ## ⚙️ feat(connections): runtime connection settings — no restart, properties pin (2026-09-14)
 
 **Repo:** EDDI (`fix/connections-review-findings`, PR #751) · Manager counterpart on `feat/connection-settings`

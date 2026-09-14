@@ -85,6 +85,27 @@ public interface IConnectionGrantStore {
     boolean delete(String tenantId, String connectionName, String principal);
 
     /**
+     * Deletes one grant, but only while the row is still the write whose access
+     * token was sealed with {@code accessTokenIv}.
+     * <p>
+     * For a writer taking back a grant it has just stored. A delete by key alone
+     * removes whatever holds the triple by the time it runs — including a later
+     * link of the same account that completed in between, which is a grant the user
+     * has no reason to think is gone. The IV is fresh random bytes for every seal,
+     * so it names one write without {@link #upsert} having to report a version
+     * back.
+     * <p>
+     * A DEK re-seal in the gap changes the IV too, and the delete then misses. That
+     * is the safe direction: the grant stays until the user disconnects or the
+     * connection is deleted, rather than a live grant being removed.
+     *
+     * @param accessTokenIv
+     *            the IV of the grant the caller wrote; {@code null} matches nothing
+     * @return true if that exact grant was removed
+     */
+    boolean deleteIfSealedWith(String tenantId, String connectionName, String principal, String accessTokenIv);
+
+    /**
      * Deletes every grant belonging to a connection. Called when the connection
      * itself is deleted, so tokens do not outlive the thing that produced them.
      */

@@ -12,6 +12,7 @@ import ai.labs.eddi.configs.connections.model.OAuthConfig;
 import ai.labs.eddi.connections.ConnectionsConfig;
 import io.quarkus.runtime.LaunchMode;
 import ai.labs.eddi.connections.CredentialReferenceResolver;
+import ai.labs.eddi.connections.grants.ConnectionGrant;
 import ai.labs.eddi.connections.grants.IConnectionGrantStore;
 import ai.labs.eddi.connections.model.ConnectionReference;
 import ai.labs.eddi.connections.oauth.CredentialEndpointAllowlist;
@@ -107,6 +108,12 @@ class RestConnectionAuthorizationCallbackTest {
     private static final String REFRESH_TOKEN = "refresh-token-value";
     private static final String CALLBACK_METRIC = "eddi.connection.oauth.callback.count";
 
+    /**
+     * The access-token IV of the grant this callback writes; what a discard must
+     * name.
+     */
+    private static final String STORED_IV = "iv-of-this-link";
+
     private static final TokenResponse TOKEN = new TokenResponse("access-token-value", REFRESH_TOKEN, Duration.ofHours(1),
             List.of("https://www.googleapis.com/auth/drive.readonly"));
 
@@ -167,7 +174,7 @@ class RestConnectionAuthorizationCallbackTest {
         }).when(tokenClient).authorizationCode(any(), any(), any(), any(), any());
         doAnswer(invocation -> {
             grantsStoredFor.add(invocation.getArgument(2));
-            return null;
+            return storedGrant();
         }).when(tokenService).persistNew(any(), any(), any(), any(), any());
         // The uncached reads — at authorize, before the exchange and after the grant
         // is written: by default the name stays with the connection the flow was
@@ -272,8 +279,26 @@ class RestConnectionAuthorizationCallbackTest {
         doAnswer(invocation -> {
             grantsStoredFor.add(invocation.getArgument(2));
             meanwhile.run();
-            return null;
+            return storedGrant();
         }).when(tokenService).persistNew(any(), any(), any(), any(), any());
+    }
+
+    /**
+     * The grant {@code persistNew} reports writing, sealed with {@link #STORED_IV}.
+     */
+    private static ConnectionGrant storedGrant() {
+        var grant = new ConnectionGrant();
+        grant.setTenantId(TENANT);
+        grant.setConnectionName(CONNECTION_NAME);
+        grant.setPrincipal(PRINCIPAL);
+        grant.setAccessTokenIv(STORED_IV);
+        return grant;
+    }
+
+    /** A discard must be keyed on the write, never on the triple alone. */
+    private void assertOnlyThisWriteWasDiscarded() {
+        verify(grantStore).deleteIfSealedWith(TENANT, CONNECTION_NAME, PRINCIPAL, STORED_IV);
+        verify(grantStore, never()).delete(any(), any(), any());
     }
 
     private void assertNothingWasStored(String because) {
@@ -358,11 +383,8 @@ class RestConnectionAuthorizationCallbackTest {
     // ── a connection that changes shape while an account is being linked ─────
 
     @Test
-    @DisplayName("an update that landed before the post-write re-read: the grant just stored is deleted and the link reports exchange_failed")
-    void grantStoredUnderAShapeTheConnectionNoLongerHasIsDeleted() throws Exception {
-        // The interleaving the update cannot see: its second count ran before this
-        // grant was written, so its own write preceded the re-read here, and the
-        // re-read is what has to catch it.
+    @DisplayName("a connection reshaped before the callback: the code is not redeemed and nothing is stored")
+    void shapeChangedBeforeTheExchangeRedeemsNothing() throws Exception {
         var registry = new SimpleMeterRegistry();
         RestConnectionAuthorization resource = resource(registry);
         StartedFlow flow = startFlow(resource, "/manage/connections");
@@ -373,10 +395,39 @@ class RestConnectionAuthorizationCallbackTest {
 
         Response response = resource.callback(CODE, flow.row().getState(), null, browserWith(flow.cookie()));
 
+        assertNothingWasStored("the connection no longer takes user grants");
+        verifyNoInteractions(grantStore);
+        assertEquals(303, response.getStatus());
+        assertEquals(URI.create("/manage/connections?error=exchange_failed"), response.getLocation());
+        Counter failed = registry.find(CALLBACK_METRIC).tag("outcome", "exchange_failed").counter();
+        assertTrue(failed != null && failed.count() == 1, "the refusal must be counted as exchange_failed");
+    }
+
+    @Test
+    @DisplayName("an update that landed before the post-write re-read: the grant just stored is deleted and the link reports exchange_failed")
+    void grantStoredUnderAShapeTheConnectionNoLongerHasIsDeleted() throws Exception {
+        // The interleaving the update cannot see: its second count ran before this
+        // grant was written, so its own write preceded the re-read here, and the
+        // re-read is what has to catch it. The pre-exchange read still sees the
+        // original shape — a change before it is refused without redeeming the code.
+        var registry = new SimpleMeterRegistry();
+        RestConnectionAuthorization resource = resource(registry);
+        StartedFlow flow = startFlow(resource, "/manage/connections");
+        ConnectionConfiguration reshaped = connection();
+        reshaped.setAuthType(AuthType.OAUTH2_CLIENT_CREDENTIALS);
+        reshaped.setBinding(Binding.SERVICE);
+        // The pre-exchange read sees the original; the post-write re-read sees the
+        // update.
+        doReturn(connection).doReturn(reshaped).when(connectionStore).read(CONNECTION_ID, 1);
+
+        Response response = resource.callback(CODE, flow.row().getState(), null, browserWith(flow.cookie()));
+
+        assertEquals(List.of(CODE), codesRedeemed, "the pre-exchange check passed: the update landed afterwards");
         var order = inOrder(tokenService, connectionStore, grantStore);
         order.verify(tokenService).persistNew(any(), any(), any(), any(), any());
         order.verify(connectionStore).read(CONNECTION_ID, 1);
-        order.verify(grantStore).delete(TENANT, CONNECTION_NAME, PRINCIPAL);
+        order.verify(grantStore).deleteIfSealedWith(TENANT, CONNECTION_NAME, PRINCIPAL, STORED_IV);
+        verify(grantStore, never()).delete(any(), any(), any());
         assertEquals(303, response.getStatus());
         assertEquals(URI.create("/manage/connections?error=exchange_failed"), response.getLocation(),
                 "an existing error code the Manager already maps — the link did not produce a usable account");
@@ -394,7 +445,7 @@ class RestConnectionAuthorizationCallbackTest {
 
         Response response = resource.callback(CODE, flow.row().getState(), null, browserWith(flow.cookie()));
 
-        verify(grantStore).delete(TENANT, CONNECTION_NAME, PRINCIPAL);
+        assertOnlyThisWriteWasDiscarded();
         assertEquals(URI.create("/manage/connections?error=exchange_failed"), response.getLocation());
     }
 
@@ -409,7 +460,7 @@ class RestConnectionAuthorizationCallbackTest {
         Response response = resource.callback(CODE, flow.row().getState(), null, browserWith(flow.cookie()));
 
         assertEquals(List.of(PRINCIPAL), grantsStoredFor, "the grant was stored before the re-read failed");
-        verify(grantStore).delete(TENANT, CONNECTION_NAME, PRINCIPAL);
+        assertOnlyThisWriteWasDiscarded();
         assertEquals(URI.create("/manage/connections?error=exchange_failed"), response.getLocation());
     }
 
@@ -426,6 +477,7 @@ class RestConnectionAuthorizationCallbackTest {
         verify(connectionStore, times(3)).idOfName(TENANT, CONNECTION_NAME);
         verify(connectionStore, times(3)).read(CONNECTION_ID, 1);
         verify(grantStore, never()).delete(anyString(), anyString(), anyString());
+        verify(grantStore, never()).deleteIfSealedWith(any(), any(), any(), any());
         assertEquals(URI.create("/manage/connections?connected=drive"), response.getLocation());
         Counter succeeded = registry.find(CALLBACK_METRIC).tag("outcome", "success").counter();
         assertTrue(succeeded != null && succeeded.count() == 1, "an unchanged binding is an ordinary success");
@@ -491,6 +543,7 @@ class RestConnectionAuthorizationCallbackTest {
         }
         verify(connectionStore, never()).read(REPLACEMENT_ID, 1);
         verify(grantStore, never()).delete(anyString(), anyString(), anyString());
+        verify(grantStore, never()).deleteIfSealedWith(any(), any(), any(), any());
     }
 
     @Test
@@ -510,7 +563,8 @@ class RestConnectionAuthorizationCallbackTest {
         assertEquals(List.of(CODE), codesRedeemed, "the pre-exchange check passed: the replacement landed afterwards");
         var order = inOrder(tokenService, grantStore);
         order.verify(tokenService).persistNew(any(), any(), any(), any(), any());
-        order.verify(grantStore).delete(TENANT, CONNECTION_NAME, PRINCIPAL);
+        order.verify(grantStore).deleteIfSealedWith(TENANT, CONNECTION_NAME, PRINCIPAL, STORED_IV);
+        verify(grantStore, never()).delete(any(), any(), any());
         assertEquals(URI.create("/manage/connections?error=exchange_failed"), response.getLocation());
         Counter failed = registry.find(CALLBACK_METRIC).tag("outcome", "exchange_failed").counter();
         assertTrue(failed != null && failed.count() == 1, "the discarded link must be counted as exchange_failed");

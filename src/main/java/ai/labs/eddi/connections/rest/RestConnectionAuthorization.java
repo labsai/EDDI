@@ -312,6 +312,16 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
                     + "to it; the authorization code is not redeemed", sanitize(oauthState.getConnectionName()));
             return redirect(oauthState.getReturnTo(), "error", "connection_removed", expiredBindingCookie(state));
         }
+        // Same connection, but no longer the shape a user grant belongs to: an update
+        // changed its authType or binding while the user was on the consent screen.
+        // Redeeming the code anyway mints a refresh token only to discard it below,
+        // and a provider that counts or notifies linked apps has already seen one.
+        if (!takesPerUserGrants(connection)) {
+            increment("eddi.connection.oauth.callback.count", "outcome", "exchange_failed", null);
+            LOGGER.warnf("Connection '%s' stopped being a PER_USER authorization-code connection while an account was being linked to it; "
+                    + "the authorization code is not redeemed", sanitize(oauthState.getConnectionName()));
+            return redirect(oauthState.getReturnTo(), "error", "exchange_failed", expiredBindingCookie(state));
+        }
 
         try {
             TokenResponse token = tokenClient.authorizationCode(connection, resolveClientSecret(connection), code, oauthState.getCodeVerifier(),
@@ -319,13 +329,14 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
             // The principal comes from the CLAIMED ROW. Reading it from a query
             // parameter would let anyone who obtains a state install a grant under
             // somebody else's name.
-            tokenService.persistNew(connection, oauthState.getTenantId(), oauthState.getPrincipal(), token, token.refreshToken());
+            ConnectionGrant stored = tokenService.persistNew(connection, oauthState.getTenantId(), oauthState.getPrincipal(), token,
+                    token.refreshToken());
             if (!connectionStillTakesTheGrant(oauthState)) {
-                // An update changed the connection's authType or binding while this
-                // link was in flight. See RestConnectionStore
+                // An update changed the connection's authType or binding after the
+                // check above. See RestConnectionStore
                 // .deleteGrantsLinkedDuringTheUpdate for why re-reading HERE, after the
                 // grant is written, is what closes the race.
-                discardGrant(oauthState);
+                discardGrant(oauthState, stored);
                 increment("eddi.connection.oauth.callback.count", "outcome", "exchange_failed", connection);
                 return redirect(oauthState.getReturnTo(), "error", "exchange_failed", expiredBindingCookie(state));
             }
@@ -427,7 +438,7 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
             }
             IResourceStore.IResourceId current = connectionStore.getCurrentResourceId(id);
             ConnectionConfiguration connection = connectionStore.read(id, current.getVersion());
-            if (connection != null && connection.getAuthType() == AuthType.OAUTH2_AUTHORIZATION_CODE && connection.getBinding() == Binding.PER_USER) {
+            if (takesPerUserGrants(connection)) {
                 return true;
             }
             LOGGER.warnf("Connection '%s' stopped being a PER_USER authorization-code connection while an account was being linked to it; the "
@@ -501,12 +512,28 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
     }
 
     /**
-     * Deletes the grant this callback stored — and only that one: the principal
-     * comes from the claimed state row, as it did for the write.
+     * Whether a connection is the shape a user's authorization-code grant is filed
+     * and read under.
      */
-    private void discardGrant(OAuthState oauthState) {
+    private static boolean takesPerUserGrants(ConnectionConfiguration connection) {
+        return connection != null && connection.getAuthType() == AuthType.OAUTH2_AUTHORIZATION_CODE && connection.getBinding() == Binding.PER_USER;
+    }
+
+    /**
+     * Takes back the grant this callback stored — and only that write. The
+     * principal comes from the claimed state row, as it did for the write, and the
+     * delete is conditional on the IV the write was sealed with: a later link of
+     * the same account that replaced this grant in the meantime is one the user
+     * still expects to have, and a delete by key alone would remove it.
+     */
+    private void discardGrant(OAuthState oauthState, ConnectionGrant stored) {
         try {
-            grantStore.delete(oauthState.getTenantId(), oauthState.getConnectionName(), oauthState.getPrincipal());
+            boolean discarded = grantStore.deleteIfSealedWith(oauthState.getTenantId(), oauthState.getConnectionName(), oauthState.getPrincipal(),
+                    stored == null ? null : stored.getAccessTokenIv());
+            if (!discarded) {
+                LOGGER.infof("The grant just stored for connection '%s' had already been replaced or removed; nothing was discarded",
+                        sanitize(oauthState.getConnectionName()));
+            }
         } catch (RuntimeException e) {
             LOGGER.errorf("A grant for connection '%s' that can never be resolved could not be deleted (%s); its refresh token remains at rest "
                     + "until the user disconnects or the connection is deleted", sanitize(oauthState.getConnectionName()),

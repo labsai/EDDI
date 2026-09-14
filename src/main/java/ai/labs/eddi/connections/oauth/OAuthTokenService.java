@@ -552,10 +552,16 @@ public class OAuthTokenService implements AccessTokenSupplier {
     /**
      * Stores a brand-new grant. Used by the {@code client_credentials} path and by
      * the authorization-code callback.
+     *
+     * @return the grant as written, so a caller that must take it back can name
+     *         this write and not whatever holds the key later — see
+     *         {@link IConnectionGrantStore#deleteIfSealedWith}
      */
-    public void persistNew(ConnectionConfiguration connection, String tenantId, String principal, TokenResponse token, String refreshToken) {
+    public ConnectionGrant persistNew(ConnectionConfiguration connection, String tenantId, String principal, TokenResponse token,
+                                      String refreshToken) {
         ConnectionGrant grant = buildGrant(connection, tenantId, principal, token, refreshToken);
         grantStore.upsert(grant);
+        return grant;
     }
 
     private void persist(ConnectionConfiguration connection, String tenantId, String principal, TokenResponse token, String refreshToken,

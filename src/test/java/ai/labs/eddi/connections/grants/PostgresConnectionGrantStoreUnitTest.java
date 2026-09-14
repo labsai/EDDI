@@ -619,6 +619,38 @@ class PostgresConnectionGrantStoreUnitTest {
     }
 
     @Test
+    @DisplayName("deleteIfSealedWith adds the IV of the write being taken back to the predicate")
+    void deleteIfSealedWithAlsoMatchesTheIv() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+
+        assertTrue(store.deleteIfSealedWith(TENANT, CONNECTION, PRINCIPAL, "iv-access"));
+
+        verify(preparedStatement).setString(1, TENANT);
+        verify(preparedStatement).setString(2, CONNECTION);
+        verify(preparedStatement).setString(3, PRINCIPAL);
+        verify(preparedStatement).setString(4, "iv-access");
+        assertTrue(capturedSql().contains(
+                "DELETE FROM connection_grants WHERE tenant_id = ? AND connection_name = ? AND principal = ? AND access_token_iv = ?"),
+                "without the IV a callback taking back its grant deletes a later link that replaced it");
+    }
+
+    @Test
+    @DisplayName("deleteIfSealedWith reports false when the row was already replaced")
+    void deleteIfSealedWithReturnsFalseWhenNothingMatched() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(0);
+
+        assertFalse(store.deleteIfSealedWith(TENANT, CONNECTION, PRINCIPAL, "iv-of-an-older-write"));
+    }
+
+    @Test
+    @DisplayName("deleteIfSealedWith with a null IV names no write and runs no statement")
+    void deleteIfSealedWithNullIvDeletesNothing() throws Exception {
+        assertFalse(store.deleteIfSealedWith(TENANT, CONNECTION, PRINCIPAL, null));
+
+        verify(preparedStatement, never()).executeUpdate();
+    }
+
+    @Test
     @DisplayName("delete wraps a database failure with its cause intact")
     void deleteWrapsSqlException() throws Exception {
         var boom = new SQLException("relation does not exist");

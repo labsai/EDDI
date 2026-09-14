@@ -171,6 +171,17 @@ public class MongoConnectionGrantStore implements IConnectionGrantStore {
     }
 
     @Override
+    public boolean deleteIfSealedWith(String tenantId, String connectionName, String principal, String accessTokenIv) {
+        if (accessTokenIv == null) {
+            // eq(field, null) also matches a document without the field: a null here
+            // must name no write, not every write that lacks an IV.
+            return false;
+        }
+        Bson filter = Filters.and(key(tenantId, connectionName, principal), Filters.eq(FIELD_ACCESS_IV, accessTokenIv));
+        return grants.deleteOne(filter).getDeletedCount() > 0;
+    }
+
+    @Override
     public int deleteByConnection(String tenantId, String connectionName) {
         return (int) grants.deleteMany(Filters.and(Filters.eq(FIELD_TENANT, tenantId), Filters.eq(FIELD_CONNECTION, connectionName)))
                 .getDeletedCount();
