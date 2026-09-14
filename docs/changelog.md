@@ -37,7 +37,7 @@ which neither a reader nor an agent's context window could usefully hold.
 
 | Period | Entries | Size |
 |---|---|---|
-| [August 2026](changelog/2026-08.md) | 190 | 731 KB |
+| [August 2026](changelog/2026-08.md) | 202 | 788 KB |
 | [July 2026](changelog/2026-07.md) | 147 | 648 KB |
 | [June 2026](changelog/2026-06.md) | 26 | 67 KB |
 | [May 2026](changelog/2026-05.md) | 34 | 76 KB |
@@ -46,6 +46,451 @@ which neither a reader nor an agent's context window could usefully hold.
 
 The two running registers — **Decision Log** and **Regression Notes** — live at the
 bottom of this file and are never archived.
+
+---
+
+## 🔁 fix(connections): the fourth PR #751 review round, with main merged in (2026-09-14)
+
+**Repo:** EDDI (`fix/connections-review-findings`)
+
+**Merge.** `origin/main` @ `52d031940` (PR #750, the 6.4.0 E2E fixes, and PR #746) merged in. Only this
+file conflicted: both sides' entries are kept, as are both sides' Decision Log rows. The merged file
+was over the 250 KB cap, so `scripts/rotate-changelog.py` moved 12 entries into the existing
+`docs/changelog/2026-08.md` (no new archive, so `docs/SUMMARY.md` is unchanged).
+
+**Review findings** — the open thread and the two outside-diff findings from the round-3 review body:
+
+- **A reshaped connection still had its code redeemed.** `boundConnection` checked only that the
+  name still belonged to the bound id, so a connection switched to `OAUTH2_CLIENT_CREDENTIALS` or
+  `SERVICE` while the user sat on the consent screen had the authorization code exchanged, a refresh
+  token minted and stored, and only then discarded by the post-write re-read.
+  `RestConnectionAuthorization.callback` now refuses with `exchange_failed` before the exchange
+  unless the document is still a `PER_USER` authorization-code connection
+  (`takesPerUserGrants`, shared with `connectionStillTakesTheGrant`). The post-write re-read stays
+  for an update landing after that check. Tests: `shapeChangedBeforeTheExchangeRedeemsNothing`;
+  `grantStoredUnderAShapeTheConnectionNoLongerHasIsDeleted` now reshapes the connection inside the
+  write window.
+- **A stale callback's discard could delete a newer grant.** `discardGrant` deleted by
+  `(tenant, name, principal)`, so a later link of the same account that replaced the grant between
+  the write and the discard was removed with it. New `IConnectionGrantStore.deleteIfSealedWith`
+  deletes only while the row still carries the access-token IV of the write being taken back
+  (Mongo: filter on `accessTokenIv`; Postgres: `AND access_token_iv = ?`; the in-memory double
+  mirrors it). `OAuthTokenService.persistNew` now returns the grant it wrote so the callback can
+  name it. A `null` IV matches nothing — in Mongo `eq(field, null)` would also match a row without
+  the field. Tests in `MongoConnectionGrantStoreTest`, `PostgresConnectionGrantStoreUnitTest`,
+  `ConnectionGrantStoreCasTest` and every discard test in `RestConnectionAuthorizationCallbackTest`
+  (which now also assert no keyed `delete`).
+- **Docs:** `docs/connections.md` described plaintext-origin enforcement in terms of the property,
+  which a stored `allowPlaintextRemoteOrigins: true` makes wrong. Both places now say "the effective
+  `allowPlaintextRemoteOrigins` setting".
+
+**Decision:** the discard is keyed on the IV rather than on `version`. `upsert` does not report the
+version it wrote, and making it do so means `findOneAndUpdate` / `RETURNING` on both backends for
+one caller. The IV is random per seal, so it names the write; its one blind spot is a DEK re-seal in
+the milliseconds between write and discard, where the delete misses and the grant stays until
+disconnect or connection deletion — the safe direction.
+
+---
+
+## ⚙️ feat(connections): runtime connection settings — no restart, properties pin (2026-09-14)
+
+**Repo:** EDDI (`fix/connections-review-findings`, PR #751) · Manager counterpart on `feat/connection-settings`
+
+The four deployment settings of the connections feature — `enabled`, `publicBaseUrl`,
+`credentialEndpointAllowlist`, `allowPlaintextRemoteOrigins` — were properties only, so
+turning the feature on or approving one more OAuth provider meant a restart, and enabling
+it without a base URL refused the boot outright. They are runtime settings now, written
+through `PUT /connectionstore/settings` and read back with their provenance.
+
+**Why the properties-only argument did not hold.** It rested on "an operator, not an
+administrator, approves where a client secret may go". Nothing else in EDDI draws that
+line: `eddi-admin` writes the vault, and an httpcall header resolves any `${vault:…}` and
+sends it to any host (`ApiCallExecutor` resolves vault references in headers, query, body
+and URL with no destination binding), which `eddi-editor` may also author. A properties-only
+allowlist therefore cost a restart and protected nothing from an administrator. What it
+*does* still need protecting from — an LLM, an imported agent, a connection document
+vouching for itself — is kept out by where the endpoint is exposed, not by a restart.
+
+**Design.**
+
+- **Precedence: pinned → stored → default.** A property or environment variable that is
+  set *pins* its value: it wins, reads as `PINNED`, and a `PUT` that would change it is a
+  **409** naming the property. That keeps the operator/administrator split available to a
+  deployment that genuinely has one. Restating the pinned value, or omitting it, is
+  accepted. Every default fails closed. The four property lines in
+  `application.properties` are now commented out, because an uncommented line would pin.
+- **No seeding.** A pinned value is never copied into the store, and a pinned field's
+  previously stored value is carried forward untouched — so removing the property later
+  falls back to what an administrator stored, not to a silent copy of the old pin.
+- **Freshness.** `ConnectionsConfig` caches the stored document for 5 s (it is read on hot
+  paths — every resolution asks about plaintext origins). The writing instance adopts its
+  own write immediately; others see it within the TTL. A store read failure keeps the last
+  values; before the first successful read only pins and defaults apply.
+- **Validation at the write boundary** (`RestConnectionSettings`): the base URL must be a
+  bare https origin (dev/test: loopback http), allowlist entries are canonicalised and
+  de-duplicated, and a *remote plaintext* allowlist entry is refused — a credential endpoint
+  must be https or loopback before a secret is sent, so it would approve nothing. The shape
+  rules live once in `ConnectionSettingsRules`, shared with the boot and request-time checks.
+- **The boot no longer refuses a missing base URL.** Only per-user OAuth linking needs it,
+  and `POST /connections/{name}/authorize` now answers **400** naming the setting. A
+  *pinned* base URL of the wrong shape still refuses the boot — it is operator configuration
+  that only a restart changes.
+- **Exposure.** `eddi-admin` only (`IRestConnectionSettingsRoleGateTest`). Not an MCP tool,
+  not in export/import or Agent Sync, and excluded from the Platform Operator's write scope
+  (pinned by a Manager test). The response carries the `redirectUri` to register at each
+  provider and warnings for a configuration that saves but will not fully work. Each change
+  is logged at INFO with the principal and the before/after values (none is a secret).
+- **One document per tenant**, Mongo `connection_settings` (`_id = tenantId`) and Postgres
+  `connection_settings` (nullable columns, `TEXT[]` allowlist); `tenantId` is `"default"`
+  until multi-tenancy supplies one. Whole-document replace, last write wins.
+
+**Files.** New: `connections/settings/` — `ConnectionSettings`, `ConnectionSettingsRules`,
+`ConnectionSettingsView`, `IConnectionSettingsStore`, `MongoConnectionSettingsStore`,
+`PostgresConnectionSettingsStore`, `IRestConnectionSettings`, `RestConnectionSettings`.
+Changed: `ConnectionsConfig` (pinned/stored/default resolution, cache), `CredentialEndpointAllowlist`
+(reads the effective allowlist per call), `ConnectionStartupGuard` (pinned-only refusal,
+warning otherwise), `RestConnectionAuthorization` (`requirePublicBaseUrl`), messages in
+`ConnectionResolver`, `RestConnectionStore` and `ConnectionConfiguration` naming both
+handles, `DataStoreProducers`, `application.properties`, `docs/connections.md`,
+`docs/configuration-reference.md`. Tests: `ConnectionsConfigStoredSettingsTest`,
+`RestConnectionSettingsTest`, `ConnectionSettingsRulesTest`, both store tests, the role gate;
+`ConnectionStartupGuardTest` and `RestConnectionAuthorizationCallbackTest` updated for the
+new boot and authorize behaviour.
+
+**Review round (Fable 5.1 review + a live boot against MongoDB).**
+
+- **Unauthenticated writes are refused outside dev/test** while `authorization.enabled=false`
+  (403), unless `eddi.connections.settings.allow-unauthenticated-writes=true`. The rationale
+  "properties-only protected nothing from an administrator" is right for administrators, but on
+  a deployment without OIDC `@RolesAllowed` is a no-op — and the shipped compose files run that
+  way — so an *anonymous* caller could otherwise approve an origin for a client secret. Same
+  narrow per-surface opt-out shape as `HighValueSurfaceGuard`; adding the path to that guard
+  instead would have failed every existing unauthenticated boot.
+- **A stored value hidden behind a pin is surfaced** (`Setting.shadowedStoredValue`) with a
+  warning. Removing a restrictive pin brings a permissive stored value back; that must never be
+  invisible.
+- **Enabling at runtime runs the stored-connection report** (`ConnectionStartupGuard.reportStoredConnections`)
+  that a boot with the feature off skipped. A store unreadable at boot says the report was skipped.
+- **Restating a pinned value is compared before strict validation and normalised**: a trailing
+  slash or scheme case on the base URL, and an operator-pinned plaintext allowlist entry, no
+  longer produce a 409 or 400.
+- **Postgres `updated_by` is `TEXT`** (an OIDC principal can exceed 255 characters); `Array.free()`.
+- **Serialization contract.** EDDI omits null fields (`NON_NULL`), so an unset `value`,
+  `redirectUri`, `updatedAt` or `updatedBy` is absent from the JSON, not `null`. Documented on
+  `ConnectionSettingsView`; the Manager types and fixtures follow it.
+- **Upgrade note**: a property set even to its default now pins (configuration-reference).
+
+**Not done / open.** Cross-replica invalidation is TTL-only (no event bus). Changes are
+logged, not written to the audit ledger — the ledger is conversation-task shaped. The
+Manager's OpenAPI snapshot exempts the two new operations until it is refreshed against a
+backend that has them.
+
+---
+
+## 🔁 fix(connections): the PR #751 review round — claims, clocks, export, plaintext and redaction (2026-09-13)
+
+**Repo:** EDDI (`fix/connections-review-findings`)
+
+Twenty-two review comments on PR #751 (CodeRabbit, Copilot, CodeQL, code quality), all
+verified against the code and all valid. One commit per finding, each with a regression
+test. Two of them correct fixes recorded in the entries below: R7 bound the contender's JVM
+clock, which only moved the skew, and C3 enforced name uniqueness with scans that could not
+see across replicas.
+
+**Uniqueness and races.**
+
+- **A durable name claim** (`10962ccab`). `IConnectionNameClaimStore` keeps one claim per
+  (tenant, name) under a MongoDB unique index or a PostgreSQL unique constraint. A create
+  claims first and answers 409 for a live holder; a stale claim (crashed create, failed
+  release) is taken over by compare-and-set. The create records its id against its token,
+  then writes the descriptor, and a descriptor failure is now a failed create. Connections
+  that predate claims are found by the one remaining name scan and backfilled. The unused
+  multi-holder scan, `IConnectionStore.idsOfName`, is removed.
+- **Grants linked during an authType/binding change** (`e5db9c0a8`). A count before the
+  update is not atomic with an OAuth callback. Both sides now re-check after their own
+  write — the update counts again and deletes what appeared, the callback re-reads the
+  connection uncached and discards its grant if the shape changed — so one of the two
+  always sees the other.
+- **The refresh lease uses the database clock on both sides** (`22f153147`):
+  `CURRENT_TIMESTAMP AT TIME ZONE 'UTC'` on PostgreSQL, `$$NOW` on MongoDB. `claimRefresh`
+  takes a duration. The lease is released when the claimant's re-read fails (`9cbbb83c2`).
+
+**Credentials in transit and at rest.**
+
+- **Plaintext remote origins need an opt-in** (`e0bf28a9b`):
+  `eddi.connections.allow-plaintext-remote-origins`, default `false`. Refused at save (400),
+  per request (`TARGET_NOT_ALLOWED`) and reported at ERROR at boot. Loopback http is always
+  allowed.
+- **A plaintext token URL is refused before the client secret is sent** (`1adb43c22`);
+  https, or http to a loopback host, shared with save-time validation.
+- **Non-admin reads are redacted** (`414982f3d`). An editor reading a connection gets
+  `clientSecret`, `passwordRef`, `valueTemplate` and each `extraAuthParams` entry only if it
+  passes the write-time rule; a legacy literal is replaced by a marker. Admins see the
+  stored document so they can fix it.
+- **Log lines sanitize user-controlled values** (`a9f87b184`, plus the four refresh-path
+  lines in `OAuthTokenService`), closing CodeQL `java/log-injection`.
+
+**Export, import and grants checking.**
+
+- Export authorizes VIEW on every referenced connection and refuses without it
+  (`2d85bce21`); only a dangling reference is skipped, every other failure fails the export
+  (`c35005ceb`).
+- `strategy=upgrade` imports the archive's connections too (`3b65c91cf`), and an import that
+  cannot account for a connection it created (no resource URI, no descriptor) fails and
+  rolls it back (`5c602dd91`).
+- The vault-grant check expands `${vars:}` in the connection's own tenant (`5735c021d`) and
+  before the connection scan as well as the vault scan (`5a86bbc98`).
+- A malformed stored origin no longer aborts the startup report (`6a8b73ac9`); the allowlist
+  docs no longer mention discovery endpoints (`3cdf0780a`); two mocked `ResultSet` stubs no
+  longer read as leaks (`830acb20e`).
+
+**Decision — export refuses rather than skips** a connection the caller cannot view. An
+archive quietly missing a connection imports into an agent whose references do not resolve,
+and nothing says why.
+
+**Decision — the claim is a separate store, not an index on the config document.** The
+versioned document store cannot carry a unique index on a field inside the document.
+
+**Upgrade notes.**
+
+- Connections with a remote `http://` origin stop resolving until the new property is set
+  or the origin moves to https.
+- MongoDB 4.2+ is required (`$$NOW`); the project documents 6.0+.
+- New storage, created lazily: collection or table `connection_name_claims`.
+- A duplicate name on create answers **409**, not 400.
+- During a rolling upgrade, a replica without claims can still race a create briefly.
+
+**Not changed:** CodeRabbit's docstring-coverage pre-merge warning, which counts every
+touched function; the project documents behaviour at class and non-obvious-method level.
+
+**Second round.** The push drew nine more threads from CodeRabbit, CodeQL and GitHub code
+quality.
+
+- **The OAuth callback is bound to the connection's id, not its name** (`bcddbb4a2`). A
+  connection deleted and re-created under the same name while the user was on the consent screen
+  received a grant issued for its predecessor's client, and its own allowlist decided where that
+  token went. The state row now carries the connection id (a MongoDB field; a PostgreSQL
+  `connection_id` column added with `ADD COLUMN IF NOT EXISTS`). The callback exchanges nothing
+  unless the name still resolves to that id, reads the connection by id uncached rather than from
+  the name-keyed registry, and after storing the grant re-checks id and shape and discards it on a
+  mismatch.
+- **A method CodeQL read as a permission check is renamed**, `requirePlaintextOriginsPermitted` to
+  `refusePlaintextRemoteOriginsUnlessAllowed`. `java/tainted-permissions-check` matches any
+  one-argument method whose name contains "permitted"; this one validates input, and who may
+  write is `@RolesAllowed("eddi-admin")`. Renamed rather than dismissed, so no alert needs an
+  admin's judgement.
+- **The PostgreSQL store tests assert resource closing** (`f7be4653f`). The code-quality leak
+  findings pointed at Mockito stubbing expressions, which acquire nothing, and last round's
+  restyling only moved the warning. The tests now check that every connection, statement and
+  result set the name-claim and grant stores open is closed, on the failure paths too.
+- **The in-memory grant store validates the refresh lease first** (`192895d29`), as both real
+  stores do; it used to leave a claim with no expiry behind on a null lease.
+- **The plain-text variable test proves expansion ran** (`fbe3bd213`).
+
+**Upgrade note:** an account link started before the upgrade and finished after it is answered
+`invalid_state`, because its state row carries no connection id. States live ten minutes; the user
+starts the link again.
+
+**Third round.** Two more threads. CodeRabbit found that `authorize` still built the consent
+URL from the name-keyed registry cache while taking the connection id from the store, so right
+after a delete and re-create a replica could send the user to the predecessor's consent screen and
+fail at the callback. `authorize` now reads the connection by id at its current version, uncached,
+and uses that one document for validation, the state and the URL; the registry it no longer
+reads is dropped as a dependency. A further code-quality "leak"
+on a mocked `ResultSet` in the name-claim store test is the same false positive as round two; that
+test already asserts the store closes it.
+
+**Companion:** labsai/EDDI-Manager#208 answered its own review round (a complete reference
+before the chip, retries only on network/5xx, the name grammar in references, Retry through
+the `Button` primitive).
+
+---
+
+## 🔐 fix(connections): runtime and security findings from the connections review (2026-09-13)
+
+**Repo:** EDDI (`fix/connections-review-findings`)
+
+Thirteen findings from the code review of the connections feature, runtime and security side
+(the config/store/docs findings are on a sibling branch). One conventional commit per finding;
+every fix carries a regression test that fails without it.
+
+**Credentials that leaked or went missing.**
+
+- **R1 — connection-owned headers persisted in plaintext.** `RequestRedactor` recognised a
+  credential only by conventional header name, a `${vault:` marker, or value shape. A `STATIC`
+  connection on `X-Amp-Id` or a `CALLER_SUPPLIED` one on `X-Gnowbe-Key` matched none, so the live
+  value was written to MongoDB and shown to a HITL approver. `buildRequest` now returns the header
+  names a connection filled, and both the persisted request map and the approval preview redact them
+  unconditionally, case-insensitively. MCP and A2A persist no request headers.
+- **R2 — no `CallerIdentity` on turn 0.** `startConversation` bound the `ResolutionPrincipal` around
+  the synchronous CONVERSATION_START turn but not the caller, so `${caller:token}` and every
+  `CALLER_SUPPLIED` connection failed closed on turn 0 with advice about scheduled runs. The identity
+  is captured once, binds the start turn, and the previous binding is restored (nested starts).
+- **R5 — principal not propagated to cascade/batch threads.** `callerIdentityContext.propagate`
+  carried the caller only; a `PER_USER` connection inside an agent-mode cascade step or a
+  fire-and-forget batch was refused. `ResolutionPrincipalContext` gains `propagate`/`withPrincipalSupplying`,
+  and `CallerIdentityContext.propagate` composes both — the single helper mid-pipeline dispatches
+  use, so the next binding is added there. The explicit `withIdentity(...)` sites stay caller-only:
+  they dispatch from request threads where the member conversation binds its own principal, or
+  compose with `withPrincipal` themselves (the HITL resume).
+
+**The token endpoint.**
+
+- **R3 — redirects followed with the body.** `sendValidated` re-implements redirect following
+  (method and body preserved on 307/308) and validates the hop against SSRF rules only. A token
+  request carries the client secret and the refresh token or code, so an allowlisted endpoint
+  answering 307 re-sent all of it elsewhere, while docs and Javadoc claimed otherwise.
+  `SafeHttpClient` gains `sendValidatedNoRedirect` and `sendNoRedirect`; any 3xx from a token
+  endpoint is `TOKEN_ENDPOINT_UNAVAILABLE` with a message saying a token endpoint must not redirect.
+- **R4 — transient failures marked terminal.** An access token that would not unseal inside the
+  refresh claim, and a 200 whose body is not a token response (HTML maintenance page, empty body,
+  no `access_token`), were `GRANT_UNUSABLE` and wrote `REFRESH_FAILED`. Both are transient now; only
+  `invalid_grant` / `invalid_client` / `unauthorized_client` is terminal.
+- **R6 — escaping exceptions, and on-prem IdPs.** The callback caught only `ConnectionException`
+  after claiming the state; an `IllegalArgumentException` from URL validation or an
+  `IllegalStateException` from the store reached the browser as a 500 with the state consumed.
+  Every `RuntimeException` after the claim is counted `exchange_failed`, logged at ERROR (class name
+  only) and answered 303. `refreshAsClaimant` wraps the same as `TOKEN_ENDPOINT_UNAVAILABLE` (503).
+  The token request no longer goes through the SSRF address block: the credential-endpoint
+  allowlist is a stricter rule (an exact operator-listed origin), so an on-premises IdP on a private
+  network is usable; scheme and host are still validated, nothing else gets the exemption.
+- **R7 — Postgres lease vs the DB clock.** `claimRefresh` compared a JVM-written lease against
+  `CURRENT_TIMESTAMP`; app/DB skew shortened the lease and let a second replica refresh mid-flight.
+  The JVM instant is bound, as `PostgresOAuthStateStore` and the Mongo store already do.
+
+**What the operator is told.**
+
+- **R8** — with `authorization.enabled=false` every request is anonymous and its credential headers
+  are dropped, so `NO_CALLER_CREDENTIAL` now says the deployment cannot accept one and names the fix,
+  instead of claiming the request carried nothing.
+- **R9** — the four OAuth/refresh meters were unprefixed and registered through a helper the
+  `MetricsDashboardCoverageTest` regex cannot see; they are `eddi.connection.*` now, registered via
+  `increment("eddi.…")`, charted in four new panels, and listed in `docs/metrics.md` and the
+  `docs/connections.md` table. `UNSUPPORTED_PLACEMENT` was mapped to 400 but never thrown —
+  `ApiCallExecutor` now throws it for a `${connection:…}` outside a header.
+- **R10** — the MCP discovery warning named `PER_USER` for `CALLER_SUPPLIED` too and A2A logged
+  nothing; `ConnectionResolver.bindingOf` names the actual binding for both, and routes a registry
+  read failure through `countLookupFailure`. RFC 9728 discovery is not implemented, and the
+  allowlist Javadoc and "Two allowlists" section no longer claim discovery endpoints.
+- **R11** — a cached `STATIC`/`BASIC` document without `staticAuth` NPE'd, which the MCP failure
+  classifier fed to the circuit breaker; both refuse with `INVALID_CONFIGURATION`, and BASIC with a
+  null username refuses rather than sending `null:password`.
+- **R12** — `VaultGrantChecker` skipped an unreadable connection at DEBUG (its secrets counted as
+  granted); it is now a violation naming the connection. `${vars:}` is expanded through
+  `GlobalVariableResolver` before the vault scan, on the connection hop and the general scan alike.
+- **R13** — tests for `X-EDDI-Connection-Credential` parsing, the HITL resume bindings, the
+  `lease_expired` branch (via a package-private await-timeout seam) and a failing `REFRESH_FAILED`
+  write, which no longer replaces the provider's verdict with a raw store exception.
+
+**Decision — `propagate` carries both bindings; `withIdentity` does not.** A wrapper that carries
+one of the two thread bindings and not the other is the drift R5 fixed, so the snapshot-current
+helper composes them. The explicit-identity helpers are used where the principal is deliberately
+different (HITL resume) or established later from stored memory (group members), so they stay
+single-purpose rather than silently overriding a principal the caller set.
+
+**Decision — the credential-endpoint allowlist outranks the SSRF address block for the token
+endpoint only.** An exact origin an operator wrote down is a stronger statement than "not a private
+address"; the httpcalls path keeps `eddi.security.ssrf-protection` untouched.
+
+**Not verifiable here:** `SafeHttpClientTest` binds a loopback server, which this sandbox refuses at
+`HttpServer.create` (pre-existing for the whole class); its three new no-redirect cases run in CI.
+
+---
+
+## 🧩 fix(connections): configuration, store and export findings from the connections review (2026-09-13)
+
+**Repo:** EDDI (`fix/connections-review-findings`, merged from `wip/connections-config-findings`)
+
+Thirteen findings from the connections code review, each its own commit with a regression test
+that fails without it. The runtime findings of the same review are on a sibling branch; the
+two meet in `docs/connections.md` and here.
+
+**Write-boundary validation (`ConnectionConfiguration`):**
+
+- **`valueTemplate` literal text is now checked** (C1). The old check inspected only the `${…}`
+  segments, so `sk-live-abcdef${vault:unused}` saved while the docs said it was refused. Rule:
+  every `${` must be a well-formed `${vault:…}`/`${vars:…}` reference (an unclosed brace or a
+  key over 256 chars used to count as literal text), at least one reference, and each literal
+  segment ≤ 32 chars with no run of ≥ 12 key characters. Scheme prefixes pass; a key does not.
+- **The name has a grammar** (C2): `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`, refused rather than
+  trimmed. `ConnectionReference` stops at `/` and `}`, the credential header splits at the first
+  space, so `acme/jira` resolved as tenant `acme` and a name with a space resolved for nobody.
+- **`extraAuthParams` values are checked** (C7): no `${…}` reference (it would be resolved into a
+  browser-visible URL), ≤ 512 chars, no credential-shaped prefix (`sk-`, `xox?-`, `gh?_`,
+  `AKIA`, `eyJ`, `Bearer`). The key denylist gains the parameters EDDI composes itself
+  (`redirect_uri`, `state`, `code_challenge`, …), normalised so `Redirect_uri` is caught.
+- **`timeoutMs` is bounded 1..60000** at save time (C9); the token client's own ceiling still
+  clamps at use. A non-loopback `http://` origin in `baseUrlAllowlist` stays accepted but is
+  logged at WARN when saved and again by the startup guard.
+
+**REST store (`RestConnectionStore`):**
+
+- **Name uniqueness is no longer check-then-act** (C3). Creates of one `(tenant, name)` are
+  serialised on a striped lock inside the JVM; after the write lands the store is asked again
+  who holds the name (`IConnectionStore.idsOfName`, oldest-first). **Review fix:** the first
+  version of this left the descriptor to `DocumentDescriptorFilter` *after* the method
+  returned — outside the lock — so the lock guarded nothing: a second create on the same
+  node took it the instant the first released it, scanned, found no descriptor yet, and both
+  landed. `RestConnectionStore` now writes the descriptor itself inside the lock (the filter
+  finds it and does nothing; `RestImportService.recordCreatedConnection` writes one only when
+  missing). Our own id is expected in the post-write scan and filtered out; the rule stays
+  "any other holder visible now wins" — ours is removed permanently, descriptor included, and
+  the caller gets 409. Chosen over "oldest wins" because under asymmetric visibility the latter
+  duplicates the name; the cost is that two replicas seeing each other both stand down and both
+  callers retry. What remains is replication lag between nodes.
+- **Duplicate goes through `validateForWrite`** (C4) — it skipped the deployment checks.
+- **`CALLER_SUPPLIED` needs OIDC** (C5): `CallerIdentityContext` drops the credential header for
+  an anonymous identity, so with `authorization.enabled=false` the connection saved and failed
+  every call as `NO_CALLER_CREDENTIAL`. Now 400 at the write boundary and a stored-state report
+  at boot, like `PER_USER`.
+- **An `authType`/`binding` change with linked accounts is a 409** (C6), naming the count and
+  the way out (`DELETE /connections/{name}/grant`, or delete the connection). Re-saving a
+  `PER_USER` OAuth connection as `STATIC` left every user's refresh token at rest under a name
+  the resolver never read again. `IConnectionGrantStore.countByConnection` added (Mongo,
+  Postgres, in-memory double) — the only change under `connections/grants/`.
+- **Editors may list and read connections** (C11): `eddi-editor` on the descriptor listing and
+  the single read; every write stays admin-only. A document carries references only.
+
+**Startup guard:** dev/test now require a bare origin and accept plain http on loopback only,
+and the scheme is compared case-insensitively in every profile (C8); a first-release
+`OAUTH2_AUTHORIZATION_CODE` + `SERVICE` document is reported with the fix (C12).
+
+**Export/import (C10):** an agent archive now carries the connections its configs reference,
+as `connections/{connectionId}.connection.json` — document only, never a grant. Two defects
+made this necessary rather than nice: `AbstractBackupService` had no connection entry, and
+`SecretScrubber` redacted `${connection:jira}` in an `Authorization` header to
+`${vault:REDACTED}`, so the reference died before the archive was written. **Review fix:** the
+scrubber's exemption is for a value that *is* exactly one `${connection:…}` reference, not one
+that contains it — every outbound path refuses a mixed value (`ConnectionReference.requireSole`),
+so a "contains" exemption only kept `Bearer sk-… ${connection:jira}` legible. Import creates a
+connection only when the name is free — an existing one is never overwritten — through
+`RestConnectionStore.createConnection` (same validation, deployment checks and lock as REST);
+a refused document is skipped with its reason and counted in `X-Connections-Skipped`. The
+descriptor is written by the store inside its name lock; the import writes one by hand only
+when it is missing, as `createResourceDirect` does. Live sync still does not carry
+connections; said so under Limitations. `AGENTS.md` §5.5 lists the file and counts thirteen.
+
+**Docs (C13):** `configuration-reference.md` no longer describes
+`credential-endpoint-allowlist` as where resolved credentials go; it bounds the client secret.
+
+**Files:** `configs/connections/**`, `connections/ConnectionStartupGuard.java`,
+`connections/grants/{IConnectionGrantStore,MongoConnectionGrantStore,PostgresConnectionGrantStore}.java`,
+`backup/impl/{AbstractBackupService,RestExportService,RestImportService}.java`,
+`secrets/sanitize/SecretScrubber.java`, `docs/{connections,configuration-reference,import-export-an-agent,agent-sync-architecture}.md`,
+`AGENTS.md`, and the tests named in each commit.
+
+**Not done / for the runtime branch:** the resolver still reads `timeoutMs` through the
+client's own clamp (fine, now documented); `SecretRedactionFilter` was not touched. A legacy
+document written before C1 could carry a literal in `valueTemplate` and is now readable by
+editors (C11) — re-saving it fails validation, which is the signal to fix it.
+
+**Review pass — token URL syntax check ran after the URI was built.** R6 added
+`UrlValidationUtils.validateUrlSyntax` to `OAuthTokenClient.exchange`, but after
+`URI.create(tokenUrl)`, so a token URL the allowlist accepts once trimmed but that will not
+parse (trailing whitespace on a document written straight to the store) still surfaced as a raw
+`IllegalArgumentException` — not a `ConnectionException`, which on the service-grant mint path is
+exactly what R11 keeps out of the MCP circuit breaker. The check now runs first, its parsed URI
+is the one fetched, and a failure is `INVALID_CONFIGURATION` naming `oauth.tokenUrl`.
 
 ---
 
@@ -470,6 +915,7 @@ locally. CI is the authority for those.
 **Reviewer note.** This branch changes the local build contract: `./mvnw compile` now fails
 on unformatted or badly-imported sources instead of quietly rewriting them. AGENTS.md is
 updated to say so, because the previous wording described the old behaviour.
+
 ## 🔌 fix(install): close the PR #714 review — a busybox probe that read every port as free (2026-09-07)
 
 **Repo:** EDDI (`fix/installer-mongodb-port-conflict`)
@@ -2768,1058 +3214,6 @@ deployments. Recorded here as an open decision rather than changed quietly.
 
 ---
 
-## 🔑 fix(security): authenticate EDDI's own loopback calls; close the last USE side doors (2026-08-29)
-
-**Repo:** EDDI (`feat/multi-user-spaces-and-sharing`)
-
-Closing every remaining finding from the review passes, and answering the
-question they were blocking: **does the Platform Operator work under per-user
-workspaces?**
-
-### The Operator: yes, and here is what it took
-
-In `caller-identity` mode the Operator's generated tools send
-`Authorization: Bearer ${caller:token}`, which `CallerIdentityResolver` replaces
-with the bearer of whoever is chatting. Every action it takes therefore runs as
-the real user — it lists what they can see, edits what they may edit, and
-anything it creates is stamped as theirs. That is exactly the behaviour
-workspaces want and it needed no change at all.
-
-Two things did.
-
-**EDDI's internal loopback calls carried no credentials (critical).**
-`AgentSetupService` — behind the agent wizard, the `setup-api` endpoint, and
-therefore the Operator's agent-creation tools — re-enters EDDI's own REST API
-through `RestInterfaceFactory`, as does most of `McpAdminTools`. That client sent
-no `Authorization` header while `/*` sits behind the `authenticated` HTTP policy,
-so **every one of those paths answered 401 whenever
-`authorization.enabled=true`** — the exact configuration workspaces require. The
-wizard, setup-api and the operator's entire write capability were unusable on any
-Keycloak-protected deployment, and the failure surfaced as a server fault rather
-than a missing credential.
-
-New `LoopbackCallerAuthFilter` forwards the caller's own token across the hop.
-Registered only on the **one-argument** `RestInterfaceFactory.get(Class)`, which
-addresses `127.0.0.1` on this process's own port: the destination is not merely
-same-origin, it is this very process. The two-argument overload that names an
-arbitrary remote instance for cross-instance sync deliberately does not get it —
-that is the case where forwarding a token would leak it. A pipeline thread's
-*bound* identity wins over a captured one, so a HITL resume stays attributed to
-the user whose turn it is rather than the administrator approving it.
-
-Two consequences beyond the 401: resources created through `setup-api` are now
-stamped with their **actual owner** instead of being left unowned, and the MCP
-tools that resolve stores this way genuinely do inherit `ResourceAccessGuard` —
-making true the claim an earlier pass had to walk back.
-
-**The Operator agent would have been invisible to everyone but its activator.**
-It is provisioned by whoever turns it on, so under enforcement it lands in that
-person's space and every other user gets 403 opening the drawer. Deliberately
-*not* fixed in code: auto-publishing an agent because of its name is how security
-bugs get written. The sharing API already covers it, and the deployment step is
-now documented — publish it once, or share it to a team at `USE` if the
-deployment would rather not expose the Operator's prompt.
-
-### The last USE side doors
-
-- **Group membership.** Same shape as the schedules and triggers closed last
-  pass: a group's member turns run system-initiated, below the gate, so
-  recruiting a colleague's private agent as a member reached it with the group
-  discussion as the read-out channel. Checked now at group create and update.
-- **The OpenAI-compatible `/v1` API.** One shared key reached any deployed agent
-  by id. It now applies the same gate — and since `/v1` has no verified principal
-  (one key, a user id from a trusted header), that admits **published agents
-  only** under enforcement. Deliberately not scoped to the header-supplied user
-  id: honouring a self-asserted identity would let one leaked key reach that
-  user's private agents. `listModels` filters to match, so a client never sees a
-  model it would be refused at chat time.
-
-### Manager-readiness
-
-- **`?space=` narrows any descriptor listing server-side**, so a space switcher
-  can page correctly — client-side filtering cannot, because page 2 of
-  "everything" is not page 2 of "this space". Implemented as its own AND-ed
-  filter group: folding it into the access group would OR it and turn a narrowing
-  into a widening, which `AccessScopeTest` pins down along with the anchoring that
-  stops `team:eng` matching `team:engineering`.
-- **Share results carry resource names** alongside ids, so a share dialog can say
-  "also granted on Support Rules" rather than on `1111111111111111111111` — the
-  difference between a confirmation a person can check and one they can only
-  accept. `updatedIds()` / `skippedIds()` keep the id-only shape for callers that
-  just count.
-
-### Deliberately still open
-
-- **Sub-agent tools** (`ConverseWithAgentTool`, `CreateSubAgentTool`) reach
-  agents by id under the conversation's identity. Runtime-side and governed by
-  tool approval rather than workspaces.
-- **Descriptor creation in a response filter** rather than in the stores. Much
-  less pressing now the loopback paths authenticate and stamp correctly, but
-  still the most leveraged follow-up.
-- **The access predicate is a regex scan.** A scaling ceiling, not a correctness
-  problem; the array-plus-`$in` fix needs a real PostgreSQL to verify.
-- **Enumeration oracles** on the capability registry, deployment listing and
-  `getCurrentResourceId`. Pre-existing; names and ids, not configuration.
-
-Across four passes every serious finding was the same shape — *a surface that
-reaches agents or descriptors without passing the guard*. They are now closed
-individually at each authoring entry point, which is correct but enumerative. The
-durable version is a USE check inside `ConversationService.startConversation`
-with an explicit flag for genuinely system-initiated callers; worth doing before
-this is described as a hard security boundary.
-
-### Verification
-
-Full unit suite green apart from this machine's environmental socket failures.
-New: `LoopbackCallerAuthFilterTest` (six cases, including bound-over-captured
-precedence and the fail-soft path) and `AccessScopeTest` (six, including that a
-space narrowing cannot widen).
-
-**What is still unproven, and it is the important part.** The loopback fix
-changes how every internal API call authenticates, and its correctness depends on
-a live security context, a real Keycloak and the HTTP stack — none of which exist
-in a unit test. Before enabling this anywhere that matters: staging, Keycloak on,
-two real accounts, Operator activated and published, then confirm each user sees
-only their own agents, the Operator can create one, and the created agent belongs
-to whoever asked for it.
-
----
-
-## 🔎 fix(security): third-pass review — group-share regression, ACL leak in listings, USE-gate side doors (2026-08-29)
-
-**Repo:** EDDI (`feat/multi-user-spaces-and-sharing`)
-
-A fresh critical pass over the whole branch, this time including the API/UX
-surface. Four defects found and fixed, each with a test that fails without the
-fix; the rest of the pass is recorded as verified-clean or explicitly open.
-
-### Fixed
-
-- **Sharing a group silently dropped the member agents (critical, my own
-  regression).** The nested-group fix from the previous pass made the seeding
-  recursion and the poll loop share one visited-set, so every member agent was
-  pre-marked "done" and excluded from the share result: recipients of a group
-  share could open the workflows but not talk to any member agent. It survived
-  because `ResourceSharingServiceTest` mocks the resolver and the resolver itself
-  had **no test** — the exact blind spot reviews exist to find.
-  `ConfigGraphResolver` now uses two sets (`seededRoots` for recursion,
-  `dequeued` for the loop), the dead `referencedFromAgent` helper is gone, and
-  `ConfigGraphResolverTest` runs the real traversal over in-memory stores —
-  agent graphs, groups, nested groups, self-referential groups. Mutation-checked:
-  re-merging the two sets fails three of the five tests.
-- **The ACL still leaked through every listing.** `describe()` discloses grants
-  only at OWN — but listings and direct descriptor reads serialised the raw
-  `DocumentDescriptor`, `grants` and `accessIndex` included, and a `published`
-  resource is listable by everyone. The restraint on the sharing endpoint was
-  theatre. `ResourceAccessGuard.redactForCaller` now strips both fields for
-  non-owners at every descriptor exit: `RestVersionInfo.readDescriptors` (all
-  fifteen types), the cross-type descriptor endpoint, and the two
-  reverse-reference listings. Owner, space and visibility stay — the Manager's
-  owner column needs them, and "owned by alice" is what a recipient needs to know
-  whom to ask.
-- **Schedules and triggers were standing side doors around the USE gate.** Both
-  are authored by a user naming an agent id, and both *fire* system-initiated —
-  deliberately below the gate, because no interactive caller exists then. So any
-  editor could converse with a private agent by scheduling it or pointing a
-  trigger at it. The gate now applies at authoring time — schedule create/update
-  (the re-point path) and trigger create/update, on every referenced deployment.
-- **The schedule store turned the 403 into a 500.** Found by the new gate test,
-  not by reading: `createSchedule`'s blanket `catch (Exception)` swallowed the
-  guard's `ForbiddenException` and rethrew `InternalServerErrorException` — the
-  caller could not tell "you may not schedule that agent" from "the server
-  broke". Both create and update now rethrow the refusal.
-- **`@Consumes(APPLICATION_JSON)` on the body-less share POST** made strict
-  clients and generated SDKs manufacture a Content-Type for an entity that does
-  not exist. Removed.
-
-### Verified clean this pass
-
-- All fifteen `duplicate*` endpoints read through the guarded
-  `restVersionInfo.read` — duplication is not a read bypass anywhere.
-- The setup-API concern dissolves on inspection: its credential-less loopback
-  calls already 401 under `authorization.enabled=true` (pre-existing, see the
-  loopback-auth note), and enforcement *requires* auth — so no unowned-agent hole
-  opens through the wizard path under enforcement.
-- The `ForbiddenException`-to-403 mapping is the same one `OwnershipValidator`
-  has always relied on; no new mapper needed.
-
-### Known open, deliberately not implemented here
-
-- **OpenAI `/v1` adapter bypasses USE**: one shared API key converses with every
-  deployed agent. Whether `/v1` should serve only `published` agents under
-  enforcement is a product decision (it would change what Open WebUI users see),
-  not something to half-implement from a review.
-- **Group membership is not USE-checked at group creation** — recruiting a
-  colleague's private agent into a group reaches it through the (deliberately
-  ungated) member-turn path. Same class as the schedule/trigger doors, but group
-  flows are collaborative by design; needs its own decision.
-- **Built-in sub-agent tools** (`ConverseWithAgentTool`, `CreateSubAgentTool`)
-  let a prompted LLM converse with agents by id under the conversation's
-  identity. Runtime-side, partially mitigated by tool governance; out of scope
-  for the authoring-surface model.
-- **Enumeration surfaces**: capability registry, deployment listing, and the
-  `getCurrentResourceId` endpoints remain unscoped existence/version oracles
-  (pre-existing).
-- **Manager-facing API gaps** for the upcoming UI: listings have no server-side
-  `space` filter (the space switcher would need one to page correctly), and
-  `ShareResult` returns ids, not names.
-- **Keycloak nesting semantics**: membership in `/engineering/backend` does not
-  confer the `/engineering` space — Keycloak's group-membership claim lists the
-  groups a user is actually in. Documented behaviour, worth knowing before teams
-  adopt nested groups.
-
-### Verification
-
-Targeted suites for every touched area plus `ImportStyleTest` and the doc-link
-guard, then two full unit runs (the first raced a parallel build over `target/`
-and produced phantom `NoClassDefFound`s — the piped-mvnw lesson again, now in
-concurrent form; the uncontended rerun was clean apart from the known
-environmental failures). Mutation checks: the resolver two-set fix and the
-schedule USE gate both have tests that fail with the defect reintroduced. The
-full run also caught that `readDescriptor` returned whatever
-`redactForCaller` returned — the call site now ignores the decorator's return
-value, so no double (or future decorator) can null the response.
-
----
-
-## 🔐 fix(security): close the bypasses an adversarial review found in workspaces (2026-08-29)
-
-**Repo:** EDDI (`feat/multi-user-spaces-and-sharing`)
-
-Follow-up to the workspaces commit, from my own second pass plus a maximum-effort
-adversarial review. Every finding below was traced in the code before being fixed;
-nothing here is speculative hardening.
-
-### Bypasses — resources reachable without passing the guard
-
-- **Export was a complete read of any agent by id.** `RestExportService.exportAgent`
-  and `previewExport` read the agent and then every workflow, rule set, api call,
-  LLM config, output set, dictionary, mcp call, RAG config and snippet it
-  references — straight from the stores, gated only by the `eddi-editor` role. An
-  editor with no grant on anything could `POST /backup/export/{anyAgentId}` and
-  receive another user's system prompts, tool definitions, api-call headers and MCP
-  server configs. Exactly the capability the feature exists to remove, and
-  `docs/workspaces.md` already claimed export required VIEW. Both entry points now
-  require it, and the snippet sweep is scoped.
-- **`/descriptorstore/descriptors` was an unscoped inventory of everything.** The
-  cross-type listing called the unscoped overload, `readDescriptor` had no check,
-  and `patchDescriptor` — which renames a resource — had none either. One request
-  per type returned every descriptor in the deployment *and*, now that descriptors
-  carry them, every owner, space and grant. All three guarded.
-- **MCP conversation tools bypassed the USE gate.** `createConversation`,
-  `chatWithAgent` and `chat_managed` call `ConversationService.startConversation`
-  directly, gated only by `eddi-viewer` — the lowest tier. The REST equivalent was
-  403 while the MCP one held a full conversation with any private agent.
-- **Two reverse-reference listings were unscoped** —
-  `readAgentDescriptors(containingWorkflowUri=…)` and
-  `readWorkflowDescriptors(containingResourceUri=…)`. Anyone holding one resource
-  URI could enumerate everything referencing it, across all workspaces.
-- **RAG ingestion was a write gated by read access.** `published` grants VIEW to
-  everyone, so any editor could inject documents into a published RAG config's
-  knowledge base — prompt-injection into every agent retrieving from it. Now EDIT.
-- **Template preview returned every prompt snippet in the deployment.** Snippet
-  names stay (a preview that cannot say which references resolve is useless);
-  bodies are redacted for callers who do not already see everything.
-
-### Descriptor provenance — where ownership comes from
-
-- **Duplicating copied the source's ownership.**
-  `createDocumentDescriptorForDuplicate` wrote the source descriptor back verbatim,
-  so duplicating a *published* agent — which anyone may do — filed the copy under
-  the original owner, in their space, at their visibility. The duplicator could not
-  edit or delete what they had just created, and anyone could inject resources into
-  a victim's workspace attributed to them. It now builds a fresh descriptor, carries
-  name and description only, and stamps the duplicator. It also no longer mutates
-  the source object it read.
-- **Import trusted the archive.** A crafted `descriptor.json` could set `ownerId`,
-  `visibility: published`, arbitrary `grants` — and, worst, a hand-written
-  `accessIndex`, which is the one way to reach the token index without passing
-  through `Subjects` and its escaping. Ownership is stripped from imported
-  descriptors and the importing user stamped. Export strips the same fields, so a
-  ZIP no longer discloses principal and team names to whoever receives it.
-- **Three more descriptor-creating paths were unstamped** — the import create path,
-  both `UpgradeExecutor` direct-create paths, and the group descriptor sync.
-
-### Fail-open corrections
-
-- **A missing descriptor granted OWN to everyone.** `requireAccess` treated "no
-  descriptor" as "unowned" and, under the default `legacy-visibility=shared`,
-  returned OWN — read, edit, delete, deploy, undeploy. Not hypothetical: the setup
-  API reaches the stores over an unauthenticated loopback call and produces
-  descriptors with no owner. The fallback now admits **reading and using only** and
-  refuses EDIT and above regardless of policy, logged at WARN naming the resource.
-- **Listing and reading could disagree in the leaking direction.** `DescriptorAccess`
-  promises "listed but not readable cannot happen". Two shapes broke it: an
-  owner-less descriptor with a real space and `private` visibility fell through to
-  the `legacy` token — admitted to everyone — while `effectiveLevel` granted nobody
-  anything; and an unowned descriptor's grants were indexed but ignored by the
-  short-circuit. Fixed with `Subjects.TOKEN_NONE` (which `admittingTokens` never
-  emits) and by making the legacy admission a contribution rather than an early
-  return. The agreement test now sweeps the **full** cross-product of owner × space
-  × visibility × grant shape × caller × policy — ~1000 cases — and it was that sweep
-  that found the second shape.
-- **`transferOwnership(id, null, …)` un-owned a whole graph**, which under the
-  default policy means owned by everybody. Validated in the service, not only at the
-  REST edge, since the bean is reachable in-process.
-
-### Correctness
-
-- **The backfill migration queried four descriptor types that do not exist.** It
-  used the ZIP file-extension names — `ai.labs.behavior`, `ai.labs.httpcalls`,
-  `ai.labs.langchain`, `ai.labs.regulardictionary` — where listings use
-  `ai.labs.rules`, `ai.labs.apicalls`, `ai.labs.llm`, `ai.labs.dictionary`
-  (AGENTS.md §5.5). Those four queries matched nothing and the migration then
-  recorded itself complete, so **every pre-existing rule set, api call, LLM config
-  and dictionary would have vanished from every listing** the moment enforcement was
-  switched on — including from their owners, with no way to re-run short of deleting
-  the log row. The list is now derived from the stores' own `resourceURI` constants,
-  and `WorkspaceAccessIndexMigrationTest` asserts it. The migration also no longer
-  records completion when a page read failed.
-- **`ResourceSharingService` wrote back at the wrong version.** It re-resolved the
-  current version at write time and wrote a descriptor read at an earlier one; a
-  concurrent `PUT` in between left the descriptor naming the wrong version of its
-  own resource. It now writes at the version it read.
-- **The grant list is disclosed at OWN, not VIEW.** `published` grants VIEW to
-  everyone, so returning grants to any reader published every subject on the
-  resource — real principal and team names.
-- **Nested groups are followed** when sharing a group-of-groups, bounded by a
-  nesting limit as well as the visited set.
-
-### Corrections to my own claims
-
-- **The MCP coverage claim was wrong.** `ResourceAccessGuard` and `RestVersionInfo`
-  said the MCP admin tools "call those same beans in-process and therefore inherit
-  it". `McpAdminTools` resolves most stores through `IRestInterfaceFactory`, which
-  builds a REST client and makes a **loopback HTTP call**. Only the injected facades
-  inherit the guard. Corrected in both javadocs and in the documentation.
-- **`accessIndex` being in `INDEXED_FIELDS` does not make the access predicate
-  index-backed.** The predicate is an unanchored regex, which neither backend can
-  serve from a btree index. Not a regression — the type predicate this store has
-  always applied is a regex scan too — but the comment claimed otherwise. It now
-  states plainly what the index does and does not buy, and names the fix (tokens as
-  an array plus an operator on `IResourceFilter`), deliberately not attempted blind
-  because the PostgreSQL half cannot be verified without a PostgreSQL to run it on.
-
-### Verification
-
-Full unit suite: 20 373 tests. The only remaining failures are the environmental
-ones this machine always has (loopback sockets and event-loop creation) — none in
-any touched package. New tests: `WorkspaceAccessIndexMigrationTest`,
-`ResourceUtilitiesDuplicateOwnershipTest`, the widened `DescriptorAccessTest`
-cross-product sweep, and the missing-descriptor and principal-trimming cases in
-`ResourceAccessGuardTest`.
-
----
-
-## 🔐 feat(security): per-user workspaces and resource sharing (2026-08-29)
-
-**Repo:** EDDI (`feat/multi-user-spaces-and-sharing`)
-
-Configuration resources — agents, workflows, rule sets, LLM configs, output sets,
-dictionaries, api calls, mcp calls, RAG, prompt snippets, channels, connections,
-agent groups — had **no ownership at all**. `DocumentDescriptor` inherits a
-`createdBy` field from `ResourceDescriptor` and nothing ever wrote it, so the
-authoring surface was one shared workspace gated only by
-`@RolesAllowed({"eddi-admin","eddi-editor"})`. Any editor could read, edit,
-undeploy and delete anyone's work, and `eddi-user` could `POST
-/agents/{anyId}/start`.
-
-Off by default (`eddi.workspaces.enabled=false`). Full operator guide:
-[`docs/workspaces.md`](workspaces.md).
-
-### The model
-
-**Spaces are the boundary, grants are the exception.** Every descriptor gains
-`ownerId`, `spaceId` (`user:<principal>` or `team:<keycloak group>`),
-`visibility` (`private` / `space` / `published`) and a list of `ResourceGrant`.
-A single ACL-per-resource model makes the common case tedious; a pure space model
-makes the common exception impossible.
-
-**`AccessLevel` is USE < VIEW < EDIT < OWN.** The `USE`/`VIEW` split is the one
-that earns its complexity: letting a colleague *talk to* an agent is a different
-act from letting them read its system prompt, tool list and vault references, and
-the first is by far the more common share. `EDIT` deliberately excludes delete and
-re-share — a teammate sharing a space can change a colleague's agent but not
-remove it.
-
-### Design decisions
-
-- **One materialised `accessIndex` field, not a query over structured fields.**
-  `IResourceFilter` ANDs groups and ORs within a group, and cannot nest — so the
-  real policy (`owner OR (space AND visibility=space) OR granted OR published`) is
-  not expressible as a query at all. Collapsing it to pipe-delimited tokens at
-  write time makes a listing one indexed OR-group. `DescriptorAccess` holds both
-  halves so it stays checkable that they agree; `DescriptorAccessTest` asserts
-  agreement across the whole matrix.
-- **Every identity predicate is anchored and escaped.** Both backends treat a
-  `String` filter as a **regular expression** — `MongoResourceStorage` builds
-  `Filters.regex`, `PostgresResourceStorage` emits `~`. An unescaped predicate for
-  `alice` also matches `malice`, and an unescaped `.` in an email matches any
-  character. `Subjects` escapes only the metacharacters PCRE and POSIX ERE agree
-  on: escaping an ordinary character is *undefined* in POSIX ERE, so escaping
-  defensively would be less portable, not more.
-- **Filtered in the query, not on the page.** `RestConversationStore` post-filters
-  conversations with a `MAX_OWNER_SCAN` budget because no predicate exists there.
-  Config listings must not repeat that: `accessIndex` joined
-  `DescriptorStore.INDEXED_FIELDS`, which matters especially because the
-  `descriptors` collection is shared with conversation descriptors and grows with
-  conversation volume.
-- **`AccessScope` is an explicit argument, never ambient state.** Internal callers
-  that operate below the access model — the export service, the orphan sweep, the
-  startup migration — write `unrestricted()` at the call site. Reading scope from
-  a thread-local would make "unfiltered" the behaviour of any path that forgot to
-  set it, which is the shape most fail-open authorization bugs have.
-- **Cascades check before they cascade.** `deleteAgent`/`deleteWorkflow` tear down
-  referenced resources *before* the guarded `restVersionInfo.delete`, so both now
-  call `requireOwnAccess` first. Checking only at the end would have let an
-  unauthorised caller destroy the graph on the way to being refused.
-- **Sharing walks the graph, and stops at what you do not own.**
-  `ConfigGraphResolver` resolves agent → workflows → steps → parser dictionaries;
-  a referenced resource the sharer only borrowed is skipped and named in the
-  response's `skipped` list rather than silently widened. Bounded at 500 resources
-  against cyclic configs, and the cut-off is logged rather than silent.
-- **The channel-uniqueness sweep stays global but stopped naming names.** A
-  `channelId` collides with every integration in the deployment, so scoping the
-  check would let two workspaces bind the same Slack channel. Its error message no
-  longer names the conflicting integration, which had turned a uniqueness check
-  into an enumeration oracle.
-
-### Enforcement surfaces
-
-`RestVersionInfo` (all fifteen types, inherited by the MCP admin tools),
-the store methods that bypass it for filter arguments (`readOutputSet`,
-`readOutputKeys`, `readExpressions`, `readSnippet`, the patch and duplicate
-paths), the workflow-fan-out helpers (`RestAction`, `RestExpression`,
-`RestOutputActions` — all keyed on the workflow the caller named), the group
-workspace endpoints (decided against the *group's* descriptor, since a workspace
-has none of its own), deploy/undeploy, and `POST /agents/{id}/start`.
-
-### Backward compatibility
-
-- Default off; `eddi.workspaces.enabled=true` with `authorization.enabled=false`
-  logs that it has no effect rather than denying everyone everything.
-- Ownership is **recorded** whenever authentication is on, independent of
-  enforcement, so an operator can accumulate attribution, verify it, and only then
-  enforce.
-- `WorkspaceAccessIndexMigration` backfills every pre-existing descriptor with the
-  `legacy` token. Required, not optional: neither backend can express "this field
-  is absent", so an unstamped descriptor would match no access predicate and
-  vanish from every listing. It deliberately **does not invent owners**.
-- `eddi.workspaces.legacy-visibility=shared` (default) keeps pre-existing
-  resources visible to everyone, so an upgrade hides nothing.
-
-### Keycloak
-
-`keycloak/eddi-realm.json` gains a `groups` protocol mapper on both clients, a
-sample `/engineering` group, and — unrelated but overdue — the **`eddi-approver`
-role, which `OwnershipValidator` and `HitlAccessGuard` have been checking for
-without it ever being defined in the shipped realm.**
-
-### Verification
-
-`./mvnw compile`, `./mvnw test-compile`, the repo-wide guards (`ImportStyleTest`,
-`DocumentationLinks`, `StrictBoundary*`, `ShippedRulesets`) and 49 new tests
-across `SubjectsTest`, `DescriptorAccessTest`, `ResourceAccessGuardTest`,
-`RestVersionInfoAccessTest` and `ResourceSharingServiceTest`.
-
-Two mutation checks confirm the tests are not vacuous: removing the token
-delimiters from `Subjects.tokenPattern` fails `doesNotMatchSubstring`, and
-defaulting a missing visibility to `published` fails
-`missingVisibilityDefaultsToSpace`.
-
-### Not done
-
-The EDDI-Manager UI (space switcher, owner column, share dialog, published
-catalog) is a separate repo and a separate change. Until it lands, sharing is
-driven through the REST endpoints above.
-
----
-
-## 🔐 refactor(engine): split the engine's config reads off the authoring surface (2026-08-29)
-
-**Repo:** EDDI (`feat/multi-user-spaces-and-sharing`)
-
-Prerequisite for per-user workspaces, and worth doing on its own merits. Two
-populations were reading configuration through the same beans and needed opposite
-answers from them.
-
-`ResourceClientLibrary.getResource` — the engine resolving an `eddi://` reference
-mid-turn — went through the `IRest*Store` facades, as did `AgentStoreService`,
-`WorkflowStoreService`, `WorkflowTraversal`, `AgentCardService` and
-`ChannelTargetRouter`. The identity on a conversation turn is **whoever is
-chatting**, who in general does not own the agent they are talking to. Any
-ownership check placed on the authoring surface would therefore have failed every
-turn on every shared agent — the agent would not have been able to load its own
-rule set.
-
-All of those now read `IResourceStore` beans directly. What stayed on the facades
-is exactly the set of operations a *person* performs: `duplicateResource` and
-`deleteResource` (the cascade behind `RestWorkflowStore` and the orphan purge
-behind `RestOrphanAdmin`). The class comment states the rule so the split does not
-silently erode: **a read added here belongs on the store side, a mutation on the
-facade side.**
-
-### Design decisions
-
-- **`AgentOrchestrator` lost a parameter rather than gaining a type.** It already
-  injected `IAgentStore`; the separate `IRestAgentStore` it passed down to
-  `HttpCallToolsProvider` and `McpToolsProvider` was redundant once those take the
-  store. Dropping it beats keeping two parameters of the same type.
-- **`AgentCardService.listA2AAgents` lists through `IDocumentDescriptorStore`
-  unrestricted, deliberately.** An Agent Card is published to A2A *peers* — remote
-  systems, not EDDI users — so there is no caller workspace to scope to. Its gate
-  is `isA2aEnabled()` plus whatever authenticates the A2A endpoints.
-- **The store reads throw checked exceptions the facades swallowed.**
-  `readFromStore` rethrows via `SneakyThrow`, exactly as the facades did, so
-  `WorkflowTraversal`'s degrade-and-continue behaviour on a missing reference is
-  unchanged.
-
-### Verification
-
-`./mvnw compile`, `./mvnw test-compile`, and 637 tests across the touched areas
-(`ResourceClientLibraryTest`, `AgentOrchestrator*`, `WorkflowTraversal*`,
-`RagContextProvider*`, `ChannelTargetRouter*`, `AgentCardServiceTest`,
-`DocumentDescriptorFilterTest`) — all green. `ResourceClientLibraryTest` now mocks
-both sides and asserts the split: reads verify against the stores, duplicate/delete
-against the facades.
-
----
-
-## 🔍 fix(review): close an SSRF gap, and two tests that passed for the wrong reason (2026-08-28)
-
-**Repo:** EDDI (`claude/code-review-test-coverage-59bf99`)
-
-A review pass for dead code, defects and thin coverage. Dead code came up empty —
-every candidate turned out to be framework-wired (`OpenApiTagSortFilter` via Quarkus
-`@OpenApiFilter`, `LifecycleModule` as a CDI producer, `URIMessageBodyProvider` as a
-JAX-RS `@Provider`), there are zero `TODO/FIXME` markers in `src/main`, and no
-`ILifecycleTask` holds mutable instance state. Three real problems did surface, each
-verified by reverting the fix and watching the new test fail.
-
-**Measured baseline** (local `./mvnw test`): 20,295 tests, 8 failures / 193 errors —
-all environmental (loopback sockets, Docker, network), matching the known local
-profile. Fresh JaCoCo from that run: 89.91% instruction / 79.24% branch.
-
-### 1. `SourceUrlValidator` accepted internal hosts the rest of the codebase refuses
-
-The remote agent-sync endpoints (`backup/import/sync*`, open to **`eddi-editor`**,
-not just admin) validated their `sourceUrl` with a second, local copy of the SSRF
-predicate built from the four JDK checks. Those do not cover:
-
-- **RFC 4193 IPv6 ULA `fc00::/7`** — `isSiteLocalAddress()` only matches the
-  deprecated `fec0::/10`
-- **RFC 6598 CGNAT `100.64.0.0/10`** — used by Tailscale and some k8s pod CIDRs
-- IPv4 multicast
-
-`UrlValidationUtils.isPrivateAddress` — which AGENTS.md already names as the thing to
-call before fetching a user-controlled URL — covers all of them. `isPrivateIp` now
-delegates there instead of keeping the weaker duplicate, which is also what §4.7
-"Unification over duplication" asks for. `isPrivateAddress` is promoted to `public`
-and documented as the single definition of an unsafe outbound address.
-
-The wrapper keeps its own messages and its HTTPS-in-production rule (which has no
-equivalent in `UrlValidationUtils`), so no existing message assertion changes.
-Deliberately *not* adopted: `UrlValidationUtils`' `.local`/`.internal` hostname
-block — those hostnames resolve and are then caught by the address check anyway, and
-blocking them by name would newly reject a legitimate corporate sync target.
-
-Confirmed by mutation: with the old predicate restored, `100.64.0.1`, `fd00::1`,
-`fc00::1` and `224.0.0.1` were all **accepted**.
-
-### 2. Two audit dead-letter tests never tested what they claimed on Linux
-
-`AuditLedgerServiceBranchTest` passed `"Z:\\nonexistent\\path\\deadletter.jsonl"` as
-the dead-letter path to force the file-fallback **failure** branch. That is only
-unwritable on Windows: a backslash is a legal character in a Unix filename, so on the
-Linux CI runner the whole string is one relative filename that
-`Files.write(..., CREATE)` happily creates. So the two assertion-free tests
-(`writeToDeadLetterNatsFails`, `writeToDeadLetterFileOnly`) exercised the *success*
-path on CI while their comments claimed the failure path — and left a junk file named
-`Z:\nonexistent\path\deadletter.jsonl` in the build directory, which is not
-gitignored.
-
-Replaced with `@TempDir` + a deliberately-uncreated parent directory: `Files.write`
-with `CREATE` does not create parent directories, so it throws `NoSuchFileException`
-on both platforms. Both tests gained real assertions — that NATS was actually
-attempted (or actually skipped), and that the dead-letter file does **not** exist
-afterwards, which is what makes them fail if the write ever starts succeeding again.
-
-Confirmed by mutation: pointing the helper at a writable path fails exactly those two
-tests.
-
-### 3. `McpToolsProvider` sat at 31% coverage, including its tool-confusion defence
-
-`McpToolsProviderTest` asserted in its javadoc that discovery was "already covered
-indirectly by `AgentOrchestratorExtendedTest`". Measurement disagreed: 264 of 383
-instructions and 41 of 50 branches missed. The indirect suites drive discovery with a
-mocked memory whose `getAgentVersion()` is null, so `WorkflowTraversal` returns before
-the per-server loop is ever entered, and the `McpToolProviderManager*Test` suites
-cover the *manager*, not this class.
-
-Untested as a result: whitelist/blacklist filtering (the blacklist is an operator
-security control), the first-write-wins collision handling the class documents at
-length as an anti-tool-confusion measure, the spec-without-executor skip, the
-resource-bridge opt-in and its `IllegalArgumentException` → `INVALID_CONFIGURATION`
-path, and the `asProviderFailures` kind mapping.
-
-New `McpToolsProviderDiscoveryTest` covers all of it (13 tests). Note for future
-authors, called out in the class comment: `WorkflowTraversal` memoizes a completed
-traversal for two seconds in a **static** map keyed on
-`agentId|version|stepType|configClass`, so every test allocates its own agent id.
-
-The stale javadoc is corrected, and `contribute_nullFlag_defaultsToEnabled` — which
-asserted only `assertNotNull`, and so passed whether or not the flag short-circuited —
-now verifies that discovery was actually attempted.
-
-Confirmed by mutation: removing the collision guard fails
-`collisionKeepsFirstSpecAndItsExecutor`.
-
-### Noted, not changed
-
-- `RemoteApiResourceSource` builds a raw `HttpClient` rather than using
-  `SafeHttpClient`, contrary to §4.4. Not urgent — the JDK default redirect policy is
-  `NEVER`, so there is no redirect-based bypass — but it is a real follow-up with its
-  own blast radius (timeout/redirect semantics differ).
-- `ImportStyleTest` enforces the §4.7 no-inline-FQN rule only for
-  `ai.labs.eddi|java.util|java.time|java.nio.file`, so ~59 inline third-party FQNs
-  across 41 files slip through. Handled separately so it does not drown this review.
-
----
-
-## 🧹 refactor(style): make ImportStyleTest enforce the rule it documents (2026-08-28)
-
-**Repo:** EDDI (`refactor/import-style-guard`)
-
-`ImportStyleTest` guards AGENTS.md §4.7 ("never inline a fully-qualified name"), but
-its `INLINE_FQN` pattern only matched four package roots —
-`ai.labs.eddi|java.util|java.time|java.nio.file`. Every third-party FQN was invisible
-to it, so the rule was enforced on about a tenth of the surface it claims to cover.
-
-Measured blind spot: **381 inline FQNs across 118 files**, for roots the project
-actually depends on — `jakarta`, `javax`, `org.eclipse`, `org.jboss`, `com.fasterxml`,
-`io.quarkus`, `io.smallrye`, `io.micrometer`, `io.nats`, `org.bson`, `com.mongodb`,
-`org.postgresql`, `dev.langchain4j`, plus the JDK's `java.io`, `java.net`, `java.lang`
-and `java.security`. Examples: `jakarta.ws.rs.NotFoundException` in `McpHitlTools`,
-`io.micrometer.core.instrument.Counter` as a field type in `AuditLedgerService`,
-`org.eclipse.microprofile.openapi.models.tags.Tag::getName` in `OpenApiTagSortFilter`.
-
-Essentially none were the disambiguation case §4.7 permits — they were simply missing
-imports. Rather than park 118 files in an allowlist (the test's own doc argues an
-`ALLOWED` entry should be "a deliberate, reviewable act rather than silent drift", and
-an allowlist that never shrinks is exactly the drift it warns about), the pattern is
-widened to an explicit root list and the violations are fixed.
-
-The root list stays explicit rather than a general lowercase-dotted-path shape,
-because a generic pattern also matches method chains and builder idioms on a
-lowercase receiver, which are not FQNs at all.
-
-### One genuine collision found, and allowlisted
-
-`NatsConversationCoordinator` imports `io.nats.client.api.*`, which brings in
-`io.nats.client.api.Error`. Its `catch (RuntimeException | java.lang.Error e)` clauses
-mean the JDK type, and the inline FQN is load-bearing: rewriting it to `Error` makes
-the reference ambiguous and the file stops compiling. An explicit
-`import java.lang.Error` resolves it but is a redundant import (`java.lang` is
-implicit) that Checkstyle flags — so the inline FQN really is the only clean spelling.
-Added to `ALLOWED` with that reasoning recorded.
-
-Worth noting how this surfaced: the automated rewrite's conflict check only consulted
-*single-type* imports, so a name introduced by a wildcard import was invisible to it.
-The compiler caught it. Anyone repeating this exercise should expect wildcard imports
-to hide exactly this class of collision.
-
-### Verification
-
-Clean `test-compile` (not incremental — a type-level refactor reuses stale `.class`
-files otherwise), `ImportStyleTest` green against the widened pattern, and the full
-unit suite re-run against the pre-change baseline of 20,295 tests / 8 failures /
-193 errors (all environmental: loopback sockets, Docker, network). Checkstyle is
-unchanged at its pre-existing violation count — the one violation this work did
-introduce, a redundant `import java.lang.Error`, is gone with the revert above.
-
-No behaviour changes: every edit replaces an inline FQN with the identical type named
-by a top-level import, or moves an import line.
-
-One review follow-up, in two rounds. Shortening the two FQNs in
-`HttpCallToolsProvider.parseFailureDetail` pulled its `case JsonParseException ignored ->` /
-`case MismatchedInputException ignored ->` switch labels into the diff, and CodeQL's
-"unread local variable" query flagged both bindings. It was right, and it predated this
-branch: the switch only needs the *type* to choose a sentence, so `ignored` never had a
-reader.
-
-The first attempt renamed them to the unnamed variable `_`, which is what the codebase
-already uses for a binding it does not intend to read (`catch (NumberFormatException _)` in
-`BoundedLogStore` and `PathNavigator`). **CodeQL re-fired on that** - it reports
-`Variable 'JsonParseException _' is never read` just the same, so it does not treat `_` as
-an intentional discard.
-
-Since a pattern label must bind *something*, the fix is to stop using one: the switch is now
-a plain `instanceof` chain, which is also the style the position lookup in the same method
-already uses. Same order, same three sentences, same default. The single call site is inside
-`catch (IOException e)`, so the one semantic difference between the two forms - a pattern
-switch throws on a null selector where `instanceof` yields false - is unreachable. Note that
-no test pins these strings; equivalence here is by inspection, not by assertion.
-
-The failing-class *set* was diffed rather than just the counts - that catches a swap
-where one class newly breaks while another newly passes, which equal totals would hide.
-It came back identical, so nothing regressed.
-
----
-
-## 📝 docs(monitoring): reconcile the dashboard inventory with what is provisioned (2026-08-27)
-
-**Repo:** EDDI (`feat/grafana-full-metrics-dashboard`)
-
-`docker-compose.monitoring.yml` bind-mounts **three** dashboards, but
-`docs/metrics.md` announced "two dashboards" and listed only `eddi-ops` and
-`eddi-metrics-all` — omitting `eddi-grafana-dashboard.json` (`eddi-observability`)
-entirely, even though Grafana provisions it. The table now lists all three with
-their UID *and* filename, so the inventory can be checked against the compose file
-without guessing which JSON is which.
-
-The panel count for the Operations Command Center was also wrong, and had been
-wrong on `main` before this branch: both docs said **45 panels**, the dashboard
-actually has **51**. Counted by unique panel id, recursing into collapsed rows, and
-cross-checked for duplicate ids (none) — the discrepancy comes from the
-`Platform Overview & HTTP Traffic` row being expanded, so its four children sit at
-the top level rather than inside `row.panels`. Corrected in both places.
-
-`docs/monitoring/monitoring-guide.md` already carried the correct three-dashboard
-inventory and identifiers, so only its panel count needed syncing. Its description
-of the observability dashboard was also corrected from "5-group" to the actual six
-rows, naming the `Pipeline Tasks` group it had dropped.
-
-### Not changed
-
-`README.md` still advertises a singular "Pre-built Grafana dashboard" linking to
-`eddi-grafana-dashboard.json` — the oldest and least useful of the three. Same
-class of staleness, but outside the two files this pass covered; worth a follow-up
-that points readers at the Operations Command Center instead.
-
----
-
-## 🩹 fix(install): `eddi update` refreshes monitoring assets, not just compose files (2026-08-27)
-
-**Repo:** EDDI (`feat/grafana-full-metrics-dashboard`)
-
-The entry below fixed the *fresh install* path. The **upgrade** path was still
-broken, and worse: it would have taken working installations down.
-
-### Why
-
-The generated `eddi` CLI wrapper's `update` command refreshes only the files in
-`COMPOSE_FILES` and then runs `pull` + `up -d`. Nothing under `docs/monitoring/`
-was ever re-fetched. So on an existing monitored installation:
-
-1. `docker-compose.monitoring.yml` is refreshed and now carries the
-   `eddi-full-metrics-dashboard.json` bind mount.
-2. The dashboard itself is never downloaded.
-3. `up -d` recreates Grafana against a mount source that does not exist.
-
-Reproduced end to end against a simulated pre-branch installation with real
-Docker.
-
-### The failure has two shapes, and it is sticky
-
-Worth recording precisely, because the earlier entry overstated it as always
-fatal — the outcome depends on what the `grafana-data` volume already holds:
-
-- **Fresh volume:** Docker creates a directory at the host path, the container
-  *starts*, and Grafana provisions **2 of 3** dashboards. Nothing is logged at
-  `level=error`. Silent partial monitoring.
-- **Volume already holding a file there:** runc fails the mount
-  (`Are you trying to mount a directory onto a file`) and the container never
-  leaves state `Created` — the whole stack is down.
-
-And the first case poisons the second: it also creates a directory *inside* the
-named volume at `/var/lib/grafana/dashboards/eddi-full-metrics.json`. Once that
-exists, restoring the host file makes the mount fail in the **opposite**
-direction, so re-running the install script is **not** sufficient on its own.
-Verified remedy:
-
-```bash
-docker compose ... down
-docker run --rm -v <project>_grafana-data:/v alpine:3 \
-  rm -rf /v/dashboards/eddi-full-metrics.json
-docker compose ... up -d          # after the host file is back in place
-```
-
-Comments at both download sites in `install.sh` were corrected to describe both
-shapes rather than only the hard failure.
-
-### The fix
-
-Both wrappers now refresh the monitoring assets after the compose files and
-**before** `pull`/`up -d`, and abort rather than restart if an asset is missing
-and cannot be downloaded — the running stack is left untouched instead of being
-recreated into a broken mount. Assets that fail to download but already exist on
-disk are kept, as the compose refresh already does.
-
-- **`install.sh`** derives the list from the refreshed compose file
-  (`grep -oE './docs/monitoring/…\.(json|ya?ml)'`), so the next asset added to
-  `docker-compose.monitoring.yml` needs no wrapper change.
-- **`install.ps1`** could not do the same safely. Its wrapper is a `.cmd` batch
-  file generated from an expandable PowerShell here-string, where `` ` `` is an
-  escape character and `$` interpolates — batch's `for /f ... in (\`cmd\`)` form
-  is unusable there, and no Windows/PowerShell was available to test a nested
-  construct. Instead the asset list was hoisted to `$script:MonitoringFiles` (one
-  source of truth, used by the install-time download) and the file-type entries
-  are interpolated into the wrapper at generation time as a plain batch list, so
-  the wrapper does no parsing at runtime.
-
-### Limitation — existing installations still need the install script re-run
-
-`eddi update` does not refresh the wrapper itself, so an installation created
-before this change keeps its old wrapper and its `eddi update` remains broken. The
-fix reaches it only by re-running the install script, which regenerates the
-wrapper. Making the wrapper self-refresh was deliberately not attempted: it would
-not help any wrapper already on disk, and a running bash script that overwrites
-itself risks corrupting its own execution, since bash reads scripts incrementally.
-
-### Verified
-
-- Fixed `update` against a pre-branch install: all four monitoring files fetched,
-  assets landing **before** the `pull`/`up -d` calls (checked with a `docker`
-  stub), then a real run producing a healthy Grafana with all **3** dashboards.
-- Abort guard: with the asset absent and the source unreachable, exit code 1, no
-  `docker` invocation, no stray directory left behind.
-- Old wrapper, same starting state, real Docker: 2 of 3 dashboards and a
-  root-owned directory at the mount path — the regression this prevents.
-- Generated batch wrapper rendered and checked: every `goto`/`call` label
-  resolves, no backticks inside the here-string, no unintended `$`.
-
-### Noticed, not fixed (both pre-existing, out of scope)
-
-- `eddi update --with-monitoring` is advertised by the installer's wizard
-  (`install.sh`, monitoring step) but the wrapper's `update` only parses
-  `--eddi-version=`. The flag does nothing.
-- The `.cmd` wrapper's `uninstall` embeds `$_` unescaped inside the expandable
-  here-string, so it is interpolated at *generation* time (to empty) rather than
-  reaching the generated file. The PATH-cleanup `Where-Object` is therefore
-  almost certainly broken, leaving a stale PATH entry after uninstall. Unverified
-  — no PowerShell in this environment.
-
----
-
-## 🩹 fix(install): ship the new dashboard through the installers, not just compose (2026-08-26)
-
-**Repo:** EDDI (`feat/grafana-full-metrics-dashboard`)
-
-Adding the Full Metrics Reference to `docker-compose.monitoring.yml` in the entry
-below was only half the deployment path. `install.sh` and `install.ps1` carry an
-explicit list of monitoring files to fetch for `--with-monitoring` /
-`-WithMonitoring`, and the new dashboard was not on it. Now it is.
-
-### Why this was a hard break, not a missing panel
-
-Every file in that list is bind-mounted **as a file** by the monitoring compose.
-When the source path does not exist, Docker creates a *directory* there, and the
-mount then fails at container init:
-
-```text
-runc create failed: ... error mounting ".../eddi-full-metrics-dashboard.json"
-to rootfs at "/var/lib/grafana/dashboards/eddi-full-metrics.json":
-not a directory: Are you trying to mount a directory onto a file (or vice-versa)?
-```
-
-The Grafana container is left in state `Created` and never starts. So the whole
-monitoring stack would have been down for anyone installing from outside a git
-clone — not merely missing one dashboard. `gcp/provision-vm.sh` shells out to
-`install.sh --with-monitoring`, so it inherited the same break and is fixed by the
-same change.
-
-Reproduced both directions in a simulated install directory containing only the
-files the installer fetches: with the dashboard absent, Grafana fails to start with
-the error above and a root-owned directory is left at the mount path; with it
-present, all three dashboards provision and Grafana is healthy.
-
-The comments at both download sites understated this ("Grafana then fails to
-provision") and now say what actually happens, plus the invariant that caused it:
-**this list must stay in step with every file-type bind mount in
-`docker-compose.monitoring.yml`.**
-
-### Not changed — two Grafana surfaces that ship no dashboards at all
-
-Worth knowing, both pre-existing and neither touched here:
-
-- **`k8s/overlays/monitoring/monitoring-stack.yaml`** deploys Grafana with
-  `emptyDir` and no dashboard provisioning whatsoever — no ConfigMaps, no
-  provisioning mounts. None of the three dashboards reach a Kubernetes install
-  today; the file's own comment says as much. Fixing that means adding dashboard
-  ConfigMaps + a provisioning sidecar config, and the Full Metrics Reference is
-  **322 KB**, which is above the 262,144-byte ceiling on the
-  `kubectl.kubernetes.io/last-applied-configuration` annotation that client-side
-  `kubectl apply` writes — so it would need server-side apply or a Grafana
-  sidecar/PVC instead. Not attempted here, and not verified locally (no cluster in
-  this environment).
-- **`helm/eddi/values.yaml`** exposes `monitoring.grafana.enabled`, but the chart
-  has no Grafana template at all — the toggle is unimplemented, so there is nothing
-  to add a dashboard to.
-
----
-
-## 📊 feat(monitoring): a Grafana dashboard covering every meter EDDI registers (2026-08-26)
-
-**Repo:** EDDI (`feat/grafana-full-metrics-dashboard`)
-
-`docs/monitoring/eddi-full-metrics-dashboard.json` — "E.D.D.I — Full Metrics
-Reference" (`eddi-metrics-all`), 133 panels across 19 subsystem rows, covering all
-**144** registered meters. Mounted in `docker-compose.monitoring.yml`; the
-provisioning provider globs the directory, so no provisioning change was needed.
-
-The Operations Command Center stays the front door. This is the companion you open
-when the number you need is not on it.
-
-### Why it is generated, not hand-written
-
-The panel set is produced from the metric registration sites in the source, and the
-generator fails if any registered meter has no panel. Hand-maintaining 133 panels
-against a codebase that adds meters is how dashboards rot.
-
-### What the audit turned up
-
-Counting the meters was not straightforward, and each surprise changed the output:
-
-- **144, not 141.** Three meters register through `Metrics.globalRegistry` rather
-  than an injected `MeterRegistry` and are invisible to the obvious grep:
-  `eddi.llm.tool_context.evictions`, `eddi.operator.write.approval`,
-  `eddi.hitl.rule.matched`. A fourth, `eddi.coordinator.total_processed`, is a
-  `FunctionCounter.builder`.
-- **The existing dashboards covered 55 of them.** 86 meters — HITL, MCP, the model
-  cascade, Dream, capability registry, connections, agent identity, attachments,
-  the OpenAI-compatible adapter, team cadences, group deliberation — had no panel
-  anywhere.
-- **Two shipped panels queried series that do not exist** (see below).
-- **`eddi.tenant.quota.denied` was unobservable per-tenant.** Fixed in the entry
-  below.
-- **Two documented metric names were wrong.** `eddi_tool_cache_puts` does not
-  exist; the meter is `eddi.tool.cache.puts.by_tool`. And the `*_by_tool` hits and
-  misses meters are *separate meters*, not a `tool` dimension of the aggregate
-  ones — the guide implied otherwise.
-
-### Timers do not publish percentiles
-
-Only `eddi.pipeline.task.duration` calls `publishPercentileHistogram()`, so it is
-the only EDDI timer with a `_seconds_bucket` series and the only one where
-`histogram_quantile()` returns anything. Two shipped panels ignored this and were
-permanently empty — "No data", indistinguishable from an idle system:
-
-- `eddi-operations-dashboard.json` — "Processing Duration P50 / P95 / P99" over
-  `eddi_conversation_processing_duration_seconds_bucket`
-- `eddi-grafana-dashboard.json` — "Vault Resolve Latency" P99 over
-  `eddi_vault_resolve_duration_seconds_bucket`
-
-Both now chart mean (`_seconds_sum / _seconds_count`) and peak (`_seconds_max`),
-with a panel description saying why there is no percentile. `docs/metrics.md`
-carried the same bad query as a copy-paste example; it is corrected and the rule is
-now written down. The one panel that *did* use buckets correctly —
-"Task Duration (Avg / P99)" — was left alone.
-
-### Naming rules, verified rather than assumed
-
-Pinned by running the project's own registry (Micrometer 1.17.0 +
-`micrometer-registry-prometheus-simpleclient`) and reading the scrape, because
-guessing wrong produces a silently empty panel:
-
-- a counter already ending in `_total` is **not** doubled
-  (`eddi_group_cost_ceiling_hit_total` stays put), but one ending in `_count`
-  **does** gain it (`eddi_hitl_pause_count_total`)
-- dotted tag keys become underscores (`task.id` → `task_id`); camelCase keys do
-  not change (`authType` stays `authType`)
-
-### How it was verified
-
-Not just "the JSON parses":
-
-- every one of the 203 expressions executed against a real Prometheus — 0 parse
-  errors, across all three dashboards
-- a synthetic exporter built on the real Micrometer registry served all 144 meters
-  with representative tags; **191 of 203 queries returned data**, the only 12
-  blanks being Quarkus/JVM binders the exporter does not register
-- all three dashboards provisioned into Grafana 11.6.0 with no errors
-- rendered and inspected, which caught two things no validator would: KPI titles
-  truncated at three grid columns, and the `barchart` panels drawing one bar per
-  scrape timestamp instead of one per label (a range query where an instant query
-  was needed — now horizontal bar gauges, single hue, `move`/`tool`/`skill` on the
-  axis)
-
-### Design notes
-
-- Counters as rates, timers as mean + peak, gauges as-is; one unit per panel and no
-  dual axes.
-- Status colours (green/amber/red thresholds) only where the colour *means*
-  good/bad — the KPI gauges and error-rate tiles. Series identity everywhere else
-  is Grafana's categorical palette, never a status token.
-- Single-series panels carry no legend box; the title names the series.
-- Panel descriptions carry the operational reading, not a restatement of the title
-  — what a sustained non-zero rate on `eddi_tool_cache_bypassed_total`,
-  `eddi_audit_entries_dropped_total` or `eddi_counterweight_strict_downgraded_total`
-  actually means for the operator.
-- `$datasource` and `$job` template variables; all rows but `Overview` collapsed.
-
----
-
-## 🐛 fix(tenancy): the per-tenant quota breakdown never reached Prometheus (2026-08-26)
-
-**Repo:** EDDI (`feat/grafana-full-metrics-dashboard`)
-
-While auditing every registered meter to build a Grafana dashboard, one documented
-metric dimension turned out not to exist in the exposition at all.
-
-### Why it failed
-
-A `PrometheusMeterRegistry` keeps only the **first** tag-key shape registered under
-a given metric name and silently drops every later one — no exception, no warning.
-`TenantQuotaService.init()` registered `eddi.tenant.quota.denied` with no tags, and
-each of the five denial paths then registered the same name with `tenant`+`type`.
-The untagged registration won, so `eddi_tenant_quota_denied_total{tenant,type}`
-never appeared at `/q/metrics`. The per-tenant breakdown promised in
-`docs/metrics.md` — and the "denied by type" panel on the operations dashboard —
-could not work.
-
-Proven directly against Micrometer 1.17.0 with
-`micrometer-registry-prometheus-simpleclient` (the registry Quarkus 3.38.3 pulls):
-register untagged then tagged, increment both, scrape, and only the untagged line
-comes back.
-
-### The fix
-
-The `quotaDeniedCounter` field, its two initialisations and its five
-`increment()` calls are gone. Every denial is now recorded once, tagged; the
-aggregate is `sum(rate(eddi_tenant_quota_denied_total[...]))` at query time. This
-is the shape `eddi.tenant.usage.*` already used.
-
-`quotaAllowedCounter` is untouched — it has a single untagged shape at every call
-site, so it never collided.
-
-### The new test
-
-`TenantQuotaServiceTest.PrometheusExpositionTests.deniedCounterIsExposedWithItsLabels`
-drives a real denial through a real `PrometheusMeterRegistry` and asserts the
-scraped line carries `tenant=` and `type=`. Verified the way the flake fix in the
-entry below was: reintroducing the untagged registration fails it with
-*"denial series lost its tenant label — a colliding untagged registration is
-shadowing it: eddi_tenant_quota_denied_total 0.0"*.
-
-The existing tests could not have caught this. Both use `SimpleMeterRegistry`,
-which tolerates the collision and reports both shapes happily — which is exactly
-why the bug survived. The new test is the only one that goes through a Prometheus
-scrape.
-
-### Not changed
-
-Neither existing assertion needed touching: one checks the tagged counter (still
-1.0), the other sums all counters of that name and asserts `>= 1.0` (now 1 instead
-of 2). 26 tests green.
-
-### Upgrade note
-
-Prometheus retains the old label-less samples for its retention window, so
-breakdown queries should filter with `{tenant!=""}` for a while after deploying.
-The dashboards do.
-
----
-
 ---
 
 ## Decision Log
@@ -3831,6 +3225,7 @@ _For recording decisions that come up during implementation that aren't in the p
 | 2026-03-05 | Use Astro (not Expo) for website                                      | Static site on GitHub Pages           | Expo would add unnecessary abstraction for a marketing site |
 | 2026-03-05 | Use AI complexity scale (🟢/🟡/🔴/⚫) instead of human time estimates | AI will do all implementation work    | Human hours are meaningless for AI execution                |
 | 2026-03-05 | Docs already published at docs.labs.ai                                | Third-party tool reads `docs/` folder | Could migrate to Astro Content Collections later            |
+| 2026-09-14 | Connection deployment settings are runtime-writable; a set property pins its value (409 on change) | Properties-only meant a restart per change and protected nothing from `eddi-admin`, who already writes the vault and can send any `${vault:}` value anywhere via an httpcall | Keep properties only (restart, no real protection); store without pinning (removes the operator/admin split for deployments that have one); seed the store from properties (a removed property would be silently replaced by its copy) |
 | 2026-09-13 | Block the cloud metadata service on every outbound path, even with `eddi.security.ssrf-protection.enabled=false` | E2E: a config-authored httpcall reached `169.254.169.254` | Flip SSRF protection on by default — breaks every configured internal API |
 | 2026-09-13 | Buffer a turn's audit entries and flush them after the pipeline, redacting a vaulted input | E2E: parser/rules entries carried a `scope: secret` plaintext into the append-only ledger | Redact after submission — impossible, entries are signed and immutable |
 | 2026-09-13 | Exclude stateful tools from the tool cache by reflecting over their `@Tool` classes | E2E: group members share a user, so `listArtifacts()` was served stale | Make caching opt-in per tool — changes every existing cached tool |

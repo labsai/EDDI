@@ -5,10 +5,11 @@
 package ai.labs.eddi.connections.rest;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+import ai.labs.eddi.configs.connections.IConnectionStore;
 import ai.labs.eddi.configs.connections.model.AuthType;
+import ai.labs.eddi.configs.connections.model.Binding;
 import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
 import ai.labs.eddi.connections.ConnectionException;
-import ai.labs.eddi.connections.ConnectionRegistry;
 import ai.labs.eddi.connections.CredentialReferenceResolver;
 import ai.labs.eddi.connections.ConnectionsConfig;
 import ai.labs.eddi.connections.grants.ConnectionGrant;
@@ -20,12 +21,14 @@ import ai.labs.eddi.connections.oauth.OAuthState;
 import ai.labs.eddi.connections.oauth.OAuthTokenClient;
 import ai.labs.eddi.connections.oauth.OAuthTokenService;
 import ai.labs.eddi.connections.oauth.TokenResponse;
+import ai.labs.eddi.datastore.IResourceStore;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.ForbiddenException;
+import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.NewCookie;
@@ -52,8 +55,8 @@ import java.util.Map;
  * <h3>The callback is the interesting part</h3> It is a {@code permit} path
  * because it has to be, and it is guarded by two things that must both hold: a
  * single-use, server-stored, short-TTL {@code state} that binds the tenant, the
- * connection and the principal, and a nonce cookie proving the callback reached
- * the browser that started the flow.
+ * connection (by resource id) and the principal, and a nonce cookie proving the
+ * callback reached the browser that started the flow.
  * <p>
  * Both are needed. The state binds a principal, but the ATTACKER chooses that
  * principal: they start a flow under their own account, keep the state, and
@@ -93,7 +96,8 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
 
     private static final SecureRandom RANDOM = new SecureRandom();
 
-    private final ConnectionRegistry connectionRegistry;
+    /** Uncached, for the post-write re-read the registry's cache cannot serve. */
+    private final IConnectionStore connectionStore;
     private final IOAuthStateStore stateStore;
     private final IConnectionGrantStore grantStore;
     private final OAuthTokenClient tokenClient;
@@ -105,11 +109,11 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
     private final MeterRegistry meterRegistry;
 
     @Inject
-    public RestConnectionAuthorization(ConnectionRegistry connectionRegistry, IOAuthStateStore stateStore, IConnectionGrantStore grantStore,
+    public RestConnectionAuthorization(IOAuthStateStore stateStore, IConnectionGrantStore grantStore,
             OAuthTokenClient tokenClient, OAuthTokenService tokenService, CredentialEndpointAllowlist endpointAllowlist,
             ConnectionsConfig connectionsConfig, SecurityIdentity securityIdentity, CredentialReferenceResolver credentialReferenceResolver,
-            MeterRegistry meterRegistry) {
-        this.connectionRegistry = connectionRegistry;
+            MeterRegistry meterRegistry, IConnectionStore connectionStore) {
+        this.connectionStore = connectionStore;
         this.stateStore = stateStore;
         this.grantStore = grantStore;
         this.tokenClient = tokenClient;
@@ -125,7 +129,9 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
     public Response authorize(String name, String returnTo) {
         requireEnabled();
         String principal = requirePrincipal();
-        ConnectionConfiguration connection = requireConnection(name);
+        requirePublicBaseUrl();
+        CurrentConnection current = requireCurrentConnection(name);
+        ConnectionConfiguration connection = current.configuration();
 
         if (connection.getAuthType() != AuthType.OAUTH2_AUTHORIZATION_CODE) {
             throw new BadRequestException("Connection '" + name + "' is " + connection.getAuthType()
@@ -133,6 +139,7 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
         }
         endpointAllowlist.require(connection.getOauth().getAuthorizationUrl(), "oauth.authorizationUrl");
         endpointAllowlist.require(connection.getOauth().getTokenUrl(), "oauth.tokenUrl");
+        String connectionId = current.id();
 
         String codeVerifier = randomUrlSafe(64);
         String nonce = randomUrlSafe(32);
@@ -140,6 +147,7 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
         state.setState(randomUrlSafe(32));
         state.setTenantId(ConnectionConfiguration.effectiveTenant(connection));
         state.setConnectionName(connection.getName());
+        state.setConnectionId(connectionId);
         state.setPrincipal(principal);
         state.setCodeVerifier(codeVerifier);
         state.setRedirectUri(connectionsConfig.redirectUri());
@@ -149,7 +157,7 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
         state.setExpiresAt(Instant.now().plus(STATE_TTL));
         stateStore.create(state);
 
-        count("connection.oauth.authorize.count", "outcome", "issued", connection);
+        increment("eddi.connection.oauth.authorize.count", "outcome", "issued", connection);
         return Response.ok(Map.of("authorizationUrl", buildAuthorizationUrl(connection, state, codeVerifier)))
                 .cookie(bindingCookie(state.getState(), nonce, (int) STATE_TTL.toSeconds())).build();
     }
@@ -237,7 +245,7 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
             // Unknown, expired and already-used are answered identically. Telling them
             // apart is a state-guessing oracle, and none of the three is actionable by
             // the user beyond "start again".
-            count("connection.oauth.callback.count", "outcome", "bad_state", null);
+            increment("eddi.connection.oauth.callback.count", "outcome", "bad_state", null);
             LOGGER.warn("An OAuth callback arrived with a state that is unknown, expired or already used");
             return redirect(connectionsConfig.defaultReturnTo(), "error", "invalid_state");
         }
@@ -247,10 +255,22 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
         // After the claim, deliberately — the state is single-use whichever way this
         // check goes, so a failed binding cannot be retried with the same state.
         if (!bindingMatches(oauthState, headers, state)) {
-            count("connection.oauth.callback.count", "outcome", "binding_mismatch", null);
+            increment("eddi.connection.oauth.callback.count", "outcome", "binding_mismatch", null);
             LOGGER.warnf("An OAuth callback for connection '%s' arrived without the browser binding that started the flow. The state was "
                     + "valid, so this is either a link followed in a different browser or an attempt to file somebody else's tokens "
                     + "under another principal.", sanitize(oauthState.getConnectionName()));
+            return redirect(oauthState.getReturnTo(), "error", "invalid_state", expiredBindingCookie(state));
+        }
+
+        if (oauthState.getConnectionId() == null || oauthState.getConnectionId().isBlank()) {
+            // A row written before states carried the connection id. Refused rather
+            // than grandfathered, like a row without a nonce hash: it lives at most
+            // STATE_TTL past an upgrade, and without the id the callback cannot tell the
+            // connection the flow was started for from a new one that took its name.
+            // The user starts again.
+            increment("eddi.connection.oauth.callback.count", "outcome", "bad_state", null);
+            LOGGER.warnf("An OAuth callback for connection '%s' carried a state written before states were bound to a connection id; the "
+                    + "user must start the link again", sanitize(oauthState.getConnectionName()));
             return redirect(oauthState.getReturnTo(), "error", "invalid_state", expiredBindingCookie(state));
         }
 
@@ -259,22 +279,48 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
             // error_description is not bound at all, let alone echoed onward: it is
             // attacker-influenceable text heading for a browser. Only the short
             // error code is logged, sanitized.
-            count("connection.oauth.callback.count", "outcome", "provider_error", null);
+            increment("eddi.connection.oauth.callback.count", "outcome", "provider_error", null);
             LOGGER.warnf("The provider refused an authorization for connection '%s' (%s)", sanitize(oauthState.getConnectionName()),
                     sanitize(error));
             return redirect(oauthState.getReturnTo(), "error", "authorization_declined", expiredBindingCookie(state));
         }
         if (code == null || code.isBlank()) {
-            count("connection.oauth.callback.count", "outcome", "bad_state", null);
+            increment("eddi.connection.oauth.callback.count", "outcome", "bad_state", null);
             return redirect(oauthState.getReturnTo(), "error", "missing_code", expiredBindingCookie(state));
         }
 
+        // BEFORE anything is exchanged: the connection this flow was started for must
+        // still be the one holding the name. Grants are filed under the name, so a
+        // connection deleted and re-created under it while the user sat on the consent
+        // screen would otherwise be handed a token issued for its predecessor's
+        // client — and its own allowlist decides where that token is sent. The
+        // document is read by the bound id at its current version, uncached: the
+        // registry is keyed by name, and on another replica its TTL can still serve
+        // the predecessor.
         ConnectionConfiguration connection;
         try {
-            connection = connectionRegistry.require(new ConnectionReference(oauthState.getTenantId(), oauthState.getConnectionName()));
-        } catch (ConnectionException e) {
-            count("connection.oauth.callback.count", "outcome", "exchange_failed", null);
+            connection = boundConnection(oauthState);
+        } catch (Exception e) {
+            increment("eddi.connection.oauth.callback.count", "outcome", "exchange_failed", null);
+            LOGGER.warnf("Could not read connection '%s' before redeeming an authorization code (%s); nothing was exchanged",
+                    sanitize(oauthState.getConnectionName()), e.getClass().getSimpleName());
+            return redirect(oauthState.getReturnTo(), "error", "exchange_failed", expiredBindingCookie(state));
+        }
+        if (connection == null) {
+            increment("eddi.connection.oauth.callback.count", "outcome", "exchange_failed", null);
+            LOGGER.warnf("Connection '%s' was deleted, or replaced by another connection of the same name, while an account was being linked "
+                    + "to it; the authorization code is not redeemed", sanitize(oauthState.getConnectionName()));
             return redirect(oauthState.getReturnTo(), "error", "connection_removed", expiredBindingCookie(state));
+        }
+        // Same connection, but no longer the shape a user grant belongs to: an update
+        // changed its authType or binding while the user was on the consent screen.
+        // Redeeming the code anyway mints a refresh token only to discard it below,
+        // and a provider that counts or notifies linked apps has already seen one.
+        if (!takesPerUserGrants(connection)) {
+            increment("eddi.connection.oauth.callback.count", "outcome", "exchange_failed", null);
+            LOGGER.warnf("Connection '%s' stopped being a PER_USER authorization-code connection while an account was being linked to it; "
+                    + "the authorization code is not redeemed", sanitize(oauthState.getConnectionName()));
+            return redirect(oauthState.getReturnTo(), "error", "exchange_failed", expiredBindingCookie(state));
         }
 
         try {
@@ -283,12 +329,34 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
             // The principal comes from the CLAIMED ROW. Reading it from a query
             // parameter would let anyone who obtains a state install a grant under
             // somebody else's name.
-            tokenService.persistNew(connection, oauthState.getTenantId(), oauthState.getPrincipal(), token, token.refreshToken());
-            count("connection.oauth.callback.count", "outcome", "success", connection);
+            ConnectionGrant stored = tokenService.persistNew(connection, oauthState.getTenantId(), oauthState.getPrincipal(), token,
+                    token.refreshToken());
+            if (!connectionStillTakesTheGrant(oauthState)) {
+                // An update changed the connection's authType or binding after the
+                // check above. See RestConnectionStore
+                // .deleteGrantsLinkedDuringTheUpdate for why re-reading HERE, after the
+                // grant is written, is what closes the race.
+                discardGrant(oauthState, stored);
+                increment("eddi.connection.oauth.callback.count", "outcome", "exchange_failed", connection);
+                return redirect(oauthState.getReturnTo(), "error", "exchange_failed", expiredBindingCookie(state));
+            }
+            increment("eddi.connection.oauth.callback.count", "outcome", "success", connection);
             return redirect(oauthState.getReturnTo(), "connected", connection.getName(), expiredBindingCookie(state));
         } catch (ConnectionException e) {
-            count("connection.oauth.callback.count", "outcome", "exchange_failed", connection);
+            increment("eddi.connection.oauth.callback.count", "outcome", "exchange_failed", connection);
             LOGGER.warnf("Token exchange failed for connection '%s': %s", connection.getName(), e.getReason());
+            return redirect(oauthState.getReturnTo(), "error", "exchange_failed", expiredBindingCookie(state));
+        } catch (RuntimeException e) {
+            // Everything else, once the state is claimed. A token host refused by URL
+            // validation (IllegalArgumentException), a grant store that cannot write
+            // (IllegalStateException): each used to escape as a 500 to a browser the
+            // provider just redirected, with the single-use state consumed and a
+            // provider token possibly minted but never stored. The contract is a 303
+            // in every outcome. Class name only — the message can quote the request,
+            // and this is an ERROR line.
+            increment("eddi.connection.oauth.callback.count", "outcome", "exchange_failed", connection);
+            LOGGER.errorf("Token exchange for connection '%s' failed unexpectedly (%s); the user must start the link again",
+                    sanitize(connection.getName()), e.getClass().getSimpleName());
             return redirect(oauthState.getReturnTo(), "error", "exchange_failed", expiredBindingCookie(state));
         }
     }
@@ -340,6 +408,140 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
     // ── helpers ──────────────────────────────────────────────────────────────
 
     /**
+     * Whether the connection this grant was just stored for still reads grants of
+     * this kind — re-read from the store AFTER the grant was written.
+     * <p>
+     * The other half of
+     * {@code RestConnectionStore.deleteGrantsLinkedDuringTheUpdate}, whose comment
+     * carries the interleaving argument: an update that counted zero grants and
+     * then changed {@code authType} or {@code binding} would otherwise leave this
+     * refresh token under a shape the resolver never reads. So the read must see
+     * that update if it landed first, which rules out the registry: it is cached,
+     * and on another replica its TTL is the only invalidation. The name must still
+     * resolve to the id the state was bound to — a connection deleted and
+     * re-created under the same name after the pre-exchange check would otherwise
+     * inherit this grant — and the document is read by that id at its CURRENT
+     * version, because the descriptor a name lookup follows may still point at the
+     * version before the update.
+     * <p>
+     * A read that fails answers false. Not knowing is not evidence the grant is
+     * usable, and the cost of being wrong is a live refresh token nothing will ever
+     * read or revoke; the cost of the other mistake is the user linking again.
+     */
+    private boolean connectionStillTakesTheGrant(OAuthState oauthState) {
+        try {
+            String id = connectionStore.idOfName(oauthState.getTenantId(), oauthState.getConnectionName());
+            if (!oauthState.getConnectionId().equals(id)) {
+                LOGGER.warnf("Connection '%s' was deleted, or replaced by another connection of the same name, while an account was being "
+                        + "linked to it; the grant just stored is discarded", sanitize(oauthState.getConnectionName()));
+                return false;
+            }
+            IResourceStore.IResourceId current = connectionStore.getCurrentResourceId(id);
+            ConnectionConfiguration connection = connectionStore.read(id, current.getVersion());
+            if (takesPerUserGrants(connection)) {
+                return true;
+            }
+            LOGGER.warnf("Connection '%s' stopped being a PER_USER authorization-code connection while an account was being linked to it; the "
+                    + "grant just stored could never be resolved and is discarded", sanitize(oauthState.getConnectionName()));
+            return false;
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            LOGGER.warnf("Connection '%s' was deleted while an account was being linked to it; the grant just stored is discarded",
+                    sanitize(oauthState.getConnectionName()));
+            return false;
+        } catch (Exception e) {
+            LOGGER.warnf("Could not re-read connection '%s' after linking an account (%s), so the grant just stored cannot be shown to be "
+                    + "usable and is discarded; the user must link again", sanitize(oauthState.getConnectionName()), e.getClass().getSimpleName());
+            return false;
+        }
+    }
+
+    /**
+     * The connection the state is bound to, provided it still holds the state's
+     * name: read by that id at its current version, from the uncached store.
+     *
+     * @return {@code null} when the name is free, belongs to a different
+     *         connection, or its document is gone
+     */
+    private ConnectionConfiguration boundConnection(OAuthState oauthState)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+        String holder = connectionStore.idOfName(oauthState.getTenantId(), oauthState.getConnectionName());
+        if (!oauthState.getConnectionId().equals(holder)) {
+            return null;
+        }
+        IResourceStore.IResourceId current;
+        try {
+            current = connectionStore.getCurrentResourceId(holder);
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            return null;
+        }
+        return connectionStore.read(holder, current.getVersion());
+    }
+
+    /**
+     * The connection {@code authorize} starts a flow for, read the way the callback
+     * reads it: the id from the store, then the document by that id at its current
+     * version, uncached.
+     * <p>
+     * The name-keyed registry is a cache cleared only on the replica that wrote the
+     * change, so right after a delete and re-create it can still return the
+     * predecessor. Building the consent URL from that document while binding the
+     * state to the replacement's id sends the user to the wrong client's consent
+     * screen, and the link can only fail at the callback.
+     */
+    private CurrentConnection requireCurrentConnection(String name) {
+        try {
+            String id = connectionStore.idOfName(ConnectionReference.DEFAULT_TENANT, name);
+            if (id != null) {
+                IResourceStore.IResourceId version = connectionStore.getCurrentResourceId(id);
+                ConnectionConfiguration connection = connectionStore.read(id, version.getVersion());
+                if (connection != null) {
+                    return new CurrentConnection(id, connection);
+                }
+            }
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            // Deleted between the name lookup and the read: the same answer as no such
+            // name.
+        } catch (IResourceStore.ResourceStoreException e) {
+            throw new InternalServerErrorException("Could not look up connection '" + name + "'.", e);
+        }
+        throw new NotFoundException("No connection named '" + name + "'.");
+    }
+
+    /** A connection document together with the resource id it was read under. */
+    private record CurrentConnection(String id, ConnectionConfiguration configuration) {
+    }
+
+    /**
+     * Whether a connection is the shape a user's authorization-code grant is filed
+     * and read under.
+     */
+    private static boolean takesPerUserGrants(ConnectionConfiguration connection) {
+        return connection != null && connection.getAuthType() == AuthType.OAUTH2_AUTHORIZATION_CODE && connection.getBinding() == Binding.PER_USER;
+    }
+
+    /**
+     * Takes back the grant this callback stored — and only that write. The
+     * principal comes from the claimed state row, as it did for the write, and the
+     * delete is conditional on the IV the write was sealed with: a later link of
+     * the same account that replaced this grant in the meantime is one the user
+     * still expects to have, and a delete by key alone would remove it.
+     */
+    private void discardGrant(OAuthState oauthState, ConnectionGrant stored) {
+        try {
+            boolean discarded = grantStore.deleteIfSealedWith(oauthState.getTenantId(), oauthState.getConnectionName(), oauthState.getPrincipal(),
+                    stored == null ? null : stored.getAccessTokenIv());
+            if (!discarded) {
+                LOGGER.infof("The grant just stored for connection '%s' had already been replaced or removed; nothing was discarded",
+                        sanitize(oauthState.getConnectionName()));
+            }
+        } catch (RuntimeException e) {
+            LOGGER.errorf("A grant for connection '%s' that can never be resolved could not be deleted (%s); its refresh token remains at rest "
+                    + "until the user disconnects or the connection is deleted", sanitize(oauthState.getConnectionName()),
+                    e.getClass().getSimpleName());
+        }
+    }
+
+    /**
      * Refuses every route on this resource when the feature is off.
      * <p>
      * A 404, matching what {@link #callback} answers in the same state: one
@@ -351,8 +553,25 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
      */
     private void requireEnabled() {
         if (!connectionsConfig.isEnabled()) {
-            throw new NotFoundException("Connections are disabled. Set eddi.connections.enabled=true to use them.");
+            throw new NotFoundException(
+                    "Connections are disabled. Turn them on with " + ConnectionsConfig.describe("enabled", ConnectionsConfig.ENABLED) + ".");
         }
+    }
+
+    /**
+     * Refuses to start a flow whose {@code redirect_uri} the provider could not
+     * match.
+     * <p>
+     * Checked here rather than at boot. The base URL is a runtime setting now, and
+     * refusing the boot over it turned one missing value into an outage — although
+     * every connection type except this one works without it. A 400 rather than the
+     * disabled feature's 404: the feature is on, the deployment's configuration is
+     * incomplete, and the message names the setting that completes it.
+     */
+    private void requirePublicBaseUrl() {
+        connectionsConfig.publicBaseUrlProblem().ifPresent(problem -> {
+            throw new BadRequestException(problem + " Linking an account needs it: it becomes the OAuth redirect_uri.");
+        });
     }
 
     /**
@@ -375,14 +594,6 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
             throw new ForbiddenException("The authenticated identity has no principal name.");
         }
         return name;
-    }
-
-    private ConnectionConfiguration requireConnection(String name) {
-        try {
-            return connectionRegistry.require(new ConnectionReference(ConnectionReference.DEFAULT_TENANT, name));
-        } catch (ConnectionException e) {
-            throw new NotFoundException("No connection named '" + name + "'.");
-        }
     }
 
     private String resolveClientSecret(ConnectionConfiguration connection) {
@@ -492,6 +703,12 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
     /**
      * Records one outcome.
      * <p>
+     * Named {@code increment} and called with the meter name as a string literal at
+     * every site, on purpose: {@code MetricsDashboardCoverageTest} discovers meters
+     * by scanning for {@code counter("…")}/{@code increment("…")} registrations,
+     * and a helper under any other name hid these four from it. Every meter carries
+     * the {@code eddi.} prefix for the same reason.
+     * <p>
      * The tag KEYS are fixed whether or not a connection is in hand, because a
      * meter name registered with two different tag shapes is a registration failure
      * and Quarkus builds the Prometheus registry with
@@ -504,7 +721,7 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
      * instrumentation failure may turn a completed link into a 500 the user cannot
      * retry — their state is consumed.
      */
-    private void count(String metric, String tagName, String tagValue, ConnectionConfiguration connection) {
+    private void increment(String metric, String tagName, String tagValue, ConnectionConfiguration connection) {
         if (meterRegistry == null) {
             return;
         }

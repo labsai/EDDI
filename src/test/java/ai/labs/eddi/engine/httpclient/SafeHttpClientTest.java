@@ -390,4 +390,79 @@ class SafeHttpClientTest {
         assertEquals("method=GET", response.body(),
                 "302 redirect should downgrade POST to GET");
     }
+
+    // --- No-redirect sends (an OAuth token request must never follow a hop) ---
+
+    @Test
+    @DisplayName("sendValidatedNoRedirect() hands a 307 back to the caller instead of re-sending the body to the Location")
+    void sendValidatedNoRedirectReturnsTheRedirectUnfollowed() throws Exception {
+        // Bypass initial-target validation for loopback; redirect validation is not
+        // involved because no redirect may be followed.
+        SafeHttpClient spy = Mockito.spy(client);
+        doNothing().when(spy).validateInitialTarget(anyString());
+
+        var secondHopHit = new AtomicReference<String>();
+        server.createContext("/token", exchange -> {
+            exchange.getResponseHeaders().set("Location", "http://127.0.0.1:" + port + "/elsewhere");
+            exchange.sendResponseHeaders(307, -1);
+            exchange.close();
+        });
+        server.createContext("/elsewhere", exchange -> {
+            secondHopHit.set(exchange.getRequestMethod());
+            exchange.sendResponseHeaders(200, -1);
+            exchange.close();
+        });
+        server.start();
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create("http://127.0.0.1:" + port + "/token"))
+                .header("Authorization", "Basic Y2xpZW50OnNlY3JldA==")
+                .POST(HttpRequest.BodyPublishers.ofString("grant_type=refresh_token&refresh_token=rt"))
+                .build();
+
+        HttpResponse<String> response = spy.sendValidatedNoRedirect(request, HttpResponse.BodyHandlers.ofString());
+
+        assertEquals(307, response.statusCode(), "the 3xx is the caller's to interpret, not the client's to follow");
+        assertTrue(response.headers().firstValue("Location").isPresent(), "the Location must be visible to the caller");
+        assertNull(secondHopHit.get(), "send() would have re-sent the POST with its body and Authorization header to the Location; "
+                + "the no-redirect send must make exactly one request");
+    }
+
+    @Test
+    @DisplayName("sendValidatedNoRedirect() still validates the initial target against SSRF rules")
+    void sendValidatedNoRedirectRejectsAnUnsafeTarget() {
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create("http://169.254.169.254/latest/meta-data/"))
+                .GET()
+                .build();
+
+        assertThrows(IllegalArgumentException.class,
+                () -> client.sendValidatedNoRedirect(request, HttpResponse.BodyHandlers.ofString()),
+                "skipping redirects must not mean skipping the initial-target check");
+    }
+
+    @Test
+    @DisplayName("sendNoRedirect() sends exactly once without validating, for targets an allowlist already vouched for")
+    void sendNoRedirectMakesOneRequestOnLoopback() throws Exception {
+        var hits = new AtomicReference<Integer>(0);
+        server.createContext("/token", exchange -> {
+            hits.set(hits.get() + 1);
+            exchange.getResponseHeaders().set("Location", "http://127.0.0.1:" + port + "/token");
+            exchange.sendResponseHeaders(302, -1);
+            exchange.close();
+        });
+        server.start();
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create("http://127.0.0.1:" + port + "/token"))
+                .POST(HttpRequest.BodyPublishers.ofString("grant_type=client_credentials"))
+                .build();
+
+        // No spy: loopback would be refused by validation, and this method performs
+        // none.
+        HttpResponse<String> response = client.sendNoRedirect(request, HttpResponse.BodyHandlers.ofString());
+
+        assertEquals(302, response.statusCode());
+        assertEquals(1, hits.get(), "a self-referential redirect must not be followed even once");
+    }
 }

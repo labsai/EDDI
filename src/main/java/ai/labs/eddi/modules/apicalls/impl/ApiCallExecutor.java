@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.apicalls.model.*;
 import ai.labs.eddi.configs.apicalls.model.HttpPostResponse;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
+import ai.labs.eddi.connections.ConnectionException;
 import ai.labs.eddi.connections.ConnectionResolver;
 import ai.labs.eddi.connections.model.ConnectionReference;
 import ai.labs.eddi.engine.security.CallerIdentityResolver;
@@ -33,6 +34,7 @@ import java.net.URI;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -213,7 +215,8 @@ public class ApiCallExecutor implements IApiCallExecutor {
                     // otherwise inherit the failed attempt's error body next to
                     // its own 2xx code — a self-contradictory tool result.
                     result.clear();
-                    request = buildRequest(targetServerUrl, call, templateDataObjects);
+                    BuiltRequest built = buildRequest(targetServerUrl, call, templateDataObjects);
+                    request = built.request();
                     var objectName = call.getName() + "Request";
                     var requestMap = request.toMap();
                     // Scrub resolved secrets — headers, query parameters and body — from
@@ -221,8 +224,10 @@ public class ApiCallExecutor implements IApiCallExecutor {
                     // actual request was already built and still carries them; each entry
                     // here is REPLACED with a redacted copy, so this only affects the debug
                     // record. Shares RequestRedactor with the approval preview so the two
-                    // cannot disagree about what counts as a credential.
-                    requestRedactor.redactRequestMap(requestMap);
+                    // cannot disagree about what counts as a credential — including which
+                    // headers a connection filled, which no name or value heuristic can
+                    // recognise on its own.
+                    requestRedactor.redactRequestMap(requestMap, built.connectionOwnedHeaders());
                     prePostUtils.createMemoryEntry(currentStep, requestMap, objectName, KEY_HTTP_CALLS);
                     response = executeAndMeasureRequest(call, request, retryCall, amountOfExecutions);
 
@@ -394,7 +399,8 @@ public class ApiCallExecutor implements IApiCallExecutor {
             // Note the absence of executePreRequestPropertyInstructions: it writes
             // to conversation memory, and previewing a call must not change the
             // conversation. See IApiCallExecutor#resolve for what that costs.
-            var requestMap = buildRequest(targetServerUrl, call, templateDataObjects).toMap();
+            BuiltRequest built = buildRequest(targetServerUrl, call, templateDataObjects);
+            var requestMap = built.request().toMap();
             var headers = requestMap.get(IRequest.KEY_HEADERS) instanceof Map<?, ?> h ? (Map<String, ?>) h : Map.<String, Object>of();
             var queryParams = normalizeQueryParams(requestMap.get(IRequest.KEY_QUERY_PARAMS));
             Object body = requestMap.get(IRequest.KEY_BODY);
@@ -407,7 +413,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
                     String.valueOf(requestMap.get(IRequest.KEY_METHOD)),
                     String.valueOf(requestMap.get(IRequest.KEY_URI)),
                     queryParams,
-                    requestRedactor.redactHeaders(headers),
+                    requestRedactor.redactHeaders(headers, built.connectionOwnedHeaders()),
                     body == null ? null : body.toString(),
                     !canExecuteDivergeFromResolve(call));
         } catch (Exception e) {
@@ -556,7 +562,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
                 IRequest request;
                 for (Object iterationObject : batchIterationList) {
                     templateDataObjects.put(batchRequest.getIterationObjectName(), iterationObject);
-                    request = buildRequest(targetServerUrl, call, templateDataObjects);
+                    request = buildRequest(targetServerUrl, call, templateDataObjects).request();
                     if (batchRequest.getExecuteCallsSequentially()) {
                         long executionStart = currentTimeMillis();
                         LOGGER.info(callName + " Batch Request: " + request);
@@ -569,7 +575,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
                 return null;
             }), null);
         } else {
-            IRequest request = buildRequest(targetServerUrl, call, templateDataObjects);
+            IRequest request = buildRequest(targetServerUrl, call, templateDataObjects).request();
             executeFireAndForgetCall(request, callName);
         }
     }
@@ -720,7 +726,29 @@ public class ApiCallExecutor implements IApiCallExecutor {
         return false;
     }
 
-    private IRequest buildRequest(String targetServerUrl, ApiCall call, Map<String, Object> templateDataObjects)
+    /**
+     * A request ready to send, together with the names of the headers a connection
+     * filled.
+     * <p>
+     * The names travel with the request because the request itself cannot say: by
+     * the time {@link IRequest#toMap()} is read back, a connection-supplied
+     * {@code X-Amp-Id} is indistinguishable from a plain one, and neither its name
+     * nor its value need match any credential heuristic. Both consumers of the
+     * built request — the debug record persisted to memory and the HITL approval
+     * preview — hand this set to {@link RequestRedactor}, so a credential is
+     * redacted because the executor <em>knows</em> it is one rather than because it
+     * happens to look like one.
+     *
+     * @param request
+     *            the request, still carrying every live credential
+     * @param connectionOwnedHeaders
+     *            header names written from a {@code ${connection:…}} reference;
+     *            never null, empty when none was
+     */
+    record BuiltRequest(IRequest request, Set<String> connectionOwnedHeaders) {
+    }
+
+    private BuiltRequest buildRequest(String targetServerUrl, ApiCall call, Map<String, Object> templateDataObjects)
             throws ITemplatingEngine.TemplateEngineException {
 
         Request requestConfig = call.getRequest();
@@ -792,6 +820,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
         // CONNECTION owns the name: that is the collision iteration order must
         // never decide, because one side of it is a credential.
         var claimedHeaders = new HashMap<String, Boolean>();
+        var connectionOwnedHeaders = new HashSet<String>();
         for (String headerName : headers.keySet()) {
             String headerValue = prePostUtils.templateValues(headers.get(headerName), templateDataObjects);
             // Resolve global variable references, then vault references in headers
@@ -828,6 +857,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
                     throw connectionHeaderCollision(credential.headerName());
                 }
                 request.setHttpHeader(credential.headerName(), credential.headerValue());
+                connectionOwnedHeaders.add(credential.headerName());
                 continue;
             }
             // The same map, read from the other side. A plain header sharing a name
@@ -854,7 +884,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
             qpValue = callerIdentityResolver.resolveValue(qpValue, targetUri);
             request.setQueryParam(queryParam, qpValue);
         }
-        return request;
+        return new BuiltRequest(request, Set.copyOf(connectionOwnedHeaders));
     }
 
     /**
@@ -888,8 +918,15 @@ public class ApiCallExecutor implements IApiCallExecutor {
      */
     private static void rejectConnectionReference(String value, String where) {
         if (ConnectionResolver.containsReference(value)) {
-            throw new IllegalArgumentException("A ${connection:…} reference may only appear in a header, not in " + where
-                    + ". A credential in a URL or query string is recorded by every hop before the provider sees it.");
+            // A ConnectionException, not an IllegalArgumentException: UNSUPPORTED_PLACEMENT
+            // is the reason ConnectionExceptionMapper maps to 400, and it was the one
+            // reason nothing ever threw. execute() and resolve() wrap it in a
+            // LifecycleException either way, so the pipeline reports it as the same
+            // configuration error; only the type — and with it the REST status when it
+            // escapes a resource — changes.
+            throw new ConnectionException(ConnectionException.Reason.UNSUPPORTED_PLACEMENT,
+                    "A ${connection:…} reference may only appear in a header, not in " + where
+                            + ". A credential in a URL or query string is recorded by every hop before the provider sees it.");
         }
     }
 

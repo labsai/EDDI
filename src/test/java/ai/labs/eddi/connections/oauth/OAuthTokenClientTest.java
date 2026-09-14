@@ -99,14 +99,15 @@ class OAuthTokenClientTest {
         HttpResponse<String> response = mock(HttpResponse.class);
         doReturn(statusCode).when(response).statusCode();
         doReturn(body).when(response).body();
-        // doReturn rather than when(...): sendValidated is generic and stubbing it
+        // doReturn rather than when(...): sendValidatedNoRedirect is generic and
+        // stubbing it
         // through when() would need the call to type-check against a concrete T.
-        doReturn(response).when(httpClient).sendValidated(any(), any());
+        doReturn(response).when(httpClient).sendNoRedirect(any(), any());
     }
 
     private HttpRequest sentRequest() throws Exception {
         var captor = ArgumentCaptor.forClass(HttpRequest.class);
-        verify(httpClient).sendValidated(captor.capture(), any());
+        verify(httpClient).sendNoRedirect(captor.capture(), any());
         return captor.getValue();
     }
 
@@ -290,13 +291,116 @@ class OAuthTokenClientTest {
         var error = assertThrows(ConnectionException.class, () -> client.clientCredentials(connection, CLIENT_SECRET));
 
         assertEquals(ConnectionException.Reason.INVALID_CONFIGURATION, error.getReason());
+        verify(httpClient, never()).sendNoRedirect(any(), any());
+    }
+
+    @Test
+    @DisplayName("an allowlisted plain-http token URL on a remote host is refused before the client secret is sent in the clear")
+    void refusesAPlaintextRemoteTokenUrl() throws Exception {
+        // The allowlist accepts http origins, and a document that never ran write-time
+        // validation can carry an http tokenUrl, so the allowlist alone let this go.
+        client = new OAuthTokenClient(httpClient, new CredentialEndpointAllowlist(Set.of("http://auth.example.com")));
+        var connection = connection();
+        connection.getOauth().setTokenUrl("http://auth.example.com/oauth/token");
+
+        var error = assertThrows(ConnectionException.class, () -> client.clientCredentials(connection, CLIENT_SECRET));
+
+        assertEquals(ConnectionException.Reason.INVALID_CONFIGURATION, error.getReason(), error.getMessage());
+        assertTrue(error.getMessage().contains("oauth.tokenUrl"), "the message must name the field to fix: " + error.getMessage());
+        verify(httpClient, never()).sendNoRedirect(any(), any());
+    }
+
+    @Test
+    @DisplayName("a plain-http token URL on a loopback host is contacted — nothing crosses the network")
+    void contactsALoopbackHttpTokenUrl() throws Exception {
+        for (String origin : List.of("http://localhost:9999", "http://127.0.0.1:9999", "http://[::1]:9999")) {
+            httpClient = mock(SafeHttpClient.class);
+            client = new OAuthTokenClient(httpClient, new CredentialEndpointAllowlist(Set.of(origin)));
+            var connection = connection();
+            connection.getOauth().setTokenUrl(origin + "/oauth/token");
+            respondWith(200, FULL_TOKEN_BODY);
+
+            assertEquals("at-live", client.clientCredentials(connection, CLIENT_SECRET).accessToken(), origin);
+            assertEquals(origin + "/oauth/token", sentRequest().uri().toString(), origin);
+        }
+    }
+
+    @Test
+    @DisplayName("a redirect from the token endpoint is never followed and is transient, not a dead grant")
+    void redirectIsRefusedRatherThanFollowed() throws Exception {
+        // The request that produced this carries the client secret and the refresh
+        // token. Following a 307 preserves method and body, so everything would be
+        // re-sent to whatever host the Location names — validated only against the
+        // SSRF rules, never against the operator's credential-endpoint allowlist.
+        for (int status : List.of(301, 302, 303, 307, 308)) {
+            respondWith(status, "");
+
+            var error = assertThrows(ConnectionException.class, () -> client.refresh(connection(), CLIENT_SECRET, "rt-stored"),
+                    "HTTP " + status);
+
+            assertEquals(ConnectionException.Reason.TOKEN_ENDPOINT_UNAVAILABLE, error.getReason(),
+                    "HTTP " + status + ": a redirect is a configuration problem at the provider, not a revoked grant");
+            assertTrue(error.getMessage().contains("must not redirect"), error.getMessage());
+            assertTrue(error.getMessage().contains("unchanged"), "the grant must be reported untouched: " + error.getMessage());
+        }
+        // The no-redirect send is the whole guarantee: the ordinary send would have
+        // followed the hop with the body intact before this client ever saw a 3xx.
         verify(httpClient, never()).sendValidated(any(), any());
+        verify(httpClient, never()).send(any(), any());
+    }
+
+    @Test
+    @DisplayName("an allowlisted token endpoint on a private network is contacted — the operator's allowlist outranks the SSRF address block")
+    void allowlistedPrivateNetworkTokenEndpointIsContacted() throws Exception {
+        // An on-premises identity provider. sendValidated* would refuse the host
+        // before the request left the process, and the operator who listed the exact
+        // origin is precisely the person entitled to send a client secret there.
+        String privateOrigin = "https://idp.corp.internal";
+        client = new OAuthTokenClient(httpClient, new CredentialEndpointAllowlist(Set.of(privateOrigin)));
+        var connection = connection();
+        connection.getOauth().setTokenUrl(privateOrigin + "/oauth/token");
+        respondWith(200, FULL_TOKEN_BODY);
+
+        assertEquals("at-live", client.clientCredentials(connection, CLIENT_SECRET).accessToken());
+
+        assertEquals(privateOrigin + "/oauth/token", sentRequest().uri().toString());
+        verify(httpClient, never()).sendValidatedNoRedirect(any(), any());
+        verify(httpClient, never()).sendValidated(any(), any());
+    }
+
+    @Test
+    @DisplayName("the exemption is from the address check only — a non-http scheme or a hostless URL is still refused")
+    void schemeAndHostAreStillValidated() {
+        for (String tokenUrl : List.of("ftp://auth.example.com/token", "https:///token")) {
+            var connection = connection();
+            connection.getOauth().setTokenUrl(tokenUrl);
+            // The allowlist itself refuses these first (it only accepts bare http(s)
+            // origins), which is the layered defence the syntax check backs up.
+            assertThrows(RuntimeException.class, () -> client.clientCredentials(connection, CLIENT_SECRET), tokenUrl);
+        }
+    }
+
+    @Test
+    @DisplayName("a tokenUrl the allowlist accepts once trimmed but that will not parse is a configuration error, and nothing is sent")
+    void unparseableTokenUrlIsAConfigurationError() throws Exception {
+        // The allowlist trims before it judges the origin, so this passes it; the
+        // request builder does not, so URI.create threw a raw IllegalArgumentException
+        // — which is not a ConnectionException, and on the mint path the MCP failure
+        // classifier fed it to the circuit breaker as a server outage.
+        var connection = connection();
+        connection.getOauth().setTokenUrl(TOKEN_URL + " ");
+
+        var error = assertThrows(ConnectionException.class, () -> client.clientCredentials(connection, CLIENT_SECRET));
+
+        assertEquals(ConnectionException.Reason.INVALID_CONFIGURATION, error.getReason(), error.getMessage());
+        assertTrue(error.getMessage().contains("oauth.tokenUrl"), "the message must name the field to fix: " + error.getMessage());
+        verify(httpClient, never()).sendNoRedirect(any(), any());
     }
 
     @Test
     @DisplayName("a transport failure is transient — the grant is left alone and the next call retries")
     void transportFailureIsTransient() throws Exception {
-        doThrow(new IOException("connection reset")).when(httpClient).sendValidated(any(), any());
+        doThrow(new IOException("connection reset")).when(httpClient).sendNoRedirect(any(), any());
 
         var error = assertThrows(ConnectionException.class, () -> client.refresh(connection(), CLIENT_SECRET, "rt-stored"));
 
@@ -308,7 +412,7 @@ class OAuthTokenClientTest {
     @Test
     @DisplayName("an interrupted exchange is transient and hands the interrupt back to the caller")
     void interruptionIsTransientAndRestoresTheInterruptFlag() throws Exception {
-        doThrow(new InterruptedException("shutting down")).when(httpClient).sendValidated(any(), any());
+        doThrow(new InterruptedException("shutting down")).when(httpClient).sendNoRedirect(any(), any());
 
         var error = assertThrows(ConnectionException.class, () -> client.refresh(connection(), CLIENT_SECRET, "rt-stored"));
 
@@ -412,8 +516,12 @@ class OAuthTokenClientTest {
     }
 
     @Test
-    @DisplayName("a 200 with no usable access token is a dead grant, not a success")
+    @DisplayName("a 200 with no usable access token is the endpoint misbehaving, not a dead grant")
     void refusesATwoHundredWithoutAnAccessToken() throws Exception {
+        // Only a provider error body naming invalid_grant / invalid_client /
+        // unauthorized_client is terminal. A 2xx that is not a token response leaves
+        // the grant alone; calling it terminal wrote REFRESH_FAILED for every user of
+        // the connection during a provider's bad minute.
         List<String> bodies = List.of("{\"token_type\":\"Bearer\"}", "{\"access_token\":null}", "{\"access_token\":\"\"}",
                 "{\"access_token\":\"   \"}");
         for (String body : bodies) {
@@ -421,20 +529,23 @@ class OAuthTokenClientTest {
 
             var error = assertThrows(ConnectionException.class, () -> client.clientCredentials(connection(), CLIENT_SECRET));
 
-            assertEquals(ConnectionException.Reason.GRANT_UNUSABLE, error.getReason(), body);
+            assertEquals(ConnectionException.Reason.TOKEN_ENDPOINT_UNAVAILABLE, error.getReason(), body);
             assertTrue(error.getMessage().contains("no access_token"), error.getMessage());
+            assertTrue(error.getMessage().contains("unchanged"), "the grant must be reported untouched: " + error.getMessage());
         }
     }
 
     @Test
-    @DisplayName("a body that is not a token response at all is reported as such")
+    @DisplayName("a 200 that is not a token response at all — an HTML maintenance page — is transient")
     void refusesAMalformedBody() throws Exception {
         respondWith(200, "<html>we are down for maintenance</html>");
 
         var error = assertThrows(ConnectionException.class, () -> client.clientCredentials(connection(), CLIENT_SECRET));
 
-        assertEquals(ConnectionException.Reason.GRANT_UNUSABLE, error.getReason());
+        assertEquals(ConnectionException.Reason.TOKEN_ENDPOINT_UNAVAILABLE, error.getReason(),
+                "a maintenance page is the endpoint being unavailable; marking the grant dead demands a reconnect for an outage");
         assertTrue(error.getMessage().contains("not a token response"), error.getMessage());
+        assertTrue(error.getMessage().contains("unchanged"), "the grant must be reported untouched: " + error.getMessage());
     }
 
     @Test
@@ -444,7 +555,7 @@ class OAuthTokenClientTest {
 
         var error = assertThrows(ConnectionException.class, () -> client.clientCredentials(connection(), CLIENT_SECRET));
 
-        assertEquals(ConnectionException.Reason.GRANT_UNUSABLE, error.getReason());
+        assertEquals(ConnectionException.Reason.TOKEN_ENDPOINT_UNAVAILABLE, error.getReason());
         assertTrue(error.getMessage().contains("no access_token"), error.getMessage());
     }
 

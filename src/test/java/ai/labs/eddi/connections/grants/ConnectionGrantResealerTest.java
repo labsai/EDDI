@@ -10,6 +10,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.UnaryOperator;
@@ -124,7 +125,7 @@ class ConnectionGrantResealerTest {
     @DisplayName("a re-seal is invisible to a refresh: no version bump, no lease change")
     void doesNotDisturbLifecycleFields() {
         store.upsert(grant("jira", "alice", GEN_1, true));
-        store.claimRefresh(TENANT, "jira", "alice", "another-replica", Instant.now().plusSeconds(60));
+        store.claimRefresh(TENANT, "jira", "alice", "another-replica", Duration.ofSeconds(60));
         long versionBefore = stored("jira", "alice").getVersion();
 
         assertEquals(0, resealer.resealAll(TENANT, GEN_2, rekeyTo(GEN_2)));

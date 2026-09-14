@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.connections.oauth;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 import ai.labs.eddi.configs.connections.model.AuthType;
 import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
 import ai.labs.eddi.connections.AccessTokenSupplier;
@@ -82,6 +84,13 @@ public class OAuthTokenService implements AccessTokenSupplier {
 
     /** How long a non-claimant waits for the claimant's result before retrying. */
     static final Duration AWAIT_TIMEOUT = REFRESH_LEASE;
+
+    /**
+     * The await deadline actually applied. {@link #AWAIT_TIMEOUT} in production;
+     * shortened by a test so the lease-expired branch — a claimant that never
+     * returns — can be reached without waiting out a real lease.
+     */
+    private volatile Duration awaitTimeout = AWAIT_TIMEOUT;
 
     /** Poll interval while awaiting another replica's refresh. */
     static final Duration AWAIT_POLL_INTERVAL = Duration.ofMillis(250);
@@ -242,10 +251,10 @@ public class OAuthTokenService implements AccessTokenSupplier {
     }
 
     private String refreshOrAwait(ConnectionConfiguration connection, String tenantId, String principal, ConnectionGrant grant) {
-        Instant deadline = Instant.now().plus(AWAIT_TIMEOUT);
+        Instant deadline = Instant.now().plus(awaitTimeout);
         while (true) {
-            if (grantStore.claimRefresh(tenantId, connection.getName(), principal, claimantId, Instant.now().plus(REFRESH_LEASE))) {
-                count("connection.token.refresh.claim.count", "outcome", "claimed");
+            if (grantStore.claimRefresh(tenantId, connection.getName(), principal, claimantId, REFRESH_LEASE)) {
+                increment("eddi.connection.token.refresh.claim.count", "outcome", "claimed");
                 return refreshAsClaimant(connection, tenantId, principal);
             }
             // Somebody else is refreshing. Poll for their result rather than making a
@@ -253,7 +262,7 @@ public class OAuthTokenService implements AccessTokenSupplier {
             // is what kills the first one's token.
             AwaitOutcome awaited = awaitAnotherRefresh(connection, tenantId, principal, deadline);
             if (awaited.token() != null) {
-                count("connection.token.refresh.claim.count", "outcome", "awaited");
+                increment("eddi.connection.token.refresh.claim.count", "outcome", "awaited");
                 return awaited.token();
             }
             if (awaited.grantGone()) {
@@ -271,15 +280,23 @@ public class OAuthTokenService implements AccessTokenSupplier {
                 // one provider hiccup. Claim instead. The poll already paced this by an
                 // interval, and the deadline below still bounds a permanently contended
                 // grant, so this cannot spin.
-                count("connection.token.refresh.claim.count", "outcome", "lease_released");
+                increment("eddi.connection.token.refresh.claim.count", "outcome", "lease_released");
                 continue;
             }
             if (Instant.now().isAfter(deadline)) {
                 // The lease outlived its holder — a crashed replica, or one that hung.
                 // Retry the claim rather than refreshing blind, so exactly one caller
                 // proceeds even now.
-                count("connection.token.refresh.claim.count", "outcome", "lease_expired");
-                if (grantStore.claimRefresh(tenantId, connection.getName(), principal, claimantId, Instant.now().plus(REFRESH_LEASE))) {
+                //
+                // This JVM-clock comparison is a POLLING HINT only: a deadline this
+                // replica set, measured on this replica's own clock, deciding when to
+                // stop waiting and ask again. Whether the lease has really expired is
+                // never decided here. The claim below decides it, as a conditional
+                // update against the store's clock, and simply fails if the holder's
+                // lease is still live — so skew between replicas can cost a waiter an
+                // early retry or a late one, never a second refresh.
+                increment("eddi.connection.token.refresh.claim.count", "outcome", "lease_expired");
+                if (grantStore.claimRefresh(tenantId, connection.getName(), principal, claimantId, REFRESH_LEASE)) {
                     return refreshAsClaimant(connection, tenantId, principal);
                 }
                 throw new ConnectionException(ConnectionException.Reason.TOKEN_ENDPOINT_UNAVAILABLE, "Timed out waiting for a token refresh on "
@@ -352,22 +369,47 @@ public class OAuthTokenService implements AccessTokenSupplier {
     }
 
     private String refreshAsClaimant(ConnectionConfiguration connection, String tenantId, String principal) {
-        // Re-read INSIDE the claim: between the caller's read and the claim landing,
-        // another node may have completed a refresh, in which case there is nothing
-        // to do and the newest refresh token is the one to use.
-        ConnectionGrant grant = grantStore.find(tenantId, connection.getName(), principal).orElseThrow(() -> new ConnectionException(
-                ConnectionException.Reason.NOT_CONNECTED, "The grant for connection '" + connection.getName() + "' disappeared mid-refresh."));
+        // Everything after a successful claim runs inside the cleanup scope — the
+        // re-read included. It used to sit in front of the try, so a grant that had
+        // gone (NOT_CONNECTED) or a store that threw on the read skipped the release
+        // and left this replica's lease held until it expired: a minute in which every
+        // other caller of this grant waited on a refresh nobody was performing.
+        //
+        // Null until the re-read succeeds. Only a GRANT_UNUSABLE failure needs it to
+        // mark the row, and none can happen before the row has been read.
+        ConnectionGrant grant = null;
         try {
+            // Re-read INSIDE the claim: between the caller's read and the claim landing,
+            // another node may have completed a refresh, in which case there is nothing
+            // to do and the newest refresh token is the one to use.
+            grant = grantStore.find(tenantId, connection.getName(), principal).orElseThrow(() -> new ConnectionException(
+                    ConnectionException.Reason.NOT_CONNECTED, "The grant for connection '" + connection.getName() + "' disappeared mid-refresh."));
             if (grant.isAccessTokenUsable(Instant.now(), effectiveMargin(connection, grant))) {
                 return unseal(tenantId, grant.getEncryptedAccessToken(), grant.getAccessTokenIv(), grant.getDekId(), connection);
             }
             RefreshResult refreshed = requestNewToken(connection, tenantId, grant);
             persist(connection, tenantId, principal, refreshed.token(), refreshed.refreshToken(), grant.getVersion());
-            count("connection.token.refresh.count", "outcome", "success");
+            increment("eddi.connection.token.refresh.count", "outcome", "success");
             return refreshed.token().accessToken();
         } catch (ConnectionException e) {
-            handleRefreshFailure(connection, grant, e);
+            if (grant != null) {
+                // A grant that vanished is not a refresh failure — there is nothing to
+                // mark and nothing transient about it — so it is not counted as one.
+                handleRefreshFailure(connection, grant, e);
+            }
             throw e;
+        } catch (RuntimeException e) {
+            // A store or vault failure that is not a ConnectionException — a CAS write
+            // throwing, a resolver blowing up. It used to escape the classification
+            // entirely: no transient metric, no log line, and a REST caller saw a 500
+            // rather than the 503 the reason mapper gives a transient failure. The
+            // grant is untouched, so it IS transient, and is reported as such.
+            ConnectionException transientFailure = new ConnectionException(ConnectionException.Reason.TOKEN_ENDPOINT_UNAVAILABLE,
+                    "Refreshing the grant for connection '" + connection.getName() + "' failed unexpectedly (" + e.getClass().getSimpleName()
+                            + "). The grant is unchanged; the next request will retry.",
+                    e);
+            handleRefreshFailure(connection, grant, transientFailure);
+            throw transientFailure;
         } finally {
             releaseQuietly(tenantId, connection.getName(), principal);
         }
@@ -391,7 +433,7 @@ public class OAuthTokenService implements AccessTokenSupplier {
         try {
             grantStore.releaseRefresh(tenantId, connectionName, principal, claimantId);
         } catch (RuntimeException e) {
-            LOGGER.warnf("Could not release the refresh lease for connection '%s'; it will expire on its own", connectionName);
+            LOGGER.warnf("Could not release the refresh lease for connection '%s'; it will expire on its own", sanitize(connectionName));
         }
     }
 
@@ -465,14 +507,33 @@ public class OAuthTokenService implements AccessTokenSupplier {
      */
     private void handleRefreshFailure(ConnectionConfiguration connection, ConnectionGrant grant, ConnectionException failure) {
         if (failure.getReason() != ConnectionException.Reason.GRANT_UNUSABLE) {
-            count("connection.token.refresh.count", "outcome", "transient");
-            LOGGER.warnf("Refresh for connection '%s' failed transiently; the grant is unchanged", connection.getName());
+            increment("eddi.connection.token.refresh.count", "outcome", "transient");
+            LOGGER.warnf("Refresh for connection '%s' failed transiently; the grant is unchanged", sanitize(connection.getName()));
             return;
         }
-        count("connection.token.refresh.count", "outcome", "invalid_grant");
+        increment("eddi.connection.token.refresh.count", "outcome", "invalid_grant");
         grant.setStatus(ConnectionGrant.Status.REFRESH_FAILED);
-        grantStore.completeRefresh(grant, grant.getVersion());
-        LOGGER.warnf("Refresh for connection '%s' was rejected by the provider; the grant is marked REFRESH_FAILED", connection.getName());
+        try {
+            grantStore.completeRefresh(grant, grant.getVersion());
+            LOGGER.warnf("Refresh for connection '%s' was rejected by the provider; the grant is marked REFRESH_FAILED",
+                    sanitize(connection.getName()));
+        } catch (RuntimeException e) {
+            // The provider's verdict stands whether or not it could be recorded. A
+            // store failure here used to replace the terminal reason with a raw
+            // IllegalStateException, so the caller lost the one fact that mattered —
+            // reconnect required — and the next request repeats the rejected refresh,
+            // which is harmless and marks the grant then.
+            LOGGER.warnf(e, "Refresh for connection '%s' was rejected by the provider, but the grant could not be marked REFRESH_FAILED; "
+                    + "the next request will repeat the rejection and try again", connection.getName());
+        }
+    }
+
+    /**
+     * Test seam: shortens the await deadline so the lease-expired branch is
+     * reachable.
+     */
+    void awaitTimeoutForTests(Duration timeout) {
+        this.awaitTimeout = timeout;
     }
 
     /**
@@ -484,17 +545,23 @@ public class OAuthTokenService implements AccessTokenSupplier {
     private String mintServiceGrant(ConnectionConfiguration connection, String tenantId, String principal) {
         TokenResponse token = tokenClient.clientCredentials(connection, resolveClientSecret(connection));
         persistNew(connection, tenantId, principal, token, token.refreshToken());
-        count("connection.token.refresh.count", "outcome", "minted");
+        increment("eddi.connection.token.refresh.count", "outcome", "minted");
         return token.accessToken();
     }
 
     /**
      * Stores a brand-new grant. Used by the {@code client_credentials} path and by
      * the authorization-code callback.
+     *
+     * @return the grant as written, so a caller that must take it back can name
+     *         this write and not whatever holds the key later — see
+     *         {@link IConnectionGrantStore#deleteIfSealedWith}
      */
-    public void persistNew(ConnectionConfiguration connection, String tenantId, String principal, TokenResponse token, String refreshToken) {
+    public ConnectionGrant persistNew(ConnectionConfiguration connection, String tenantId, String principal, TokenResponse token,
+                                      String refreshToken) {
         ConnectionGrant grant = buildGrant(connection, tenantId, principal, token, refreshToken);
         grantStore.upsert(grant);
+        return grant;
     }
 
     private void persist(ConnectionConfiguration connection, String tenantId, String principal, TokenResponse token, String refreshToken,
@@ -504,7 +571,7 @@ public class OAuthTokenService implements AccessTokenSupplier {
             // Another writer landed first. Not an error: their token is at least as
             // fresh as ours, and the caller gets the one we just obtained, which the
             // provider issued and has not rejected.
-            LOGGER.debugf("Refresh CAS lost for connection '%s'; another writer was ahead", connection.getName());
+            LOGGER.debugf("Refresh CAS lost for connection '%s'; another writer was ahead", sanitize(connection.getName()));
         }
     }
 
@@ -546,11 +613,23 @@ public class OAuthTokenService implements AccessTokenSupplier {
         }
     }
 
+    /**
+     * Opens a stored access token, or fails <em>transiently</em>.
+     * <p>
+     * Ciphertext that will not open is a vault or DEK problem — the master key
+     * briefly unavailable, a generation not yet swept — and not a revoked grant.
+     * This used to throw {@code GRANT_UNUSABLE}, and inside the refresh claim that
+     * reached {@link #handleRefreshFailure}, which wrote {@code REFRESH_FAILED} for
+     * a token the provider never rejected: the user was told to reconnect over
+     * something that fixed itself. The refresh-token path already made this
+     * distinction ({@link #storedRefreshToken}); the access-token path now does
+     * too.
+     */
     private String unseal(String tenantId, String ciphertext, String iv, String dekId, ConnectionConfiguration connection) {
         String plaintext = unsealOrNull(tenantId, ciphertext, iv, dekId);
         if (plaintext == null) {
-            throw new ConnectionException(ConnectionException.Reason.GRANT_UNUSABLE,
-                    "The stored token for connection '" + connection.getName() + "' could not be decrypted. The user must reconnect.");
+            throw new ConnectionException(ConnectionException.Reason.TOKEN_ENDPOINT_UNAVAILABLE, "The stored access token for connection '"
+                    + connection.getName() + "' could not be decrypted. The grant is unchanged; the next request will retry.");
         }
         return plaintext;
     }
@@ -609,8 +688,12 @@ public class OAuthTokenService implements AccessTokenSupplier {
                 : connection.getTenantId();
     }
 
-    /** Bounded categoricals only — see {@code ConnectionResolver#record}. */
-    private void count(String metric, String tagName, String tagValue) {
+    /**
+     * Bounded categoricals only — see {@code ConnectionResolver#record}. Named
+     * {@code increment} and called with a literal meter name at every site so
+     * {@code MetricsDashboardCoverageTest} can see the registrations.
+     */
+    private void increment(String metric, String tagName, String tagValue) {
         if (meterRegistry != null) {
             meterRegistry.counter(metric, tagName, tagValue).increment();
         }

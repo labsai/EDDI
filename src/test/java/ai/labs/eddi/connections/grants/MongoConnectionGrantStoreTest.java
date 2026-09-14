@@ -24,6 +24,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Date;
 import java.util.Iterator;
@@ -34,6 +35,7 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.*;
 
 /**
@@ -59,6 +61,7 @@ class MongoConnectionGrantStoreTest {
     private static final Instant UPDATED_AT = Instant.parse("2026-06-07T08:09:10Z");
     private static final Instant REFRESHED_AT = Instant.parse("2026-08-22T09:15:30Z");
     private static final Instant LEASE_UNTIL = Instant.parse("2026-08-22T09:16:00Z");
+    private static final Duration LEASE = Duration.ofSeconds(60);
 
     private MongoCollection<Document> grants;
     private MongoConnectionGrantStore store;
@@ -294,17 +297,17 @@ class MongoConnectionGrantStoreTest {
     @Test
     @DisplayName("claimRefresh — a matched row means this caller now owns the refresh")
     void claimRefreshWins() {
-        updateOneMatches(1L);
+        pipelineUpdateMatches(1L);
 
-        assertTrue(store.claimRefresh(TENANT, CONNECTION, PRINCIPAL, "replica-1", LEASE_UNTIL));
+        assertTrue(store.claimRefresh(TENANT, CONNECTION, PRINCIPAL, "replica-1", LEASE));
     }
 
     @Test
     @DisplayName("claimRefresh — a lease somebody else holds is not taken")
     void claimRefreshLoses() {
-        updateOneMatches(0L);
+        pipelineUpdateMatches(0L);
 
-        assertFalse(store.claimRefresh(TENANT, CONNECTION, PRINCIPAL, "replica-1", LEASE_UNTIL));
+        assertFalse(store.claimRefresh(TENANT, CONNECTION, PRINCIPAL, "replica-1", LEASE));
     }
 
     @Test
@@ -317,54 +320,70 @@ class MongoConnectionGrantStoreTest {
         UpdateResult result = mock(UpdateResult.class);
         when(result.getMatchedCount()).thenReturn(1L);
         when(result.getModifiedCount()).thenReturn(0L);
-        when(grants.updateOne(any(Bson.class), any(Bson.class))).thenReturn(result);
+        when(grants.updateOne(any(Bson.class), anyList())).thenReturn(result);
 
-        assertTrue(store.claimRefresh(TENANT, CONNECTION, PRINCIPAL, "replica-1", LEASE_UNTIL));
+        assertTrue(store.claimRefresh(TENANT, CONNECTION, PRINCIPAL, "replica-1", LEASE));
         verify(result, never()).getModifiedCount();
     }
 
     @Test
-    @DisplayName("claimRefresh — matches only a lease that is unset, null or already expired")
+    @DisplayName("claimRefresh — matches only a lease that is unset, null, or expired by the server's $$NOW")
     void claimRefreshFiltersOnAFreeLease() {
-        updateOneMatches(1L);
-        // Same clock source as the store, so the comparison cannot skew by a
-        // millisecond the way System.currentTimeMillis() can against Instant.now().
-        long before = Instant.now().toEpochMilli();
+        pipelineUpdateMatches(1L);
 
-        store.claimRefresh(TENANT, CONNECTION, PRINCIPAL, "replica-1", LEASE_UNTIL);
+        store.claimRefresh(TENANT, CONNECTION, PRINCIPAL, "replica-1", LEASE);
 
-        Map<String, BsonValue> filter = capturedUpdateOneFilter();
+        Map<String, BsonValue> filter = capturedPipelineFilter();
         assertKeyedOnTheGrantTriple(filter);
 
         BsonArray free = filter.get("$or").asArray();
         assertEquals(3, free.size(), "missing, explicitly null and expired are three different shapes of a free lease");
         assertFalse(free.get(0).asDocument().getDocument("refreshInProgress").getBoolean("$exists").getValue());
         assertTrue(free.get(1).asDocument().get("refreshInProgress").isNull());
-        assertTrue(free.get(2).asDocument().getDocument("refreshLeaseExpiresAt").getDateTime("$lt").getValue() >= before,
-                "the cutoff has to be the moment of the claim, or an expired lease never becomes reclaimable");
+        BsonArray lessThan = free.get(2).asDocument().getDocument("$expr").getArray("$lt");
+        assertEquals("$refreshLeaseExpiresAt", lessThan.get(0).asString().getValue());
+        assertEquals("$$NOW", lessThan.get(1).asString().getValue(),
+                "the expiry must be judged by the server's clock; a JVM instant lets a contender whose clock runs ahead free a live lease");
     }
 
     @Test
-    @DisplayName("claimRefresh — writes the claimant and the lease expiry it was given")
+    @DisplayName("claimRefresh — writes the claimant, and an expiry of $$NOW plus the lease, in one pipeline stage")
     void claimRefreshWritesTheClaim() {
-        updateOneMatches(1L);
+        pipelineUpdateMatches(1L);
 
-        store.claimRefresh(TENANT, CONNECTION, PRINCIPAL, "replica-1", LEASE_UNTIL);
+        store.claimRefresh(TENANT, CONNECTION, PRINCIPAL, "replica-1", LEASE);
 
-        BsonDocument set = capturedUpdateOneUpdate().getDocument("$set");
+        List<BsonDocument> pipeline = capturedPipeline();
+        assertEquals(1, pipeline.size());
+        BsonDocument set = pipeline.get(0).getDocument("$set");
         assertEquals(2, set.size(), "taking a lease is not a token write; nothing else may move");
-        assertEquals("replica-1", set.getString("refreshInProgress").getValue());
-        assertEquals(LEASE_UNTIL.toEpochMilli(), set.getDateTime("refreshLeaseExpiresAt").getValue());
+        assertEquals("replica-1", set.getDocument("refreshInProgress").getString("$literal").getValue(),
+                "a pipeline reads a '$'-prefixed string as a field path, so the claimant goes through $literal");
+        BsonArray expiry = set.getDocument("refreshLeaseExpiresAt").getArray("$add");
+        assertEquals("$$NOW", expiry.get(0).asString().getValue(), "the expiry is written by the same clock that compares it");
+        assertEquals(60_000L, expiry.get(1).asNumber().longValue());
     }
 
     @Test
     @DisplayName("claimRefresh — never creates the grant it failed to find")
     void claimRefreshIsNotAnUpsert() {
-        updateOneMatches(0L);
+        pipelineUpdateMatches(0L);
 
-        store.claimRefresh(TENANT, CONNECTION, PRINCIPAL, "replica-1", LEASE_UNTIL);
+        store.claimRefresh(TENANT, CONNECTION, PRINCIPAL, "replica-1", LEASE);
 
+        verify(grants, never()).updateOne(any(Bson.class), anyList(), any(UpdateOptions.class));
         verify(grants, never()).updateOne(any(Bson.class), any(Bson.class), any(UpdateOptions.class));
+    }
+
+    @Test
+    @DisplayName("claimRefresh — a missing or non-positive lease is refused rather than written")
+    void claimRefreshRefusesAnUnusableLease() {
+        assertThrows(IllegalArgumentException.class, () -> store.claimRefresh(TENANT, CONNECTION, PRINCIPAL, "replica-1", null));
+        assertThrows(IllegalArgumentException.class, () -> store.claimRefresh(TENANT, CONNECTION, PRINCIPAL, "replica-1", Duration.ZERO));
+        assertThrows(IllegalArgumentException.class,
+                () -> store.claimRefresh(TENANT, CONNECTION, PRINCIPAL, "replica-1", Duration.ofSeconds(-1)));
+
+        verify(grants, never()).updateOne(any(Bson.class), anyList());
     }
 
     // ==================== completeRefresh ====================
@@ -507,6 +526,37 @@ class MongoConnectionGrantStoreTest {
         deleteOneRemoves(0L);
 
         assertFalse(store.delete(TENANT, CONNECTION, PRINCIPAL));
+    }
+
+    // ==================== deleteIfSealedWith ====================
+
+    @Test
+    @DisplayName("deleteIfSealedWith — keyed on the triple AND the IV of the write being taken back")
+    void deleteIfSealedWithAlsoMatchesTheIv() {
+        deleteOneRemoves(1L);
+
+        assertTrue(store.deleteIfSealedWith(TENANT, CONNECTION, PRINCIPAL, "iv-of-this-write"));
+
+        Map<String, BsonValue> filter = capturedDeleteOneFilter();
+        assertEquals(4, filter.size(), "without the IV a callback taking back its grant deletes a later link that replaced it");
+        assertKeyedOnTheGrantTriple(filter);
+        assertEquals("iv-of-this-write", filter.get("accessTokenIv").asString().getValue());
+    }
+
+    @Test
+    @DisplayName("deleteIfSealedWith — reports false when the row was already replaced")
+    void deleteIfSealedWithFindsNothing() {
+        deleteOneRemoves(0L);
+
+        assertFalse(store.deleteIfSealedWith(TENANT, CONNECTION, PRINCIPAL, "iv-of-an-older-write"));
+    }
+
+    @Test
+    @DisplayName("deleteIfSealedWith — a null IV names no write and sends no delete, since eq(null) would match a row without the field")
+    void deleteIfSealedWithNullIvDeletesNothing() {
+        assertFalse(store.deleteIfSealedWith(TENANT, CONNECTION, PRINCIPAL, null));
+
+        verify(grants, never()).deleteOne(any(Bson.class));
     }
 
     // ==================== deleteByConnection ====================
@@ -662,6 +712,22 @@ class MongoConnectionGrantStoreTest {
         assertEquals("REVOKED", capturedCountFilter().get("status").asString().getValue());
     }
 
+    // ==================== countByConnection ====================
+
+    @Test
+    @DisplayName("countByConnection — counts one connection's grants in one tenant, whatever their status")
+    void countByConnectionCounts() {
+        when(grants.countDocuments(any(Bson.class))).thenReturn(3L);
+
+        assertEquals(3L, store.countByConnection(TENANT, CONNECTION));
+
+        Map<String, BsonValue> filter = capturedCountFilter();
+        assertEquals(2, filter.size(), "the count is by (tenant, name) and nothing else — a status clause would hide REFRESH_FAILED tokens "
+                + "that are still at rest");
+        assertEquals(TENANT, filter.get("tenantId").asString().getValue());
+        assertEquals(CONNECTION, filter.get("connectionName").asString().getValue());
+    }
+
     // ==================== Helpers ====================
 
     private static BsonDocument render(Bson bson) {
@@ -769,6 +835,24 @@ class MongoConnectionGrantStoreTest {
         UpdateResult result = mock(UpdateResult.class);
         when(result.getMatchedCount()).thenReturn(matchedCount);
         when(grants.updateOne(any(Bson.class), any(Bson.class))).thenReturn(result);
+    }
+
+    private void pipelineUpdateMatches(long matchedCount) {
+        UpdateResult result = mock(UpdateResult.class);
+        when(result.getMatchedCount()).thenReturn(matchedCount);
+        when(grants.updateOne(any(Bson.class), anyList())).thenReturn(result);
+    }
+
+    private Map<String, BsonValue> capturedPipelineFilter() {
+        ArgumentCaptor<Bson> filter = ArgumentCaptor.forClass(Bson.class);
+        verify(grants).updateOne(filter.capture(), anyList());
+        return conjunction(filter.getValue());
+    }
+
+    private List<BsonDocument> capturedPipeline() {
+        ArgumentCaptor<List<Bson>> pipeline = ArgumentCaptor.forClass(List.class);
+        verify(grants).updateOne(any(Bson.class), pipeline.capture());
+        return pipeline.getValue().stream().map(MongoConnectionGrantStoreTest::render).toList();
     }
 
     private void deleteOneRemoves(long deletedCount) {

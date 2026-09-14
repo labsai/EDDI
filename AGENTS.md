@@ -916,10 +916,12 @@ snippets/
   {snippetId}.snippet.json        → Prompt snippets (root, agent, or version level)
 schedules/
   {scheduleId}.schedule.json      → Agent schedules
+connections/
+  {connectionId}.connection.json  → Connections the configs reference as ${connection:name} (references only — never resolved secrets, never grants; skipped on import when the name already exists)
 ```
 
 > The authoritative list of file extensions is `AbstractBackupService`'s `*_EXT` constants —
-> twelve of them. Check against that file rather than against this block if the two ever disagree.
+> thirteen of them. Check against that file rather than against this block if the two ever disagree.
 
 > **Important**: File extensions use legacy names (`behavior`, `httpcalls`, `langchain`) while URIs use v6 names (`rules`, `apicalls`, `llm`). The import service maps between them via `AbstractBackupService` constants.
 

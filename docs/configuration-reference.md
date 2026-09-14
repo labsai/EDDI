@@ -337,12 +337,25 @@ Full guide: [open-webui-integration.md](open-webui-integration.md).
 
 Full guide: [connections.md](connections.md).
 
+The first four are **runtime settings**: an administrator changes them without a
+restart through `PUT /connectionstore/settings` (or the Manager's Connections page).
+Setting the property **pins** the value instead — it wins over the stored one, and
+the endpoint refuses to change it (409). Unset and unstored, each takes the default
+below. See [Enabling connections](connections.md#enabling-connections).
+
 | Property | Default | Description |
 |---|---|---|
-| `eddi.connections.enabled` | `false` | Master switch for the connection credential model |
-| `eddi.connections.public-base-url` | *(empty)* | Externally reachable base URL for OAuth redirect URIs |
-| `eddi.connections.credential-endpoint-allowlist` | *(empty)* | Hosts permitted to receive resolved credentials |
+| `eddi.connections.enabled` | `false` | Master switch for the connection credential model. Runtime setting `enabled` |
+| `eddi.connections.public-base-url` | *(none)* | Externally reachable base URL for OAuth redirect URIs. Runtime setting `publicBaseUrl`. A pinned value that is not a bare https origin refuses the boot; without one, per-user account linking answers 400 |
+| `eddi.connections.credential-endpoint-allowlist` | *(empty)* | Origins that may receive the **client secret** — a connection's token and authorization endpoints, and only those (RFC 9728 resource-metadata discovery is not implemented). Not where the access token goes: that is each connection's own `baseUrlAllowlist`. Runtime setting `credentialEndpointAllowlist` |
+| `eddi.connections.allow-plaintext-remote-origins` | `false` | Whether a connection's `baseUrlAllowlist` may send its credential over plaintext `http://` to a non-loopback host. While `false` such an origin is refused at save time (400), refused per request (`TARGET_NOT_ALLOWED`) and reported at ERROR at boot; `true` accepts it with a WARN. Loopback `http://` is always allowed. Runtime setting `allowPlaintextRemoteOrigins`. **Upgrade note:** existing connections with a remote `http://` origin stop resolving until this is set |
+| `eddi.connections.settings.allow-unauthenticated-writes` | `false` | Whether `PUT /connectionstore/settings` accepts a write with no verified identity. Outside dev and test, while `authorization.enabled=false`, such a write is refused (403) unless this is `true` — `@RolesAllowed` is a no-op without OIDC, and an anonymous caller must not be able to approve a credential endpoint. Not a runtime setting |
 | `eddi.connections.state-sweep-interval` | `1h` | How often expired OAuth state entries are cleared |
+
+> **Upgrade note.** Any of the first four properties that is *set* — even to its
+> default, e.g. `EDDI_CONNECTIONS_ENABLED=false` copied from an old example — now
+> **pins** that value, and the settings page shows it read-only. Unset it to let
+> administrators manage the value at runtime.
 
 ---
 

@@ -11,6 +11,7 @@ import ai.labs.eddi.configs.connections.model.Binding;
 import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
 import ai.labs.eddi.configs.connections.model.OAuthConfig;
 import ai.labs.eddi.configs.connections.model.StaticAuth;
+import ai.labs.eddi.configs.connections.names.InMemoryConnectionNameClaimStore;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.connections.ConnectionRegistry;
@@ -18,19 +19,25 @@ import ai.labs.eddi.connections.grants.IConnectionGrantStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.secrets.ISecretProvider;
 import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.ClientErrorException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -58,7 +65,7 @@ class RestConnectionStoreGrantLifecycleTest {
 
     private RestConnectionStore rest() {
         return new RestConnectionStore(connectionStore, mock(IDocumentDescriptorStore.class), mock(IJsonSchemaCreator.class), connectionRegistry,
-                grantStore, secretProvider, true, mock(ResourceAccessGuard.class));
+                grantStore, secretProvider, true, mock(ResourceAccessGuard.class), new InMemoryConnectionNameClaimStore());
     }
 
     private static ConnectionConfiguration connection(String name, String tenantId) {
@@ -102,10 +109,114 @@ class RestConnectionStoreGrantLifecycleTest {
     }
 
     @Test
+    @DisplayName("an authType change is refused while linked accounts exist, naming the count and the way out")
+    void refusesAuthTypeChangeWithLinkedAccounts() throws Exception {
+        // The rename rule was in place, but nothing stopped the same PUT from turning a
+        // per-user OAuth connection into a static one: the resolver then never read the
+        // grants again, and nothing deleted them either — every user's refresh token
+        // at rest under a name that now meant something else.
+        var perUser = connection("drive", "default");
+        perUser.setAuthType(AuthType.OAUTH2_AUTHORIZATION_CODE);
+        perUser.setBinding(Binding.PER_USER);
+        perUser.setStaticAuth(null);
+        perUser.setOauth(oauth());
+        storedAs(perUser, 2);
+        when(connectionStore.idOfName("default", "drive")).thenReturn(ID);
+        when(grantStore.countByConnection("default", "drive")).thenReturn(2L);
+
+        var error = assertThrows(ClientErrorException.class, () -> rest().updateConnection(ID, 2, connection("drive", "default")));
+
+        assertEquals(409, error.getResponse().getStatus());
+        assertTrue(error.getMessage().contains("2 linked account"), error.getMessage());
+        assertTrue(error.getMessage().contains("DELETE /connections/drive/grant"), "the refusal must name the way out: " + error.getMessage());
+        verify(connectionStore, never()).update(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("an authType change goes through once nobody is linked any more")
+    void permitsAuthTypeChangeWithoutLinkedAccounts() throws Exception {
+        var perUser = connection("drive", "default");
+        perUser.setAuthType(AuthType.OAUTH2_AUTHORIZATION_CODE);
+        perUser.setBinding(Binding.PER_USER);
+        perUser.setStaticAuth(null);
+        perUser.setOauth(oauth());
+        storedAs(perUser, 2);
+        when(connectionStore.idOfName("default", "drive")).thenReturn(ID);
+        when(grantStore.countByConnection("default", "drive")).thenReturn(0L);
+        when(connectionStore.update(eq(ID), eq(2), any())).thenReturn(3);
+
+        rest().updateConnection(ID, 2, connection("drive", "default"));
+
+        verify(connectionStore).update(eq(ID), eq(2), any());
+        verify(grantStore, times(2)).countByConnection("default", "drive");
+        verify(grantStore, never()).deleteByConnection(anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("a grant linked between the count and the update is deleted by the second count, after the update is written")
+    void deletesAGrantLinkedBetweenTheCountAndTheUpdate() throws Exception {
+        // The interleaving the callback cannot see: its grant landed after the first
+        // count said zero, and its own re-read ran before this update was written,
+        // so it still found the old shape. The count made after the write is what
+        // has to catch it.
+        var perUser = connection("drive", "default");
+        perUser.setAuthType(AuthType.OAUTH2_AUTHORIZATION_CODE);
+        perUser.setBinding(Binding.PER_USER);
+        perUser.setStaticAuth(null);
+        perUser.setOauth(oauth());
+        storedAs(perUser, 2);
+        when(connectionStore.idOfName("default", "drive")).thenReturn(ID);
+        when(grantStore.countByConnection("default", "drive")).thenReturn(0L, 1L);
+        when(grantStore.deleteByConnection("default", "drive")).thenReturn(1);
+        when(connectionStore.update(eq(ID), eq(2), any())).thenReturn(3);
+
+        rest().updateConnection(ID, 2, connection("drive", "default"));
+
+        var order = inOrder(grantStore, connectionStore);
+        order.verify(grantStore).countByConnection("default", "drive");
+        order.verify(connectionStore).update(eq(ID), eq(2), any());
+        order.verify(grantStore).countByConnection("default", "drive");
+        order.verify(grantStore).deleteByConnection("default", "drive");
+    }
+
+    @Test
+    @DisplayName("a post-update count that fails is logged, not turned into an error for an update that did land")
+    void aFailedPostUpdateCountDoesNotFailTheUpdate() throws Exception {
+        var perUser = connection("drive", "default");
+        perUser.setAuthType(AuthType.OAUTH2_AUTHORIZATION_CODE);
+        perUser.setBinding(Binding.PER_USER);
+        perUser.setStaticAuth(null);
+        perUser.setOauth(oauth());
+        storedAs(perUser, 2);
+        when(connectionStore.idOfName("default", "drive")).thenReturn(ID);
+        when(grantStore.countByConnection("default", "drive")).thenReturn(0L).thenThrow(new IllegalStateException("blinked"));
+        when(connectionStore.update(eq(ID), eq(2), any())).thenReturn(3);
+
+        assertDoesNotThrow(() -> rest().updateConnection(ID, 2, connection("drive", "default")));
+
+        verify(connectionStore).update(eq(ID), eq(2), any());
+    }
+
+    @Test
+    @DisplayName("an update that keeps authType and binding never consults the grant store")
+    void doesNotCountGrantsWhenNothingChanges() throws Exception {
+        storedAs(connection("jira", "default"), 2);
+        when(connectionStore.idOfName("default", "jira")).thenReturn(ID);
+        when(connectionStore.update(eq(ID), eq(2), any())).thenReturn(3);
+        var edited = connection("jira", "default");
+        edited.setDescription("only the description");
+
+        rest().updateConnection(ID, 2, edited);
+
+        verify(grantStore, never()).countByConnection(anyString(), anyString());
+        verify(connectionStore).update(eq(ID), eq(2), any());
+    }
+
+    @Test
     @DisplayName("a PER_USER connection cannot be created where no identity is verified")
     void refusesPerUserWithoutAuthorization() {
         var rest = new RestConnectionStore(connectionStore, mock(IDocumentDescriptorStore.class), mock(IJsonSchemaCreator.class),
-                connectionRegistry, grantStore, secretProvider, false, mock(ResourceAccessGuard.class));
+                connectionRegistry, grantStore, secretProvider, false, mock(ResourceAccessGuard.class), new InMemoryConnectionNameClaimStore());
         var connection = connection("drive", "acme");
         connection.setAuthType(AuthType.OAUTH2_AUTHORIZATION_CODE);
         connection.setBinding(Binding.PER_USER);

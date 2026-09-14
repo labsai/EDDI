@@ -38,6 +38,7 @@ public class MongoOAuthStateStore implements IOAuthStateStore {
     private static final String FIELD_STATE = "state";
     private static final String FIELD_TENANT = "tenantId";
     private static final String FIELD_CONNECTION = "connectionName";
+    private static final String FIELD_CONNECTION_ID = "connectionId";
     private static final String FIELD_PRINCIPAL = "principal";
     private static final String FIELD_VERIFIER = "codeVerifier";
     private static final String FIELD_REDIRECT_URI = "redirectUri";
@@ -61,7 +62,8 @@ public class MongoOAuthStateStore implements IOAuthStateStore {
     @Override
     public void create(OAuthState state) {
         states.insertOne(new Document(FIELD_STATE, state.getState()).append(FIELD_TENANT, state.getTenantId())
-                .append(FIELD_CONNECTION, state.getConnectionName()).append(FIELD_PRINCIPAL, state.getPrincipal())
+                .append(FIELD_CONNECTION, state.getConnectionName()).append(FIELD_CONNECTION_ID, state.getConnectionId())
+                .append(FIELD_PRINCIPAL, state.getPrincipal())
                 .append(FIELD_VERIFIER, state.getCodeVerifier()).append(FIELD_REDIRECT_URI, state.getRedirectUri())
                 .append(FIELD_RETURN_TO, state.getReturnTo()).append(FIELD_NONCE_HASH, state.getNonceHash())
                 .append(FIELD_CREATED, Date.from(state.getCreatedAt()))
@@ -94,6 +96,8 @@ public class MongoOAuthStateStore implements IOAuthStateStore {
         state.setState(document.getString(FIELD_STATE));
         state.setTenantId(document.getString(FIELD_TENANT));
         state.setConnectionName(document.getString(FIELD_CONNECTION));
+        // Absent on a row written before the field existed; the callback refuses it.
+        state.setConnectionId(document.getString(FIELD_CONNECTION_ID));
         state.setPrincipal(document.getString(FIELD_PRINCIPAL));
         state.setCodeVerifier(document.getString(FIELD_VERIFIER));
         state.setRedirectUri(document.getString(FIELD_REDIRECT_URI));

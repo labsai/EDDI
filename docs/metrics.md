@@ -602,6 +602,10 @@ eddi_summarization_duration_seconds         # Summarization duration (timer)
 eddi_connection_resolve_count_total         # Connection resolutions; tags: authType, binding, outcome
 eddi_connection_resolve_time_seconds        # Connection resolution duration (timer); tags: authType, binding
 eddi_connection_grant_missing_count_total   # Resolutions refused for a missing grant; tag: binding
+eddi_connection_oauth_authorize_count_total # Per-user OAuth link flows started; tags: outcome (issued), authType
+eddi_connection_oauth_callback_count_total  # OAuth callback outcomes; tags: outcome (success, bad_state, binding_mismatch, provider_error, exchange_failed), authType
+eddi_connection_token_refresh_count_total   # Token endpoint outcomes; tag: outcome (success, minted, invalid_grant, transient)
+eddi_connection_token_refresh_claim_count_total # Refresh lease protocol; tag: outcome (claimed, awaited, lease_released, lease_expired)
 ```
 
 ### Deployed Agents

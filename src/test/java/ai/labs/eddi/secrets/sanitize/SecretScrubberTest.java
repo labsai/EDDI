@@ -564,4 +564,36 @@ class SecretScrubberTest {
                 "the live credential beside the reference must not survive export: " + scrubbed);
         assertTrue(scrubbed.contains("&lang=en"), "the benign parameter still survives: " + scrubbed);
     }
+
+    @Test
+    @DisplayName("a connection reference survives export wherever it sits, like a vault reference does")
+    void scrubJson_connectionReferences_passthrough() {
+        // The reference sits in exactly the fields the scrubber redacts by name — an
+        // Authorization header, an apiKey — so before the exemption every exported
+        // httpcall header reading ${connection:jira} came back as ${vault:REDACTED}
+        // and the archive referenced nothing.
+        String json = "{\"headers\":{\"Authorization\":\"${connection:jira}\"},\"apiKey\":\"${connection:acme/drive}\"}";
+
+        String scrubbed = scrubber.scrubJson(json);
+
+        assertTrue(scrubbed.contains("${connection:jira}"), "the header reference must survive: " + scrubbed);
+        assertTrue(scrubbed.contains("${connection:acme/drive}"), "and so must a tenant-qualified one in an apiKey: " + scrubbed);
+        assertFalse(scrubbed.contains("REDACTED"), scrubbed);
+    }
+
+    @Test
+    @DisplayName("a connection reference exempts only a value that IS the reference — a literal beside it is still redacted")
+    void scrubJson_connectionReferenceBesideALiteral_stillRedacted() {
+        // Every outbound path refuses a mixed value (ConnectionReference.requireSole),
+        // so there is no legitimate config to preserve here — only a pasted credential
+        // that a "contains" exemption would have exported legibly.
+        String json = "{\"headers\":{\"Authorization\":\"Bearer sk-live-abcdef ${connection:jira}\"},"
+                + "\"apiKey\":\"${connection:drive} xoxb-1234567890-abcdef\"}";
+
+        String scrubbed = scrubber.scrubJson(json);
+
+        assertFalse(scrubbed.contains("sk-live-abcdef"), "the literal credential must not survive export: " + scrubbed);
+        assertFalse(scrubbed.contains("xoxb-1234567890"), scrubbed);
+        assertTrue(scrubbed.contains(SecretScrubber.REDACTED), scrubbed);
+    }
 }

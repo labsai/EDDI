@@ -30,16 +30,29 @@ import java.util.List;
 /**
  * CRUD for connection configurations.
  * <p>
- * {@code eddi-admin} only, deliberately narrower than the {@code {eddi-admin,
- * eddi-editor}} pair its sibling config stores use. A connection is an egress
- * channel plus a credential — the same class of capability as a vault write,
- * which is already admin-only and is already excluded from operator write
- * scope. An editor who can create a connection can point an existing credential
- * at a host of their choosing.
+ * Writes are {@code eddi-admin} only, deliberately narrower than the
+ * {@code {eddi-admin, eddi-editor}} pair its sibling config stores use. A
+ * connection is an egress channel plus a credential — the same class of
+ * capability as a vault write, which is already admin-only and is already
+ * excluded from operator write scope. An editor who can create a connection can
+ * point an existing credential at a host of their choosing.
+ * <p>
+ * The two reads — the descriptor listing and a single document — admit
+ * {@code eddi-editor} as well, because an editor authoring an httpcall header
+ * has to know which connections exist to write {@code ${connection:jira}} at
+ * all, and the Manager's picker needs the same list. Reading is safe: a
+ * connection document carries only references ({@code ${vault:…}}), the
+ * {@code clientId} is public by definition, and
+ * {@code ConnectionConfiguration#validate()} refuses a literal in every
+ * secret-bearing field at write time. A document written before those rules can
+ * still hold one, so a caller who is not {@code eddi-admin} reads a copy in
+ * which {@code oauth.clientSecret}, {@code staticAuth.passwordRef},
+ * {@code staticAuth.valueTemplate} and each {@code oauth.extraAuthParams} entry
+ * that fails its write-time rule is redacted; an administrator reads the
+ * document as stored, to find and fix it.
  * <p>
  * Note what is <em>not</em> here: there is no endpoint that returns a resolved
- * credential, and no endpoint that returns a grant. A connection document
- * carries only references, so reading one is safe; a grant carries tokens, so
+ * credential, and no endpoint that returns a grant. A grant carries tokens, so
  * it has no read surface at all.
  */
 @Path("/connectionstore/connections")
@@ -61,6 +74,7 @@ public interface IRestConnectionStore extends IRestVersionInfo {
     @GET
     @Path("descriptors")
     @Produces(MediaType.APPLICATION_JSON)
+    @RolesAllowed({"eddi-admin", "eddi-editor"})
     @Operation(summary = "List connection descriptors", description = "Read the list of connection configuration descriptors.")
     List<DocumentDescriptor> readConnectionDescriptors(@QueryParam("filter")
     @DefaultValue("") String filter,
@@ -72,7 +86,9 @@ public interface IRestConnectionStore extends IRestVersionInfo {
     @GET
     @Path("/{id}")
     @Produces(MediaType.APPLICATION_JSON)
-    @Operation(summary = "Read connection", description = "Read a connection configuration. Secret-bearing fields are references, never values.")
+    @RolesAllowed({"eddi-admin", "eddi-editor"})
+    @Operation(summary = "Read connection", description = "Read a connection configuration. Secret-bearing fields are references, never values; "
+            + "for a caller who is not eddi-admin, a legacy literal in one of them is redacted.")
     ConnectionConfiguration readConnection(@PathParam("id") String id,
                                            @Parameter(name = "version", required = true, example = "1")
                                            @QueryParam("version") Integer version);
@@ -86,6 +102,13 @@ public interface IRestConnectionStore extends IRestVersionInfo {
                               @QueryParam("version") Integer version,
                               ConnectionConfiguration connectionConfiguration);
 
+    /**
+     * Creates a connection, and — unlike its sibling stores — writes the new
+     * document's descriptor itself before returning, inside the lock that keeps
+     * {@code (tenant, name)} unique. An in-process caller (the import service) may
+     * rely on that; the HTTP response filter finds the descriptor and leaves it
+     * alone.
+     */
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
     @Operation(summary = "Create connection", description = "Create a connection configuration.")

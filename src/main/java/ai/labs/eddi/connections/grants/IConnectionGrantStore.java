@@ -4,7 +4,7 @@
  */
 package ai.labs.eddi.connections.grants;
 
-import java.time.Instant;
+import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 
@@ -37,19 +37,27 @@ public interface IConnectionGrantStore {
      * invalidated one of them. The CAS would then dutifully serialise two writes,
      * one carrying a token the provider had already killed, and the user is
      * silently logged out.
+     * <p>
+     * <b>One clock.</b> "now" is the <em>database's</em> clock, both where the
+     * expiry is written ({@code now + lease}) and where it is compared. The caller
+     * passes a duration, never an instant. An expiry written from the claimant
+     * JVM's clock and compared on a contender JVM's clock frees a live lease early
+     * by exactly the skew between the two, and a lease freed early is a second
+     * replica refreshing while the first is still in flight.
      *
-     * @param leaseExpiresAt
-     *            must be later than the token-endpoint timeout, or a slow provider
-     *            frees the lease while the claimant is still in flight and
-     *            reintroduces exactly the double refresh this prevents. Must also
-     *            be non-null: a missing expiry is not a shorter lease but a
-     *            permanent one, since the predicate asks whether the lease has
-     *            expired and {@code NULL < CURRENT_TIMESTAMP} is NULL rather than
-     *            true. Implementations reject it instead of writing a grant whose
-     *            refresh can never be claimed again
+     * @param lease
+     *            how long the claimant owns the refresh. Must be longer than the
+     *            token-endpoint timeout, or a slow provider frees the lease while
+     *            the claimant is still in flight and reintroduces exactly the
+     *            double refresh this prevents. Must also be non-null and positive:
+     *            a missing lease is not a shorter one but a permanent one, since
+     *            the predicate asks whether the lease has expired and
+     *            {@code NULL < CURRENT_TIMESTAMP} is NULL rather than true.
+     *            Implementations reject it instead of writing a grant whose refresh
+     *            can never be claimed again
      * @return true if this caller now owns the refresh
      */
-    boolean claimRefresh(String tenantId, String connectionName, String principal, String claimantId, Instant leaseExpiresAt);
+    boolean claimRefresh(String tenantId, String connectionName, String principal, String claimantId, Duration lease);
 
     /**
      * Writes a refreshed grant and clears the lease, guarded by the version the
@@ -75,6 +83,27 @@ public interface IConnectionGrantStore {
 
     /** Deletes one grant. This is what "disconnect" means. */
     boolean delete(String tenantId, String connectionName, String principal);
+
+    /**
+     * Deletes one grant, but only while the row is still the write whose access
+     * token was sealed with {@code accessTokenIv}.
+     * <p>
+     * For a writer taking back a grant it has just stored. A delete by key alone
+     * removes whatever holds the triple by the time it runs — including a later
+     * link of the same account that completed in between, which is a grant the user
+     * has no reason to think is gone. The IV is fresh random bytes for every seal,
+     * so it names one write without {@link #upsert} having to report a version
+     * back.
+     * <p>
+     * A DEK re-seal in the gap changes the IV too, and the delete then misses. That
+     * is the safe direction: the grant stays until the user disconnects or the
+     * connection is deleted, rather than a live grant being removed.
+     *
+     * @param accessTokenIv
+     *            the IV of the grant the caller wrote; {@code null} matches nothing
+     * @return true if that exact grant was removed
+     */
+    boolean deleteIfSealedWith(String tenantId, String connectionName, String principal, String accessTokenIv);
 
     /**
      * Deletes every grant belonging to a connection. Called when the connection
@@ -119,4 +148,15 @@ public interface IConnectionGrantStore {
 
     /** Counts by status, for the {@code connection.grant.status} gauge. */
     long countByStatus(String tenantId, ConnectionGrant.Status status);
+
+    /**
+     * How many grants a connection holds, across every principal and status.
+     * <p>
+     * Exists so an update that changes a connection's {@code authType} or
+     * {@code binding} can be refused while linked accounts still exist: their
+     * refresh tokens would otherwise stay at rest under a name the resolver no
+     * longer reads them for. A count rather than a listing, because the caller
+     * needs a number for its refusal and must never receive token ciphertext.
+     */
+    long countByConnection(String tenantId, String connectionName);
 }

@@ -21,8 +21,10 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Timestamp;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.AbstractList;
+import java.util.Calendar;
 import java.util.List;
 import java.util.Optional;
 
@@ -33,9 +35,14 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mockingDetails;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -67,6 +74,7 @@ class PostgresConnectionGrantStoreUnitTest {
     private static final Instant UPDATED_AT = Instant.parse("2025-12-01T11:00:00Z");
     private static final Instant LAST_REFRESH_AT = Instant.parse("2025-12-24T12:00:00Z");
     private static final Instant LEASE_EXPIRES_AT = Instant.parse("2026-01-02T03:00:00Z");
+    private static final Duration LEASE = Duration.ofSeconds(60);
 
     @Mock
     private Instance<DataSource> dataSourceInstance;
@@ -102,6 +110,28 @@ class PostgresConnectionGrantStoreUnitTest {
         if (mocks != null) {
             mocks.close();
         }
+    }
+
+    /**
+     * Every connection and statement the store obtained was closed.
+     * <p>
+     * The stubs in {@link #setUp} hand out mocks; nothing is acquired there. The
+     * contract worth pinning is the production side: that each
+     * {@code getConnection()}, {@code createStatement()} and
+     * {@code prepareStatement()} is matched by a {@code close()}, on the failure
+     * path as well as the success path.
+     */
+    private void assertEveryConnectionAndStatementClosed() throws SQLException {
+        int connections = invocations(dataSource, "getConnection");
+        assertTrue(connections > 0, "the scenario must actually have opened a connection");
+        verify(connection, times(connections)).close();
+        verify(statement, times(invocations(connection, "createStatement"))).close();
+        verify(preparedStatement, times(invocations(connection, "prepareStatement"))).close();
+    }
+
+    private static int invocations(Object mock, String method) {
+        return (int) mockingDetails(mock).getInvocations().stream().filter(invocation -> invocation.getMethod().getName().equals(method))
+                .count();
     }
 
     private static ConnectionGrant grant() {
@@ -159,7 +189,7 @@ class PostgresConnectionGrantStoreUnitTest {
         when(resultSet.getTimestamp("created_at")).thenReturn(Timestamp.from(CREATED_AT));
         when(resultSet.getTimestamp("updated_at")).thenReturn(Timestamp.from(UPDATED_AT));
         when(resultSet.getTimestamp("last_refresh_at")).thenReturn(Timestamp.from(LAST_REFRESH_AT));
-        when(resultSet.getTimestamp("refresh_lease_expires_at")).thenReturn(Timestamp.from(LEASE_EXPIRES_AT));
+        when(resultSet.getTimestamp(eq("refresh_lease_expires_at"), any(Calendar.class))).thenReturn(Timestamp.from(LEASE_EXPIRES_AT));
     }
 
     private void stubTwoRows() throws SQLException {
@@ -405,15 +435,36 @@ class PostgresConnectionGrantStoreUnitTest {
     void claimRefreshReturnsTrueWhenTheLeaseWasTaken() throws Exception {
         when(preparedStatement.executeUpdate()).thenReturn(1);
 
-        assertTrue(store.claimRefresh(TENANT, CONNECTION, PRINCIPAL, CLAIMANT, LEASE_EXPIRES_AT));
+        assertTrue(store.claimRefresh(TENANT, CONNECTION, PRINCIPAL, CLAIMANT, LEASE));
 
         verify(preparedStatement).setString(1, CLAIMANT);
-        verify(preparedStatement).setTimestamp(2, Timestamp.from(LEASE_EXPIRES_AT));
+        verify(preparedStatement).setLong(2, 60_000L);
         verify(preparedStatement).setString(3, TENANT);
         verify(preparedStatement).setString(4, CONNECTION);
         verify(preparedStatement).setString(5, PRINCIPAL);
-        assertTrue(capturedSql().contains("refresh_in_progress IS NULL OR refresh_lease_expires_at < CURRENT_TIMESTAMP"),
+        assertTrue(capturedSql().contains("refresh_in_progress IS NULL OR refresh_lease_expires_at < (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')"),
                 "the free-lease predicate is what makes the claim atomic; a read-then-write lets two replicas both win");
+    }
+
+    @Test
+    @DisplayName("claimRefresh writes and compares the lease expiry by the database clock, binding only the lease duration")
+    void claimRefreshUsesTheDatabaseClockOnBothSides() throws Exception {
+        // An expiry stamped by the claimant JVM's clock and compared on a contender
+        // JVM's clock frees a live lease early by the skew between the two replicas:
+        // a second refresh while the claimant is still in flight, the double refresh
+        // the claim exists to prevent. One clock — the database's — on both sides,
+        // and the same kind of timestamp on both sides, so no session time zone can
+        // shift one relative to the other.
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+
+        store.claimRefresh(TENANT, CONNECTION, PRINCIPAL, CLAIMANT, LEASE);
+
+        String sql = capturedSql();
+        assertTrue(sql.contains("refresh_lease_expires_at = (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') + (? * INTERVAL '1 millisecond')"),
+                "the expiry is written as database-now plus the bound duration: " + sql);
+        assertTrue(sql.contains("refresh_lease_expires_at < (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')"),
+                "and compared with database-now, in the same kind of timestamp: " + sql);
+        verify(preparedStatement, never()).setTimestamp(anyInt(), any(Timestamp.class));
     }
 
     @Test
@@ -421,18 +472,20 @@ class PostgresConnectionGrantStoreUnitTest {
     void claimRefreshReturnsFalseWhenTheLeaseIsHeld() throws Exception {
         when(preparedStatement.executeUpdate()).thenReturn(0);
 
-        assertFalse(store.claimRefresh(TENANT, CONNECTION, PRINCIPAL, CLAIMANT, LEASE_EXPIRES_AT),
+        assertFalse(store.claimRefresh(TENANT, CONNECTION, PRINCIPAL, CLAIMANT, LEASE),
                 "reporting a lost race as won sends a second token request and rotates the winner's refresh token away");
     }
 
     @Test
-    @DisplayName("claimRefresh refuses a lease with no expiry rather than writing one nobody can reclaim")
-    void claimRefreshRefusesANullLeaseExpiry() throws Exception {
+    @DisplayName("claimRefresh refuses a missing or non-positive lease rather than writing one nobody can reclaim")
+    void claimRefreshRefusesAnUnusableLease() throws Exception {
         // A missing expiry is not a shorter lease, it is a permanent one: the claim
         // predicate asks whether the lease has expired, and `NULL <
         // CURRENT_TIMESTAMP` is NULL rather than true, so the row could never be
         // claimed again and refresh for that grant would be wedged for good.
         assertThrows(IllegalArgumentException.class, () -> store.claimRefresh(TENANT, CONNECTION, PRINCIPAL, CLAIMANT, null));
+        assertThrows(IllegalArgumentException.class, () -> store.claimRefresh(TENANT, CONNECTION, PRINCIPAL, CLAIMANT, Duration.ZERO));
+        assertThrows(IllegalArgumentException.class, () -> store.claimRefresh(TENANT, CONNECTION, PRINCIPAL, CLAIMANT, Duration.ofMillis(-1)));
 
         verify(preparedStatement, never()).executeUpdate();
     }
@@ -443,7 +496,20 @@ class PostgresConnectionGrantStoreUnitTest {
         var boom = new SQLException("lock timeout");
         when(preparedStatement.executeUpdate()).thenThrow(boom);
 
-        assertWraps("Failed to claim a refresh lease", boom, () -> store.claimRefresh(TENANT, CONNECTION, PRINCIPAL, CLAIMANT, LEASE_EXPIRES_AT));
+        assertWraps("Failed to claim a refresh lease", boom, () -> store.claimRefresh(TENANT, CONNECTION, PRINCIPAL, CLAIMANT, LEASE));
+    }
+
+    @Test
+    @DisplayName("find reads the lease expiry back as the UTC wall clock claimRefresh wrote it in")
+    void findReadsTheLeaseExpiryAsUtc() throws Exception {
+        stubFullRow();
+
+        store.find(TENANT, CONNECTION, PRINCIPAL);
+
+        var calendar = ArgumentCaptor.forClass(Calendar.class);
+        verify(resultSet).getTimestamp(eq("refresh_lease_expires_at"), calendar.capture());
+        assertEquals("UTC", calendar.getValue().getTimeZone().getID(),
+                "read in this JVM's zone, the expiry would be off by the zone's offset on any replica not running in UTC");
     }
 
     @Test
@@ -550,6 +616,38 @@ class PostgresConnectionGrantStoreUnitTest {
         when(preparedStatement.executeUpdate()).thenReturn(0);
 
         assertFalse(store.delete(TENANT, CONNECTION, PRINCIPAL));
+    }
+
+    @Test
+    @DisplayName("deleteIfSealedWith adds the IV of the write being taken back to the predicate")
+    void deleteIfSealedWithAlsoMatchesTheIv() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+
+        assertTrue(store.deleteIfSealedWith(TENANT, CONNECTION, PRINCIPAL, "iv-access"));
+
+        verify(preparedStatement).setString(1, TENANT);
+        verify(preparedStatement).setString(2, CONNECTION);
+        verify(preparedStatement).setString(3, PRINCIPAL);
+        verify(preparedStatement).setString(4, "iv-access");
+        assertTrue(capturedSql().contains(
+                "DELETE FROM connection_grants WHERE tenant_id = ? AND connection_name = ? AND principal = ? AND access_token_iv = ?"),
+                "without the IV a callback taking back its grant deletes a later link that replaced it");
+    }
+
+    @Test
+    @DisplayName("deleteIfSealedWith reports false when the row was already replaced")
+    void deleteIfSealedWithReturnsFalseWhenNothingMatched() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(0);
+
+        assertFalse(store.deleteIfSealedWith(TENANT, CONNECTION, PRINCIPAL, "iv-of-an-older-write"));
+    }
+
+    @Test
+    @DisplayName("deleteIfSealedWith with a null IV names no write and runs no statement")
+    void deleteIfSealedWithNullIvDeletesNothing() throws Exception {
+        assertFalse(store.deleteIfSealedWith(TENANT, CONNECTION, PRINCIPAL, null));
+
+        verify(preparedStatement, never()).executeUpdate();
     }
 
     @Test
@@ -746,5 +844,35 @@ class PostgresConnectionGrantStoreUnitTest {
         when(preparedStatement.executeQuery()).thenThrow(boom);
 
         assertWraps("Failed to count connection grants", boom, () -> store.countByStatus(TENANT, ConnectionGrant.Status.ACTIVE));
+    }
+
+    @Test
+    @DisplayName("countByConnection binds the tenant and the connection name and returns the count")
+    void countByConnectionReturnsTheCount() throws Exception {
+        // A stubbing expression on a mock acquires nothing, whichever form it takes.
+        // What is worth asserting is that the store closes what it opens.
+        doReturn(resultSet).when(preparedStatement).executeQuery();
+        when(resultSet.next()).thenReturn(true);
+        when(resultSet.getLong(1)).thenReturn(3L);
+
+        assertEquals(3L, store.countByConnection(TENANT, CONNECTION));
+
+        verify(preparedStatement).setString(1, TENANT);
+        verify(preparedStatement).setString(2, CONNECTION);
+        verify(resultSet).close();
+        assertEveryConnectionAndStatementClosed();
+    }
+
+    @Test
+    @DisplayName("countByConnection wraps a database failure with its cause intact")
+    void countByConnectionWrapsSqlException() throws Exception {
+        var boom = new SQLException("connection reset");
+        doThrow(boom).when(preparedStatement).executeQuery();
+
+        assertWraps("Failed to count a connection's grants", boom, () -> store.countByConnection(TENANT, CONNECTION));
+        // The query threw, so no ResultSet exists; the statement and connection that
+        // do exist are still released.
+        verify(preparedStatement).close();
+        assertEveryConnectionAndStatementClosed();
     }
 }

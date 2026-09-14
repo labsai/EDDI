@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.connections.model;
 
 import ai.labs.eddi.connections.model.ConnectionReference;
+import org.jboss.logging.Logger;
 
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -15,6 +16,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
  * How to authenticate to one external system.
@@ -28,24 +31,29 @@ import java.util.regex.Pattern;
  * request</em>, which is what lets one model cover both an org-wide API key and
  * a per-end-user OAuth grant.
  *
- * <h3>Everything secret is a reference</h3> {@code clientSecret},
- * {@code passwordRef} and any interpolated segment of a {@code valueTemplate}
- * must be a {@code ${vault:…}} or {@code ${vars:…}} reference. A plaintext key
- * in a connection document would sit outside the vault, outside export
- * scrubbing and outside {@code VaultGrantChecker}'s {@code ${vault:}} scan
- * simultaneously — one field defeating three controls.
+ * <h3>Everything secret is a reference</h3> {@code clientSecret} and
+ * {@code passwordRef} must be exactly one {@code ${vault:…}} or
+ * {@code ${vars:…}} reference. A {@code valueTemplate} may add literal text
+ * around its references — a scheme — but that text is bounded and checked for a
+ * credential shape too (see {@link #requireTemplateIsReferenceOnly}), or a
+ * literal key with a reference stapled on would pass. A plaintext key in a
+ * connection document would sit outside the vault, outside export scrubbing and
+ * outside {@code VaultGrantChecker}'s {@code ${vault:}} scan simultaneously —
+ * one field defeating three controls.
  *
  * <h3>Two separate allowlists</h3> {@code baseUrlAllowlist} says where the
- * ACCESS TOKEN may be sent. Credential endpoints — {@code tokenUrl},
- * {@code authorizationUrl}, {@code discoveryUrl} — are validated against their
- * own operator-managed list, because the vault-resolved {@code clientSecret} is
- * sent to {@code tokenUrl}: an unvalidated token URL is a direct client-secret
+ * ACCESS TOKEN may be sent. Credential endpoints — {@code tokenUrl} and
+ * {@code authorizationUrl} — are validated against their own operator-managed
+ * list, because the vault-resolved {@code clientSecret} is sent to
+ * {@code tokenUrl}: an unvalidated token URL is a direct client-secret
  * exfiltration path, strictly worse than a misdirected access token. Their
  * origins routinely differ from the API's (Atlassian:
  * {@code auth.atlassian.com} versus {@code api.atlassian.com}), which is why
  * folding them into one list does not work.
  */
 public class ConnectionConfiguration {
+
+    private static final Logger LOGGER = Logger.getLogger(ConnectionConfiguration.class);
 
     /**
      * A reference EDDI resolves at use time. Anchored and whole-segment: a value
@@ -55,8 +63,40 @@ public class ConnectionConfiguration {
      */
     private static final Pattern REFERENCE_ONLY = Pattern.compile("\\$\\{(vault|eddivault|vars):[^}]{1,256}}");
 
-    /** Interpolated segments inside a header value template. */
-    private static final Pattern INTERPOLATION = Pattern.compile("\\$\\{[^}]{0,256}}");
+    /**
+     * The most literal text a {@code valueTemplate} may carry between or around its
+     * references. Enough for a scheme ({@code "Bearer "}, {@code "SSWS "},
+     * {@code "token="}); not enough for a key.
+     */
+    static final int MAX_TEMPLATE_LITERAL_CHARS = 32;
+
+    /**
+     * A run of key characters long enough to be a credential rather than a scheme.
+     * Twelve is below every real API key format and above every scheme word
+     * ({@code Bearer}, {@code Basic}, {@code Authorization} — 13, is the one it
+     * refuses, and a template has no business carrying a header NAME in its value).
+     */
+    private static final Pattern CREDENTIAL_SHAPED_RUN = Pattern.compile("[A-Za-z0-9_\\-+/=.]{12,}");
+
+    /** How much of an offending literal a refusal quotes back. */
+    private static final int QUOTED_LITERAL_CHARS = 4;
+
+    /**
+     * What a connection may be called, spelled out so an author can read it back
+     * from the refusal. Derived from the two places a name is parsed, neither of
+     * which has a grammar of its own:
+     * {@code ConnectionReference.CONNECTION_PATTERN} stops at {@code /} and
+     * {@code }}, and the caller-credential header is split at the first space. A
+     * name carrying a space, a slash, a brace, a colon or surrounding whitespace
+     * therefore saved and could never be referenced or supplied — or, with a slash,
+     * resolved as somebody else's tenant.
+     */
+    public static final String NAME_GRAMMAR = "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$";
+
+    private static final Pattern NAME = Pattern.compile(NAME_GRAMMAR);
+
+    /** How much of an unusable name a refusal quotes back. */
+    private static final int QUOTED_NAME_CHARS = 80;
 
     /**
      * Names that mark a value as credential-shaped, used to keep one out of
@@ -73,6 +113,32 @@ public class ConnectionConfiguration {
     private static final Set<String> CREDENTIAL_PARAM_NAMES = Set.of("apikey", "apitoken", "password", "passwd", "secret", "secretkey",
             "token", "accesstoken", "refreshtoken", "authorization", "auth", "credential", "credentials", "privatekey", "clientsecret",
             "assertion", "codeverifier");
+
+    /**
+     * Parameters of the authorization request that EDDI composes itself. Same
+     * normalized form as {@link #CREDENTIAL_PARAM_NAMES}, and for the same reason:
+     * {@code Redirect_uri} and {@code redirect-uri} are one name on the wire once a
+     * provider has applied its own leniency. A value here would either be silently
+     * ignored or override the one PKCE and the callback depend on — a
+     * {@code redirect_uri} pointing elsewhere is an authorization code delivered
+     * elsewhere.
+     */
+    private static final Set<String> RESERVED_OAUTH_PARAM_NAMES = Set.of("redirecturi", "state", "codechallenge", "codechallengemethod",
+            "clientid", "responsetype", "codeverifier", "clientsecret");
+
+    /** Longest value an extra authorization parameter may carry. */
+    static final int MAX_EXTRA_AUTH_PARAM_VALUE_CHARS = 512;
+
+    /**
+     * Value prefixes no protocol parameter legitimately starts with and every
+     * common credential format does: OpenAI/Stripe keys, Slack tokens, GitHub
+     * tokens, AWS access key ids, JWTs, and a pasted {@code Authorization} header.
+     * A small local list rather than the export scrubber's entropy heuristic — this
+     * is a write-boundary check on a handful of short values, so it can afford to
+     * refuse by shape and say so.
+     */
+    private static final Pattern CREDENTIAL_SHAPED_VALUE = Pattern
+            .compile("^(?:sk-|xox[abpsre]-|gh[pousr]_|github_pat_|AKIA|eyJ|(?i:bearer|basic)\\s)");
 
     /** Referenced as {@code ${connection:name}}. */
     private String name;
@@ -124,8 +190,21 @@ public class ConnectionConfiguration {
      */
     private List<String> baseUrlAllowlist = new ArrayList<>();
 
-    /** Timeout for the token endpoint. Null means the resolver's default. */
+    /**
+     * Timeout for the token endpoint,
+     * {@value #MIN_TIMEOUT_MS}..{@value #MAX_TIMEOUT_MS} ms. Null means the
+     * resolver's default.
+     */
     private Integer timeoutMs;
+
+    /** Lower bound of {@link #timeoutMs}. */
+    public static final int MIN_TIMEOUT_MS = 1;
+
+    /**
+     * Upper bound of {@link #timeoutMs}: a token endpoint that takes a minute is
+     * down.
+     */
+    public static final int MAX_TIMEOUT_MS = 60_000;
 
     /**
      * Rejects a connection the engine cannot honour safely.
@@ -137,12 +216,22 @@ public class ConnectionConfiguration {
         if (name == null || name.isBlank()) {
             throw new IllegalArgumentException("A connection needs a name — it is what ${connection:name} refers to.");
         }
+        // Not trimmed: a name saved with whitespace the author cannot see is a name
+        // that resolves for nobody, and silently storing something other than what
+        // was sent is a worse surprise than refusing it.
+        if (!NAME.matcher(name).matches()) {
+            throw new IllegalArgumentException("Connection name '" + quoteName(name) + "' is not usable. A name must match " + NAME_GRAMMAR
+                    + ": letters, digits, '.', '_' and '-', starting with a letter or digit, at most 64 characters, with no surrounding "
+                    + "whitespace. It is what ${connection:name} refers to and what a caller names in the X-EDDI-Connection-Credential "
+                    + "header, so a space, '/', '}' or ':' in it could never be referenced or supplied.");
+        }
         if (authType == null) {
             throw new IllegalArgumentException("authType is required (STATIC, BASIC, OAUTH2_CLIENT_CREDENTIALS or OAUTH2_AUTHORIZATION_CODE).");
         }
         validateBinding();
         validateUnverifiedPrincipalFlag();
         validateAllowlist();
+        validateTimeout();
         switch (authType) {
             case STATIC, BASIC -> validateStaticAuth();
             case OAUTH2_CLIENT_CREDENTIALS, OAUTH2_AUTHORIZATION_CODE -> validateOAuth();
@@ -202,7 +291,77 @@ public class ConnectionConfiguration {
                     + "or a config edit can redirect that credential to any host.");
         }
         for (String origin : baseUrlAllowlist) {
-            requireCanonicalOrigin(origin, "baseUrlAllowlist");
+            String canonical = requireCanonicalOrigin(origin, "baseUrlAllowlist");
+            // Structurally valid, so not refused here: whether a deployment accepts
+            // plaintext to an internal host is a deployment decision
+            // (eddi.connections.allow-plaintext-remote-origins, enforced by the write
+            // boundary and the resolver), not a property of the document. It is a
+            // credential crossing the network unencrypted either way, so it is said
+            // out loud at the moment somebody can still change their mind — and again
+            // at boot, by ConnectionStartupGuard, for a document that arrived some
+            // other way.
+            if (isPlaintextRemoteOrigin(canonical)) {
+                LOGGER.warnf("[CONNECTIONS] Connection '%s' allows its credential to be sent over plaintext http to %s; the credential "
+                        + "crosses the network unencrypted. It is refused unless allowPlaintextRemoteOrigins is on "
+                        + "(/connectionstore/settings, or the eddi.connections.allow-plaintext-remote-origins property); prefer an https "
+                        + "origin.", sanitize(name), sanitize(canonical));
+            }
+        }
+    }
+
+    /**
+     * Whether a canonical origin sends traffic in the clear to something other than
+     * this host. Loopback is exempt: {@code http://localhost} never leaves the
+     * machine, and it is the normal shape of a development setup.
+     */
+    public static boolean isPlaintextRemoteOrigin(String canonicalOrigin) {
+        if (canonicalOrigin == null || !canonicalOrigin.startsWith("http://")) {
+            return false;
+        }
+        String host = URI.create(canonicalOrigin).getHost();
+        return host != null && !isLoopbackHost(host);
+    }
+
+    /**
+     * Whether a credential endpoint may be sent a client secret: https to any host,
+     * or plain http to a loopback host only.
+     * <p>
+     * One rule for the write boundary and for {@code OAuthTokenClient}, which
+     * re-checks it immediately before a request leaves the process — a document
+     * that reached the store by import or a direct write never ran validation, and
+     * the credential-endpoint allowlist accepts http origins, so the allowlist
+     * alone would let a secret go out in the clear. The loopback exemption is the
+     * one {@code baseUrlAllowlist} and the dev-mode {@code public-base-url} rule
+     * already make, with the same host set: {@code http://localhost} never leaves
+     * the machine.
+     */
+    public static boolean isSecureCredentialEndpoint(URI endpoint) {
+        if (endpoint == null || endpoint.getScheme() == null || endpoint.getHost() == null) {
+            return false;
+        }
+        String scheme = endpoint.getScheme().toLowerCase(Locale.ROOT);
+        return "https".equals(scheme) || ("http".equals(scheme) && isLoopbackHost(endpoint.getHost()));
+    }
+
+    /**
+     * {@code localhost}, {@code 127.0.0.1} or {@code ::1}, as {@link URI#getHost()}
+     * renders them.
+     */
+    public static boolean isLoopbackHost(String host) {
+        String lower = host.toLowerCase(Locale.ROOT);
+        return "localhost".equals(lower) || "127.0.0.1".equals(lower) || "[::1]".equals(lower) || "::1".equals(lower);
+    }
+
+    /**
+     * A bound rather than a clamp. {@code OAuthTokenClient} already clamps the
+     * value it uses, so an out-of-range document worked — silently, at a timeout
+     * the author did not write. Refusing at save time is the only place the author
+     * finds out.
+     */
+    private void validateTimeout() {
+        if (timeoutMs != null && (timeoutMs < MIN_TIMEOUT_MS || timeoutMs > MAX_TIMEOUT_MS)) {
+            throw new IllegalArgumentException("timeoutMs must be between " + MIN_TIMEOUT_MS + " and " + MAX_TIMEOUT_MS
+                    + " milliseconds; got: " + timeoutMs + ". Leave it unset for the resolver's default.");
         }
     }
 
@@ -293,15 +452,101 @@ public class ConnectionConfiguration {
         if (params == null) {
             return;
         }
-        for (String key : params.keySet()) {
-            if (key == null) {
-                continue;
-            }
-            String normalized = key.toLowerCase(Locale.ROOT).replaceAll("[\\-._]", "");
-            if (CREDENTIAL_PARAM_NAMES.contains(normalized)) {
-                throw new IllegalArgumentException("oauth.extraAuthParams may carry only non-secret protocol parameters (prompt, audience, …). '"
-                        + key + "' is credential-shaped; store it with POST /secretstore/secrets and reference it instead.");
-            }
+        for (Map.Entry<String, String> param : params.entrySet()) {
+            requireExtraAuthParam(param.getKey(), param.getValue());
+        }
+    }
+
+    /** One entry of {@code extraAuthParams}: its key, then its value. */
+    private static void requireExtraAuthParam(String key, String value) {
+        if (key == null) {
+            return;
+        }
+        String normalized = key.toLowerCase(Locale.ROOT).replaceAll("[\\-._]", "");
+        if (CREDENTIAL_PARAM_NAMES.contains(normalized)) {
+            throw new IllegalArgumentException("oauth.extraAuthParams may carry only non-secret protocol parameters (prompt, audience, …). '"
+                    + key + "' is credential-shaped; store it with POST /secretstore/secrets and reference it instead.");
+        }
+        if (RESERVED_OAUTH_PARAM_NAMES.contains(normalized)) {
+            throw new IllegalArgumentException("oauth.extraAuthParams must not set '" + key + "': it is a protocol parameter EDDI "
+                    + "composes itself when it builds the authorization request (redirect_uri, state, code_challenge, "
+                    + "code_challenge_method, client_id, response_type). A value here would be ignored or would override the one the "
+                    + "callback and PKCE depend on.");
+        }
+        requireProtocolParameterValue(key, value);
+    }
+
+    // --- The write-time rules as predicates -----------------------------------
+    //
+    // For a reader that must decide whether a STORED value would pass today's
+    // rules — a document written before them can still hold a literal — without
+    // copying the rules and letting the two drift.
+
+    /**
+     * Whether a value passes the rule {@code oauth.clientSecret} and
+     * {@code staticAuth.passwordRef} are held to at write time: exactly one
+     * {@code ${vault:…}} or {@code ${vars:…}} reference and nothing else.
+     */
+    public static boolean isReferenceOnly(String value) {
+        return value != null && REFERENCE_ONLY.matcher(value.trim()).matches();
+    }
+
+    /**
+     * Whether a {@code staticAuth.valueTemplate} passes the write-time template
+     * rule — see {@link #requireTemplateIsReferenceOnly}.
+     */
+    public static boolean isAcceptableValueTemplate(String template) {
+        if (template == null) {
+            return false;
+        }
+        try {
+            requireTemplateIsReferenceOnly(template);
+            return true;
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+    }
+
+    /**
+     * Whether one {@code oauth.extraAuthParams} entry passes the write-time rules
+     * for its key and its value.
+     */
+    public static boolean isAcceptableExtraAuthParam(String key, String value) {
+        try {
+            requireExtraAuthParam(key, value);
+            return true;
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+    }
+
+    /**
+     * The value half of the same check. The docs promised the map "is checked too",
+     * and the keys were — but a key called {@code prompt} carrying a pasted API key
+     * sailed through, straight into a plaintext field of the document. So: no
+     * reference (a {@code ${vault:…}} here would be RESOLVED into the authorization
+     * URL, which the browser history, the {@code Referer} and every proxy log see),
+     * a bounded length, and no credential-shaped prefix.
+     */
+    private static void requireProtocolParameterValue(String key, String value) {
+        if (value == null) {
+            throw new IllegalArgumentException("oauth.extraAuthParams['" + key + "'] has no value. A parameter with nothing to send does "
+                    + "not belong in the authorization request; remove it.");
+        }
+        if (value.contains("${")) {
+            throw new IllegalArgumentException("oauth.extraAuthParams['" + key + "'] must not carry a ${…} reference: the authorization URL "
+                    + "is opened in the user's browser, so a resolved value would land in browser history, the Referer and every proxy log "
+                    + "in front of the provider. Only literal, non-secret protocol values belong here.");
+        }
+        if (value.length() > MAX_EXTRA_AUTH_PARAM_VALUE_CHARS) {
+            throw new IllegalArgumentException("oauth.extraAuthParams['" + key + "'] is " + value.length() + " characters long; a protocol "
+                    + "parameter is at most " + MAX_EXTRA_AUTH_PARAM_VALUE_CHARS + ". Anything longer is being smuggled through the "
+                    + "authorization URL.");
+        }
+        if (CREDENTIAL_SHAPED_VALUE.matcher(value).find()) {
+            throw new IllegalArgumentException("oauth.extraAuthParams['" + key + "'] looks like a credential ('" + quoteLiteral(value)
+                    + "'). The map may carry only non-secret protocol parameters (prompt, audience, access_type, …); store a credential "
+                    + "with POST /secretstore/secrets and reference it from the field that expects it.");
         }
     }
 
@@ -316,7 +561,7 @@ public class ConnectionConfiguration {
         if (value == null || value.isBlank()) {
             throw new IllegalArgumentException(field + " is required, as a ${vault:…} reference.");
         }
-        if (!REFERENCE_ONLY.matcher(value.trim()).matches()) {
+        if (!isReferenceOnly(value)) {
             throw new IllegalArgumentException(field + " must be a ${vault:…} or ${vars:…} reference, not a literal. Store the value with "
                     + "POST /secretstore/secrets and reference it here — a literal here bypasses the vault, export scrubbing and deploy-time "
                     + "grant enforcement at once.");
@@ -325,24 +570,78 @@ public class ConnectionConfiguration {
 
     /**
      * A header template may mix literal text with references — {@code "Bearer
-     * ${vault:k}"} — as long as every interpolated segment is one. The literal text
-     * between them is checked too: a template with no interpolation at all is a
-     * plaintext credential wearing a template's clothes.
+     * ${vault:k}"} — under three rules, all of them about the LITERAL text, because
+     * the references were always checked and the literal text was not:
+     * <ol>
+     * <li>every {@code ${} is a well-formed {@code ${vault:…}} or {@code ${vars:…}}
+     * reference. An unknown prefix, an empty key, an unclosed brace or a key over
+     * 256 characters used to fall outside the interpolation pattern and count as
+     * literal text — which the old check never looked at;</li>
+     * <li>at least one reference is present, or the whole value is a plaintext
+     * credential wearing a template's clothes;</li>
+     * <li>each literal segment between or around the references is at most {@value
+     * #MAX_TEMPLATE_LITERAL_CHARS} characters and contains no run of twelve or more
+     * key characters ({@code [A-Za-z0-9_\-+/=.]}). {@code "Bearer "}, {@code "Basic
+     * "}, {@code "token="} and {@code "SSWS "} pass; {@code
+     * "sk-live-abcdef${vault:unused}"} — a literal key with a reference stapled on
+     * to satisfy the pattern — does not.</li>
+     * </ol>
+     * The offending literal is quoted back redacted to its first {@value
+     * #QUOTED_LITERAL_CHARS} characters: it is the one string in the document that
+     * may be a credential.
      */
     private static void requireTemplateIsReferenceOnly(String template) {
-        Matcher matcher = INTERPOLATION.matcher(template);
+        Matcher matcher = REFERENCE_ONLY.matcher(template);
+        List<String> literals = new ArrayList<>();
+        int cursor = 0;
         boolean sawReference = false;
         while (matcher.find()) {
-            String segment = matcher.group();
-            if (!REFERENCE_ONLY.matcher(segment).matches()) {
-                throw new IllegalArgumentException("staticAuth.valueTemplate may only interpolate ${vault:…} or ${vars:…}; found: " + segment);
-            }
+            literals.add(template.substring(cursor, matcher.start()));
+            cursor = matcher.end();
             sawReference = true;
+        }
+        literals.add(template.substring(cursor));
+        for (String literal : literals) {
+            int stray = literal.indexOf("${");
+            if (stray >= 0) {
+                throw new IllegalArgumentException("staticAuth.valueTemplate may only interpolate ${vault:…} or ${vars:…}; the interpolation "
+                        + "at '" + quoteLiteral(literal.substring(stray)) + "' is not a well-formed reference (unknown prefix, empty key, "
+                        + "unclosed brace, or a key over 256 characters).");
+            }
         }
         if (!sawReference) {
             throw new IllegalArgumentException("staticAuth.valueTemplate contains no ${vault:…} reference, so it is a plaintext credential. "
                     + "Store it with POST /secretstore/secrets and reference it here.");
         }
+        for (String literal : literals) {
+            if (literal.length() > MAX_TEMPLATE_LITERAL_CHARS) {
+                throw new IllegalArgumentException("staticAuth.valueTemplate carries " + literal.length() + " characters of literal text ('"
+                        + quoteLiteral(literal) + "') around its references; a literal segment may hold at most " + MAX_TEMPLATE_LITERAL_CHARS
+                        + " characters — a scheme such as 'Bearer ' — so a plaintext credential cannot ride alongside a reference. Store the "
+                        + "value with POST /secretstore/secrets and reference it here.");
+            }
+            Matcher run = CREDENTIAL_SHAPED_RUN.matcher(literal);
+            if (run.find()) {
+                throw new IllegalArgumentException("staticAuth.valueTemplate carries a credential-shaped literal ('" + quoteLiteral(run.group())
+                        + "') around its references — a run of twelve or more key characters. Literal text may only carry a scheme such as "
+                        + "'Bearer '; store the value with POST /secretstore/secrets and reference it here.");
+            }
+        }
+    }
+
+    /**
+     * A name is not secret, but an unbounded one has no place in an error message.
+     */
+    private static String quoteName(String candidate) {
+        return candidate.length() <= QUOTED_NAME_CHARS ? candidate : candidate.substring(0, QUOTED_NAME_CHARS) + "…";
+    }
+
+    /**
+     * The first few characters of a literal that may be a credential, and no more.
+     */
+    private static String quoteLiteral(String literal) {
+        String trimmed = literal.strip();
+        return trimmed.length() <= QUOTED_LITERAL_CHARS ? trimmed : trimmed.substring(0, QUOTED_LITERAL_CHARS) + "…";
     }
 
     /**
@@ -363,8 +662,9 @@ public class ConnectionConfiguration {
             return;
         }
         URI parsed = parse(url, field);
-        if (!"https".equals(parsed.getScheme())) {
-            throw new IllegalArgumentException(field + " must use https — the client secret is sent to it: " + url);
+        if (!isSecureCredentialEndpoint(parsed)) {
+            throw new IllegalArgumentException(field + " must use https — the client secret is sent to it. Plain http is accepted only for "
+                    + "a loopback host (localhost, 127.0.0.1, [::1]), where nothing crosses the network: " + url);
         }
         if (parsed.getUserInfo() != null) {
             throw new IllegalArgumentException(field + " must not carry userinfo: " + url);

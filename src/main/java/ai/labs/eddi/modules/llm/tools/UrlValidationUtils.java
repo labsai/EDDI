@@ -75,6 +75,45 @@ public final class UrlValidationUtils {
      *             if the URL is invalid or targets a private address
      */
     public static InetAddress[] validateUrl(String url, HostResolver resolver) {
+        URI uri = validateUrlSyntax(url);
+        String host = uri.getHost();
+
+        // 3. Block known internal hostnames
+        String lowerHost = host.toLowerCase();
+        if (isBlockedHostname(lowerHost)) {
+            throw new IllegalArgumentException("Access to internal/local addresses is not allowed: " + host);
+        }
+
+        // 4. Resolve hostname and check if it's a private IP
+        try {
+            InetAddress[] addresses = resolver.resolveAll(host);
+            for (InetAddress addr : addresses) {
+                if (isPrivateAddress(addr)) {
+                    throw new IllegalArgumentException("URL resolves to a private/internal address which is not allowed: " + host);
+                }
+            }
+            return addresses;
+        } catch (UnknownHostException e) {
+            throw new IllegalArgumentException("Cannot resolve hostname: " + host);
+        }
+    }
+
+    /**
+     * The syntactic half of {@link #validateUrl(String)} on its own: non-blank,
+     * parseable, an {@code http} or {@code https} scheme, and a host — and no
+     * address check whatsoever.
+     * <p>
+     * For a target that a rule <em>stricter</em> than the SSRF check has already
+     * approved: an operator-maintained allowlist of exact origins may legitimately
+     * name a host on a private network (an on-premises identity provider), which
+     * the address check would refuse. Nothing user- or config-controlled may use
+     * this without such a rule in front of it.
+     *
+     * @return the parsed URI
+     * @throws IllegalArgumentException
+     *             if the URL is blank, malformed, not http(s), or has no host
+     */
+    public static URI validateUrlSyntax(String url) {
         if (url == null || url.isBlank()) {
             throw new IllegalArgumentException("URL must not be null or empty");
         }
@@ -97,25 +136,7 @@ public final class UrlValidationUtils {
         if (host == null || host.isBlank()) {
             throw new IllegalArgumentException("URL must have a valid hostname");
         }
-
-        // 3. Block known internal hostnames
-        String lowerHost = host.toLowerCase();
-        if (isBlockedHostname(lowerHost)) {
-            throw new IllegalArgumentException("Access to internal/local addresses is not allowed: " + host);
-        }
-
-        // 4. Resolve hostname and check if it's a private IP
-        try {
-            InetAddress[] addresses = resolver.resolveAll(host);
-            for (InetAddress addr : addresses) {
-                if (isPrivateAddress(addr)) {
-                    throw new IllegalArgumentException("URL resolves to a private/internal address which is not allowed: " + host);
-                }
-            }
-            return addresses;
-        } catch (UnknownHostException e) {
-            throw new IllegalArgumentException("Cannot resolve hostname: " + host);
-        }
+        return uri;
     }
 
     /**

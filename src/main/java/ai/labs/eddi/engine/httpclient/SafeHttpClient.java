@@ -124,6 +124,54 @@ public class SafeHttpClient {
     }
 
     /**
+     * Sends an HTTP request with SSRF validation on the initial URL and <em>without
+     * following any redirect</em>: a 3xx is returned to the caller as the response,
+     * {@code Location} and all, and no second request is ever made.
+     * <p>
+     * For requests that carry a credential the caller has vouched for one specific
+     * origin — an OAuth token request, whose client secret sits in the
+     * {@code Authorization} header or the form body and whose refresh token or
+     * authorization code is in the body. {@link #sendValidated} would honour a
+     * 307/308 with the method and body preserved and re-send all of that to
+     * whatever host the redirect named, after checking only that the host is not
+     * private; the caller's own allowlist is never consulted for the second hop.
+     * Here the caller decides what a 3xx means, and for a token endpoint the answer
+     * is "refuse".
+     *
+     * @throws IllegalArgumentException
+     *             if the URL is unsafe
+     */
+    public <T> HttpResponse<T> sendValidatedNoRedirect(HttpRequest request, HttpResponse.BodyHandler<T> bodyHandler)
+            throws IOException, InterruptedException {
+        validateInitialTarget(request.uri().toString());
+        return sendNoRedirect(request, bodyHandler);
+    }
+
+    /**
+     * Sends an HTTP request exactly once, following no redirect, and without
+     * validating the URL.
+     * <p>
+     * For callers that have already decided the target is acceptable by a rule
+     * stricter than the SSRF check — an operator-maintained allowlist, for example,
+     * which is allowed to name a host on a private network that the SSRF rules
+     * would refuse. Callers that fetch anything user- or config-controlled without
+     * such a rule must use {@link #sendValidatedNoRedirect} instead.
+     */
+    public <T> HttpResponse<T> sendNoRedirect(HttpRequest request, HttpResponse.BodyHandler<T> bodyHandler)
+            throws IOException, InterruptedException {
+        return httpClient.send(withDefaultTimeout(request), bodyHandler);
+    }
+
+    /**
+     * Validates the initial request URL against SSRF rules. Package-private for the
+     * same reason as {@link #validateRedirectTarget(String)}: an embedded test
+     * server lives on loopback.
+     */
+    void validateInitialTarget(String url) {
+        UrlValidationUtils.validateUrl(url);
+    }
+
+    /**
      * Returns {@code request} unchanged when it already carries a timeout, else a
      * copy bounded by {@link #DEFAULT_REQUEST_TIMEOUT}. {@link HttpRequest} is
      * immutable, so the bound can only be applied by rebuilding.

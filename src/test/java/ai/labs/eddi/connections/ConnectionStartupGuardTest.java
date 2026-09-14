@@ -33,6 +33,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.logging.Handler;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
@@ -56,9 +57,10 @@ import static org.mockito.Mockito.when;
 
 /**
  * The guard is split between refusals and reports, and the split is the whole
- * design: a bad {@code public-base-url} can only ever produce a broken OAuth
- * flow, so it fails the boot, while a questionable stored connection already
- * fails closed per request and would take a whole cluster down if it failed the
+ * design: a malformed <em>pinned</em> {@code public-base-url} is operator
+ * configuration that only a restart can fix, so it fails the boot, while a
+ * missing or stored one, and a questionable stored connection, already fail
+ * closed per request and would take a whole cluster down if they failed the
  * boot too. So each test asserts which of the two happened, and which setting
  * was named — "it threw" or "it logged something" would still pass while the
  * operator is left with nothing to act on.
@@ -78,6 +80,8 @@ class ConnectionStartupGuardTest {
     private static final String UNVERIFIED_IDENTITY_REPORT = "authorization.enabled=false";
     private static final String INACTIVE_VAULT_REPORT = "EDDI_VAULT_MASTER_KEY";
     private static final String ANY_PER_USER_REPORT = "PER_USER connection is stored";
+    private static final String CALLER_SUPPLIED_REPORT = "CALLER_SUPPLIED connection is stored";
+    private static final String LEGACY_BINDING_REPORT = "Re-save it as PER_USER";
 
     private IConnectionStore connectionStore;
     private IDocumentDescriptorStore descriptorStore;
@@ -106,7 +110,9 @@ class ConnectionStartupGuardTest {
                 // The printf-style calls keep their arguments out of the message, so both
                 // halves are kept — otherwise an assertion on a logged value silently
                 // matches nothing.
-                logRecords.add(record.getMessage() + " " + Arrays.toString(record.getParameters()));
+                // Prefixed with the level, so a test can tell a report from a refusal
+                // notice.
+                logRecords.add(levelTag(record.getLevel()) + " " + record.getMessage() + " " + Arrays.toString(record.getParameters()));
             }
 
             @Override
@@ -160,13 +166,18 @@ class ConnectionStartupGuardTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"", "   "})
-    @DisplayName("enabling connections without a public base URL refuses the boot and names the property")
-    void blankPublicBaseUrlRefusesStartup(String publicBaseUrl) {
+    @DisplayName("enabling connections without a public base URL warns and names both ways to set it, instead of refusing the boot")
+    void blankPublicBaseUrlOnlyWarns(String publicBaseUrl) {
+        // The base URL is a runtime setting now, and only per-user OAuth linking needs
+        // it — which answers 400 naming the setting. Refusing the boot over it turned
+        // one missing value into an outage for every other connection type.
         var guard = guardWithBaseUrl(publicBaseUrl);
 
-        var failure = assertThrows(IllegalStateException.class, () -> start(guard));
+        assertDoesNotThrow(() -> start(guard));
 
-        assertTrue(failure.getMessage().contains("eddi.connections.public-base-url"), failure.getMessage());
+        assertTrue(logged("publicBaseUrl"), logRecords.toString());
+        assertTrue(logged(ConnectionsConfig.SETTINGS_PATH), "the administrator's handle must be named; saw: " + logRecords);
+        assertTrue(logged("eddi.connections.public-base-url"), "the operator's handle must be named; saw: " + logRecords);
     }
 
     @Test
@@ -188,6 +199,41 @@ class ConnectionStartupGuardTest {
         LaunchMode.set(launchMode);
 
         assertDoesNotThrow(() -> start(guardWithBaseUrl("http://localhost:7070")));
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = LaunchMode.class, names = {"DEVELOPMENT", "TEST"})
+    @DisplayName("plain http on 127.0.0.1 and an upper-cased https scheme are accepted while developing")
+    void devAndTestModesAcceptLoopbackAndCaseInsensitiveHttps(LaunchMode launchMode) {
+        LaunchMode.set(launchMode);
+
+        assertDoesNotThrow(() -> start(guardWithBaseUrl("http://127.0.0.1:7070")));
+        assertDoesNotThrow(() -> start(guardWithBaseUrl("HTTPS://eddi.example.com")));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"http://eddi.example.com", "http://localhost:7070/eddi", "https://eddi.example.com?tenant=acme",
+            "https://ops@eddi.example.com", "http://localhost#x"})
+    @DisplayName("dev and test still require a bare origin, and plain http only on loopback")
+    void devModeRefusesWhatAProviderWouldNotMatch(String publicBaseUrl) {
+        // Any parseable URL used to pass here, so a path or a remote http host that
+        // fails the provider's exact redirect_uri match in production sailed through
+        // every test and was discovered as a user-facing OAuth error.
+        LaunchMode.set(LaunchMode.DEVELOPMENT);
+        var guard = guardWithBaseUrl(publicBaseUrl);
+
+        var failure = assertThrows(IllegalStateException.class, () -> start(guard));
+
+        assertTrue(failure.getMessage().contains("bare https origin"), failure.getMessage());
+        assertTrue(failure.getMessage().contains("http://localhost"), "dev mode must say what else it accepts: " + failure.getMessage());
+        assertTrue(failure.getMessage().contains(publicBaseUrl), "the operator has to be told which value to fix");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"HTTPS://eddi.example.com", "Https://EDDI.example.com:8443"})
+    @DisplayName("production compares the scheme case-insensitively, as the model does everywhere else")
+    void productionAcceptsAnUpperCasedHttpsScheme(String publicBaseUrl) {
+        assertDoesNotThrow(() -> start(guardWithBaseUrl(publicBaseUrl)));
     }
 
     @Test
@@ -229,7 +275,10 @@ class ConnectionStartupGuardTest {
 
         assertDoesNotThrow(() -> start(guard));
 
-        assertTrue(logged("eddi.connections.credential-endpoint-allowlist is empty"), logRecords.toString());
+        assertTrue(logged("credential endpoint allowlist"), logRecords.toString());
+        assertTrue(logged("is empty"), logRecords.toString());
+        assertTrue(logged(ConnectionsConfig.SETTINGS_PATH), "the runtime handle must be named; saw: " + logRecords);
+        assertTrue(logged("eddi.connections.credential-endpoint-allowlist"), "the pinning property must be named; saw: " + logRecords);
     }
 
     @Test
@@ -296,6 +345,70 @@ class ConnectionStartupGuardTest {
         assertDoesNotThrow(() -> start(enabledGuard(openAiCompatOff(), false)));
 
         assertTrue(logged(UNVERIFIED_IDENTITY_REPORT), logRecords.toString());
+    }
+
+    @Test
+    @DisplayName("the stored-connection report runs on demand, for a feature switched on at runtime after a boot that skipped it")
+    void storedConnectionReportRunsOnDemand() throws Exception {
+        storedConnections(perUserConnection());
+        var guard = guard(new ConnectionsConfig(false, ""), approvedEndpoints(), openAiCompatOff(), false);
+
+        start(guard);
+        assertFalse(logged(UNVERIFIED_IDENTITY_REPORT), "a boot with the feature off reports nothing; saw: " + logRecords);
+
+        guard.reportStoredConnections();
+
+        assertTrue(logged(UNVERIFIED_IDENTITY_REPORT), "enabling at runtime must not leave the report unmade; saw: " + logRecords);
+    }
+
+    @Test
+    @DisplayName("a stored CALLER_SUPPLIED connection is reported when nothing authenticates the caller who would supply it")
+    void callerSuppliedWithoutAuthorizationIsReported() throws Exception {
+        // The credential header is dropped for an anonymous identity, and with
+        // authorization off every identity is anonymous — so the connection fails
+        // every call as NO_CALLER_CREDENTIAL while the operator can see the header
+        // going out. Nothing connected the two before this report.
+        storedConnections(callerSuppliedConnection());
+
+        assertDoesNotThrow(() -> start(enabledGuard(openAiCompatOff(), false)));
+
+        assertTrue(logged(CALLER_SUPPLIED_REPORT), logRecords.toString());
+        assertTrue(logged("NO_CALLER_CREDENTIAL"), "the report must name the refusal the operator will see; saw: " + logRecords);
+    }
+
+    @Test
+    @DisplayName("the CALLER_SUPPLIED report is withheld once callers are authenticated")
+    void callerSuppliedWithAuthorizationIsNotReported() throws Exception {
+        storedConnections(callerSuppliedConnection());
+
+        assertDoesNotThrow(() -> start(enabledGuard(openAiCompatOff(), true)));
+
+        assertFalse(logged(CALLER_SUPPLIED_REPORT), logRecords.toString());
+    }
+
+    @Test
+    @DisplayName("a first-release authorization-code connection still bound to SERVICE is reported, with the fix")
+    void legacyServiceBoundAuthorizationCodeIsReported() throws Exception {
+        // Validation runs on write only, so this document — the pre-fix DEFAULT for an
+        // authorization-code block — still loads and fails every call as "not
+        // connected" for a user who has just connected.
+        storedConnections(connection("legacy-drive", AuthType.OAUTH2_AUTHORIZATION_CODE, Binding.SERVICE));
+
+        assertDoesNotThrow(() -> start(enabledGuard()));
+
+        assertTrue(logged(LEGACY_BINDING_REPORT), logRecords.toString());
+        assertTrue(logged("legacy-drive"), "the report must name the connection to re-save; saw: " + logRecords);
+        assertTrue(logged("not connected"), "and the symptom the operator is chasing; saw: " + logRecords);
+    }
+
+    @Test
+    @DisplayName("a correctly bound authorization-code connection is not reported as legacy")
+    void perUserAuthorizationCodeIsNotReportedAsLegacy() throws Exception {
+        storedConnections(perUserConnection());
+
+        assertDoesNotThrow(() -> start(enabledGuard()));
+
+        assertFalse(logged(LEGACY_BINDING_REPORT), logRecords.toString());
     }
 
     @Test
@@ -380,6 +493,78 @@ class ConnectionStartupGuardTest {
         assertFalse(logged(ANY_PER_USER_REPORT), logRecords.toString());
         assertFalse(logged(INACTIVE_VAULT_REPORT), logRecords.toString());
         assertTrue(logged("Credential endpoints allowed"), "the one line a healthy boot does print; saw: " + logRecords);
+    }
+
+    // --- Plaintext origins: accepted, but said out loud --------------------
+
+    @Test
+    @DisplayName("a stored connection allowing plaintext http to a remote host is reported at boot, naming both")
+    void plaintextRemoteOriginIsReported() throws Exception {
+        var internal = staticConnection();
+        internal.setBaseUrlAllowlist(List.of("http://api.internal.example:8080"));
+        storedConnections(internal);
+
+        assertDoesNotThrow(() -> start(enabledGuard()));
+
+        assertTrue(logged("plaintext http"), logRecords.toString());
+        assertTrue(logged("jira"), "the report must name the connection; saw: " + logRecords);
+        assertTrue(logged("http://api.internal.example:8080"), "and the origin; saw: " + logRecords);
+    }
+
+    @Test
+    @DisplayName("with plaintext remote origins not allowed (the default) the report is an ERROR naming the property")
+    void plaintextRemoteOriginIsAnErrorByDefault() throws Exception {
+        var internal = staticConnection();
+        internal.setBaseUrlAllowlist(List.of("http://api.internal.example:8080"));
+        storedConnections(internal);
+
+        assertDoesNotThrow(() -> start(enabledGuard()));
+
+        assertTrue(loggedAt("[ERROR]", "plaintext http"), "every call to that origin is refused, so this is not a mere warning; saw: " + logRecords);
+        assertTrue(logged("eddi.connections.allow-plaintext-remote-origins"), "the report must name the setting; saw: " + logRecords);
+        assertFalse(loggedAt("[WARN]", "plaintext http"), logRecords.toString());
+    }
+
+    @Test
+    @DisplayName("with plaintext remote origins allowed the report stays a WARN")
+    void plaintextRemoteOriginIsAWarningWhenAllowed() throws Exception {
+        var internal = staticConnection();
+        internal.setBaseUrlAllowlist(List.of("http://api.internal.example:8080"));
+        storedConnections(internal);
+
+        assertDoesNotThrow(() -> start(guard(new ConnectionsConfig(true, PRODUCTION_BASE_URL, true), approvedEndpoints(), openAiCompatOff(), true)));
+
+        assertTrue(loggedAt("[WARN]", "plaintext http"), logRecords.toString());
+        assertFalse(loggedAt("[ERROR]", "plaintext http"), "an accepted risk is not an error; saw: " + logRecords);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"http://localhost:7070", "http://127.0.0.1", "https://api.example.com"})
+    @DisplayName("loopback and https origins are not reported")
+    void loopbackAndHttpsOriginsAreNotReported(String origin) throws Exception {
+        var connection = staticConnection();
+        connection.setBaseUrlAllowlist(List.of(origin));
+        storedConnections(connection);
+
+        assertDoesNotThrow(() -> start(enabledGuard()));
+
+        assertFalse(logged("plaintext http"), logRecords.toString());
+    }
+
+    @Test
+    @DisplayName("an allowlist origin that cannot be parsed is reported and skipped, and the reports after it still run")
+    void malformedOriginDoesNotAbortTheReport() throws Exception {
+        // A stored document never re-ran validation, so "http://[" can be in the
+        // store — and URI parsing throws on it.
+        var broken = staticConnection();
+        broken.setBaseUrlAllowlist(List.of("http://[", "http://api.internal.example:8080"));
+        storedConnections(broken, perUserConnection());
+
+        assertDoesNotThrow(() -> start(enabledGuard(openAiCompatOff(), false)));
+
+        assertTrue(logged("could not be classified"), "the unparseable entry must be named, not silently dropped; saw: " + logRecords);
+        assertTrue(logged("http://api.internal.example:8080"), "the next entry of the same connection is still inspected; saw: " + logRecords);
+        assertTrue(logged(UNVERIFIED_IDENTITY_REPORT), "and so is every connection after it; saw: " + logRecords);
     }
 
     // --- Enumerating the store ----------------------------------------------
@@ -534,11 +719,11 @@ class ConnectionStartupGuardTest {
     }
 
     private static CredentialEndpointAllowlist approvedEndpoints() {
-        return new CredentialEndpointAllowlist(Optional.of(APPROVED_ENDPOINT));
+        return new CredentialEndpointAllowlist(Set.of(APPROVED_ENDPOINT));
     }
 
     private static CredentialEndpointAllowlist noApprovedEndpoints() {
-        return new CredentialEndpointAllowlist(Optional.empty());
+        return new CredentialEndpointAllowlist(Set.of());
     }
 
     private static OpenAiCompatConfig openAiCompat(boolean enabled, String httpPolicy, boolean trustUserHeaders) {
@@ -569,6 +754,10 @@ class ConnectionStartupGuardTest {
 
     private static ConnectionConfiguration staticConnection() {
         return connection("jira", AuthType.STATIC, Binding.SERVICE);
+    }
+
+    private static ConnectionConfiguration callerSuppliedConnection() {
+        return connection("gnowbe", AuthType.STATIC, Binding.CALLER_SUPPLIED);
     }
 
     private static DocumentDescriptor descriptorOf(String resourceUri) {
@@ -602,5 +791,22 @@ class ConnectionStartupGuardTest {
 
     private boolean logged(String fragment) {
         return logRecords.stream().anyMatch(record -> record.contains(fragment));
+    }
+
+    private boolean loggedAt(String levelTag, String fragment) {
+        return logRecords.stream().anyMatch(record -> record.startsWith(levelTag) && record.contains(fragment));
+    }
+
+    /**
+     * By numeric level, so it reads the same under JUL and the JBoss log manager.
+     */
+    private static String levelTag(Level level) {
+        if (level == null) {
+            return "[INFO]";
+        }
+        if (level.intValue() >= Level.SEVERE.intValue()) {
+            return "[ERROR]";
+        }
+        return level.intValue() >= Level.WARNING.intValue() ? "[WARN]" : "[INFO]";
     }
 }

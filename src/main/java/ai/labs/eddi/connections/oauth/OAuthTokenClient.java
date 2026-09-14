@@ -10,6 +10,7 @@ import ai.labs.eddi.connections.ConnectionException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import ai.labs.eddi.engine.httpclient.SafeHttpClient;
+import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -27,6 +28,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 /**
  * Speaks to an OAuth 2.0 token endpoint. Nothing else.
  * <p>
@@ -34,12 +37,19 @@ import java.util.Map;
  * and are tested differently: this one is about RFC 6749 wire format and
  * provider quirks, the service is about concurrency and storage.
  *
- * <h3>Every request goes through {@link SafeHttpClient}</h3> This is the one
- * new outbound path the connectors work introduces, so it starts compliant
- * rather than joining the four services that already bypass it. That buys
- * {@code Redirect.NEVER} — which matters more here than almost anywhere else,
- * since a token request carries the client secret in an {@code Authorization}
- * header and a followed redirect would hand it to whatever host the 302 named.
+ * <h3>Every request goes through {@link SafeHttpClient}, and follows no
+ * redirect</h3> This is the one new outbound path the connectors work
+ * introduces, so it starts compliant rather than joining the four services that
+ * already bypass it. It uses the client's <em>no-redirect</em> send
+ * deliberately: the ordinary {@code sendValidated} re-implements redirect
+ * following on top of {@code Redirect.NEVER}, preserving method and body on a
+ * 307/308, and validates the target only against the SSRF rules — never against
+ * the operator's credential-endpoint allowlist. A token request carries the
+ * client secret in an {@code Authorization} header or the form body, and always
+ * a refresh token or a code plus verifier in the body, so a followed redirect
+ * would hand all of that to whatever host an allowlisted endpoint pointed at.
+ * Any 3xx from a token endpoint is therefore answered as a transient failure
+ * and never followed.
  */
 @ApplicationScoped
 public class OAuthTokenClient {
@@ -121,8 +131,36 @@ public class OAuthTokenClient {
         // by import or by a direct write, and this is the last point before the
         // client secret leaves the process.
         endpointAllowlist.require(oauth.getTokenUrl(), "oauth.tokenUrl");
+        // The allowlist is the access rule here, and it is stricter than the SSRF
+        // check: an exact origin an operator wrote down, not "anything public". That
+        // is what lets an on-premises identity provider on a private network be a
+        // token endpoint at all — the SSRF address block would refuse it, and the
+        // operator who listed it is precisely the person entitled to. Scheme and
+        // host are still validated; only the address class is not. Validated BEFORE
+        // the request is built, and the URI it parsed is the one fetched: a token
+        // URL the allowlist accepts once trimmed but that will not parse (trailing
+        // whitespace, say) used to surface as a raw IllegalArgumentException from
+        // URI.create — not a ConnectionException, so the MCP failure classifier fed
+        // it to the circuit breaker as a server outage.
+        URI tokenUri;
+        try {
+            tokenUri = UrlValidationUtils.validateUrlSyntax(oauth.getTokenUrl());
+        } catch (IllegalArgumentException e) {
+            throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION, "oauth.tokenUrl of connection '"
+                    + connection.getName() + "' is not a usable URL: " + e.getMessage(), e);
+        }
+        // Checked here, before the request is built, and not left to the allowlist:
+        // the allowlist accepts an http origin, and a document that never ran
+        // write-time validation can carry one. The client secret travels in this
+        // request, so an http token URL to anything but loopback sends it in the clear.
+        if (!ConnectionConfiguration.isSecureCredentialEndpoint(tokenUri)) {
+            throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION, "oauth.tokenUrl of connection '"
+                    + connection.getName() + "' must use https: the client secret is sent to it, and plain http is accepted only for a "
+                    + "loopback host (localhost, 127.0.0.1, [::1]). Nothing was sent. Got: " + tokenUri.getScheme() + "://"
+                    + tokenUri.getHost());
+        }
 
-        HttpRequest.Builder request = HttpRequest.newBuilder().uri(URI.create(oauth.getTokenUrl()))
+        HttpRequest.Builder request = HttpRequest.newBuilder().uri(tokenUri)
                 .timeout(effectiveTimeout(connection))
                 .header("Content-Type", "application/x-www-form-urlencoded").header("Accept", "application/json");
 
@@ -139,7 +177,7 @@ public class OAuthTokenClient {
 
         HttpResponse<String> response;
         try {
-            response = httpClient.sendValidated(request.POST(HttpRequest.BodyPublishers.ofString(encodeForm(body))).build(),
+            response = httpClient.sendNoRedirect(request.POST(HttpRequest.BodyPublishers.ofString(encodeForm(body))).build(),
                     HttpResponse.BodyHandlers.ofString());
         } catch (IOException e) {
             // Transport failure. NOT terminal: the grant stays usable and the next
@@ -157,6 +195,20 @@ public class OAuthTokenClient {
 
         if (response.statusCode() >= 200 && response.statusCode() < 300) {
             return parse(connection, response.body());
+        }
+        if (response.statusCode() >= 300 && response.statusCode() < 400) {
+            // Never followed. The request that produced this carried the client
+            // secret and a refresh token or authorization code, and the only thing a
+            // redirect can mean is "send them somewhere else" — to a host the operator
+            // never approved for them. The grant is untouched: a provider migrating
+            // its token endpoint is a configuration change, not a dead grant.
+            LOGGER.warnf("Token endpoint for connection '%s' answered HTTP %d with a redirect, which is never followed",
+                    sanitize(connection.getName()), response.statusCode());
+            throw new ConnectionException(ConnectionException.Reason.TOKEN_ENDPOINT_UNAVAILABLE, "Token endpoint for connection '"
+                    + connection.getName() + "' answered HTTP " + response.statusCode()
+                    + ". A token endpoint must not redirect: the request carries the client secret and the grant's refresh token, and "
+                    + "following it would send them to a host the credential-endpoint allowlist never approved. Point oauth.tokenUrl at the "
+                    + "endpoint's final address. The grant is unchanged.");
         }
         throw errorFor(connection, response);
     }
@@ -179,7 +231,8 @@ public class OAuthTokenClient {
             // A non-JSON error body is itself only worth its status code.
         }
         boolean terminal = TERMINAL_ERRORS.contains(errorCode);
-        LOGGER.warnf("Token endpoint for connection '%s' returned HTTP %d (%s)", connection.getName(), response.statusCode(), errorCode);
+        LOGGER.warnf("Token endpoint for connection '%s' returned HTTP %d (%s)", sanitize(connection.getName()), response.statusCode(),
+                sanitize(errorCode));
         if (terminal) {
             return new ConnectionException(ConnectionException.Reason.GRANT_UNUSABLE, "The provider rejected the grant for connection '"
                     + connection.getName() + "' (" + errorCode + "). The user must reconnect.");
@@ -189,13 +242,25 @@ public class OAuthTokenClient {
                 + connection.getName() + "' returned HTTP " + response.statusCode() + " (" + errorCode + "). The grant is unchanged.");
     }
 
+    /**
+     * Reads a 2xx body as an RFC 6749 §5.1 token response.
+     * <p>
+     * A 2xx that is not a token response — an HTML maintenance page behind a
+     * misbehaving load balancer, an empty body, JSON with no {@code access_token} —
+     * is the endpoint being unavailable, not the grant being dead. Only a provider
+     * error body naming {@code invalid_grant}, {@code invalid_client} or
+     * {@code unauthorized_client} is terminal (see {@link #errorFor}); everything
+     * else leaves the grant untouched for the next request to retry. Reporting it
+     * as terminal wrote {@code REFRESH_FAILED} for every user of the connection
+     * during a provider's bad minute.
+     */
     private static TokenResponse parse(ConnectionConfiguration connection, String body) {
         try {
             JsonNode json = MAPPER.readTree(body);
             String accessToken = json.path("access_token").asText(null);
             if (accessToken == null || accessToken.isBlank()) {
-                throw new ConnectionException(ConnectionException.Reason.GRANT_UNUSABLE,
-                        "Token endpoint for connection '" + connection.getName() + "' returned 200 with no access_token.");
+                throw new ConnectionException(ConnectionException.Reason.TOKEN_ENDPOINT_UNAVAILABLE, "Token endpoint for connection '"
+                        + connection.getName() + "' returned 200 with no access_token. The grant is unchanged; the next request will retry.");
             }
             String refreshToken = json.path("refresh_token").asText(null);
             Duration expiresIn = json.hasNonNull("expires_in")
@@ -218,8 +283,9 @@ public class OAuthTokenClient {
         } catch (ConnectionException e) {
             throw e;
         } catch (Exception e) {
-            throw new ConnectionException(ConnectionException.Reason.GRANT_UNUSABLE,
-                    "Token endpoint for connection '" + connection.getName() + "' returned a body that is not a token response.", e);
+            throw new ConnectionException(ConnectionException.Reason.TOKEN_ENDPOINT_UNAVAILABLE, "Token endpoint for connection '"
+                    + connection.getName() + "' returned a body that is not a token response. The grant is unchanged; the next request "
+                    + "will retry.", e);
         }
     }
 
@@ -235,7 +301,7 @@ public class OAuthTokenClient {
         Duration configured = Duration.ofMillis(connection.getTimeoutMs());
         if (configured.compareTo(MAX_TIMEOUT) > 0) {
             LOGGER.warnf("Connection '%s' sets timeoutMs=%d, above the %ds ceiling that keeps the refresh lease meaningful — clamping.",
-                    connection.getName(), connection.getTimeoutMs(), MAX_TIMEOUT.toSeconds());
+                    sanitize(connection.getName()), connection.getTimeoutMs(), MAX_TIMEOUT.toSeconds());
             return MAX_TIMEOUT;
         }
         return configured;

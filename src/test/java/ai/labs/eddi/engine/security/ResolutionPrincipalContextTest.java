@@ -220,4 +220,63 @@ class ResolutionPrincipalContextTest {
                     "the binding must still be intact on the thread that made it");
         }
     }
+
+    @Nested
+    @DisplayName("propagate carries this thread's principal to a dispatched thread")
+    class Propagate {
+
+        @Test
+        @DisplayName("a Callable dispatched with propagate() sees the dispatching thread's principal")
+        void callableCarriesThePrincipal() throws Exception {
+            context.bind(PARENT);
+            ExecutorService pool = Executors.newSingleThreadExecutor();
+            try {
+                Callable<ResolutionPrincipal> work = context::current;
+                assertSame(PARENT, pool.submit(context.propagate(work)).get(),
+                        "a cascade step or a batch call that loses the principal refuses every PER_USER connection");
+                assertNull(pool.submit((Callable<ResolutionPrincipal>) context::current).get(),
+                        "the pooled thread must be left with no principal afterwards");
+            } finally {
+                pool.shutdownNow();
+            }
+        }
+
+        @Test
+        @DisplayName("a Runnable and a Supplier dispatched with propagate() see it too")
+        void runnableAndSupplierCarryThePrincipal() throws Exception {
+            context.bind(PARENT);
+            ExecutorService pool = Executors.newSingleThreadExecutor();
+            try {
+                var seenByRunnable = new AtomicReference<ResolutionPrincipal>();
+                pool.submit(context.propagate((Runnable) () -> seenByRunnable.set(context.current()))).get();
+                assertSame(PARENT, seenByRunnable.get());
+
+                var supplier = context.propagateSupplying(context::current);
+                assertSame(PARENT, pool.submit(supplier::get).get());
+            } finally {
+                pool.shutdownNow();
+            }
+        }
+
+        @Test
+        @DisplayName("propagate() with nothing bound masks a stale principal on the destination thread")
+        void nothingBoundMasksRatherThanInherits() throws Exception {
+            context.clear();
+            Callable<ResolutionPrincipal> work = context::current;
+            Callable<ResolutionPrincipal> wrapped = context.propagate(work);
+
+            ExecutorService pool = Executors.newSingleThreadExecutor();
+            try {
+                pool.submit(() -> context.bind(CHILD)).get();
+                assertSame(CHILD, pool.submit((Callable<ResolutionPrincipal>) context::current).get(),
+                        "the worker really is carrying a stale principal");
+
+                assertNull(pool.submit(wrapped).get(),
+                        "work dispatched from a turn with no principal must not resolve the previous occupant's credentials");
+            } finally {
+                pool.submit(context::clear).get();
+                pool.shutdownNow();
+            }
+        }
+    }
 }
