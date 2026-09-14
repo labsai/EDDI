@@ -404,6 +404,43 @@ public interface IConversationService {
         }
     }
 
+    /**
+     * Throws {@link InputTooLargeException} when {@code inputData}'s text exceeds
+     * {@code eddi.conversations.max-input-chars}. The conversationId entry points
+     * apply it themselves; callers that drive the agent-id overloads on behalf of
+     * an external party (A2A) call it before they do.
+     */
+    void requireInputWithinLimit(InputData inputData);
+
+    /**
+     * A turn's input is longer than {@code eddi.conversations.max-input-chars}.
+     * <p>
+     * Unchecked, like {@link ConversationNotFoundException}, so it travels through
+     * every caller of {@code say} without widening their signatures; the REST
+     * surfaces answer it with 413. Without a limit a multi-megabyte message was
+     * accepted and forwarded to the model — which refused it, after the request had
+     * been paid for in time and, on providers that bill rejected prompts, in money.
+     */
+    class InputTooLargeException extends RuntimeException {
+        private final int length;
+        private final int limit;
+
+        public InputTooLargeException(int length, int limit) {
+            super("Input is " + length + " characters long; this deployment accepts at most " + limit
+                    + " per turn (eddi.conversations.max-input-chars).");
+            this.length = length;
+            this.limit = limit;
+        }
+
+        public int getLength() {
+            return length;
+        }
+
+        public int getLimit() {
+            return limit;
+        }
+    }
+
     class ConversationEndedException extends Exception {
         public ConversationEndedException(String message) {
             super(message);

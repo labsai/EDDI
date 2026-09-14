@@ -88,6 +88,48 @@ class ToolExecutionServiceTest {
             verify(costTracker).trackToolCall(ToolInvocation.of("testTool"), "conv-1");
         }
 
+        /**
+         * Every member of a group discussion runs as the same user, so a cached
+         * {@code listArtifacts()} served one member's stale "No artifacts yet" to the
+         * next — and a cached create would skip the create altogether.
+         */
+        @Test
+        @DisplayName("stateful group tools are never read from or written to the cache, even with caching on")
+        void statefulToolsBypassTheCache() {
+            when(rateLimiter.tryAcquire(anyString(), anyString(), anyInt())).thenReturn(true);
+            when(cacheService.get(anyString(), anyString(), anyString())).thenReturn("No artifacts yet. Create one with createArtifact.");
+
+            var result = service.executeToolWrapped("listArtifacts", "{}", SCOPE, "conv-1",
+                    () -> "Shared artifacts:\n- \"plan\" (MARKDOWN, DRAFT, v1)", true, true, true, 60);
+
+            assertEquals("Shared artifacts:\n- \"plan\" (MARKDOWN, DRAFT, v1)", result);
+            verify(cacheService, never()).get(nullable(String.class), anyString(), anyString());
+            verify(cacheService, never()).put(nullable(String.class), any(ToolInvocation.class), anyString(), anyString());
+        }
+
+        /**
+         * The tool has already run when its cost is tracked. A tracking failure (the
+         * Prometheus meter collision was one) used to replace the result with "Error
+         * executing tool: …" and count the call as failed, discarding real work whose
+         * side effects had happened.
+         */
+        @Test
+        @DisplayName("a cost-tracking failure returns the tool result unchanged and is not a tool failure")
+        void costTrackingFailureKeepsResult() {
+            when(rateLimiter.tryAcquire("conv-1", "testTool", 60)).thenReturn(true);
+            when(costTracker.trackToolCall(ToolInvocation.of("testTool"), "conv-1"))
+                    .thenThrow(new IllegalArgumentException("Prometheus requires that all meters with the same name have the same set of tag keys"));
+
+            var result = service.executeToolWrapped(
+                    "testTool", "args", SCOPE, "conv-1",
+                    () -> "tool result",
+                    true, false, true, 60);
+
+            assertEquals("tool result", result);
+            assertEquals(0.0, meterRegistry.counter("eddi.tool.execution.failure", "tool", "testTool").count());
+            assertEquals(1.0, meterRegistry.counter("eddi.tool.execution.success", "tool", "testTool").count());
+        }
+
         @Test
         @DisplayName("should return cached result when available")
         void cachedResult() {

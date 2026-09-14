@@ -264,7 +264,20 @@ public class CreateSubAgentTool {
                          // shared-key case this field exists for
             );
 
-            SetupResult result = agentSetupService.setupAgent(request);
+            SetupResult result;
+            try {
+                result = agentSetupService.setupAgent(request);
+            } catch (AgentSetupException e) {
+                // Inheritance was asked for but supplied no key: say why, instead of
+                // leaving the model with a bare "API key is required" it cannot act on.
+                if (config.isInheritParentModel() && inheritedApiKey == null) {
+                    String reason = parentProfile == null
+                            ? "the parent agent's LLM configuration could not be read (see the server log)"
+                            : "the parent agent has no vault-referenced key for provider '" + resolvedProvider + "'";
+                    throw new AgentSetupException(e.getMessage() + " — nothing was inherited: " + reason);
+                }
+                throw e;
+            }
             String agentId = result.agentId();
             createdAgentIds.add(agentId);
             if (Boolean.TRUE.equals(retain)) {

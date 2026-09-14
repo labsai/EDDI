@@ -162,6 +162,13 @@ public class RagConfiguration {
      *         implementable as written
      */
     public String findUnsupportedSettings() {
+        // Checked first: an unknown provider makes the knowledge base unusable, where
+        // an unknown chunkStrategy only changes how new documents are split.
+        if (embeddingProvider != null && !embeddingProvider.isBlank()
+                && !SUPPORTED_EMBEDDING_PROVIDERS.contains(embeddingProvider.trim())) {
+            return "Unsupported embeddingProvider '" + embeddingProvider + "' for knowledge base '" + name + "' (supported: "
+                    + SUPPORTED_EMBEDDING_PROVIDERS.stream().sorted().toList() + ").";
+        }
         if (chunkStrategy == null || chunkStrategy.isBlank()) {
             return null;
         }
@@ -173,6 +180,14 @@ public class RagConfiguration {
                 + "'. Only recursive splitting is implemented (supported: " + SUPPORTED_CHUNK_STRATEGIES
                 + "); documents are chunked recursively regardless.";
     }
+
+    /**
+     * The providers {@code EmbeddingModelFactory} can build — keep in step with its
+     * {@code switch}. An unknown provider used to save fine and fail only at the
+     * first ingestion, long after the author left.
+     */
+    public static final Set<String> SUPPORTED_EMBEDDING_PROVIDERS = Set.of("openai", "azure-openai", "ollama", "mistral", "bedrock",
+            "cohere", "gemini", "vertex");
 
     /**
      * Rewrites a historically documented but never implemented

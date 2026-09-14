@@ -92,6 +92,19 @@ class RestRagIngestionTest {
     }
 
     @Test
+    void getIngestionStatus_unknownIdIs404() {
+        when(ragIngestionService.getStatus("never-started")).thenReturn(RagIngestionService.STATUS_UNKNOWN);
+
+        Response response = restRagIngestion.getIngestionStatus("rag-123", "never-started");
+
+        assertEquals(404, response.getStatus());
+        @SuppressWarnings("unchecked")
+        Map<String, Object> body = (Map<String, Object>) response.getEntity();
+        assertEquals("never-started", body.get("ingestionId"));
+        assertEquals(RagIngestionService.STATUS_UNKNOWN, body.get("status"));
+    }
+
+    @Test
     void getIngestionStatus_shouldReturnStatus() {
         when(ragIngestionService.getStatus("ing-123")).thenReturn("completed");
 

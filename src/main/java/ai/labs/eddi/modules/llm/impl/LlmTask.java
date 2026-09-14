@@ -692,7 +692,11 @@ public class LlmTask implements ILifecycleTask {
             // Under cascade, record the actual winning model (provider/model), not the
             // task-level default — an auditor must be able to reconstruct which model
             // produced the answer (#5).
-            String modelName = cascadeAuditModel != null ? cascadeAuditModel : processedParams.getOrDefault("model", task.getType());
+            // resolveModelName, not params["model"]: most providers take "modelName", so
+            // the
+            // ledger recorded the provider type ("anthropic") instead of the model id.
+            String resolvedModelName = resolveModelName(processedParams);
+            String modelName = cascadeAuditModel != null ? cascadeAuditModel : resolvedModelName != null ? resolvedModelName : task.getType();
             var modelNameData = dataFactory.createData(MemoryKeys.AUDIT_MODEL_NAME, modelName);
             currentStep.storeData(modelNameData);
 
@@ -1119,7 +1123,8 @@ public class LlmTask implements ILifecycleTask {
                 var modelResponse = dataFactory.createData(MemoryKeys.AUDIT_MODEL_RESPONSE, responseContent);
                 currentStep.storeData(modelResponse);
             }
-            String modelName = processedParams.getOrDefault("model", task.getType());
+            String resolvedModelName = resolveModelName(processedParams);
+            String modelName = resolvedModelName != null ? resolvedModelName : task.getType();
             var modelNameData = dataFactory.createData(MemoryKeys.AUDIT_MODEL_NAME, modelName);
             currentStep.storeData(modelNameData);
 

@@ -972,6 +972,8 @@ public class McpToolProviderManager {
         if (!lower.startsWith("http://") && !lower.startsWith("https://")) {
             throw new IllegalArgumentException("MCP server URL must use http or https: " + url);
         }
+        // ...and never the cloud instance-metadata service, whatever the setting.
+        UrlValidationUtils.rejectCloudMetadataTarget(url);
     }
 
     /**

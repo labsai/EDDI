@@ -155,7 +155,11 @@ Returns:
 
 ### `searchMemory`
 
-Search for memories by keyword across keys and values.
+Search for memories by keyword across keys and values. The query is split into
+terms on anything that is not a letter or digit, and an entry matches when
+**every** term appears (case-insensitively) in its key or its value — so
+`"dog name"`, `"dog_name"` and `"dog-name"` all find the key `dog_name`.
+Punctuation-only queries match nothing.
 
 ```
 Parameters:

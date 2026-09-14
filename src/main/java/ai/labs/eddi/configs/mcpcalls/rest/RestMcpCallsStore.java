@@ -214,6 +214,19 @@ public class RestMcpCallsStore implements IRestMcpCallsStore {
 
             McpToolProviderManager.McpToolsResult result = mcpToolProviderManager.discoverTools(List.of(tempConfig));
 
+            // A configuration the manager refused outright (blocked address, bad
+            // transport, malformed URL) contributes no tools and throws nothing, so it
+            // used to come back as 200 {"tools":[],"count":0} — indistinguishable from
+            // a server that genuinely exposes no tools. Say why instead.
+            if (result.hasConfigurationErrors()) {
+                String reason = result.failures().stream()
+                        .filter(failure -> failure.kind() == McpToolProviderManager.McpFailureKind.INVALID_CONFIGURATION)
+                        .map(McpToolProviderManager.McpServerFailure::message)
+                        .findFirst()
+                        .orElse("the MCP server configuration is invalid");
+                return badRequest(reason);
+            }
+
             // Convert to a simple JSON-serializable list of tool info
             List<Map<String, Object>> tools = new ArrayList<>();
             for (ToolSpecification spec : result.toolSpecs()) {

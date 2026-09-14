@@ -63,7 +63,11 @@ curl -X POST /groups/<groupId>/conversations \
 
 ## Member Roles
 
-Some styles require specific roles:
+Some styles require specific roles. A preset `DEBATE` group without at least one
+`PRO` and one `CON` member, or a preset `DEVIL_ADVOCATE` group without a
+`DEVIL_ADVOCATE` member, is rejected at save time — the engine would otherwise
+fall back to ALL members and the style would silently become something else.
+(Groups with explicit `phases` route roles themselves and are not checked.)
 
 | Role | Used By | Purpose |
 |---|---|---|
@@ -236,7 +240,9 @@ peer-hidden until their phase completes (commit-reveal).
   abstentions; a mostly-silent team has not reached quorum, and that is signal.
 - **Options:** `EXPLICIT` is the reliable path. `LAST_SYNTHESIS` extracts
   `Option A: …` lines from the newest synthesis — instruct that synthesis to
-  emit them.
+  emit them (the default synthesis prompt does not). The line may be written the
+  way models write it: `**Option A:** …`, `- Option B: …`, `1. Option C) …`,
+  `Option D. …`, in any letter case.
 - **Ties and quorum failures** go to `tiePolicy`: `MODERATOR_DECIDES` runs one
   moderator turn choosing among the unresolved options (method
   `vote+moderator-tiebreak`); `NO_DECISION` (default) records an honest
@@ -449,7 +455,9 @@ claim/lease/retry/dead-letter; the executor branches on
 
 **Writeback** happens at the next fire (or on a workspace read — read-repair),
 never from inside the discussion thread, so a pod crash mid-discussion loses
-nothing. VERIFIED outcomes stay VERIFIED on the backlog and credit the
+nothing. It also means a fire's `COMPLETED` status says the discussion was
+*started*, not that its tasks are done: backlog statuses change only once that
+writeback has run. VERIFIED outcomes stay VERIFIED on the backlog and credit the
 assignee's `perMemberStats`; anything else returns to PENDING with the
 reviewer's feedback appended to the description — **the cross-run retry
 loop**. A FAILED/CANCELLED discussion returns every pulled task untouched.
@@ -510,7 +518,12 @@ artifact.
 
 Off by default with the same absence discipline as the task tools: no opt-in
 means the tools are never assembled. The member agent's own
-`enableBuiltInTools` switch still applies. `markFinal: true` freezes an
+`enableBuiltInTools` switch still applies — a member whose LLM task does not
+set it takes part **without** the tools, and saving a group that enables
+artifacts, agent task creation or dynamic agents logs that prerequisite. Artifact,
+task and dynamic-agent tool results are never served from the tool cache: every
+member runs as the same user, so a cached `listArtifacts()` would hide a peer's
+new artifact. `markFinal: true` freezes an
 artifact — FINAL artifacts accept no further updates. Artifacts are deleted
 with their discussion (close/delete cascade) and by GDPR erasure; the durable
 trace of the work is the transcript.
@@ -583,6 +596,8 @@ create_group(
 ```
 
 Depth tracking prevents infinite recursion (`eddi.groups.max-depth`, default: 3).
+A group that would contain itself through its GROUP members (directly or via
+other groups) is rejected when it is saved.
 
 ## Custom Phases
 
@@ -616,6 +631,10 @@ For full control, define phases directly:
   ]
 }
 ```
+
+A `CRITIQUE` phase with `targetEachPeer: true` has every member critique each
+peer in turn. Without it, each member reviews all peers' latest responses in one
+turn.
 
 ### Per-phase controls
 
@@ -750,6 +769,9 @@ Pass a `tasks` array to skip the PLAN phase entirely — useful for deterministi
 ```
 
 When `tasks` is provided, the system posts `[System] "Pre-configured task plan: N tasks"` instead of invoking the moderator's LLM.
+A `CUSTOM` group whose phases include `EXECUTE` but no `PLAN` gets the same
+materialization at the start of `EXECUTE`. A `requiresApproval` gate on a PLAN
+phase does not apply there, because there is no plan phase to pause after.
 
 #### Task Dependencies
 
@@ -978,9 +1000,9 @@ summarizer's.
 | `POST` | `/groups/{groupId}/conversations/{id}/continue/stream` | Continue, streaming |
 | `POST` | `/groups/{groupId}/conversations/{id}/close` | Close the conversation to further rounds |
 | `POST` | `/groups/{groupId}/conversations/{id}/cancel` | Cancel a running discussion |
-| `POST` | `/groups/{groupId}/conversations/{id}/approve` | Approve/reject a HITL pause |
+| `POST` | `/groups/{groupId}/conversations/{id}/approve` | Approve/reject a HITL pause. Returns as soon as the decision is recorded — the resumed run continues asynchronously, so the response typically shows `IN_PROGRESS`; poll the conversation or use `/approve/stream` |
 | `POST` | `/groups/{groupId}/conversations/{id}/approve/stream` | Approve and stream the resumed run |
-| `POST` | `/groups/{groupId}/conversations/{id}/human-input` | Submit a HUMAN member's turn (I6) |
+| `POST` | `/groups/{groupId}/conversations/{id}/human-input` | Submit a HUMAN member's turn (I6). Asynchronous like `/approve`: the discussion resumes in the background (`IN_PROGRESS`) |
 | `GET` | `/groups/{groupId}/conversations/{id}/approval-status` | Pause coordinates (`detail=full` for approvers) |
 | `GET` | `/groups/{groupId}/conversations/pending-approvals` | This group's discussions awaiting a decision |
 | `GET` | `/groups/pending-approvals` | Every group discussion awaiting a decision, across all groups |

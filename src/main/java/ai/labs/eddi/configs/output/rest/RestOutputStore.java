@@ -112,6 +112,11 @@ public class RestOutputStore implements IRestOutputStore {
 
         for (var patchInstruction : patchInstructions) {
             var outputConfigurationSetPatch = patchInstruction.getDocument();
+            // A missing operation is a malformed request (400). Switching on null threw
+            // a NullPointerException, reported as a 500.
+            if (patchInstruction.getOperation() == null) {
+                throw new IllegalArgumentException("Patch operation must be either SET or DELETE!");
+            }
             switch (patchInstruction.getOperation()) {
                 case SET -> {
                     currentOutputConfigurationSet.getOutputSet().removeAll(outputConfigurationSetPatch.getOutputSet());

@@ -91,6 +91,20 @@ class DynamicAgentToolsTest {
         }
 
         @Test
+        void createSubAgent_failedInheritanceIsExplained() throws Exception {
+            // The parent's profile could not be read (the mock returns null), so no key
+            // was inherited — the model must be told that, not just "API key is required".
+            when(agentSetupService.setupAgent(any(SetupAgentRequest.class)))
+                    .thenThrow(new AgentSetupService.AgentSetupException("API key is required for cloud LLM providers"));
+
+            String result = tool.createSubAgent("Helper", "You help", null, null, null, null);
+
+            assertTrue(result.contains("API key is required"), result);
+            assertTrue(result.contains("nothing was inherited"), result);
+            assertTrue(result.contains("could not be read"), result);
+        }
+
+        @Test
         void createSubAgent_creationDisabled() {
             config.setAllowCreation(false);
 

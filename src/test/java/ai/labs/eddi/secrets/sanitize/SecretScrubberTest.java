@@ -40,6 +40,31 @@ class SecretScrubberTest {
     }
 
     @Test
+    @DisplayName("model identifiers survive export — claude-sonnet-5 scores over the entropy threshold")
+    void scrubJson_modelNamesAreNotRedacted() throws Exception {
+        String json = """
+                {
+                    "type": "anthropic",
+                    "parameters": {
+                        "modelName": "claude-sonnet-5",
+                        "model": "gpt-4o-mini-2024-07-18",
+                        "model_id": "anthropic.claude-sonnet-5-v1:0",
+                        "deploymentName": "prod-gpt4o-eastus2-x9",
+                        "apiKey": "sk-ant-api03-AbCdEfGh1234567890"
+                    }
+                }
+                """;
+
+        String scrubbed = scrubber.scrubJson(json);
+
+        assertTrue(scrubbed.contains("\"claude-sonnet-5\""), scrubbed);
+        assertTrue(scrubbed.contains("\"gpt-4o-mini-2024-07-18\""), scrubbed);
+        assertTrue(scrubbed.contains("\"anthropic.claude-sonnet-5-v1:0\""), scrubbed);
+        assertTrue(scrubbed.contains("\"prod-gpt4o-eastus2-x9\""), scrubbed);
+        assertFalse(scrubbed.contains("sk-ant-api03-AbCdEfGh1234567890"), "a credential beside them is still scrubbed: " + scrubbed);
+    }
+
+    @Test
     void scrubJson_vaultReferences_passthrough() throws Exception {
         String json = """
                 {

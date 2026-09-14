@@ -72,6 +72,23 @@ public final class DiscussionStylePresets {
             weaknesses, and suggestions for improvement.
             """ + ANTI_SYCOPHANCY_DIRECTIVE;
 
+    /**
+     * CRITIQUE without {@code targetEachPeer}: nobody is assigned, so the speaker
+     * reviews every peer's latest response. {@link #TEMPLATE_CRITIQUE} assumes one
+     * target and rendered "Their response: """ in this case.
+     */
+    public static final String TEMPLATE_CRITIQUE_PANEL = """
+            You are reviewing your peers' perspectives on:
+            "{question}"
+
+            {#for peer in peerResponses}
+            — {peer.speaker}: "{peer.content}"
+            {/for}
+
+            As {displayName}, provide constructive feedback on each — identify strengths, \
+            weaknesses, and suggestions for improvement.
+            """ + ANTI_SYCOPHANCY_DIRECTIVE;
+
     public static final String TEMPLATE_REVISION = """
             You previously shared your perspective on:
             "{question}"

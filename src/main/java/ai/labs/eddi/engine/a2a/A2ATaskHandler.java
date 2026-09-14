@@ -8,6 +8,7 @@ import ai.labs.eddi.engine.a2a.A2AModels.*;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
+import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
 import io.quarkus.security.identity.SecurityIdentity;
@@ -107,6 +108,17 @@ public class A2ATaskHandler {
      */
     private final ICache<String, String> contextConversationCache;
 
+    /**
+     * Maps (peer, A2A taskId) → the task's own {@link TaskState} name.
+     * <p>
+     * A task's state cannot be read off its conversation: a finished turn leaves
+     * the conversation {@code READY} for the next one, and one conversation serves
+     * every task of a context. Inferring it did both wrong things — a completed
+     * task read back as {@code submitted}, and {@code tasks/cancel} on it ended the
+     * reusable conversation and reported success.
+     */
+    private final ICache<String, String> taskStateCache;
+
     @Inject
     public A2ATaskHandler(IConversationService conversationService, ICacheFactory cacheFactory, SecurityIdentity identity,
             AgentCardService agentCardService,
@@ -116,6 +128,7 @@ public class A2ATaskHandler {
         this.conversationService = conversationService;
         this.taskConversationCache = cacheFactory.getCache(CACHE_NAME);
         this.contextConversationCache = cacheFactory.getCache(CACHE_NAME + ":context");
+        this.taskStateCache = cacheFactory.getCache(CACHE_NAME + ":state");
         this.identity = identity;
         // A non-positive budget makes Future.get return immediately and fails every
         // peer
@@ -167,25 +180,47 @@ public class A2ATaskHandler {
             throw new InvalidA2ARequestException("Agent is not available over A2A: " + agentId);
         }
 
-        // Resolve or create conversation — scoped to the calling peer
-        String conversationId = resolveConversation(agentId, taskId, contextId, callerPrincipal());
-
         // Build InputData
         InputData inputData = new InputData();
         inputData.setInput(userInput);
 
+        // The same input cap the conversationId entry points enforce: A2A drives the
+        // agent-id overload on behalf of an external peer, so it applies the check
+        // itself — before resolving the task, so a refused message does not leave a
+        // started conversation behind. Reported as invalid params, not an internal
+        // error.
+        try {
+            conversationService.requireInputWithinLimit(inputData);
+        } catch (IConversationService.InputTooLargeException e) {
+            throw new InvalidA2ARequestException(e.getMessage());
+        }
+
+        // Resolve or create conversation — scoped to the calling peer
+        String principal = callerPrincipal();
+        String conversationId = resolveConversation(agentId, taskId, contextId, principal);
+        String taskKey = scopedKey(principal, taskId);
+        taskStateCache.put(taskKey, TaskState.working.name());
+
         // Execute synchronously via ConversationService
         CompletableFuture<String> responseFuture = new CompletableFuture<>();
 
-        conversationService.say(Environment.production, agentId, conversationId, false, true, null, inputData, false, snapshot -> {
-            String response = "";
-            if (snapshot != null && snapshot.getConversationOutputs() != null && !snapshot.getConversationOutputs().isEmpty()) {
-                var outputs = snapshot.getConversationOutputs();
-                var lastOutput = outputs.get(outputs.size() - 1);
-                response = lastOutput != null ? lastOutput.toString() : "";
-            }
-            responseFuture.complete(response);
-        });
+        try {
+            conversationService.say(Environment.production, agentId, conversationId, false, true, null, inputData, false, snapshot -> {
+                String response = "";
+                if (snapshot != null && snapshot.getConversationOutputs() != null && !snapshot.getConversationOutputs().isEmpty()) {
+                    var outputs = snapshot.getConversationOutputs();
+                    var lastOutput = outputs.get(outputs.size() - 1);
+                    response = lastOutput != null ? lastOutput.toString() : "";
+                }
+                // Recorded when the turn completes rather than after the wait below, so a
+                // turn that outlives the peer's timeout still reads back as completed.
+                taskStateCache.put(taskKey, TaskState.completed.name());
+                responseFuture.complete(response);
+            });
+        } catch (Exception e) {
+            taskStateCache.put(taskKey, TaskState.failed.name());
+            throw e;
+        }
 
         String response = responseFuture.get(taskTimeoutSeconds, TimeUnit.SECONDS);
 
@@ -205,9 +240,17 @@ public class A2ATaskHandler {
      * to another peer is indistinguishable from an unknown one.
      */
     public A2ATask handleTaskGet(String taskId) {
-        String conversationId = taskConversationCache.get(scopedKey(callerPrincipal(), taskId));
+        String taskKey = scopedKey(callerPrincipal(), taskId);
+        String conversationId = taskConversationCache.get(taskKey);
         if (conversationId == null) {
             return null; // Task not found (or not this peer's task)
+        }
+
+        // A finished task answers from its own record: its conversation is READY
+        // again, which would read as submitted.
+        TaskState terminal = terminalStateOf(taskKey);
+        if (terminal != null) {
+            return new A2ATask(taskId, null, terminal, null, null, null);
         }
 
         try {
@@ -234,13 +277,28 @@ public class A2ATaskHandler {
      * cancel a task it created itself.
      */
     public boolean handleTaskCancel(String taskId) {
-        String conversationId = taskConversationCache.get(scopedKey(callerPrincipal(), taskId));
+        String taskKey = scopedKey(callerPrincipal(), taskId);
+        String conversationId = taskConversationCache.get(taskKey);
         if (conversationId == null) {
             return false;
         }
 
+        // A task that already reached a terminal state cannot be cancelled (A2A
+        // TaskNotCancelableError). Ending it again reported success for a no-op and
+        // told the peer its cancel had stopped work that was long finished. The
+        // task's own record decides first: after a completed turn the conversation is
+        // READY, and ending it would also end the context's later tasks.
+        if (terminalStateOf(taskKey) != null) {
+            return false;
+        }
+
         try {
+            ConversationState state = conversationService.getConversationState(conversationId);
+            if (state == ConversationState.ENDED || state == ConversationState.ERROR) {
+                return false;
+            }
             conversationService.endConversation(conversationId);
+            taskStateCache.put(taskKey, TaskState.canceled.name());
             return true;
         } catch (Exception e) {
             LOGGER.warnf("Failed to cancel task %s: %s", sanitize(taskId), e.getMessage());
@@ -273,6 +331,27 @@ public class A2ATaskHandler {
      */
     static String scopedKey(String principal, String id) {
         return principal.length() + ":" + principal + "|" + id;
+    }
+
+    /**
+     * The task's recorded state when it is terminal ({@code completed},
+     * {@code canceled}, {@code failed}); {@code null} while it is still running or
+     * was never recorded.
+     */
+    private TaskState terminalStateOf(String taskKey) {
+        String recorded = taskStateCache.get(taskKey);
+        if (recorded == null) {
+            return null;
+        }
+        try {
+            TaskState state = TaskState.valueOf(recorded);
+            return switch (state) {
+                case completed, canceled, failed -> state;
+                default -> null;
+            };
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
     }
 
     private String resolveConversation(String agentId, String taskId, String contextId, String principal) throws Exception {

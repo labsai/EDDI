@@ -116,6 +116,17 @@ public record AuditEntry(String id, String conversationId, String agentId, Integ
     }
 
     /**
+     * Return a copy of this entry with its recorded payload replaced. Used by
+     * {@code TurnAuditBuffer} to redact a secret user input BEFORE the entry is
+     * submitted — never after: once signed, an entry's payload is immutable.
+     */
+    public AuditEntry withPayload(Map<String, Object> newInput, Map<String, Object> newOutput, Map<String, Object> newLlmDetail,
+                                  Map<String, Object> newToolCalls) {
+        return new AuditEntry(id, conversationId, agentId, agentVersion, userId, environment, stepIndex, taskId, taskType, taskIndex, durationMs,
+                newInput, newOutput, newLlmDetail, newToolCalls, actions, cost, timestamp, hmac, agentSignature, sequence);
+    }
+
+    /**
      * Return a copy of this entry with the HMAC integrity hash set. Used by
      * AuditLedgerService after computing the HMAC.
      */

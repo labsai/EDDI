@@ -20,6 +20,7 @@ import ai.labs.eddi.engine.api.IRestAgentEngine;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.audit.rest.IRestAuditStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
+import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.*;
@@ -42,6 +43,7 @@ import java.time.Instant;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import io.quarkus.security.identity.SecurityIdentity;
 import static org.junit.jupiter.api.Assertions.*;
@@ -293,13 +295,39 @@ class McpConversationToolsTest {
 
     @Test
     void readConversation_withReturningFields() throws Exception {
+        var output = new ConversationOutput();
+        output.put("input", "hello");
+        output.put("output", List.of("hi"));
+        output.put("actions", List.of("greet"));
         var snapshot = new SimpleConversationMemorySnapshot();
-        when(conversationService.readConversation(eq(CONV_ID), eq(false), eq(false), eq(List.of("input", "output")))).thenReturn(snapshot);
+        snapshot.setConversationOutputs(List.of(output));
+        when(conversationService.readConversation(eq(CONV_ID), eq(false), eq(false), anyList())).thenReturn(snapshot);
         when(jsonSerialization.serialize(snapshot)).thenReturn("{}");
 
-        tools.readConversation(AGENT_ID, CONV_ID, "production", false, false, "input,output");
+        tools.readConversation(AGENT_ID, CONV_ID, "production", false, false, " input , output ");
 
-        verify(conversationService).readConversation(any(), eq(false), eq(false), eq(List.of("input", "output")));
+        // Output keys are not sections: the service is asked for conversationOutputs
+        // (it filters by section only — passing "input" dropped every section) and the
+        // keys select within it.
+        verify(conversationService).readConversation(any(), eq(false), eq(false), eq(List.of("conversationOutputs")));
+        assertEquals(1, snapshot.getConversationOutputs().size());
+        assertEquals(Set.of("input", "output"), snapshot.getConversationOutputs().getFirst().keySet());
+    }
+
+    @Test
+    void readConversation_sectionNamesPassThroughAndKeepTheWholeSection() throws Exception {
+        var output = new ConversationOutput();
+        output.put("input", "hello");
+        output.put("actions", List.of("greet"));
+        var snapshot = new SimpleConversationMemorySnapshot();
+        snapshot.setConversationOutputs(List.of(output));
+        when(conversationService.readConversation(eq(CONV_ID), eq(false), eq(true), anyList())).thenReturn(snapshot);
+        when(jsonSerialization.serialize(snapshot)).thenReturn("{}");
+
+        tools.readConversation(AGENT_ID, CONV_ID, null, null, null, "conversationOutputs,conversationProperties,input");
+
+        verify(conversationService).readConversation(any(), eq(false), eq(true), eq(List.of("conversationOutputs", "conversationProperties")));
+        assertEquals(Set.of("input", "actions"), snapshot.getConversationOutputs().getFirst().keySet());
     }
 
     @Test

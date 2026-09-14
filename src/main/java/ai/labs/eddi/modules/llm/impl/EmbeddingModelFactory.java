@@ -93,8 +93,10 @@ public class EmbeddingModelFactory {
         Map<String, String> rawParams = config.getEmbeddingParameters() != null ? config.getEmbeddingParameters() : Map.of();
         Map<String, String> params = globalVariableResolver.resolveAll(rawParams);
         ConnectionParameterGuard.rejectConnectionReferences(params);
-        params = secretResolver.resolveSecrets(params);
-        String provider = config.getEmbeddingProvider();
+        // Trimmed, as RagConfiguration validates it: " openai" must not save and then
+        // fail here as an unsupported provider.
+        String provider = config.getEmbeddingProvider() != null ? config.getEmbeddingProvider().trim() : null;
+        params = SecretResolver.requireResolved(secretResolver.resolveSecrets(params), "embedding model '" + provider + "'");
         LOGGER.infof("Building embedding model for provider: %s", provider);
 
         return switch (provider) {

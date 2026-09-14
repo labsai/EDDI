@@ -536,7 +536,10 @@ public class RestConversationStore implements IRestConversationStore {
     public List<ConversationStatus> getActiveConversations(String agentId, Integer agentVersion)
             throws ResourceStoreException, ResourceNotFoundException {
         checkNotNull(agentId, "agentId");
-        checkNotNull(agentVersion, "agentVersion");
+        // agentVersion is optional: absent means every version of the agent. It was
+        // mandatory and a bare GET answered 400 "Argument must not be null", although
+        // "which conversations of this agent are still open" is the question an
+        // operator asks before undeploying — across versions, not for one.
 
         List<ConversationMemorySnapshot> conversationMemorySnapshots;
         List<ConversationStatus> conversationStatuses = new LinkedList<>();
@@ -547,7 +550,7 @@ public class RestConversationStore implements IRestConversationStore {
             String conversationId = snapshot.getId();
             conversationStatus.setConversationId(conversationId);
             conversationStatus.setAgentId(agentId);
-            conversationStatus.setAgentVersion(agentVersion);
+            conversationStatus.setAgentVersion(agentVersion != null ? agentVersion : snapshot.getAgentVersion());
             conversationStatus.setConversationState(snapshot.getConversationState());
             var conversationDescriptor = conversationDescriptorStore.readDescriptor(conversationId, CONVERSATION_DESCRIPTOR_VERSION);
             conversationStatus.setLastInteraction(conversationDescriptor.getLastModifiedOn());

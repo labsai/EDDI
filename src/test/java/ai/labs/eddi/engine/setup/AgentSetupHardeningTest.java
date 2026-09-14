@@ -4,8 +4,12 @@
  */
 package ai.labs.eddi.engine.setup;
 
+import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.llm.ILlmStore;
 import ai.labs.eddi.configs.llm.IRestLlmStore;
+import ai.labs.eddi.configs.workflows.IWorkflowStore;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.configs.output.IRestOutputStore;
 import ai.labs.eddi.configs.parser.IRestParserStore;
 import ai.labs.eddi.configs.rules.IRestRuleSetStore;
@@ -230,6 +234,53 @@ class AgentSetupHardeningTest {
             verify(agentStore).getCurrentVersion("parent-1");
             verify(agentStore).readAgent("parent-1", 4);
             verify(agentStore, never()).readAgent(anyString(), isNull());
+        }
+
+        /**
+         * create_sub_agent runs inheritance on the LLM tool thread, which has no
+         * inbound request for the REST loopback's auth filter to forward. Inside the
+         * container the parent is read straight from the stores.
+         */
+        @Test
+        @DisplayName("inside the container the parent is read from the stores, not over the REST loopback")
+        void readsParentThroughInProcessStores() throws Exception {
+            IAgentStore agentStoreDirect = mock(IAgentStore.class);
+            IWorkflowStore workflowStoreDirect = mock(IWorkflowStore.class);
+            ILlmStore llmStoreDirect = mock(ILlmStore.class);
+            service.agentStore = agentStoreDirect;
+            service.workflowStore = workflowStoreDirect;
+            service.llmStore = llmStoreDirect;
+
+            IResourceStore.IResourceId current = mock(IResourceStore.IResourceId.class);
+            when(current.getVersion()).thenReturn(4);
+            when(agentStoreDirect.getCurrentResourceId("parent-1")).thenReturn(current);
+            var agent = new AgentConfiguration();
+            agent.setWorkflows(List.of(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/w1?version=1")));
+            when(agentStoreDirect.read("parent-1", 4)).thenReturn(agent);
+
+            var step = new WorkflowConfiguration.WorkflowStep();
+            step.setType(URI.create("eddi://ai.labs.llm"));
+            var stepConfig = new LinkedHashMap<String, Object>();
+            stepConfig.put("uri", "eddi://ai.labs.llm/llmstore/llms/l1?version=1");
+            step.setConfig(stepConfig);
+            var workflow = new WorkflowConfiguration();
+            workflow.setWorkflowSteps(List.of(step));
+            when(workflowStoreDirect.read("w1", 1)).thenReturn(workflow);
+
+            var task = new LlmConfiguration.Task();
+            task.setType("anthropic");
+            task.setParameters(new LinkedHashMap<>(Map.of("modelName", "claude-sonnet-5", "apiKey", "${vault:anthropic-key}")));
+            when(llmStoreDirect.read("l1", 1)).thenReturn(new LlmConfiguration(List.of(task)));
+
+            var profile = service.resolveParentLlmProfile("parent-1");
+
+            assertNotNull(profile);
+            assertEquals("anthropic", profile.provider());
+            assertEquals("claude-sonnet-5", profile.model());
+            assertEquals("${vault:anthropic-key}", profile.apiKeyReference());
+            verify(agentStore, never()).getCurrentVersion(anyString());
+            verify(agentStore, never()).readAgent(anyString(), any());
+            verify(workflowStore, never()).readWorkflow(anyString(), any());
         }
 
         @Test

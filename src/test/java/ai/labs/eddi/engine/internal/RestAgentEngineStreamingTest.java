@@ -316,6 +316,26 @@ class RestAgentEngineStreamingTest {
         }
 
         @Test
+        @DisplayName("W17: oversized input is refused (413) before the stream is opened")
+        void refusesOversizedInputBeforeTheStream() throws Exception {
+            var eventSink = mock(SseEventSink.class);
+            var sse = mock(Sse.class);
+            var inputData = new InputData();
+            inputData.setInput("x".repeat(11));
+
+            doThrow(new IConversationService.InputTooLargeException(11, 10))
+                    .when(conversationService).requireInputWithinLimit(inputData);
+
+            // Thrown, so InputTooLargeExceptionMapper answers 413 — not an SSE 'error'
+            // event on an already-committed 200 stream.
+            assertThrows(IConversationService.InputTooLargeException.class,
+                    () -> streaming.sayStreaming("conv-1", false, false, List.of(), inputData, eventSink, sse));
+
+            verify(conversationService, never()).sayStreaming(anyString(), any(), any(), any(), any(), any());
+            verify(eventSink, never()).send(any(OutboundSseEvent.class));
+        }
+
+        @Test
         @DisplayName("A1: the owner check runs on every streaming turn")
         void checksOwnershipOnEveryTurn() throws Exception {
             var eventSink = mock(SseEventSink.class);

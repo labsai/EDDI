@@ -130,6 +130,76 @@ class ConversationServiceTest {
     }
 
     // =========================================================================
+    // input length limit (eddi.conversations.max-input-chars)
+    // =========================================================================
+
+    /**
+     * A multi-megabyte message used to be accepted and forwarded to the model,
+     * which refused it after the round trip. The conversationId entry points now
+     * refuse it first.
+     */
+    @Nested
+    @DisplayName("input length limit")
+    class InputLengthLimit {
+
+        private InputData inputOf(int length) {
+            InputData input = new InputData();
+            input.setInput("x".repeat(length));
+            return input;
+        }
+
+        @Test
+        @DisplayName("say refuses input above the limit, naming length and limit")
+        void sayRejectsOversizedInput() {
+            conversationService.maxInputChars = 10;
+
+            var ex = assertThrows(IConversationService.InputTooLargeException.class,
+                    () -> conversationService.say(CONVERSATION_ID, false, true, List.of(), inputOf(11), false,
+                            mock(IConversationService.ConversationResponseHandler.class)));
+
+            assertEquals(11, ex.getLength());
+            assertEquals(10, ex.getLimit());
+            verifyNoInteractions(conversationCoordinator);
+        }
+
+        @Test
+        @DisplayName("sayStreaming refuses input above the limit")
+        void sayStreamingRejectsOversizedInput() {
+            conversationService.maxInputChars = 10;
+
+            assertThrows(IConversationService.InputTooLargeException.class,
+                    () -> conversationService.sayStreaming(CONVERSATION_ID, false, true, List.of(), inputOf(11),
+                            mock(IConversationService.StreamingResponseHandler.class)));
+            verifyNoInteractions(conversationCoordinator);
+        }
+
+        @Test
+        @DisplayName("input exactly at the limit is accepted")
+        void inputAtLimitPasses() {
+            conversationService.maxInputChars = 10;
+
+            assertDoesNotThrow(() -> conversationService.requireInputWithinLimit(inputOf(10)));
+        }
+
+        @Test
+        @DisplayName("a limit of zero disables the check")
+        void zeroDisablesTheLimit() {
+            conversationService.maxInputChars = 0;
+
+            assertDoesNotThrow(() -> conversationService.requireInputWithinLimit(inputOf(5_000_000)));
+        }
+
+        @Test
+        @DisplayName("null input and null text are not counted")
+        void nullInputIsIgnored() {
+            conversationService.maxInputChars = 1;
+
+            assertDoesNotThrow(() -> conversationService.requireInputWithinLimit(null));
+            assertDoesNotThrow(() -> conversationService.requireInputWithinLimit(new InputData()));
+        }
+    }
+
+    // =========================================================================
     // startConversation
     // =========================================================================
 

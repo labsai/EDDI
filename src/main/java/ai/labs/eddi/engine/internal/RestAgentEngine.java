@@ -8,6 +8,7 @@ import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.*;
+import ai.labs.eddi.engine.exception.InputTooLargeExceptionMapper;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictedException;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictionUnavailableException;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictionUnavailableExceptionMapper;
@@ -251,6 +252,10 @@ public class RestAgentEngine implements IRestAgentEngine {
         } catch (AgentNotReadyException e) {
             LOGGER.warn("Agent not ready for conversation " + conversationId + ": " + e.getMessage());
             response.resume(new NotFoundException("Agent is not deployed or not ready"));
+        } catch (InputTooLargeException e) {
+            // Resumed through the AsyncResponse, so InputTooLargeExceptionMapper never
+            // runs here — the body mirrors it.
+            response.resume(InputTooLargeExceptionMapper.responseOf(e));
         } catch (ConversationEndedException e) {
             response.resume(Response.status(Response.Status.GONE).entity("Conversation has ended").build());
         } catch (ConversationAwaitingApprovalException e) {

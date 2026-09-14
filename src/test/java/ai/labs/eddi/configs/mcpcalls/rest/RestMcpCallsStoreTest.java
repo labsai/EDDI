@@ -18,6 +18,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -124,6 +125,20 @@ class RestMcpCallsStoreTest {
         void blankUrl() {
             Response response = restStore.discoverTools(new McpToolDiscoveryRequest("  ", null), null);
             assertEquals(400, response.getStatus());
+        }
+
+        @Test
+        @DisplayName("a configuration the manager refused is a 400 with the reason, not 200 with zero tools")
+        void rejectedConfigurationIsBadRequest() {
+            var refused = new McpToolProviderManager.McpServerFailure("discovery-probe", "http://169.254.169.254/",
+                    McpToolProviderManager.McpFailureKind.INVALID_CONFIGURATION, "URL targets a blocked address");
+            when(mcpToolProviderManager.discoverTools(any()))
+                    .thenReturn(new McpToolProviderManager.McpToolsResult(List.of(), Map.of(), List.of(refused)));
+
+            Response response = restStore.discoverTools(new McpToolDiscoveryRequest("http://169.254.169.254/", "http"), null);
+
+            assertEquals(400, response.getStatus());
+            assertTrue(String.valueOf(response.getEntity()).contains("URL targets a blocked address"), String.valueOf(response.getEntity()));
         }
 
         @Test

@@ -109,3 +109,11 @@ eebfe898b34858918d5cbbe11e60336d1b6a916e:src/test/java/ai/labs/eddi/secrets/sani
 # and then discarded, and any string does the job.
 0c228141ecfcaf0270190b557dafa2aea0d09eab:src/test/java/ai/labs/eddi/connections/oauth/MongoOAuthStateStoreTest.java:generic-api-key:62
 0c228141ecfcaf0270190b557dafa2aea0d09eab:src/test/java/ai/labs/eddi/connections/oauth/PostgresOAuthStateStoreUnitTest.java:generic-api-key:57
+
+# PR #750 (fix/e2e-test-findings): fake keys in two audit-redaction test fixtures,
+# assigned to a constant whose name matches generic-api-key. Not credentials. The
+# values were rewritten to low-entropy strings in a later commit of the same PR;
+# these entries cover the commit that introduced them, which stays in the scan
+# range (not quoted here -- the rule would match this file too).
+22c380c2878ab9c2227b39b17fb34ce20991b758:src/test/java/ai/labs/eddi/engine/audit/TurnAuditBufferTest.java:generic-api-key:25
+22c380c2878ab9c2227b39b17fb34ce20991b758:src/test/java/ai/labs/eddi/engine/runtime/internal/ConversationHitlCoverageTest.java:generic-api-key:211

@@ -340,7 +340,7 @@ class McpConversationToolsExtendedTest {
         output.put("actions", List.of("greet"));
         snapshot.setConversationOutputs(List.of(output));
         when(conversationService.readConversation(eq(CONV_ID), eq(false), eq(true),
-                eq(List.of("input", "output")))).thenReturn(snapshot);
+                eq(List.of("conversationOutputs")))).thenReturn(snapshot);
         when(jsonSerialization.serialize(snapshot)).thenReturn("{}");
 
         tools.readConversation(null, CONV_ID, null, null, null, "input,output");

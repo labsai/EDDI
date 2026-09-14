@@ -543,10 +543,27 @@ class RestConversationStoreTest {
         }
 
         @Test
-        @DisplayName("should throw for null agentVersion")
-        void throwsForNullVersion() {
-            assertThrows(IllegalArgumentException.class,
-                    () -> restConversationStore.getActiveConversations("agent-1", null));
+        @DisplayName("a null agentVersion lists every version, reporting each snapshot's own version")
+        void nullVersionMeansEveryVersion() throws Exception {
+            var v1 = new ConversationMemorySnapshot();
+            v1.setId("conv-v1");
+            v1.setAgentVersion(1);
+            v1.setConversationState(ConversationState.READY);
+            var v2 = new ConversationMemorySnapshot();
+            v2.setId("conv-v2");
+            v2.setAgentVersion(2);
+            v2.setConversationState(ConversationState.IN_PROGRESS);
+            when(conversationMemoryStore.loadActiveConversationMemorySnapshot("agent-1", null))
+                    .thenReturn(List.of(v1, v2));
+            var convDesc = new ConversationDescriptor();
+            convDesc.setLastModifiedOn(new Date());
+            when(conversationDescriptorStore.readDescriptor(anyString(), eq(0))).thenReturn(convDesc);
+
+            List<ConversationStatus> result = restConversationStore.getActiveConversations("agent-1", null);
+
+            assertEquals(2, result.size());
+            assertEquals(1, result.get(0).getAgentVersion());
+            assertEquals(2, result.get(1).getAgentVersion());
         }
     }
 
