@@ -395,6 +395,25 @@ it read. A pinned value is **never copied into the store**: removing the propert
 later falls back to whatever an administrator stored, not to a silent copy of the
 old pin.
 
+Because that stored value would come back, it is **never invisible**: a pinned setting
+whose stored value differs carries it as `shadowedStoredValue`, and the response adds a
+warning. Removing a restrictive pin in front of a permissive stored value is exactly the
+change that needs to be seen before it is made.
+
+**Writes need a verified identity.** `@RolesAllowed` is a no-op while
+`authorization.enabled=false` — the way the shipped compose files run — so outside dev and
+test a `PUT` without OIDC is refused with **403**. Before these settings were writable, an
+anonymous caller on such a deployment could not approve a credential endpoint at all, and
+the endpoint must not quietly hand them that. Pin the values with their properties, enable
+OIDC, or accept unauthenticated writes deliberately with
+`eddi.connections.settings.allow-unauthenticated-writes=true`. Reading stays open — none of
+the values is a secret.
+
+**Turning connections on at runtime runs the startup report.** The guard's report on stored
+connections the deployment cannot honour (below) is made at boot only when the feature is
+already on. A `PUT` that switches it on makes the same report then, rather than leaving it
+until the next restart.
+
 ### Validation, and when a change takes effect
 
 A `PUT` is validated where the administrator making it can see the answer:

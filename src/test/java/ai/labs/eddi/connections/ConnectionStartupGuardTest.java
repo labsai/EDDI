@@ -57,9 +57,10 @@ import static org.mockito.Mockito.when;
 
 /**
  * The guard is split between refusals and reports, and the split is the whole
- * design: a bad {@code public-base-url} can only ever produce a broken OAuth
- * flow, so it fails the boot, while a questionable stored connection already
- * fails closed per request and would take a whole cluster down if it failed the
+ * design: a malformed <em>pinned</em> {@code public-base-url} is operator
+ * configuration that only a restart can fix, so it fails the boot, while a
+ * missing or stored one, and a questionable stored connection, already fail
+ * closed per request and would take a whole cluster down if they failed the
  * boot too. So each test asserts which of the two happened, and which setting
  * was named — "it threw" or "it logged something" would still pass while the
  * operator is left with nothing to act on.
@@ -344,6 +345,20 @@ class ConnectionStartupGuardTest {
         assertDoesNotThrow(() -> start(enabledGuard(openAiCompatOff(), false)));
 
         assertTrue(logged(UNVERIFIED_IDENTITY_REPORT), logRecords.toString());
+    }
+
+    @Test
+    @DisplayName("the stored-connection report runs on demand, for a feature switched on at runtime after a boot that skipped it")
+    void storedConnectionReportRunsOnDemand() throws Exception {
+        storedConnections(perUserConnection());
+        var guard = guard(new ConnectionsConfig(false, ""), approvedEndpoints(), openAiCompatOff(), false);
+
+        start(guard);
+        assertFalse(logged(UNVERIFIED_IDENTITY_REPORT), "a boot with the feature off reports nothing; saw: " + logRecords);
+
+        guard.reportStoredConnections();
+
+        assertTrue(logged(UNVERIFIED_IDENTITY_REPORT), "enabling at runtime must not leave the report unmade; saw: " + logRecords);
     }
 
     @Test

@@ -13,14 +13,19 @@ import java.util.List;
  * Each value says where it came from, because "I saved it and nothing changed"
  * has exactly one explanation — the property pins it — and a settings page that
  * cannot say so leaves the administrator to guess.
+ * <p>
+ * Serialized with EDDI's global {@code NON_NULL} inclusion: a null field is
+ * <em>absent</em> from the JSON, not {@code null}. Clients must treat a missing
+ * {@code value}, {@code redirectUri}, {@code updatedAt}, {@code updatedBy} or
+ * {@code shadowedStoredValue} as unset.
  *
  * @param redirectUri
  *            what to register at each OAuth provider, derived from
- *            {@code publicBaseUrl}; null while that is not set
+ *            {@code publicBaseUrl}; absent while that is not usable
  * @param updatedAt
- *            ISO-8601 instant of the last stored write, or null
+ *            ISO-8601 instant of the last stored write, or absent
  * @param updatedBy
- *            principal of the last stored write, or null
+ *            principal of the last stored write, or absent
  * @param warnings
  *            configurations that save cleanly and still leave part of the
  *            feature unable to work
@@ -45,7 +50,11 @@ public record ConnectionSettingsView(Setting<Boolean> enabled, Setting<String> p
      *            the property that pins it when set — named whatever the source, so
      *            an operator knows which variable would take it out of
      *            administrators' hands
+     * @param shadowedStoredValue
+     *            for a {@code PINNED} value only: a different value that is stored
+     *            and hidden by the pin, which takes effect as soon as the property
+     *            is removed; absent otherwise
      */
-    public record Setting<T>(T value, Source source, String property) {
+    public record Setting<T>(T value, Source source, String property, T shadowedStoredValue) {
     }
 }

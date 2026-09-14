@@ -4,12 +4,16 @@
  */
 package ai.labs.eddi.connections.settings;
 
+import ai.labs.eddi.connections.ConnectionStartupGuard;
 import ai.labs.eddi.connections.ConnectionsConfig;
 import ai.labs.eddi.connections.settings.ConnectionSettingsView.Source;
+import io.quarkus.runtime.LaunchMode;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.ClientErrorException;
+import jakarta.ws.rs.ForbiddenException;
 import jakarta.ws.rs.InternalServerErrorException;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -28,6 +32,9 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -38,14 +45,25 @@ class RestConnectionSettingsTest {
 
     private InMemorySettingsStore store;
     private SecurityIdentity identity;
+    private ConnectionStartupGuard guard;
+    private LaunchMode previousLaunchMode;
 
     @BeforeEach
     void setUp() {
         store = new InMemorySettingsStore();
         identity = mock(SecurityIdentity.class);
+        guard = mock(ConnectionStartupGuard.class);
         Principal principal = () -> "alice";
         when(identity.isAnonymous()).thenReturn(false);
         when(identity.getPrincipal()).thenReturn(principal);
+        // Production rules unless a test says otherwise, whatever ran before.
+        previousLaunchMode = LaunchMode.current();
+        LaunchMode.set(LaunchMode.NORMAL);
+    }
+
+    @AfterEach
+    void tearDown() {
+        LaunchMode.set(previousLaunchMode);
     }
 
     // --- Reading -------------------------------------------------------------
@@ -82,7 +100,7 @@ class RestConnectionSettingsTest {
     @DisplayName("a write takes effect immediately and records who made it")
     void writeTakesEffectImmediately() {
         var config = config(new ConnectionSettings());
-        var resource = new RestConnectionSettings(config, store, identity);
+        var resource = new RestConnectionSettings(config, store, identity, guard, true, false);
 
         var view = resource.updateSettings(
                 new ConnectionSettings(true, "https://eddi.example.com/", List.of("https://auth.atlassian.com"), null));
@@ -184,21 +202,56 @@ class RestConnectionSettingsTest {
     void failedWriteChangesNothing() {
         store.failWrites = true;
         var config = config(new ConnectionSettings());
-        var resource = new RestConnectionSettings(config, store, identity);
+        var resource = new RestConnectionSettings(config, store, identity, guard, true, false);
 
         assertThrows(InternalServerErrorException.class, () -> resource.updateSettings(new ConnectionSettings(true, null, null, null)));
 
         assertFalse(config.isEnabled());
     }
 
-    @Test
-    @DisplayName("with authorization off the write is attributed to 'anonymous' rather than failing")
-    void anonymousWriterIsRecorded() {
-        when(identity.isAnonymous()).thenReturn(true);
+    // --- Who may write -------------------------------------------------------
 
-        var view = resource(new ConnectionSettings()).updateSettings(new ConnectionSettings(false, null, null, null));
+    @Test
+    @DisplayName("with authorization off in production, a write is refused and nothing is stored")
+    void unauthenticatedWriteIsRefusedInProduction() {
+        when(identity.isAnonymous()).thenReturn(true);
+        var resource = new RestConnectionSettings(config(new ConnectionSettings()), store, identity, guard, false, false);
+
+        var failure = assertThrows(ForbiddenException.class,
+                () -> resource.updateSettings(new ConnectionSettings(true, null, List.of("https://attacker.example.com"), null)));
+
+        assertTrue(failure.getMessage().contains(RestConnectionSettings.ALLOW_UNAUTHENTICATED_WRITES), failure.getMessage());
+        assertNull(store.stored, "an anonymous caller must not be able to approve a credential endpoint");
+    }
+
+    @Test
+    @DisplayName("reading stays possible with authorization off — the values are not secrets")
+    void unauthenticatedReadIsAllowed() {
+        var resource = new RestConnectionSettings(config(new ConnectionSettings()), store, identity, guard, false, false);
+
+        assertEquals(Source.DEFAULT, resource.readSettings().enabled().source());
+    }
+
+    @Test
+    @DisplayName("the explicit opt-out accepts an unauthenticated write, attributed to 'anonymous'")
+    void optOutAcceptsUnauthenticatedWrite() {
+        when(identity.isAnonymous()).thenReturn(true);
+        var resource = new RestConnectionSettings(config(new ConnectionSettings()), store, identity, guard, false, true);
+
+        var view = resource.updateSettings(new ConnectionSettings(false, null, null, null));
 
         assertEquals(RestConnectionSettings.ANONYMOUS, view.updatedBy());
+    }
+
+    @Test
+    @DisplayName("dev mode accepts an unauthenticated write, because OIDC is normally off there")
+    void devModeAcceptsUnauthenticatedWrite() {
+        LaunchMode.set(LaunchMode.DEVELOPMENT);
+        var resource = new RestConnectionSettings(config(new ConnectionSettings()), store, identity, guard, false, false);
+
+        var view = resource.updateSettings(new ConnectionSettings(true, null, null, null));
+
+        assertEquals(true, view.enabled().value());
     }
 
     // --- Pinning -------------------------------------------------------------
@@ -228,6 +281,26 @@ class RestConnectionSettingsTest {
     }
 
     @Test
+    @DisplayName("a pinned base URL restated with a trailing slash or another scheme case is the same value, not a conflict")
+    void restatingAPinnedBaseUrlInAnotherSpellingIsAccepted() {
+        var resource = resource(new ConnectionSettings(null, "https://eddi.example.com/", null, null));
+
+        var view = resource.updateSettings(new ConnectionSettings(false, "HTTPS://eddi.example.com", null, null));
+
+        assertEquals(Source.PINNED, view.publicBaseUrl().source());
+    }
+
+    @Test
+    @DisplayName("a pinned allowlist holding a remote plaintext entry can be restated — the pin, not the plaintext rule, decides")
+    void restatingAPinnedPlaintextAllowlistIsAccepted() {
+        var resource = resource(new ConnectionSettings(null, null, List.of("http://auth.internal.example.com"), null));
+
+        var view = resource.updateSettings(new ConnectionSettings(false, null, List.of("HTTP://auth.internal.example.com:80"), null));
+
+        assertEquals(Source.PINNED, view.credentialEndpointAllowlist().source());
+    }
+
+    @Test
     @DisplayName("a pinned field is never seeded into the store, and a value stored before the pin is kept for when it goes")
     void pinnedFieldIsNeitherSeededNorErased() {
         store.put(new ConnectionSettings(false, "https://stored.example.com", null, null), "bob");
@@ -250,7 +323,31 @@ class RestConnectionSettingsTest {
         assertEquals("https://pinned.example.com", view.publicBaseUrl().value());
     }
 
-    // --- Warnings ------------------------------------------------------------
+    @Test
+    @DisplayName("a stored value hidden behind a pin is surfaced and warned about, because it returns when the pin is removed")
+    void shadowedStoredValueIsSurfaced() {
+        store.put(new ConnectionSettings(null, null, null, true), "bob");
+        var view = resource(new ConnectionSettings(null, null, null, false)).readSettings();
+
+        assertEquals(false, view.allowPlaintextRemoteOrigins().value());
+        assertEquals(true, view.allowPlaintextRemoteOrigins().shadowedStoredValue());
+        assertTrue(view.warnings().stream().anyMatch(warning -> warning.contains(ConnectionsConfig.ALLOW_PLAINTEXT_REMOTE_ORIGINS)),
+                view.warnings().toString());
+    }
+
+    @Test
+    @DisplayName("a stored value that equals the pin in another spelling is not reported as hidden")
+    void equivalentStoredValueIsNotShadowed() {
+        store.put(new ConnectionSettings(null, "https://eddi.example.com/", List.of("https://b.example.com", "https://a.example.com"), null),
+                "bob");
+        var view = resource(new ConnectionSettings(null, "https://eddi.example.com", List.of("https://a.example.com", "https://b.example.com"),
+                null)).readSettings();
+
+        assertNull(view.publicBaseUrl().shadowedStoredValue());
+        assertNull(view.credentialEndpointAllowlist().shadowedStoredValue());
+    }
+
+    // --- Warnings and reports ------------------------------------------------
 
     @Test
     @DisplayName("enabled without a base URL or an allowlist says what will not work, without refusing the save")
@@ -270,8 +367,28 @@ class RestConnectionSettingsTest {
         assertTrue(view.warnings().stream().anyMatch(warning -> warning.contains("allowPlaintextRemoteOrigins")), view.warnings().toString());
     }
 
+    @Test
+    @DisplayName("switching the feature on at runtime runs the stored-connection report the boot skipped")
+    void enablingAtRuntimeReportsStoredConnections() {
+        resource(new ConnectionSettings()).updateSettings(new ConnectionSettings(true, null, null, null));
+
+        verify(guard, times(1)).reportStoredConnections();
+    }
+
+    @Test
+    @DisplayName("a save that leaves the feature as it was does not repeat the report")
+    void saveWithoutEnablingDoesNotReport() {
+        store.put(new ConnectionSettings(true, null, null, null), "bob");
+        var enabledResource = resource(new ConnectionSettings());
+        enabledResource.updateSettings(new ConnectionSettings(true, "https://eddi.example.com", null, null));
+
+        resource(new ConnectionSettings()).updateSettings(new ConnectionSettings(false, null, null, null));
+
+        verify(guard, never()).reportStoredConnections();
+    }
+
     private RestConnectionSettings resource(ConnectionSettings pinned) {
-        return new RestConnectionSettings(config(pinned), store, identity);
+        return new RestConnectionSettings(config(pinned), store, identity, guard, true, false);
     }
 
     private ConnectionsConfig config(ConnectionSettings pinned) {

@@ -388,7 +388,8 @@ public class ConnectionsConfig {
                 return new Snapshot(previous.stored(), previous.origins(), now);
             }
             LOGGER.warnf("[CONNECTIONS] Could not read the stored connection settings (%s). Until they can be read only pinned properties "
-                    + "and defaults apply, so connections stay disabled unless %s is set.", e.getClass().getSimpleName(), ENABLED);
+                    + "and defaults apply, so connections stay disabled unless %s is set. If this happens during startup, the startup "
+                    + "guard's report on stored connections is skipped for this boot.", e.getClass().getSimpleName(), ENABLED);
             return new Snapshot(null, Set.of(), now);
         }
     }

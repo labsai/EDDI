@@ -114,6 +114,29 @@ handles, `DataStoreProducers`, `application.properties`, `docs/connections.md`,
 `ConnectionStartupGuardTest` and `RestConnectionAuthorizationCallbackTest` updated for the
 new boot and authorize behaviour.
 
+**Review round (Fable 5.1 review + a live boot against MongoDB).**
+
+- **Unauthenticated writes are refused outside dev/test** while `authorization.enabled=false`
+  (403), unless `eddi.connections.settings.allow-unauthenticated-writes=true`. The rationale
+  "properties-only protected nothing from an administrator" is right for administrators, but on
+  a deployment without OIDC `@RolesAllowed` is a no-op — and the shipped compose files run that
+  way — so an *anonymous* caller could otherwise approve an origin for a client secret. Same
+  narrow per-surface opt-out shape as `HighValueSurfaceGuard`; adding the path to that guard
+  instead would have failed every existing unauthenticated boot.
+- **A stored value hidden behind a pin is surfaced** (`Setting.shadowedStoredValue`) with a
+  warning. Removing a restrictive pin brings a permissive stored value back; that must never be
+  invisible.
+- **Enabling at runtime runs the stored-connection report** (`ConnectionStartupGuard.reportStoredConnections`)
+  that a boot with the feature off skipped. A store unreadable at boot says the report was skipped.
+- **Restating a pinned value is compared before strict validation and normalised**: a trailing
+  slash or scheme case on the base URL, and an operator-pinned plaintext allowlist entry, no
+  longer produce a 409 or 400.
+- **Postgres `updated_by` is `TEXT`** (an OIDC principal can exceed 255 characters); `Array.free()`.
+- **Serialization contract.** EDDI omits null fields (`NON_NULL`), so an unset `value`,
+  `redirectUri`, `updatedAt` or `updatedBy` is absent from the JSON, not `null`. Documented on
+  `ConnectionSettingsView`; the Manager types and fixtures follow it.
+- **Upgrade note**: a property set even to its default now pins (configuration-reference).
+
 **Not done / open.** Cross-replica invalidation is TTL-only (no event bus). Changes are
 logged, not written to the audit ledger — the ledger is conversation-task shaped. The
 Manager's OpenAPI snapshot exempts the two new operations until it is refreshed against a

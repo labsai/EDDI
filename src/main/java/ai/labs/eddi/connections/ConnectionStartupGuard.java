@@ -133,6 +133,19 @@ public class ConnectionStartupGuard {
     }
 
     /**
+     * The stored-connection reports, for a feature switched on at runtime.
+     * <p>
+     * {@link #onStart} makes them only when connections are already enabled at
+     * boot. Enabled later through {@code PUT /connectionstore/settings}, a stored
+     * {@code PER_USER} connection on a deployment without OIDC, or an OAuth one
+     * with an inert vault, would otherwise go unreported until the next restart.
+     * Log lines only, like at boot: every condition still fails closed per request.
+     */
+    public void reportStoredConnections() {
+        requireStoredConnectionsAreSupportable();
+    }
+
+    /**
      * Reports the configurations that make a stored grant meaningless.
      * <p>
      * All are checked against what is actually STORED rather than against a flag,

@@ -45,7 +45,7 @@ public class PostgresConnectionSettingsStore implements IConnectionSettingsStore
                 credential_endpoint_allowlist TEXT[],
                 allow_plaintext_remote_origins BOOLEAN,
                 updated_at TIMESTAMPTZ,
-                updated_by VARCHAR(255)
+                updated_by TEXT
             )
             """;
 
@@ -159,13 +159,17 @@ public class PostgresConnectionSettingsStore implements IConnectionSettingsStore
         if (array == null) {
             return null;
         }
-        Object values = array.getArray();
-        if (values instanceof String[] strings) {
-            return List.copyOf(Arrays.asList(strings));
+        try {
+            Object values = array.getArray();
+            if (values instanceof String[] strings) {
+                return List.copyOf(Arrays.asList(strings));
+            }
+            if (values instanceof Object[] objects) {
+                return Arrays.stream(objects).map(String::valueOf).toList();
+            }
+            return List.of();
+        } finally {
+            array.free();
         }
-        if (values instanceof Object[] objects) {
-            return Arrays.stream(objects).map(String::valueOf).toList();
-        }
-        return List.of();
     }
 }

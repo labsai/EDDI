@@ -348,7 +348,13 @@ below. See [Enabling connections](connections.md#enabling-connections).
 | `eddi.connections.public-base-url` | *(none)* | Externally reachable base URL for OAuth redirect URIs. Runtime setting `publicBaseUrl`. A pinned value that is not a bare https origin refuses the boot; without one, per-user account linking answers 400 |
 | `eddi.connections.credential-endpoint-allowlist` | *(empty)* | Origins that may receive the **client secret** — a connection's token and authorization endpoints, and only those (RFC 9728 resource-metadata discovery is not implemented). Not where the access token goes: that is each connection's own `baseUrlAllowlist`. Runtime setting `credentialEndpointAllowlist` |
 | `eddi.connections.allow-plaintext-remote-origins` | `false` | Whether a connection's `baseUrlAllowlist` may send its credential over plaintext `http://` to a non-loopback host. While `false` such an origin is refused at save time (400), refused per request (`TARGET_NOT_ALLOWED`) and reported at ERROR at boot; `true` accepts it with a WARN. Loopback `http://` is always allowed. Runtime setting `allowPlaintextRemoteOrigins`. **Upgrade note:** existing connections with a remote `http://` origin stop resolving until this is set |
+| `eddi.connections.settings.allow-unauthenticated-writes` | `false` | Whether `PUT /connectionstore/settings` accepts a write with no verified identity. Outside dev and test, while `authorization.enabled=false`, such a write is refused (403) unless this is `true` — `@RolesAllowed` is a no-op without OIDC, and an anonymous caller must not be able to approve a credential endpoint. Not a runtime setting |
 | `eddi.connections.state-sweep-interval` | `1h` | How often expired OAuth state entries are cleared |
+
+> **Upgrade note.** Any of the first four properties that is *set* — even to its
+> default, e.g. `EDDI_CONNECTIONS_ENABLED=false` copied from an old example — now
+> **pins** that value, and the settings page shows it read-only. Unset it to let
+> administrators manage the value at runtime.
 
 ---
 
