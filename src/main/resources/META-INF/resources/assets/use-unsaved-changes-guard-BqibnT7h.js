@@ -1,0 +1,1 @@
+import{r as o}from"./index-CzeUC7cn.js";function a(e){o.useEffect(()=>{if(!e)return;function n(r){r.preventDefault(),r.returnValue=""}return window.addEventListener("beforeunload",n),()=>window.removeEventListener("beforeunload",n)},[e])}export{a as u};
