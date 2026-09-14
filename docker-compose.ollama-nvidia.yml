@@ -1,3 +1,6 @@
+# docker-compose.ollama-nvidia.yml
 services:
   ollama:
+    image: ollama/ollama:0.34.0
     gpus: all
+
