@@ -957,7 +957,8 @@
                      them reinstall node_modules and rebuild both UIs (and delete node_modules
                      under a running `npm run dev`). copy-ui-bundles below shares the phase;
                      executions of one phase run in POM order, so this plugin must stay
-                     declared before maven-resources-plugin. -->
+                     declared before maven-clean-plugin (which drops the previous run's
+                     bundles) and maven-resources-plugin (which copies the new ones). -->
                 <executions>
                     <execution>
                         <id>install-node</id>
@@ -1018,6 +1019,101 @@
             </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-clean-plugin</artifactId>
+                <version>${maven-clean-plugin.version}</version>
+                <!-- Both filesets are configured per execution rather than on the plugin.
+                     A plugin-level <configuration> is merged into every execution, and how
+                     Maven merges repeated <fileset> elements is not something to rely on
+                     here: were the `clean`-phase list to reach drop-stale-ui-bundles, that
+                     execution would delete ui/manager/dist in prepare-package — moments
+                     before copy-ui-bundles reads it. -->
+                <executions>
+                    <execution>
+                        <!-- The built-in `clean` lifecycle execution. -->
+                        <id>default-clean</id>
+                        <configuration>
+                            <filesets>
+                                <fileset>
+                                    <!-- Same list as the .gitignore block and the resource excludes
+                                         above. quarkus:dev watches src/main/resources directly, so
+                                         excluding stale generated files from the copy is not enough;
+                                         ./mvnw clean removes them from the source tree as well. -->
+                                    <directory>src/main/resources/META-INF/resources</directory>
+                                    <includes>
+                                        <include>assets/**</include>
+                                        <include>manage.html</include>
+                                        <include>welcome.html</include>
+                                        <include>workforce.html</include>
+                                        <include>chat.html</include>
+                                        <include>scripts/js/chat-ui*.js</include>
+                                        <include>scripts/css/chat-ui*.css</include>
+                                        <include>mockServiceWorker.js</include>
+                                        <include>eddi-icon.ico</include>
+                                        <include>eddi-icon.svg</include>
+                                        <include>logo_eddi.png</include>
+                                        <include>fonts/**</include>
+                                        <include>img/**</include>
+                                    </includes>
+                                </fileset>
+                                <fileset>
+                                    <directory>ui/manager/dist</directory>
+                                </fileset>
+                                <fileset>
+                                    <directory>ui/chat/dist</directory>
+                                </fileset>
+                            </filesets>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <!-- `-DskipUi=true` skips the UI build and the copy below, but it cannot
+                             un-copy: a plain `./mvnw package` followed by
+                             `./mvnw package -DskipTests -DskipUi=true` in the same target/ left
+                             the first run's bundles in target/classes, and they were packaged
+                             into the jar — the documented "the jar then serves no UI" was not
+                             what you got. Dropping the generated paths here makes the option
+                             mean what it says without requiring a `clean` first.
+
+                             It runs unconditionally, not only under skipUi, because a UI rebuild
+                             has the same problem in miniature: Vite content-hashes its
+                             filenames, so every repackage without a `clean` added a fresh
+                             assets/index-<hash>.js beside the previous one and shipped both. -->
+                        <id>drop-stale-ui-bundles</id>
+                        <goals>
+                            <goal>clean</goal>
+                        </goals>
+                        <phase>prepare-package</phase>
+                        <configuration>
+                            <!-- Without this the `clean` goal deletes target/ itself, mid-build. -->
+                            <excludeDefaultDirectories>true</excludeDefaultDirectories>
+                            <filesets>
+                                <fileset>
+                                    <!-- Generated paths only: index.html, robots.txt and
+                                         scripts/js/landing-redirect.js are backend-owned, and are
+                                         the same three copy-ui-bundles excludes. -->
+                                    <directory>${project.build.outputDirectory}/META-INF/resources</directory>
+                                    <includes>
+                                        <include>assets/**</include>
+                                        <include>manage.html</include>
+                                        <include>welcome.html</include>
+                                        <include>workforce.html</include>
+                                        <include>chat.html</include>
+                                        <include>scripts/js/chat-ui*.js</include>
+                                        <include>scripts/css/chat-ui*.css</include>
+                                        <include>mockServiceWorker.js</include>
+                                        <include>eddi-icon.ico</include>
+                                        <include>eddi-icon.svg</include>
+                                        <include>logo_eddi.png</include>
+                                        <include>fonts/**</include>
+                                        <include>img/**</include>
+                                    </includes>
+                                </fileset>
+                            </filesets>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-resources-plugin</artifactId>
                 <version>${maven-resources-plugin.version}</version>
                 <executions>
@@ -1063,43 +1159,6 @@
                         </configuration>
                     </execution>
                 </executions>
-            </plugin>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-clean-plugin</artifactId>
-                <version>${maven-clean-plugin.version}</version>
-                <configuration>
-                    <filesets>
-                        <fileset>
-                            <!-- Same list as the .gitignore block and the resource excludes
-                                 above. quarkus:dev watches src/main/resources directly, so
-                                 excluding stale generated files from the copy is not enough;
-                                 ./mvnw clean removes them from the source tree as well. -->
-                            <directory>src/main/resources/META-INF/resources</directory>
-                            <includes>
-                                <include>assets/**</include>
-                                <include>manage.html</include>
-                                <include>welcome.html</include>
-                                <include>workforce.html</include>
-                                <include>chat.html</include>
-                                <include>scripts/js/chat-ui*.js</include>
-                                <include>scripts/css/chat-ui*.css</include>
-                                <include>mockServiceWorker.js</include>
-                                <include>eddi-icon.ico</include>
-                                <include>eddi-icon.svg</include>
-                                <include>logo_eddi.png</include>
-                                <include>fonts/**</include>
-                                <include>img/**</include>
-                            </includes>
-                        </fileset>
-                        <fileset>
-                            <directory>ui/manager/dist</directory>
-                        </fileset>
-                        <fileset>
-                            <directory>ui/chat/dist</directory>
-                        </fileset>
-                    </filesets>
-                </configuration>
             </plugin>
         </plugins>
     </build>

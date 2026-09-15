@@ -26,6 +26,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -83,6 +85,11 @@ class BuildQualityGatesTest {
     private static final Path BASE_IMAGE_WORKFLOW = Path.of(".github", "workflows", "base-image-check.yml");
     private static final Path WORKFLOWS = Path.of(".github", "workflows");
     private static final Path DEPENDABOT = Path.of(".github", "dependabot.yml");
+    /**
+     * ci.yml is read with its line endings normalised, so the job helpers split on
+     * this.
+     */
+    private static final String LINE_FEED = "\n";
     private static final Path PRE_PUSH_HOOK = Path.of(".githooks", "pre-push");
 
     /**
@@ -868,12 +875,14 @@ class BuildQualityGatesTest {
         List<String> expected = new ArrayList<>(ciFilterPatterns("code"));
         assertTrue(expected.remove("ui/**"),
                 "the `code` filter no longer lists ui/**, but the frontends ship inside the image. Found: " + expected);
-        expected.addAll(List.of("ui/**/*.md", "README.md", "AGENTS.md", ".githooks/**"));
+        expected.addAll(
+                List.of("ui/**/*.md", "README.md", "AGENTS.md", ".githooks/**", ".github/dependabot.yml"));
         List<String> backend = ciFilterPatterns("backend");
 
         assertEquals(expected.stream().sorted().toList(), backend.stream().sorted().toList(),
                 "the `backend` filter in " + CI_WORKFLOW + " must be the `code` filter without ui/** and with"
-                        + " ui/**/*.md, README.md, AGENTS.md and .githooks/** (only tests read those). Build & Test gates on it for"
+                        + " ui/**/*.md, README.md, AGENTS.md, .githooks/** and .github/dependabot.yml (only tests read"
+                        + " those). Build & Test gates on it for"
                         + " pull requests, so a path that is in `code` but not here skips the Java suite on every PR"
                         + " that touches only that path.");
     }
@@ -898,6 +907,127 @@ class BuildQualityGatesTest {
                         + " the unit tests — exactly one of each");
         assertTrue(ci.contains("path: target/jacoco.exec"),
                 "Build & Test must upload target/jacoco.exec, the file the `merge` execution reads");
+    }
+
+    /**
+     * A job whose {@code needs} names a job GitHub skipped is skipped too — before
+     * its own {@code if} is ever evaluated. So a job gated on the {@code code}
+     * filter must not depend on one gated on {@code backend}: a pull request
+     * confined to {@code ui/} resolves {@code code=true, backend=false}, and the
+     * dependent silently does not run, however plainly its own condition says it
+     * should — and a skipped required check still satisfies branch protection.
+     * <p>
+     * This is the trap the UI Gate and E2E Gate aggregators exist to avoid on the
+     * publish path. {@code Preflight Dry-Run (PR)} fell into it on the
+     * certification path: it listed Build &amp; Test in {@code needs} although it
+     * consumes only Build Image's artifact, so every UI-only pull request produced
+     * an image that nothing certified.
+     * <p>
+     * Push-only jobs are exempt, and say so in their own condition: on a push Build
+     * &amp; Test gates on {@code code} exactly as they do, so it cannot be the
+     * skipped one.
+     */
+    @Test
+    @DisplayName("no pull-request job gated on `code` waits on Build & Test, which gates on `backend`")
+    void codeGatedPullRequestJobsDoNotDependOnTheBackendGatedBuild() throws Exception {
+        Map<String, String> jobs = ciJobBlocks();
+        assertTrue(jobs.containsKey("build-and-test"),
+                CI_WORKFLOW + " no longer declares a build-and-test job, so this assertion grades nothing");
+
+        List<String> trapped = new ArrayList<>();
+        for (Map.Entry<String, String> job : jobs.entrySet()) {
+            String condition = ciJobCondition(job.getValue());
+            boolean waitsOnBuildAndTest = ciJobNeeds(job.getValue()).contains("build-and-test");
+            boolean pullRequestReachable = !condition.contains("github.event_name == 'push'");
+            boolean gatesOnCodeAlone = condition.contains("outputs.code") && !condition.contains("outputs.backend");
+            if (waitsOnBuildAndTest && pullRequestReachable && gatesOnCodeAlone && !condition.contains("always()")) {
+                trapped.add(job.getKey());
+            }
+        }
+
+        assertEquals(List.of(), trapped,
+                "these jobs in " + CI_WORKFLOW + " run when the `code` filter matches but wait on build-and-test,"
+                        + " which runs only when `backend` matches. On a pull request that touches only ui/ the"
+                        + " dependency is skipped, so GitHub skips these too and never evaluates their condition."
+                        + " Depend on what the job actually consumes, or add always() and grade the results"
+                        + " explicitly the way UI Gate does.");
+    }
+
+    /**
+     * Every job in the workflow, name to raw block. A job header is the only line
+     * indented by exactly two spaces that is a bare key.
+     */
+    private static Map<String, String> ciJobBlocks() throws IOException {
+        Map<String, String> jobs = new LinkedHashMap<>();
+        String name = null;
+        StringBuilder block = new StringBuilder();
+
+        for (String line : read(CI_WORKFLOW).lines().toList()) {
+            if (line.matches("^ {2}[A-Za-z0-9_-]+:$")) {
+                if (name != null) {
+                    jobs.put(name, block.toString());
+                }
+                name = line.strip().replace(":", "");
+                block = new StringBuilder();
+            } else if (name != null) {
+                block.append(line).append(LINE_FEED);
+            }
+        }
+        if (name != null) {
+            jobs.put(name, block.toString());
+        }
+        return jobs;
+    }
+
+    /**
+     * A job's own {@code if:}, folded onto one line. Only the four-space form is
+     * the job's — anything indented deeper belongs to a step.
+     */
+    private static String ciJobCondition(String block) {
+        StringBuilder condition = new StringBuilder();
+        boolean inCondition = false;
+
+        for (String line : block.split(LINE_FEED, -1)) {
+            if (line.matches("^ {4}if:.*")) {
+                inCondition = true;
+                condition.append(line.strip().substring(3).strip()).append(' ');
+            } else if (inCondition) {
+                if (line.matches("^ {4}[^ ].*")) {
+                    break;
+                }
+                condition.append(line.strip()).append(' ');
+            }
+        }
+        return condition.toString();
+    }
+
+    /**
+     * The job names listed in a job's {@code needs:}, inline or as a block list.
+     */
+    private static List<String> ciJobNeeds(String block) {
+        List<String> needs = new ArrayList<>();
+        boolean inNeeds = false;
+
+        for (String line : block.split(LINE_FEED, -1)) {
+            if (line.matches("^ {4}needs:.*")) {
+                inNeeds = true;
+                needs.addAll(ciSplitNames(line.strip().substring(6)));
+            } else if (inNeeds) {
+                String stripped = line.strip();
+                if (!stripped.startsWith("- ") && !stripped.startsWith("#")) {
+                    break;
+                }
+                needs.addAll(ciSplitNames(stripped.replaceFirst("^- ", "")));
+            }
+        }
+        return needs;
+    }
+
+    private static List<String> ciSplitNames(String raw) {
+        return Arrays.stream(raw.replace("[", "").replace("]", "").split(","))
+                .map(String::strip)
+                .filter(name -> name.matches("[A-Za-z0-9_-]+"))
+                .toList();
     }
 
     /**

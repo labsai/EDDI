@@ -149,7 +149,58 @@ in code the import brought in unchanged:
   default" setting, unchanged.
 - Verified locally: the `.ds-sync` production audit is clean; the hook's 14 tests, the Manager lint and
   typecheck pass; both workflows parse, and `backend` still equals `code` without `ui/**` plus the
-  four test-only entries.
+  test-only entries.
+
+### Copilot review findings on PR #757
+
+Four unresolved threads, all confirmed against the code before being fixed. CodeRabbit skipped the
+PR entirely (1345 files against a 100-file limit) and Codacy reported nothing, so these were the
+whole review.
+
+- **`-DskipUi=true` could still ship a UI.** The flag skips the npm build and the `copy-ui-bundles`
+  execution, but skipping a copy cannot undo one: a plain `./mvnw package` followed by
+  `./mvnw package -DskipTests -DskipUi=true` in the same `target/` left the first run's bundles in
+  `target/classes` and packaged them, so the documented "the jar then serves no UI" was not what you
+  got. `maven-clean-plugin` gains a `drop-stale-ui-bundles` execution on `prepare-package` that
+  deletes the thirteen generated paths from `target/classes/META-INF/resources`, leaving the three
+  backend-owned files (`index.html`, `robots.txt`, `scripts/js/landing-redirect.js`) alone. It runs
+  unconditionally rather than only under `skipUi`, because a UI *rebuild* has the same bug in
+  miniature: Vite content-hashes its filenames, so every repackage without a `clean` shipped the new
+  `assets/index-<hash>.js` beside the old one.
+  - The plugin moved above `maven-resources-plugin` in the POM — executions of one phase run in
+    declaration order, and the drop has to land after the UIs build and before the copy — and both
+    filesets moved from the plugin onto their executions (`default-clean` keeps the source-tree
+    list). A plugin-level `<configuration>` merges into *every* execution, and had the `clean`-phase
+    list reached this one it would have deleted `ui/manager/dist` moments before the copy read it.
+  - Verified: `./mvnw clean:clean@drop-stale-ui-bundles` against a seeded `target/classes` removes
+    exactly the generated paths and leaves `target/`, `ui/manager/dist` and the three backend files;
+    `./mvnw clean` still clears the source tree and both `dist/` directories.
+- **`Preflight Dry-Run (PR)` never ran for a UI-only pull request.** It listed `build-and-test` in
+  `needs` although it consumes only Build Image's `eddi-ci-image` artifact. `build-and-test` gates on
+  `backend`, which is false when a PR touches only `ui/`, and GitHub skips a job whose dependency was
+  skipped *before* evaluating its `if` — so the job's own `code == 'true'` condition never got a say
+  and the image that PR would publish went uncertified. Now `needs: [detect-changes, build-image]`.
+  This is the same trap `UI Gate` and `E2E Gate` exist to avoid on the publish path, so
+  `BuildQualityGatesTest` now grades it for every job: a pull-request-reachable job gated on `code`
+  alone may not wait on `build-and-test` without `always()`. Mutation-checked — restoring the old
+  `needs` fails the test naming `preflight-check`.
+- **`.github/dependabot.yml` was in no filter a Java test reads.** `BuildQualityGatesTest` parses it
+  to check the Docker ecosystems it declares stay in step with `base-image-check.yml`'s skip logic;
+  Dependabot's own check validates the schema, not that contract. A PR changing only that file
+  resolved `backend=false` and skipped the one test that owns it. Added to the `backend` filter
+  alongside `README.md`, `AGENTS.md` and `.githooks/**`, and to the parity assertion.
+- **The published SBOM described only the Maven half.** Both UIs are built into the jar, so their npm
+  production dependencies are part of the shipped supply chain, and `cyclonedx-maven-plugin:makeBom`
+  inventories Maven only. The `sbom` job now also runs `@cyclonedx/cyclonedx-npm` for
+  `ui/manager` and `ui/chat` with `--package-lock-only` (reads the lockfile, so no `npm ci` and no
+  install scripts) and `--omit dev`, which is what Vite actually bundles. Verified locally: valid
+  CycloneDX 1.6, 192 components for the Manager and 134 for the Chat UI.
+  - Three documents are uploaded rather than one merged BOM. Merging across ecosystems needs
+    `cyclonedx-cli`, a GitHub-release binary we would have to fetch unverified, and hand-rolling the
+    metadata/bom-ref/dependency-graph merge is how you get a plausible but invalid BOM. Each file is
+    valid on its own and Dependency-Track, Red Hat certification and grype all ingest a set.
+  - `ui/manager/.ds-sync` is deliberately not inventoried: it is design-sync tooling that never
+    reaches the image.
 
 ## 🧩 chore(monorepo): EDDI-Manager and EDDI-Chat-UI move into this repository as ui/manager and ui/chat (2026-09-15)
 

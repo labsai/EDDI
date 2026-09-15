@@ -97,7 +97,7 @@ gh attestation verify oci://docker.io/labsai/eddi:6.4.0 --repo labsai/EDDI
 
 ### SBOM
 
-CI builds on `main` generate a [CycloneDX](https://cyclonedx.org/) Software Bill of Materials. The SBOM is uploaded as a CI artifact and can be downloaded from the GitHub Actions run summary.
+CI builds on `main` generate [CycloneDX](https://cyclonedx.org/) Software Bills of Materials: one for the Maven dependency tree and one for each UI’s npm production dependencies, since both UIs are built into the jar. All three are uploaded under the single `sbom-cyclonedx` artifact and can be downloaded from the GitHub Actions run summary.
 
 ## Known Limitations
 

@@ -125,6 +125,12 @@ jobs:
               # queries. .githooks/** is in `scripts` as well, but that job only lints
               # shell — it cannot run the unit test that owns the hook's logic.
               - '.githooks/**'
+              # And again: BuildQualityGatesTest reads dependabot.yml to check that the
+              # Docker ecosystems it declares stay in step with base-image-check.yml's
+              # skip logic. Dependabot's own validation check grades the file's schema,
+              # not that contract, so without this entry a PR that changes only
+              # dependabot.yml skips the one test that owns it.
+              - '.github/dependabot.yml'
             # The installers are the README's headline `curl | bash` path and were
             # in NO filter at all, so a PR touching only them skipped the whole
             # pipeline — and a skipped required check still satisfies branch
@@ -1193,14 +1199,48 @@ jobs:
           java-version: ${{ env.JAVA_VERSION }}
           cache: maven
 
-      - name: Generate CycloneDX SBOM
+      - name: Set up Node 20
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 20
+
+      - name: Generate CycloneDX SBOM (Maven)
         run: ./mvnw org.cyclonedx:cyclonedx-maven-plugin:2.9.1:makeBom -DskipTests -B --no-transfer-progress
 
+      - name: Generate CycloneDX SBOMs (npm)
+        # Both UIs are built into the jar, so their npm production dependencies are part
+        # of the shipped supply chain — and cyclonedx-maven-plugin inventories Maven only,
+        # so without this the published SBOM described just over half the artifact.
+        #
+        # --package-lock-only reads package-lock.json instead of node_modules, so this
+        # needs no `npm ci` and cannot execute install scripts. --omit dev matches what
+        # Vite actually bundles into dist/; ui/manager/.ds-sync is design-sync tooling
+        # that never reaches the image, so it is deliberately not inventoried here.
+        run: |
+          set -euo pipefail
+          for ui in manager chat; do
+            npx --yes @cyclonedx/cyclonedx-npm@6.0.1 \
+              --package-lock-only \
+              --omit dev \
+              --output-format JSON \
+              --output-file "target/bom-ui-$ui.json" \
+              "ui/$ui/package.json"
+          done
+
       - name: Upload SBOM
+        # Three CycloneDX documents rather than one merged file: merging across ecosystems
+        # needs cyclonedx-cli, a GitHub-release binary we would have to fetch unverified,
+        # and a hand-rolled merge of metadata/bom-refs/dependency graphs is exactly the
+        # kind of thing that yields a plausible but invalid BOM. Each file here is a valid
+        # document on its own, and every consumer we target (Dependency-Track, Red Hat
+        # certification, grype) ingests a set.
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: sbom-cyclonedx
-          path: target/bom.json
+          path: |
+            target/bom.json
+            target/bom-ui-manager.json
+            target/bom-ui-chat.json
           retention-days: 90
 
   # ─── Job 3a: Build Image ────────────────────────────────────────
@@ -2125,10 +2165,15 @@ jobs:
     name: Preflight Dry-Run (PR)
     runs-on: ubuntu-latest
     # Certifies the image build-image produced — the one e2e-fullstack tests — rather
-    # than a second Maven + npm + Docker build of the same commit. Explicit `code`,
-    # for the same reason as sbom: build-and-test also runs on an operator-docs-only
-    # PR, and a container preflight there certifies an image nothing changed.
-    needs: [detect-changes, build-and-test, build-image]
+    # than a second Maven + npm + Docker build of the same commit. So it needs
+    # build-image and nothing else: eddi-ci-image is the only thing it downloads.
+    #
+    # build-and-test used to be listed here too, which silently defeated the `code`
+    # condition below — on a UI-only PR `code` is true but `backend` is false, so
+    # build-and-test is skipped, and GitHub skips a job whose dependency was skipped
+    # before it ever evaluates the condition. The image that PR would publish went
+    # uncertified. BuildQualityGatesTest now grades that shape for every job.
+    needs: [detect-changes, build-image]
     if: github.event_name == 'pull_request' && needs.detect-changes.outputs.code == 'true'
 
     steps:
