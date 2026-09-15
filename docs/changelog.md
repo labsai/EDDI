@@ -76,7 +76,8 @@ the import exists; a squash flattens 1,275 commits into one.
 - **The UIs build with Maven (§6–§7).** `manage.html`, `welcome.html`, `workforce.html` moved into
   `ui/manager` as Vite multi-page inputs sharing one hashed bundle; the Chat builds to `dist/`
   instead of `../EDDI/src/main/resources`. `frontend-maven-plugin` runs `npm ci` + `npm run build`
-  for both in `generate-resources` (Node 20.20.2 vendored into `ui/node/`), and
+  for both in `prepare-package` (Node 20.20.2 vendored into `ui/node/`) — so `compile`, `test` and
+  `quarkus:dev` never touch npm, while `package`, `verify` and `install` always build the UI — and
   `copy-ui-bundles` copies both `dist/` trees into the jar — without the MSW worker and without
   ever overwriting `index.html`, `robots.txt` or `landing-redirect.js`. 756 generated files are
   no longer tracked; `src/main/resources/META-INF/resources` holds exactly those three
@@ -87,18 +88,23 @@ the import exists; a squash flattens 1,275 commits into one.
 - **Backend tests.** Five tests read the committed shells or assets and would have failed once
   those stopped being committed. The four resource tests now read stand-in shells under
   `src/test/resources/META-INF/resources`; `StaticAssetCachingTest` drops the `.manager-assets`
-  manifest check (the orphaned-bundle problem it guarded against is gone by construction) and
-  checks the hashes of the assets the build actually produced.
-- **CI (§8).** New jobs: `UI Build & Test` (the Manager's former CI plus the MSW Playwright tier,
-  and the Chat's typecheck/tests/build), `UI Gate`, `Build Image` (jar + both UIs + image, built
-  once and passed on as an artifact), `Backend E2E (mongodb|postgres)` (the Manager's API and
+  manifest check (the orphaned-bundle problem it guarded against is gone by construction); the
+  content-hash check on the built assets lives in `Build Image`, where those assets are produced.
+- **CI (§8).** New jobs: `UI Manager Checks`, `UI Manager E2E (MSW)` and `UI Chat` (the Manager's
+  former CI plus its MSW Playwright tier, and the Chat's typecheck and tests, as three parallel
+  jobs), `UI Gate`, `Build Image` (jar + both UIs + image, built once with an npm cache and passed on
+  as an artifact, after checking the four shells, the content hashes and the Chat bundle), `Backend E2E (mongodb|postgres)` (the Manager's API and
   full-stack Playwright tiers against the image built from the same commit, a check that every
   same-origin dependency of the four shipped shells answers 2xx, and a blocking OpenAPI snapshot
   check), `E2E Gate`, `CodeQL Analysis (UI)`. `Build Image` also asserts that the packaged
   `assets/` set equals what Vite just emitted: `copy-resources` never prunes, and a local build without
   `clean` really did package 913 assets against 737 built. `docker` no longer builds: it publishes the tested
-  image. `preflight-check` certifies the same image. `Build & Test`, `Integration Tests` and both
-  CodeQL builds pass `-DskipUi=true`.
+  image. `preflight-check` certifies the same image. On a pull request `Build & Test` and
+  `Integration Tests` gate on a new `backend` filter — `code` without `ui/**`, plus the UI markdown
+  the documentation tests walk, kept equal by `BuildQualityGatesTest` — so a Manager, Chat or npm
+  Dependabot PR skips the Java suite; on push and on tags they gate on `code`, so nothing publishes
+  untested. `pom.xml` is not in the `ui` filter: the UI jobs never run Maven. The OpenAPI snapshot
+  check runs on the MongoDB leg only and uploads the regenerated file when it fails.
 - **Housekeeping (§9).** Dependabot npm entries for both UIs (replacing Renovate, carrying its
   react-router major-version block); the scheduled CodeQL scans TypeScript; the Manager's
   compose files take `EDDI_IMAGE` and set the two `HighValueSurfaceGuard` opt-outs whose absence
@@ -118,6 +124,13 @@ the import exists; a squash flattens 1,275 commits into one.
   builds it replaces did.
 - **The OpenAPI snapshot check is blocking on PRs too.** In the Manager repo it was advisory there
   because the backend image tracked `latest`; here the backend is built from the PR.
+- **Efficiency review (two independent reviewers, Fable 5 and Opus 5).** Both found the same costs:
+  every local `compile`/`test`/`quarkus:dev` rebuilt both UIs (and deleted `node_modules` under a
+  running `npm run dev`), UI-only PRs ran the ~20k-test Java suite, Maven Dependabot PRs ran the UI
+  job, and the UI job ran Manager and Chat serially. Fixed as above. Rejected: defaulting `skipUi`
+  to true (a local `package` — `install.sh --local`, `mise run docker-build` — would then silently
+  build an image without a UI), and frontend-maven-plugin's incremental build options (its `npm`
+  goal has none in 1.15.1 — checked in the plugin descriptor).
 - **Phases 2 and 3 are one commit.** Deleting the committed bundles before Maven builds them would
   leave a commit whose jar serves a blank `/manage`.
 - **The Chat `typecheck` script is now `tsc -b --noEmit`.** `tsc --noEmit` against its solution-style
@@ -178,14 +191,23 @@ All run locally on 2026-09-15 (Windows 11, JDK 25.0.1) unless marked Linux.
   failure had retried the whole group twice; after the fix it passes **9/9 in 20 s**.
 - **Not run locally:** the Playwright tiers on PostgreSQL (the image boots there and passes the
   shipped-shell step, above) and any of it on a GitHub runner — the first signal is this PR's own run.
+- **Efficiency changes:** `./mvnw clean compile` and a `test` run executed **zero** frontend steps;
+  `clean package` ran surefire, then all five frontend steps in `prepare-package`, then
+  `copy-ui-bundles`, then the jar (737 assets, and the build-time OpenAPI document in
+  `target/openapi`); the new `Verify the built and packaged UI` step, extracted from `ci.yml`, passes
+  on that output; the guard tests (176, including the new `backend`-filter drift test) show only the
+  3 environmental failures above.
 - **Not verifiable locally:** the CI graph itself (job skips, artifact hand-off, fork PRs, required
   checks).
 
 ### Outside this repository (plan §9.5, §10) — still to do
 
-- Branch protection: require `UI Gate` and `E2E Gate` (both always report) and decide on
-  `UI Build & Test` / `Build Image`; keep `CodeQL Analysis` and `Build & Test` as they are.
-- Enable `javascript-typescript` in the GitHub-managed CodeQL default setup.
+- Branch protection: require `UI Gate` and `E2E Gate` (both always report; the jobs behind them
+  are path-gated); keep `CodeQL Analysis` and `Build & Test` as they are.
+- Do **not** enable GitHub's CodeQL default setup. It is `not-configured` (checked with
+  `gh api …/code-scanning/default-setup`); every analysis comes from `ci.yml`, and turning it on
+  would make GitHub reject the workflow's own uploads and fail the required `CodeQL Analysis`
+  check. `CodeQL Analysis (UI)` already scans the TypeScript.
 - After the first green `main` pipeline including Backend E2E: pointer READMEs, close the open PRs
   (Manager #72, #95, #140, #168, #207; Chat #19–#24, #26) with a link here, archive both repos.
 - Local: `EDDI.code-workspace`, stale copies of the deploy scripts; run `./mvnw clean` once.

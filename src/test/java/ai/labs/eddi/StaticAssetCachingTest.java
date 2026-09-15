@@ -21,7 +21,6 @@ import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * Guards the shipped static assets and the one-year cache header applied to
@@ -40,18 +39,14 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  * {@code immutable} suppresses one.
  * <p>
  * The filter is allowed to treat all of {@code /assets/} as immutable precisely
- * because every file there is machine-generated and content-hashed, which is
- * what {@link #everyBuiltAssetCarriesAContentHash()} asserts.
+ * because every file there is machine-generated and content-hashed. That half
+ * is asserted where the assets are built: CI's Build Image job fails on any
+ * un-hashed file in {@code ui/manager/dist/assets} before an image exists. This
+ * class keeps the filter half.
  */
 @DisplayName("static assets and cache headers")
 class StaticAssetCachingTest {
 
-    /**
-     * Where the Maven UI build (execution {@code copy-ui-bundles}) puts the
-     * Manager's assets. The UI is built in {@code process-resources}, before
-     * {@code test}, so this exists whenever the same run built the UI.
-     */
-    private static final String BUILT_ASSETS_DIR = "target/classes/META-INF/resources/assets";
     private static final String SCRIPTS_DIR = "src/main/resources/META-INF/resources/scripts";
     private static final String APPLICATION_PROPERTIES = "src/main/resources/application.properties";
 
@@ -79,31 +74,6 @@ class StaticAssetCachingTest {
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
-    }
-
-    /**
-     * Justifies the cache filter treating all of {@code /assets/} as immutable. If
-     * an un-hashed file ever lands here, that assumption stops holding and this
-     * test says so before a year-long cache pin does.
-     * <p>
-     * Reads the assets the Maven UI build put in {@code target/classes}, so it runs
-     * only when this build included the UI. CI's Build &amp; Test passes
-     * {@code -DskipUi=true} and reports this as skipped; the
-     * {@code UI Build & Test} job applies the same check to
-     * {@code ui/manager/dist/assets}, where it cannot be skipped.
-     */
-    @Test
-    @DisplayName("every built asset carries a content hash")
-    void everyBuiltAssetCarriesAContentHash() {
-        assumeTrue(Files.isDirectory(repoRoot().resolve(BUILT_ASSETS_DIR)),
-                BUILT_ASSETS_DIR + " does not exist — this build skipped the UI (-DskipUi=true)");
-        Set<String> unhashed = new TreeSet<>();
-        for (String name : filesIn(BUILT_ASSETS_DIR)) {
-            if (!HASHED.matcher(name).matches()) {
-                unhashed.add(name);
-            }
-        }
-        assertTrue(unhashed.isEmpty(), "these assets carry no content hash, so the immutable cache header would pin a mutable file: " + unhashed);
     }
 
     /**
@@ -138,9 +108,9 @@ class StaticAssetCachingTest {
 
     /**
      * Everything under {@code /scripts/} that the filter would pin must in fact be
-     * hashed. This is the pair to {@link #everyBuiltAssetCarriesAContentHash()} for
-     * the hand-maintained half of the tree, where a new file is written by a person
-     * rather than emitted by a bundler.
+     * hashed. This is the pair to the Build Image job's hash check on the built
+     * assets for the hand-maintained half of the tree, where a new file is written
+     * by a person rather than emitted by a bundler.
      */
     @Test
     @DisplayName("no un-hashed script is matched by the immutable filter")

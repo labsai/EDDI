@@ -80,7 +80,7 @@ restore them from the last lockfile CI accepted rather than regenerating.
 ### Quality Gates
 
 There is no pre-commit hook any more (the husky + lint-staged hook did not survive the move into the
-EDDI monorepo). CI's `UI Build & Test` job runs both of these on every PR that touches `ui/`, so run
+EDDI monorepo). CI's `UI Manager Checks` job runs both of these on every PR that touches `ui/`, so run
 them yourself before pushing:
 
 1. **ESLint** — `npm run lint` (`--max-warnings 0`)

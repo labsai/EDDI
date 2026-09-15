@@ -11,8 +11,8 @@ run = "mvn compile quarkus:dev"
 description = "Start dev mode with live reload (port 7070)"
 
 [tasks.compile]
-run = "mvn compile -DskipUi=true"
-description = "Compile sources only (fast feedback; skips the npm build of ui/)"
+run = "mvn compile"
+description = "Compile sources only (fast feedback; never builds the UIs)"
 
 [tasks.test]
 run = "mvn verify -DskipUi=true"

@@ -520,7 +520,7 @@ Dev mode starts the application with **live reload** — code changes are picked
 
 Then open [http://localhost:7070](http://localhost:7070). The Quarkus Dev UI is available at [http://localhost:7070/q/dev](http://localhost:7070/q/dev).
 
-> **💡 The Manager and Chat UI build with Maven.** Their sources live in `ui/manager` and `ui/chat`, and every Maven build compiles them into the jar (about two minutes). For backend-only work add `-DskipUi=true`. Live reload does not rebuild the UI — for frontend work run `npm run dev` in `ui/manager` (port 3000, proxying to the backend on 7070). Upgrading an older checkout? Run `./mvnw clean` once.
+> **💡 The Manager and Chat UI build with Maven, at packaging time.** Their sources live in `ui/manager` and `ui/chat`. `./mvnw package` (and `verify`, `install`) builds them into the jar, about two minutes; `compile`, `test` and dev mode never touch npm, so dev mode serves `/manage` only after a `package`. For frontend work run `npm run dev` in `ui/manager` (port 3000, proxying to the backend on 7070). Upgrading an older checkout? Run `./mvnw clean` once.
 
 Dev mode also enables:
 
@@ -551,7 +551,7 @@ Dev mode also enables:
 | `./mvnw compile`                                              | Compile sources only (fast feedback). Also runs the two `validate`-phase style gates, so it **fails** on an unused import (Checkstyle) or an unformatted file (`formatter:validate`) — neither edits your sources; run `./mvnw formatter:format` to fix formatting |
 | `./mvnw clean compile`                                        | Clean build — delete `target/` and recompile from scratch                   |
 | `./mvnw test`                                                 | Run **unit tests** (excludes `*IT.java` integration tests)                  |
-| `./mvnw test -DskipUi=true` | Unit tests **without** building the Manager and Chat UIs — backend-only work |
+| `./mvnw package -DskipTests -DskipUi=true` | Build the jar **without** the Manager and Chat UIs (`compile` and `test` never build them) |
 | `./mvnw verify`                                               | Compile + unit tests + package. **Integration tests are skipped** — `skipITs` defaults to `true` in `pom.xml` |
 | `./mvnw verify -DskipITs=false`                               | **Full build** — adds the `*IT.java` integration tests (requires Docker). This is what CI runs |
 | `./mvnw validate`                                             | Run the **blocking style gates** — Checkstyle (`UnusedImports`/`RedundantImport` fail the build; `FileLength`/`LineLength` stay advisory) and `formatter:validate`, which reports unformatted files without touching them |

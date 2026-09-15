@@ -89,8 +89,8 @@ docker run -d --name mongodb -p 27017:27017 mongo:7
 # Run unit tests
 ./mvnw test
 
-# Backend-only work: skip the npm build of ui/manager and ui/chat (~2 min)
-./mvnw test -DskipUi=true
+# compile and test never build the UIs; package and verify do (~2 min) unless told not to
+./mvnw package -DskipTests -DskipUi=true
 
 # Full build: compile + unit tests + package
 ./mvnw clean verify -DskipITs
@@ -209,7 +209,9 @@ Every PR runs through these automated gates:
 | --------------------- | ---------------------------------------------------- | -------------- |
 | **Build + Tests**     | `mvnw clean verify` with Java 25                     | ✅ Yes         |
 | **CodeQL**            | Security scanning (injection, hardcoded creds, etc.) | ✅ Yes         |
-| **UI Build & Test**   | Manager lint, i18n, typecheck, Vitest, Playwright (mocked API); Chat UI typecheck and tests — when `ui/` changes | Blocks publishing |
+| **UI Manager Checks** | Manager audit, lint, i18n, typecheck, Vitest with coverage — when `ui/` changes | Blocks publishing |
+| **UI Manager E2E (MSW)** | Manager Playwright tier against mocked API — when `ui/` changes | Blocks publishing |
+| **UI Chat**           | Chat UI typecheck and tests — when `ui/` changes | Blocks publishing |
 | **Backend E2E**       | The Manager's Playwright API and full-stack tiers against the image built from the PR | Blocks publishing |
 | **Dependency Review** | Blocks vulnerable or incompatibly-licensed deps      | ✅ Yes         |
 | **CodeRabbit**        | AI code review with line-by-line feedback            | Advisory       |

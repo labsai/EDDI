@@ -328,7 +328,9 @@ The Manager's checks run in the EDDI repository's root workflow,
 
 | Job                   | What It Does                                                                 | When |
 | --------------------- | ---------------------------------------------------------------------------- | ---- |
-| **UI Build & Test**   | `npm run audit:prod`, lint (`src/` + `e2e/`, `--max-warnings 0`), `npm run i18n:check`, `tsc -b` (app, node configs and `e2e/`), Vitest with coverage thresholds, the production build, and the Playwright UI tier against MSW mocks | Every PR and push that touches `ui/`, `pom.xml`, `mise.toml` or `ci.yml` |
+| **UI Manager Checks** | `npm run audit:prod`, lint (`src/` + `e2e/`, `--max-warnings 0`), `npm run i18n:check`, `tsc -b` (app, node configs and `e2e/`), Vitest with coverage thresholds | Every PR and push that touches `ui/` or `ci.yml` |
+| **UI Manager E2E (MSW)** | The Playwright UI tier against MSW mocks | Same |
+| **Build Image**       | The production build of both UIs through Maven, and a check of what it emitted and packaged | Every change that affects the image |
 | **Backend E2E**       | Builds EDDI **from the same commit**, boots it, checks the shipped shells, then runs the Playwright API-integration and full-stack tiers and the OpenAPI snapshot check against it | MongoDB on every PR that changes code; MongoDB and PostgreSQL on push to main |
 
 The **OpenAPI snapshot check** is blocking everywhere. The backend under test is

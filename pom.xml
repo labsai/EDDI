@@ -35,13 +35,13 @@
         <quarkus-mcp-server.version>1.13.2</quarkus-mcp-server.version>
         <skipITs>true</skipITs>
         <!-- The Manager and Chat UIs (ui/manager, ui/chat) are built by Maven in
-             generate-resources and copied into the jar in process-resources, so every
-             lifecycle build runs npm unless -DskipUi=true. Backend-only work:
-             ./mvnw test -DskipUi=true. CI's Build & Test does the same; the UI is
-             built and tested in its own job. -->
+             prepare-package and copied into target/classes just before the jar is
+             assembled. compile, test and quarkus:dev therefore never run npm, while
+             package, verify and install always build both UIs unless -DskipUi=true.
+             CI's Build Image job is the build that ships them. -->
         <skipUi>false</skipUi>
         <frontend-maven-plugin.version>1.15.1</frontend-maven-plugin.version>
-        <!-- Node 20 matches CI (ci.yml, ui-build-and-test). Both frontends are on
+        <!-- Node 20 matches CI (ci.yml, the ui-* jobs). Both frontends are on
              Vite 6, which needs 20.19 or newer. -->
         <node.version>v20.20.2</node.version>
         <!-- Pinned: Maven only warns when a declared plugin carries no version, then
@@ -945,20 +945,26 @@
                     <!-- Node lands in ui/node (gitignored), shared by both UIs. -->
                     <installDirectory>${project.basedir}/ui</installDirectory>
                 </configuration>
+                <!-- prepare-package, not generate-resources: `./mvnw compile`, `test` and
+                     `quarkus:dev` never need the UI, and binding it earlier made every one of
+                     them reinstall node_modules and rebuild both UIs (and delete node_modules
+                     under a running `npm run dev`). copy-ui-bundles below shares the phase;
+                     executions of one phase run in POM order, so this plugin must stay
+                     declared before maven-resources-plugin. -->
                 <executions>
                     <execution>
                         <id>install-node</id>
                         <goals>
                             <goal>install-node-and-npm</goal>
                         </goals>
-                        <phase>generate-resources</phase>
+                        <phase>prepare-package</phase>
                     </execution>
                     <execution>
                         <id>manager-install</id>
                         <goals>
                             <goal>npm</goal>
                         </goals>
-                        <phase>generate-resources</phase>
+                        <phase>prepare-package</phase>
                         <configuration>
                             <arguments>ci</arguments>
                             <workingDirectory>${project.basedir}/ui/manager</workingDirectory>
@@ -969,7 +975,7 @@
                         <goals>
                             <goal>npm</goal>
                         </goals>
-                        <phase>generate-resources</phase>
+                        <phase>prepare-package</phase>
                         <configuration>
                             <arguments>run build</arguments>
                             <workingDirectory>${project.basedir}/ui/manager</workingDirectory>
@@ -984,7 +990,7 @@
                         <goals>
                             <goal>npm</goal>
                         </goals>
-                        <phase>generate-resources</phase>
+                        <phase>prepare-package</phase>
                         <configuration>
                             <arguments>ci</arguments>
                             <workingDirectory>${project.basedir}/ui/chat</workingDirectory>
@@ -995,7 +1001,7 @@
                         <goals>
                             <goal>npm</goal>
                         </goals>
-                        <phase>generate-resources</phase>
+                        <phase>prepare-package</phase>
                         <configuration>
                             <arguments>run build</arguments>
                             <workingDirectory>${project.basedir}/ui/chat</workingDirectory>
@@ -1013,7 +1019,7 @@
                         <goals>
                             <goal>copy-resources</goal>
                         </goals>
-                        <phase>process-resources</phase>
+                        <phase>prepare-package</phase>
                         <configuration>
                             <skip>${skipUi}</skip>
                             <outputDirectory>${project.build.outputDirectory}/META-INF/resources</outputDirectory>

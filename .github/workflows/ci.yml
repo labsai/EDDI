@@ -38,6 +38,7 @@ jobs:
       scripts: ${{ steps.result.outputs.scripts }}
       operator_docs: ${{ steps.result.outputs.operator_docs }}
       ui: ${{ steps.result.outputs.ui }}
+      backend: ${{ steps.result.outputs.backend }}
       # JSON list consumed by e2e-fullstack's matrix; see "Resolve E2E databases".
       databases: ${{ steps.dbs.outputs.databases }}
     steps:
@@ -97,6 +98,35 @@ jobs:
               # only lints shell — it cannot run the unit test that owns the
               # hook's logic, so a hook-only PR would change it ungraded.
               - '.githooks/**'
+            # `code` without the frontends, plus the UI markdown that
+            # DocumentationLinksTest and DocumentationAccuracyTest walk. On a pull
+            # request Build & Test and Integration Tests gate on this instead of
+            # `code`, so a change confined to ui/ does not run the Java suite; on
+            # push and on tags they still gate on `code`, so nothing is published
+            # untested. BuildQualityGatesTest keeps it equal to `code` minus
+            # 'ui/**' plus 'ui/**/*.md'.
+            backend:
+              - 'src/**'
+              - 'pom.xml'
+              - '.github/workflows/**'
+              - '**/Dockerfile*'
+              - '**/.dockerignore'
+              - 'docker-compose*.yml'
+              - 'mcp-sidecar/**'
+              - 'k8s/**'
+              - 'helm/**'
+              - 'mvnw*'
+              - '.mvn/**'
+              - 'checkstyle.xml'
+              - 'eclipse-formatter.xml'
+              - 'mise.toml'
+              - '.trivyignore'
+              - '.gitleaksignore'
+              - 'licenses/**'
+              - 'README.md'
+              - 'AGENTS.md'
+              - '.githooks/**'
+              - 'ui/**/*.md'
             # The installers are the README's headline `curl | bash` path and were
             # in NO filter at all, so a PR touching only them skipped the whole
             # pipeline — and a skipped required check still satisfies branch
@@ -128,15 +158,13 @@ jobs:
               - 'docs/kubernetes.md'
               - 'README.md'
               - 'docs/security.md'
-            # Gates UI Build & Test. The workflow is listed so that a CI-only change
-            # still runs the UI job it may have broken.
+            # Gates the ui-* jobs. The workflow is listed so that a CI-only change
+            # still runs the UI jobs it may have broken. pom.xml is deliberately not:
+            # the ui-* jobs never run Maven, and the pom's UI wiring (node.version,
+            # the frontend plugin, copy-ui-bundles) is exercised by Build Image.
             ui:
               - 'ui/**'
               - '.github/workflows/ci.yml'
-              # The UI build's own configuration: node.version, the frontend and
-              # copy-ui-bundles plugins and the MSW exclude live in the pom.
-              - 'pom.xml'
-              - 'mise.toml'
 
       - name: Resolve
         id: result
@@ -152,11 +180,13 @@ jobs:
             echo "scripts=true" >> "$GITHUB_OUTPUT"
             echo "operator_docs=true" >> "$GITHUB_OUTPUT"
             echo "ui=true" >> "$GITHUB_OUTPUT"
+            echo "backend=true" >> "$GITHUB_OUTPUT"
           else
             echo "code=${{ steps.filter.outputs.code }}" >> "$GITHUB_OUTPUT"
             echo "scripts=${{ steps.filter.outputs.scripts }}" >> "$GITHUB_OUTPUT"
             echo "operator_docs=${{ steps.filter.outputs.operator_docs }}" >> "$GITHUB_OUTPUT"
             echo "ui=${{ steps.filter.outputs.ui }}" >> "$GITHUB_OUTPUT"
+            echo "backend=${{ steps.filter.outputs.backend }}" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Resolve E2E databases
@@ -177,6 +207,7 @@ jobs:
           echo "### 📊 Change Detection" >> "$GITHUB_STEP_SUMMARY"
           echo "- Code changed: **${{ steps.result.outputs.code }}**" >> "$GITHUB_STEP_SUMMARY"
           echo "- UI changed: **${{ steps.result.outputs.ui }}**" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Backend changed: **${{ steps.result.outputs.backend }}**" >> "$GITHUB_STEP_SUMMARY"
           if [[ "$GITHUB_REF" == refs/tags/* ]]; then
             echo "- 🏷️ Tag push — full pipeline forced regardless of changed paths" >> "$GITHUB_STEP_SUMMARY"
           fi
@@ -526,19 +557,30 @@ jobs:
     name: Build & Test
     runs-on: ubuntu-latest
     needs: detect-changes
-    # operator_docs as well as code. DeploymentManifestsTest asserts things about
+    # backend or operator_docs on a pull request; code on push and on tags.
+    #
+    # operator_docs: DeploymentManifestsTest asserts things about
     # docs/kubernetes.md and README.md — that they route `kubectl apply -k`
     # through create-secrets.sh, name ContainerCreating, and do not advertise the
-    # mutable tag — and neither file is in the `code` filter, so the one change
-    # those guards could not see was a change to the files they guard.
+    # mutable tag — so the one change those guards could not see was a change to
+    # the files they guard.
     #
-    # Nothing downstream widens with it: integration-test and trivy-scan still
-    # gate on `code` alone, and docker `needs` all three, so a docs-only change
-    # runs the tests and publishes nothing. sbom and preflight-check carry the
-    # same `code` condition explicitly for that reason. (codeql has no condition
-    # at all — it is deliberately unconditional for OpenSSF Scorecard; see its
-    # own header.)
-    if: needs.detect-changes.outputs.code == 'true' || needs.detect-changes.outputs.operator_docs == 'true'
+    # backend, not code, on a pull request: a change confined to ui/ cannot fail a
+    # Java test (the resource tests read stand-in shells), so a Manager, Chat or
+    # npm-Dependabot PR does not pay for the ~20k-test suite. On push and on tags
+    # this job still gates on `code`, so docker's `needs` see every published
+    # commit tested.
+    #
+    # Nothing downstream widens with operator_docs: integration-test and
+    # trivy-scan still gate on `code`, and docker `needs` all three, so a docs-only
+    # change runs the tests and publishes nothing. sbom and preflight-check carry
+    # the same `code` condition explicitly for that reason. (codeql has no
+    # condition at all — it is deliberately unconditional for OpenSSF Scorecard;
+    # see its own header.)
+    if: >-
+      needs.detect-changes.outputs.backend == 'true' ||
+      needs.detect-changes.outputs.operator_docs == 'true' ||
+      (github.event_name != 'pull_request' && needs.detect-changes.outputs.code == 'true')
 
     steps:
       - name: Checkout
@@ -552,9 +594,10 @@ jobs:
           cache: maven
 
       - name: Build and test
-        # -DskipUi=true: the UI has its own job (UI Build & Test), and the image it
-        # ships in is built once, by Build Image. The resource tests that read the
-        # SPA shells use the stand-ins under src/test/resources.
+        # -DskipUi=true is belt and braces: `test` stops before prepare-package, where
+        # the UIs are built. They have their own ui-* jobs, and the image is built
+        # once, by Build Image. The resource tests that read the SPA shells use the
+        # stand-ins under src/test/resources.
         run: ./mvnw clean test -DskipUi=true -B
 
       - name: Upload test results
@@ -639,7 +682,9 @@ jobs:
     name: Integration Tests
     runs-on: ubuntu-latest
     needs: [detect-changes, build-and-test]
-    if: needs.detect-changes.outputs.code == 'true'
+    # Same split as build-and-test: on a pull request only a backend change runs the
+    # Testcontainers suite; on push and on tags any code change does.
+    if: needs.detect-changes.outputs.code == 'true' && (github.event_name != 'pull_request' || needs.detect-changes.outputs.backend == 'true')
 
     steps:
       - name: Checkout
@@ -828,16 +873,21 @@ jobs:
         with:
           category: "/language:javascript-typescript"
 
-  # ─── Job 2f: UI Build & Test ───────────────────────────────────
+  # ─── Job 2f: UI jobs ───────────────────────────────────────────
   # The Manager's and the Chat UI's own CI, carried over from their former repos
-  # (EDDI-Manager ci-cd.yml + the `UI E2E (MSW)` tier of its e2e.yml). The tiers
-  # that need a running backend are in e2e-fullstack, against the image this run
-  # builds.
-  ui-build-and-test:
-    name: UI Build & Test
+  # (EDDI-Manager ci-cd.yml + the `UI E2E (MSW)` tier of its e2e.yml), as three
+  # parallel jobs so a Chat failure does not wait behind the Manager's tests.
+  # Their production builds are not repeated here: Build Image builds both UIs
+  # through Maven and checks the output. The tiers that need a running backend
+  # are in e2e-fullstack, against that image.
+  ui-manager-checks:
+    name: UI Manager Checks
     runs-on: ubuntu-latest
     needs: detect-changes
     if: needs.detect-changes.outputs.ui == 'true'
+    defaults:
+      run:
+        working-directory: ui/manager
     steps:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -849,135 +899,138 @@ jobs:
           cache: npm
           cache-dependency-path: |
             ui/manager/package-lock.json
-            ui/chat/package-lock.json
 
-      - name: Manager - install
-        working-directory: ui/manager
+      - name: Install
         run: npm ci
 
-      - name: Manager - audit production dependencies
-        working-directory: ui/manager
+      - name: Audit production dependencies
         run: npm run audit:prod
 
-      - name: Manager - lint
-        working-directory: ui/manager
+      - name: Lint
         run: npm run lint
 
       # Fails on any drift between the code and the locale files: a key passed to
       # t() that en.json lacks, a key en.json has that a locale lacks, or a leftover
       # key in a locale. See ui/manager/scripts/check-i18n.mjs.
-      - name: Manager - i18n drift check
-        working-directory: ui/manager
+      - name: i18n drift check
         run: npm run i18n:check
 
-      - name: Manager - type check
-        working-directory: ui/manager
+      - name: Type check
         run: npm run typecheck
 
       # Includes openapi-contract.test.ts, which checks the MSW handlers against the
       # committed OpenAPI snapshot. e2e-fullstack checks that snapshot against the
       # backend built from this same commit.
-      - name: Manager - unit tests with coverage
-        working-directory: ui/manager
+      - name: Unit tests with coverage
         run: npx vitest run --coverage
 
-      - name: Manager - build
-        working-directory: ui/manager
-        run: npm run build
-
-      - name: Manager - verify the build output
-        working-directory: ui/manager
-        # /assets/ is served with `Cache-Control: immutable` for a year
-        # (quarkus.http.filter.ui-assets-immutable), which is only safe because
-        # every file there carries a content hash. StaticAssetCachingTest makes the
-        # same assertion but is skipped by Build & Test (-DskipUi=true); here it
-        # cannot be. The shells are what EDDI serves by exact name.
-        run: |
-          set -euo pipefail
-          for shell in manage welcome workforce; do
-            [ -f "dist/$shell.html" ] || { echo "::error::dist/$shell.html was not built"; exit 1; }
-          done
-          if [ -e dist/index.html ]; then
-            echo "::error::dist/index.html was built — index.html is the dev-server entry and must not be a build input"
-            exit 1
-          fi
-          unhashed=$(find dist/assets -type f -printf '%f\n' | grep -vE '^.+[.-][A-Za-z0-9_-]{8}\.[A-Za-z0-9]+$' || true)
-          if [ -n "$unhashed" ]; then
-            echo "::error::these assets carry no content hash, so the immutable cache header would pin a mutable file:"
-            echo "$unhashed"
-            exit 1
-          fi
-          echo "$(find dist/assets -type f | wc -l) hashed assets, three shells, no index.html"
-
-      - name: Install Playwright browsers
-        working-directory: ui/manager
-        run: npx playwright install --with-deps chromium
-
-      - name: Manager - UI E2E (MSW, no backend)
-        working-directory: ui/manager
-        run: npm run test:e2e
-
-      - name: Upload Manager reports
+      - name: Upload coverage report
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: ui-manager-reports
-          path: |
-            ui/manager/playwright-report/
-            ui/manager/coverage/
+          name: ui-manager-coverage
+          path: ui/manager/coverage/
           retention-days: 14
 
-      # `!cancelled()`: a failing Manager step must not hide a second, Chat failure.
-      - name: Chat - install
-        id: chat-install
-        if: ${{ !cancelled() }}
-        working-directory: ui/chat
+  ui-manager-e2e:
+    name: UI Manager E2E (MSW)
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.ui == 'true'
+    defaults:
+      run:
+        working-directory: ui/manager
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Set up Node 20
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            ui/manager/package-lock.json
+
+      - name: Install
         run: npm ci
 
-      - name: Chat - type check
-        if: ${{ !cancelled() && steps.chat-install.outcome == 'success' }}
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: UI E2E (MSW, no backend)
+        run: npm run test:e2e
+
+      - name: Upload Playwright report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ui-manager-e2e-report
+          path: ui/manager/playwright-report/
+          retention-days: 14
+
+  ui-chat:
+    name: UI Chat
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.ui == 'true'
+    defaults:
+      run:
         working-directory: ui/chat
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Set up Node 20
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            ui/chat/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Type check
         run: npm run typecheck
 
-      - name: Chat - unit tests
-        if: ${{ !cancelled() && steps.chat-install.outcome == 'success' }}
-        working-directory: ui/chat
+      - name: Unit tests
         run: npm test
-
-      - name: Chat - build
-        if: ${{ !cancelled() && steps.chat-install.outcome == 'success' }}
-        working-directory: ui/chat
-        run: |
-          set -euo pipefail
-          npm run build
-          ls dist/chat.html dist/scripts/js/chat-ui.*.js dist/scripts/css/chat-ui.*.css > /dev/null
 
   # ─── Job 2g: UI Gate ───────────────────────────────────────────
   # docker must not publish an image whose UI failed its checks — but a bare
-  # `needs: ui-build-and-test` would SKIP docker on every backend-only push,
-  # because a skipped dependency skips its dependents. This always runs, and fails
-  # only when the UI changed and its job did not succeed.
+  # `needs` on the ui-* jobs would SKIP docker on every backend-only push, because
+  # a skipped dependency skips its dependents. This always runs, and fails only
+  # when the UI changed and one of its jobs did not succeed. It is the one UI
+  # check to make required.
   ui-gate:
     name: UI Gate
     runs-on: ubuntu-latest
-    needs: [detect-changes, ui-build-and-test]
+    needs: [detect-changes, ui-manager-checks, ui-manager-e2e, ui-chat]
     if: always()
     steps:
       - name: Require UI success only when the UI changed
         env:
           DETECT: ${{ needs.detect-changes.result }}
           CHANGED: ${{ needs.detect-changes.outputs.ui }}
-          RESULT: ${{ needs.ui-build-and-test.result }}
+          CHECKS: ${{ needs.ui-manager-checks.result }}
+          E2E: ${{ needs.ui-manager-e2e.result }}
+          CHAT: ${{ needs.ui-chat.result }}
         run: |
           if [ "$DETECT" != "success" ]; then
             echo "::error::detect-changes=$DETECT, so whether the UI changed is unknown"
             exit 1
           fi
-          if [ "$CHANGED" = "true" ] && [ "$RESULT" != "success" ]; then
-            echo "::error::the UI changed but ui-build-and-test=$RESULT"
-            exit 1
+          if [ "$CHANGED" = "true" ]; then
+            for result in "ui-manager-checks=$CHECKS" "ui-manager-e2e=$E2E" "ui-chat=$CHAT"; do
+              if [ "${result#*=}" != "success" ]; then
+                echo "::error::the UI changed but $result"
+                exit 1
+              fi
+            done
           fi
-          echo "ui changed=$CHANGED, ui-build-and-test=$RESULT — gate satisfied"
+          echo "ui changed=$CHANGED, checks=$CHECKS, e2e=$E2E, chat=$CHAT — gate satisfied"
 
   # ─── Job 2c: Trivy Filesystem Scan ─────────────────────────────
   trivy-scan:
@@ -1236,6 +1289,18 @@ jobs:
             echo "- \`${DOCKER_IMAGE}:latest\`" >> "$GITHUB_STEP_SUMMARY"
           fi
 
+      # frontend-maven-plugin vendors its own Node, but its `npm ci` reads and writes
+      # the same ~/.npm cache this restores; without it every run downloaded both
+      # dependency trees cold.
+      - name: Set up Node 20 (npm cache for the UI build)
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            ui/manager/package-lock.json
+            ui/chat/package-lock.json
+
       - name: Build application
         # No -DskipUi: this is the build that ships, so it runs npm ci + npm run build
         # for both UIs (frontend-maven-plugin vendors Node into ui/node) and copies
@@ -1246,11 +1311,14 @@ jobs:
         # style verdict for this commit, and docker needs it before anything ships.
         run: ./mvnw clean package -DskipTests -Dformatter.skip=true -Dcheckstyle.skip=true -Plicense-gen -B
 
-      - name: Verify the packaged UI matches this build
-        # copy-resources never prunes, so without `clean` above every hashed chunk of
-        # every earlier build would ship too (reproduced locally: 913 packaged assets
-        # against 737 built). The jar must carry exactly the assets Vite just emitted,
-        # and never the MSW dev worker.
+      - name: Verify the built and packaged UI
+        # What EDDI serves by exact name must exist: the three Manager shells and the
+        # Chat shell and bundle. /assets/ is served `immutable` for a year, which is
+        # only safe while every file there carries a content hash. And copy-resources
+        # never prunes, so without `clean` above every hashed chunk of every earlier
+        # build would ship too (reproduced locally: 913 packaged assets against 737
+        # built) — the jar must carry exactly the assets Vite just emitted, and never
+        # the MSW dev worker.
         run: |
           set -euo pipefail
           packaged=$(cd target/classes/META-INF/resources/assets && find . -type f | sort)
@@ -1264,7 +1332,21 @@ jobs:
             echo "::error::mockServiceWorker.js was packaged"
             exit 1
           fi
-          echo "packaged assets match the build: $(echo "$built" | wc -l) files"
+          for shell in manage welcome workforce; do
+            [ -f "ui/manager/dist/$shell.html" ] || { echo "::error::ui/manager/dist/$shell.html was not built"; exit 1; }
+          done
+          if [ -e ui/manager/dist/index.html ]; then
+            echo "::error::ui/manager/dist/index.html was built — index.html is the dev-server entry and must not be a build input"
+            exit 1
+          fi
+          unhashed=$(echo "$built" | sed 's#^\./##' | grep -vE '^.+[.-][A-Za-z0-9_-]{8}\.[A-Za-z0-9]+$' || true)
+          if [ -n "$unhashed" ]; then
+            echo "::error::these assets carry no content hash, so the immutable cache header would pin a mutable file:"
+            echo "$unhashed"
+            exit 1
+          fi
+          ls ui/chat/dist/chat.html ui/chat/dist/scripts/js/chat-ui.*.js ui/chat/dist/scripts/css/chat-ui.*.css > /dev/null
+          echo "packaged assets match the build: $(echo "$built" | wc -l) hashed files, four shells, the Chat bundle"
 
       - name: Build Docker image
         # PRIMARY_TAG arrives through env:, never through ${{ }} interpolation — see
@@ -1440,8 +1522,13 @@ jobs:
       # touched nothing. Here the backend is built from the same commit, so a stale
       # snapshot means THIS change altered the API surface: refresh it in the PR.
       # Operations only — `eddiVersion` moves with every pom bump.
+      #
+      # MongoDB leg only: the API surface does not depend on the datastore, and one
+      # failure is enough. On failure the regenerated file is uploaded, so whoever
+      # changed the API can commit it without a local backend or Node.
       - name: Check the OpenAPI snapshot matches this backend
-        if: ${{ !cancelled() && steps.health.outcome == 'success' }}
+        id: openapi
+        if: ${{ !cancelled() && steps.health.outcome == 'success' && matrix.database == 'mongodb' }}
         working-directory: ui/manager
         run: |
           node scripts/refresh-openapi-operations.mjs
@@ -1451,6 +1538,14 @@ jobs:
             exit 1
           fi
           echo "Snapshot operations match the backend built from this commit."
+
+      - name: Upload the regenerated OpenAPI snapshot
+        if: ${{ failure() && steps.openapi.outcome == 'failure' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: openapi-operations-refreshed
+          path: ui/manager/src/test/mocks/openapi-operations.json
+          retention-days: 14
 
       - name: Collect backend logs
         if: ${{ !cancelled() }}
@@ -1515,7 +1610,7 @@ jobs:
     #   gitleaks          secret scanning
     #   build-image       the image this job publishes — it builds nothing itself
     #   e2e-fullstack     the Manager driven against THAT image, on both stores
-    #   ui-gate           UI Build & Test, when the UI changed (see ui-gate)
+    #   ui-gate           the ui-* jobs, when the UI changed (see ui-gate)
     needs: [detect-changes, build-and-test, integration-test, trivy-scan, codeql, codeql-ui, gitleaks, build-image, e2e-fullstack, ui-gate]
     # NOTE: deliberately no always(). always() cancelled the implicit
     # needs-success gate, and the tag branch then short-circuited the explicit
@@ -2177,7 +2272,7 @@ jobs:
     runs-on: ubuntu-latest
     if: always()
     needs:
-      [detect-changes, build-and-test, integration-test, ui-build-and-test, build-image, e2e-fullstack, docker, smoke-test, codeql, trivy-scan, gitleaks, preflight-check, preflight-push]
+      [detect-changes, build-and-test, integration-test, ui-gate, build-image, e2e-fullstack, docker, smoke-test, codeql, trivy-scan, gitleaks, preflight-check, preflight-push]
 
     steps:
       - name: Send build notification
@@ -2203,7 +2298,7 @@ jobs:
           # Determine overall status
           BUILD="${{ needs.build-and-test.result }}"
           IT="${{ needs.integration-test.result }}"
-          UI="${{ needs.ui-build-and-test.result }}"
+          UI="${{ needs.ui-gate.result }}"
           IMAGE="${{ needs.build-image.result }}"
           E2E="${{ needs.e2e-fullstack.result }}"
           DOCKER="${{ needs.docker.result }}"
@@ -2301,7 +2396,7 @@ jobs:
                   fields: [
                     { type: "mrkdwn", text: ($build_icon + " Build & Test") },
                     { type: "mrkdwn", text: ($it_icon + " Integration Tests") },
-                    { type: "mrkdwn", text: ($ui_icon + " UI Build & Test") },
+                    { type: "mrkdwn", text: ($ui_icon + " UI Gate") },
                     { type: "mrkdwn", text: ($image_icon + " Build Image") },
                     { type: "mrkdwn", text: ($e2e_icon + " Backend E2E") },
                     { type: "mrkdwn", text: ($docker_icon + " Docker Push") },

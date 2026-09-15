@@ -854,6 +854,31 @@ class BuildQualityGatesTest {
     }
 
     /**
+     * On a pull request, Build &amp; Test and Integration Tests gate on the
+     * {@code backend} filter instead of {@code code}, so that a change confined to
+     * {@code ui/} does not run the Java suite. That is only safe while
+     * {@code backend} is exactly {@code code} minus the frontends, plus the UI
+     * markdown the documentation tests walk: a path added to {@code code} and
+     * forgotten in {@code backend} would silently stop running the Java suite on
+     * the pull requests that touch it.
+     */
+    @Test
+    @DisplayName("the backend path filter is the code filter minus the frontends")
+    void ciBackendFilterIsTheCodeFilterMinusTheFrontends() throws Exception {
+        List<String> expected = new ArrayList<>(ciFilterPatterns("code"));
+        assertTrue(expected.remove("ui/**"),
+                "the `code` filter no longer lists ui/**, but the frontends ship inside the image. Found: " + expected);
+        expected.add("ui/**/*.md");
+        List<String> backend = ciFilterPatterns("backend");
+
+        assertEquals(expected.stream().sorted().toList(), backend.stream().sorted().toList(),
+                "the `backend` filter in " + CI_WORKFLOW + " must be the `code` filter without ui/** and with"
+                        + " ui/**/*.md (DocumentationLinksTest walks the UI markdown). Build & Test gates on it for"
+                        + " pull requests, so a path that is in `code` but not here skips the Java suite on every PR"
+                        + " that touches only that path.");
+    }
+
+    /**
      * The globs listed under one named filter of the paths-filter step, unquoted.
      * The list ends at the next key, which is the only line inside the block that
      * is neither a comment nor a {@code - } item.
