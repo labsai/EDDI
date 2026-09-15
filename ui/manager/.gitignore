@@ -1,0 +1,42 @@
+node_modules
+dist
+.idea
+.vscode
+.vscode/settings.json
+*.log
+coverage
+
+# Auth / secrets
+.npmrc
+.env
+.env.*
+
+# Firebase (legacy)
+.firebaserc
+firebase.json
+
+# Test output
+playwright-report/
+test-results/
+test-results.json
+test-output*.txt
+vitest-results.json
+out.txt
+test_output.txt
+
+# Mutation testing (Stryker) — sandbox and generated report
+.stryker-tmp/
+reports/mutation/
+
+# Local API spec dumps
+openapi.json
+openapi_paths.txt
+
+# design-sync (claude.ai/design) — generated caches only.
+# The `.design-sync/` and `.ds-sync/` scaffolding itself is tracked, so it must
+# not be listed here: ignoring a tracked path has no effect and only misleads.
+ds-bundle/
+.design-sync/.cache/
+.design-sync/learnings/
+.design-sync/node_modules
+.ds-sync/node_modules
