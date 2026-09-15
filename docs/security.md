@@ -112,7 +112,7 @@ if (checkForUserAuthentication &&
 
 ### Local Development Keycloak
 
-The EDDI-Manager repo provides a docker-compose for local Keycloak:
+The Manager (`ui/manager` in this repository) provides a docker-compose for local Keycloak — run it from that directory:
 
 ```bash
 docker compose -f docker-compose.keycloak.yml up

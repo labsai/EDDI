@@ -27,10 +27,12 @@ class RestHtmlChatResourceTest {
         resource = new RestHtmlChatResource();
     }
 
-    // chat.html ships in src/main/resources/META-INF/resources, which IS on the
-    // test classpath, so these assert outright. Every assertion here used to be
-    // hedged with `catch (Exception e) { assertNotNull(e); }`, which passes
-    // whatever happens — and is why the resource-name defect below went unnoticed.
+    // chat.html is on the test classpath via the stand-in under
+    // src/test/resources/META-INF/resources (the real shell is built from ui/chat,
+    // which the unit-test job skips), so these assert outright. Every assertion
+    // here used to be hedged with `catch (Exception e) { assertNotNull(e); }`,
+    // which passes whatever happens — and is why the resource-name defect below
+    // went unnoticed.
 
     @Test
     @DisplayName("viewDefault should delegate to viewHtml with root path")

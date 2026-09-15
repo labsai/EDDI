@@ -834,9 +834,9 @@ class BuildQualityGatesTest {
      * along.
      */
     @Test
-    @DisplayName("the CI paths filter covers every repo-root document a test grades")
-    void ciCodeFilterCoversTheRootDocumentsTestsGrade() throws Exception {
-        List<String> patterns = ciFilterPatterns("code");
+    @DisplayName("the backend CI paths filter covers every repo-root document a test grades")
+    void ciBackendFilterCoversTheRootDocumentsTestsGrade() throws Exception {
+        List<String> patterns = ciFilterPatterns("backend");
         List<String> documents = rootDocumentsReadByTests();
 
         assertFalse(documents.isEmpty(),
@@ -847,10 +847,57 @@ class BuildQualityGatesTest {
         List<String> unfiltered = documents.stream().filter(document -> !patterns.contains(document)).toList();
 
         assertEquals(List.of(), unfiltered,
-                "these repo-root documents are graded by a test but appear in no `code` path filter in " + CI_WORKFLOW
-                        + ", so a PR that changes only one of them resolves code=false and skips Build & Test — and a"
+                "these repo-root documents are graded by a test but appear in no `backend` path filter in " + CI_WORKFLOW
+                        + ", so a PR that changes only one of them resolves backend=false and skips Build & Test — and a"
                         + " skipped required check still satisfies branch protection, so it merges with the contract"
                         + " ungraded. Current filter: " + patterns);
+    }
+
+    /**
+     * On a pull request, Build &amp; Test and Integration Tests gate on the
+     * {@code backend} filter instead of {@code code}, so that a change confined to
+     * {@code ui/} does not run the Java suite. That is only safe while
+     * {@code backend} is exactly {@code code} minus the frontends, plus the UI
+     * markdown the documentation tests walk: a path added to {@code code} and
+     * forgotten in {@code backend} would silently stop running the Java suite on
+     * the pull requests that touch it.
+     */
+    @Test
+    @DisplayName("the backend path filter is the code filter minus the frontends, plus the test-only files")
+    void ciBackendFilterIsTheCodeFilterMinusTheFrontends() throws Exception {
+        List<String> expected = new ArrayList<>(ciFilterPatterns("code"));
+        assertTrue(expected.remove("ui/**"),
+                "the `code` filter no longer lists ui/**, but the frontends ship inside the image. Found: " + expected);
+        expected.addAll(List.of("ui/**/*.md", "README.md", "AGENTS.md", ".githooks/**"));
+        List<String> backend = ciFilterPatterns("backend");
+
+        assertEquals(expected.stream().sorted().toList(), backend.stream().sorted().toList(),
+                "the `backend` filter in " + CI_WORKFLOW + " must be the `code` filter without ui/** and with"
+                        + " ui/**/*.md, README.md, AGENTS.md and .githooks/** (only tests read those). Build & Test gates on it for"
+                        + " pull requests, so a path that is in `code` but not here skips the Java suite on every PR"
+                        + " that touches only that path.");
+    }
+
+    /**
+     * The Integration Tests job skips surefire ({@code -DskipUTs=true}) because
+     * Build &amp; Test already ran the unit tests on the same commit. The merged
+     * coverage gate still needs their execution data: without
+     * {@code target/jacoco.exec} restored it would grade integration-test coverage
+     * alone against the 90/80 limits and fail every release, or — if the limits
+     * were ever relaxed to make that pass — stop measuring what it claims to.
+     */
+    @Test
+    @DisplayName("a CI job that skips the unit tests restores their coverage data for the merged gate")
+    void skippedUnitTestsStillFeedTheMergedCoverageGate() throws Exception {
+        String ci = read(CI_WORKFLOW);
+        assertTrue(ci.contains("-DskipUTs=true"),
+                CI_WORKFLOW + " no longer passes -DskipUTs=true; if the unit tests run twice again on purpose, delete"
+                        + " this test together with the unit-test-coverage-data hand-off");
+        assertEquals(2, ci.split("name: unit-test-coverage-data", -1).length - 1,
+                "the unit-test coverage data must be uploaded by Build & Test and downloaded by the job that skips"
+                        + " the unit tests — exactly one of each");
+        assertTrue(ci.contains("path: target/jacoco.exec"),
+                "Build & Test must upload target/jacoco.exec, the file the `merge` execution reads");
     }
 
     /**

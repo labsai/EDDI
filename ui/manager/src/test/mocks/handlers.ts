@@ -1,0 +1,5857 @@
+import { http, HttpResponse } from "msw";
+
+const AGENTS_MOCK = [
+  {
+    resource: "eddi://ai.labs.agent/agentstore/agents/agent1?version=3",
+    name: "Support Agent",
+    description: "24/7 customer support with order tracking, returns processing, and live-agent escalation",
+    createdOn: Date.now() - 12 * 86400000,
+    lastModifiedOn: Date.now() - 3600000,
+    ownerId: "alice@example.com",
+    spaceId: "user:alice@example.com",
+    visibility: "space"
+  },
+  {
+    resource: "eddi://ai.labs.agent/agentstore/agents/agent2?version=2",
+    name: "FAQ Agent",
+    description: "Self-service knowledge base answering product, billing, and account questions",
+    createdOn: Date.now() - 14 * 86400000,
+    lastModifiedOn: Date.now() - 7200000,
+    ownerId: "alice@example.com",
+    spaceId: "user:alice@example.com",
+    visibility: "private"
+  },
+  {
+    resource: "eddi://ai.labs.agent/agentstore/agents/agent3?version=1",
+    name: "Appointment Scheduler",
+    description: "Books, reschedules, and cancels appointments with calendar integration and reminders",
+    createdOn: Date.now() - 10 * 86400000,
+    lastModifiedOn: Date.now() - 2 * 86400000,
+    ownerId: "alice@example.com",
+    spaceId: "team:engineering",
+    visibility: "space"
+  },
+  {
+    resource: "eddi://ai.labs.agent/agentstore/agents/agent4?version=2",
+    name: "Invoice Analyst",
+    description: "Extracts line items from uploaded invoices, validates totals, and flags discrepancies",
+    createdOn: Date.now() - 8 * 86400000,
+    lastModifiedOn: Date.now() - 86400000,
+    ownerId: "bob@example.com",
+    spaceId: "team:engineering",
+    visibility: "published"
+  },
+  {
+    resource: "eddi://ai.labs.agent/agentstore/agents/agent5?version=1",
+    name: "Product Recommender",
+    description: "Suggests products based on browsing history, preferences, and real-time inventory",
+    createdOn: Date.now() - 6 * 86400000,
+    lastModifiedOn: Date.now() - 4 * 3600000,
+  },
+  {
+    resource: "eddi://ai.labs.agent/agentstore/agents/agent6?version=1",
+    name: "Employee Onboarding Guide",
+    description: "Walks new hires through IT setup, policy acknowledgement, and benefits enrollment",
+    createdOn: Date.now() - 5 * 86400000,
+    lastModifiedOn: Date.now() - 2 * 3600000,
+  },
+  {
+    resource: "eddi://ai.labs.agent/agentstore/agents/agent7?version=1",
+    name: "Contract Review Assistant",
+    description: "Analyzes legal contracts using RAG, highlights key clauses, and flags risk areas",
+    createdOn: Date.now() - 3 * 86400000,
+    lastModifiedOn: Date.now() - 5 * 3600000,
+  },
+  {
+    resource: "eddi://ai.labs.agent/agentstore/agents/agent8?version=1",
+    name: "IT Helpdesk Bot",
+    description: "Troubleshoots common IT issues, resets passwords, and creates Jira tickets for escalation",
+    createdOn: Date.now() - 2 * 86400000,
+    lastModifiedOn: Date.now() - 1800000,
+  },
+];
+
+const WORKFLOWS_MOCK = [
+  {
+    resource: "eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=2",
+    name: "Support Ticket Pipeline",
+    description: "Parser → intent rules → LLM response → output with escalation fallback",
+    createdOn: Date.now() - 12 * 86400000,
+    lastModifiedOn: Date.now() - 3600000,
+  },
+  {
+    resource: "eddi://ai.labs.workflow/workflowstore/workflows/wf2?version=1",
+    name: "FAQ Lookup Flow",
+    description: "Dictionary matching → behavior rules → LLM answer → quick-reply output",
+    createdOn: Date.now() - 14 * 86400000,
+    lastModifiedOn: Date.now() - 7200000,
+  },
+  {
+    resource: "eddi://ai.labs.workflow/workflowstore/workflows/wf3?version=1",
+    name: "Appointment Booking Pipeline",
+    description: "Slot extraction → calendar API → confirmation output with reminder scheduling",
+    createdOn: Date.now() - 10 * 86400000,
+    lastModifiedOn: Date.now() - 2 * 86400000,
+  },
+  {
+    resource: "eddi://ai.labs.workflow/workflowstore/workflows/wf4?version=2",
+    name: "Invoice Processing Flow",
+    description: "Document parser → field extraction → validation rules → CRM API update",
+    createdOn: Date.now() - 8 * 86400000,
+    lastModifiedOn: Date.now() - 86400000,
+  },
+  {
+    resource: "eddi://ai.labs.workflow/workflowstore/workflows/wf5?version=1",
+    name: "Product Recommendation Engine",
+    description: "User context → RAG product catalog → LLM ranking → personalized output",
+    createdOn: Date.now() - 6 * 86400000,
+    lastModifiedOn: Date.now() - 4 * 3600000,
+  },
+  {
+    resource: "eddi://ai.labs.workflow/workflowstore/workflows/wf6?version=1",
+    name: "Contract Analysis Pipeline",
+    description: "RAG legal corpus → clause extraction → risk scoring → structured report output",
+    createdOn: Date.now() - 3 * 86400000,
+    lastModifiedOn: Date.now() - 5 * 3600000,
+  },
+];
+
+const CONVERSATIONS_MOCK = [
+  {
+    resource: "eddi://ai.labs.conversation/conversationstore/conversations/conv1",
+    name: "", description: "",
+    createdOn: Date.now() - 1800000,
+    lastModifiedOn: Date.now() - 300000,
+    agentId: "agent1", agentVersion: 3,
+    conversationState: "READY",
+    viewState: "UNSEEN",
+    conversationStepSize: 8,
+    environment: "production",
+    agentName: "Support Agent",
+  },
+  {
+    resource: "eddi://ai.labs.conversation/conversationstore/conversations/conv2",
+    name: "", description: "",
+    createdOn: Date.now() - 86400000,
+    lastModifiedOn: Date.now() - 3600000,
+    agentId: "agent2", agentVersion: 2,
+    conversationState: "ENDED",
+    viewState: "SEEN",
+    conversationStepSize: 12,
+    environment: "production",
+    agentName: "FAQ Agent",
+  },
+  {
+    resource: "eddi://ai.labs.conversation/conversationstore/conversations/conv3",
+    name: "", description: "",
+    createdOn: Date.now() - 7200000,
+    lastModifiedOn: Date.now() - 600000,
+    agentId: "agent1", agentVersion: 3,
+    conversationState: "IN_PROGRESS",
+    viewState: "UNSEEN",
+    conversationStepSize: 3,
+    environment: "production",
+    agentName: "Support Agent",
+  },
+  {
+    resource: "eddi://ai.labs.conversation/conversationstore/conversations/conv4",
+    name: "", description: "",
+    createdOn: Date.now() - 2 * 86400000,
+    lastModifiedOn: Date.now() - 2 * 3600000,
+    agentId: "agent3", agentVersion: 1,
+    conversationState: "ENDED",
+    viewState: "SEEN",
+    conversationStepSize: 6,
+    environment: "production",
+    agentName: "Appointment Scheduler",
+  },
+  {
+    resource: "eddi://ai.labs.conversation/conversationstore/conversations/conv5",
+    name: "", description: "",
+    createdOn: Date.now() - 3 * 86400000,
+    lastModifiedOn: Date.now() - 86400000,
+    agentId: "agent4", agentVersion: 2,
+    conversationState: "ENDED",
+    viewState: "SEEN",
+    conversationStepSize: 4,
+    environment: "production",
+    agentName: "Invoice Analyst",
+  },
+  {
+    resource: "eddi://ai.labs.conversation/conversationstore/conversations/conv6",
+    name: "", description: "",
+    createdOn: Date.now() - 3600000,
+    lastModifiedOn: Date.now() - 900000,
+    agentId: "agent5", agentVersion: 1,
+    conversationState: "READY",
+    viewState: "UNSEEN",
+    conversationStepSize: 5,
+    environment: "production",
+    agentName: "Product Recommender",
+  },
+  {
+    resource: "eddi://ai.labs.conversation/conversationstore/conversations/conv7",
+    name: "", description: "",
+    createdOn: Date.now() - 4 * 86400000,
+    lastModifiedOn: Date.now() - 3 * 86400000,
+    agentId: "agent6", agentVersion: 1,
+    conversationState: "ENDED",
+    viewState: "SEEN",
+    conversationStepSize: 14,
+    environment: "production",
+    agentName: "Employee Onboarding Guide",
+  },
+  {
+    resource: "eddi://ai.labs.conversation/conversationstore/conversations/conv8",
+    name: "", description: "",
+    createdOn: Date.now() - 5400000,
+    lastModifiedOn: Date.now() - 120000,
+    agentId: "agent7", agentVersion: 1,
+    conversationState: "IN_PROGRESS",
+    viewState: "UNSEEN",
+    conversationStepSize: 2,
+    environment: "production",
+    agentName: "Contract Review Assistant",
+  },
+  {
+    resource: "eddi://ai.labs.conversation/conversationstore/conversations/conv9",
+    name: "", description: "",
+    createdOn: Date.now() - 7 * 86400000,
+    lastModifiedOn: Date.now() - 6 * 86400000,
+    agentId: "agent8", agentVersion: 1,
+    conversationState: "ENDED",
+    viewState: "SEEN",
+    conversationStepSize: 9,
+    environment: "production",
+    agentName: "IT Helpdesk Bot",
+  },
+  {
+    resource: "eddi://ai.labs.conversation/conversationstore/conversations/conv10",
+    name: "", description: "",
+    createdOn: Date.now() - 10800000,
+    lastModifiedOn: Date.now() - 1200000,
+    agentId: "agent1", agentVersion: 3,
+    conversationState: "ERROR",
+    viewState: "UNSEEN",
+    conversationStepSize: 1,
+    environment: "test",
+    agentName: "Support Agent",
+  },
+  {
+    resource: "eddi://ai.labs.conversation/conversationstore/conversations/conv11",
+    name: "", description: "",
+    createdOn: Date.now() - 2 * 3600000,
+    lastModifiedOn: Date.now() - 3600000,
+    agentId: "agent5", agentVersion: 1,
+    conversationState: "READY",
+    viewState: "SEEN",
+    conversationStepSize: 7,
+    environment: "test",
+    agentName: "Product Recommender",
+  },
+  {
+    resource: "eddi://ai.labs.conversation/conversationstore/conversations/conv12",
+    name: "", description: "",
+    createdOn: Date.now() - 5 * 86400000,
+    lastModifiedOn: Date.now() - 4 * 86400000,
+    agentId: "agent4", agentVersion: 2,
+    conversationState: "ENDED",
+    viewState: "SEEN",
+    conversationStepSize: 10,
+    environment: "production",
+    agentName: "Invoice Analyst",
+  },
+];
+
+// --- Enriched JSON Schemas (matching victools Draft 2020-12 output) ---
+/**
+ * Whether a `:id` wildcard has matched something that is not an id.
+ *
+ * These handlers are registered before the dedicated `/descriptors` and
+ * `/jsonSchema` routes, so `:id` swallows both unless they stand aside. Only
+ * `/descriptors` used to be checked, which meant every one of these ten stores
+ * answered `GET …/jsonSchema` with a CONFIG DOCUMENT — a ruleset, an apicall —
+ * where the app expects a JSON Schema. `RESOURCE_SCHEMAS` and the factory that
+ * serves it were unreachable for all of them, and use-json-schema.test.tsx
+ * asserted only `toBeDefined()`, so a ruleset satisfied it.
+ */
+function isNotAnId(pathname: string): boolean {
+  return pathname.endsWith("/descriptors") || pathname.endsWith("/jsonSchema");
+}
+
+/**
+ * Stores whose `/descriptors` route has a dedicated handler of its own.
+ *
+ * The generic handler stands aside for these. Registration order alone is not
+ * enough: `agentstore` and `workflowstore` happen to be declared above it and
+ * win anyway, but `groupstore` and `channelstore` are declared below and would
+ * be swallowed. `groupstore` was, silently, for as long as this list said only
+ * `channelstore`.
+ */
+const STORES_WITH_DEDICATED_DESCRIPTORS = ["channelstore", "groupstore", "connectionstore"];
+
+const RESOURCE_SCHEMAS: Record<string, object> = {
+  behavior: {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    type: "object",
+    title: "BehaviorConfiguration",
+    properties: {
+      appendActions: { type: "boolean", description: "Whether to append actions from behavior rules to existing actions" },
+      expressionsAsActions: { type: "boolean", description: "Whether to use expressions as actions" },
+      behaviorGroups: {
+        type: "array",
+        description: "Groups of behavior rules",
+        items: {
+          type: "object",
+          properties: {
+            name: { type: "string", description: "Name of the behavior group" },
+            executionStrategy: { type: "string", description: "Execution strategy: currentStepOnly or allSteps" },
+            behaviorRules: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  name: { type: "string", description: "Rule name" },
+                  actions: { type: "array", items: { type: "string" }, description: "Actions to trigger" },
+                  conditions: { type: "array", items: { type: "object" }, description: "Conditions to evaluate" },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  httpcalls: {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    type: "object",
+    title: "HttpCallsConfiguration",
+    properties: {
+      targetServerUrl: { type: "string", description: "Base URL of the target server" },
+      httpCalls: {
+        type: "array",
+        description: "List of HTTP call definitions",
+        items: {
+          type: "object",
+          properties: {
+            name: { type: "string", description: "Name of the HTTP call" },
+            description: { type: "string", description: "Description of what this call does" },
+            actions: { type: "array", items: { type: "string" }, description: "Actions that trigger this call" },
+            saveResponse: { type: "boolean", description: "Whether to save the response" },
+            responseObjectName: { type: "string", description: "Key to store response under" },
+            fireAndForget: { type: "boolean", description: "Whether to wait for response" },
+            request: {
+              type: "object",
+              properties: {
+                path: { type: "string", description: "URL path (supports Thymeleaf templates)" },
+                method: { type: "string", description: "HTTP method (GET, POST, PUT, DELETE, PATCH)" },
+                headers: { type: "object", additionalProperties: { type: "string" } },
+                contentType: { type: "string" },
+                body: { type: "string" },
+                queryParams: { type: "object", additionalProperties: { type: "string" } },
+              },
+            },
+            preRequest: { type: "object", properties: { propertyInstructions: { type: "array" } } },
+            postResponse: {
+              type: "object",
+              properties: {
+                propertyInstructions: { type: "array" },
+                outputBuildInstructions: { type: "array" },
+                qrBuildInstructions: { type: "array" },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  output: {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    type: "object",
+    title: "OutputConfigurationSet",
+    properties: {
+      lang: { type: "string", description: "Language code (e.g. en, de, fr)" },
+      outputSet: {
+        type: "array",
+        description: "List of output configurations",
+        items: {
+          type: "object",
+          properties: {
+            action: { type: "string", description: "Action that triggers this output" },
+            timesOccurred: { type: "integer", description: "Number of occurrences to match (0 = any)" },
+            outputs: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  valueAlternatives: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: {
+                        type: { type: "string", description: "Output type: text, image, quickReply, button, etc." },
+                        text: { type: "string" },
+                        delay: { type: "integer" },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            quickReplies: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  value: { type: "string", description: "Display text" },
+                  expressions: { type: "string", description: "Expression to evaluate" },
+                  isDefault: { type: "boolean" },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  dictionary: {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    type: "object",
+    title: "RegularDictionaryConfiguration",
+    properties: {
+      lang: { type: "string", description: "Language code" },
+      words: {
+        type: "array",
+        description: "Word definitions",
+        items: {
+          type: "object",
+          description: "A word definition of the dictionary.",
+          properties: {
+            word: { type: "string", description: "A word of a natural language that you want the parser to recognize (e.g. hello)." },
+            expressions: { type: "string", description: "Prolog like expressions describing the meaning of this word (e.g. greeting(hello))" },
+            frequency: { type: "integer", description: "Word frequency weight" },
+          },
+        },
+      },
+      phrases: {
+        type: "array",
+        description: "Phrase definitions",
+        items: {
+          type: "object",
+          description: "A phrase definition of the dictionary.",
+          properties: {
+            phrase: { type: "string", description: "A phrase to recognize (e.g. good morning)." },
+            expressions: { type: "string", description: "Prolog like expressions describing the meaning" },
+          },
+        },
+      },
+      regExs: {
+        type: "array",
+        description: "Regular expression definitions",
+        items: {
+          type: "object",
+          description: "A RegEx definition of the dictionary.",
+          properties: {
+            regEx: { type: "string", description: "A regular expression pattern" },
+            expressions: { type: "string", description: "Prolog like expressions describing the meaning" },
+          },
+        },
+      },
+    },
+  },
+  langchain: {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    type: "object",
+    title: "LangChainConfiguration",
+    properties: {
+      tasks: {
+        type: "array",
+        description: "List of LangChain tasks",
+        items: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "Unique task identifier" },
+            type: { type: "string", description: "LLM provider: openai, anthropic, gemini, ollama, mistral, huggingface" },
+            description: { type: "string", description: "Task description" },
+            actions: { type: "array", items: { type: "string" }, description: "Actions that trigger this task" },
+            parameters: {
+              type: "object",
+              description: "Provider-specific parameters",
+              properties: {
+                systemMessage: { type: "string", description: "System prompt for the LLM" },
+                addToOutput: { type: "string", description: "Whether to add response to output" },
+                logSizeLimit: { type: "string", description: "Maximum conversation log entries" },
+              },
+              additionalProperties: { type: "string" },
+            },
+            tools: { type: "array", items: { type: "string" }, description: "URIs to HTTP calls configs used as tools" },
+            enableBuiltInTools: { type: "boolean", description: "Whether to enable built-in tools" },
+            enableHttpCallTools: { type: "boolean", description: "Auto-discover httpcall extensions from the workflow as tools (default: true)" },
+            builtInToolsWhitelist: { type: "array", items: { type: "string" }, description: "Whitelist of built-in tool names" },
+            conversationHistoryLimit: { type: "integer", description: "Max conversation history entries sent to LLM" },
+            maxBudgetPerConversation: { type: "number", description: "Maximum cost budget per conversation" },
+            enableCostTracking: { type: "boolean" },
+            enableToolCaching: { type: "boolean" },
+            enableRateLimiting: { type: "boolean" },
+            defaultRateLimit: { type: "integer", description: "Default rate limit per minute" },
+          },
+        },
+      },
+    },
+  },
+  propertysetter: {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    type: "object",
+    title: "PropertySetterConfiguration",
+    properties: {
+      setOnActions: {
+        type: "array",
+        description: "List of property setter definitions triggered by actions",
+        items: {
+          type: "object",
+          properties: {
+            actions: { type: "array", items: { type: "string" }, description: "Actions that trigger this setter" },
+            setProperties: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  name: { type: "string", description: "Property name" },
+                  valueString: { type: "string", description: "Value to set (supports Thymeleaf expressions)" },
+                  scope: { type: "string", description: "Scope: conversation, longTerm, or step" },
+                  fromObjectPath: { type: "string", description: "Path to read value from" },
+                  override: { type: "boolean", description: "Whether to override existing value" },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  rag: {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    type: "object",
+    title: "RagConfiguration",
+    description: "Knowledge Base configuration for RAG (Retrieval-Augmented Generation)",
+    properties: {
+      name: { type: "string", description: "Display name for this knowledge base" },
+      embeddingProvider: { type: "string", description: "Embedding model provider: openai, ollama, vertex, google, huggingface, jlama" },
+      embeddingParameters: { type: "object", additionalProperties: { type: "string" }, description: "Provider-specific parameters (model, apiKey, baseUrl)" },
+      storeType: { type: "string", description: "Vector store type: in-memory, pgvector, mongodb-atlas, qdrant" },
+      storeParameters: { type: "object", additionalProperties: { type: "string" }, description: "Store-specific connection parameters" },
+      isolationStrategy: { type: "string", description: "Tenant isolation: collection or metadata" },
+      chunkStrategy: { type: "string", description: "Chunking strategy: recursive, paragraph, sentence" },
+      chunkSize: { type: "integer", description: "Chunk size in characters (default: 512)" },
+      chunkOverlap: { type: "integer", description: "Chunk overlap in characters (default: 64)" },
+      maxResults: { type: "integer", description: "Default max results to return (top-K)" },
+      minScore: { type: "number", description: "Default minimum similarity score (0.0-1.0)" },
+    },
+  },
+};
+
+// ─── Audit mock data generator ─────────────────────────────────────
+const TASK_TYPES = ["langchain", "behavior", "output", "httpcalls", "propertysetter", "expressions"];
+function generateMockAuditEntries(conversationId: string, count: number) {
+  const now = Date.now();
+  return Array.from({ length: count }, (_, i) => ({
+    id: `audit-${conversationId}-${i}`,
+    conversationId,
+    agentId: "agent1",
+    agentVersion: 1,
+    userId: "manager-user",
+    environment: i % 3 === 0 ? "production" : "test",
+    stepIndex: Math.floor(i / 2),
+    taskId: `task-${i}`,
+    taskType: TASK_TYPES[i % TASK_TYPES.length]!,
+    taskIndex: i % 2,
+    durationMs: 50 + Math.floor(Math.random() * 500),
+    input: i === 0 ? { "input:initial": "Tell me about the weather" } : null,
+    output: i % 2 === 0 ? { "output:text": "Here's the latest weather information..." } : null,
+    llmDetail: TASK_TYPES[i % TASK_TYPES.length] === "langchain" ? {
+      model: "gpt-5.4-mini",
+      modelName: "gpt-5.4-mini",
+      provider: "openai",
+      tokens: { input: 128, output: 64 },
+      tokenUsage: { inputTokens: 128, outputTokens: 64 },
+      compiledPrompt: JSON.stringify([
+        { role: "system", content: "You are a helpful weather assistant." },
+        { role: "user", content: "Tell me about the weather in Vienna" },
+      ]),
+      modelResponse: "The weather in Vienna is currently sunny with a temperature of 22°C and humidity of 45%.",
+    } : null,
+    toolCalls: i === 3 ? [{ name: "fetch_weather", args: { city: "Vienna" }, result: "sunny 22°C" }] : null,
+    actions: ["greet", "respond"].slice(0, (i % 2) + 1),
+    cost: TASK_TYPES[i % TASK_TYPES.length] === "langchain" ? 0.003 + Math.random() * 0.01 : 0,
+    timestamp: new Date(now - (count - i) * 60000).toISOString(),
+    hmac: i % 4 === 0 ? "a1b2c3d4e5f6a1b2c3d4e5f6789012345678901234567890abcdef" : null,
+    agentSignature: i % 4 === 0 ? "ed25519:sig_" + conversationId + "_" + i : null,
+  }));
+}
+
+/**
+ * A finished DEBATE, reproducing the two things a real one does that the tidy
+ * `gconv1` fixture does not — both of which broke the board in a demo:
+ *
+ *  1. The judge answers in JSON, so the SYNTHESIS entry's body is a ```json
+ *     verdict rather than prose. The engine parses the same object into
+ *     `decision`; the raw text stays on the entry, and rendering it verbatim
+ *     printed a blob where the conclusion should be.
+ *  2. A member pastes something with no break opportunity in it. That is what
+ *     turned (1) into a layout failure: a flex column at `min-width: auto`
+ *     sizes to its widest unbreakable child, so one long line pushed the config
+ *     panel, the composer's Send button and every per-message action off-screen
+ *     — silently, because the shell clips rather than scrolls, so no
+ *     `scrollWidth` probe could see it.
+ *
+ * Requested by id, so `gconv1` keeps describing the ordinary case.
+ */
+const VERDICT_CONVERSATION_ID = "gconv-verdict";
+
+/** One token, no spaces, wider than any viewport this app supports. */
+const UNBREAKABLE_LINE = `https://example.test/trace/${"a1b2c3d4".repeat(240)}`;
+
+const VERDICT_REASONING =
+  "Both sides argued substantively and both left evidentiary gaps, so the verdict is a tie. " +
+  "PRO carried the modular-scalability point; CON carried the counterparty-credit point.";
+
+function verdictConversation() {
+  const now = Date.now();
+  const at = (agoMs: number) => new Date(now - agoMs).toISOString();
+  const entry = (over: Record<string, unknown>) => ({
+    speakerAgentId: "agent3",
+    speakerDisplayName: "Market Analyst",
+    phaseIndex: 0,
+    phaseName: "Opening Arguments",
+    type: "ARGUMENT",
+    errorReason: null,
+    targetAgentId: null,
+    ...over,
+  });
+
+  return {
+    id: VERDICT_CONVERSATION_ID,
+    groupId: "grp2",
+    userId: "manager-user",
+    state: "COMPLETED",
+    originalQuestion: "Which monetization pathway should we back?",
+    transcript: [
+      entry({
+        speakerAgentId: "user",
+        speakerDisplayName: "User",
+        content: "Which monetization pathway should we back?",
+        phaseIndex: -1,
+        phaseName: null,
+        type: "QUESTION",
+        timestamp: at(600_000),
+      }),
+      entry({
+        content: `## My Proposition\n\nI traced the pipeline run here:\n\n\`\`\`\n${UNBREAKABLE_LINE}\n\`\`\`\n\n---\n\n## Argument 1\n\nThe numbers hold.`,
+        timestamp: at(480_000),
+      }),
+      entry({
+        speakerAgentId: "agent4",
+        speakerDisplayName: "Growth Strategist",
+        // The same token OUTSIDE a fence. A code block brings its own
+        // horizontal scroller; bare prose has nothing but `break-words`,
+        // so this is the case that stretches the card itself — and the
+        // one the viewport probe alone cannot see, because everything in
+        // the transcript sits inside its vertical scroll box.
+        content: `Mine is at ${UNBREAKABLE_LINE} — same conclusion.`,
+        timestamp: at(300_000),
+      }),
+      entry({
+        speakerAgentId: "agent4",
+        speakerDisplayName: "Growth Strategist",
+        phaseIndex: 1,
+        phaseName: "Judgment",
+        type: "SYNTHESIS",
+        content: `\`\`\`json\n{\n  "winner": "TIE",\n  "scores": {"PRO": 7, "CON": 7},\n  "reasoning": ${JSON.stringify(VERDICT_REASONING)}\n}\n\`\`\``,
+        timestamp: at(120_000),
+      }),
+    ],
+    memberConversationIds: {},
+    currentPhaseIndex: 1,
+    currentPhaseName: "Judgment",
+    // Empty on purpose: with no conversation-level synthesis, the SYNTHESIS
+    // entry is the only thing carrying the conclusion, so a surface that cannot
+    // read the verdict has nothing else to fall back on.
+    synthesizedAnswer: "",
+    decision: {
+      type: "VERDICT",
+      outcome: "Tie (PRO 7, CON 7)",
+      winner: null,
+      tally: { PRO: 7, CON: 7 },
+      dissents: [],
+      method: "debate-judgment",
+      decidedAtPhase: "Judgment",
+      raw: null,
+    },
+    depth: 0,
+    taskList: null,
+    dynamicMembers: [],
+    createdAgentIds: [],
+    retainedAgentIds: [],
+    availableActions: [],
+    created: at(600_000),
+    lastModified: at(120_000),
+  };
+}
+
+/**
+ * A deployment that records ownership but does not enforce it — the backend's
+ * own default, and therefore this suite's.
+ */
+const WORKSPACES_DISABLED = {
+  enabled: false,
+  // `principal` and `defaultSpace` are deliberately ABSENT rather than null.
+  // EDDI's REST mapper serialises with NON_NULL, so that is the shape the real
+  // endpoint sends for an anonymous caller — and a mock that sent explicit
+  // nulls would let a `=== null` check pass here and fail in production.
+  spaces: [] as { id: string; kind: string; label: string }[],
+  seesEverything: true,
+};
+
+/** Where an E2E spec plants the workspace context it wants. */
+export const WORKSPACE_SEED_KEY = "eddi-e2e-workspaces";
+
+/** Where an E2E spec plants the sharing state of one resource, keyed by id. */
+export const SHARE_SEED_KEY = "eddi-e2e-shares";
+
+function readSeed<T>(key: string): T | null {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : null;
+  } catch {
+    // No localStorage (the node tier), or malformed JSON someone hand-edited.
+    // Falling back to the default is right either way: a seed that cannot be
+    // read must not silently become a *different* seed.
+    return null;
+  }
+}
+
+function readWorkspaceSeed() {
+  return readSeed<typeof WORKSPACES_DISABLED>(WORKSPACE_SEED_KEY);
+}
+
+function readShareSeed(id: string) {
+  const all = readSeed<Record<string, unknown>>(SHARE_SEED_KEY);
+  return all?.[id] ?? null;
+}
+
+/**
+ * What each fixture agent grants the signed-in user once enforcement is on.
+ *
+ * agent1/agent2 are alice's own; agent3 is shared with her team for chatting
+ * only; agent4 is bob's, published, so readable but not hers to delete.
+ */
+const CALLER_LEVELS: Record<string, string> = {
+  agent1: "OWN",
+  agent2: "OWN",
+  agent3: "USE",
+  agent4: "VIEW",
+};
+
+function withCallerLevel<T extends { resource: string }>(agent: T): T & { callerLevel?: string } {
+  const id = /agents\/([^?]+)/.exec(agent.resource)?.[1];
+  const level = id ? CALLER_LEVELS[id] : undefined;
+  return level ? { ...agent, callerLevel: level } : agent;
+}
+
+function stripCallerLevel<T extends object>(agent: T): T {
+  const rest = { ...(agent as T & { callerLevel?: string }) };
+  delete rest.callerLevel;
+  return rest as T;
+}
+
+function defaultShareInfo(id: string) {
+  return {
+    resourceId: id,
+    ownerId: "alice@example.com",
+    spaceId: "user:alice@example.com",
+    visibility: "space",
+    // Empty rather than absent: an empty list is not null, so NON_NULL keeps it.
+    grants: [],
+    // The SHARING endpoint's own level, which is a different field from the one
+    // on a listed descriptor: `describe()` refuses below VIEW, so this is always
+    // present and always at least VIEW. It is what gates the dialog's controls.
+    callerLevel: "OWN",
+  };
+}
+
+export const handlers = [
+  // Workspace context. Disabled by default, matching the backend's own default
+  // and today's behaviour — no existing test should suddenly grow a sharing UI
+  // it never asked for.
+  //
+  // Unit tests override this with `server.use()`. The E2E tier cannot: MSW
+  // answers from a service worker there, so `page.route` never sees the request
+  // (workforce.spec.ts documents that trap at length). So this one handler also
+  // reads a seed from localStorage, which a spec plants with
+  // `page.addInitScript` before the app boots. Confined to the mock layer on
+  // purpose — the application code has no idea this exists.
+  http.get("*/workspaces", () => HttpResponse.json(readWorkspaceSeed() ?? WORKSPACES_DISABLED)),
+
+  // The sharing family, keyed by resource id. Answers for an unshared,
+  // caller-owned resource; a spec that needs grants or a non-owner view seeds
+  // them the same way as above.
+  http.get("*/descriptorstore/descriptors/:id/shares", ({ params }) =>
+    HttpResponse.json(readShareSeed(String(params.id)) ?? defaultShareInfo(String(params.id)))
+  ),
+  http.post("*/descriptorstore/descriptors/:id/shares", ({ params }) =>
+    HttpResponse.json({ updated: [{ id: String(params.id), name: "Support Agent" }], skipped: [] })
+  ),
+  http.delete("*/descriptorstore/descriptors/:id/shares", ({ params }) =>
+    HttpResponse.json({ updated: [{ id: String(params.id), name: "Support Agent" }], skipped: [] })
+  ),
+  http.put("*/descriptorstore/descriptors/:id/shares/visibility", ({ params }) =>
+    HttpResponse.json({ updated: [{ id: String(params.id), name: "Support Agent" }], skipped: [] })
+  ),
+
+  // Template preview — resolves Qute templates for the LLM editor preview
+  http.post("*/administration/preview/template", async ({ request }) => {
+    const body = (await request.json()) as { template?: string; conversationId?: string };
+    const template = body.template ?? "";
+    // Sample data matching what the real backend provides
+    const sampleData: Record<string, unknown> = {
+      "properties.userName": "Alice",
+      "properties.language": "en",
+      "properties.email": "alice@example.com",
+      "memory.current.input": "What is my order status?",
+      "memory.current.actions": "check_order, respond",
+      "memory.last.input": "Hello",
+      "memory.last.output": "Welcome! How can I help you today?",
+      "context.output": "Previous context value",
+      "snippets.tone": "Be professional and concise.",
+      "snippets.safety": "Do not reveal internal system details.",
+      "userInfo.userId": "user-12345",
+      "conversationInfo.conversationId": body.conversationId ?? "conv-67890",
+      "conversationInfo.agentId": "agent-abc",
+      "conversationInfo.agentVersion": "1",
+      "input": "What is my order status?",
+    };
+    // Simple template resolution: replace {key} with values
+    let resolved = template;
+    for (const [key, val] of Object.entries(sampleData)) {
+      resolved = resolved.split(`{${key}}`).join(String(val));
+    }
+    // Strip {#if ...} ... {/if} and {#for ...} ... {/for} blocks (just show inner content)
+    resolved = resolved.replace(/\{#if[^}]*\}\n?/g, "");
+    resolved = resolved.replace(/\{\/if\}\n?/g, "");
+    resolved = resolved.replace(/\{#for[^}]*\}\n?/g, "");
+    resolved = resolved.replace(/\{\/for\}\n?/g, "");
+    resolved = resolved.replace(/\{#else\}\n?/g, "");
+    return HttpResponse.json({
+      resolved,
+      availableVariables: Object.keys(sampleData),
+      variableValues: sampleData,
+      error: null,
+    });
+  }),
+
+  // Descriptor PATCH — used by create-workflow/create-agent to set name/description
+  http.patch("*/descriptorstore/descriptors/:id", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  // Single descriptor GET — how a screen resolves the NAME behind a resource
+  // reference it holds only as an eddi:// URI (e.g. a parser's linked
+  // dictionaries). Echoes the id so a test can tell which one it asked for.
+  http.get("*/descriptorstore/descriptors/:id", ({ params, request }) => {
+    const version = Number(new URL(request.url).searchParams.get("version") ?? 1);
+    return HttpResponse.json({
+      resource: `eddi://ai.labs.mock/descriptorstore/descriptors/${params.id}?version=${version}`,
+      name: `Mock descriptor ${params.id}`,
+      description: "Mock document descriptor",
+      createdOn: Date.now() - 86400000,
+      lastModifiedOn: Date.now() - 3600000,
+      deleted: false,
+    });
+  }),
+
+  // JSON Schema endpoints for agents and packages
+  http.get("*/agentstore/agents/jsonSchema", () => {
+    return HttpResponse.json({
+      $schema: "https://json-schema.org/draft/2020-12/schema",
+      type: "object",
+      title: "AgentConfiguration",
+      properties: {
+        workflows: {
+          type: "array",
+          description: "List of workflow URIs that make up this agent",
+          items: { type: "string", format: "uri" },
+        },
+        channels: {
+          type: "array",
+          description: "Channel connectors for this agent",
+          items: {
+            type: "object",
+            properties: {
+              type: { type: "string", description: "Channel type identifier" },
+              config: { type: "object", additionalProperties: true, description: "Channel-specific configuration" },
+            },
+          },
+        },
+      },
+    });
+  }),
+  http.get("*/workflowstore/workflows/jsonSchema", () => {
+    return HttpResponse.json({
+      $schema: "https://json-schema.org/draft/2020-12/schema",
+      type: "object",
+      title: "WorkflowConfiguration",
+      properties: {
+        workflowSteps: {
+          type: "array",
+          description: "List of steps in this workflow",
+          items: {
+            type: "object",
+            properties: {
+              type: { type: "string", description: "Extension type (e.g. ai.labs.rules, ai.labs.llm)" },
+              extensions: { type: "object", additionalProperties: true, description: "Extension-specific configuration" },
+              config: {
+                type: "object",
+                properties: {
+                  uri: { type: "string", format: "uri", description: "Resource URI for this extension" },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+  }),
+
+  // Agent descriptors
+  // Honours `filter`, `limit` and `index`, because the backend does.
+  //
+  // It used to return all eight agents whatever was asked of it, which made the
+  // Agents page's search unverifiable: disconnecting the query entirely
+  // (`useInfiniteAgentDescriptors("")`) left all 28 tests in `agents.test.tsx`
+  // green, because no possible assertion could tell filtered from unfiltered.
+  // Checked against a live EDDI 6.3.0: `filter=zzzznomatch` returns 0 of 17.
+  http.get("*/agentstore/agents/descriptors", ({ request }) => {
+    const url = new URL(request.url);
+    const filter = (url.searchParams.get("filter") ?? "").toLowerCase();
+    const limit = Number(url.searchParams.get("limit") ?? "20");
+    const index = Number(url.searchParams.get("index") ?? "0");
+
+    // Matches the resource URI as well as name and description, because the
+    // backend does — `getAgentDescriptorsWithVersions` looks an agent up with
+    // `filter=${agentId}`, and a mock that only searched the display fields
+    // returned nothing for it, breaking every detail-page test. Verified
+    // against a live EDDI 6.3.0: `filter=<agent id>` returns exactly that one.
+    const matched = filter
+      ? AGENTS_MOCK.filter(
+          (a) =>
+            a.name.toLowerCase().includes(filter) ||
+            a.description.toLowerCase().includes(filter) ||
+            a.resource.toLowerCase().includes(filter),
+        )
+      : AGENTS_MOCK;
+
+    // `?space=` narrows in the query on the backend, so it has to narrow here
+    // too. A mock that accepted the parameter and ignored it would let the
+    // space switcher pass its own E2E test while doing nothing — which is
+    // exactly the bug this feature already shipped once.
+    const space = url.searchParams.get("space") ?? "";
+    const scoped = space
+      ? matched.filter((a) => "spaceId" in a && a.spaceId === space)
+      : matched;
+
+    // `callerLevel` is stamped by the server ONLY while enforcement is on —
+    // ResourceAccessGuard omits it otherwise, and NON_NULL keeps it off the
+    // wire. Carrying it on the static fixtures produced a pairing the backend
+    // cannot produce (levels present, `enabled: false`), which would let a test
+    // encode "USE gating applies with the feature off" as expected behaviour.
+    const enforced = readWorkspaceSeed()?.enabled === true;
+    const answered = enforced ? scoped.map(withCallerLevel) : scoped.map(stripCallerLevel);
+
+    // Most-recent-first, because the backend orders them that way — verified
+    // against a live EDDI 6.3.0. This matters as soon as `limit` is honoured:
+    // the dashboard's "recent agents" asks for exactly 4, so returning them in
+    // array order hands it the four OLDEST and quietly makes the section a lie.
+    // The E2E expectation encoded the correct four all along; it only passed
+    // before because the handler returned all eight and let the page sort.
+    const ordered = [...answered].sort(
+      (a, b) => b.lastModifiedOn - a.lastModifiedOn,
+    );
+
+    return HttpResponse.json(ordered.slice(index, index + limit));
+  }),
+
+  // Get agent
+  http.get("*/agentstore/agents/:id", ({ request, params }) => {
+    const url = new URL(request.url);
+    const version = parseInt(url.searchParams.get("version") ?? "1", 10);
+    const agentId = params.id as string;
+    // Per-agent configs for a realistic detail view
+    const agentConfigs: Record<string, object> = {
+      agent1: {
+        workflows: ["eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=2"],
+        channels: [{ type: "web", config: { allowedOrigins: ["*"], maxIdleMinutes: 30 } }],
+        a2aEnabled: true,
+        description: "24/7 customer support with order tracking, returns processing, and escalation handling",
+        a2aSkills: ["order-tracking", "return-processing", "escalation"],
+        memory: { memoryType: "longTerm", maxConversationSteps: 100 },
+        // Agentic improvements — identity, session management
+        identity: {
+          agentDid: "did:eddi:agent-1",
+          publicKey: "MCowBQYDK2VwAyEAexampleKey1234567890abcdef",
+          keys: [
+            { version: 1, publicKeyB64: "MCowBQYDK2VwAyEAexampleKey1234567890abcdef", validFromMs: 1700000000000, validUntilMs: 0 },
+          ],
+        },
+        sessionManagement: {
+          autoSnapshot: {
+            enabled: true,
+            triggerOn: ["before_tool"],
+          },
+          forkingEnabled: false,
+          maxCheckpointsPerConversation: 10,
+          maxForksPerConversation: 5,
+        },
+      },
+      agent3: {
+        workflows: ["eddi://ai.labs.workflow/workflowstore/workflows/wf3?version=1"],
+        channels: [
+          { type: "web", config: { allowedOrigins: ["https://clinic.example.com"] } },
+          { type: "slack", config: { channelId: "C0123ABCDEF", botToken: "${vault:slack-bot-token}", signingSecret: "${vault:slack-signing-secret}", groupId: "group-123" } },
+        ],
+        a2aEnabled: false,
+        description: "Patient appointment scheduling with slot extraction and calendar integration",
+        a2aSkills: [],
+        memory: { memoryType: "shortTerm", maxConversationSteps: 20 },
+      },
+      agent4: {
+        workflows: ["eddi://ai.labs.workflow/workflowstore/workflows/wf4?version=2"],
+        channels: [],
+        a2aEnabled: true,
+        description: "Automated invoice analysis with field extraction, validation, and CRM updates",
+        a2aSkills: ["invoice-parsing", "data-validation"],
+        memory: { memoryType: "longTerm", maxConversationSteps: 50 },
+      },
+    };
+    const agentFallbacks: Record<string, object> = {
+      agent2: {
+        workflows: ["eddi://ai.labs.workflow/workflowstore/workflows/wf2?version=1"],
+        channels: [{ type: "web", config: { allowedOrigins: ["https://support.example.com"], maxIdleMinutes: 15 } }],
+        a2aEnabled: true,
+        description: "Self-service knowledge base answering product, billing, and account questions",
+        a2aSkills: ["faq", "knowledge-search"],
+        memory: { memoryType: "shortTerm", maxConversationSteps: 30 },
+      },
+      agent5: {
+        workflows: ["eddi://ai.labs.workflow/workflowstore/workflows/wf5?version=1"],
+        channels: [
+          { type: "web", config: { allowedOrigins: ["https://shop.example.com"], maxIdleMinutes: 20 } },
+        ],
+        a2aEnabled: true,
+        description: "Suggests products based on browsing history, preferences, and real-time inventory",
+        a2aSkills: ["product-recommendation"],
+        memory: { memoryType: "longTerm", maxConversationSteps: 40 },
+      },
+      agent6: {
+        workflows: ["eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=2"],
+        channels: [
+          { type: "web", config: { allowedOrigins: ["https://hr.example.com"] } },
+          { type: "slack", config: { channelId: "C0HR_ONBOARD", botToken: "${vault:slack-bot-token}", signingSecret: "${vault:slack-signing-secret}" } },
+        ],
+        a2aEnabled: false,
+        description: "Walks new hires through IT setup, policy acknowledgement, and benefits enrollment",
+        a2aSkills: ["onboarding"],
+        memory: { memoryType: "longTerm", maxConversationSteps: 60 },
+      },
+      agent7: {
+        workflows: ["eddi://ai.labs.workflow/workflowstore/workflows/wf6?version=1"],
+        channels: [],
+        a2aEnabled: true,
+        description: "Analyzes legal contracts using RAG, highlights key clauses, and flags risk areas",
+        a2aSkills: ["contract-analysis", "risk-assessment"],
+        memory: { memoryType: "longTerm", maxConversationSteps: 80 },
+      },
+      agent8: {
+        workflows: ["eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=2"],
+        channels: [
+          { type: "web", config: { allowedOrigins: ["https://internal.example.com"] } },
+          { type: "slack", config: { channelId: "C0IT_HELP", botToken: "${vault:slack-bot-token}", signingSecret: "${vault:slack-signing-secret}", groupId: "group-it" } },
+        ],
+        a2aEnabled: true,
+        description: "Troubleshoots common IT issues, resets passwords, and creates Jira tickets for escalation",
+        a2aSkills: ["it-troubleshooting", "password-reset"],
+        memory: { memoryType: "shortTerm", maxConversationSteps: 25 },
+      },
+    };
+    const config = agentConfigs[agentId] ?? agentFallbacks[agentId] ?? {
+      workflows: ["eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=2"],
+      channels: [],
+      a2aEnabled: false,
+      description: "AI agent configured for EDDI platform",
+      a2aSkills: [],
+    };
+    return HttpResponse.json({ ...config, _version: version });
+  }),
+
+  // Deployment status
+  http.get("*/administration/:env/deploymentstatus/:agentId", () => {
+    return HttpResponse.json({ status: "READY" });
+  }),
+
+  // Deploy agent
+  http.post("*/administration/:env/deploy/:agentId", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  // Undeploy agent
+  http.post("*/administration/:env/undeploy/:agentId", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  // Agent setup (wizard quick-create)
+  http.post("*/administration/agents/setup", () => {
+    const newId = `agent-setup-${Date.now()}`;
+    return HttpResponse.json({
+      action: "created",
+      agentId: newId,
+      agentName: "Setup Agent",
+      provider: "openai",
+      model: "gpt-5.4",
+      deployed: true,
+      deploymentStatus: "READY",
+    });
+  }),
+
+  // Update agent
+  http.put("*/agentstore/agents/:id", ({ request, params }) => {
+    const url = new URL(request.url);
+    const currentVersion = parseInt(
+      url.searchParams.get("version") ?? "1",
+      10
+    );
+    const newVersion = currentVersion + 1;
+    return new HttpResponse(null, {
+      status: 200,
+      headers: {
+        Location: `eddi://ai.labs.agent/agentstore/agents/${params.id}?version=${newVersion}`,
+      },
+    });
+  }),
+
+  // Create agent (bare POST without :id)
+  http.post("*/agentstore/agents", ({ request }) => {
+    const url = new URL(request.url);
+    // Check if this is a duplicate request (has :id param with version query)
+    const pathParts = url.pathname.split("/").filter(Boolean);
+    const lastPart = pathParts[pathParts.length - 1];
+    if (lastPart !== "agents") {
+      // This is a duplicate request (/agents/:id?version=X&deepCopy=Y)
+      const deepCopy = url.searchParams.get("deepCopy");
+      const newId = `dup-${Date.now()}`;
+      return new HttpResponse(null, {
+        status: 201,
+        headers: {
+          Location: `eddi://ai.labs.agent/agentstore/agents/${newId}?version=1${deepCopy ? "&deepCopy=true" : ""}`,
+        },
+      });
+    }
+    // Create new agent
+    const newId = `agent-${Date.now()}`;
+    return new HttpResponse(null, {
+      status: 201,
+      headers: {
+        Location: `eddi://ai.labs.agent/agentstore/agents/${newId}?version=1`,
+      },
+    });
+  }),
+
+  // Delete agent
+  http.delete("*/agentstore/agents/:id", () => {
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  // Workflow descriptors
+  http.get("*/workflowstore/workflows/descriptors", () => {
+    return HttpResponse.json(WORKFLOWS_MOCK);
+  }),
+
+  // Get package
+  http.get("*/workflowstore/workflows/:id", () => {
+    return HttpResponse.json({
+      workflowSteps: [
+        {
+          type: "eddi://ai.labs.parser",
+          extensions: {},
+          config: { uri: "eddi://ai.labs.parser/parserstore/parsers/parser1?version=1" },
+        },
+        {
+          type: "eddi://ai.labs.parser",
+          extensions: {
+            dictionaries: [
+              { type: "eddi://ai.labs.parser.dictionaries.integer" },
+              { type: "eddi://ai.labs.parser.dictionaries.decimal" },
+            ],
+            corrections: [],
+            normalizer: [],
+          },
+          config: {
+            appendExpressions: true,
+            includeUnused: true,
+            includeUnknown: true,
+          },
+        },
+        {
+          type: "eddi://ai.labs.rules",
+          extensions: {},
+          config: { uri: "eddi://ai.labs.rules/rulestore/rulesets/beh1?version=1" },
+        },
+        {
+          type: "eddi://ai.labs.property",
+          extensions: {},
+          config: { uri: "eddi://ai.labs.property/propertysetterstore/propertysetters/ps1?version=1" },
+        },
+        {
+          type: "eddi://ai.labs.llm",
+          extensions: {},
+          config: { uri: "eddi://ai.labs.llm/llmstore/llms/llm1?version=1" },
+        },
+        {
+          type: "eddi://ai.labs.output",
+          extensions: {},
+          config: { uri: "eddi://ai.labs.output/outputstore/outputsets/out1?version=1" },
+        },
+      ],
+    });
+  }),
+
+  // Create workflow
+  http.post("*/workflowstore/workflows", () => {
+    const newId = `wf-${Date.now()}`;
+    return new HttpResponse(null, {
+      status: 201,
+      headers: {
+        Location: `eddi://ai.labs.workflow/workflowstore/workflows/${newId}?version=1`,
+      },
+    });
+  }),
+
+  // Delete package
+  http.delete("*/workflowstore/workflows/:id", () => {
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  // Conversation descriptors — supports agentId, conversationId, conversationState filters
+  http.get("*/conversationstore/conversations", ({ request }) => {
+    const url = new URL(request.url);
+    const agentId = url.searchParams.get("agentId");
+    const conversationId = url.searchParams.get("conversationId");
+    const conversationState = url.searchParams.get("conversationState");
+    let result = [...CONVERSATIONS_MOCK];
+    if (agentId) result = result.filter((c) => c.agentId === agentId);
+    if (conversationId) result = result.filter((c) => c.resource.includes(conversationId));
+    if (conversationState) result = result.filter((c) => c.conversationState === conversationState);
+    return HttpResponse.json(result);
+  }),
+
+  // Simple conversation log
+  http.get("*/conversationstore/conversations/simple/:id", () => {
+    const now = new Date();
+    const stepTime = (offsetMs: number) => new Date(now.getTime() - offsetMs).toISOString();
+    return HttpResponse.json({
+      agentId: "agent1",
+      agentVersion: 3,
+      conversationId: "conv1",
+      conversationState: "READY",
+      environment: "production",
+      undoAvailable: true,
+      redoAvailable: false,
+      conversationSteps: [
+        {
+          conversationStep: [
+            { key: "input:initial", value: "Hi, I need help with my order", timestamp: stepTime(300000), originWorkflowId: null },
+            { key: "actions", value: ["greet", "order_inquiry"], timestamp: stepTime(299500), originWorkflowId: "wf1" },
+            { key: "output:text:greet", value: "Hello! I'd be happy to help with your order. Could you share your order number?", timestamp: stepTime(299000), originWorkflowId: "wf1" },
+          ],
+          timestamp: stepTime(300000),
+        },
+        {
+          conversationStep: [
+            { key: "input:initial", value: "It's ORD-2024-78542", timestamp: stepTime(240000), originWorkflowId: null },
+            { key: "actions", value: ["lookup_order"], timestamp: stepTime(239500), originWorkflowId: "wf1" },
+            { key: "output:text:lookup_order", value: "I found your order ORD-2024-78542. It was placed on March 28th for a Wireless Keyboard ($89.99). It's currently in transit and expected to arrive by April 2nd. Is there anything specific you'd like to know about it?", timestamp: stepTime(238000), originWorkflowId: "wf1" },
+          ],
+          timestamp: stepTime(240000),
+        },
+        {
+          conversationStep: [
+            { key: "input:initial", value: "Can I change the delivery address?", timestamp: stepTime(180000), originWorkflowId: null },
+            { key: "actions", value: ["address_change"], timestamp: stepTime(179500), originWorkflowId: "wf1" },
+            { key: "output:text:address_change", value: "Since your order is already in transit, I can try to redirect the package. Please provide the new delivery address and I'll check if a redirect is possible with the carrier.", timestamp: stepTime(178000), originWorkflowId: "wf1" },
+            { key: "quickReplies", value: ["Keep current address", "Provide new address", "Cancel order instead"], timestamp: stepTime(177500), originWorkflowId: "wf1" },
+          ],
+          timestamp: stepTime(180000),
+        },
+        {
+          conversationStep: [
+            { key: "input:initial", value: "123 Oak Street, Suite 4B, Portland OR 97201", timestamp: stepTime(120000), originWorkflowId: null },
+            { key: "actions", value: ["update_address", "notify_carrier"], timestamp: stepTime(119000), originWorkflowId: "wf1" },
+            { key: "output:text:update_address", value: "Great news! I've submitted a redirect request to the carrier for: 123 Oak Street, Suite 4B, Portland OR 97201. You'll receive a confirmation email within the next 2 hours. The estimated delivery date may shift by 1 business day.", timestamp: stepTime(117000), originWorkflowId: "wf1" },
+          ],
+          timestamp: stepTime(120000),
+        },
+        {
+          conversationStep: [
+            { key: "input:initial", value: "Perfect, thank you!", timestamp: stepTime(60000), originWorkflowId: null },
+            { key: "actions", value: ["farewell"], timestamp: stepTime(59500), originWorkflowId: "wf1" },
+            { key: "output:text:farewell", value: "You're welcome! Your redirect reference is RDR-98765. Is there anything else I can help you with?", timestamp: stepTime(58000), originWorkflowId: "wf1" },
+            { key: "quickReplies", value: ["Track my order", "View other orders", "No thanks, goodbye"], timestamp: stepTime(57500), originWorkflowId: "wf1" },
+          ],
+          timestamp: stepTime(60000),
+        },
+      ],
+      conversationOutputs: [
+        { "output:text:greet": "Hello! I'd be happy to help with your order. Could you share your order number?" },
+        { "output:text:lookup_order": "I found your order ORD-2024-78542. It was placed on March 28th for a Wireless Keyboard ($89.99). It's currently in transit and expected to arrive by April 2nd." },
+        { "output:text:address_change": "Since your order is already in transit, I can try to redirect the package." },
+        { "output:text:update_address": "Great news! I've submitted a redirect request to the carrier." },
+        { "output:text:farewell": "You're welcome! Your redirect reference is RDR-98765." },
+      ],
+      conversationProperties: {
+        agentName: "Support Agent",
+        userId: "user-42",
+        channel: "web",
+      },
+    });
+  }),
+
+  // Raw conversation log
+  http.get("*/conversationstore/conversations/:id", () => {
+    return HttpResponse.json({
+      agentId: "agent1",
+      agentVersion: 1,
+      conversationId: "conv1",
+      conversationState: "READY",
+      environment: "production",
+      conversationSteps: [],
+    });
+  }),
+
+  // Delete conversation
+  http.delete("*/conversationstore/conversations/:id", () => {
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  // --- Chat / Agent Engine ---
+
+  // Start conversation (v6: POST /agents/:agentId/start)
+  // NOTE: must stay above the broad `*/agents/:conversationId` handler below —
+  // MSW's `*` spans path segments, so that pattern also matches this URL and
+  // would otherwise answer setup-api with a conversation snapshot.
+  http.post("*/administration/agents/setup-api", async ({ request }) => {
+    const body = (await request.json()) as Record<string, unknown>;
+    // Mirror the backend contract: AgentSetupService rejects a blank `agentName`
+    // with "Agent name is required". Sending `name` (the old manager bug) must fail.
+    const agentName = body.agentName;
+    if (typeof agentName !== "string" || agentName.trim() === "") {
+      return HttpResponse.json(
+        { message: "Agent name is required" },
+        { status: 400 },
+      );
+    }
+    return HttpResponse.json(
+      {
+        action: "api_agent_created",
+        agentId: `api-agent-${Date.now()}`,
+        agentName,
+        provider: body.provider ?? "anthropic",
+        model: body.model ?? "claude-sonnet-4-6",
+        deployed: body.deploy !== false,
+        deploymentStatus: body.deploy !== false ? "READY" : undefined,
+        endpointCount: 5,
+        groups: ["Users", "Orders"],
+        quickRepliesEnabled: body.enableQuickReplies ?? false,
+        sentimentAnalysisEnabled: body.enableSentimentAnalysis ?? false,
+        resources: { agentLocation: "/agentstore/agents/mock-api-agent?version=1" },
+      },
+      { status: 201 },
+    );
+  }),
+
+  http.post("*/agents/:agentId/start", () => {
+    return new HttpResponse(null, {
+      status: 201,
+      headers: {
+        Location: `/agents/conv-${Date.now()}`,
+      },
+    });
+  }),
+
+  // Send message (text/plain or JSON) — returns snapshot (v6: POST /agents/:conversationId)
+  http.post("*/agents/:conversationId", () => {
+    return HttpResponse.json({
+      agentId: "agent1",
+      agentVersion: 3,
+      conversationId: "conv-mock",
+      conversationState: "READY",
+      environment: "production",
+      conversationSteps: [
+        {
+          input: "",
+          output: "I'd be happy to help! I can assist you with order tracking, returns, account inquiries, or product recommendations. What would you like help with?",
+          actions: ["respond"],
+          quickReplies: ["Track my order", "Start a return", "Browse products"],
+        },
+      ],
+      conversationProperties: {
+        agentName: "Support Agent",
+        userId: "user-42",
+        channel: "web",
+      },
+    });
+  }),
+
+  // List pending HITL approvals (1:1 surface). MUST precede the ":conversationId"
+  // catch-all below, or MSW (first-match-wins) treats "pending-approvals" as a
+  // conversation id and returns a single conversation object.
+  http.get("*/agents/pending-approvals", () => {
+    return HttpResponse.json([
+      {
+        conversationId: "conv-awaiting-1",
+        agentId: "agent1",
+        userId: "user-123",
+        pausedAt: new Date(Date.now() - 300_000).toISOString(),
+        pauseReason: "High-value transaction requires human review",
+        timeoutPolicy: "WAIT_INDEFINITELY",
+        approvalTimeout: null,
+      },
+      {
+        conversationId: "conv-awaiting-2",
+        agentId: "agent2",
+        userId: "user-456",
+        pausedAt: new Date(Date.now() - 120_000).toISOString(),
+        pauseReason: "Agent requested escalation to human operator",
+        timeoutPolicy: "AUTO_REJECT",
+        approvalTimeout: "PT15M",
+      },
+    ]);
+  }),
+
+  // Read conversation (v6: GET /agents/:conversationId) — the snapshot
+  // `readConversation` reads on load and on the GET that follows starting a
+  // conversation.
+  //
+  // The shape here is load-bearing and was wrong: this used to return
+  // `conversationSteps: [{ output, actions, quickReplies }]` and no
+  // `conversationOutputs` at all — an invented flat shape that
+  // `snapshotToMessages` cannot read (it wants keyed `conversationStep`
+  // entries plus a positionally-matching `conversationOutputs` entry, which is
+  // what the backend and the conversation-detail mock both use). Every load
+  // against this handler therefore produced ZERO messages, and the two tests
+  // that should have caught it asserted `length >= 0`, which is true of any
+  // array. Keep this aligned with `extractInput` / `extractOutputParts`.
+  http.get("*/agents/:conversationId", ({ params }) => {
+    // One handler serves two different situations, and they do not look alike.
+    //
+    // A conversation *just started* has no user turn yet — only the agent's
+    // welcome. Returning a user message there put words in the user's mouth: a
+    // freshly opened chat rendered "Can I change the delivery address?" as
+    // something they had supposedly typed. It made the assertion pass; it was
+    // not the contract. Only an *existing* conversation being reopened has a
+    // transcript, so only `conv1` gets one.
+    const isExisting = params.conversationId === "conv1";
+
+    const welcome = {
+      "output:text:welcome":
+        "Welcome to EDDI Support! I can help with orders, returns, billing, or product questions. How can I assist you today?",
+      quickReplies: ["Order help", "Returns", "Billing question", "Something else"],
+    };
+
+    return HttpResponse.json({
+      agentId: "agent1",
+      agentVersion: 3,
+      conversationId: params.conversationId ?? "conv-mock",
+      conversationState: "READY",
+      environment: "production",
+      conversationSteps: isExisting
+        ? [
+            {
+              conversationStep: [
+                { key: "input:initial", value: "Can I change the delivery address?", timestamp: Date.now() - 180000, originWorkflowId: null },
+                { key: "actions", value: ["welcome"], timestamp: Date.now() - 179500, originWorkflowId: "wf1" },
+              ],
+              timestamp: Date.now() - 180000,
+            },
+          ]
+        : [
+            {
+              conversationStep: [
+                { key: "actions", value: ["welcome"], timestamp: Date.now() - 1000, originWorkflowId: "wf1" },
+              ],
+              timestamp: Date.now() - 1000,
+            },
+          ],
+      conversationOutputs: [welcome],
+      conversationProperties: {
+        agentName: "Support Agent",
+        userId: "user-42",
+        channel: "web",
+      },
+    });
+  }),
+
+  // --- Backup / Import / Export ---
+  http.post("*/backup/export/:agentId", () => {
+    return new HttpResponse(null, {
+      status: 200,
+      headers: { Location: "/backup/export/test-agent-1.zip" },
+    });
+  }),
+
+  http.get("*/backup/export/:filename", () => {
+    return new HttpResponse(new Blob(["fake-zip"]), {
+      status: 200,
+      headers: { "Content-Type": "application/zip" },
+    });
+  }),
+
+  http.post("*/backup/import/preview", () => {
+    return HttpResponse.json({
+      agentOriginId: "origin-agent-1",
+      agentName: "Weather Agent",
+      resources: [
+        {
+          originId: "origin-agent-1",
+          resourceType: "agent",
+          name: "Weather Agent",
+          action: "UPDATE",
+          localId: "agent1",
+          localVersion: 1,
+        },
+        {
+          originId: "origin-wf-1",
+          resourceType: "package",
+          name: "Main Workflow",
+          action: "UPDATE",
+          localId: "wf1",
+          localVersion: 1,
+        },
+        {
+          originId: "origin-beh-1",
+          resourceType: "behavior",
+          name: "Greeting Rules",
+          action: "CREATE",
+          localId: null,
+          localVersion: null,
+        },
+        {
+          originId: "origin-dict-1",
+          resourceType: "dictionary",
+          name: "English Dictionary",
+          action: "UPDATE",
+          localId: "dict1",
+          localVersion: 1,
+        },
+      ],
+    });
+  }),
+
+  // NOTE: This generic handler must come AFTER the /preview handler
+  http.post("*/backup/import", ({ request }) => {
+    const url = new URL(request.url);
+    const strategy = url.searchParams.get("strategy");
+    if (strategy === "merge") {
+      return new HttpResponse(null, {
+        status: 200,
+        headers: { Location: "/agentstore/agents/agent1?version=2" },
+      });
+    }
+    return new HttpResponse(null, {
+      status: 200,
+      headers: { Location: "/agentstore/agents/imported-agent?version=1" },
+    });
+  }),
+
+  // --- Extension Store ---
+  http.get("*/extensionstore/extensions", () => {
+    return HttpResponse.json([
+      { type: "eddi://ai.labs.parser", displayName: "Parser", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
+      { type: "eddi://ai.labs.rules", displayName: "Rules", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
+      { type: "eddi://ai.labs.property", displayName: "Property Setter", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
+      { type: "eddi://ai.labs.apicalls", displayName: "API Calls", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
+      { type: "eddi://ai.labs.llm", displayName: "LLM", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
+      { type: "eddi://ai.labs.output", displayName: "Output", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
+      { type: "eddi://ai.labs.output.template", displayName: "Output Template", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
+      { type: "eddi://ai.labs.mcpcalls", displayName: "MCP Calls", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
+      { type: "eddi://ai.labs.rag", displayName: "RAG Knowledge Base", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
+    ]);
+  }),
+
+  // Update package
+  http.put("*/workflowstore/workflows/:id", ({ request, params }) => {
+    const url = new URL(request.url);
+    const currentVersion = parseInt(
+      url.searchParams.get("version") ?? "1",
+      10
+    );
+    const newVersion = currentVersion + 1;
+    return new HttpResponse(null, {
+      status: 200,
+      headers: {
+        Location: `eddi://ai.labs.workflow/workflowstore/workflows/${params.id}?version=${newVersion}`,
+      },
+    });
+  }),
+
+  // --- Resource Stores ---
+
+  // Generic currentversion handler — returns version 1 for all resource types.
+  // Must be registered before the per-store `:id` handlers so it matches first.
+  http.get("*/:store/:plural/:id/currentversion", () => {
+    return HttpResponse.json(1);
+  }),
+
+  // Generic descriptors handler for resource stores — the stores that have no
+  // dedicated one of their own. Must precede the per-store `:id` wildcards.
+  //
+  // `storesWithDedicatedHandlers` is load-bearing and was incomplete: it named
+  // `channelstore` only, so this handler answered `groupstore` too and the eight
+  // groups defined further down were dead fixture. Every Workforce and Groups
+  // test ran against one synthetic row. `descriptor-handlers.test.ts` now fails
+  // if a dedicated handler is shadowed again.
+  //
+  // Returns THREE rows rather than one, so that list rendering, ordering and
+  // pagination are exercised at all. `limit`/`index` are honoured for the same
+  // reason.
+  http.get("*/:store/:plural/descriptors", ({ request, params }) => {
+    const url = new URL(request.url);
+    const filter = url.searchParams.get("filter") ?? "";
+    const limit = Number(url.searchParams.get("limit") ?? 20);
+    const index = Number(url.searchParams.get("index") ?? 0);
+    const storeVal = params.store as string;
+    if (!storeVal.endsWith("store")) return;
+    if (STORES_WITH_DEDICATED_DESCRIPTORS.includes(storeVal)) return;
+
+    const descriptor = (id: string, ageHours: number) => ({
+      resource: `eddi://ai.labs.mock/${storeVal}/${params.plural}/${id}?version=1`,
+      name: `Mock ${id}`,
+      description: "Mock resource descriptor",
+      createdOn: Date.now() - 86400000,
+      lastModifiedOn: Date.now() - ageHours * 3600000,
+    });
+
+    // A filter is TWO different things to this app. On a list page it is the
+    // user's search box; in `getResourceVersions` (resources.ts) it is an id
+    // lookup — `descriptors?filter=<id>` — for a resource this mock has never
+    // heard of. So an unmatched filter still echoes a descriptor for whatever
+    // was asked for, because returning [] there would break every version
+    // picker and detail page. A test that needs an empty list should say so
+    // with its own `server.use` override rather than rely on this.
+    if (filter) {
+      return HttpResponse.json([descriptor(filter, 1)]);
+    }
+
+    const all = ["res1", "res2", "res3"].map((id, i) => descriptor(id, i + 1));
+    return HttpResponse.json(all.slice(index, index + limit));
+  }),
+
+  // Specific handlers for behavior and httpcalls with realistic mock data
+  http.get("*/rulestore/rulesets/:id", ({ request }) => {
+    const url = new URL(request.url);
+    const includePrevious = url.searchParams.get("includePreviousVersions");
+    // Don't match descriptor endpoints
+    if (isNotAnId(url.pathname) || includePrevious) {
+      return;
+    }
+    return HttpResponse.json({
+      appendActions: true,
+      expressionsAsActions: false,
+      behaviorGroups: [
+        {
+          name: "Greeting Rules",
+          executionStrategy: "currentStepOnly",
+          behaviorRules: [
+            {
+              name: "greeting_rule",
+              actions: ["greet"],
+              conditions: [
+                {
+                  type: "inputmatcher",
+                  configs: {
+                    expressions: "greeting(*)",
+                    occurrence: "currentStep",
+                  },
+                },
+              ],
+            },
+            {
+              name: "fallback_rule",
+              actions: ["fallback"],
+              conditions: [
+                {
+                  type: "negation",
+                  configs: {},
+                  conditions: [
+                    {
+                      type: "actionmatcher",
+                      configs: { actions: "greet" },
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+  }),
+
+  // EDDI Platform OpenAPI (used for version checking in standalone mode)
+  http.get("*/openapi", () => {
+    return HttpResponse.json({
+      info: {
+        version: "6.0.0-demo",
+        title: "EDDI API Mock",
+      },
+    });
+  }),
+
+  // GitHub latest-release lookup behind the opt-in update check. Returns a
+  // version far ahead of the mock backend's so the "update available" path is
+  // the one exercised by default.
+  http.get("https://api.github.com/repos/labsai/EDDI/releases/latest", () => {
+    return HttpResponse.json({
+      tag_name: "9.9.9",
+      name: "9.9.9",
+      html_url: "https://github.com/labsai/EDDI/releases/tag/9.9.9",
+      published_at: "2026-01-15T10:00:00Z",
+      body: "## Highlights\n\n- Mock release note one\n- Mock release note two",
+    });
+  }),
+
+  // There is deliberately no second outbound handler here. The update check
+  // contacts exactly one host, and `onUnhandledRequest: "error"` in the test
+  // setup means reintroducing a relay (shields.io or otherwise) fails the suite
+  // rather than passing quietly.
+
+  // OpenAPI endpoint discovery.
+  //
+  // POST with a body, mirroring EDDI. The superseded GET took the credential as
+  // `?apiAuth=` and echoed it back inside every generated call; it survives on
+  // the backend only to reject a request that still carries one, so a handler
+  // for it here would let a regression back onto the old path unnoticed.
+  http.post("*/apicallstore/apicalls/discover-endpoints", async ({ request }) => {
+    const body = (await request.json().catch(() => null)) as {
+      specUrl?: string;
+      authHeaderRef?: string;
+    } | null;
+    const specUrl = body?.specUrl;
+    if (!specUrl) {
+      return HttpResponse.json({ error: "a request body with a 'specUrl' is required" }, { status: 400 });
+    }
+    // EDDI's own rule, prefix-matched: only a reference is ever inherited.
+    const authRef = body?.authHeaderRef;
+    if (
+      authRef &&
+      !["${vault:", "${eddivault:", "${vars:", "${caller:"].some((p) => authRef.startsWith(p))
+    ) {
+      return HttpResponse.json(
+        { error: "authHeaderRef must be a ${vault:…}, ${vars:…} or ${caller:…} reference, not a literal credential." },
+        { status: 400 },
+      );
+    }
+    return HttpResponse.json({
+      title: "Petstore API",
+      baseUrl: "https://petstore.example.com/v1",
+      endpointCount: 5,
+      groups: {
+        pets: {
+          targetServerUrl: "https://petstore.example.com/v1",
+          httpCalls: [
+            {
+              name: "listPets",
+              description: "List all pets",
+              actions: ["api_get_pets"],
+              saveResponse: true,
+              responseObjectName: "listPets_response",
+              request: { path: "/pets", method: "get", headers: {}, queryParams: { limit: "{limit}" }, contentType: "application/json", body: "" },
+              parameters: { limit: "Max items to return" },
+            },
+            {
+              name: "createPet",
+              description: "Create a pet",
+              actions: ["api_post_pets"],
+              saveResponse: true,
+              responseObjectName: "createPet_response",
+              request: { path: "/pets", method: "post", headers: {}, queryParams: {}, contentType: "application/json", body: '{\n  "name": "{name}",\n  "age": {age}\n}' },
+              parameters: { name: "Pet name", age: "Pet age" },
+            },
+            {
+              name: "getPet",
+              description: "Get a pet by ID",
+              actions: ["api_get_pets_petid"],
+              saveResponse: true,
+              responseObjectName: "getPet_response",
+              request: { path: "/pets/{petId}", method: "get", headers: {}, queryParams: {}, contentType: "application/json", body: "" },
+              parameters: { petId: "The pet ID" },
+            },
+          ],
+        },
+        store: {
+          targetServerUrl: "https://petstore.example.com/v1",
+          httpCalls: [
+            {
+              name: "getInventory",
+              description: "Returns pet inventories",
+              actions: ["api_get_store_inventory"],
+              saveResponse: true,
+              responseObjectName: "getInventory_response",
+              request: { path: "/store/inventory", method: "get", headers: {}, queryParams: {}, contentType: "application/json", body: "" },
+            },
+            {
+              name: "placeOrder",
+              description: "Place an order",
+              actions: ["api_post_store_order"],
+              saveResponse: true,
+              responseObjectName: "placeOrder_response",
+              request: { path: "/store/order", method: "post", headers: {}, queryParams: {}, contentType: "application/json", body: '{\n  "petId": "{petId}",\n  "quantity": {quantity}\n}' },
+              parameters: { petId: "Pet ID to order", quantity: "Number to order" },
+            },
+          ],
+        },
+      },
+    });
+  }),
+
+  http.get("*/apicallstore/apicalls/:id", ({ request }) => {
+    const url = new URL(request.url);
+    const includePrevious = url.searchParams.get("includePreviousVersions");
+    if (isNotAnId(url.pathname) || includePrevious) {
+      return;
+    }
+    return HttpResponse.json({
+      targetServerUrl: "https://api.example.com",
+      httpCalls: [
+        {
+          name: "get_weather",
+          description: "Fetch current weather data for a city including temperature, humidity, and forecast",
+          parameters: { city: "City name to look up", units: "Temperature units (metric or imperial)" },
+          actions: ["get_weather"],
+          saveResponse: true,
+          responseObjectName: "weatherData",
+          fireAndForget: false,
+          request: {
+            path: "/v2/weather/current",
+            method: "GET",
+            headers: {
+              Authorization: "Bearer [[${apiKey}]]",
+              "X-Request-ID": "[[${conversationId}]]",
+            },
+            queryParams: { city: "[[${city}]]", units: "[[${units}]]" },
+            contentType: "application/json",
+            body: "",
+          },
+          preRequest: {
+            propertyInstructions: [
+              { name: "units", valueString: "metric", scope: "step", override: false },
+            ],
+          },
+          postResponse: {
+            propertyInstructions: [
+              { name: "current_temp", valueString: "[[${weatherData.temperature}]]", scope: "conversation", override: true },
+            ],
+            outputBuildInstructions: [],
+            qrBuildInstructions: [],
+          },
+        },
+        {
+          name: "lookup_order",
+          description: "Retrieve order details from the e-commerce backend by order ID",
+          parameters: { orderId: "The order ID (e.g. ORD-2024-78542)" },
+          actions: ["lookup_order"],
+          saveResponse: true,
+          responseObjectName: "orderDetails",
+          fireAndForget: false,
+          request: {
+            path: "/v1/orders/[[${orderId}]]",
+            method: "GET",
+            headers: {
+              Authorization: "Bearer ${vault:ecommerce-api-key}",
+              Accept: "application/json",
+            },
+            queryParams: {},
+            contentType: "application/json",
+            body: "",
+          },
+          preRequest: { propertyInstructions: [] },
+          postResponse: {
+            propertyInstructions: [
+              { name: "order_status", valueString: "[[${orderDetails.status}]]", scope: "conversation", override: true },
+              { name: "order_total", valueString: "[[${orderDetails.total}]]", scope: "conversation", override: true },
+            ],
+            outputBuildInstructions: [],
+            qrBuildInstructions: [],
+          },
+        },
+        {
+          name: "create_support_ticket",
+          description: "Create a Jira support ticket for issues that require human follow-up",
+          parameters: { summary: "Ticket summary", priority: "Priority level (low, medium, high, critical)" },
+          actions: ["escalate", "create_ticket"],
+          saveResponse: true,
+          responseObjectName: "ticketResult",
+          fireAndForget: false,
+          request: {
+            path: "/v2/issues",
+            method: "POST",
+            headers: {
+              Authorization: "Basic ${vault:jira-api-token}",
+              Accept: "application/json",
+            },
+            queryParams: {},
+            contentType: "application/json",
+            body: '{\n  "fields": {\n    "project": { "key": "SUP" },\n    "summary": "[[${summary}]]",\n    "description": "Auto-created by EDDI agent from conversation [[${conversationId}]]",\n    "issuetype": { "name": "Support Request" },\n    "priority": { "name": "[[${priority}]]" }\n  }\n}',
+          },
+          preRequest: {
+            propertyInstructions: [
+              { name: "priority", valueString: "medium", scope: "step", override: false },
+            ],
+          },
+          postResponse: {
+            propertyInstructions: [
+              { name: "ticket_key", valueString: "[[${ticketResult.key}]]", scope: "conversation", override: true },
+            ],
+            outputBuildInstructions: [],
+            qrBuildInstructions: [],
+          },
+        },
+        {
+          name: "send_notification_email",
+          description: "Send a transactional notification email to the customer via SendGrid",
+          parameters: {},
+          actions: ["notify_customer"],
+          saveResponse: false,
+          responseObjectName: "",
+          fireAndForget: true,
+          request: {
+            path: "/v3/mail/send",
+            method: "POST",
+            headers: {
+              Authorization: "Bearer ${vault:sendgrid-api-key}",
+            },
+            queryParams: {},
+            contentType: "application/json",
+            body: '{\n  "personalizations": [{ "to": [{ "email": "[[${properties.email}]]" }] }],\n  "from": { "email": "noreply@example.com", "name": "Support Team" },\n  "subject": "Update on your request",\n  "content": [{ "type": "text/plain", "value": "[[${notification_body}]]" }]\n}',
+          },
+          preRequest: { propertyInstructions: [] },
+          postResponse: {
+            propertyInstructions: [],
+            outputBuildInstructions: [],
+            qrBuildInstructions: [],
+          },
+        },
+      ],
+    });
+  }),
+
+  // LangChain mock data
+  http.get("*/llmstore/llms/:id", ({ request }) => {
+    const url = new URL(request.url);
+    const includePrevious = url.searchParams.get("includePreviousVersions");
+    if (isNotAnId(url.pathname) || includePrevious) return;
+    return HttpResponse.json({
+      tasks: [
+        {
+          actions: ["help", "chat"],
+          id: "main-chat",
+          type: "openai",
+          description: "Main AI assistant task",
+          parameters: {
+            systemMessage: "You are a helpful assistant.",
+            addToOutput: "true",
+            logSizeLimit: "20",
+          },
+          enableBuiltInTools: true,
+          builtInToolsWhitelist: ["calculator", "datetime"],
+          tools: [
+            "eddi://ai.labs.apicalls/apicallstore/apicalls/weather?version=1",
+          ],
+          enableHttpCallTools: true,
+          enableMcpCallTools: true,
+          conversationHistoryLimit: 10,
+          maxBudgetPerConversation: 1.0,
+          enableCostTracking: true,
+          enableToolCaching: true,
+          enableRateLimiting: true,
+          defaultRateLimit: 100,
+          a2aAgents: [
+            {
+              url: "https://remote.example.com/a2a/agents/support",
+              name: "Support Agent",
+              timeoutMs: 30000,
+            },
+          ],
+          modelCascade: {
+            enabled: true,
+            strategy: "cascade",
+            evaluationStrategy: "structured_output",
+            enableInAgentMode: true,
+            steps: [
+              { type: "openai", parameters: { model: "gpt-5.4-mini" }, confidenceThreshold: 0.7, timeoutMs: 10000 },
+              { type: "openai", parameters: { model: "gpt-5.4" }, confidenceThreshold: null, timeoutMs: 30000 },
+            ],
+          },
+          retry: {
+            maxAttempts: 3,
+            backoffDelayMs: 1000,
+            backoffMultiplier: 2.0,
+            maxBackoffDelayMs: 10000,
+          },
+          preRequest: {
+            propertyInstructions: [
+              { name: "userContext", valueString: "[[${memory.current.input}]]", scope: "step", override: true },
+            ],
+          },
+          postResponse: {
+            outputBuildInstructions: [
+              {
+                iterationObjectName: "obj",
+                templateFilterExpression: "",
+                outputType: "text",
+                outputValue: "{aiOutput.htmlResponseText}",
+                httpCodeValidator: {},
+              },
+            ],
+            qrBuildInstructions: [
+              {
+                pathToTargetArray: "aiOutput.quickReplies",
+                iterationObjectName: "obj",
+                templateFilterExpression: "",
+                quickReplyValue: "{obj.value}",
+                quickReplyExpressions: "{obj.expressions}",
+                httpCodeValidator: {},
+              },
+            ],
+          },
+          // Agentic improvements
+          counterweight: {
+            enabled: true,
+            level: "cautious",
+            placement: "suffix",
+            customInstructions: [],
+          },
+          identityMasking: {
+            enabled: false,
+            rules: [],
+          },
+          toolResponseLimits: {
+            defaultMaxChars: 50000,
+            truncationStrategy: "truncate",
+            perToolLimits: { webscraper: 2000 },
+          },
+        },
+      ],
+    });
+  }),
+
+  // Output mock data
+  http.get("*/outputstore/outputsets/:id", ({ request }) => {
+    const url = new URL(request.url);
+    const includePrevious = url.searchParams.get("includePreviousVersions");
+    if (isNotAnId(url.pathname) || includePrevious) return;
+    return HttpResponse.json({
+      lang: "en",
+      outputSet: [
+        {
+          action: "greet",
+          timesOccurred: 0,
+          outputs: [
+            {
+              valueAlternatives: [
+                { type: "text", text: "Hello! 👋 Welcome to our support. How can I help you today?", delay: 0 },
+                { type: "text", text: "Hi there! I'm your virtual assistant. What can I do for you?", delay: 0 },
+                { type: "text", text: "Good day! I'm here to help with orders, returns, or general questions. What do you need?", delay: 0 },
+              ],
+            },
+          ],
+          quickReplies: [
+            { value: "Track my order", expressions: "order_tracking", isDefault: false },
+            { value: "Start a return", expressions: "return_request", isDefault: false },
+            { value: "Billing question", expressions: "billing_inquiry", isDefault: false },
+            { value: "Something else", expressions: "other", isDefault: false },
+          ],
+        },
+        {
+          action: "farewell",
+          timesOccurred: 0,
+          outputs: [
+            {
+              valueAlternatives: [
+                { type: "text", text: "Thank you for reaching out! Have a great day. 😊", delay: 0 },
+                { type: "text", text: "Glad I could help! Don't hesitate to come back if you need anything.", delay: 0 },
+              ],
+            },
+          ],
+          quickReplies: [],
+        },
+        {
+          action: "fallback",
+          timesOccurred: 0,
+          outputs: [
+            {
+              valueAlternatives: [
+                { type: "text", text: "I'm not sure I understood that. Could you rephrase your question?", delay: 0 },
+                { type: "text", text: "Hmm, I didn't quite catch that. Can you try asking in a different way?", delay: 0 },
+                { type: "text", text: "I want to make sure I help you correctly — could you provide more details?", delay: 0 },
+              ],
+            },
+          ],
+          quickReplies: [
+            { value: "Talk to a human", expressions: "escalate", isDefault: false },
+            { value: "Main menu", expressions: "restart", isDefault: true },
+          ],
+        },
+        {
+          action: "order_status",
+          timesOccurred: 0,
+          outputs: [
+            {
+              valueAlternatives: [
+                { type: "text", text: "Here's the status of your order [[${properties.order_id}]]: It is currently **[[${properties.order_status}]]** and expected to arrive by [[${properties.delivery_date}]].", delay: 0 },
+              ],
+            },
+          ],
+          quickReplies: [
+            { value: "Track another order", expressions: "order_tracking", isDefault: false },
+            { value: "Return this order", expressions: "return_request", isDefault: false },
+            { value: "That's all, thanks", expressions: "bye", isDefault: false },
+          ],
+        },
+        {
+          action: "escalate",
+          timesOccurred: 0,
+          outputs: [
+            {
+              valueAlternatives: [
+                { type: "text", text: "I understand this needs personal attention. I'm connecting you with a support specialist now. Your reference number is [[${properties.ticket_key}]].", delay: 500 },
+              ],
+            },
+          ],
+          quickReplies: [],
+        },
+        {
+          action: "greet",
+          timesOccurred: 1,
+          outputs: [
+            {
+              valueAlternatives: [
+                { type: "text", text: "Welcome back! Is there something else I can help you with?", delay: 0 },
+              ],
+            },
+          ],
+          quickReplies: [
+            { value: "Continue previous topic", expressions: "continue", isDefault: false },
+            { value: "New question", expressions: "restart", isDefault: false },
+          ],
+        },
+      ],
+    });
+  }),
+
+  // Property setter mock data
+  http.get("*/propertysetterstore/propertysetters/:id", ({ request }) => {
+    const url = new URL(request.url);
+    const includePrevious = url.searchParams.get("includePreviousVersions");
+    if (isNotAnId(url.pathname) || includePrevious) return;
+    return HttpResponse.json({
+      setOnActions: [
+        {
+          actions: ["greet"],
+          setProperties: [
+            { name: "user_greeted", valueString: "true", scope: "conversation", override: true },
+            { name: "greeting_count", valueString: "[[${greeting_count}]] + 1", scope: "longTerm", fromObjectPath: "", override: true },
+            { name: "session_start", valueString: "[[${new java.util.Date().toISOString()}]]", scope: "conversation", override: true },
+          ],
+        },
+        {
+          actions: ["lookup_order"],
+          setProperties: [
+            { name: "last_order_id", valueString: "[[${orderDetails.orderId}]]", scope: "longTerm", fromObjectPath: "", override: true },
+            { name: "order_status", valueString: "[[${orderDetails.status}]]", scope: "conversation", fromObjectPath: "", override: true },
+            { name: "delivery_date", valueString: "[[${orderDetails.estimatedDelivery}]]", scope: "conversation", fromObjectPath: "", override: true },
+            { name: "order_total", valueString: "[[${orderDetails.total}]]", scope: "conversation", fromObjectPath: "", override: true },
+          ],
+        },
+        {
+          actions: ["escalate"],
+          setProperties: [
+            { name: "escalation_reason", valueString: "[[${memory.current.input}]]", scope: "conversation", override: true },
+            { name: "escalated_at", valueString: "[[${new java.util.Date().toISOString()}]]", scope: "conversation", override: true },
+            { name: "escalation_count", valueString: "[[${escalation_count}]] + 1", scope: "longTerm", fromObjectPath: "", override: true },
+          ],
+        },
+        {
+          actions: ["farewell"],
+          setProperties: [
+            { name: "last_interaction", valueString: "[[${new java.util.Date().toISOString()}]]", scope: "longTerm", override: true },
+            { name: "satisfaction_prompted", valueString: "false", scope: "conversation", override: true },
+          ],
+        },
+      ],
+    });
+  }),
+
+  // Dictionary mock data
+  http.get("*/dictionarystore/dictionaries/:id", ({ request }) => {
+    const url = new URL(request.url);
+    const includePrevious = url.searchParams.get("includePreviousVersions");
+    if (isNotAnId(url.pathname) || includePrevious) return;
+    return HttpResponse.json({
+      lang: "en",
+      words: [
+        { word: "hello", expressions: "greeting(hello)", frequency: 10 },
+        { word: "hi", expressions: "greeting(hi)", frequency: 10 },
+        { word: "hey", expressions: "greeting(hey)", frequency: 8 },
+        { word: "goodbye", expressions: "farewell(goodbye)", frequency: 5 },
+        { word: "bye", expressions: "farewell(bye)", frequency: 5 },
+        { word: "thanks", expressions: "gratitude(thanks)", frequency: 7 },
+        { word: "order", expressions: "topic(order)", frequency: 9 },
+        { word: "return", expressions: "intent(return_request)", frequency: 6 },
+        { word: "refund", expressions: "intent(refund_request)", frequency: 6 },
+        { word: "help", expressions: "intent(help)", frequency: 8 },
+        { word: "cancel", expressions: "intent(cancel)", frequency: 4 },
+        { word: "status", expressions: "intent(check_status)", frequency: 7 },
+      ],
+      phrases: [
+        { phrase: "good morning", expressions: "greeting(good_morning)" },
+        { phrase: "good evening", expressions: "greeting(good_evening)" },
+        { phrase: "see you later", expressions: "farewell(see_you)" },
+        { phrase: "track my order", expressions: "intent(order_tracking)" },
+        { phrase: "I want to return", expressions: "intent(return_request)" },
+        { phrase: "talk to a human", expressions: "intent(escalate)" },
+        { phrase: "billing question", expressions: "intent(billing_inquiry)" },
+        { phrase: "change my address", expressions: "intent(address_change)" },
+      ],
+      regExs: [
+        { regEx: "ORD-\\d{4}-\\d{5}", expressions: "entity(order_id)" },
+        { regEx: "\\d{5}(-\\d{4})?", expressions: "entity(zipcode)" },
+        { regEx: "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z]{2,}", expressions: "entity(email)" },
+        { regEx: "\\+?\\d{1,3}[-.\\s]?\\(?\\d{1,4}\\)?[-.\\s]?\\d{1,4}[-.\\s]?\\d{1,9}", expressions: "entity(phone_number)" },
+      ],
+    });
+  }),
+
+  // MCP tool discovery endpoint.
+  //
+  // POST with the probed server's key in `X-Mcp-Authorization`, mirroring EDDI.
+  // No GET handler, deliberately: `onUnhandledRequest: "error"` then turns a
+  // regression back to `?apiKey=` into a failing test rather than a silent pass.
+  http.post("*/mcpcallsstore/mcpcalls/discover-tools", async ({ request }) => {
+    const body = (await request.json().catch(() => null)) as { url?: string } | null;
+    const serverUrl = body?.url;
+    if (!serverUrl) {
+      return HttpResponse.json({ error: "a request body with a 'url' is required" }, { status: 400 });
+    }
+    return HttpResponse.json({
+      tools: [
+        { name: "search_documents", description: "Search indexed documents by query" },
+        { name: "index_document", description: "Index a new document into the knowledge base" },
+        { name: "delete_document", description: "Delete a document by its unique ID" },
+      ],
+      count: 3,
+    });
+  }),
+
+  // MCP Calls mock data
+  http.get("*/mcpcallsstore/mcpcalls/:id", ({ request }) => {
+    const url = new URL(request.url);
+    const includePrevious = url.searchParams.get("includePreviousVersions");
+    if (isNotAnId(url.pathname) || includePrevious) return;
+    return HttpResponse.json({
+      name: "Enterprise Document Tools Server",
+      mcpServerUrl: "https://mcp.internal.example.com/v1",
+      transport: "http",
+      apiKey: "${vault:mcp-doc-key}",
+      timeoutMs: 30000,
+      toolsWhitelist: ["search_documents", "index_document", "get_document_metadata"],
+      toolsBlacklist: ["delete_document"],
+      mcpCalls: [
+        {
+          name: "searchDocs",
+          description: "Search internal knowledge base using semantic similarity matching",
+          actions: ["search", "find_info"],
+          toolName: "search_documents",
+          toolArguments: { query: "[[${memory.current.input}]]", maxResults: "5", minScore: "0.7" },
+          saveResponse: true,
+          responseObjectName: "searchResults",
+        },
+        {
+          name: "indexNewDoc",
+          description: "Index a new document from a conversation attachment into the knowledge base",
+          actions: ["index_attachment"],
+          toolName: "index_document",
+          toolArguments: { content: "[[${attachment.text}]]", title: "[[${attachment.fileName}]]", metadata: '{"source": "conversation", "conversationId": "[[${conversationId}]]"}' },
+          saveResponse: true,
+          responseObjectName: "indexResult",
+        },
+        {
+          name: "getDocMeta",
+          description: "Retrieve metadata for a specific document by its ID",
+          actions: ["get_doc_details"],
+          toolName: "get_document_metadata",
+          toolArguments: { documentId: "[[${searchResults[0].id}]]" },
+          saveResponse: true,
+          responseObjectName: "docMetadata",
+        },
+      ],
+    });
+  }),
+
+  // RAG Knowledge Base mock data (BEFORE generic handlers)
+  http.get("*/ragstore/rags/:id", ({ request }) => {
+    const url = new URL(request.url);
+    const includePrevious = url.searchParams.get("includePreviousVersions");
+    if (isNotAnId(url.pathname) || includePrevious) return;
+    return HttpResponse.json({
+      name: "product-docs",
+      embeddingProvider: "openai",
+      embeddingParameters: {
+        model: "text-embedding-3-small",
+        apiKey: "${vault:openai-key}",
+      },
+      storeType: "pgvector",
+      storeParameters: {
+        host: "localhost",
+        port: "5432",
+        database: "eddi",
+        table: "embeddings",
+        user: "${vault:pg-user}",
+        password: "${vault:pg-password}",
+      },
+      chunkStrategy: "recursive",
+      chunkSize: 512,
+      chunkOverlap: 64,
+      maxResults: 5,
+      minScore: 0.6,
+    });
+  }),
+
+  // RAG ingestion endpoints (mock)
+  http.post("*/ragstore/rags/:id/ingest", () => {
+    return HttpResponse.json({
+      ingestionId: `ingest-${Date.now()}`,
+    });
+  }),
+
+  http.get("*/ragstore/rags/:id/ingestion/:ingestionId/status", () => {
+    return HttpResponse.json({
+      status: "completed",
+    });
+  }),
+
+  // --- Group Store Mock Handlers ---
+  http.get("*/groupstore/groups/descriptors", () => {
+    const groups = [
+      {
+        resource: "eddi://ai.labs.group/groupstore/groups/grp1?version=1",
+        name: "Product Review Panel",
+        description: "Peer-review discussion for product decisions",
+        createdOn: Date.now() - 86400000,
+        lastModifiedOn: Date.now(),
+      },
+      {
+        resource: "eddi://ai.labs.group/groupstore/groups/grp2?version=1",
+        name: "Strategy Debate",
+        description: "Devil's advocate debate on business strategy",
+        createdOn: Date.now() - 172800000,
+        lastModifiedOn: Date.now() - 3600000,
+      },
+      {
+        resource: "eddi://ai.labs.group/groupstore/groups/grp3?version=2",
+        name: "Research Round Table",
+        description: "Open discussion for research synthesis",
+        createdOn: Date.now() - 259200000,
+        lastModifiedOn: Date.now() - 7200000,
+      },
+      {
+        resource: "eddi://ai.labs.group/groupstore/groups/grp4?version=1",
+        name: "Market Forecast Panel",
+        description: "Delphi-style anonymous forecasting for quarterly predictions",
+        createdOn: Date.now() - 432000000,
+        lastModifiedOn: Date.now() - 14400000,
+      },
+      {
+        resource: "eddi://ai.labs.group/groupstore/groups/grp5?version=3",
+        name: "Feature Prioritization Debate",
+        description: "Pro/con debate on which features to prioritize for next release",
+        createdOn: Date.now() - 604800000,
+        lastModifiedOn: Date.now() - 43200000,
+      },
+      {
+        resource: "eddi://ai.labs.group/groupstore/groups/grp6?version=1",
+        name: "Security Audit Task Force",
+        description: "Coordinated task force to plan and execute a full security audit",
+        createdOn: Date.now() - 345600000,
+        lastModifiedOn: Date.now() - 1800000,
+      },
+      {
+        resource: "eddi://ai.labs.group/groupstore/groups/grp7?version=2",
+        name: "Customer Feedback Analysis",
+        description: "Round table review of customer feedback themes and action items",
+        createdOn: Date.now() - 518400000,
+        lastModifiedOn: Date.now() - 86400000,
+      },
+      {
+        resource: "eddi://ai.labs.group/groupstore/groups/grp8?version=1",
+        name: "Compliance Risk Review",
+        description: "Devil's advocate challenge of compliance assumptions across departments",
+        createdOn: Date.now() - 691200000,
+        lastModifiedOn: Date.now() - 172800000,
+      },
+    ];
+    return HttpResponse.json(groups);
+  }),
+
+  // Mirrors `RestAgentGroupStore.readDiscussionStyles`: a JSON ARRAY of
+  // {style, phases, description}, one entry per DiscussionStyle the backend
+  // knows. Not a map keyed by the enum, and no display label — the mock claimed
+  // both, which let a hook that could never match the real payload look correct.
+  http.get("*/groupstore/groups/styles", () => {
+    return HttpResponse.json([
+      { style: "ROUND_TABLE", phases: ["Initial Opinions", "Discussion", "Synthesis"], description: "Open discussion with multiple opinion rounds and moderator synthesis" },
+      { style: "PEER_REVIEW", phases: ["Initial Opinions", "Peer Critique", "Revision", "Synthesis"], description: "Each member gives an opinion, then critiques every peer, then revises" },
+      { style: "DEVIL_ADVOCATE", phases: ["Initial Opinions", "Devil's Challenge", "Defense", "Synthesis"], description: "One designated challenger argues against the group consensus" },
+      { style: "DELPHI", phases: ["Round 1 (Independent)", "Round 2 (Anonymous)", "Synthesis"], description: "Anonymous opinion rounds to reduce groupthink and achieve convergence" },
+      { style: "DEBATE", phases: ["Opening Arguments (Pro)", "Opening Arguments (Con)", "Rebuttal (Pro)", "Rebuttal (Con)", "Judgment"], description: "Structured pro/con argumentation with rebuttal and judge" },
+      { style: "TASK_FORCE", phases: ["Task Planning", "Task Execution", "Result Verification", "Final Synthesis"], description: "Collaborative task accomplishment: plan, execute in parallel, verify, synthesize" },
+      { style: "NEGOTIATION", phases: ["Positions & Interests", "Opening Proposals", "Bargaining", "Arbitration", "Synthesis"], description: "Trade, not win/lose: positions, opening proposals, bargaining with a concession ledger, arbitration only if no agreement, synthesis" },
+      { style: "CUSTOM", phases: [], description: "User-defined phases for full control over the discussion flow" },
+    ]);
+  }),
+
+  http.get("*/groupstore/groups/jsonSchema", () => {
+    return HttpResponse.json({
+      $schema: "https://json-schema.org/draft/2020-12/schema",
+      type: "object",
+      title: "AgentGroupConfiguration",
+      properties: {
+        name: { type: "string", description: "Group name" },
+        description: { type: "string", description: "Group description" },
+        members: { type: "array", items: { type: "object" }, description: "Group members" },
+        moderatorAgentId: { type: "string", description: "Moderator agent ID" },
+        style: { type: "string", description: "Discussion style" },
+        maxRounds: { type: "integer", description: "Maximum rounds" },
+      },
+    });
+  }),
+
+  http.get("*/groupstore/groups/:id", ({ params }) => {
+    const groupConfigs: Record<string, object> = {
+      grp1: {
+        name: "Product Review Panel",
+        description: "Peer-review discussion for product decisions",
+        members: [
+          { agentId: "agent1", displayName: "Support Agent", speakingOrder: 1, role: "Reviewer", memberType: "AGENT" },
+          { agentId: "agent2", displayName: "FAQ Agent", speakingOrder: 2, role: "Critic", memberType: "AGENT" },
+        ],
+        moderatorAgentId: "agent1",
+        style: "PEER_REVIEW",
+        maxRounds: 3,
+        phases: [
+          { name: "Initial Opinions", type: "OPINION", participants: "*", turnOrder: "SEQUENTIAL", contextScope: "NONE", targetEachPeer: false, inputTemplate: null, repeats: 1 },
+          { name: "Critique", type: "CRITIQUE", participants: "*", turnOrder: "SEQUENTIAL", contextScope: "FULL", targetEachPeer: true, inputTemplate: null, repeats: 1 },
+          { name: "Synthesis", type: "SYNTHESIS", participants: "moderator", turnOrder: "SEQUENTIAL", contextScope: "FULL", targetEachPeer: false, inputTemplate: null, repeats: 1 },
+        ],
+        protocol: {
+          agentTimeoutSeconds: 60, onAgentFailure: "SKIP", maxRetries: 2, onMemberUnavailable: "SKIP",
+          // EDDI I1 — a dollar ceiling on the whole discussion.
+          maxCostPerDiscussion: 2.5, onCostExceeded: "SYNTHESIZE_NOW",
+        },
+        dynamicAgents: {
+          enabled: false, allowCreation: false, allowRecruitment: false, allowDelegation: true,
+          maxCreatedAgentsPerDiscussion: 5, maxRecruitedAgentsPerDiscussion: 10,
+          maxDelegationsPerTask: 3, maxDelegationDepth: 3, delegationTimeoutSeconds: 120,
+          allowedDelegationTargets: [], allowedProviders: [], allowedModels: {},
+          inheritParentModel: true,
+          // Hyphenated and lower-case, exactly as Jackson's @JsonValue writes it
+          // on AgentGroupConfiguration.LifecyclePolicy. A mock that returned the
+          // canonical constant would hide the mismatch this format caused.
+          lifecyclePolicy: "keep-deployed",
+        },
+        recordDissents: true,
+        taskListConfig: { allowAgentTaskCreation: true, maxAgentAddedTasksPerDiscussion: 20, maxPerTurn: 3 },
+      },
+      grp2: {
+        name: "Strategy Debate",
+        description: "Devil's advocate debate on business strategy",
+        members: [
+          { agentId: "agent3", displayName: "Market Analyst", speakingOrder: 1, role: "Risk", memberType: "AGENT" },
+          { agentId: "agent4", displayName: "Growth Strategist", speakingOrder: 2, role: "Domain", memberType: "AGENT" },
+          { agentId: "agent5", displayName: "Contrarian", speakingOrder: 3, role: "DEVIL_ADVOCATE", memberType: "AGENT" },
+        ],
+        moderatorAgentId: "agent3",
+        style: "DEVIL_ADVOCATE",
+        maxRounds: 1,
+        phases: null,
+        protocol: { agentTimeoutSeconds: 60, onAgentFailure: "SKIP", maxRetries: 2, onMemberUnavailable: "SKIP" },
+      },
+      grp3: {
+        name: "Research Round Table",
+        description: "Open discussion for research synthesis",
+        members: [
+          { agentId: "agent6", displayName: "Data Scientist", speakingOrder: 1, role: "Analysis", memberType: "AGENT" },
+          { agentId: "agent7", displayName: "Domain Expert", speakingOrder: 2, role: "Context", memberType: "AGENT" },
+          { agentId: "agent8", displayName: "Research Lead", speakingOrder: 3, role: "Synthesis", memberType: "AGENT" },
+          { agentId: "agent9", displayName: "Peer Reviewer", speakingOrder: 4, role: "Validation", memberType: "AGENT" },
+        ],
+        moderatorAgentId: "agent8",
+        style: "ROUND_TABLE",
+        maxRounds: 2,
+        phases: null,
+        protocol: { agentTimeoutSeconds: 60, onAgentFailure: "SKIP", maxRetries: 2, onMemberUnavailable: "SKIP" },
+      },
+      grp4: {
+        name: "Market Forecast Panel",
+        description: "Delphi-style anonymous forecasting for quarterly predictions",
+        members: [
+          { agentId: "agent10", displayName: "Economist A", speakingOrder: 1, role: "Forecasting", memberType: "AGENT" },
+          { agentId: "agent11", displayName: "Economist B", speakingOrder: 2, role: "Forecasting", memberType: "AGENT" },
+          { agentId: "agent12", displayName: "Industry Analyst", speakingOrder: 3, role: "Forecasting", memberType: "AGENT" },
+          { agentId: "agent13", displayName: "Risk Modeler", speakingOrder: 4, role: "Forecasting", memberType: "AGENT" },
+          { agentId: "agent14", displayName: "Trend Spotter", speakingOrder: 5, role: "Forecasting", memberType: "AGENT" },
+        ],
+        moderatorAgentId: "agent10",
+        style: "DELPHI",
+        maxRounds: 3,
+        phases: null,
+        protocol: { agentTimeoutSeconds: 90, onAgentFailure: "SKIP", maxRetries: 3, onMemberUnavailable: "SKIP" },
+      },
+      grp5: {
+        name: "Feature Prioritization Debate",
+        description: "Pro/con debate on which features to prioritize for next release",
+        members: [
+          { agentId: "agent15", displayName: "Product Advocate", speakingOrder: 1, role: "PRO", memberType: "AGENT" },
+          { agentId: "agent16", displayName: "UX Champion", speakingOrder: 2, role: "PRO", memberType: "AGENT" },
+          { agentId: "agent17", displayName: "Tech Debt Guardian", speakingOrder: 3, role: "CON", memberType: "AGENT" },
+          { agentId: "agent18", displayName: "Budget Hawk", speakingOrder: 4, role: "CON", memberType: "AGENT" },
+        ],
+        moderatorAgentId: null,
+        style: "DEBATE",
+        maxRounds: 1,
+        phases: null,
+        protocol: { agentTimeoutSeconds: 60, onAgentFailure: "SKIP", maxRetries: 2, onMemberUnavailable: "SKIP" },
+      },
+      grp6: {
+        name: "Security Audit Task Force",
+        description: "Coordinated task force to plan and execute a full security audit",
+        members: [
+          { agentId: "agent19", displayName: "Security Lead", speakingOrder: 1, role: "Lead", memberType: "AGENT" },
+          { agentId: "agent20", displayName: "Penetration Tester", speakingOrder: 2, role: "Research", memberType: "AGENT" },
+          { agentId: "agent21", displayName: "Infrastructure Eng", speakingOrder: 3, role: "Implementation", memberType: "AGENT" },
+          { agentId: "agent22", displayName: "Compliance Officer", speakingOrder: 4, role: "QA", memberType: "AGENT" },
+        ],
+        moderatorAgentId: "agent19",
+        style: "TASK_FORCE",
+        maxRounds: 1,
+        phases: null,
+        protocol: { agentTimeoutSeconds: 120, onAgentFailure: "RETRY", maxRetries: 3, onMemberUnavailable: "SKIP" },
+      },
+      grp7: {
+        name: "Customer Feedback Analysis",
+        description: "Round table review of customer feedback themes and action items",
+        members: [
+          { agentId: "agent23", displayName: "CX Analyst", speakingOrder: 1, role: "Analysis", memberType: "AGENT" },
+          { agentId: "agent24", displayName: "Product Manager", speakingOrder: 2, role: "Prioritization", memberType: "AGENT" },
+          { agentId: "grp4", displayName: "Market Forecast Panel", speakingOrder: 3, role: "Context", memberType: "GROUP" },
+        ],
+        moderatorAgentId: "agent24",
+        style: "ROUND_TABLE",
+        maxRounds: 2,
+        phases: null,
+        protocol: { agentTimeoutSeconds: 60, onAgentFailure: "SKIP", maxRetries: 2, onMemberUnavailable: "SKIP" },
+      },
+      grp8: {
+        name: "Compliance Risk Review",
+        description: "Devil's advocate challenge of compliance assumptions across departments",
+        members: [
+          { agentId: "agent25", displayName: "Legal Advisor", speakingOrder: 1, role: "Compliance", memberType: "AGENT" },
+          { agentId: "agent26", displayName: "Risk Manager", speakingOrder: 2, role: "Risk", memberType: "AGENT" },
+          { agentId: "agent27", displayName: "Operations Head", speakingOrder: 3, role: "Operations", memberType: "AGENT" },
+          { agentId: "agent28", displayName: "External Auditor", speakingOrder: 4, role: "DEVIL_ADVOCATE", memberType: "AGENT" },
+          { agentId: "grp2", displayName: "Strategy Debate", speakingOrder: 5, role: "Strategy", memberType: "GROUP" },
+        ],
+        moderatorAgentId: "agent25",
+        style: "DEVIL_ADVOCATE",
+        maxRounds: 2,
+        phases: null,
+        protocol: { agentTimeoutSeconds: 60, onAgentFailure: "SKIP", maxRetries: 2, onMemberUnavailable: "SKIP" },
+      },
+    };
+    const id = params.id as string;
+    const config = groupConfigs[id] ?? groupConfigs.grp1;
+    return HttpResponse.json(config);
+  }),
+
+  http.post("*/groupstore/groups", () => {
+    const newId = `grp-${Date.now()}`;
+    return new HttpResponse(null, {
+      status: 201,
+      headers: {
+        Location: `eddi://ai.labs.group/groupstore/groups/${newId}?version=1`,
+      },
+    });
+  }),
+
+  http.put("*/groupstore/groups/:id", ({ request, params }) => {
+    const url = new URL(request.url);
+    const currentVersion = parseInt(url.searchParams.get("version") ?? "1", 10);
+    return new HttpResponse(null, {
+      status: 200,
+      headers: {
+        Location: `eddi://ai.labs.group/groupstore/groups/${params.id}?version=${currentVersion + 1}`,
+      },
+    });
+  }),
+
+  // ── I13 — standing-team workspace ──
+
+  http.get("*/groupstore/groups/:groupId/workspace", ({ params }) => {
+    return HttpResponse.json({
+      id: `ws-${params.groupId}`, schemaVersion: 1, groupId: params.groupId,
+      // awardedBids is a Record<taskId, AwardedBid>, not an array — an empty
+      // object is the real empty shape.
+      backlog: { tasks: [], awardedBids: {} },
+      metrics: { discussions: 0, tasksVerified: 0, totalCost: 0, lastRunAt: null, perMemberStats: {} },
+      cadences: [],
+      runningDiscussionId: "",
+      pulledTaskIds: [],
+      created: "2026-06-01T00:00:00Z", lastModified: "2026-06-01T00:00:00Z", revision: "0",
+    });
+  }),
+
+  http.post("*/groupstore/groups/:groupId/workspace/backlog", async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as { subject?: string; description?: string; priority?: number };
+    if (!body?.subject?.trim()) {
+      return HttpResponse.json({ error: "subject is required" }, { status: 400 });
+    }
+    return HttpResponse.json({
+      id: `task-${Date.now()}`, subject: body.subject, description: body.description ?? "",
+      status: "PENDING", assignedAgentId: null, assignedDisplayName: null, dependsOnIds: [],
+      result: null, verificationNote: null, verified: false, priority: body.priority ?? 0,
+      createdAt: new Date().toISOString(), completedAt: null,
+    }, { status: 201 });
+  }),
+
+  http.post("*/groupstore/groups/:groupId/workspace/cadences", async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as { cronExpression?: string };
+    if (!body?.cronExpression?.trim()) {
+      return HttpResponse.json({ error: "cronExpression is required" }, { status: 400 });
+    }
+    return HttpResponse.json({
+      cadenceId: `cad-${Date.now()}`, scheduleRef: `sched-${Date.now()}`,
+      inputTemplate: null, maxBacklogTasksPerRun: 5, maxCostPerRun: null, createdBy: "manager-user",
+    }, { status: 201 });
+  }),
+
+  http.delete("*/groupstore/groups/:groupId/workspace/cadences/:cadenceId", () => {
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  // ── I10 — packaged group templates ──
+
+  http.get("*/groupstore/templates", () => {
+    return HttpResponse.json([
+      {
+        templateId: "research-pod", title: "Research Pod",
+        description: "Three independent researchers converge on findings, synthesized by a moderator.",
+        requiredRoles: [
+          { role: "researcher1", description: "First independent researcher" },
+          { role: "researcher2", description: "Second independent researcher" },
+          { role: "researcher3", description: "Third independent researcher" },
+          { role: "moderator", description: "Synthesizes the pod's findings and judges convergence" },
+        ],
+      },
+      {
+        templateId: "decision-board", title: "Decision Board",
+        description: "A board with a human director votes on options a chair distills.",
+        requiredRoles: [
+          { role: "advisor1", description: "First board advisor" },
+          { role: "advisor2", description: "Second board advisor" },
+          { role: "humanDirector", description: "Human board member — their principal id" },
+          { role: "chair", description: "Chairs the board" },
+        ],
+      },
+    ]);
+  }),
+
+  http.get("*/groupstore/templates/:templateId", ({ params }) => {
+    if (params.templateId === "research-pod") {
+      return HttpResponse.json({
+        manifest: {
+          templateId: "research-pod", title: "Research Pod",
+          description: "Three independent researchers converge on findings, synthesized by a moderator.",
+          requiredRoles: [
+            { role: "researcher1", description: "First independent researcher" },
+            { role: "researcher2", description: "Second independent researcher" },
+            { role: "researcher3", description: "Third independent researcher" },
+            { role: "moderator", description: "Synthesizes the pod's findings and judges convergence" },
+          ],
+        },
+        config: {
+          style: "CUSTOM", moderatorAgentId: "$moderator",
+          members: [
+            { agentId: "$researcher1", displayName: "Researcher 1", speakingOrder: 1 },
+            { agentId: "$researcher2", displayName: "Researcher 2", speakingOrder: 2 },
+            { agentId: "$researcher3", displayName: "Researcher 3", speakingOrder: 3 },
+          ],
+        },
+      });
+    }
+    if (params.templateId === "decision-board") {
+      return HttpResponse.json({
+        manifest: {
+          templateId: "decision-board", title: "Decision Board",
+          description: "A board with a human director votes on options a chair distills.",
+          requiredRoles: [
+            { role: "advisor1", description: "First board advisor" },
+            { role: "advisor2", description: "Second board advisor" },
+            { role: "humanDirector", description: "Human board member — their principal id" },
+            { role: "chair", description: "Chairs the board" },
+          ],
+        },
+        config: {
+          style: "CUSTOM", moderatorAgentId: "$chair",
+          members: [
+            { agentId: "$advisor1", displayName: "Advisor 1", speakingOrder: 1 },
+            { agentId: "$advisor2", displayName: "Advisor 2", speakingOrder: 2 },
+            { agentId: "$humanDirector", displayName: "Director", speakingOrder: 3, memberType: "HUMAN" },
+          ],
+        },
+      });
+    }
+    return HttpResponse.json({ error: `No such template: ${params.templateId}` }, { status: 404 });
+  }),
+
+  http.post("*/groupstore/templates/:templateId/instantiate", async ({ request, params }) => {
+    const body = (await request.json().catch(() => ({}))) as {
+      name?: string; roleAssignments?: Record<string, string>;
+    };
+    const assignments = body?.roleAssignments ?? {};
+    const knownRoles: Record<string, string[]> = {
+      "research-pod": ["researcher1", "researcher2", "researcher3", "moderator"],
+      "decision-board": ["advisor1", "advisor2", "humanDirector", "chair"],
+    };
+    const required = knownRoles[String(params.templateId)];
+    if (!required) {
+      return HttpResponse.json({ error: `No such template: ${params.templateId}` }, { status: 400 });
+    }
+    const missing = required.filter((r) => !assignments[r]?.trim());
+    if (missing.length > 0) {
+      return HttpResponse.json(
+        { error: `Missing role assignment(s): ${missing.join(", ")}` },
+        { status: 400 },
+      );
+    }
+    return new HttpResponse(null, {
+      status: 201,
+      headers: {
+        Location: `eddi://ai.labs.group/groupstore/groups/grp-from-tmpl?version=1`,
+      },
+    });
+  }),
+
+  http.delete("*/groupstore/groups/:id", () => {
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  // Group conversations
+  http.get("*/groups/:groupId/conversations", ({ params }) => {
+    const now = Date.now();
+    const groupConversations: Record<string, object[]> = {
+      grp1: [
+        { id: "gc-1a", groupId: "grp1", userId: "admin", state: "COMPLETED", originalQuestion: "Review the new onboarding flow — is it production-ready?", created: new Date(now - 86400000).toISOString(), lastModified: new Date(now - 82800000).toISOString() },
+        { id: "gc-1b", groupId: "grp1", userId: "admin", state: "COMPLETED", originalQuestion: "Assess the mobile checkout redesign for UX consistency", created: new Date(now - 604800000).toISOString(), lastModified: new Date(now - 601200000).toISOString() },
+        { id: "gc-1c", groupId: "grp1", userId: "admin", state: "FAILED", originalQuestion: "Evaluate the new API rate limiting strategy", created: new Date(now - 172800000).toISOString(), lastModified: new Date(now - 169200000).toISOString() },
+      ],
+      grp2: [
+        { id: "gc-2a", groupId: "grp2", userId: "admin", state: "COMPLETED", originalQuestion: "Should we pivot to a product-led growth strategy?", created: new Date(now - 259200000).toISOString(), lastModified: new Date(now - 255600000).toISOString() },
+        { id: "gc-2b", groupId: "grp2", userId: "admin", state: "COMPLETED", originalQuestion: "Is expanding into the enterprise segment worth the R&D cost?", created: new Date(now - 432000000).toISOString(), lastModified: new Date(now - 428400000).toISOString() },
+      ],
+      grp3: [
+        { id: "gc-3a", groupId: "grp3", userId: "admin", state: "COMPLETED", originalQuestion: "What are the key findings from last quarter's user research?", created: new Date(now - 345600000).toISOString(), lastModified: new Date(now - 342000000).toISOString() },
+        { id: "gc-3b", groupId: "grp3", userId: "admin", state: "IN_PROGRESS", originalQuestion: "Synthesize competitor analysis data from the 3 latest reports", created: new Date(now - 3600000).toISOString(), lastModified: new Date(now - 1800000).toISOString() },
+      ],
+      grp4: [
+        { id: "gc-4a", groupId: "grp4", userId: "admin", state: "COMPLETED", originalQuestion: "Forecast Q3 revenue across our three business lines", created: new Date(now - 518400000).toISOString(), lastModified: new Date(now - 514800000).toISOString() },
+        { id: "gc-4b", groupId: "grp4", userId: "admin", state: "COMPLETED", originalQuestion: "What is the probability of a market correction in the next 6 months?", created: new Date(now - 691200000).toISOString(), lastModified: new Date(now - 687600000).toISOString() },
+        { id: "gc-4c", groupId: "grp4", userId: "admin", state: "COMPLETED", originalQuestion: "Estimate customer churn rate for enterprise tier in Q4", created: new Date(now - 864000000).toISOString(), lastModified: new Date(now - 860400000).toISOString() },
+      ],
+      grp5: [
+        { id: "gc-5a", groupId: "grp5", userId: "admin", state: "COMPLETED", originalQuestion: "Should we prioritize real-time collaboration or offline mode?", created: new Date(now - 172800000).toISOString(), lastModified: new Date(now - 169200000).toISOString() },
+      ],
+      grp6: [
+        { id: "gc-6a", groupId: "grp6", userId: "admin", state: "COMPLETED", originalQuestion: "Plan and execute a comprehensive security audit of our auth system", created: new Date(now - 259200000).toISOString(), lastModified: new Date(now - 252000000).toISOString() },
+        { id: "gc-6b", groupId: "grp6", userId: "admin", state: "AWAITING_APPROVAL", originalQuestion: "Audit the new payment processing microservice for PCI compliance", created: new Date(now - 43200000).toISOString(), lastModified: new Date(now - 36000000).toISOString() },
+      ],
+      grp7: [
+        { id: "gc-7a", groupId: "grp7", userId: "admin", state: "COMPLETED", originalQuestion: "What are the top 5 customer pain points from this month's feedback?", created: new Date(now - 604800000).toISOString(), lastModified: new Date(now - 601200000).toISOString() },
+        { id: "gc-7b", groupId: "grp7", userId: "admin", state: "COMPLETED", originalQuestion: "Analyze NPS trends and identify actionable improvements", created: new Date(now - 1209600000).toISOString(), lastModified: new Date(now - 1206000000).toISOString() },
+      ],
+      grp8: [
+        { id: "gc-8a", groupId: "grp8", userId: "admin", state: "COMPLETED", originalQuestion: "Challenge our GDPR compliance assumptions for the new analytics pipeline", created: new Date(now - 432000000).toISOString(), lastModified: new Date(now - 428400000).toISOString() },
+        { id: "gc-8b", groupId: "grp8", userId: "admin", state: "COMPLETED", originalQuestion: "Review SOC 2 readiness across all departments", created: new Date(now - 864000000).toISOString(), lastModified: new Date(now - 860400000).toISOString() },
+        { id: "gc-8c", groupId: "grp8", userId: "admin", state: "CREATED", originalQuestion: "Assess data retention policy compliance with new EU regulations", created: new Date(now - 7200000).toISOString(), lastModified: new Date(now - 7200000).toISOString() },
+      ],
+    };
+    const id = params.groupId as string;
+    return HttpResponse.json(groupConversations[id] ?? []);
+  }),
+
+  http.post("*/groups/:groupId/conversations", ({ params }) => {
+    return HttpResponse.json({
+      id: `gc-${Date.now()}`,
+      groupId: params.groupId,
+      userId: "manager-user",
+      state: "IN_PROGRESS",
+      originalQuestion: "What should we prioritize for Q2?",
+      transcript: [],
+      memberConversationIds: {},
+      currentPhaseIndex: 0,
+      currentPhaseName: "Initial Opinions",
+      synthesizedAnswer: null,
+      depth: 0,
+      taskList: null,
+      dynamicMembers: [],
+      createdAgentIds: [],
+      retainedAgentIds: [],
+      created: new Date().toISOString(),
+      lastModified: new Date().toISOString(),
+    });
+  }),
+
+  // --- Schedule Store Mock Handlers ---
+  http.get("*/schedulestore/schedules", () => {
+    return HttpResponse.json([
+      {
+        id: "sched-1",
+        name: "Daily Health Check",
+        triggerType: "CRON",
+        agentId: "agent1",
+        agentVersion: 0,
+        environment: "production",
+        cronExpression: "0 9 * * MON-FRI",
+        cronDescription: "At 09:00 AM, Monday through Friday",
+        message: "Run daily health check",
+        conversationStrategy: "new",
+        enabled: true,
+        nextFire: Date.now() + 43200000,
+        lastFired: Date.now() - 43200000,
+        fireStatus: "COMPLETED",
+        failCount: 0,
+        timeZone: "UTC",
+        createdAt: Date.now() - 604800000,
+        updatedAt: Date.now() - 43200000,
+      },
+      {
+        id: "sched-2",
+        name: "Heartbeat Monitor",
+        triggerType: "HEARTBEAT",
+        agentId: "agent2",
+        agentVersion: 1,
+        environment: "production",
+        heartbeatIntervalSeconds: 300,
+        message: "Heartbeat ping",
+        conversationStrategy: "persistent",
+        persistentConversationId: "conv-heartbeat-001",
+        enabled: true,
+        nextFire: Date.now() + 1800000,
+        lastFired: Date.now() - 1800000,
+        fireStatus: "PENDING",
+        failCount: 0,
+        createdAt: Date.now() - 2592000000,
+        updatedAt: Date.now() - 1800000,
+      },
+      {
+        id: "sched-3",
+        name: "Failed Report",
+        triggerType: "CRON",
+        agentId: "agent1",
+        agentVersion: 0,
+        environment: "production",
+        cronExpression: "0 8 * * 1",
+        cronDescription: "Every Monday at 8:00 AM",
+        message: "Generate weekly summary report",
+        conversationStrategy: "new",
+        enabled: false,
+        lastFired: Date.now() - 604800000,
+        fireStatus: "DEAD_LETTERED",
+        failCount: 3,
+        timeZone: "Europe/Vienna",
+        createdAt: Date.now() - 2592000000,
+        updatedAt: Date.now() - 604800000,
+      },
+    ]);
+  }),
+
+  http.get("*/schedulestore/schedules/admin/failed", () => {
+    const now = Date.now();
+    return HttpResponse.json([
+      {
+        id: "fire-fail-1",
+        scheduleId: "sched-3",
+        fireId: "f-3-1",
+        fireTime: new Date(now - 604800000).toISOString(),
+        startedAt: new Date(now - 604800000).toISOString(),
+        completedAt: new Date(now - 604799000).toISOString(),
+        status: "DEAD_LETTERED",
+        conversationId: null,
+        errorMessage: "Agent not deployed in production environment",
+        attemptNumber: 3,
+        cost: 0,
+      },
+    ]);
+  }),
+
+  http.get("*/schedulestore/schedules/:id", () => {
+    return HttpResponse.json({
+      id: "sched-1",
+      name: "Daily Health Check",
+      triggerType: "CRON",
+      agentId: "agent1",
+      agentVersion: 0,
+      environment: "production",
+      cronExpression: "0 9 * * MON-FRI",
+      cronDescription: "At 09:00 AM, Monday through Friday",
+      message: "Run daily health check",
+      conversationStrategy: "new",
+      enabled: true,
+      nextFire: Date.now() + 43200000,
+      lastFired: Date.now() - 43200000,
+      fireStatus: "COMPLETED",
+      failCount: 0,
+      timeZone: "UTC",
+      createdAt: Date.now() - 604800000,
+      updatedAt: Date.now() - 43200000,
+    });
+  }),
+
+  http.post("*/schedulestore/schedules", () => {
+    return new HttpResponse(null, {
+      status: 201,
+      headers: { Location: `/schedulestore/schedules/sched-${Date.now()}` },
+    });
+  }),
+
+  http.put("*/schedulestore/schedules/:id", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  http.delete("*/schedulestore/schedules/:id", () => {
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  http.post("*/schedulestore/schedules/:id/enable", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  http.post("*/schedulestore/schedules/:id/disable", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  http.post("*/schedulestore/schedules/:id/fire", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  http.post("*/schedulestore/schedules/:id/retry", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  http.post("*/schedulestore/schedules/:id/dismiss", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  http.get("*/schedulestore/schedules/:id/fires", () => {
+    const now = Date.now();
+    return HttpResponse.json([
+      {
+        id: "fire-1",
+        scheduleId: "sched-1",
+        fireId: "f-1-1",
+        fireTime: new Date(now - 43200000).toISOString(),
+        startedAt: new Date(now - 43200000).toISOString(),
+        completedAt: new Date(now - 43195000).toISOString(),
+        status: "COMPLETED",
+        conversationId: "conv-fire-001",
+        attemptNumber: 1,
+        cost: 0.0012,
+      },
+      {
+        id: "fire-2",
+        scheduleId: "sched-1",
+        fireId: "f-1-2",
+        fireTime: new Date(now - 129600000).toISOString(),
+        startedAt: new Date(now - 129600000).toISOString(),
+        completedAt: new Date(now - 129594000).toISOString(),
+        status: "COMPLETED",
+        conversationId: "conv-fire-002",
+        attemptNumber: 1,
+        cost: 0.0015,
+      },
+    ]);
+  }),
+
+  // Prompt Snippets mock data
+  http.get("*/snippetstore/snippets/:id", ({ request }) => {
+    const url = new URL(request.url);
+    const includePrevious = url.searchParams.get("includePreviousVersions");
+    if (isNotAnId(url.pathname) || includePrevious) return;
+    return HttpResponse.json({
+      name: "cautious_mode",
+      category: "governance",
+      description: "Makes the agent more careful and hedging in responses — recommended for production agents handling regulated domains",
+      content: "## Response Guidelines\n\nYou must follow these rules at all times:\n\n1. **Accuracy First**: When uncertain about facts, explicitly state your uncertainty. Say \"I believe\" or \"Based on available information\" rather than making definitive claims.\n2. **No Financial/Legal Advice**: Never provide specific financial, legal, or medical recommendations. Instead, direct users to qualified professionals.\n3. **Source Attribution**: When citing data, reference the source document or knowledge base entry.\n4. **Hedging Language**: Use phrases like \"typically\", \"in most cases\", \"generally speaking\" for statements that may not apply universally.\n5. **Escalation Trigger**: If confidence drops below 70% on a user question, offer to connect with a human specialist.\n\n{#if properties.regulated_domain}\n⚠️ This conversation involves a regulated domain ({properties.regulated_domain}). Apply maximum caution.\n{/if}",
+      tags: ["safety", "production", "enterprise", "compliance", "regulated"],
+      templateEnabled: true,
+    });
+  }),
+
+  // Parser config mock data (BEFORE generic handlers)
+  http.get("*/parserstore/parsers/:id", ({ request }) => {
+    const url = new URL(request.url);
+    const includePrevious = url.searchParams.get("includePreviousVersions");
+    if (isNotAnId(url.pathname) || includePrevious) return;
+    return HttpResponse.json({
+      config: {
+        appendExpressions: true,
+        includeUnused: true,
+        includeUnknown: true,
+      },
+      extensions: {
+        dictionaries: [
+          { type: "eddi://ai.labs.parser.dictionaries.integer" },
+          { type: "eddi://ai.labs.parser.dictionaries.decimal" },
+          { type: "eddi://ai.labs.parser.dictionaries.punctuation" },
+          { type: "eddi://ai.labs.parser.dictionaries.email" },
+          { type: "eddi://ai.labs.parser.dictionaries.time" },
+          { type: "eddi://ai.labs.parser.dictionaries.ordinalNumber" },
+          {
+            type: "eddi://ai.labs.parser.dictionaries.regular",
+            config: { uri: "eddi://ai.labs.dictionary/dictionarystore/dictionaries/dict1?version=1" },
+          },
+        ],
+        corrections: [
+          { type: "eddi://ai.labs.parser.corrections.levenshtein", config: { distance: "2" } },
+          { type: "eddi://ai.labs.parser.corrections.mergedTerms" },
+        ],
+        normalizer: [],
+      },
+    });
+  }),
+
+  // Generic descriptor handlers for all resource types
+  ...createResourceHandlers("rulestore", "rulesets", "rules"),
+  ...createResourceHandlers("apicallstore", "apicalls", "apicalls"),
+  ...createResourceHandlers("outputstore", "outputsets", "output"),
+  ...createResourceHandlers(
+    "dictionarystore",
+    "dictionaries",
+    "dictionary"
+  ),
+  ...createResourceHandlers("llmstore", "llms", "llm"),
+  ...createResourceHandlers(
+    "propertysetterstore",
+    "propertysetters",
+    "propertysetter"
+  ),
+  ...createResourceHandlers("mcpcallsstore", "mcpcalls", "mcpcalls"),
+  ...createResourceHandlers("ragstore", "rags", "rag"),
+  ...createResourceHandlers("parserstore", "parsers", "parser"),
+  ...createResourceHandlers("snippetstore", "snippets", "snippets"),
+];
+
+function createResourceHandlers(
+  store: string,
+  plural: string,
+  label: string
+) {
+  // Per-type descriptors with meaningful names
+  const descriptorsByType: Record<string, { id: string; name: string; desc: string }[]> = {
+    rules: [
+      { id: "beh1", name: "Intent Classification Rules", desc: "Routes user input to intents based on expression patterns" },
+      { id: "beh2", name: "Escalation Rules", desc: "Detects frustration signals and triggers live-agent handoff" },
+      { id: "beh3", name: "Fallback Handler", desc: "Catches unrecognized input and offers guided alternatives" },
+    ],
+    apicalls: [
+      { id: "hc1", name: "Weather API Integration", desc: "Fetches current weather from OpenWeatherMap for any city" },
+      { id: "hc2", name: "Payment Gateway", desc: "Stripe payment intent creation and status check" },
+      { id: "hc3", name: "CRM Lookup", desc: "Queries Salesforce for customer account details by email" },
+      { id: "hc4", name: "Email Notification Service", desc: "Sends transactional emails via SendGrid API" },
+    ],
+    output: [
+      { id: "out1", name: "English Responses", desc: "Standard conversational responses in English" },
+      { id: "out2", name: "German Responses", desc: "Localized German output set for DACH market" },
+      { id: "out3", name: "Quick Reply Templates", desc: "Pre-built quick reply options for common intents" },
+    ],
+    dictionary: [
+      { id: "dict1", name: "English Intent Dictionary", desc: "Core NLP expressions for greetings, farewells, and common queries" },
+      { id: "dict2", name: "Medical Terminology", desc: "Symptom and condition phrases for healthcare triage scenarios" },
+      { id: "dict3", name: "Financial Glossary", desc: "Banking and investment terms for financial advisor agents" },
+    ],
+    llm: [
+      { id: "llm1", name: "GPT-5.4 Support Config", desc: "OpenAI GPT-5.4 with tool calling enabled for customer support" },
+      { id: "llm2", name: "Claude Analysis Config", desc: "Anthropic Claude for document analysis and summarization" },
+      { id: "llm3", name: "Gemini Creative Writing", desc: "Google Gemini 2.5 Flash for creative content generation" },
+    ],
+    propertysetter: [
+      { id: "ps1", name: "Session Tracker", desc: "Persists user session context: language, timezone, last topic" },
+      { id: "ps2", name: "User Profile Builder", desc: "Extracts and stores user preferences from conversation history" },
+      { id: "ps3", name: "Context Enrichment", desc: "Adds metadata (channel, device, region) to conversation memory" },
+    ],
+    mcpcalls: [
+      { id: "mcp1", name: "Document Search Server", desc: "MCP server providing semantic search over enterprise documents" },
+      { id: "mcp2", name: "Calendar Integration", desc: "Google Calendar read/write via MCP for appointment scheduling" },
+    ],
+    rag: [
+      { id: "rag1", name: "Product Knowledge Base", desc: "Vector store of 10k product descriptions with pgvector embeddings" },
+      { id: "rag2", name: "Legal Document Store", desc: "Contract clauses and regulatory texts for compliance review" },
+      { id: "rag3", name: "Employee Handbook", desc: "HR policies, benefits info, and onboarding procedures" },
+    ],
+    parser: [
+      { id: "par1", name: "Default Parser", desc: "Standard expression parser" },
+    ],
+    snippets: [
+      { id: "snip1", name: "Cautious Mode", desc: "Makes the agent more careful and hedging in responses" },
+      { id: "snip2", name: "Compliance Disclaimer", desc: "Adds regulatory compliance disclaimers to financial advice" },
+      { id: "snip3", name: "Friendly Persona", desc: "Sets a warm, approachable conversational tone" },
+    ],
+  };
+
+  const items = descriptorsByType[label] ?? [
+    { id: "res1", name: `${label} Config 1`, desc: `First ${label} configuration` },
+    { id: "res2", name: `${label} Config 2`, desc: `Second ${label} configuration` },
+  ];
+
+  const mockDescriptors = items.map((item, i) => ({
+    resource: `eddi://ai.labs.${label}/${store}/${plural}/${item.id}?version=1`,
+    name: item.name,
+    description: item.desc,
+    createdOn: Date.now() - (items.length - i) * 3 * 86400000,
+    lastModifiedOn: Date.now() - i * 12 * 3600000,
+  }));
+
+  return [
+    // JSON Schema endpoint
+    http.get(`*/${store}/${plural}/jsonSchema`, () => {
+      const schema = RESOURCE_SCHEMAS[label];
+      if (schema) {
+        return HttpResponse.json(schema);
+      }
+      return HttpResponse.json({
+        $schema: "https://json-schema.org/draft/2020-12/schema",
+        type: "object",
+        title: `${label}Configuration`,
+        properties: {},
+      });
+    }),
+    http.get(`*/${store}/${plural}/descriptors`, ({ request }) => {
+      const url = new URL(request.url);
+      const includePrevious = url.searchParams.get("includePreviousVersions");
+      const filter = url.searchParams.get("filter");
+
+      if (includePrevious === "true" && filter) {
+        // Return multiple versions for a specific resource
+        return HttpResponse.json([
+          {
+            resource: `eddi://ai.labs.${label}/${store}/${plural}/${filter}?version=2`,
+            name: `${label} Config`,
+            description: `${label} configuration`,
+            createdOn: Date.now() - 86400000,
+            lastModifiedOn: Date.now(),
+          },
+          {
+            resource: `eddi://ai.labs.${label}/${store}/${plural}/${filter}?version=1`,
+            name: `${label} Config`,
+            description: `${label} configuration`,
+            createdOn: Date.now() - 172800000,
+            lastModifiedOn: Date.now() - 86400000,
+          },
+        ]);
+      }
+      return HttpResponse.json(mockDescriptors);
+    }),
+    http.get(`*/${store}/${plural}/:id`, () => {
+      return HttpResponse.json({ type: label, config: {} });
+    }),
+    http.post(`*/${store}/${plural}`, () => {
+      return new HttpResponse(null, {
+        status: 201,
+        headers: {
+          Location: `/${store}/${plural}/new-res?version=1`,
+        },
+      });
+    }),
+    http.put(`*/${store}/${plural}/:id`, ({ request, params }) => {
+      const url = new URL(request.url);
+      const currentVersion = parseInt(
+        url.searchParams.get("version") ?? "1",
+        10
+      );
+      const newVersion = currentVersion + 1;
+      return new HttpResponse(null, {
+        status: 200,
+        headers: {
+          Location: `eddi://ai.labs.${label}/${store}/${plural}/${params.id}?version=${newVersion}`,
+        },
+      });
+    }),
+    http.delete(`*/${store}/${plural}/:id`, () => {
+      return new HttpResponse(null, { status: 204 });
+    }),
+    // Duplicate resource (POST with :id)
+    http.post(`*/${store}/${plural}/:id`, ({ params }) => {
+      return new HttpResponse(null, {
+        status: 201,
+        headers: {
+          Location: `/${store}/${plural}/dup-${params.id}?version=1`,
+        },
+      });
+    }),
+  ];
+}
+
+// --- Coordinator Admin Mock Data ---
+const COORDINATOR_STATUS_MOCK = {
+  coordinatorType: "nats",
+  connected: true,
+  connectionStatus: "CONNECTED — nats://eddi-nats:4222 (cluster: eddi-prod, 3 nodes)",
+  activeConversations: 24,
+  totalProcessed: 142_897,
+  totalDeadLettered: 7,
+  queueDepths: {
+    "conv-abc123": 3,
+    "conv-def456": 1,
+    "conv-ghi789": 2,
+    "conv-jkl012": 4,
+    "conv-mno345": 1,
+    "conv-pqr678": 2,
+    "conv-stu901": 1,
+    "conv-vwx234": 3,
+    "conv-yza567": 2,
+    "conv-bcd890": 1,
+    "conv-efg123": 2,
+    "conv-hij456": 1,
+  },
+};
+
+const DEAD_LETTERS_MOCK = [
+  {
+    id: "1",
+    conversationId: "conv-fail-001",
+    error: "Connection timeout to external API",
+    timestamp: Date.now() - 3600000,
+    payload: '{"conversationId":"conv-fail-001","error":"Connection timeout to external API","timestamp":' + (Date.now() - 3600000) + '}',
+  },
+  {
+    id: "2",
+    conversationId: "conv-fail-002",
+    error: "LLM rate limit exceeded",
+    timestamp: Date.now() - 7200000,
+    payload: '{"conversationId":"conv-fail-002","error":"LLM rate limit exceeded","timestamp":' + (Date.now() - 7200000) + '}',
+  },
+  {
+    id: "3",
+    conversationId: "conv-fail-003",
+    error: "NullPointerException in BehaviorRulesEvaluationTask",
+    timestamp: Date.now() - 86400000,
+    payload: '{"conversationId":"conv-fail-003","error":"NullPointerException in BehaviorRulesEvaluationTask","timestamp":' + (Date.now() - 86400000) + '}',
+  },
+];
+
+export const coordinatorHandlers = [
+  http.get("*/administration/coordinator/status", () => {
+    return HttpResponse.json(COORDINATOR_STATUS_MOCK);
+  }),
+
+  http.get("*/administration/coordinator/dead-letters", () => {
+    return HttpResponse.json(DEAD_LETTERS_MOCK);
+  }),
+
+  http.post("*/administration/coordinator/dead-letters/:entryId/replay", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  http.delete("*/administration/coordinator/dead-letters/:entryId", () => {
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  http.delete("*/administration/coordinator/dead-letters", () => {
+    return HttpResponse.json(0);
+  }),
+];
+
+// ─── Orphan Admin Handlers ───────────────────────────────────────────────────
+
+const ORPHAN_REPORT_MOCK = {
+  totalOrphans: 5,
+  deletedCount: 0,
+  // A scan that finished, which is what makes the list actionable. EDDI refuses
+  // to purge when this is false, so a fixture omitting it would leave the
+  // page's incomplete-scan branch untested against the real shape.
+  scanComplete: true,
+  scanWarning: null,
+  orphans: [
+    {
+      resourceUri: "eddi://ai.labs.workflow/workflowstore/workflows/orphan1?version=1",
+      type: "eddi://ai.labs.workflow",
+      name: "Legacy Support Workflow (v1)",
+      deleted: false,
+    },
+    {
+      resourceUri: "eddi://ai.labs.rules/rulestore/rulesets/orphan2?version=1",
+      type: "eddi://ai.labs.rules",
+      name: "Deprecated Greeting Rules",
+      deleted: true,
+    },
+    {
+      resourceUri: "eddi://ai.labs.output/outputstore/outputsets/orphan3?version=2",
+      type: "eddi://ai.labs.output",
+      name: "Archived French Responses",
+      deleted: false,
+    },
+    {
+      resourceUri: "eddi://ai.labs.parser/parserstore/parsers/orphan4?version=1",
+      type: "eddi://ai.labs.parser",
+      name: "Test Intent Dictionary",
+      deleted: false,
+    },
+    {
+      resourceUri: "eddi://ai.labs.langchain/llmstore/llms/orphan5?version=1",
+      type: "eddi://ai.labs.langchain",
+      name: "Old GPT-3.5 Config",
+      deleted: true,
+    },
+  ],
+};
+
+export const orphanHandlers = [
+  http.get("*/administration/orphans", () => {
+    return HttpResponse.json(ORPHAN_REPORT_MOCK);
+  }),
+
+  http.delete("*/administration/orphans", () => {
+    return HttpResponse.json({
+      ...ORPHAN_REPORT_MOCK,
+      deletedCount: ORPHAN_REPORT_MOCK.totalOrphans,
+    });
+  }),
+];
+
+// ─── Log Admin Handlers ──────────────────────────────────────────────────────
+
+const MOCK_LOG_ENTRIES = [
+  {
+    timestamp: Date.now() - 12000,
+    level: "INFO",
+    loggerName: "ai.labs.eddi.engine.runtime.AgentEngine",
+    message: "Processing conversation conv-abc123 for agent agent1 (v3, production)",
+    environment: "production",
+    agentId: "agent1",
+    agentVersion: 3,
+    conversationId: "conv-abc123",
+    userId: "user-42",
+    instanceId: "eddi-prod-node1",
+  },
+  {
+    timestamp: Date.now() - 10000,
+    level: "INFO",
+    loggerName: "ai.labs.eddi.modules.llm.impl.LlmTask",
+    message: "LLM call completed: model=gpt-5.4, tokens_in=142, tokens_out=89, duration=1240ms, cost=$0.0032",
+    environment: "production",
+    agentId: "agent1",
+    agentVersion: 3,
+    conversationId: "conv-abc123",
+    userId: "user-42",
+    instanceId: "eddi-prod-node1",
+  },
+  {
+    timestamp: Date.now() - 8000,
+    level: "WARNING",
+    loggerName: "ai.labs.eddi.modules.llm.impl.LlmTask",
+    message: "LLM response took 8200ms, exceeding soft timeout of 5000ms. Consider switching to a faster model.",
+    environment: "production",
+    agentId: "agent4",
+    agentVersion: 2,
+    conversationId: "conv-def456",
+    userId: "user-15",
+    instanceId: "eddi-prod-node2",
+  },
+  {
+    timestamp: Date.now() - 6000,
+    level: "INFO",
+    loggerName: "ai.labs.eddi.engine.schedule.ScheduleFireExecutor",
+    message: "Scheduled fire completed: sched-1 'Daily Health Check' → agent1 (strategy=new, cost=$0.0018)",
+    environment: "production",
+    agentId: "agent1",
+    agentVersion: 3,
+    conversationId: "conv-sched-001",
+    userId: "system:scheduler",
+    instanceId: "eddi-prod-node1",
+  },
+  {
+    timestamp: Date.now() - 4500,
+    level: "INFO",
+    loggerName: "ai.labs.eddi.engine.lifecycle.LifecycleManager",
+    message: "Workflow pipeline completed: 4 tasks executed in 1842ms (parser→rules→llm→output)",
+    environment: "production",
+    agentId: "agent5",
+    agentVersion: 1,
+    conversationId: "conv-ghi789",
+    userId: "user-78",
+    instanceId: "eddi-prod-node1",
+  },
+  {
+    timestamp: Date.now() - 3000,
+    level: "WARNING",
+    loggerName: "ai.labs.eddi.secrets.SecretResolver",
+    message: "Secret 'stripe-secret-key' for agent4 has not been rotated in 90+ days",
+    environment: "production",
+    agentId: "agent4",
+    agentVersion: 2,
+    conversationId: null,
+    userId: null,
+    instanceId: "eddi-prod-node2",
+  },
+  {
+    timestamp: Date.now() - 1500,
+    level: "SEVERE",
+    loggerName: "ai.labs.eddi.modules.httpcalls.impl.HttpCallsTask",
+    message:
+      "Failed to execute HTTP call 'crm-lookup'\n\tat ai.labs.eddi.modules.httpcalls.impl.HttpCallsTask.executeTask(HttpCallsTask.java:85)\n\tat ai.labs.eddi.engine.lifecycle.LifecycleManager.executeComponent(LifecycleManager.java:120)\nCaused by: java.net.ConnectException: Connection refused (Connection refused)\n\tat java.net.http/jdk.internal.net.http.HttpClientImpl.send(HttpClientImpl.java:565)",
+    environment: "production",
+    agentId: "agent4",
+    agentVersion: 2,
+    conversationId: "conv-jkl012",
+    userId: "user-33",
+    instanceId: "eddi-prod-node2",
+  },
+  {
+    timestamp: Date.now() - 500,
+    level: "INFO",
+    loggerName: "ai.labs.eddi.engine.audit.AuditLedgerService",
+    message: "Audit ledger flushed: 12 entries persisted (batch integrity verified, HMAC OK)",
+    environment: "production",
+    agentId: null,
+    agentVersion: null,
+    conversationId: null,
+    userId: null,
+    instanceId: "eddi-prod-node1",
+  },
+];
+
+export const logAdminHandlers = [
+  http.get("*/administration/logs", () => {
+    return HttpResponse.json(MOCK_LOG_ENTRIES);
+  }),
+
+  http.get("*/administration/logs/history", () => {
+    return HttpResponse.json(
+      MOCK_LOG_ENTRIES.map((e) => ({
+        ...e,
+        timestamp: new Date(e.timestamp).toISOString(),
+      }))
+    );
+  }),
+
+  http.get("*/administration/logs/instance-id", () => {
+    return HttpResponse.json({ instanceId: "eddi-host-a1b2" });
+  }),
+];
+
+// --- Secrets Vault Mock ---
+const MOCK_SECRETS = [
+  {
+    tenantId: "default",
+    keyName: "openai-api-key",
+    createdAt: new Date(Date.now() - 45 * 86400000).toISOString(),
+    lastAccessedAt: new Date(Date.now() - 120000).toISOString(),
+    lastRotatedAt: new Date(Date.now() - 5 * 86400000).toISOString(),
+    checksum: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+    description: "OpenAI API key for GPT-5.4 production agents",
+    allowedAgents: ["*"],
+  },
+  {
+    tenantId: "default",
+    keyName: "anthropic-api-key",
+    createdAt: new Date(Date.now() - 30 * 86400000).toISOString(),
+    lastAccessedAt: new Date(Date.now() - 3600000).toISOString(),
+    lastRotatedAt: new Date(Date.now() - 10 * 86400000).toISOString(),
+    checksum: "c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4",
+    description: "Anthropic Claude Opus / Sonnet API key",
+    allowedAgents: ["*"],
+  },
+  {
+    tenantId: "default",
+    keyName: "google-gemini-key",
+    createdAt: new Date(Date.now() - 20 * 86400000).toISOString(),
+    lastAccessedAt: new Date(Date.now() - 7200000).toISOString(),
+    lastRotatedAt: null,
+    checksum: "e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6",
+    description: "Google Gemini 2.5 Flash API key",
+    allowedAgents: ["agent5", "agent7"],
+  },
+  {
+    tenantId: "default",
+    keyName: "sendgrid-api-key",
+    createdAt: new Date(Date.now() - 25 * 86400000).toISOString(),
+    lastAccessedAt: new Date(Date.now() - 2 * 3600000).toISOString(),
+    lastRotatedAt: null,
+    checksum: "f6e5d4c3b2a1f6e5d4c3b2a1f6e5d4c3b2a1f6e5d4c3b2a1f6e5d4c3b2a1f6e5",
+    description: "SendGrid transactional email service key",
+    allowedAgents: ["agent1", "agent4"],
+  },
+  {
+    tenantId: "default",
+    keyName: "stripe-secret-key",
+    createdAt: new Date(Date.now() - 18 * 86400000).toISOString(),
+    lastAccessedAt: new Date(Date.now() - 86400000).toISOString(),
+    lastRotatedAt: new Date(Date.now() - 7 * 86400000).toISOString(),
+    checksum: "d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5",
+    description: "Stripe payment processing secret (PCI-compliant)",
+    allowedAgents: ["agent4"],
+  },
+  {
+    tenantId: "default",
+    keyName: "pg-connection-string",
+    createdAt: new Date(Date.now() - 40 * 86400000).toISOString(),
+    lastAccessedAt: new Date(Date.now() - 1800000).toISOString(),
+    lastRotatedAt: new Date(Date.now() - 2 * 86400000).toISOString(),
+    checksum: "b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3",
+    description: "PostgreSQL pgvector store connection string",
+    allowedAgents: ["*"],
+  },
+  {
+    tenantId: "default",
+    keyName: "salesforce-oauth-token",
+    createdAt: new Date(Date.now() - 15 * 86400000).toISOString(),
+    lastAccessedAt: new Date(Date.now() - 4 * 3600000).toISOString(),
+    lastRotatedAt: new Date(Date.now() - 3 * 86400000).toISOString(),
+    checksum: "a2b3c4d5e6f7a2b3c4d5e6f7a2b3c4d5e6f7a2b3c4d5e6f7a2b3c4d5e6f7a2b3",
+    description: "Salesforce CRM OAuth refresh token",
+    allowedAgents: ["agent1", "agent4"],
+  },
+  {
+    tenantId: "default",
+    keyName: "mcp-doc-server-key",
+    createdAt: new Date(Date.now() - 8 * 86400000).toISOString(),
+    lastAccessedAt: new Date(Date.now() - 900000).toISOString(),
+    lastRotatedAt: null,
+    checksum: "f1e2d3c4b5a6f1e2d3c4b5a6f1e2d3c4b5a6f1e2d3c4b5a6f1e2d3c4b5a6f1e2",
+    description: "MCP document search server API key",
+    allowedAgents: ["agent7"],
+  },
+];
+
+// ─── Global Variables Mock Data ────────────────────────────────────────────────
+
+const MOCK_VARIABLES = [
+  {
+    key: "default-model",
+    value: "gpt-4.1",
+    description: "Primary LLM model for all agents — cascades to gpt-4.1-mini on budget overflow",
+    exportable: true,
+  },
+  {
+    key: "fallback-model",
+    value: "gpt-4.1-mini",
+    description: "Cost-effective fallback when primary model quota is exhausted",
+    exportable: true,
+  },
+  {
+    key: "llm.temperature",
+    value: "0.7",
+    description: "Default temperature for all LLM tasks (0.0–2.0)",
+    exportable: true,
+  },
+  {
+    key: "llm.max-tokens",
+    value: "4096",
+    description: "Maximum output tokens per LLM completion",
+    exportable: true,
+  },
+  {
+    key: "api.base-url",
+    value: "https://api.openai.com/v1",
+    description: "OpenAI-compatible API base URL — change to use Azure, LiteLLM, or local proxy",
+    exportable: false,
+  },
+  {
+    key: "rag.chunk-size",
+    value: "512",
+    description: "RAG document chunk size in tokens for vector embedding",
+    exportable: true,
+  },
+  {
+    key: "rag.top-k",
+    value: "5",
+    description: "Number of top matching chunks to retrieve per RAG query",
+    exportable: true,
+  },
+  {
+    key: "feature.cascade-enabled",
+    value: "true",
+    description: "Enable automatic model cascading on confidence threshold failure",
+    exportable: true,
+  },
+  {
+    key: "branding.bot-name",
+    value: "EDDI Assistant",
+    description: "Display name shown in chat UI and system prompts",
+    exportable: true,
+  },
+  {
+    key: "rate-limit.rpm",
+    value: "60",
+    description: "Global rate limit — max requests per minute to external LLM providers",
+    exportable: false,
+  },
+  {
+    key: "mcp.timeout-ms",
+    value: "30000",
+    description: "MCP tool call timeout in milliseconds before fallback",
+    exportable: false,
+  },
+  {
+    key: "environment",
+    value: "production",
+    description: null,
+    exportable: false,
+  },
+];
+
+export const variablesHandlers = [
+  // List all global variables for a tenant
+  http.get("*/variablestore/variables/:tenantId", ({ request }) => {
+    const url = new URL(request.url);
+    // Only match /variablestore/variables/:tenantId (no trailing key segment)
+    const segments = url.pathname.split("/").filter(Boolean);
+    if (segments.length > 3) return;
+    return HttpResponse.json(MOCK_VARIABLES);
+  }),
+
+  // Get a single variable by key
+  http.get("*/variablestore/variables/:tenantId/:key", ({ params }) => {
+    const key = params.key as string;
+    const found = MOCK_VARIABLES.find((v) => v.key === key);
+    if (!found) {
+      return new HttpResponse(null, { status: 404 });
+    }
+    return HttpResponse.json(found);
+  }),
+
+  // Create or update a variable
+  http.put("*/variablestore/variables/:tenantId/:key", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  // Delete a variable
+  http.delete("*/variablestore/variables/:tenantId/:key", () => {
+    return new HttpResponse(null, { status: 204 });
+  }),
+];
+
+export const secretsHandlers = [
+  // List secrets (tenant-scoped, no agentId)
+  http.get("*/secretstore/secrets/:tenantId", ({ params, request }) => {
+    // Skip the health endpoint
+    if (params.tenantId === "health") return;
+    const url = new URL(request.url);
+    // Skip paths like /tenantId/keyName (those are getMetadata)
+    const segments = url.pathname.split("/").filter(Boolean);
+    if (segments.length > 3) return;
+    const filtered = MOCK_SECRETS.filter(
+      (s) => s.tenantId === params.tenantId,
+    );
+    return HttpResponse.json(filtered);
+  }),
+
+  // Store secret (tenant-scoped)
+  http.put("*/secretstore/secrets/:tenantId/:keyName", ({ params }) => {
+    const tenantId = params.tenantId as string;
+    const keyName = params.keyName as string;
+    const ref = tenantId === "default"
+      ? `\${vault:${keyName}}`
+      : `\${vault:${tenantId}/${keyName}}`;
+    return HttpResponse.json(
+      {
+        reference: ref,
+        tenantId,
+        keyName,
+      },
+      { status: 201 },
+    );
+  }),
+
+  // Delete secret (tenant-scoped)
+  http.delete(
+    "*/secretstore/secrets/:tenantId/:keyName",
+    () => new HttpResponse(null, { status: 204 }),
+  ),
+
+  // Health check
+  http.get("*/secretstore/secrets/health", () =>
+    HttpResponse.json({ status: "UP", provider: "VaultSecretProvider", available: true }),
+  ),
+
+  // Rotate secret
+  http.post("*/secretstore/secrets/:tenantId/:keyName/rotate", ({ params }) => {
+    const tenantId = params.tenantId as string;
+    const keyName = params.keyName as string;
+    const ref = tenantId === "default"
+      ? `\${vault:${keyName}}`
+      : `\${vault:${tenantId}/${keyName}}`;
+    return HttpResponse.json(
+      { reference: ref, tenantId, keyName },
+      { status: 200 },
+    );
+  }),
+];
+
+// ─── Audit Trail Handlers ────────────────────────────────────────────────────
+
+const MOCK_AUDIT_ENTRIES = [
+  {
+    id: "audit-1",
+    conversationId: "conv1",
+    agentId: "agent1",
+    agentVersion: 1,
+    userId: "user-1",
+    environment: "production",
+    stepIndex: 0,
+    taskId: "ai.labs.parser",
+    taskType: "expressions",
+    taskIndex: 0,
+    durationMs: 12,
+    input: { "input:initial": "Hello there" },
+    output: { "expressions:parsed": ["greeting(hello)"] },
+    llmDetail: null,
+    toolCalls: null,
+    actions: null,
+    cost: 0,
+    timestamp: new Date(Date.now() - 60000).toISOString(),
+    hmac: "a1b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef12345678",
+    agentSignature: "ed25519:sig_test_audit1",
+  },
+  {
+    id: "audit-2",
+    conversationId: "conv1",
+    agentId: "agent1",
+    agentVersion: 1,
+    userId: "user-1",
+    environment: "production",
+    stepIndex: 0,
+    taskId: "ai.labs.rules",
+    taskType: "behavior",
+    taskIndex: 1,
+    durationMs: 3,
+    input: { "expressions:parsed": ["greeting(hello)"] },
+    output: { "actions:triggered": ["greet", "chat"] },
+    llmDetail: null,
+    toolCalls: null,
+    actions: ["greet", "chat"],
+    cost: 0,
+    timestamp: new Date(Date.now() - 59000).toISOString(),
+    hmac: "b2c3d4e5f6a1789012345678901234567890abcdef1234567890abcdef12345678",
+    agentSignature: "ed25519:sig_test_audit2",
+  },
+  {
+    id: "audit-3",
+    conversationId: "conv1",
+    agentId: "agent1",
+    agentVersion: 1,
+    userId: "user-1",
+    environment: "production",
+    stepIndex: 0,
+    taskId: "ai.labs.llm",
+    taskType: "langchain",
+    taskIndex: 2,
+    durationMs: 1850,
+    input: { "user:message": "Hello there", "conversation:history": 3 },
+    output: { "llm:response": "Hi there! How can I help you today?" },
+    llmDetail: {
+      compiledPrompt: "System: You are a helpful assistant.\n\nUser: Hello there",
+      modelResponse: "Hi there! How can I help you today?",
+      modelName: "gpt-5.4-mini",
+      tokenUsage: {
+        inputTokens: 42,
+        outputTokens: 12,
+      },
+      temperature: 0.7,
+    },
+    toolCalls: null,
+    actions: ["greet", "chat"],
+    cost: 0.003,
+    timestamp: new Date(Date.now() - 57000).toISOString(),
+    hmac: "c3d4e5f6a1b2789012345678901234567890abcdef1234567890abcdef12345678",
+    agentSignature: "ed25519:sig_test_audit3",
+  },
+  {
+    id: "audit-4",
+    conversationId: "conv1",
+    agentId: "agent1",
+    agentVersion: 1,
+    userId: "user-1",
+    environment: "production",
+    stepIndex: 0,
+    taskId: "ai.labs.output",
+    taskType: "output",
+    taskIndex: 3,
+    durationMs: 2,
+    input: { "actions": ["greet", "chat"] },
+    output: { "output:text": "Hi there! How can I help you today?" },
+    llmDetail: null,
+    toolCalls: null,
+    actions: ["greet", "chat"],
+    cost: 0,
+    timestamp: new Date(Date.now() - 55000).toISOString(),
+    hmac: "d4e5f6a1b2c3789012345678901234567890abcdef1234567890abcdef12345678",
+    agentSignature: "ed25519:sig_test_audit4",
+  },
+];
+
+export const auditHandlers = [
+  // Get audit trail by conversation
+  http.get("*/auditstore/:conversationId/count", () => {
+    return HttpResponse.json(MOCK_AUDIT_ENTRIES.length);
+  }),
+
+  http.get("*/auditstore/agent/:agentId", () => {
+    return HttpResponse.json(MOCK_AUDIT_ENTRIES);
+  }),
+
+  http.get("*/auditstore/:conversationId", ({ params }) => {
+    if (params.conversationId === "count") return;
+    return HttpResponse.json(MOCK_AUDIT_ENTRIES);
+  }),
+];
+
+// --- Tenant Quota Mock Data ---
+
+const MOCK_QUOTA = {
+  tenantId: "default",
+  maxConversationsPerDay: 5000,
+  maxAgentsPerTenant: 100,
+  maxApiCallsPerMinute: 500,
+  maxMonthlyCostUsd: 2500.00,
+  enabled: true,
+};
+
+const MOCK_USAGE = {
+  tenantId: "default",
+  conversationsToday: 3842,
+  apiCallsThisMinute: 312,
+  monthlyCostUsd: 1847.63,
+  minuteWindowStart: new Date().toISOString(),
+  dayStart: new Date(new Date().setHours(0, 0, 0, 0)).toISOString(),
+};
+
+export const quotaHandlers = [
+  http.get("*/administration/quotas", () => {
+    return HttpResponse.json([MOCK_QUOTA]);
+  }),
+
+  http.get("*/administration/quotas/:tenantId/usage", () => {
+    return HttpResponse.json(MOCK_USAGE);
+  }),
+
+  http.get("*/administration/quotas/:tenantId", () => {
+    return HttpResponse.json(MOCK_QUOTA);
+  }),
+
+  http.put("*/administration/quotas/:tenantId", async ({ request }) => {
+    const body = await request.json();
+    return HttpResponse.json(body);
+  }),
+
+  http.post("*/administration/quotas/:tenantId/usage/reset", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+];
+
+// ─── Schedule Handlers ───────────────────────────────────────────────────────
+
+const SCHEDULES_MOCK = [
+  {
+    id: "sched-1",
+    name: "Daily Health Check",
+    triggerType: "CRON",
+    agentId: "agent1",
+    agentVersion: 0,
+    environment: "production",
+    cronExpression: "0 9 * * MON-FRI",
+    cronDescription: "At 09:00 AM, Monday through Friday",
+    message: "health_check",
+    conversationStrategy: "new",
+    enabled: true,
+    nextFire: Date.now() + 3600000,
+    lastFired: Date.now() - 86400000,
+    fireStatus: "COMPLETED",
+    failCount: 0,
+    createdAt: Date.now() - 604800000,
+    updatedAt: Date.now() - 86400000,
+  },
+  {
+    id: "sched-2",
+    name: "Heartbeat Monitor",
+    triggerType: "HEARTBEAT",
+    agentId: "agent2",
+    agentVersion: 0,
+    environment: "production",
+    heartbeatIntervalSeconds: 300,
+    message: "ping",
+    conversationStrategy: "persistent",
+    enabled: true,
+    nextFire: Date.now() + 60000,
+    lastFired: Date.now() - 300000,
+    fireStatus: "PENDING",
+    failCount: 0,
+    createdAt: Date.now() - 172800000,
+    updatedAt: Date.now() - 300000,
+  },
+  {
+    id: "sched-3",
+    name: "Weekly Summary Report",
+    triggerType: "CRON",
+    agentId: "agent1",
+    agentVersion: 0,
+    environment: "production",
+    cronExpression: "0 8 * * 1",
+    cronDescription: "Every Monday at 8:00 AM",
+    message: "generate_weekly_summary",
+    conversationStrategy: "new",
+    enabled: false,
+    nextFire: null,
+    lastFired: Date.now() - 7200000,
+    fireStatus: "DEAD_LETTERED",
+    failCount: 3,
+    createdAt: Date.now() - 259200000,
+    updatedAt: Date.now() - 7200000,
+  },
+  {
+    id: "sched-4",
+    name: "Nightly Invoice Processing",
+    triggerType: "CRON",
+    agentId: "agent4",
+    agentVersion: 0,
+    environment: "production",
+    cronExpression: "0 2 * * *",
+    cronDescription: "Every day at 2:00 AM",
+    message: "process_pending_invoices",
+    conversationStrategy: "new",
+    enabled: true,
+    nextFire: Date.now() + 18000000,
+    lastFired: Date.now() - 68400000,
+    fireStatus: "COMPLETED",
+    failCount: 0,
+    createdAt: Date.now() - 1209600000,
+    updatedAt: Date.now() - 68400000,
+  },
+  {
+    id: "sched-5",
+    name: "Knowledge Base Reindex",
+    triggerType: "CRON",
+    agentId: "agent7",
+    agentVersion: 0,
+    environment: "production",
+    cronExpression: "0 4 * * SUN",
+    cronDescription: "Every Sunday at 4:00 AM",
+    message: "reindex_knowledge_base",
+    conversationStrategy: "new",
+    enabled: true,
+    nextFire: Date.now() + 432000000,
+    lastFired: Date.now() - 172800000,
+    fireStatus: "COMPLETED",
+    failCount: 0,
+    createdAt: Date.now() - 2592000000,
+    updatedAt: Date.now() - 172800000,
+  },
+  {
+    id: "sched-6",
+    name: "Product Catalog Sync",
+    triggerType: "HEARTBEAT",
+    agentId: "agent5",
+    agentVersion: 0,
+    environment: "production",
+    heartbeatIntervalSeconds: 900,
+    message: "sync_catalog",
+    conversationStrategy: "persistent",
+    enabled: true,
+    nextFire: Date.now() + 420000,
+    lastFired: Date.now() - 480000,
+    fireStatus: "COMPLETED",
+    failCount: 0,
+    createdAt: Date.now() - 864000000,
+    updatedAt: Date.now() - 480000,
+  },
+];
+
+const FIRE_LOGS_MOCK = [
+  {
+    id: "fire-1",
+    scheduleId: "sched-1",
+    fireId: "f-1-1",
+    fireTime: new Date(Date.now() - 86400000).toISOString(),
+    startedAt: new Date(Date.now() - 86400000).toISOString(),
+    completedAt: new Date(Date.now() - 86399000).toISOString(),
+    status: "COMPLETED",
+    conversationId: "conv-123",
+    attemptNumber: 1,
+    cost: 0.001,
+  },
+  {
+    id: "fire-2",
+    scheduleId: "sched-1",
+    fireId: "f-1-2",
+    fireTime: new Date(Date.now() - 172800000).toISOString(),
+    startedAt: new Date(Date.now() - 172800000).toISOString(),
+    completedAt: new Date(Date.now() - 172799500).toISOString(),
+    status: "FAILED",
+    conversationId: "conv-124",
+    errorMessage: "Connection timeout",
+    attemptNumber: 2,
+    cost: 0,
+  },
+];
+
+export const scheduleHandlers = [
+  // List all schedules
+  http.get("*/schedulestore/schedules", ({ request }) => {
+    const url = new URL(request.url);
+    const agentId = url.searchParams.get("agentId");
+    if (agentId) {
+      return HttpResponse.json(SCHEDULES_MOCK.filter((s) => s.agentId === agentId));
+    }
+    return HttpResponse.json(SCHEDULES_MOCK);
+  }),
+
+  // Get single schedule
+  http.get("*/schedulestore/schedules/:id", ({ params, request }) => {
+    const url = new URL(request.url);
+    // Skip sub-paths like /fires, /enable, etc.
+    if (url.pathname.includes("/fires") || url.pathname.includes("/admin")) return;
+    const schedule = SCHEDULES_MOCK.find((s) => s.id === params.id);
+    if (schedule) return HttpResponse.json(schedule);
+    return new HttpResponse(null, { status: 404 });
+  }),
+
+  // Create schedule
+  http.post("*/schedulestore/schedules", () => {
+    return new HttpResponse(null, {
+      status: 201,
+      headers: { Location: "/schedulestore/schedules/new-sched-1" },
+    });
+  }),
+
+  // Update schedule
+  http.put("*/schedulestore/schedules/:id", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  // Delete schedule
+  http.delete("*/schedulestore/schedules/:id", () => {
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  // Enable
+  http.post("*/schedulestore/schedules/:id/enable", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  // Disable
+  http.post("*/schedulestore/schedules/:id/disable", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  // Fire now
+  http.post("*/schedulestore/schedules/:id/fire", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  // Fire logs
+  http.get("*/schedulestore/schedules/:id/fires", () => {
+    return HttpResponse.json(FIRE_LOGS_MOCK);
+  }),
+
+  // Admin - failed fires
+  http.get("*/schedulestore/schedules/admin/failed", () => {
+    return HttpResponse.json(
+      FIRE_LOGS_MOCK.filter((l) => l.status !== "COMPLETED")
+    );
+  }),
+
+  // Retry dead letter
+  http.post("*/schedulestore/schedules/:id/retry", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  // Dismiss dead letter
+  http.post("*/schedulestore/schedules/:id/dismiss", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  // --- Agent Setup Wizard ---
+  http.post("*/administration/agents/setup", async ({ request }) => {
+    const body = (await request.json()) as Record<string, unknown>;
+    return HttpResponse.json(
+      {
+        action: "setup_complete",
+        agentId: `agent-${Date.now()}`,
+        agentName: body.name ?? "New Agent",
+        provider: body.provider ?? "anthropic",
+        model: body.model ?? "claude-sonnet-4-6",
+        deployed: body.deploy !== false,
+        deploymentStatus: body.deploy !== false ? "READY" : undefined,
+        quickRepliesEnabled: body.enableQuickReplies ?? false,
+        sentimentAnalysisEnabled: body.enableSentimentAnalysis ?? false,
+        resources: { agentLocation: "/agentstore/agents/mock-agent?version=1" },
+      },
+      { status: 201 },
+    );
+  }),
+
+
+  // ==========================================
+  // === Secrets Vault Mocks ===
+  // ==========================================
+
+  // Vault health check (health endpoint is only here, not in secretsHandlers)
+  http.get("*/secretstore/secrets/health", () => {
+    return HttpResponse.json({
+      status: "UP",
+      provider: "VaultSecretProvider",
+      available: true,
+    });
+  }),
+
+  // List/Store/Delete secrets are in the secretsHandlers export (used by server.ts)
+
+  // ==========================================
+  // === Coordinator Mocks ===
+  // ==========================================
+
+  // Coordinator status
+  http.get("*/administration/coordinator/status", () => {
+    return HttpResponse.json({
+      coordinatorType: "nats",
+      connected: true,
+      connectionStatus: "CONNECTED",
+      activeConversations: 24,
+      totalProcessed: 142_897,
+      totalDeadLettered: 7,
+      queueDepths: {
+        "conv-abc123": 1,
+        "conv-def456": 2,
+        "conv-ghi789": 3,
+      },
+    });
+  }),
+
+  // Coordinator dead-letters
+  http.get("*/administration/coordinator/dead-letters", () => {
+    return HttpResponse.json([
+      {
+        id: "dl-001",
+        conversationId: "conv-failed-1",
+        error: "LLM provider timeout after 30s — model gpt-5.4-mini did not respond",
+        timestamp: Date.now() - 3600000,
+        payload: JSON.stringify({ input: "What is the weather?", agentId: "agent1", step: 2 }),
+      },
+      {
+        id: "dl-002",
+        conversationId: "conv-failed-2",
+        error: "HttpCallTask failed: 503 Service Unavailable from https://api.weather.com",
+        timestamp: Date.now() - 7200000,
+        payload: JSON.stringify({ input: "Book a flight", agentId: "agent2", step: 1 }),
+      },
+    ]);
+  }),
+
+  // Replay dead-letter
+  http.post("*/administration/coordinator/dead-letters/:id/replay", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  // Discard dead-letter
+  http.delete("*/administration/coordinator/dead-letters/:id", () => {
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  // Purge all dead-letters
+  http.delete("*/administration/coordinator/dead-letters", () => {
+    return HttpResponse.json(2);
+  }),
+
+  // Coordinator SSE stream
+  http.get("*/administration/coordinator/stream", () => {
+    return new HttpResponse(null, { status: 200, headers: { "Content-Type": "text/event-stream" } });
+  }),
+
+  // ==========================================
+  // === Audit Trail Mocks ===
+  // ==========================================
+
+  // Audit by conversation
+  http.get("*/auditstore/:conversationId", ({ request, params }) => {
+    const url = new URL(request.url);
+    // Don't match /count sub-path
+    if (url.pathname.endsWith("/count")) return;
+    const convId = params.conversationId as string;
+    // Don't match the /agent/ path
+    if (convId === "agent") return;
+    if (convId === "recent") {
+      // Recent entries endpoint
+      return HttpResponse.json(generateMockAuditEntries("conv-recent-1", 10));
+    }
+    return HttpResponse.json(generateMockAuditEntries(convId, 5));
+  }),
+
+  // Audit by agent
+  http.get("*/auditstore/agent/:agentId", () => {
+    return HttpResponse.json(generateMockAuditEntries("conv-from-agent", 8));
+  }),
+
+  // Audit count
+  http.get("*/auditstore/:conversationId/count", () => {
+    return HttpResponse.json(5);
+  }),
+
+  // ==========================================
+  // === Group Conversation Mocks ===
+  // ==========================================
+  // NOTE: Group config handlers (descriptors, detail, styles, schema, CRUD) are
+  // in the main `handlers` export. Only group *conversation* handlers are here.
+
+  // List group conversations
+  http.get("*/groups/:groupId/conversations", ({ request }) => {
+    const url = new URL(request.url);
+    const pathParts = url.pathname.split("/");
+    // Don't match specific conversation GETs (which have an extra path segment)
+    if (pathParts.length > 4 && !url.pathname.endsWith("/conversations")) return;
+    return HttpResponse.json([
+      {
+        id: "gconv1",
+        groupId: "group1",
+        userId: "manager-user",
+        state: "COMPLETED",
+        originalQuestion: "Should we expand into the European market this quarter?",
+        transcript: [],
+        memberConversationIds: {},
+        currentPhaseIndex: 2,
+        currentPhaseName: "Synthesis",
+        synthesizedAnswer: "After careful consideration, the panel recommends a phased European market expansion starting in Q3.",
+        depth: 0,
+        taskList: null,
+        dynamicMembers: [],
+        createdAgentIds: [],
+        retainedAgentIds: [],
+        created: new Date(Date.now() - 3600000).toISOString(),
+        lastModified: new Date(Date.now() - 1800000).toISOString(),
+      },
+    ]);
+  }),
+
+  // Cross-group HITL inbox (GET /groups/pending-approvals). Group summaries
+  // carry a groupId (that drives the "Group" badge / View link on the queue).
+  http.get("*/groups/pending-approvals", () => {
+    return HttpResponse.json([
+      {
+        conversationId: "gconv-awaiting-1",
+        agentId: null,
+        groupId: "group1",
+        userId: "manager-user",
+        pausedAt: new Date(Date.now() - 90_000).toISOString(),
+        pauseReason: "Group discussion needs sign-off before synthesis",
+        timeoutPolicy: "WAIT_INDEFINITELY",
+        approvalTimeout: null,
+      },
+    ]);
+  }),
+
+  // List this group's pending HITL approvals. MUST be registered before the
+  // ":convId" catch-all below, or MSW (first-match-wins) would treat
+  // "pending-approvals" as a conversation id and return a single object.
+  http.get("*/groups/:groupId/conversations/pending-approvals", () => {
+    return HttpResponse.json([]);
+  }),
+
+  // Get single group conversation (detailed transcript)
+  http.get("*/groups/:groupId/conversations/:convId", ({ params }) => {
+    if (params.convId === VERDICT_CONVERSATION_ID) return HttpResponse.json(verdictConversation());
+    const now = new Date();
+    return HttpResponse.json({
+      id: "gconv1",
+      groupId: "group1",
+      userId: "manager-user",
+      state: "COMPLETED",
+      originalQuestion: "Should we expand into the European market this quarter?",
+      transcript: [
+        { speakerAgentId: "user", speakerDisplayName: "User", content: "Should we expand into the European market this quarter?", phaseIndex: -1, phaseName: null, type: "QUESTION", timestamp: new Date(now.getTime() - 600000).toISOString(), errorReason: null, targetAgentId: null },
+        { speakerAgentId: "agent1", speakerDisplayName: "Marketing Expert", content: "From a marketing perspective, Europe presents significant opportunities. Brand awareness campaigns could leverage our existing digital presence. However, we need to consider GDPR compliance and localization of marketing materials.", phaseIndex: 0, phaseName: "Initial Opinions", type: "OPINION", timestamp: new Date(now.getTime() - 540000).toISOString(), errorReason: null, targetAgentId: null },
+        { speakerAgentId: "agent2", speakerDisplayName: "Sales Strategist", content: "The sales pipeline data suggests strong demand in Germany and France. I recommend starting with these markets due to existing partner relationships. Timeline should be 6–8 months for meaningful traction.", phaseIndex: 0, phaseName: "Initial Opinions", type: "OPINION", timestamp: new Date(now.getTime() - 480000).toISOString(), errorReason: null, targetAgentId: null },
+        { speakerAgentId: "agent3", speakerDisplayName: "Product Manager", content: "Our product needs localization work for European markets — currency support, language packs, and compliance features. I estimate 3 months of engineering effort before we can launch.", phaseIndex: 0, phaseName: "Initial Opinions", type: "OPINION", timestamp: new Date(now.getTime() - 420000).toISOString(), errorReason: null, targetAgentId: null },
+        { speakerAgentId: "agent4", speakerDisplayName: "Tech Lead", content: "Infrastructure-wise, we'd need EU-based data centers for GDPR. AWS eu-west-1 is ready, but we need to provision new clusters. Budget estimate: $50k/month additional hosting.", phaseIndex: 0, phaseName: "Initial Opinions", type: "OPINION", timestamp: new Date(now.getTime() - 360000).toISOString(), errorReason: null, targetAgentId: null },
+        { speakerAgentId: "agent5", speakerDisplayName: "Legal Counsel", content: "GDPR compliance is mandatory and non-trivial. We need a DPO appointment, privacy impact assessments, and updated Terms of Service. I strongly advise against rushing this.", phaseIndex: 0, phaseName: "Initial Opinions", type: "OPINION", timestamp: new Date(now.getTime() - 300000).toISOString(), errorReason: null, targetAgentId: null },
+        { speakerAgentId: "agent1", speakerDisplayName: "Marketing Expert", content: "I agree with Sales on starting with Germany and France. Marketing can run preliminary campaigns while Legal handles compliance. Let's plan for a Q3 soft launch.", phaseIndex: 1, phaseName: "Discussion", type: "ARGUMENT", timestamp: new Date(now.getTime() - 240000).toISOString(), errorReason: null, targetAgentId: null },
+        { speakerAgentId: "agent5", speakerDisplayName: "Legal Counsel", content: "A Q3 timeline is realistic for compliance if we start immediately. I'd recommend engaging a European law firm for local expertise.", phaseIndex: 1, phaseName: "Discussion", type: "ARGUMENT", timestamp: new Date(now.getTime() - 180000).toISOString(), errorReason: null, targetAgentId: null },
+        { speakerAgentId: "agent-mod", speakerDisplayName: "Moderator", content: "After careful consideration, the panel recommends a phased European market expansion starting in Q3, with Germany and France as initial targets. Key prerequisites: (1) GDPR compliance and DPO appointment — start immediately, (2) Product localization — 3 month engineering sprint, (3) EU infrastructure provisioning — $50k/month incremental, (4) Local legal counsel engagement. The consensus is to proceed, but not to rush. A well-prepared Q3 soft launch balances opportunity with risk management.", phaseIndex: 2, phaseName: "Synthesis", type: "SYNTHESIS", timestamp: new Date(now.getTime() - 120000).toISOString(), errorReason: null, targetAgentId: null },
+      ],
+      memberConversationIds: { agent1: "mc1", agent2: "mc2", agent3: "mc3", agent4: "mc4", agent5: "mc5" },
+      currentPhaseIndex: 2,
+      currentPhaseName: "Synthesis",
+      synthesizedAnswer: "After careful consideration, the panel recommends a phased European market expansion starting in Q3, with Germany and France as initial targets. Key prerequisites: (1) GDPR compliance and DPO appointment — start immediately, (2) Product localization — 3 month engineering sprint, (3) EU infrastructure provisioning — $50k/month incremental, (4) Local legal counsel engagement. The consensus is to proceed, but not to rush. A well-prepared Q3 soft launch balances opportunity with risk management.",
+      depth: 0,
+      taskList: null,
+      dynamicMembers: [],
+      createdAgentIds: [],
+      retainedAgentIds: [],
+      created: new Date(now.getTime() - 600000).toISOString(),
+      lastModified: new Date(now.getTime() - 120000).toISOString(),
+      // Wave-3 read-side state (I17/I11/I9). Only the SINGLE-conversation GET
+      // carries `artifacts` — the list/stream responses deliberately do not, so
+      // demo mode mirrors the real backend's shape rather than showing the
+      // panel everywhere.
+      artifacts: [
+        {
+          id: "art-1",
+          groupConversationId: "gconv1",
+          ownerUserId: "manager-user",
+          name: "eu-expansion-brief.md",
+          type: "MARKDOWN",
+          content:
+            "# EU Expansion Brief\n\n## Target markets\n- Germany (existing partners)\n- France (strong pipeline)\n\n## Blockers\n1. GDPR compliance — DPO appointment outstanding\n2. Product localization — ~3 months engineering\n",
+          version: 3,
+          lastEditorAgentId: "agent3",
+          status: "DRAFT",
+          history: [
+            { content: "# EU Expansion Brief\n\nDraft.", editorAgentId: "agent1", version: 1, at: new Date(now.getTime() - 500000).toISOString() },
+            { content: "# EU Expansion Brief\n\n## Target markets\n- Germany\n", editorAgentId: "agent2", version: 2, at: new Date(now.getTime() - 400000).toISOString() },
+          ],
+          createdAt: new Date(now.getTime() - 520000).toISOString(),
+          updatedAt: new Date(now.getTime() - 200000).toISOString(),
+        },
+        {
+          id: "art-2",
+          groupConversationId: "gconv1",
+          ownerUserId: "manager-user",
+          name: "cost-model.json",
+          type: "JSON",
+          content: '{"infrastructureMonthlyUsd":50000,"localizationOneOffUsd":180000,"targetLaunch":"Q3"}',
+          version: 1,
+          lastEditorAgentId: "agent4",
+          status: "FINAL",
+          history: [],
+          createdAt: new Date(now.getTime() - 300000).toISOString(),
+          updatedAt: new Date(now.getTime() - 300000).toISOString(),
+        },
+      ],
+      negotiation: {
+        proposals: [
+          { id: "p1", byAgentId: "agent2", round: 1, terms: "Launch in Q2 across DACH + France simultaneously.", status: "SUPERSEDED", acceptedBy: [], acceptanceEntryIndices: {} },
+          { id: "p2", byAgentId: "agent2", round: 2, terms: "Q3 soft launch, Germany first, France 6 weeks later.", status: "OPEN", acceptedBy: ["agent2", "agent5"], acceptanceEntryIndices: { agent2: 6, agent5: 8 } },
+        ],
+        concessions: [
+          { byAgentId: "agent2", round: 2, gaveUp: "a simultaneous two-market launch", inReturnFor: "Legal dropping its objection to a Q3 date", refProposalId: "p2" },
+          { byAgentId: "agent5", round: 2, gaveUp: "the demand for a full DPIA before any launch", inReturnFor: "a staged rollout with a DPO appointed up front", refProposalId: "p2" },
+        ],
+      },
+      summaryUpToIndex: 4,
+      transcriptSummary:
+        "The panel opened with independent positions: Marketing saw brand opportunity but flagged GDPR; Sales pointed to demand in Germany and France; Product estimated three months of localization; Tech priced EU hosting at ~$50k/month; Legal warned against rushing compliance.",
+    });
+  }),
+
+  // Start group discussion
+  http.post("*/groups/:groupId/conversations", () => {
+    return HttpResponse.json({
+      id: `gconv-${Date.now()}`,
+      groupId: "group1",
+      userId: "manager-user",
+      state: "IN_PROGRESS",
+      originalQuestion: "New discussion started",
+      transcript: [],
+      memberConversationIds: {},
+      currentPhaseIndex: 0,
+      currentPhaseName: "Initial Opinions",
+      synthesizedAnswer: null,
+      depth: 0,
+      taskList: null,
+      dynamicMembers: [],
+      createdAgentIds: [],
+      retainedAgentIds: [],
+      created: new Date().toISOString(),
+      lastModified: new Date().toISOString(),
+    }, { status: 201 });
+  }),
+
+  // SSE stream group discussion
+  http.post("*/groups/:groupId/conversations/stream", ({ params }) => {
+    const groupId = String(params.groupId);
+    const convId = `gconv-stream-${Date.now()}`;
+
+    // Build SSE event string helper
+    const sseEvent = (name: string, data: object) =>
+      `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`;
+
+    // Simulate a multi-phase discussion with delays
+    const events = [
+      sseEvent("group_start", {
+        conversationId: convId,
+        groupId,
+        question: "What are the key benefits of AI agents?",
+        style: "ROUND_TABLE",
+        phaseCount: 2,
+        agentIds: ["agent1", "agent2"],
+      }),
+      sseEvent("phase_start", { phaseIndex: 0, phaseName: "Initial Opinions", phaseType: "OPINION", participants: "ALL_MEMBERS" }),
+      sseEvent("speaker_start", { agentId: "agent1", displayName: "Support Agent", phaseIndex: 0, phaseName: "Initial Opinions" }),
+      sseEvent("speaker_complete", {
+        agentId: "agent1",
+        displayName: "Support Agent",
+        content: "AI agents provide 24/7 availability, consistent response quality, and can handle multiple conversations simultaneously. They reduce operational costs while improving customer satisfaction through instant responses.",
+        phaseIndex: 0,
+        phaseName: "Initial Opinions",
+      }),
+      sseEvent("speaker_start", { agentId: "agent2", displayName: "FAQ Agent", phaseIndex: 0, phaseName: "Initial Opinions" }),
+      sseEvent("speaker_complete", {
+        agentId: "agent2",
+        displayName: "FAQ Agent",
+        content: "From an information management perspective, AI agents excel at maintaining up-to-date knowledge bases, providing consistent answers across all channels, and learning from user interactions to improve over time.",
+        phaseIndex: 0,
+        phaseName: "Initial Opinions",
+      }),
+      sseEvent("phase_complete", { phaseIndex: 0, phaseName: "Initial Opinions" }),
+      sseEvent("phase_start", { phaseIndex: 1, phaseName: "Synthesis", phaseType: "SYNTHESIS", participants: "MODERATOR_ONLY" }),
+      sseEvent("synthesis_start", { moderatorAgentId: "moderator-agent" }),
+      sseEvent("speaker_start", { agentId: "moderator-agent", displayName: "Moderator", phaseIndex: 1, phaseName: "Synthesis" }),
+      sseEvent("speaker_complete", {
+        agentId: "moderator-agent",
+        displayName: "Moderator",
+        content: "Both agents highlight complementary benefits: operational efficiency (24/7 availability, cost reduction, scalability) and knowledge management (consistent answers, continuous learning, multi-channel support). Together, these benefits make AI agents a compelling solution for modern customer engagement.",
+        phaseIndex: 1,
+        phaseName: "Synthesis",
+      }),
+      sseEvent("phase_complete", { phaseIndex: 1, phaseName: "Synthesis" }),
+      sseEvent("group_complete", {
+        state: "COMPLETED",
+        synthesizedAnswer: "Both agents highlight complementary benefits: operational efficiency (24/7 availability, cost reduction, scalability) and knowledge management (consistent answers, continuous learning, multi-channel support). Together, these benefits make AI agents a compelling solution for modern customer engagement.",
+      }),
+    ];
+
+    // Stream events with simulated delays
+    const stream = new ReadableStream({
+      async start(controller) {
+        const encoder = new TextEncoder();
+        for (const event of events) {
+          await new Promise((r) => setTimeout(r, 500 + Math.random() * 1000));
+          controller.enqueue(encoder.encode(event));
+        }
+        controller.close();
+      },
+    });
+
+    return new HttpResponse(stream, {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+      },
+    });
+  }),
+
+  // Delete group conversation
+  http.delete("*/groups/:groupId/conversations/:convId", () => {
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  // --- Phase 13: Tool Metrics & Debug Endpoints ---
+
+  // Conversation costs
+  http.get("*/llm/tools/costs/conversation/:convId", () => {
+    return HttpResponse.json({
+      conversationId: "conv-mock",
+      totalCost: 0.015,
+      toolCallCount: 7,
+      toolUsage: {
+        websearch: 3,
+        fetch_weather: 4,
+      },
+    });
+  }),
+
+  // Tool rate limit
+  http.get("*/llm/tools/ratelimit/:tool", ({ params }) => {
+    return HttpResponse.json({
+      tool: params.tool as string,
+      limit: 60,
+      remaining: 42,
+      resetTimeMs: Date.now() + 60_000,
+    });
+  }),
+
+  // Cache stats
+  http.get("*/llm/tools/cache/stats", () => {
+    return HttpResponse.json({
+      size: 35,
+      hits: 23,
+      misses: 12,
+      hitRate: 0.657,
+      perToolStats: {
+        fetch_weather: { hits: 15, misses: 5 },
+        websearch: { hits: 8, misses: 7 },
+      },
+      details: "Cache: 35 entries, 23 hits, 12 misses (65.7%)",
+    });
+  }),
+
+  // Tool history
+  http.get("*/llm/tools/history/:convId", () => {
+    return HttpResponse.json([
+      {
+        toolName: "fetch_weather",
+        args: { city: "Vienna" },
+        result: '{"temp": 22, "condition": "sunny"}',
+        durationMs: 156,
+        cost: 0.0005,
+        timestamp: new Date().toISOString(),
+      },
+      {
+        toolName: "websearch",
+        args: { query: "EDDI AI platform" },
+        result: '{"results": [{"title": "EDDI docs", "url": "https://docs.labs.ai"}]}',
+        durationMs: 342,
+        cost: 0.001,
+        timestamp: new Date().toISOString(),
+      },
+    ]);
+  }),
+
+  // Global tool costs
+  http.get("*/llm/tools/costs", () => {
+    return HttpResponse.json({
+      totalCost: 0.045,
+      summary: "Tool Cost Summary:\nTotal Cost: $0.0450\nPer-Tool Costs:\n  - fetch_weather: 8 calls, $0.0120 total, $0.0015 avg\n  - websearch: 7 calls, $0.0330 total, $0.0047 avg\n",
+    });
+  }),
+
+  // Rerun last conversation step (replay) — handler at end of file uses /rerun path
+
+  // Detailed conversation (memory inspector)
+  http.get("*/agents/:convId", ({ request }) => {
+    const url = new URL(request.url);
+    if (url.searchParams.get("returnDetailed") === "true") {
+      return HttpResponse.json({
+        conversationSteps: [
+          {
+            conversationStep: [
+              { key: "actions", value: ["greet"], timestamp: new Date().toISOString(), originWorkflowId: null },
+              { key: "output:text:en", value: "Hello!", timestamp: new Date().toISOString(), originWorkflowId: "wf-1" },
+            ],
+            timestamp: new Date().toISOString(),
+          },
+        ],
+        conversationProperties: { environment: "test" },
+      });
+    }
+    return HttpResponse.json({});
+  }),
+
+  // Recent logs (log viewer)
+  http.get("*/logs/recent", () => {
+    return HttpResponse.json([
+      { level: "INFO", message: "Agent started", loggerName: "ai.labs.AgentOrchestrator", timestamp: new Date().toISOString() },
+    ]);
+  }),
+
+  // Log SSE stream (log viewer) — return empty stream
+  http.get("*/logs/stream", () => {
+    return new HttpResponse(null, { status: 200, headers: { "Content-Type": "text/event-stream" } });
+  }),
+
+  // ─── Quotas ───────────────────────────────────────────────────────
+  http.get("*/administration/quotas/:tenantId/usage", () => {
+    return HttpResponse.json({
+      tenantId: "default",
+      conversationsToday: 3842,
+      apiCallsThisMinute: 312,
+      monthlyCostUsd: 1847.63,
+      minuteWindowStart: new Date().toISOString(),
+      dayStart: new Date().toISOString(),
+    });
+  }),
+
+  http.get("*/administration/quotas/:tenantId", () => {
+    return HttpResponse.json({
+      tenantId: "default",
+      maxConversationsPerDay: 5000,
+      maxAgentsPerTenant: 100,
+      maxApiCallsPerMinute: 500,
+      maxMonthlyCostUsd: 2500,
+      enabled: true,
+    });
+  }),
+
+  http.put("*/administration/quotas/:tenantId", async ({ request }) => {
+    const body = await request.json();
+    return HttpResponse.json(body);
+  }),
+
+  http.post("*/administration/quotas/:tenantId/usage/reset", () => {
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  // ─── Currentversion endpoints (used by version pickers) ─────────
+  // Returns mock latest version for any resource type
+  ...[
+    "agentstore/agents", "workflowstore/workflows",
+    "rulestore/rulesets", "apicallstore/apicalls", "outputstore/outputsets",
+    "dictionarystore/dictionaries", "parserstore/parsers", "llmstore/llms",
+    "propertysetterstore/propertysetters", "mcpcallsstore/mcpcalls",
+    "ragstore/rags", "snippetstore/snippets",
+  ].map((storePath) =>
+    http.get(`*/${storePath}/:id/currentversion`, () => {
+      // Return 2 as default latest version for test data
+      return HttpResponse.text("2", { headers: { "Content-Type": "text/plain" } });
+    })
+  ),
+
+  // ─── Generic resource store descriptors ──────────────────────────
+  // One handler per resource store type to avoid catching agent/workflow descriptors.
+  // For filter lookups, return filtered results.
+  // For list requests, return sample data so the resource-list test has items.
+  ...["rulestore/rulesets", "apicallstore/apicalls", "outputstore/outputsets",
+      "dictionarystore/dictionaries", "parserstore/parsers", "llmstore/llms", "propertysetterstore/propertysetters",
+      "mcpcallsstore/mcpcalls", "ragstore/rags", "snippetstore/snippets"].map((storePath) => {
+    const store = storePath.split("/")[0];
+    const plural = storePath.split("/")[1];
+    return http.get(`*/${storePath}/descriptors`, ({ request }) => {
+      const url = new URL(request.url);
+      const filter = url.searchParams.get("filter");
+
+      if (filter) {
+        // Version or filter lookup — return a descriptor matching the filter ID
+        return HttpResponse.json([
+          {
+            resource: `eddi://ai.labs.resource/${store}/${plural}/${filter}?version=1`,
+            name: `Resource ${filter}`,
+            description: "A resource",
+            createdOn: Date.now() - 86400000,
+            lastModifiedOn: Date.now() - 3600000,
+          },
+        ]);
+      }
+
+      // Normal list request
+      return HttpResponse.json([
+        {
+          resource: `eddi://ai.labs.resource/${store}/${plural}/res1?version=1`,
+          name: "Sample Resource 1",
+          description: "A sample resource for testing",
+          createdOn: Date.now() - 86400000,
+          lastModifiedOn: Date.now() - 3600000,
+        },
+        {
+          resource: `eddi://ai.labs.resource/${store}/${plural}/res2?version=2`,
+          name: "Sample Resource 2",
+          description: "Another sample resource",
+          createdOn: Date.now() - 2 * 86400000,
+          lastModifiedOn: Date.now() - 7200000,
+        },
+      ]);
+    });
+  }),
+
+  // ─── Tool Metrics (Cost Dashboard / Debugger) ────────────────────
+  http.get("*/llm/tools/costs/conversation/:conversationId", ({ params }) => {
+    const conversationId = params.conversationId as string;
+    return HttpResponse.json({
+      conversationId,
+      totalCost: 0.0847,
+      toolCallCount: 14,
+      toolUsage: {
+        "fetch_weather": 5,
+        "search_products": 4,
+        "create_ticket": 3,
+        "send_email": 2,
+      },
+    });
+  }),
+
+  http.get("*/llm/tools/ratelimit/:toolName", ({ params }) => {
+    const toolName = params.toolName as string;
+    return HttpResponse.json({
+      tool: toolName,
+      limit: 60,
+      remaining: 42,
+      resetTimeMs: Date.now() + 45_000,
+    });
+  }),
+
+  http.get("*/llm/tools/cache/stats", () => {
+    return HttpResponse.json({
+      size: 425,
+      hits: 328,
+      misses: 97,
+      hitRate: 0.772,
+      perToolStats: {
+        "fetch_weather": { hits: 145, misses: 32 },
+        "search_products": { hits: 98, misses: 41 },
+        "create_ticket": { hits: 85, misses: 24 },
+      },
+      details: "Cache: 425 entries, 328 hits, 97 misses (77.2%)",
+    });
+  }),
+
+  http.get("*/llm/tools/history/:conversationId", () => {
+    const now = Date.now();
+    return HttpResponse.json([
+      {
+        toolName: "fetch_weather",
+        args: { city: "Vienna", units: "metric" },
+        result: "Sunny, 22°C, humidity 45%",
+        durationMs: 187,
+        cost: 0.0025,
+        timestamp: new Date(now - 120_000).toISOString(),
+      },
+      {
+        toolName: "search_products",
+        args: { query: "summer jackets", limit: 5 },
+        result: "Found 5 matching products",
+        durationMs: 342,
+        cost: 0.0024,
+        timestamp: new Date(now - 90_000).toISOString(),
+      },
+      {
+        toolName: "create_ticket",
+        args: { title: "Return request #4521", priority: "high" },
+        result: "Ticket JIRA-4521 created",
+        durationMs: 520,
+        cost: 0.014,
+        timestamp: new Date(now - 60_000).toISOString(),
+      },
+    ]);
+  }),
+
+  http.get("*/llm/tools/costs", () => {
+    return HttpResponse.json({
+      totalCost: 1.247,
+      summary: "Tool Cost Summary:\nTotal Cost: $1.2470\nPer-Tool Costs:\n  - fetch_weather: 312 calls\n  - search_products: 245 calls\n  - create_ticket: 189 calls\n  - send_email: 146 calls\n",
+    });
+  }),
+];
+
+// ─── GDPR Admin Handlers ────────────────────────────────────────────────────
+
+export const gdprHandlers = [
+  // Art. 17 — Delete user data (cascade)
+  // A clean cascade: 200, every counter reported, nothing failed.
+  //
+  // `logsPseudonymized` is the name EDDI has always used. The fixture said
+  // `logEntriesPseudonymized`, matching the page's typo rather than the
+  // backend, which is why the blank tile survived every test.
+  http.delete("*/admin/gdpr/:userId", ({ params }) => {
+    return HttpResponse.json({
+      userId: params.userId as string,
+      memoriesDeleted: 14,
+      conversationsDeleted: 7,
+      conversationMappingsDeleted: 2,
+      logsPseudonymized: 89,
+      auditEntriesPseudonymized: 23,
+      attachmentsDeleted: 4,
+      journalEntriesDeleted: 1,
+      checkpointsDeleted: 0,
+      groupConversationsDeleted: 3,
+      sharedArtifactsDeleted: 0,
+      schedulesDeleted: 1,
+      failedSteps: [],
+      complete: true,
+      completedAt: new Date().toISOString(),
+    });
+  }),
+
+  // Art. 15/20 — Export user data
+  http.get("*/admin/gdpr/:userId/export", ({ params }) => {
+    return HttpResponse.json({
+      userId: params.userId as string,
+      memories: [
+        { key: "preferred_language", value: "en", createdAt: new Date(Date.now() - 86400000).toISOString() },
+        { key: "name", value: "Jane Doe", createdAt: new Date(Date.now() - 172800000).toISOString() },
+      ],
+      conversations: [
+        { id: "conv-1", agentId: "agent1", state: "ENDED", steps: 12, created: new Date(Date.now() - 86400000).toISOString() },
+        { id: "conv-2", agentId: "agent2", state: "IN_PROGRESS", steps: 3, created: new Date(Date.now() - 3600000).toISOString() },
+      ],
+      managedConversations: [],
+      auditEntries: [],
+      attachments: [],
+      totalConversations: 2,
+      conversationsTruncated: false,
+      failedConversationIds: [],
+      // 207, not 200, and `complete: false` — which is what EDDI answers on
+      // EVERY export today, because four personal-data categories it erases as
+      // this user's data have no exporter yet. A fixture that answered 200
+      // would test a response the backend cannot currently produce.
+      omittedCategories: ["groupConversations", "sharedArtifacts", "schedules", "journalEntries"],
+      complete: false,
+    }, { status: 207 });
+  }),
+
+  // Art. 18 — Restrict processing
+  http.post("*/admin/gdpr/:userId/restrict", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  // Art. 18 — Unrestrict processing
+  http.delete("*/admin/gdpr/:userId/restrict", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  // Art. 18 — Check restriction status
+  http.get("*/admin/gdpr/:userId/restrict", () => {
+    return HttpResponse.json(false);
+  }),
+];
+
+// ─── User Memory Handlers ───────────────────────────────────────────────────
+
+const MOCK_MEMORIES = [
+  {
+    id: "mem-1",
+    userId: "user-123",
+    key: "preferred_language",
+    value: "en",
+    category: "preference",
+    visibility: "self",
+    sourceAgentId: "agent1",
+    conflicted: false,
+    accessCount: 47,
+    createdAt: new Date(Date.now() - 21 * 86400000).toISOString(),
+    updatedAt: new Date(Date.now() - 3600000).toISOString(),
+  },
+  {
+    id: "mem-2",
+    userId: "user-123",
+    key: "timezone",
+    value: "Europe/Vienna",
+    category: "preference",
+    visibility: "self",
+    sourceAgentId: "agent1",
+    conflicted: false,
+    accessCount: 31,
+    createdAt: new Date(Date.now() - 18 * 86400000).toISOString(),
+    updatedAt: new Date(Date.now() - 86400000).toISOString(),
+  },
+  {
+    id: "mem-3",
+    userId: "user-123",
+    key: "account_type",
+    value: "enterprise",
+    category: "fact",
+    visibility: "global",
+    sourceAgentId: "agent2",
+    conflicted: false,
+    accessCount: 128,
+    createdAt: new Date(Date.now() - 30 * 86400000).toISOString(),
+    updatedAt: new Date(Date.now() - 7200000).toISOString(),
+  },
+  {
+    id: "mem-4",
+    userId: "user-123",
+    key: "last_order_id",
+    value: "ORD-2026-91247",
+    category: "context",
+    visibility: "self",
+    sourceAgentId: "agent1",
+    sourceConversationId: "conv-42",
+    conflicted: false,
+    accessCount: 6,
+    createdAt: new Date(Date.now() - 2 * 86400000).toISOString(),
+    updatedAt: new Date(Date.now() - 1800000).toISOString(),
+  },
+  {
+    id: "mem-5",
+    userId: "user-123",
+    key: "shipping_address",
+    value: "123 Oak Street, Suite 4B, Portland OR 97201",
+    category: "fact",
+    visibility: "self",
+    sourceAgentId: "agent1",
+    conflicted: false,
+    accessCount: 15,
+    createdAt: new Date(Date.now() - 14 * 86400000).toISOString(),
+    updatedAt: new Date(Date.now() - 5 * 86400000).toISOString(),
+  },
+  {
+    id: "mem-6",
+    userId: "user-123",
+    key: "preferred_contact",
+    value: "email",
+    category: "preference",
+    visibility: "self",
+    sourceAgentId: "agent3",
+    conflicted: false,
+    accessCount: 9,
+    createdAt: new Date(Date.now() - 10 * 86400000).toISOString(),
+    updatedAt: new Date(Date.now() - 4 * 86400000).toISOString(),
+  },
+  {
+    id: "mem-7",
+    userId: "user-123",
+    key: "satisfaction_score",
+    value: "4.8",
+    category: "metric",
+    visibility: "global",
+    sourceAgentId: "agent1",
+    conflicted: true,
+    accessCount: 42,
+    createdAt: new Date(Date.now() - 7 * 86400000).toISOString(),
+    updatedAt: new Date(Date.now() - 3600000).toISOString(),
+  },
+  {
+    id: "mem-8",
+    userId: "user-123",
+    key: "company_name",
+    value: "Acme Corp",
+    category: "fact",
+    visibility: "global",
+    sourceAgentId: "agent4",
+    conflicted: false,
+    accessCount: 67,
+    createdAt: new Date(Date.now() - 25 * 86400000).toISOString(),
+    updatedAt: new Date(Date.now() - 12 * 3600000).toISOString(),
+  },
+];
+
+export const userMemoryHandlers = [
+  http.get("*/usermemorystore/memories/:userId", () => {
+    return HttpResponse.json(MOCK_MEMORIES);
+  }),
+
+  http.get("*/usermemorystore/memories/:userId/search", ({ request }) => {
+    const url = new URL(request.url);
+    const q = (url.searchParams.get("q") ?? "").toLowerCase();
+    const filtered = MOCK_MEMORIES.filter(
+      (m) => m.key.toLowerCase().includes(q) || String(m.value).toLowerCase().includes(q),
+    );
+    return HttpResponse.json(filtered);
+  }),
+
+  http.get("*/usermemorystore/memories/:userId/category/:category", ({ params }) => {
+    const filtered = MOCK_MEMORIES.filter((m) => m.category === params.category);
+    return HttpResponse.json(filtered);
+  }),
+
+  http.get("*/usermemorystore/memories/:userId/count", () => {
+    return HttpResponse.json({ count: MOCK_MEMORIES.length });
+  }),
+
+  http.put("*/usermemorystore/memories", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  http.delete("*/usermemorystore/memories/entry/:entryId", () => {
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  http.delete("*/usermemorystore/memories/:userId", () => {
+    return new HttpResponse(null, { status: 204 });
+  }),
+];
+
+// ─── Properties Handlers ────────────────────────────────────────────────────
+
+const MOCK_PROPERTIES = {
+  user_name: { name: "user_name", scope: "longTerm", valueString: "Jane Doe" },
+  email: { name: "email", scope: "longTerm", valueString: "jane.doe@acme-corp.com" },
+  age: { name: "age", scope: "longTerm", valueInt: 32 },
+  is_vip: { name: "is_vip", scope: "longTerm", valueBoolean: true },
+  company: { name: "company", scope: "longTerm", valueString: "Acme Corp" },
+  department: { name: "department", scope: "longTerm", valueString: "Engineering" },
+  preferences: { name: "preferences", scope: "longTerm", valueObject: { theme: "dark", lang: "en", notifications: true, timezone: "Europe/Vienna" } },
+  tags: { name: "tags", scope: "longTerm", valueList: ["loyal", "premium", "early-adopter"] },
+  last_login: { name: "last_login", scope: "conversation", valueString: new Date(Date.now() - 3600000).toISOString() },
+  session_count: { name: "session_count", scope: "longTerm", valueInt: 147 },
+};
+
+export const propertiesHandlers = [
+  http.get("*/propertiesstore/properties/:userId", () => {
+    return HttpResponse.json(MOCK_PROPERTIES);
+  }),
+
+  http.post("*/propertiesstore/properties/:userId", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  http.delete("*/propertiesstore/properties/:userId", () => {
+    return new HttpResponse(null, { status: 204 });
+  }),
+];
+
+// ─── Agent Trigger Handlers ─────────────────────────────────────────────────
+
+const MOCK_TRIGGERS = [
+  {
+    intent: "booking_request",
+    agentDeployments: [
+      { environment: "production", agentId: "agent3" },
+      { environment: "test", agentId: "agent3" },
+    ],
+  },
+  {
+    intent: "faq_query",
+    agentDeployments: [
+      { environment: "production", agentId: "agent2" },
+    ],
+  },
+  {
+    intent: "escalation",
+    agentDeployments: [
+      { environment: "production", agentId: "agent1" },
+      { environment: "production", agentId: "agent8" },
+    ],
+  },
+  {
+    intent: "payment_issue",
+    agentDeployments: [
+      { environment: "production", agentId: "agent4" },
+    ],
+  },
+  {
+    intent: "product_recommendation",
+    agentDeployments: [
+      { environment: "production", agentId: "agent5" },
+      { environment: "test", agentId: "agent5" },
+    ],
+  },
+  {
+    intent: "contract_review",
+    agentDeployments: [
+      { environment: "production", agentId: "agent7" },
+    ],
+  },
+  {
+    intent: "onboarding_start",
+    agentDeployments: [
+      { environment: "production", agentId: "agent6" },
+      { environment: "test", agentId: "agent6" },
+    ],
+  },
+  {
+    intent: "password_reset",
+    agentDeployments: [
+      { environment: "production", agentId: "agent8" },
+    ],
+  },
+];
+
+export const triggerHandlers = [
+  http.get("*/AgentTriggerStore/agenttriggers", () => {
+    return HttpResponse.json(MOCK_TRIGGERS);
+  }),
+
+  http.get("*/AgentTriggerStore/agenttriggers/:intent", ({ params }) => {
+    const found = MOCK_TRIGGERS.find((t) => t.intent === params.intent);
+    if (!found) return new HttpResponse(null, { status: 404 });
+    return HttpResponse.json(found);
+  }),
+
+  http.post("*/AgentTriggerStore/agenttriggers", () => {
+    return new HttpResponse(null, { status: 201 });
+  }),
+
+  http.put("*/AgentTriggerStore/agenttriggers/:intent", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  http.delete("*/AgentTriggerStore/agenttriggers/:intent", () => {
+    return new HttpResponse(null, { status: 204 });
+  }),
+];
+
+// ─── Capability Registry Handlers ────────────────────────────────────────────
+
+const MOCK_CAPABILITIES = [
+  { agentId: "agent1", skill: "customer-support", attributes: { language: "en", tier: "enterprise" }, confidence: "high" },
+  { agentId: "agent1", skill: "order-tracking", attributes: { carriers: "fedex,ups,dhl" }, confidence: "high" },
+  { agentId: "agent1", skill: "return-processing", attributes: {}, confidence: "high" },
+  { agentId: "agent2", skill: "faq", attributes: { domain: "product", articles: "2.4k" }, confidence: "high" },
+  { agentId: "agent2", skill: "knowledge-search", attributes: { domain: "product" }, confidence: "medium" },
+  { agentId: "agent3", skill: "appointment-scheduling", attributes: { calendar: "google" }, confidence: "high" },
+  { agentId: "agent4", skill: "invoice-parsing", attributes: { formats: "pdf,image" }, confidence: "high" },
+  { agentId: "agent4", skill: "data-validation", attributes: {}, confidence: "high" },
+  { agentId: "agent5", skill: "product-recommendation", attributes: { catalog: "12k items" }, confidence: "medium" },
+  { agentId: "agent6", skill: "onboarding", attributes: { steps: "12" }, confidence: "high" },
+  { agentId: "agent7", skill: "contract-analysis", attributes: { corpus: "legal" }, confidence: "high" },
+  { agentId: "agent7", skill: "risk-assessment", attributes: {}, confidence: "medium" },
+  { agentId: "agent8", skill: "it-troubleshooting", attributes: { integrations: "jira,slack" }, confidence: "high" },
+  { agentId: "agent8", skill: "password-reset", attributes: {}, confidence: "high" },
+];
+
+const ALL_SKILLS = ["customer-support", "order-tracking", "return-processing", "faq", "knowledge-search", "appointment-scheduling", "invoice-parsing", "data-validation", "product-recommendation", "onboarding", "contract-analysis", "risk-assessment", "it-troubleshooting", "password-reset"];
+
+export const capabilityHandlers = [
+  // Skills list — must come BEFORE the query-param search handler
+  http.get("*/capabilities/skills", () => {
+    return HttpResponse.json(ALL_SKILLS);
+  }),
+
+  // Skill search with query params (?skill=...&strategy=...)
+  http.get("*/capabilities", ({ request }) => {
+    const url = new URL(request.url);
+    const skill = url.searchParams.get("skill") ?? "";
+    if (!skill) return HttpResponse.json(MOCK_CAPABILITIES);
+    const filtered = MOCK_CAPABILITIES.filter((c) =>
+      c.skill.toLowerCase().includes(skill.toLowerCase()),
+    );
+    return HttpResponse.json(filtered);
+  }),
+];
+
+// ─── Backup / Sync Handlers ──────────────────────────────────────────────────
+
+const MOCK_EXPORT_PREVIEW = {
+  agentId: "agent1",
+  agentName: "Support Agent",
+  agentVersion: 3,
+  resources: [
+    { resourceId: "agent1", resourceVersion: 3, resourceType: "agent", name: "Support Agent", parentWorkflowId: null, workflowIndex: 0, required: true },
+    { resourceId: "wf1", resourceVersion: 2, resourceType: "workflow", name: "Support Ticket Pipeline", parentWorkflowId: null, workflowIndex: 0, required: true },
+    { resourceId: "beh1", resourceVersion: 1, resourceType: "behavior", name: "Support Rules", parentWorkflowId: "wf1", workflowIndex: 0, required: false },
+    { resourceId: "llm1", resourceVersion: 1, resourceType: "langchain", name: "GPT-4 Task", parentWorkflowId: "wf1", workflowIndex: 1, required: false },
+    { resourceId: "out1", resourceVersion: 1, resourceType: "output", name: "Support Outputs", parentWorkflowId: "wf1", workflowIndex: 2, required: false },
+    { resourceId: "ps1", resourceVersion: 1, resourceType: "property", name: "Props", parentWorkflowId: "wf1", workflowIndex: 3, required: false },
+    { resourceId: "dict1", resourceVersion: 1, resourceType: "regulardictionary", name: "Support Dict", parentWorkflowId: "wf1", workflowIndex: 4, required: false },
+    { resourceId: "snip1", resourceVersion: 1, resourceType: "snippet", name: "System Prompt Base", parentWorkflowId: null, workflowIndex: 0, required: false },
+  ],
+};
+
+const MOCK_IMPORT_PREVIEW = {
+  sourceAgentId: "agent1",
+  sourceAgentName: "Support Agent",
+  targetAgentId: "agent1",
+  targetAgentName: "Support Agent",
+  resources: [
+    { sourceId: "beh1", resourceType: "behavior", name: "Support Rules", action: "UPDATE", targetId: "beh1-local", targetVersion: 1, matchStrategy: "type", sourceContent: '{"behaviorGroups":[{"name":"main","rules":[{"name":"greet","actions":["greet"]}]}]}', targetContent: '{"behaviorGroups":[{"name":"main","rules":[{"name":"greet","actions":["hello"]}]}]}', workflowIndex: 0 },
+    { sourceId: "llm1", resourceType: "langchain", name: "GPT-4 Task", action: "SKIP", targetId: "llm1-local", targetVersion: 1, matchStrategy: "type", sourceContent: null, targetContent: null, workflowIndex: 1 },
+    { sourceId: "out1", resourceType: "output", name: "Support Outputs", action: "UPDATE", targetId: "out1-local", targetVersion: 1, matchStrategy: "name", sourceContent: '{"outputSet":[{"action":"greet","outputs":[{"valueAlternatives":[{"type":"text","text":"Hello!"}]}]}]}', targetContent: '{"outputSet":[{"action":"greet","outputs":[{"valueAlternatives":[{"type":"text","text":"Hi!"}]}]}]}', workflowIndex: 2 },
+    { sourceId: "snip-new", resourceType: "snippet", name: "New Snippet", action: "CREATE", targetId: null, targetVersion: null, matchStrategy: null, sourceContent: '{"content":"You are a helpful assistant."}', targetContent: null, workflowIndex: 0 },
+  ],
+};
+
+const MOCK_REMOTE_AGENTS = [
+  { resource: "eddi://ai.labs.agent/agentstore/agents/remote-agent1?version=5", name: "Support Agent", description: "Support bot", lastModifiedOn: new Date().toISOString() },
+  { resource: "eddi://ai.labs.agent/agentstore/agents/remote-agent2?version=3", name: "FAQ Agent", description: "FAQ bot", lastModifiedOn: new Date().toISOString() },
+  { resource: "eddi://ai.labs.agent/agentstore/agents/remote-agent3?version=1", name: "Sales Agent", description: "Sales bot", lastModifiedOn: new Date().toISOString() },
+  { resource: "eddi://ai.labs.agent/agentstore/agents/remote-agent4?version=2", name: "Onboarding Agent", description: "New hire guide", lastModifiedOn: new Date().toISOString() },
+];
+
+export const backupSyncHandlers = [
+  // Export preview
+  http.post("*/backup/export/:agentId/preview", () => {
+    return HttpResponse.json(MOCK_EXPORT_PREVIEW);
+  }),
+
+  // Selective export — returns Location header
+  http.post("*/backup/export/:agentId", () => {
+    return new HttpResponse(null, {
+      status: 200,
+      headers: { Location: "/backup/export/agent-export.zip" },
+    });
+  }),
+
+  // Export file download
+  http.get("*/backup/export/:filename", () => {
+    return new HttpResponse(new Blob(["fake-zip-content"]), {
+      status: 200,
+      headers: { "Content-Type": "application/zip" },
+    });
+  }),
+
+  // Import preview (merge or upgrade)
+  http.post("*/backup/import/preview", ({ request }) => {
+    const url = new URL(request.url);
+    const targetAgentId = url.searchParams.get("targetAgentId");
+    if (targetAgentId) {
+      // Upgrade preview
+      return HttpResponse.json(MOCK_IMPORT_PREVIEW);
+    }
+    // Merge preview
+    return HttpResponse.json({
+      ...MOCK_IMPORT_PREVIEW,
+      targetAgentId: null,
+      targetAgentName: null,
+    });
+  }),
+
+  // Import execute (create, merge, or upgrade)
+  http.post("*/backup/import", () => {
+    const newId = `imported-${Date.now()}`;
+    return new HttpResponse(null, {
+      status: 202,
+      headers: { Location: `/agentstore/agents/${newId}?version=1` },
+    });
+  }),
+
+  // List remote agents
+  http.get("*/backup/import/sync/agents", () => {
+    return HttpResponse.json(MOCK_REMOTE_AGENTS);
+  }),
+
+  // Sync preview (single)
+  http.post("*/backup/import/sync/preview", () => {
+    return HttpResponse.json(MOCK_IMPORT_PREVIEW);
+  }),
+
+  // Sync preview (batch)
+  http.post("*/backup/import/sync/preview/batch", async ({ request }) => {
+    const mappings = (await request.json()) as Array<{ sourceAgentId: string }>;
+    return HttpResponse.json(
+      mappings.map((m) => ({
+        ...MOCK_IMPORT_PREVIEW,
+        sourceAgentId: m.sourceAgentId,
+      }))
+    );
+  }),
+
+  // Sync execute (single)
+  http.post("*/backup/import/sync", () => {
+    return new HttpResponse(null, { status: 202 });
+  }),
+
+  // Sync execute (batch)
+  http.post("*/backup/import/sync/batch", () => {
+    return new HttpResponse(null, { status: 202 });
+  }),
+
+  // ── User Conversation Store ──
+
+  http.get("*/userconversationstore/userconversations/:intent/:userId", ({ params }) => {
+    return HttpResponse.json({
+      intent: params.intent,
+      userId: params.userId,
+      environment: "production",
+      agentId: "agent1",
+      conversationId: "conv1",
+    });
+  }),
+
+  http.post("*/userconversationstore/userconversations/:intent/:userId", () => {
+    return new HttpResponse(null, {
+      status: 201,
+      headers: { Location: "/userconversationstore/userconversations/test/user1" },
+    });
+  }),
+
+  http.delete("*/userconversationstore/userconversations/:intent/:userId", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  // ── Conversation Attachments ──
+
+  http.post("*/conversations/:conversationId/attachments", ({ params }) => {
+    return HttpResponse.json(
+      {
+        storageRef: `attachment-${Date.now()}`,
+        fileName: "document.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 102400,
+        conversationId: params.conversationId,
+        forwardableInline: true,
+      },
+      { status: 201 },
+    );
+  }),
+
+  http.get("*/conversations/:conversationId/attachments", ({ params }) => {
+    return HttpResponse.json([
+      {
+        storageRef: "attachment-1",
+        filename: "document.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 102400,
+        conversationId: params.conversationId,
+      },
+    ]);
+  }),
+
+  http.delete("*/conversations/:conversationId/attachments/:storageRef", ({ params }) => {
+    return HttpResponse.json({ storageRef: params.storageRef, deleted: true });
+  }),
+
+  http.delete("*/conversations/:conversationId/attachments", ({ params }) => {
+    return HttpResponse.json({ conversationId: params.conversationId, deletedCount: 1 });
+  }),
+
+  // ── Channel Integration Store ──
+
+  http.get("*/channelstore/channels/descriptors", () => {
+    return HttpResponse.json([
+      {
+        resource: "eddi://ai.labs.channel/channelstore/channels/ch1?version=1",
+        name: "Engineering Slack",
+        description: "AI-powered engineering support channel",
+        createdOn: Date.now() - 5 * 86400000,
+        lastModifiedOn: Date.now() - 3600000,
+      },
+      {
+        resource: "eddi://ai.labs.channel/channelstore/channels/ch2?version=2",
+        name: "Customer Support Slack",
+        description: "External customer support integration",
+        createdOn: Date.now() - 10 * 86400000,
+        lastModifiedOn: Date.now() - 7200000,
+      },
+      {
+        resource: "eddi://ai.labs.channel/channelstore/channels/ch3?version=1",
+        name: "HR Onboarding Slack",
+        description: "New hire onboarding channel",
+        createdOn: Date.now() - 2 * 86400000,
+        lastModifiedOn: Date.now() - 1800000,
+      },
+    ]);
+  }),
+
+  http.get("*/channelstore/channels/:id", ({ params }) => {
+    const channelId = params.id as string;
+    const configs: Record<string, object> = {
+      ch1: {
+        name: "Engineering Slack",
+        channelType: "slack",
+        platformConfig: {
+          channelId: "C0123ABCDEF",
+          botToken: "${vault:eng-slack-bot-token}",
+          signingSecret: "${vault:eng-slack-signing-secret}",
+        },
+        targets: [
+          {
+            name: "default",
+            type: "AGENT",
+            targetId: "agent1",
+            triggers: [],
+            observeMode: false,
+            observeConfig: null,
+          },
+          {
+            name: "faq-bot",
+            type: "AGENT",
+            targetId: "agent2",
+            triggers: ["faq", "help-me"],
+            observeMode: false,
+            observeConfig: null,
+          },
+        ],
+        defaultTargetName: "default",
+      },
+      ch2: {
+        name: "Customer Support Slack",
+        channelType: "slack",
+        platformConfig: {
+          channelId: "C0456GHIJKL",
+          botToken: "${vault:support-slack-bot-token}",
+          signingSecret: "${vault:support-slack-signing-secret}",
+        },
+        targets: [
+          {
+            name: "support",
+            type: "AGENT",
+            targetId: "agent1",
+            triggers: [],
+            observeMode: false,
+            observeConfig: null,
+          },
+          {
+            name: "review-panel",
+            type: "GROUP",
+            targetId: "group1",
+            triggers: ["review", "panel"],
+            observeMode: false,
+            observeConfig: null,
+          },
+          {
+            name: "observer",
+            type: "AGENT",
+            targetId: "agent4",
+            triggers: [],
+            observeMode: true,
+            observeConfig: {
+              triggerKeywords: ["invoice", "payment"],
+              triggerMimeTypes: ["application/pdf"],
+              cooldownSeconds: 120,
+              maxDailyResponses: 25,
+              maxCostPerDay: 3.5,
+            },
+          },
+        ],
+        defaultTargetName: "support",
+      },
+      ch3: {
+        name: "HR Onboarding Slack",
+        channelType: "slack",
+        platformConfig: {
+          channelId: "C0789MNOPQR",
+          botToken: "${vault:hr-slack-bot-token}",
+          signingSecret: "${vault:hr-slack-signing-secret}",
+        },
+        targets: [
+          {
+            name: "onboarding",
+            type: "AGENT",
+            targetId: "agent6",
+            triggers: [],
+            observeMode: false,
+            observeConfig: null,
+          },
+        ],
+        defaultTargetName: "onboarding",
+      },
+    };
+    return HttpResponse.json(
+      configs[channelId] ?? configs["ch1"],
+    );
+  }),
+
+  http.post("*/channelstore/channels", () => {
+    const newId = `ch-${Date.now()}`;
+    return new HttpResponse(null, {
+      status: 201,
+      headers: {
+        Location: `/channelstore/channels/${newId}?version=1`,
+      },
+    });
+  }),
+
+  http.put("*/channelstore/channels/:id", ({ params }) => {
+    const id = params.id as string;
+    return new HttpResponse(null, {
+      status: 200,
+      headers: {
+        Location: `/channelstore/channels/${id}?version=2`,
+      },
+    });
+  }),
+
+  http.post("*/channelstore/channels/:id", ({ params }) => {
+    const id = params.id as string;
+    return new HttpResponse(null, {
+      status: 201,
+      headers: {
+        Location: `/channelstore/channels/${id}-copy?version=1`,
+      },
+    });
+  }),
+
+  http.delete("*/channelstore/channels/:id", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  // ── Conversation Rerun ──
+
+  http.post("*/agents/:conversationId/rerun", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  // ── HITL — Human-in-the-Loop ──
+  // (GET */agents/pending-approvals is registered earlier, before the
+  //  ":conversationId" catch-all, so it isn't shadowed.)
+
+  http.post("*/agents/:conversationId/resume", async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as { note?: string };
+    if (body?.note && body.note.length > 4096) {
+      return HttpResponse.json(
+        { message: "Decision note exceeds the maximum length of 4096 characters" },
+        { status: 400 },
+      );
+    }
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  http.post("*/agents/:conversationId/cancel", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  // Operator canary/gate metrics relay — best-effort by contract (see
+  // reportOperatorCanaryResult/reportOperatorGateStatus), but tests that
+  // don't care about it still trigger it as a side effect of gate
+  // verification and the write canary. Without a default, every one of them
+  // logs an MSW "unhandled request" warning that drowns out real ones.
+  http.post("*/administration/operator/canary-result", () => new HttpResponse(null, { status: 204 })),
+  http.post("*/administration/operator/gate-status", () => new HttpResponse(null, { status: 204 })),
+
+  http.get("*/agents/:conversationId/approval-status", () => {
+    return HttpResponse.json({
+      conversationId: "conv-awaiting-1",
+      state: "AWAITING_HUMAN",
+      pausedAt: new Date(Date.now() - 300_000).toISOString(),
+      pauseReason: "High-value transaction requires human review",
+    });
+  }),
+
+  // Non-streaming approve (programmatic binding). Validates the note cap.
+  http.post("*/groups/:groupId/conversations/:gcId/approve", async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as { decision?: { note?: string } };
+    if (body?.decision?.note && body.decision.note.length > 4096) {
+      return HttpResponse.json(
+        { message: "Decision note exceeds the maximum length of 4096 characters" },
+        { status: 400 },
+      );
+    }
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  // Streaming approve/resume — emits hitl_resume then group_complete over SSE.
+  http.post("*/groups/:groupId/conversations/:gcId/approve/stream", () => {
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(
+          encoder.encode(
+            'event: hitl_resume\ndata: {"verdict":"APPROVED","decidedBy":"manager-user"}\n\n',
+          ),
+        );
+        controller.enqueue(
+          encoder.encode(
+            'event: group_complete\ndata: {"state":"COMPLETED","synthesizedAnswer":"Resumed and completed."}\n\n',
+          ),
+        );
+        controller.close();
+      },
+    });
+    return new HttpResponse(stream, {
+      headers: { "Content-Type": "text/event-stream" },
+    });
+  }),
+
+  http.post("*/groups/:groupId/conversations/:gcId/cancel", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  http.get("*/groups/:groupId/conversations/:gcId/approval-status", () => {
+    return HttpResponse.json({
+      state: "AWAITING_APPROVAL",
+      pausedAt: new Date(Date.now() - 60_000).toISOString(),
+    });
+  }),
+
+  // I6 — submit a HUMAN group member's pending turn. Synchronous (no
+  // streaming variant exists on the backend): resolves to the settled
+  // GroupConversation directly.
+  http.post("*/groups/:groupId/conversations/:gcId/human-input", async ({ request, params }) => {
+    const body = (await request.json().catch(() => ({}))) as { memberId?: string; content?: string };
+    if (!body?.memberId?.trim() || !body?.content?.trim()) {
+      return HttpResponse.json({ error: "'memberId' and 'content' must not be blank" }, { status: 400 });
+    }
+    return HttpResponse.json({
+      id: params.gcId,
+      groupId: params.groupId,
+      userId: "manager-user",
+      state: "COMPLETED",
+      originalQuestion: "q",
+      transcript: [],
+      memberConversationIds: {},
+      currentPhaseIndex: 0,
+      currentPhaseName: null,
+      synthesizedAnswer: "Resumed after the human turn.",
+      depth: 0,
+      taskList: null,
+      dynamicMembers: [],
+      createdAgentIds: [],
+      retainedAgentIds: [],
+      created: new Date().toISOString(),
+      lastModified: new Date().toISOString(),
+      availableActions: ["followup", "continue", "close"],
+    });
+  }),
+];
+
+/* ─── Connections ────────────────────────────────────────────────────────────
+ *
+ * Two route groups with different audiences, mocked together because they are
+ * one feature: `/connectionstore/connections` is the admin config store, and
+ * `/connections` is the per-user grant lifecycle.
+ *
+ * **These handlers hold state.** `linkedAccounts` below is mutated by the
+ * authorize and disconnect mocks so that the one genuinely new flow in the app
+ * — leave for a provider, come back with a query parameter, refetch — actually
+ * round-trips in demo mode instead of pretending to. `server.resetHandlers()`
+ * does not reset module state, so a test that depends on a particular set of
+ * grants should say so with its own `server.use()` override rather than rely on
+ * the seed.
+ *
+ * The authorize mock returns a **same-origin** URL that lands back on the
+ * caller's own `returnTo` with `?connected=…`, standing in for the provider and
+ * the backend callback. A real provider URL here would navigate the demo out of
+ * the app to a third party, which is neither useful nor something the mocks
+ * should ever do.
+ */
+
+interface MockLinkedAccount {
+  connection: string;
+  status: "ACTIVE" | "EXPIRED" | "REVOKED" | "REFRESH_FAILED";
+  expiresAt: string | null;
+  scopes: string[] | null;
+  connectedAt: string | null;
+}
+
+const linkedAccounts = new Map<string, MockLinkedAccount>([
+  [
+    "jira",
+    {
+      connection: "jira",
+      status: "ACTIVE",
+      expiresAt: new Date(Date.now() + 40 * 60_000).toISOString(),
+      scopes: ["read:jira-work", "write:jira-work", "offline_access"],
+      connectedAt: new Date(Date.now() - 9 * 86400000).toISOString(),
+    },
+  ],
+  [
+    "google-drive",
+    {
+      connection: "google-drive",
+      status: "REFRESH_FAILED",
+      expiresAt: null,
+      scopes: ["https://www.googleapis.com/auth/drive.readonly"],
+      connectedAt: new Date(Date.now() - 60 * 86400000).toISOString(),
+    },
+  ],
+]);
+
+const mockConnections: Record<string, Record<string, unknown>> = {
+  conn1: {
+    name: "jira",
+    description: "Atlassian Jira, as the person asking",
+    authType: "OAUTH2_AUTHORIZATION_CODE",
+    binding: "PER_USER",
+    allowUnverifiedPrincipal: false,
+    oauth: {
+      authorizationUrl: "https://auth.atlassian.com/authorize",
+      tokenUrl: "https://auth.atlassian.com/oauth/token",
+      clientId: "0Xy1abcDEF",
+      clientSecret: "${vault:jira-client-secret}",
+      scopes: ["read:jira-work", "write:jira-work", "offline_access"],
+      extraAuthParams: { audience: "api.atlassian.com", prompt: "consent" },
+      usePkce: true,
+      clientAuthMethod: "client_secret_basic",
+      discoveryUrl: null,
+    },
+    staticAuth: null,
+    baseUrlAllowlist: ["https://api.atlassian.com"],
+    timeoutMs: null,
+  },
+  conn2: {
+    name: "google-drive",
+    description: "Each person's own Drive",
+    authType: "OAUTH2_AUTHORIZATION_CODE",
+    binding: "PER_USER",
+    allowUnverifiedPrincipal: false,
+    oauth: {
+      authorizationUrl: "https://accounts.google.com/o/oauth2/v2/auth",
+      tokenUrl: "https://oauth2.googleapis.com/token",
+      clientId: "1234.apps.googleusercontent.com",
+      clientSecret: "${vault:google-client-secret}",
+      scopes: ["https://www.googleapis.com/auth/drive.readonly"],
+      extraAuthParams: { access_type: "offline" },
+      usePkce: true,
+      clientAuthMethod: "client_secret_post",
+      discoveryUrl: "https://accounts.google.com/.well-known/openid-configuration",
+    },
+    staticAuth: null,
+    baseUrlAllowlist: [
+      "https://www.googleapis.com",
+      "https://drive.googleapis.com",
+    ],
+    timeoutMs: 8000,
+  },
+  conn3: {
+    name: "amplitude",
+    description: "Organisation-wide analytics key",
+    authType: "STATIC",
+    binding: "SERVICE",
+    allowUnverifiedPrincipal: false,
+    oauth: null,
+    staticAuth: {
+      headerName: "Authorization",
+      valueTemplate: "Bearer ${vault:amplitude-key}",
+      username: null,
+      passwordRef: null,
+    },
+    baseUrlAllowlist: ["https://amplitude.com"],
+    timeoutMs: null,
+  },
+  conn4: {
+    name: "billing-api",
+    description: "Service account for the billing system",
+    authType: "OAUTH2_CLIENT_CREDENTIALS",
+    binding: "SERVICE",
+    allowUnverifiedPrincipal: false,
+    oauth: {
+      authorizationUrl: null,
+      tokenUrl: "https://auth.billing.example.com/oauth/token",
+      clientId: "eddi-billing",
+      clientSecret: "${vault:billing-client-secret}",
+      scopes: ["invoices.read"],
+      extraAuthParams: {},
+      usePkce: true,
+      clientAuthMethod: "client_secret_basic",
+      discoveryUrl: null,
+    },
+    staticAuth: null,
+    baseUrlAllowlist: ["https://api.billing.example.com"],
+    timeoutMs: null,
+  },
+  conn5: {
+    name: "legacy-crm",
+    description: "HTTP Basic against the old CRM",
+    authType: "BASIC",
+    binding: "SERVICE",
+    allowUnverifiedPrincipal: false,
+    oauth: null,
+    staticAuth: {
+      headerName: "Authorization",
+      valueTemplate: null,
+      username: "eddi-service",
+      passwordRef: "${vault:legacy-crm-password}",
+    },
+    baseUrlAllowlist: ["https://crm.internal.example.com:8443"],
+    timeoutMs: null,
+  },
+  // EDDI stores nothing for this one: the calling system attaches each user's
+  // own key per request, so the document carries a header name and nowhere to
+  // send it — and no valueTemplate, which the backend refuses on this binding.
+  conn6: {
+    name: "gnowbe",
+    description: "Each caller brings their own Gnowbe key",
+    authType: "STATIC",
+    binding: "CALLER_SUPPLIED",
+    allowUnverifiedPrincipal: false,
+    oauth: null,
+    staticAuth: {
+      headerName: "x-api-key",
+      valueTemplate: null,
+      username: null,
+      passwordRef: null,
+    },
+    baseUrlAllowlist: ["https://api.gnowbe.com"],
+    timeoutMs: null,
+  },
+};
+
+export const connectionHandlers = [
+  http.get("*/connectionstore/connections/descriptors", () => {
+    return HttpResponse.json(
+      Object.entries(mockConnections).map(([id, config], i) => ({
+        resource: `eddi://ai.labs.connection/connectionstore/connections/${id}?version=1`,
+        name: config.name as string,
+        description: (config.description as string) ?? "",
+        createdOn: Date.now() - (i + 3) * 86400000,
+        lastModifiedOn: Date.now() - (i + 1) * 3600000,
+      })),
+    );
+  }),
+
+  http.get("*/connectionstore/connections/jsonSchema", () => {
+    return HttpResponse.json({
+      $schema: "https://json-schema.org/draft/2020-12/schema",
+      type: "object",
+      title: "ConnectionConfiguration",
+      properties: {
+        name: { type: "string" },
+        authType: {
+          type: "string",
+          enum: [
+            "STATIC",
+            "BASIC",
+            "OAUTH2_CLIENT_CREDENTIALS",
+            "OAUTH2_AUTHORIZATION_CODE",
+          ],
+        },
+        binding: {
+          type: "string",
+          enum: ["SERVICE", "PER_USER", "CALLER_SUPPLIED"],
+        },
+        baseUrlAllowlist: { type: "array", items: { type: "string" } },
+      },
+    });
+  }),
+
+  http.get("*/connectionstore/connections/:id", ({ params, request }) => {
+    const url = new URL(request.url);
+    // `/descriptors` and `/jsonSchema` are not ids. The two routes above are
+    // registered first and win, but this stands aside explicitly the way the
+    // resource stores do — a `server.use()` override that re-registers this one
+    // would otherwise answer both of them with a config document.
+    if (isNotAnId(url.pathname)) return;
+    const config = mockConnections[params.id as string];
+    if (!config) {
+      return new HttpResponse("No such connection", { status: 404 });
+    }
+    return HttpResponse.json(config);
+  }),
+
+  http.post("*/connectionstore/connections", () => {
+    const newId = `conn-${Date.now()}`;
+    return new HttpResponse(null, {
+      status: 201,
+      headers: { Location: `/connectionstore/connections/${newId}?version=1` },
+    });
+  }),
+
+  http.put("*/connectionstore/connections/:id", ({ params }) => {
+    return new HttpResponse(null, {
+      status: 200,
+      headers: {
+        Location: `/connectionstore/connections/${params.id}?version=2`,
+      },
+    });
+  }),
+
+  http.post("*/connectionstore/connections/:id", ({ params }) => {
+    return new HttpResponse(null, {
+      status: 201,
+      headers: {
+        Location: `/connectionstore/connections/${params.id}-copy?version=1`,
+      },
+    });
+  }),
+
+  http.delete("*/connectionstore/connections/:id", ({ params }) => {
+    // The backend deletes a connection's grants along with it — tokens must not
+    // outlive the connection that produced them — so the mock does too.
+    const config = mockConnections[params.id as string];
+    if (config) linkedAccounts.delete(config.name as string);
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  // ── Per-user grants ──
+
+  http.get("*/connections/mine", () => {
+    return HttpResponse.json([...linkedAccounts.values()]);
+  }),
+
+  http.post("*/connections/:name/authorize", ({ params, request }) => {
+    const url = new URL(request.url);
+    const name = params.name as string;
+    const returnTo = url.searchParams.get("returnTo") || "/manage/connections";
+    linkedAccounts.set(name, {
+      connection: name,
+      status: "ACTIVE",
+      expiresAt: new Date(Date.now() + 60 * 60_000).toISOString(),
+      scopes: null,
+      connectedAt: new Date().toISOString(),
+    });
+    return HttpResponse.json({
+      authorizationUrl: `${returnTo}?connected=${encodeURIComponent(name)}`,
+    });
+  }),
+
+  http.delete("*/connections/:name/grant", ({ params }) => {
+    linkedAccounts.delete(params.name as string);
+    // 204 whether or not a grant existed — whether a given user had linked a
+    // given connection is not something a caller learns by probing.
+    return new HttpResponse(null, { status: 204 });
+  }),
+];

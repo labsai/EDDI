@@ -18,9 +18,11 @@ EDDI is a **config-driven engine**, not a monolithic application. Agent behavior
 | --------------------------------------------------------------- | -------------------------- | ------------------------------------------------------------ |
 | **EDDI** (this repo)                                            | Java 25, Quarkus, MongoDB  | Backend engine, REST API, lifecycle pipeline                 |
 | **[quarkus-eddi](https://github.com/quarkiverse/quarkus-eddi)** | Java 21, Quarkus Extension | Quarkus SDK — `@Inject EddiClient`, Dev Services, MCP bridge |
-| **EDDI-Manager**                                                | React 19, Vite, Tailwind   | Admin dashboard (served from EDDI at `/manage`; `/` redirects to the `/welcome` chooser, `/workforce` is the group-conversation workspace) |
-| **eddi-chat-ui**                                                | React, TypeScript          | Standalone chat widget                                       |
+| **Manager** — [`ui/manager/`](ui/manager/) in this repo                                                | React 19, Vite, Tailwind   | Admin dashboard (served from EDDI at `/manage`; `/` redirects to the `/welcome` chooser, `/workforce` is the group-conversation workspace) |
+| **Chat UI** — [`ui/chat/`](ui/chat/) in this repo | React, TypeScript | Standalone chat widget, served at `/chat` |
 | **eddi-website**                                                | Astro, Starlight           | Marketing site + documentation at eddi.labs.ai               |
+
+> **The Manager and the Chat UI are directories of this repository** (`ui/manager`, `ui/chat`), not separate repos. They were `labsai/EDDI-Manager` and `labsai/EDDI-Chat-UI` until 2026-09-15; both histories were imported with their commits intact (`git log -- ui/manager`). Maven builds both into the jar — see Build & Test Commands.
 
 > **Versions live in `pom.xml`** (Java, Quarkus, every dependency) — treat it as the single source of truth. This file names the Java baseline for context but deliberately does not restate specific Quarkus/library versions, which drift. See §2 rule 7.
 
@@ -46,12 +48,15 @@ The [README "Maven Command Reference"](README.md#maven-command-reference) is the
 | Command | What it does |
 | ------- | ------------ |
 | `./mvnw compile quarkus:dev` | Start dev mode with live reload — app on port **7070**, Dev UI at `/q/dev` |
+| `./mvnw package -DskipTests -DskipUi=true` | Build the jar **without** the Manager and Chat UIs (the jar then serves no UI). `compile` and `test` never build the UIs anyway — see the note below the table |
 | `./mvnw compile` | Compile only (fast feedback) — run before every commit per §2 rule 6. It is also where the style gates fire: Checkstyle's import rules and `formatter:validate` are both bound to the `validate` phase, which `compile` runs through, so an unused import or an unformatted file **fails the build here** rather than being silently rewritten. Fix with `./mvnw formatter:format` (formatting) or by deleting the import (Checkstyle) |
 | `./mvnw test` | Unit tests (excludes `*IT.java`); JaCoCo report at `target/site/jacoco/index.html` |
 | `./mvnw test -Dtest=ClassName` | Run a single test class |
 | `./mvnw verify` | Compile + unit tests + package. **Integration tests do NOT run** — `skipITs` defaults to `true` |
 | `./mvnw verify -DskipITs=false` | Full build **including** integration tests — requires Docker. The command CI runs |
 | `./mvnw validate` · `./mvnw formatter:format` | The two blocking style gates — Checkstyle (`UnusedImports`/`RedundantImport` are `severity="error"`; `FileLength`/`LineLength` stay advisory) and `formatter:validate`, which **reports** drift and never edits your files · auto-format with the project Eclipse formatter, i.e. the fix for a `formatter:validate` failure |
+
+> **The UIs build with Maven, at packaging time.** `ui/manager` and `ui/chat` are built in `prepare-package` and copied into the jar just before it is assembled (`frontend-maven-plugin` + `maven-resources-plugin` in `pom.xml`). So `compile`, `test` and `quarkus:dev` never run npm, while `package`, `verify` and `install` run `npm ci` and `npm run build` for both, about two minutes, unless you pass `-DskipUi=true`. No local Node is needed: Maven downloads Node 20 into `ui/node/` (gitignored). Dev mode serves `/manage` only if an earlier `./mvnw package` left the UI in `target/classes`; for frontend work run `npm run dev` in `ui/manager` (port 3000, proxies the API to :7070) or `ui/chat` (port 5174). Generated output is never committed any more — `src/main/resources/META-INF/resources` holds only `index.html`, `robots.txt` and `scripts/js/landing-redirect.js`. **Once, after pulling the migration into an older checkout, run `./mvnw clean`**: its fileset deletes the formerly committed bundles still on disk, which `quarkus:dev` would otherwise serve from the source tree.
 
 > **Sandbox caveat:** integration tests (`*IT.java`) and any test that binds a loopback/HTTP socket need Docker and frequently cannot run in sandboxed agent environments — CI verifies those. Locally, rely on `./mvnw test` (unit tests) and treat a green CI run as the source of truth for the rest.
 
@@ -65,7 +70,7 @@ The [README "Maven Command Reference"](README.md#maven-command-reference) is the
    - [`docs/project-philosophy.md`](docs/project-philosophy.md) — **Supreme directive.** 9 architectural pillars governing all EDDI development
    - [`docs/changelog.md`](docs/changelog.md) — **Read the most recent entries first** (newest are at the top). Running log of changes, decisions, and reasoning across all repos and sessions. It holds only recent work, capped at 250 KB; older entries are archived per month under [`docs/changelog/`](docs/changelog/) and are indexed in an Archive table at the top of the live file. Skim the top 2–3 entries for current context — do not read the archives unless you are chasing a specific past decision.
    - [`docs/architecture.md`](docs/architecture.md) — Architecture overview, configuration model, pipeline, and DB-agnostic design
-   - If working on **EDDI-Manager**: also read `EDDI-Manager/AGENTS.md` in the Manager repo
+   - If working on the **Manager** (`ui/manager/`): also read [`ui/manager/AGENTS.md`](ui/manager/AGENTS.md) and its `CLAUDE.md`. For the **Chat UI**: [`ui/chat/AGENTS.md`](ui/chat/AGENTS.md)
 2. **Check git status**: Run `git status` and `git log -5 --oneline` to see current branch state and recent work.
 
 ### During Work
@@ -174,7 +179,7 @@ Follow this order unless the user explicitly requests something different.
 | —     | Session Forking           | State snapshotting, conversation forking (see `planning/agentic-improvements-plan.md` §7)                                                 |
 | —     | Conversation Chaining     | Cross-session context carry-over (see `planning/conversation-window-management.md` Strategy 3)                                       |
 | 9     | DAG Pipeline              | Parallel task execution and the dependency graph. OpenTelemetry tracing and MCP circuit breakers already shipped — see Completed          |
-| —     | HITL — remaining          | EDDI-Manager approvals UI (Manager repo) and the reserved `inGroupTurns: INBOX` mode for member *tool-call* pauses. Core framework shipped; humans as group *members* shipped in 10c — see Completed. `VoteConfig.tiePolicy: HUMAN_DECIDES` is likewise still save-time rejected pending its own resume machinery |
+| —     | HITL — remaining          | Manager approvals UI (`ui/manager`) and the reserved `inGroupTurns: INBOX` mode for member *tool-call* pauses. Core framework shipped; humans as group *members* shipped in 10c — see Completed. `VoteConfig.tiePolicy: HUMAN_DECIDES` is likewise still save-time rejected pending its own resume machinery |
 | —     | Guardrails                | Config-driven input/output guardrails in LlmTask (see `planning/guardrails-architecture.md`)                                         |
 | 11b   | Multi-Channel             | Teams adapter (Slack already ships via HITL approval channels; see `planning/multi-agent-ux-improvements.md`)                        |
 | 13    | Debugging & Visualization | Time-traveling debugger, visual pipeline builder                                                                                          |
@@ -629,6 +634,7 @@ When designing any new feature, always consider these before finalizing the desi
 | `src/main/resources/application.properties` | Quarkus config (CORS, health, OpenAPI, MongoDB)             |
 | `.github/workflows/ci.yml`                  | CI/CD pipeline (build, test, Docker push, smoke test)       |
 | `docs/`                                     | Markdown documentation, published at docs.labs.ai           |
+| `ui/manager/`, `ui/chat/` | The Manager and Chat UI sources (React, Vite, TypeScript). Each has its own `AGENTS.md`; CI runs them in `UI Manager Checks`, `UI Manager E2E (MSW)`, `UI Chat` and `Backend E2E` |
 | `docker-compose.yml`                        | EDDI + MongoDB local setup                                  |
 | `mise.toml`                                 | Optional [mise](https://mise.jdx.dev) toolchain (pinned JDK 25 + Maven) + task shortcuts |
 | `docs/agent-configs/`                       | Worked agent config sources — reference for AI; partially swept by two unit tests (scope in §5.6) |
@@ -866,7 +872,7 @@ request is written to conversation memory. Disable with
 
 #### Requesting specialized input fields from the UI
 
-The output system supports an `inputField` output type that tells the UI to switch its input control. Both **EDDI-Manager** (`SecretInputField` in `chat-panel.tsx`) and **eddi-chat-ui** (`SecretInput.tsx`) handle this natively.
+The output system supports an `inputField` output type that tells the UI to switch its input control. Both the **Manager** (`SecretInputField` in `ui/manager`'s `chat-panel.tsx`) and the **Chat UI** (`SecretInput.tsx` in `ui/chat`) handle this natively.
 
 ```json
 {

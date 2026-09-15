@@ -1,0 +1,392 @@
+import { useState, useEffect } from "react";
+import { useParams, Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
+import {
+  Search,
+  Plus,
+  FileCode,
+  GitBranch,
+  Globe,
+  MessageSquareText,
+  BookOpen,
+  BookOpenCheck,
+  Brain,
+  Settings,
+  Plug,
+  ExternalLink,
+  Copy,
+  Trash2,
+  Share2,
+} from "lucide-react";
+import { getResourceType } from "@/lib/api/resources";
+import { parseResourceUri } from "@/lib/api/agents";
+import { useResourceDescriptors, useDeleteResource, useDuplicateResource } from "@/hooks/use-resources";
+import { ResourceCard } from "@/components/resources/resource-card";
+import { CreateResourceDialog } from "@/components/resources/create-resource-dialog";
+import type { AgentDescriptor } from "@/lib/api/agents";
+import { accessFor } from "@/lib/access";
+import { useSpaces } from "@/hooks/use-spaces";
+import { OwnershipBadge } from "@/components/workspaces/ownership-badge";
+import { ShareDialog } from "@/components/workspaces/share-dialog";
+import type { LucideIcon } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { AlertDialog } from "@/components/ui/alert-dialog";
+import { BackLink } from "@/components/shared/back-link";
+import { EmptyState } from "@/components/shared/empty-state";
+import { ErrorState } from "@/components/shared/error-state";
+import {
+  ViewToggle,
+  type ViewMode,
+} from "@/components/shared/view-toggle";
+import { getStoredViewMode, setStoredViewMode } from "@/components/shared/view-mode";
+
+const ICON_MAP: Record<string, LucideIcon> = {
+  GitBranch,
+  Globe,
+  MessageSquareText,
+  BookOpen,
+  BookOpenCheck,
+  Brain,
+  Settings,
+  Plug,
+};
+
+export function ResourceListPage() {
+  const { type } = useParams<{ type: string }>();
+  const { t } = useTranslation();
+  const [search, setSearch] = useState("");
+  const [createOpen, setCreateOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; version: number } | null>(null);
+  const [view, setView] = useState<ViewMode>(() => getStoredViewMode(`resources-${type}`));
+  const [shareTarget, setShareTarget] = useState<{ id: string; name: string } | null>(null);
+  // EDDI shares by DESCRIPTOR id — `/descriptorstore/descriptors/{id}/shares`
+  // takes any resource, not only an agent. The Manager wired the dialog to the
+  // agents page alone, so a workflow or extension could not be shared, and its
+  // existing grants could be neither seen nor revoked.
+  const { enabled: workspacesEnabled } = useSpaces();
+
+  // Reset search when switching between resource types (React reuses
+  // the component, so useState values persist across route param changes).
+  useEffect(() => {
+    setSearch("");
+    setView(getStoredViewMode(`resources-${type}`));
+  }, [type]);
+
+  const rt = getResourceType(type ?? "");
+
+  const { data: items, isLoading, isError, refetch } = useResourceDescriptors(
+    type ?? "",
+    100,
+    0,
+    search
+  );
+  const deleteMutation = useDeleteResource(type ?? "");
+  const duplicateMutation = useDuplicateResource(type ?? "");
+
+  if (!rt) {
+    return (
+      <div className="space-y-4 py-20">
+        <ErrorState message={t("resources.unknownType")} />
+        <div className="text-center">
+          <Link to="/manage/resources" className="text-sm text-primary hover:underline">
+            {t("resources.backToResources")}
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  const Icon = ICON_MAP[rt.icon] ?? FileCode;
+  const typeName = t(`${rt.labelKey}.name`);
+
+  /**
+   * Each row with its id, version and what this caller may do with it.
+   *
+   * `callerLevel` is stamped on every descriptor listing, not just the agent
+   * one — `RestVersionInfo.readDescriptors` is the shared base every per-store
+   * `/{store}/descriptors` endpoint inherits. Reading it only on the agents
+   * page, as the Manager did, meant a workflow or extension a colleague shared
+   * at VIEW still offered Duplicate and Delete, both of which 403.
+   */
+  const enrichedItems = (items ?? []).map((item: AgentDescriptor) => {
+    const { id, version } = parseResourceUri(item.resource);
+    return { ...item, id, version, access: accessFor(item.callerLevel) };
+  });
+
+  function handleDelete(id: string, version: number) {
+    setDeleteTarget({ id, version });
+  }
+
+  function confirmDelete() {
+    if (deleteTarget) {
+      deleteMutation.mutate(deleteTarget, {
+        onSuccess: () => {
+          toast.success(t("common.delete") + " ✓");
+          setDeleteTarget(null);
+        },
+        onError: () => toast.error(t("common.error")),
+      });
+    }
+  }
+
+  function handleDuplicate(id: string, version: number) {
+    duplicateMutation.mutate(
+      { id, version },
+      {
+        onSuccess: () => toast.success(t("common.duplicate") + " ✓"),
+        onError: () => toast.error(t("common.error")),
+      }
+    );
+  }
+
+  function handleViewChange(mode: ViewMode) {
+    setView(mode);
+    setStoredViewMode(`resources-${type}`, mode);
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Back link */}
+      <BackLink
+        to="/manage/resources"
+        label={t("resources.backToResources")}
+      />
+
+      {/* Header */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="flex items-center gap-2 text-3xl font-bold text-foreground">
+            <Icon className="h-8 w-8 text-primary" />
+            {typeName}
+          </h1>
+          <p className="mt-1 text-muted-foreground">
+            {t(`${rt.labelKey}.description`)}
+          </p>
+        </div>
+        <Button
+          onClick={() => setCreateOpen(true)}
+          data-testid="create-resource-btn"
+        >
+          <Plus className="h-4 w-4" />
+          {t("resources.create", { type: typeName })}
+        </Button>
+      </div>
+
+      {/* Search bar + View toggle */}
+      <div className="flex items-center gap-3">
+        <div className="relative flex-1">
+          <Search className="absolute inset-s-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder={t("common.search")}
+            className="w-full rounded-lg border border-input bg-background py-2.5 ps-10 pe-4 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
+            data-testid="resource-search"
+          />
+        </div>
+        <ViewToggle view={view} onChange={handleViewChange} />
+      </div>
+
+      {/* Content */}
+      {isLoading && (
+        <div className="cq-card-grid">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="rounded-xl border border-border bg-card p-5 space-y-3">
+              <Skeleton className="h-5 w-3/4" />
+              <Skeleton className="h-4 w-1/2" />
+              <Skeleton className="h-4 w-full" />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {isError && (
+        <ErrorState
+          message={t("common.error")}
+          onRetry={() => refetch()}
+          retryLabel={t("common.retry")}
+        />
+      )}
+
+      {!isLoading && !isError && enrichedItems.length === 0 && (
+        <EmptyState
+          icon={Icon}
+          title={search ? t("common.noResults") : t("resources.empty", { type: typeName })}
+          description={!search ? t("resources.emptyDescription", { type: typeName, defaultValue: "Create your first {{type}} to use it in workflows." }) : undefined}
+          actionLabel={!search ? t("resources.create", { type: typeName }) : undefined}
+          onAction={!search ? () => setCreateOpen(true) : undefined}
+        />
+      )}
+
+      {!isLoading && !isError && enrichedItems.length > 0 && (
+        <>
+          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            {t("resources.count", { count: enrichedItems.length })}
+          </p>
+
+          {view === "card" ? (
+            <div
+              className="cq-card-grid"
+              data-testid="resource-grid"
+            >
+              {enrichedItems.map((item) => (
+                <ResourceCard
+                  key={item.resource}
+                  item={item}
+                  typeSlug={type ?? ""}
+                  iconName={rt.icon}
+                  onDuplicate={handleDuplicate}
+                  onDelete={handleDelete}
+                />
+              ))}
+            </div>
+          ) : (
+            <div
+              className="overflow-hidden rounded-xl border bg-card shadow-sm"
+              data-testid="resource-list"
+            >
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-border bg-secondary/50">
+                    <th className="px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                      {t("common.name", "Name")}
+                    </th>
+                    <th className="px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                      {t("common.id", "ID")}
+                    </th>
+                    <th className="px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                      {t("common.version", "Version")}
+                    </th>
+                    <th className="px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                      {t("common.modified", "Modified")}
+                    </th>
+                    <th className="px-5 py-3 text-end text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                      {t("conversations.actions", "Actions")}
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {enrichedItems.map((item) => (
+                    <tr
+                      key={item.resource}
+                      className="hover:bg-secondary/30 transition-colors"
+                    >
+                      <td className="px-5 py-3">
+                        <Link
+                          to={`/manage/resources/${type}/${item.id}`}
+                          className="text-sm font-medium text-foreground hover:text-primary transition-colors"
+                        >
+                          {item.name || t("resources.unnamed", "Unnamed Resource")}
+                          <ExternalLink className="ms-1 inline h-3 w-3 opacity-40" />
+                        </Link>
+                        <OwnershipBadge
+                          className="ms-2 align-middle"
+                          ownerId={item.ownerId}
+                          spaceId={item.spaceId}
+                          visibility={item.visibility}
+                        />
+                      </td>
+                      <td className="px-5 py-3">
+                        <span className="font-mono text-xs text-muted-foreground">
+                          {item.id.slice(0, 12)}…
+                        </span>
+                      </td>
+                      <td className="px-5 py-3">
+                        <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+                          v{item.version}
+                        </span>
+                      </td>
+                      <td className="px-5 py-3">
+                        <span className="text-sm text-muted-foreground">
+                          {new Date(item.lastModifiedOn).toLocaleString()}
+                        </span>
+                      </td>
+                      <td className="px-5 py-3 text-end">
+                        <div className="inline-flex items-center gap-1">
+                          {workspacesEnabled && item.access.canOwn && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                              onClick={() => setShareTarget({ id: item.id, name: item.name || item.id })}
+                              title={t("workspaces.share.title", "Share")}
+                              aria-label={t("workspaces.share.title", "Share")}
+                              data-testid={`resource-share-${item.id}`}
+                            >
+                              <Share2 aria-hidden="true" />
+                            </Button>
+                          )}
+                          {/* Duplicate reads the whole configuration to copy
+                              it, so it needs VIEW; deleting is the owner's. */}
+                          {item.access.canView && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                              onClick={() => handleDuplicate(item.id, item.version)}
+                              title={t("common.duplicate", "Duplicate")}
+                              aria-label={t("common.duplicate", "Duplicate")}
+                              data-testid={`resource-duplicate-${item.id}`}
+                            >
+                              <Copy aria-hidden="true" />
+                            </Button>
+                          )}
+                          {item.access.canOwn && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                              onClick={() => handleDelete(item.id, item.version)}
+                              title={t("common.delete")}
+                              aria-label={t("common.delete")}
+                              data-testid={`resource-delete-${item.id}`}
+                            >
+                              <Trash2 aria-hidden="true" />
+                            </Button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Create dialog */}
+      <CreateResourceDialog
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        typeSlug={type ?? ""}
+        typeName={typeName}
+      />
+
+      {/* Share dialog */}
+      {shareTarget && (
+        <ShareDialog
+          open
+          onClose={() => setShareTarget(null)}
+          resourceId={shareTarget.id}
+          resourceName={shareTarget.name}
+        />
+      )}
+
+      {/* Delete confirmation */}
+      <AlertDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => !open && setDeleteTarget(null)}
+        title={t("resources.confirmDelete", { type: typeName })}
+        description={t("resources.confirmDeleteDescription", { type: typeName, defaultValue: "This action cannot be undone. The {{type}} will be permanently deleted." })}
+        confirmLabel={t("common.delete")}
+        cancelLabel={t("common.cancel")}
+        onConfirm={confirmDelete}
+        isPending={deleteMutation.isPending}
+      />
+    </div>
+  );
+}

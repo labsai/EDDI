@@ -1,0 +1,33 @@
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.7
+    command: start-dev --import-realm
+    ports:
+      - "8180:8080"
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+    volumes:
+      - ./keycloak/eddi-realm.json:/opt/keycloak/data/import/eddi-realm.json:ro
+
+  eddi:
+    image: labsai/eddi:6
+    ports:
+      - "7070:7070"
+    depends_on:
+      - mongodb
+      - keycloak
+    environment:
+      QUARKUS_OIDC_TENANT_ENABLED: "true"
+      QUARKUS_OIDC_AUTH_SERVER_URL: "http://keycloak:8080/realms/eddi"
+      QUARKUS_OIDC_CLIENT_ID: "eddi-backend"
+      QUARKUS_HTTP_CORS_ORIGINS: "http://localhost:3000,http://localhost:5173"
+
+  mongodb:
+    image: mongo:6.0
+    restart: always
+    volumes:
+      - mongodb-db:/data/db
+
+volumes:
+  mongodb-db:
