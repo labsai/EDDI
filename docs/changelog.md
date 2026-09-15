@@ -49,6 +49,147 @@ bottom of this file and are never archived.
 
 ---
 
+## 🧩 chore(monorepo): EDDI-Manager and EDDI-Chat-UI move into this repository as ui/manager and ui/chat (2026-09-15)
+
+**Repo:** EDDI (`chore/monorepo-migration`) — executes `planning/monorepo-migration-plan.md` (PR #670, Revision 3).
+
+**Merge this PR with "Create a merge commit" — never squash.** The imported histories are the reason
+the import exists; a squash flattens 1,275 commits into one.
+
+### What changed
+
+- **History import (§5.1).** `labsai/EDDI-Manager` `main` @ `0870ae87` (1,213 commits) and
+  `labsai/EDDI-Chat-UI` `master` @ `71fa395` (62 commits) were rewritten with
+  `git filter-repo --to-subdirectory-filter` on bare clones and merged with
+  `--allow-unrelated-histories` — not `git subtree add`, which loses path-scoped `git log`.
+  Verified: both imported trees are blob-for-blob identical to the source commits, no tags
+  were imported (55 before and after), `git log -- ui/manager/package.json` returns 81 commits and
+  blame shows the original authors. Gitleaks (v8.30.1, the CI version) over both rewritten
+  histories: 0 findings, so no `.gitleaksignore` entry had to land on `main` first.
+- **Post-import fixups.** The Manager's helper scripts moved from `.github/scripts/` to
+  `scripts/`. Two of them computed their root as `../..` for the old depth, which would have
+  written the OpenAPI snapshot one directory too high — fixed, with the two tests that import
+  them. `.github/` (CI now lives in the root `ci.yml`), husky/lint-staged, `renovate.json`, the
+  `deploy-to-local-eddi-repo` scripts and the Chat's tracked `dist/` are gone. The Manager
+  lockfile was pruned of husky/lint-staged **by hand**: `npm uninstall` on Windows also drops the
+  nested `@emnapi/*` entries that Linux `npm ci` requires.
+- **The UIs build with Maven (§6–§7).** `manage.html`, `welcome.html`, `workforce.html` moved into
+  `ui/manager` as Vite multi-page inputs sharing one hashed bundle; the Chat builds to `dist/`
+  instead of `../EDDI/src/main/resources`. `frontend-maven-plugin` runs `npm ci` + `npm run build`
+  for both in `generate-resources` (Node 20.20.2 vendored into `ui/node/`), and
+  `copy-ui-bundles` copies both `dist/` trees into the jar — without the MSW worker and without
+  ever overwriting `index.html`, `robots.txt` or `landing-redirect.js`. 756 generated files are
+  no longer tracked; `src/main/resources/META-INF/resources` holds exactly those three
+  hand-written files. The `.gitignore` block, the default-resource excludes and the
+  `maven-clean-plugin` fileset list the same 13 paths, so a stale pre-migration bundle on disk
+  can neither be committed, nor copied into the jar, nor survive `./mvnw clean`.
+  `-DskipUi=true` skips all of it.
+- **Backend tests.** Five tests read the committed shells or assets and would have failed once
+  those stopped being committed. The four resource tests now read stand-in shells under
+  `src/test/resources/META-INF/resources`; `StaticAssetCachingTest` drops the `.manager-assets`
+  manifest check (the orphaned-bundle problem it guarded against is gone by construction) and
+  checks the hashes of the assets the build actually produced.
+- **CI (§8).** New jobs: `UI Build & Test` (the Manager's former CI plus the MSW Playwright tier,
+  and the Chat's typecheck/tests/build), `UI Gate`, `Build Image` (jar + both UIs + image, built
+  once and passed on as an artifact), `Backend E2E (mongodb|postgres)` (the Manager's API and
+  full-stack Playwright tiers against the image built from the same commit, a check that every
+  same-origin dependency of the four shipped shells answers 2xx, and a blocking OpenAPI snapshot
+  check), `E2E Gate`, `CodeQL Analysis (UI)`. `Build Image` also asserts that the packaged
+  `assets/` set equals what Vite just emitted: `copy-resources` never prunes, and a local build without
+  `clean` really did package 913 assets against 737 built. `docker` no longer builds: it publishes the tested
+  image. `preflight-check` certifies the same image. `Build & Test`, `Integration Tests` and both
+  CodeQL builds pass `-DskipUi=true`.
+- **Housekeeping (§9).** Dependabot npm entries for both UIs (replacing Renovate, carrying its
+  react-router major-version block); the scheduled CodeQL scans TypeScript; the Manager's
+  compose files take `EDDI_IMAGE` and set the two `HighValueSurfaceGuard` opt-outs whose absence
+  had kept the Manager's backend E2E red since 2026-08-26; one Node pin in the root `mise.toml`;
+  AGENTS.md, README, CONTRIBUTING and the Manager/Chat docs describe the new layout.
+
+### Decisions and deviations from the plan
+
+- **Fixes landed here, not as preparatory PRs in the source repos.** The Chat's `react-router`
+  7.13.1 → 7.18.3 bump (two high advisories, six HIGH Trivy findings) and the compose opt-outs.
+  Every gate that reads them (dependency-review, Trivy, Scorecard, the E2E job) reads this PR's
+  head, and the source repos are about to be archived.
+- **`CodeQL Analysis (UI)` is a separate job, not a language matrix on `codeql`.** A matrix renames
+  the required `CodeQL Analysis` check, which would wedge every PR on a context that never reports.
+- **`Build Image` labels the image by event.** A pull request gets the bare pom version (what the PR
+  preflight certifies and asserts), a push the tag it is published under — exactly what the two
+  builds it replaces did.
+- **The OpenAPI snapshot check is blocking on PRs too.** In the Manager repo it was advisory there
+  because the backend image tracked `latest`; here the backend is built from the PR.
+- **Phases 2 and 3 are one commit.** Deleting the committed bundles before Maven builds them would
+  leave a commit whose jar serves a blank `/manage`.
+- **The Chat `typecheck` script is now `tsc -b --noEmit`.** `tsc --noEmit` against its solution-style
+  `tsconfig.json` checked nothing; plain `tsc -b` would have emitted into `dist/`.
+- **Not ported:** the Chat branch `fix/release-6.2-polish` (two commits, never merged to `master`,
+  never shipped). Port with `git format-patch` + `git am --directory=ui/chat` or drop it.
+  The Manager's Stryker `mutation.yml` is not carried over (§13).
+
+### Verification
+
+All run locally on 2026-09-15 (Windows 11, JDK 25.0.1) unless marked Linux.
+
+- **Import.** Both imported trees blob-identical to the source commits; 55 tags before and after;
+  path-scoped `git log`, `--follow` and blame show the original commits. Gitleaks over both rewritten
+  histories: 0 findings.
+- **`-DskipUi=true`** (`clean package`): no frontend execution ran and `target/classes` holds no UI.
+- **Dirty workspace, `package` without `clean`**, with stale `assets/index-STALE00.js`, `manage.html`,
+  `chat.html`, `mockServiceWorker.js`, `img/loading-indicator.svg` and a `chat-ui.*.js` planted in
+  `src/main/resources/META-INF/resources`: none reached `target/classes`, and both shells there are
+  the freshly built ones — the default-resource excludes hold without help from `clean`.
+- **`./mvnw clean`** deleted every planted file and both `dist/` trees and kept `index.html`,
+  `robots.txt` and `landing-redirect.js`.
+- **Full build:** `copy-ui-bundles` copied 742 Manager and 11 Chat files; 737 hashed assets; all three
+  Manager shells load the same `assets/main-<hash>.js`; no `mockServiceWorker.js`, no root
+  `logo_eddi.png`, no pre-migration `index-*` entry; the bundle carries `EDDI Demo 6.4.0` from
+  `EDDI_VERSION`.
+- **Linux (`node:20-bookworm`), the `UI Build & Test` steps from a `git archive` of the branch:**
+  Manager `npm ci` (so the hand-pruned lockfile satisfies Linux npm), `audit:prod`, lint, i18n check,
+  typecheck, Vitest with coverage, build, the build-output check, and all 234 Playwright MSW tests;
+  Chat `npm ci`, typecheck, tests and build, with no stray `ui/EDDI`. All green.
+- **Backend guard tests** (`StaticAssetCachingTest`, the four `Rest*ResourceTest`s,
+  `BuildQualityGatesTest`, `ReleaseVersionSourceTest`, `DocumentationLinksTest`,
+  `DocumentationAccuracyTest`, `ImportStyleTest`, `ComposeStackTest`, `DeploymentManifestsTest`,
+  `StrictBoundaryShippedConfigsTest`, `RuleSetStoreShippedRulesetsTest`, `ChangelogRotationTest`,
+  `DocumentedRestPathsTest`, `ConfigurationReferenceCoverageTest`, `DemoImageDockerfileTest`), run after
+  every review fix and with this entry in place: 176 run, 3 failures — all in
+  `DeploymentManifestsTest`'s PowerShell `create-secrets.ps1` cases, which fail identically on an
+  untouched `origin/main` worktree on this machine (environmental).
+- **Environmental, not this change:** locally `quarkus:build` ends with "Unable to establish loopback
+  connection" on untouched `origin/main` too — it is the build-analytics ping; builds here pass
+  `-Dquarkus.analytics.disabled=true`.
+- **The image built from this branch** (`labsai/eddi:ci`), booted under the Manager compose files on a
+  shifted host port, on **both MongoDB and PostgreSQL**: healthy within seconds; the `Verify the shipped
+  shells` step, extracted verbatim from `ci.yml`, passed on both (487 same-origin dependencies of the
+  four shells answer 2xx, the entry chunk carries the immutable `Cache-Control`, `mockServiceWorker.js`
+  and a root `logo_eddi.png` answer 404).
+- **OpenAPI snapshot against that backend: drifted**, exactly as the new blocking check is meant to
+  catch. Refreshed in this commit (+8 operations: resource sharing, `/workspaces`, connection settings;
+  −2: `GET /chat` and `GET /chat/{path}`, now hidden from the OpenAPI document), which made five
+  `EXEMPT` entries in `openapi-contract.test.ts` stale; they are removed and the contract test passes.
+- **The Manager's Playwright tiers against that image on MongoDB** (compose file as CI uses it, port 7070):
+  API integration **44/44**. Full stack **34 passed, 1 failed** on the first run — the card test in
+  `resources-crud.fullstack.spec.ts` still clicked the pre-v6 `resource-type-behavior` id, which
+  `resources.tsx` no longer renders. Untouched Manager `main` (`0870ae87`) against the same image fails
+  the same test, so it predates this change: the tier had not been able to boot a backend since
+  2026-08-26 and never reached it. Fixed here, together with the spec's outdated known-failure header
+  (with `60188c2bd` in the image all six resource types list). The spec runs in serial mode, so the one
+  failure had retried the whole group twice; after the fix it passes **9/9 in 20 s**.
+- **Not run locally:** the Playwright tiers on PostgreSQL (the image boots there and passes the
+  shipped-shell step, above) and any of it on a GitHub runner — the first signal is this PR's own run.
+- **Not verifiable locally:** the CI graph itself (job skips, artifact hand-off, fork PRs, required
+  checks).
+
+### Outside this repository (plan §9.5, §10) — still to do
+
+- Branch protection: require `UI Gate` and `E2E Gate` (both always report) and decide on
+  `UI Build & Test` / `Build Image`; keep `CodeQL Analysis` and `Build & Test` as they are.
+- Enable `javascript-typescript` in the GitHub-managed CodeQL default setup.
+- After the first green `main` pipeline including Backend E2E: pointer READMEs, close the open PRs
+  (Manager #72, #95, #140, #168, #207; Chat #19–#24, #26) with a link here, archive both repos.
+- Local: `EDDI.code-workspace`, stale copies of the deploy scripts; run `./mvnw clean` once.
+
 ## 🏷️ chore: refresh README badges and set the project domain to eddi.technology (2026-09-15)
 
 **Repo:** EDDI (`chore/deps-and-version-6-4-0`)

@@ -245,7 +245,7 @@ The explanatory sentence ("Please enter your API key:") belongs in a sibling `te
 
 ### Chat UI: Password Fields + Secret Mode
 
-Both **eddi-chat-ui** and the **EDDI-Manager chat panel** support secret input:
+Both the **Chat UI** (`ui/chat`) and the **Manager chat panel** (`ui/manager`) support secret input:
 
 **Backend-driven password fields:**
 

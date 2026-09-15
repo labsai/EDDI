@@ -40,8 +40,8 @@ function looksLikeStaleChunk(error: unknown): boolean {
  *
  * ## Why it reloads on failure
  *
- * Chunks are content-hashed, and `deploy-to-local-eddi-repo.*` deletes hashes
- * the new build did not produce. So a user holding a tab open across a deploy
+ * Chunks are content-hashed, and a new EDDI image ships only the hashes its own
+ * build produced. So a user holding a tab open across a deploy
  * has an entry chunk naming `dashboard-OLDHASH.js`, which is now a 404. Before
  * code splitting that could not happen: one bundle either loaded at boot or did
  * not. Now the failure surfaces on navigation, which is exactly when the user is

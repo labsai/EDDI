@@ -21,33 +21,38 @@ import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * Guards the shipped static assets and the one-year cache header applied to
  * them.
  * <p>
- * Two review findings meet here. The assets tree had accumulated a complete
- * second Vite build — 19 files, 9.3 MB, roughly a fifth of the directory — that
- * no page referenced and that only imported each other: a closed island with no
- * entry point. Nothing detected it because the {@code .manager-assets} manifest
- * the Manager sync writes is advisory; no code, build step or workflow reads
- * it. Separately the immutable cache filter matched
- * {@code /(scripts|assets)/.*}, which caught {@code landing-redirect.js} —
- * un-hashed, and loaded by the landing page every visitor hits first. A fix to
- * it would have gone unseen for up to a year with no revalidation request even
- * sent, because {@code immutable} suppresses one.
+ * Two review findings met here. The committed assets tree had accumulated a
+ * complete second Vite build — 19 files, 9.3 MB — that no page referenced: a
+ * closed island with no entry point. That failure mode is gone by construction
+ * now that the Manager and Chat UIs live under {@code ui/} and are built into
+ * the jar by Maven: Vite empties {@code dist/} on every build and CI packages
+ * with {@code clean}, so nothing is carried over from a previous bundle.
+ * Separately the immutable cache filter matched {@code /(scripts|assets)/.*},
+ * which caught {@code landing-redirect.js} — un-hashed, and loaded by the
+ * landing page every visitor hits first. A fix to it would have gone unseen for
+ * up to a year with no revalidation request even sent, because
+ * {@code immutable} suppresses one.
  * <p>
- * The two are guarded together because the second depends on the first: the
- * filter is allowed to treat all of {@code /assets/} as immutable precisely
+ * The filter is allowed to treat all of {@code /assets/} as immutable precisely
  * because every file there is machine-generated and content-hashed, which is
- * what {@link #everyAssetCarriesAContentHash()} asserts.
+ * what {@link #everyBuiltAssetCarriesAContentHash()} asserts.
  */
 @DisplayName("static assets and cache headers")
 class StaticAssetCachingTest {
 
-    private static final String ASSETS_DIR = "src/main/resources/META-INF/resources/assets";
+    /**
+     * Where the Maven UI build (execution {@code copy-ui-bundles}) puts the
+     * Manager's assets. The UI is built in {@code process-resources}, before
+     * {@code test}, so this exists whenever the same run built the UI.
+     */
+    private static final String BUILT_ASSETS_DIR = "target/classes/META-INF/resources/assets";
     private static final String SCRIPTS_DIR = "src/main/resources/META-INF/resources/scripts";
-    private static final String MANIFEST = ".manager-assets";
     private static final String APPLICATION_PROPERTIES = "src/main/resources/application.properties";
 
     /**
@@ -76,58 +81,24 @@ class StaticAssetCachingTest {
         }
     }
 
-    private static Set<String> manifestEntries() {
-        Path manifest = repoRoot().resolve(ASSETS_DIR).resolve(MANIFEST);
-        assertTrue(Files.isRegularFile(manifest), MANIFEST + " is missing from " + ASSETS_DIR);
-        try {
-            // The manifest is written by the Manager sync on Windows, so its line
-            // endings are CRLF; comparing without stripping them matches nothing.
-            Set<String> entries = new TreeSet<>();
-            for (String line : Files.readAllLines(manifest, StandardCharsets.UTF_8)) {
-                String name = line.strip();
-                if (!name.isEmpty()) {
-                    entries.add(name);
-                }
-            }
-            return entries;
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
-    }
-
-    /**
-     * The manifest is what the Manager sync says it shipped; the directory is what
-     * is actually in the jar and the image. When they disagree, the difference is
-     * either dead weight nobody can load or a live file nobody recorded — and
-     * neither is visible to a reviewer diffing 700-odd hashed filenames.
-     */
-    @Test
-    @DisplayName("the assets directory and .manager-assets agree in both directions")
-    void assetsDirectoryMatchesItsManifest() {
-        Set<String> onDisk = filesIn(ASSETS_DIR);
-        Set<String> declared = manifestEntries();
-
-        Set<String> orphaned = new TreeSet<>(onDisk);
-        orphaned.removeAll(declared);
-        assertTrue(orphaned.isEmpty(), orphaned.size() + " asset file(s) are on disk but absent from " + MANIFEST
-                + ", so they ship in every jar and image with no page able to load them: " + orphaned);
-
-        Set<String> missing = new TreeSet<>(declared);
-        missing.removeAll(onDisk);
-        assertTrue(missing.isEmpty(),
-                missing.size() + " file(s) are listed in " + MANIFEST + " but are not on disk, so a page may 404: " + missing);
-    }
-
     /**
      * Justifies the cache filter treating all of {@code /assets/} as immutable. If
      * an un-hashed file ever lands here, that assumption stops holding and this
      * test says so before a year-long cache pin does.
+     * <p>
+     * Reads the assets the Maven UI build put in {@code target/classes}, so it runs
+     * only when this build included the UI. CI's Build &amp; Test passes
+     * {@code -DskipUi=true} and reports this as skipped; the
+     * {@code UI Build & Test} job applies the same check to
+     * {@code ui/manager/dist/assets}, where it cannot be skipped.
      */
     @Test
-    @DisplayName("every shipped asset carries a content hash")
-    void everyAssetCarriesAContentHash() {
+    @DisplayName("every built asset carries a content hash")
+    void everyBuiltAssetCarriesAContentHash() {
+        assumeTrue(Files.isDirectory(repoRoot().resolve(BUILT_ASSETS_DIR)),
+                BUILT_ASSETS_DIR + " does not exist — this build skipped the UI (-DskipUi=true)");
         Set<String> unhashed = new TreeSet<>();
-        for (String name : filesIn(ASSETS_DIR)) {
+        for (String name : filesIn(BUILT_ASSETS_DIR)) {
             if (!HASHED.matcher(name).matches()) {
                 unhashed.add(name);
             }
@@ -167,8 +138,8 @@ class StaticAssetCachingTest {
 
     /**
      * Everything under {@code /scripts/} that the filter would pin must in fact be
-     * hashed. This is the pair to {@link #everyAssetCarriesAContentHash()} for the
-     * hand-maintained half of the tree, where a new file is written by a person
+     * hashed. This is the pair to {@link #everyBuiltAssetCarriesAContentHash()} for
+     * the hand-maintained half of the tree, where a new file is written by a person
      * rather than emitted by a bundler.
      */
     @Test

@@ -1,5 +1,7 @@
 # EDDI Manager — AI Agent Instructions
 
+> **This directory is part of [labsai/EDDI](https://github.com/labsai/EDDI).** It was the separate `labsai/EDDI-Manager` repository until 2026-09-15; its full history was imported here (`git log -- ui/manager`). Issues and pull requests go to `labsai/EDDI`. The UI is built into the EDDI jar by Maven from the repository root — see the root `AGENTS.md` (Build & Test Commands).
+
 > **This file is automatically loaded by AI coding assistants. Follow ALL rules below.**
 
 ## 1. Project Context
@@ -8,13 +10,13 @@
 
 ### Ecosystem
 
-All repos live under `c:\dev\git\`:
+The Manager, the Chat UI and the backend are one repository, `labsai/EDDI`:
 
-| Repo                       | Tech                      | Purpose                                              |
+| Location                   | Tech                      | Purpose                                              |
 | -------------------------- | ------------------------- | ---------------------------------------------------- |
-| **EDDI**                   | Java 25, Quarkus, MongoDB | Backend engine, REST API, lifecycle pipeline         |
-| **EDDI-Manager** (this)    | React 19, Vite, Tailwind  | Admin dashboard — agents, workflows, extensions, chat |
-| **eddi-chat-ui**           | React, TypeScript         | Standalone chat widget                               |
+| **repo root**              | Java 25, Quarkus, MongoDB | Backend engine, REST API, lifecycle pipeline         |
+| **`ui/manager`** (this)    | React 19, Vite, Tailwind  | Admin dashboard — agents, workflows, extensions, chat |
+| **`ui/chat`**              | React, TypeScript         | Standalone chat widget                               |
 | **eddi-website**           | Astro                     | Marketing site at eddi.labs.ai                       |
 | **EDDI-integration-tests** | Java                      | End-to-end API tests                                 |
 
@@ -105,8 +107,9 @@ in a Playwright spec fails the build instead of surfacing at run time.
 One gate is deliberately **not** in that list: mutation testing. It asks the
 question the others cannot — whether the suite would have *complained* — but a
 full run is 20-odd minutes on CI and longer on a busy laptop, so it is not
-to run before every push. CI runs it on a PR that touches the guarded scope,
-weekly on a schedule, and on demand via `workflow_dispatch`.
+to run before every push. It is not in CI
+at the moment: the Stryker workflow did not survive the move into labsai/EDDI, and
+porting it into the root `ci.yml` is a follow-up. Run it locally.
 
 The scope is `src/lib/operator/**`, `src/lib/api/updates.ts` and
 `src/lib/hitl-tool-approvals.ts`. Two exclusions are argued in

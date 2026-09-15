@@ -3,7 +3,9 @@
 # Then wait ~30s for EDDI to boot: curl http://localhost:7070/q/health
 services:
   eddi:
-    image: labsai/eddi:latest
+    # CI (ci.yml, e2e-fullstack) sets EDDI_IMAGE to the image built from the same
+    # commit; locally, `npm run infra:up:*` falls back to the published image.
+    image: ${EDDI_IMAGE:-labsai/eddi:latest}
     ports:
       # Loopback only. The opt-out below runs this backend with NO
       # authentication, and `7070:7070` binds every interface — which would
@@ -24,6 +26,12 @@ services:
       # ran. An unauthenticated throwaway backend is the entire point of these
       # compose files, so opting out is correct here and nowhere near production.
       EDDI_SECURITY_ALLOW_UNAUTHENTICATED: "true"
+      # HighValueSurfaceGuard refuses authorization.enabled=false unless the MCP
+      # endpoint and the secret store are opted out explicitly as well —
+      # EDDI_SECURITY_ALLOW_UNAUTHENTICATED does NOT cover them, and without these
+      # two the container exits(1) at startup. Throwaway loopback test backend.
+      EDDI_MCP_ALLOW_UNAUTHENTICATED: "true"
+      EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED: "true"
 
   mongodb:
     image: mongo:6.0

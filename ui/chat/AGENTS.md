@@ -4,6 +4,8 @@
 
 ## 1. Project Context
 
+> **This directory is part of [labsai/EDDI](https://github.com/labsai/EDDI).** It was the separate `labsai/EDDI-Chat-UI` repository until 2026-09-15; its full history was imported here (`git log -- ui/chat`). Issues and pull requests go to `labsai/EDDI`. The UI is built into the EDDI jar by Maven from the repository root — see the root `AGENTS.md` (Build & Test Commands).
+
 **eddi-chat-ui** is a standalone React 19 chat widget for [EDDI](https://github.com/labsai/EDDI) agents. Built with Vite + TypeScript 5.7, vanilla CSS with CSS custom properties, and `react-markdown` for rich message rendering.
 
 ### Tech Stack
@@ -119,10 +121,12 @@ src/
 
 ## 4. Build & Deploy
 
-Production build goes to **EDDI backend** at `src/main/resources/META-INF/resources/`:
+Production build goes to `dist/` (`chat.html`, `scripts/js/chat-ui.<hash>.js`,
+`scripts/css/chat-ui.<hash>.css`, `fonts/`, `img/`). The EDDI Maven build copies it into the jar
+(`pom.xml`, execution `copy-ui-bundles`), so nothing is ever copied into the backend source tree:
 
 ```bash
-npm run build    # Outputs to EDDI backend resources
+npm run build    # Outputs to dist/
 ```
 
 ---

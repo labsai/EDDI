@@ -1,5 +1,7 @@
 # EDDI Chat UI
 
+> **This directory is part of [labsai/EDDI](https://github.com/labsai/EDDI).** It was the separate `labsai/EDDI-Chat-UI` repository until 2026-09-15; its full history was imported here (`git log -- ui/chat`). Issues and pull requests go to `labsai/EDDI`. The UI is built into the EDDI jar by Maven from the repository root — see the root `AGENTS.md` (Build & Test Commands).
+
 > Embeddable chat widget for [**EDDI**](https://github.com/labsai/EDDI) — the open-source multi-agent orchestration middleware for conversational AI.
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://github.com/labsai/EDDI/blob/main/LICENSE) ![Tests](https://img.shields.io/badge/tests-46-brightgreen)
@@ -148,7 +150,7 @@ Combine query parameters to create a minimal, focused chat experience:
 npm run dev          # Dev server (port 5174) with proxy to EDDI backend
 npm run build        # Production build
 npm run test         # Run tests (46 Vitest unit/component tests)
-npm run typecheck    # TypeScript type checking (tsc --noEmit)
+npm run typecheck    # TypeScript type checking (tsc -b --noEmit)
 ```
 
 ### CSS Convention
@@ -221,20 +223,17 @@ src/
 
 ## 🔌 Backend Integration
 
-The production build is deployed into the EDDI Quarkus backend at:
-
-```
-EDDI/src/main/resources/META-INF/resources/
-```
-
-This makes the chat UI available at `http://your-eddi-server/chat.html` — served directly by Quarkus with no separate web server required.
+`npm run build` writes to `dist/`. The EDDI Maven build (run from the repository root) builds this
+directory and copies `dist/` into the backend jar, so nothing is copied into the backend source tree by
+hand. The chat UI is then served by Quarkus at `http://your-eddi-server/chat` — no separate web server
+required.
 
 ---
 
 ## 🔗 Related
 
 - [**EDDI**](https://github.com/labsai/EDDI) — Backend engine (Java 25, Quarkus)
-- [**EDDI Manager**](https://github.com/labsai/EDDI-Manager) — Admin dashboard (React 19)
+- [**EDDI Manager**](https://github.com/labsai/EDDI/tree/main/ui/manager) — Admin dashboard (React 19), `ui/manager` of the same repository
 - [**quarkus-eddi**](https://github.com/quarkiverse/quarkus-eddi) — Quarkus SDK
 
 ---

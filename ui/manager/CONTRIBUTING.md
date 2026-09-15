@@ -22,18 +22,18 @@ This project adheres to the [Contributor Covenant Code of Conduct](CODE_OF_CONDU
 
 ### 🐛 Reporting Bugs
 
-- Open a [new issue](https://github.com/labsai/EDDI-Manager/issues/new)
+- Open a [new issue](https://github.com/labsai/EDDI/issues/new)
 - Include steps to reproduce, expected vs actual behavior, and your environment details
-- Check [existing issues](https://github.com/labsai/EDDI-Manager/issues) first to avoid duplicates
+- Check [existing issues](https://github.com/labsai/EDDI/issues) first to avoid duplicates
 
 ### 💡 Requesting Features
 
-- Open a [new issue](https://github.com/labsai/EDDI-Manager/issues/new)
+- Open a [new issue](https://github.com/labsai/EDDI/issues/new)
 - Describe the problem you're trying to solve, not just the solution
 
 ### 🔧 Code Contributions
 
-1. Look for issues labeled [`good first issue`](https://github.com/labsai/EDDI-Manager/labels/good%20first%20issue) or [`help wanted`](https://github.com/labsai/EDDI-Manager/labels/help%20wanted)
+1. Look for issues labeled [`good first issue`](https://github.com/labsai/EDDI/labels/good%20first%20issue) or [`help wanted`](https://github.com/labsai/EDDI/labels/help%20wanted)
 2. Comment on the issue to let others know you're working on it
 3. Follow the [Pull Request Process](#pull-request-process) below
 
@@ -52,9 +52,9 @@ This project adheres to the [Contributor Covenant Code of Conduct](CODE_OF_CONDU
 ```bash
 # 1. Fork the repository on GitHub
 
-# 2. Clone your fork
-git clone https://github.com/<your-username>/EDDI-Manager.git
-cd EDDI-Manager
+# 2. Clone your fork of labsai/EDDI — the Manager lives in ui/manager
+git clone https://github.com/<your-username>/EDDI.git
+cd EDDI/ui/manager
 
 # 3. Install dependencies
 npm install
@@ -169,14 +169,17 @@ scope now, for about a minute of runtime. Worth remembering when you reach for
 the next exclusion: that was the one arrived at by reasoning rather than
 measurement, and it was the one that turned out to be wrong.
 
-CI runs this three ways: on a PR that touches the guarded scope, the tests that
-cover it, or the config that decides what it measures; weekly on a schedule;
-and on demand via `workflow_dispatch`.
+> **Not in CI at the moment.** The Stryker workflow did not survive the move into
+> labsai/EDDI; porting it into the root `ci.yml` as a path-gated, scheduled job is
+> a tracked follow-up. Until then, run it locally before changing the guarded scope.
 
-`package.json` and `package-lock.json` are deliberately **not** triggers.
-`renovate.json` pins devDependencies, so every bump edits both, and minor and
-patch bumps automerge — listing either would put ~20 minutes in front of nearly
-every Renovate PR. A dependency bump changing behaviour is exactly the drift the
+When it ran in CI it ran three ways: on a PR that touched the guarded scope, the
+tests that cover it, or the config that decides what it measures; weekly on a
+schedule; and on demand via `workflow_dispatch`.
+
+`package.json` and `package-lock.json` were deliberately **not** triggers: every
+dependency bump edits both, and listing either would put ~20 minutes in front of
+nearly every dependency PR (Dependabot now, Renovate before the move). A dependency bump changing behaviour is exactly the drift the
 weekly run exists to catch, and an hour on every dependency PR is how a job like
 this gets switched off instead.
 
@@ -320,29 +323,20 @@ chore(deps): bump React to 19.1
 
 ## What the CI Checks
 
-Every PR runs through these automated gates:
+The Manager's checks run in the EDDI repository's root workflow,
+`.github/workflows/ci.yml`:
 
-| Check              | What It Does                                            | Must Pass? |
-| ------------------ | ------------------------------------------------------- | ---------- |
-| **Audit**          | `npm run audit:prod` — production advisories only        | ✅ Yes     |
-| **Lint**           | ESLint over `src/` and `e2e/`, `--max-warnings 0`        | ✅ Yes     |
-| **i18n**           | `npm run i18n:check` — locale ↔ code drift               | ✅ Yes     |
-| **Type Check**     | `tsc -b` — the app, the node configs, AND `e2e/`         | ✅ Yes     |
-| **Unit Tests**     | Vitest, with coverage thresholds enforced                | ✅ Yes     |
-| **Build**          | Production build via `tsc -b && vite build`              | ✅ Yes     |
-| **UI E2E**         | Playwright against MSW mocks, no backend                 | ✅ Yes     |
-| **API Integration**| Playwright against a live EDDI in Docker, API-only       | ✅ Yes     |
-| **Mutation**       | Stryker — **only** if the PR touches the guarded scope   | ✅ Yes     |
+| Job                   | What It Does                                                                 | When |
+| --------------------- | ---------------------------------------------------------------------------- | ---- |
+| **UI Build & Test**   | `npm run audit:prod`, lint (`src/` + `e2e/`, `--max-warnings 0`), `npm run i18n:check`, `tsc -b` (app, node configs and `e2e/`), Vitest with coverage thresholds, the production build, and the Playwright UI tier against MSW mocks | Every PR and push that touches `ui/`, `pom.xml`, `mise.toml` or `ci.yml` |
+| **Backend E2E**       | Builds EDDI **from the same commit**, boots it, checks the shipped shells, then runs the Playwright API-integration and full-stack tiers and the OpenAPI snapshot check against it | MongoDB on every PR that changes code; MongoDB and PostgreSQL on push to main |
 
-The **full-stack tier** — a browser against a live EDDI, on both MongoDB and
-Postgres — runs on push to main and on `workflow_dispatch`, not on PRs. If you
-change anything it exercises, dispatch it against your branch rather than
-trusting the PR tick: a PR reports "Backend E2E — skipping" either way.
+The **OpenAPI snapshot check** is blocking everywhere. The backend under test is
+built from your branch, so a stale `src/test/mocks/openapi-operations.json` means
+your change altered the API surface: run `npm run openapi:refresh` against a
+backend built from the branch and commit the result.
 
-The **OpenAPI snapshot check** runs in both places, with different teeth:
-advisory on a PR, blocking on push. The EDDI image tracks `latest` and can gain
-an operation with no PR touching it, so a hard failure on PRs would redden every
-open one over something none of them did.
+Mutation testing is not currently run by CI; see the note under Mutation Testing.
 
 The API-integration tier is the one most likely to surprise you, since it needs
 Docker. To reproduce it locally:
@@ -361,7 +355,7 @@ npm run infra:up:mongo && npm run test:e2e:integration
 
 - Open a [Discussion](https://github.com/labsai/EDDI/discussions) on the main EDDI repo for general questions
 - Check the [EDDI documentation](https://docs.labs.ai/) for usage guides
-- Browse [existing issues](https://github.com/labsai/EDDI-Manager/issues) for known topics
+- Browse [existing issues](https://github.com/labsai/EDDI/issues) for known topics
 
 ---
 

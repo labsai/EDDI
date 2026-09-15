@@ -1,5 +1,7 @@
 # CLAUDE.md — EDDI Manager
 
+@AGENTS.md
+
 Start with **[AGENTS.md](AGENTS.md)**. It owns workflow, branch policy, quality gates, the
 i18n mandate, architecture, API conventions and constraints — all of it applies. This file
 adds the layer AGENTS.md does not cover: **what UI should be built from and what it should

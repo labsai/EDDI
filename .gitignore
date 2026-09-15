@@ -126,3 +126,33 @@ licenses/THIRD-PARTY.txt
 # Python bytecode from scripts/ (e.g. rotate-changelog.py)
 __pycache__/
 *.py[cod]
+
+# ui/manager/.claude holds the Manager's tracked Claude Code skills and launch.json.
+# The `.claude/` rule above would ignore any new file there; re-include the directory
+# and keep only the machine-local settings file out.
+!ui/manager/.claude/
+ui/manager/.claude/settings.local.json
+
+# === Generated frontend output (ui/manager and ui/chat, built by Maven) ===
+# frontend-maven-plugin installs Node into ui/node (installDirectory is ui/, so
+# ui/*/node would NOT match it).
+ui/node/
+ui/*/node_modules/
+ui/*/dist/
+# Protective: nothing writes these any more. A stale local copy of the old
+# deploy-to-local-eddi-repo script would silently re-create them — including the
+# MSW worker, which it copies from dist/ wholesale. Keep this list identical to
+# the default-resource excludes and the maven-clean-plugin fileset in pom.xml.
+src/main/resources/META-INF/resources/assets/
+src/main/resources/META-INF/resources/manage.html
+src/main/resources/META-INF/resources/welcome.html
+src/main/resources/META-INF/resources/workforce.html
+src/main/resources/META-INF/resources/chat.html
+src/main/resources/META-INF/resources/scripts/js/chat-ui*.js
+src/main/resources/META-INF/resources/scripts/css/chat-ui*.css
+src/main/resources/META-INF/resources/mockServiceWorker.js
+src/main/resources/META-INF/resources/eddi-icon.ico
+src/main/resources/META-INF/resources/eddi-icon.svg
+src/main/resources/META-INF/resources/logo_eddi.png
+src/main/resources/META-INF/resources/fonts/
+src/main/resources/META-INF/resources/img/

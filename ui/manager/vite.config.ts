@@ -63,7 +63,9 @@ function pSSE(target = BACKEND): ProxyOptions {
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   define: {
-    __APP_VERSION__: JSON.stringify(pkg.version),
+    // The Maven build passes EDDI_VERSION=${project.version} (pom.xml, execution
+    // manager-build), so the sidebar shows the version of the jar it ships in.
+    __APP_VERSION__: JSON.stringify(process.env.EDDI_VERSION ?? pkg.version),
   },
   resolve: {
     alias: {
@@ -85,6 +87,23 @@ export default defineConfig({
      * `'self'` allows.
      */
     assetsInlineLimit: (filePath) => (/\.woff2?$/i.test(filePath) ? false : undefined),
+    /**
+     * The three production shells, one shared bundle.
+     *
+     * EDDI serves `manage.html`, `welcome.html` and `workforce.html` from the jar by
+     * exact name (RestManagerResource, RestWelcomeResource, RestWorkforceResource),
+     * and `dist/` is copied into the jar by the Maven build (pom.xml, execution
+     * copy-ui-bundles). `index.html` is deliberately NOT an input: it is the
+     * dev-server entry only, and the backend keeps its own hand-written
+     * `index.html` redirect shell.
+     */
+    rollupOptions: {
+      input: {
+        manage: fileURLToPath(new URL("./manage.html", import.meta.url)),
+        welcome: fileURLToPath(new URL("./welcome.html", import.meta.url)),
+        workforce: fileURLToPath(new URL("./workforce.html", import.meta.url)),
+      },
+    },
   },
   worker: {
     format: "es",

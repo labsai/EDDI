@@ -23,43 +23,18 @@ interface ResourceTypeCase {
 }
 
 /**
- * KNOWN FAILURE, diagnosed: three of these six types never appear in their
- * store's descriptor list, on any backend older than EDDI's `60188c2bd`.
+ * Formerly a KNOWN FAILURE: three of these six types (Rules, API Calls,
+ * Dictionaries) never appeared in their store's descriptor list on backends
+ * older than EDDI `60188c2bd`, because those stores filtered descriptors with a
+ * type that did not match their own resource URI namespace. Fixed upstream —
+ * each store now derives the type from its own resourceURI, and
+ * DescriptorTypeConsistencyTest fails the build if one restates it
+ * (https://github.com/labsai/EDDI/issues/712).
  *
- * It is a backend bug, and it follows TYPE — not position, as the earlier note
- * here concluded. `readDescriptors` filters by regex-matching the stored
- * resource URI against `eddi://` + type, so the type has to be the URI's
- * namespace segment. Three stores passed one that was not:
- *
- *   rulestore/rulesets       queried "ai.labs.behavior"         vs eddi://ai.labs.rules/
- *   apicallstore/apicalls    queried "ai.labs.httpcalls"        vs eddi://ai.labs.apicalls/
- *   dictionarystore/…        queried "ai.labs.regulardictionary" vs eddi://ai.labs.dictionary/
- *
- * Each answers 200 with `[]` while its resources exist and read back fine by
- * id. Reproduced by hand against `labsai/eddi:6.3.0` and `labsai/eddi:latest`
- * (image built 2026-08-20): Rules, API Calls and Dictionaries list nothing;
- * Output Sets, LLM and Property Setter list correctly.
- *
- * The position theory was a coincidence of ordering. RESOURCE_TYPES below opens
- * with Rules and API Calls — two of the three broken stores — so removing the
- * first moved the failure onto the second, which was broken too. Dictionaries,
- * fourth, was equally broken the whole time; only the first failure was ever
- * examined. And the ninety-second readiness probe was not a timing signal: the
- * descriptor was never going to appear, at any point, while a case for one of
- * the working three passes immediately.
- *
- * Fixed upstream in EDDI `60188c2bd` — the type is now derived from each store's
- * own resourceURI rather than restated, and DescriptorTypeConsistencyTest fails
- * the build if a store states one again. That commit landed AFTER 6.3.0 and is
- * not in `labsai/eddi:latest` yet, so this tier keeps failing until a newer
- * image is published. Nothing to change here when it is — these cases should
- * simply start passing.
- *
- * Tracked upstream: https://github.com/labsai/EDDI/issues/712
- *
- * Left failing on purpose. The tier reports one true thing rather than hiding it
- * behind a skip, and the message names the store and the id instead of timing
- * out against a UI locator.
+ * Since the move into labsai/EDDI this tier runs against the image built from
+ * the same commit, so all six cases pass. The descriptor poll below stays: when
+ * a case fails, it names the store and the id instead of timing out against a
+ * UI locator.
  */
 const RESOURCE_TYPES: ResourceTypeCase[] = [
   {
@@ -240,8 +215,9 @@ test.describe("Resources — Full Stack", () => {
   test("resource type card navigates to list page", async ({ page }) => {
     await navigateTo(page, "/manage/resources");
 
-    await page.getByTestId("resource-type-behavior").click();
-    await expect(page).toHaveURL(/\/manage\/resources\/behavior/);
+    // `rules`, not `behavior`: the card's test id and route follow the v6 slug.
+    await page.getByTestId("resource-type-rules").click();
+    await expect(page).toHaveURL(/\/manage\/resources\/rules/);
   });
 });
 

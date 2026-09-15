@@ -1,5 +1,7 @@
 # EDDI Manager
 
+> **This directory is part of [labsai/EDDI](https://github.com/labsai/EDDI).** It was the separate `labsai/EDDI-Manager` repository until 2026-09-15; its full history was imported here (`git log -- ui/manager`). Issues and pull requests go to `labsai/EDDI`. The UI is built into the EDDI jar by Maven from the repository root — see the root `AGENTS.md` (Build & Test Commands).
+
 > Admin dashboard for [**EDDI**](https://github.com/labsai/EDDI) — the open-source multi-agent orchestration middleware for conversational AI.
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
@@ -69,7 +71,7 @@ npm run build        # Production build
 ## Related
 
 - [**EDDI**](https://github.com/labsai/EDDI) — Backend engine (Java 25, Quarkus)
-- [**eddi-chat-ui**](https://github.com/labsai/eddi-chat-ui) — Embeddable chat widget
+- [**EDDI Chat UI**](https://github.com/labsai/EDDI/tree/main/ui/chat) — Embeddable chat widget, `ui/chat` of the same repository
 - [**quarkus-eddi**](https://github.com/quarkiverse/quarkus-eddi) — Quarkus SDK
 
 ## License

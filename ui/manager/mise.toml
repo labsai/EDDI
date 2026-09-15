@@ -1,5 +1,4 @@
 [tools]
-node = "v25.9.0"
 prettier = "latest"
 
 [tasks.install]
