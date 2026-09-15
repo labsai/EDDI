@@ -123,6 +123,34 @@ All on 2026-09-15, locally (Windows 11, JDK 25.0.1) unless marked.
 - **Not verifiable locally:** the workflow graph itself — the new `OpenAPI Snapshot` job, the artifact
   hand-offs between jobs, and how Dependabot applies the cooldown.
 
+### Fixed after PR #757 opened
+
+The first CI run on the PR reported three findings that no local check could have seen, all of them
+in code the import brought in unchanged:
+
+- **`Dependency Review` and `Trivy Filesystem Scan` failed on `ui/manager/.ds-sync/package-lock.json`**,
+  the Manager's design-sync tooling: `brace-expansion@5.0.7` (via `ts-morph` → `minimatch`) carries
+  GHSA-mh99-v99m-4gvg and GHSA-rgw5-rvv9-x895, both high. It lists `ts-morph` as a runtime dependency,
+  so both scanners grade it; the Chat and Manager lockfiles are clean at production scope. Bumped to
+  5.0.12 inside `minimatch`'s `^5.0.5` range — the lockfile diff is that one entry; the nested
+  `@emnapi` entries npm on Windows drops were restored. That directory also gets its own Dependabot
+  entry (validated against the schema), so the lockfile does not go stale again.
+- **The `CodeQL` result check** reported four alerts once TypeScript was scanned for the first time:
+  `js/remote-property-injection` in `use-current-screen-context.ts`, `js/missing-origin-check` in MSW's
+  generated `mockServiceWorker.js`, `js/http-to-file-access` in the `refresh-openapi-operations.mjs`
+  dev script, and `js/empty-password-in-configuration-file` on `helm/eddi/values.yaml` — the JavaScript
+  extractor reads YAML across the whole repository. The UI analysis is now scoped by
+  `.github/codeql/codeql-ui.yml` to `ui/manager/src` and `ui/chat/src`, the code that ships, in both
+  `ci.yml` and the scheduled `codeql.yml` (the file records what is left out and why), and
+  `.github/codeql/**` joins the `code` and `backend` filters. The hook alert is a false positive — its
+  keys come from the static route table — but `toContextPayload` now accepts only the known context
+  keys and builds the payload with `Object.fromEntries`, with a test that `constructor`, `__proto__`
+  and unknown keys are dropped. `password: ""` in the Helm chart is the documented "required, no
+  default" setting, unchanged.
+- Verified locally: the `.ds-sync` production audit is clean; the hook's 14 tests, the Manager lint and
+  typecheck pass; both workflows parse, and `backend` still equals `code` without `ui/**` plus the
+  four test-only entries.
+
 ## 🧩 chore(monorepo): EDDI-Manager and EDDI-Chat-UI move into this repository as ui/manager and ui/chat (2026-09-15)
 
 **Repo:** EDDI (`chore/monorepo-migration`) — executes `planning/monorepo-migration-plan.md` (PR #670, Revision 3).

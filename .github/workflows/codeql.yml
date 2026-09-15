@@ -41,6 +41,9 @@ jobs:
           languages: ${{ matrix.language }}
           # javascript-typescript (ui/manager, ui/chat) is analysed from source.
           build-mode: ${{ matrix.language == 'java-kotlin' && 'manual' || 'none' }}
+          # The UI analysis scans the shipped UI sources only (see the file); the Java
+          # analysis takes no config file.
+          config-file: ${{ matrix.language == 'javascript-typescript' && './.github/codeql/codeql-ui.yml' || '' }}
           queries: security-extended
 
       - name: Set execute permission for mvnw

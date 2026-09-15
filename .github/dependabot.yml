@@ -158,6 +158,33 @@ updates:
       - dependency-name: "react-router*"
         update-types: ["version-update:semver-major"]
 
+  # The Manager's design-sync tooling (ui/manager/.ds-sync) is its own npm project with
+  # its own lockfile, and Dependency Review and Trivy scan it like any other: a stale
+  # advisory there fails every PR. Not shipped, so version updates are rare and small.
+  - package-ecosystem: npm
+    directory: /ui/manager/.ds-sync
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 2
+    labels:
+      - dependencies
+      - chore
+    cooldown:
+      default-days: 3
+      semver-major-days: 14
+    groups:
+      security-updates:
+        applies-to: security-updates
+        patterns:
+          - "*"
+      minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+
   # GitHub Actions versions
   - package-ecosystem: github-actions
     directory: /

@@ -137,16 +137,30 @@ export type ContextPayload = Record<string, { type: "string"; value: string }>;
  */
 const SAFE_ID = /^[A-Za-z0-9_-]{1,64}$/;
 
+/**
+ * The only keys a payload may carry: `screen` and the context fields ROUTE_TABLE
+ * maps URL params onto. The TypeScript type already says so, but this function
+ * is exported and runs on whatever object it is handed at runtime — a key
+ * outside this set (`constructor`, `__proto__`, a typo'd field) is dropped, never
+ * forwarded into the system prompt or written as a property.
+ */
+const CONTEXT_KEYS: ReadonlySet<string> = new Set([
+  "screen",
+  ...ROUTE_TABLE.flatMap((entry) => Object.values(entry.params ?? {})),
+]);
+
 export function toContextPayload(context: CurrentScreenContext): ContextPayload {
-  const payload: ContextPayload = {};
-  for (const [key, value] of Object.entries(context)) {
-    if (typeof value !== "string" || value.length === 0) continue;
-    // `screen` is ours — one of a fixed set of literals in ROUTE_TABLE — so it
-    // needs no validation. Everything else is URL-derived.
-    if (key !== "screen" && !SAFE_ID.test(value)) continue;
-    payload[key] = { type: "string", value };
-  }
-  return payload;
+  return Object.fromEntries(
+    Object.entries(context)
+      .filter(([key, value]) => {
+        if (!CONTEXT_KEYS.has(key)) return false;
+        if (typeof value !== "string" || value.length === 0) return false;
+        // `screen` is ours — one of a fixed set of literals in ROUTE_TABLE — so
+        // it needs no validation. Everything else is URL-derived.
+        return key === "screen" || SAFE_ID.test(value);
+      })
+      .map(([key, value]) => [key, { type: "string" as const, value: value as string }]),
+  );
 }
 
 export function useCurrentScreenContext(): CurrentScreenContext {

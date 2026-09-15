@@ -65,6 +65,7 @@ jobs:
               - 'src/**'
               - 'pom.xml'
               - '.github/workflows/**'
+              - '.github/codeql/**'
               - '**/Dockerfile*'
               - '**/.dockerignore'
               - 'docker-compose*.yml'
@@ -95,6 +96,7 @@ jobs:
               - 'src/**'
               - 'pom.xml'
               - '.github/workflows/**'
+              - '.github/codeql/**'
               - '**/Dockerfile*'
               - '**/.dockerignore'
               - 'docker-compose*.yml'
@@ -889,6 +891,8 @@ jobs:
           languages: javascript-typescript
           build-mode: none
           queries: security-extended
+          # Scans the shipped UI sources only; the file says what is left out and why.
+          config-file: ./.github/codeql/codeql-ui.yml
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4.36.2

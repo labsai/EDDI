@@ -2,7 +2,11 @@ import { describe, it, expect } from "vitest";
 import { renderHook } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { type ReactNode } from "react";
-import { useCurrentScreenContext, toContextPayload } from "../use-current-screen-context";
+import {
+  useCurrentScreenContext,
+  toContextPayload,
+  type CurrentScreenContext,
+} from "../use-current-screen-context";
 
 function renderAt(path: string) {
   return renderHook(() => useCurrentScreenContext(), {
@@ -135,5 +139,34 @@ describe("toContextPayload — the wire shape the backend actually accepts", () 
     expect(toContextPayload({ screen: "agents" })).toEqual({
       screen: { type: "string", value: "agents" },
     });
+  });
+});
+
+describe("toContextPayload — only known context keys", () => {
+  it("drops keys that are not context fields, whatever the object carries at runtime", () => {
+    // JSON.parse builds `constructor` and `__proto__` as own, enumerable keys —
+    // exactly what a hand-built or deserialised object could hand this function.
+    const hostile = JSON.parse(
+      '{"screen":"agent-detail","agentId":"agent-1","constructor":"abc","__proto__":"x","notAField":"y"}',
+    ) as CurrentScreenContext;
+
+    const payload = toContextPayload(hostile);
+
+    expect(Object.keys(payload).sort()).toEqual(["agentId", "screen"]);
+    expect(Object.getPrototypeOf(payload)).toBe(Object.prototype);
+  });
+
+  it("still keeps every field a route can produce", () => {
+    expect(
+      Object.keys(
+        toContextPayload({
+          screen: "workforce-thread",
+          boardId: "board-1",
+          memberId: "member-1",
+          resourceType: "agents",
+          resourceId: "res-1",
+        }),
+      ).sort(),
+    ).toEqual(["boardId", "memberId", "resourceId", "resourceType", "screen"]);
   });
 });
