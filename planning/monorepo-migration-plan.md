@@ -6,6 +6,8 @@
 > **Author context:** This document is self-contained. An implementing agent should need no
 > other conversation context. Read it top to bottom before touching anything.
 > **⚠ THE PR THAT LANDS THIS MUST BE MERGED WITH A MERGE COMMIT — NEVER SQUASH. See §2.**
+> **⚠ Import with `git filter-repo --to-subdirectory-filter` + `git merge --allow-unrelated-histories`,
+> NOT `git subtree add` — the subtree approach loses path-scoped history. See §0.6 F1 and §5.1.**
 
 ---
 
@@ -16,7 +18,8 @@ written.** Nothing in the five weeks since Revision 2 has removed a reason for t
 three things have added to it. The mechanics were re-checked, one dry-run was re-executed, and
 the two Phase-0 scans that could be run without installing anything were run for real. The
 body of this document has been corrected in place wherever a fact changed; this section is the
-summary an implementer should read first.
+summary an implementer should read first. A second, adversarial pass the same day (§0.6) tested
+the remaining mechanical claims empirically and changed one §2 decision.
 
 ### 0.1 The problem got worse, not better
 
@@ -49,8 +52,10 @@ can see what moved.
 | `.github/scripts/` holds one script (`audit-prod`) | **Five**: `audit-prod.{mjs,d.mts}`, `check-i18n.{mjs,d.mts}`, `refresh-openapi-operations.mjs`, `assert-mutants-tested.mjs`; `package.json` references three of them (`audit:prod`, `i18n:check`, `openapi:refresh`) | §5.2, §8.3 |
 | Manager CI = `ci-cd.yml` + `e2e.yml` | Plus **`mutation.yml`** (Stryker on PRs + weekly cron + `assert-mutants-tested.mjs`), and `ci-cd.yml` now also runs `npm run i18n:check`. The Manager E2E workflow has **three** tiers (`UI E2E (MSW)`, `API Integration (mongodb)`, `Backend E2E (<db>)`), not two | §8.3, §8.5, §13 |
 | `ui/manager/.claude` is "local settings, never should have been tracked" | **Deliberately tracked** now: `launch.json`, `settings.local.json`, and three skills (`eddi-data`, `eddi-screens`, `eddi-ui`). Keep the skills and `launch.json`; only `settings.local.json` is a candidate for untracking | §5.2 |
-| Manager dependency updates: unspecified; §9.1 adds Dependabot | Manager (and Chat) run **Renovate** — `renovate.json` with automerge for minor/patch, 23 Renovate PRs to date, reviewer `kennethlynne`. EDDI runs Dependabot + `auto-approve-copilot.yml`. The monorepo must pick one; `renovate.json` is orphaned by the subtree unless the Renovate app is installed on `labsai/EDDI` | §9.1 |
+| Manager dependency updates: unspecified; §9.1 adds Dependabot | Manager (and Chat) run **Renovate** — `renovate.json` with automerge for minor/patch, 23 Renovate PRs to date, reviewer `kennethlynne`. EDDI runs Dependabot + `auto-approve-copilot.yml`. The monorepo must pick one; `renovate.json` is orphaned by the import unless the Renovate app is installed on `labsai/EDDI` | §9.1 |
 | "Keep Node 20" | Manager CI is still Node 20, but its own `mise.toml` now pins **`node = "v25.9.0"`**, and both frontends are on Vite 6 (needs ≥ 20.19). The decision stands (CI is the contract), but the Manager pin means local `mise` users already build on a different major — flag in §7.4 | §2, §7.4 |
+| V15/V16: `git subtree` available; `gitleaks`, `trivy` not installed | `git filter-repo` **is** installed (needed by the §5.1 recipe that replaces subtree, §0.6 F1); `gitleaks` and `trivy` still are not — Trivy was run through `docker run aquasec/trivy` instead | §3 V15/V16, §4.2 |
+| §7.1 pins Node `v20.19.0`, `maven-resources-plugin` 3.3.1 | Latest Node 20 is **v20.20.2** (2026-09-15); `maven-resources-plugin` **3.3.1 is already the managed version** in the effective POM, so no property or `<version>` is needed for it. `frontend-maven-plugin` 1.15.1 is still current | §7.1, §7.2 |
 | V11: protection = `["CodeQL Analysis", "Build & Test"]` | **Unchanged.** Additionally `enforce_admins: true`. Two rulesets exist: one disabled, one (`Frozen release branches`) active on `refs/heads/release/*` only — no effect on `main` or this PR | §3 V11 |
 | V13: GitHub-managed CodeQL runs `Analyze (java-kotlin)` | Now also **`Analyze (python)`** (picked up `scripts/rotate-changelog.py`). Same conclusion: the settings-side surface auto-detects, and TypeScript must be enabled there too | §3 V13, §9.2 |
 | §8.6 re-exports `primary-tag` and `is-release` | `ci.yml` grew a **`redhat-publish`** job (reusable `redhat-certify.yml`) that reads `needs.docker.outputs.is-stable` and `.primary-tag` — **`is-stable` must be re-exported too**, and the job goes in the downstream-consumer table | §8.6 |
@@ -67,9 +72,11 @@ can see what moved.
 | Trivy `fs` over both lockfiles, `--severity CRITICAL,HIGH --ignore-unfixed` (§4.2), run via `docker run aquasec/trivy` | **clean** | **6 HIGH** in `react-router 7.13.1` (CVE-2026-33245, -34077, -42211, -42342, -55685, GHSA-qwww-vcr4-c8h2; all fixed by **7.18.2**) | `trivy-scan` is `exit-code: 1` and gates `docker`: importing the Chat lockfile unfixed **stops every backend release** from the first push |
 | Gitleaks history scan (§4.3) | not run — `gitleaks` still not installed locally (V16) | same | Still a mandatory pre-step; 1,275 commits |
 
-The one concrete blocker is therefore a **single Chat bump**: `react-router-dom` / `react-router`
+| Boot `labsai/eddi:latest` under the Manager's `docker-compose.integration.yml` (what `Backend E2E` does) | — | — | **The container exits(1) at startup.** EDDI's `HighValueSurfaceGuard` (added 2026-08-21, `bf6f922634`) refuses `authorization.enabled=false` unless `EDDI_MCP_ALLOW_UNAUTHENTICATED=true` **and** `EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED=true` are also set; the compose files only set `EDDI_SECURITY_ALLOW_UNAUTHENTICATED`, which the guard's own Javadoc says does not cover it. **This is the entire cause of the 15-run red streak in §0.1.** With the two variables added (isolated re-run on port 17070, image `sha256:7e9d0ba4…`, built 2026-09-15), the backend boots, `POST /rulestore/rulesets` returns 201 and the new id is listed by `/rulestore/rulesets/descriptors` — i.e. the failing assertion passes. Fix: §4.7 |
+
+The one concrete blocker for the *import* is therefore a **single Chat bump**: `react-router-dom` / `react-router`
 to ≥ 7.18.2 in `labsai/EDDI-Chat-UI` (a Renovate PR for the router already sits open there),
-merged **before** the subtree import — or, as the last resort §4.2/§4.4 allow, in the import
+merged **before** the import — or, as the last resort §4.2/§4.4 allow, in the import
 commit itself. Note the Chat audit above was run against the **committed** lockfile; the local
 checkout's lockfile is dirty (+227/−236) and must not be what gets imported.
 
@@ -93,6 +100,24 @@ question is still open: PR #670 is `APPROVED` but `DIRTY` (changelog conflict, r
 merge that carries this revision), so it has not yet been possible to observe whether a
 docs-only PR with a skipped `Build & Test` reaches `mergeStateStatus: CLEAN`. **Check it on
 #670 once this merge is pushed** — it is the first clean observation available.
+
+### 0.6 Second pass — findings that changed the plan (2026-09-15, later the same day)
+
+Each of these was tested, not reasoned about. F1 changes a §2 decision.
+
+| # | Finding | Evidence | Where applied |
+|---|---|---|---|
+| **F1** | **`git subtree add` does not preserve path-scoped history.** After a subtree add, `git log -- ui/manager` and `git log -- ui/manager/<file>` show **only the import merge commit**; `git log --follow -- ui/manager/<file>` shows **nothing at all**. Only `git blame` (via rename detection) and the un-scoped `git log` see the original commits. GitHub's per-file History view has the same blind spot. Rewriting the imported history into the subdirectory first (`git filter-repo --to-subdirectory-filter`) and merging with `--allow-unrelated-histories` gives full path-scoped `git log`, `--follow`, and `git blame`, at the cost of new commit SHAs — which is acceptable because the archived source repos keep the originals and no SHA of theirs is referenced from this repo | Two throwaway repos, both recipes, same day | §2 (decision changed), §4.3, §5.1, §11, §12 |
+| **F2** | **The red Manager E2E is two missing env vars, not a contract break.** See §0.3, last row. Trivial to fix, and exactly the shape the monorepo removes: the guard and the compose file that must know about it will live 3 directories apart instead of in different repos | Container log: `HighValueSurfaceGuard.onStart` IllegalStateException; green re-run with the two variables | §4.7 (new), §8.5 |
+| **F3** | `npm run build` in the Manager (which is what §7.2 runs, i.e. `tsc -b && vite build`) takes **112 s** locally; `vite build` alone 46–55 s. Budget ~2 min per un-skipped `mvnw` invocation, not "1–3 min" hand-waved | Measured on the isolated copy | §7.4 |
+| **F4** | Stale generated files in a pre-migration checkout are excluded from the *Maven* resource copy by §7.2, but nothing removes them from disk, and Quarkus dev mode watches `src/main/resources` directly. Make removal deterministic: `maven-clean-plugin` filesets delete the gitignored generated paths on `mvnw clean`, and §7.3 gains a dev-mode check | Reasoned from the Quarkus dev-mode resource watcher; the check in §7.3 is what proves or disproves it | §7.2, §7.3 |
+| **F5** | Only `IRestManagerResource` serves `/manage/__auth_config__.js`; all three shells reference **that** path (not per-shell paths). Confirms §6.1's "preserve verbatim" — nothing to add, recorded so nobody "fixes" it | grep of the shells and `ui/` resources | §6.1 |
+| **F6** | The root `.editorconfig` declares `[*] indent_size = 4`. The Manager brings its own `root = true` file (2 spaces), so it is unaffected; the Chat has **none**, so editors would apply 4-space indentation to `ui/chat/**` | Read both files | §6.5 |
+| **F7** | `CODEOWNERS` is a single `* @ginccc @rolandpickl` line — it already covers `ui/**`; §9.3 needs no change | Read | §9.3 |
+| **F8** | The migration PR will carry ~1,275 commits and >1,000 changed files. CodeRabbit stops reviewing above ~100 files and Copilot above ~300, so the PR gets **no automated review** and `auto-approve-copilot.yml` cannot satisfy the required review. Plan for a human review of the *mechanics* (the imported trees are not reviewable and do not need to be — they are the archived repos' `main`/`master` byte-for-byte) | Known bot limits; PR size from `git ls-files` counts | §4.6 |
+| **F9** | The `ui` path filter should also list `.github/workflows/ci.yml`, or a CI-only change never exercises `ui-build-and-test` | Read of `detect-changes` | §8.1 |
+| **F10** | Neither `EDDI-Manager` nor `EDDI-Chat-UI` has any tags today, so nothing can collide with EDDI's `tags: ["[0-9]*"]` release trigger — but fetch with `--no-tags` anyway, and assert the tag count is unchanged, because an imported numeric tag would be a release trigger waiting to happen | `git tag | wc -l` in both; `ci.yml` line 6 | §5.1 |
+| **F11** | The Chat's `react-router` CVEs will also drag OpenSSF Scorecard's *Vulnerabilities* check down the moment the lockfile lands (Scorecard reads OSV over lockfiles) — one more reason the bump precedes the import | Same data as §0.3 | §4.4 |
 
 ---
 
@@ -156,8 +181,8 @@ standalone `Dockerfile` / `build-service.sh` in the Manager repo are confirmed r
 |---|---|
 | **Merge both frontends**, not just the Manager | Chat-UI literally cannot build without the backend checked out |
 | **Maven stays at the repo root**; Java is not moved to `backend/` | Avoids touching the Dockerfile, all CI path references, and ~40 docs files |
-| **`git subtree add` without `--squash`** | Preserves history and blame; all three repos are open source |
-| **THE MONOREPO PR MERGES WITH A MERGE COMMIT** | A squash-merge flattens both imported histories into one commit, destroying the attribution the subtree approach exists to preserve. `AGENTS.md` §2 recommends "Squash and merge" as the normal cleanup path — **that guidance is explicitly overridden for this one PR.** Verified: `labsai/EDDI` allows merge commits and `required_linear_history` is off. Tell the person merging. |
+| **Import by `git filter-repo --to-subdirectory-filter` + `git merge --allow-unrelated-histories`** — *changed in Revision 3 from `git subtree add`* | Revision 2 chose `subtree` "to preserve history and blame". Tested (§0.6 F1): subtree preserves `git blame` and the un-scoped log, but **`git log -- ui/manager/...` sees only the import commit** and `--follow` sees nothing. Rewriting the history into the subdirectory first preserves everything path-scoped. Cost: the imported commits get new SHAs. Acceptable: the archived repos keep the originals, nothing in this repo references a Manager/Chat SHA, and the §4.3 gitleaks fingerprints are computed on the *rewritten* clones. `git filter-repo` is installed locally (V15) |
+| **THE MONOREPO PR MERGES WITH A MERGE COMMIT** | A squash-merge flattens both imported histories into one commit, destroying the attribution the import exists to preserve. `AGENTS.md` §2 recommends "Squash and merge" as the normal cleanup path — **that guidance is explicitly overridden for this one PR.** Verified: `labsai/EDDI` allows merge commits and `required_linear_history` is off. Tell the person merging. |
 | **No npm workspaces** | Hoisting can break Vite/Tailwind resolution; a migration should not change two things at once. Revisit later. |
 | **Stop committing build output** | The entire point. Requires Maven to build the UI (§7). |
 | **Single-source every static file** (§6.4) | Both frontends' `public/` dirs duplicate files committed in the backend; after migration each file has exactly one source |
@@ -189,12 +214,17 @@ this table, stop and investigate before proceeding.
 | V13 | There are **three** CodeQL surfaces, not two: the `codeql` job in `ci.yml`, the scheduled deep scan `codeql.yml` (both with their own `java-kotlin` language list), **and a GitHub-managed dynamic run** (`path: dynamic/github-code-scanning/codeql`, check names `Analyze (java-kotlin)` and — since a Python script landed under `scripts/` — `Analyze (python)`, surfaced as "Code Quality: PR #N"). The third is configured in **repo settings, not in any file in this repo**, so §9.2's TypeScript enablement is two file edits *plus* a settings change | Read of both workflows + check-runs on `main` @ `b2310a6ed` (2026-09-15) |
 | V13b | As of `00420daa5` the ci.yml `codeql` job is **deliberately ungated** — no `needs: detect-changes`, no `if:` — so it builds with Maven on *every* PR including docs-only ones (done so OpenSSF Scorecard sees a SAST run on each PR head SHA). This makes its `-DskipUi=true` (§8.2) load-bearing: without it, every docs-only PR would run the full npm build | Read of ci.yml on current main |
 | V14 | `sbom` job invokes `cyclonedx:makeBom` as a direct plugin goal — it runs **no lifecycle phases** and therefore will not trigger the frontend build; it needs no `skipUi` flag | Maven invocation semantics + workflow read |
-| V15 | `git subtree` is available in the local Git for Windows | `git subtree -h` |
-| V16 | `gitleaks` is **not** installed locally; the Phase-0 history pre-scan (§4.3) needs it installed first | `command -v gitleaks` |
+| V15 | `git filter-repo` **is** installed locally (`git filter-repo --version` → `a40bce548d2c`); `git subtree` is too but is no longer used (§2) | `git filter-repo --version` (2026-09-15) |
+| V16 | `gitleaks` and `trivy` are **not** installed locally; the Phase-0 history pre-scan (§4.3) needs gitleaks installed first. Trivy can be run as `docker run --rm -v "<dir>:/scan" aquasec/trivy:latest fs …` (done in §0.3) | `command -v gitleaks trivy` (2026-09-15) |
 | V17 | Maven lifecycle: `generate-resources` precedes `compile`, so **every** `mvnw compile/test/verify` triggers the frontend build unless `-DskipUi=true` (§7.4) | Lifecycle definition |
 | V18 | `.gitattributes` has three `linguist-generated` entries pointing at the committed bundles, plus a comment claiming chat-ui is "a separate repo" — all stale after this migration (§6.5) | Read (still true 2026-09-15) |
 | V19 | `pom.xml` (6.4.0) declares **no** `<resources>` block and no frontend plugin — §7.1/§7.2 add both; nothing to merge with | Read of `pom.xml` on `main` (2026-09-15) |
 | V20 | `labsai/EDDI-Chat-UI`'s default branch is **`master`**, not `main` | `gh repo view` (2026-09-15) |
+| V21 | After `git subtree add`, `git log -- <prefix>` shows only the import commit and `git log --follow -- <prefix>/<file>` shows nothing; `git blame` still attributes lines to the original commits. After `git filter-repo --to-subdirectory-filter <prefix>` + `git merge --allow-unrelated-histories`, all three show the full original history | Throwaway repos, both recipes (2026-09-15) |
+| V22 | `labsai/eddi:latest` (`sha256:7e9d0ba4…`, 2026-09-15) exits(1) under the Manager's `docker-compose.integration.yml`: `HighValueSurfaceGuard` requires `EDDI_MCP_ALLOW_UNAUTHENTICATED=true` and `EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED=true` in addition to `EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true`. With both added the backend boots and a created ruleset is listed by `/rulestore/rulesets/descriptors` | Isolated compose run on port 17070 (2026-09-15) |
+| V23 | Manager `npm run build` (`tsc -b && vite build`) = **112 s**; `vite build` alone 46–55 s; output `dist/` = `manage.html`, `welcome.html`, `workforce.html`, `assets/`, `eddi-icon.ico`, `eddi-icon.svg`, `mockServiceWorker.js` | Isolated copy of Manager `main` @ `0870ae87` (2026-09-15) |
+| V24 | Neither `EDDI-Manager` nor `EDDI-Chat-UI` has any git tags | `git tag` in both (2026-09-15) |
+| V25 | Only `IRestManagerResource` declares `@Path("/manage/__auth_config__.js")`; `manage.html`, `welcome.html` and `workforce.html` all load exactly `/manage/__auth_config__.js` | grep (2026-09-15) |
 
 ---
 
@@ -219,7 +249,15 @@ and on `main`, but **the Chat checkout still sits on the unmerged `fix/release-6
 `master` @ `71fa395`, so those two fixes have never shipped) with a dirty `package-lock.json`.
 The migration orphans all of it.
 
-1. Merge or close everything mergeable; land the two in-flight local branches.
+1. Merge or close everything mergeable. Concretely, as of 2026-09-15:
+   - **Chat:** merge `fix/release-6.2-polish` (2 commits: "offer real agents instead of a
+     made-up id; load the agent name", "keep the URL's environment when picking an agent")
+     into `master` — they were never shipped. Then the `react-router` bump (§4.2).
+   - **Manager:** the four Renovate PRs (#72, #140, #168, #207) can be closed — Renovate is
+     replaced by §9.1. **`#95 scheduled-ingest-service`** (external contributor) needs a
+     decision: merge, or close with a link to this plan and the port recipe below. Do not
+     let it be silently orphaned.
+   - **Manager:** land the §4.7 compose fix.
 2. Announce a freeze on both repos.
 3. For each branch that must survive, record it and port after cutover with:
 
@@ -261,16 +299,20 @@ The trap: the CI job deliberately takes `.gitleaksignore` **from the base branch
 (so a PR cannot allowlist its own secrets). Therefore any needed ignore entries **must land
 on `main` in a separate PR *before* the migration PR is opened.**
 
+Scan the **rewritten** clones from §5.1 step 1 — not the source checkouts — because
+`git filter-repo` changes every SHA and gitleaks fingerprints are `<sha>:<path>:<rule>:<line>`:
+
 ```bash
-gitleaks git --no-banner --redact=100 /c/dev/git/EDDI-Manager   # full history
-gitleaks git --no-banner --redact=100 /c/dev/git/eddi-chat-ui
+gitleaks git --no-banner --redact=100 /tmp/manager-rewrite   # full rewritten history
+gitleaks git --no-banner --redact=100 /tmp/chat-rewrite
 ```
 
 (Install gitleaks first — it is not on the machine; V16.) For each finding: real secret →
 rotate + handle before import; false positive → add a fingerprint line to the backend's
-`.gitleaksignore` and merge that to `main` first. **Note:** fingerprints reference commit
-SHAs, and subtree add **preserves** original SHAs for the imported commits, so fingerprints
-computed against the source repos remain valid in the monorepo.
+`.gitleaksignore` and merge that to `main` first. The fingerprints are valid in the monorepo
+because the rewritten commits are byte-for-byte what §5.1 merges — **so §5.1 step 1 (the
+rewrite) must be done once, kept, and reused for the import; do not re-run `filter-repo`
+after scanning**, a second rewrite from a moved-on `main` would produce different SHAs.
 
 ### 4.4 Dependency-review pre-check
 
@@ -286,6 +328,9 @@ npx license-checker-rseidelsohn --production --excludePrivatePackages \
 
 **Run on 2026-09-15:** Manager 0 vulnerabilities; Chat **2 high** (the same `react-router`
 chain as §4.2). License sweep not run.
+
+These same CVEs also lower OpenSSF Scorecard's *Vulnerabilities* score (OSV over lockfiles)
+the moment the Chat lockfile lands (§0.6 F11).
 
 Resolve findings in the source repos first. Unlike gitleaks, this action's config lives in
 the workflow file and is read from the PR's merge ref, so a config adjustment *can* ride in
@@ -308,6 +353,35 @@ migration the entry renames to `main-<hash>.js` (V3) and you want proof of the s
 Repo allows all three merge methods (V11). The migration PR must use **"Create a merge
 commit."** Put this in the PR description in bold, first line.
 
+Also tell the reviewer what to review (§0.6 F8): the PR will show ~1,275 commits and >1,000
+files, CodeRabbit and Copilot will both decline it on size, and `auto-approve-copilot.yml`
+therefore cannot supply the required approval. The reviewable surface is small and should be
+listed in the PR description: the §5.2 deletions, the §5.3/§6.x config edits, `pom.xml`,
+`.gitignore`/`.gitattributes`, and `ci.yml`. The imported trees are the archived repos'
+`main`/`master` and need no line-by-line review.
+
+### 4.7 Fix the Manager's compose files (restore the full-stack baseline)
+
+The `Backend E2E` tiers have been red on Manager `main` since 2026-08-26 because
+`labsai/eddi:latest` no longer boots under `docker-compose.integration.yml` /
+`docker-compose.integration-postgres.yml` (V22). **Fix this in a preparatory Manager PR
+before the import**, otherwise `e2e-fullstack` (§8.5) is red from its first run and §11 cannot
+be met. In **both** compose files, under `services.eddi.environment`, add:
+
+```yaml
+      # HighValueSurfaceGuard (EDDI ≥ 2026-08-21) refuses authorization.enabled=false
+      # unless these two are set explicitly; EDDI_SECURITY_ALLOW_UNAUTHENTICATED does
+      # NOT cover them. Throwaway test backend on loopback — see the comment above.
+      EDDI_MCP_ALLOW_UNAUTHENTICATED: "true"
+      EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED: "true"
+```
+
+Verify with `npm run infra:up:mongo` → `curl -sf localhost:7070/q/health/live` → `npm run
+test:e2e:fullstack` in the Manager. On 2026-09-15 this exact change made the previously
+failing `resources-crud.fullstack` assertion pass against `:latest`. If a *different* failure
+appears once the backend is up, that is a genuine contract break and belongs in the same
+preparatory PR (or a backend fix), not in the migration PR.
+
 ---
 
 ## 5. Phase 1 — Bring the code in
@@ -316,7 +390,7 @@ Work on a branch off `origin/main`. **Each phase ends in a state that compiles a
 committed separately.**
 
 > **⚠ The imported Chat config points outside the repo — fix it in this phase, not later.**
-> `ui/chat/vite.config.ts` arrives from the subtree still carrying
+> `ui/chat/vite.config.ts` arrives from the import still carrying
 > `outDir: resolve(__dirname, "../EDDI/src/main/resources/META-INF/resources")`. Evaluated
 > from `ui/chat/`, `../EDDI` now resolves to **`<repo>/ui/EDDI`** — a directory that does not
 > exist. A `npm run build` there would silently create a stray `ui/EDDI/` tree and produce no
@@ -328,23 +402,50 @@ git fetch origin main
 git checkout -b chore/monorepo-migration origin/main
 ```
 
-### 5.1 Add the subtrees
+### 5.1 Import the two histories (filter-repo + unrelated-history merge)
+
+**Not `git subtree add`** — see §2 and V21. Two steps: rewrite each source history into its
+target subdirectory on a fresh clone, then merge the rewritten branch into the monorepo.
+
+**Step 1 — rewrite (do this once; §4.3 scans these clones and they must not be regenerated):**
 
 ```bash
-git remote add manager-origin https://github.com/labsai/EDDI-Manager.git
-git remote add chat-origin    https://github.com/labsai/EDDI-Chat-UI.git
-git fetch manager-origin main
-git fetch chat-origin master       # Chat's default branch is `master`, not `main` (V20)
+git clone --no-tags https://github.com/labsai/EDDI-Manager.git /tmp/manager-rewrite
+git -C /tmp/manager-rewrite filter-repo --to-subdirectory-filter ui/manager
 
-git subtree add --prefix=ui/manager manager-origin main
-git subtree add --prefix=ui/chat    chat-origin    master
-
-git remote remove manager-origin
-git remote remove chat-origin
+git clone --no-tags https://github.com/labsai/EDDI-Chat-UI.git /tmp/chat-rewrite
+git -C /tmp/chat-rewrite filter-repo --to-subdirectory-filter ui/chat
 ```
 
-> Use the default branches from the **remotes** — the local Chat checkout sits on an
-> unmerged feature branch with a dirty lockfile (§4.1).
+`filter-repo` insists on a fresh clone (it refuses to run on a repo with other remotes or
+local state) — that is why these are new clones and not the sibling checkouts, which also sit
+on the wrong branches (§4.1). After the rewrite, `git -C /tmp/manager-rewrite ls-files | head`
+must show every path under `ui/manager/`, and `git log --oneline | wc -l` must equal the
+source repo's commit count (1,213 / 62 as of 2026-09-15).
+
+**Step 2 — merge into the migration branch:**
+
+```bash
+git remote add manager-rewrite /tmp/manager-rewrite
+git remote add chat-rewrite    /tmp/chat-rewrite
+git fetch --no-tags manager-rewrite main
+git fetch --no-tags chat-rewrite    master      # Chat's default branch is `master` (V20)
+
+git merge --allow-unrelated-histories --no-edit \
+  -m "chore(monorepo): import EDDI-Manager history under ui/manager" manager-rewrite/main
+git merge --allow-unrelated-histories --no-edit \
+  -m "chore(monorepo): import EDDI-Chat-UI history under ui/chat" chat-rewrite/master
+
+git remote remove manager-rewrite
+git remote remove chat-rewrite
+```
+
+**Assert afterwards:**
+- `git tag | wc -l` is unchanged (V24 says neither repo has tags, `--no-tags` guarantees it;
+  an imported numeric tag would match EDDI's `tags: ["[0-9]*"]` release trigger)
+- `git log --oneline -- ui/manager/package.json | wc -l` is **> 1** (path-scoped history
+  survived — this is the assertion that fails under `subtree add`)
+- `git blame ui/manager/package.json | head -3` shows Manager commits, not the merge
 
 Expect pack growth of roughly the Manager's 102 MiB plus the Chat's 2 MiB. Accepted (§2).
 
@@ -548,6 +649,10 @@ repo and committed here" — false after this change. Optionally add
 `package-lock.json text eol=lf` to prevent the CRLF churn that already corrupted one
 committed bundle (V10).
 
+Also add `ui/chat/.editorconfig` (`root = true`, 2-space, LF — copy the Manager's) so the
+root `.editorconfig`'s `[*] indent_size = 4` does not govern the Chat's TypeScript (§0.6 F6).
+The Manager already carries its own `root = true` file.
+
 **Commit:** `chore(ui): build the frontends into dist/ instead of the backend source tree`
 
 ---
@@ -560,10 +665,14 @@ Without this, `mvnw package` produces a jar with a broken `/manage`. Mandatory.
 
 ```xml
 <frontend-maven-plugin.version>1.15.1</frontend-maven-plugin.version>
-<maven-resources-plugin.version>3.3.1</maven-resources-plugin.version>
-<node.version>v20.19.0</node.version>
+<node.version>v20.20.2</node.version>
 <skipUi>false</skipUi>
 ```
+
+`maven-resources-plugin` needs no property: 3.3.1 is already the managed version in the
+effective POM (checked 2026-09-15), so the plugin block below declares no `<version>`.
+`v20.20.2` was the newest Node 20 on 2026-09-15 (`nodejs.org/dist/index.json`); bump to the
+newest 20.x at implementation time. `frontend-maven-plugin` 1.15.1 is still the latest.
 
 ### 7.2 Plugins (append inside the existing root `<build><plugins>`)
 
@@ -629,7 +738,7 @@ Without this, `mvnw package` produces a jar with a broken `/manage`. Mandatory.
 <plugin>
     <groupId>org.apache.maven.plugins</groupId>
     <artifactId>maven-resources-plugin</artifactId>
-    <version>${maven-resources-plugin.version}</version>
+    <!-- no <version>: 3.3.1 is managed (§7.1) -->
     <executions>
         <execution>
             <id>copy-ui-bundles</id>
@@ -692,6 +801,48 @@ Without this, `mvnw package` produces a jar with a broken `/manage`. Mandatory.
 > `target/classes` indefinitely and get packaged. Two consequences for the plan: §7.3's
 > verification must always run after `clean`, and the CI `build-image` job must use
 > `mvnw clean package` (it does).
+>
+> **And the excludes only protect the Maven copy.** Quarkus dev mode watches
+> `src/main/resources` itself for live reload, so a stale `manage.html` left on disk by a
+> pre-migration checkout can still reach `quarkus:dev` (§0.6 F4; §7.3 has the check). Make
+> removal deterministic instead of hoping: on `mvnw clean`, delete the gitignored generated
+> paths from the source tree too. Add to the root `<build><plugins>`:
+
+```xml
+<plugin>
+    <groupId>org.apache.maven.plugins</groupId>
+    <artifactId>maven-clean-plugin</artifactId>
+    <!-- no <version>: 3.2.0 is managed -->
+    <configuration>
+        <filesets>
+            <fileset>
+                <!-- Pre-monorepo checkouts still carry these on disk. They are
+                     gitignored (§6.4) and excluded from the resource copy above, but
+                     quarkus:dev serves src/main/resources directly, so remove them. -->
+                <directory>src/main/resources/META-INF/resources</directory>
+                <includes>
+                    <include>assets/**</include>
+                    <include>manage.html</include>
+                    <include>welcome.html</include>
+                    <include>workforce.html</include>
+                    <include>chat.html</include>
+                    <include>scripts/js/chat-ui*.js</include>
+                    <include>scripts/css/chat-ui*.css</include>
+                </includes>
+            </fileset>
+            <fileset>
+                <directory>ui/manager/dist</directory>
+            </fileset>
+            <fileset>
+                <directory>ui/chat/dist</directory>
+            </fileset>
+        </filesets>
+    </configuration>
+</plugin>
+```
+
+> The upgrade note for developers (§7.4) is then one line: run `./mvnw clean` once after
+> pulling the migration.
 
 The two dist trees do not collide (Manager: three shells + `assets/**` + icons; Chat:
 `chat.html` + `scripts/**` + `fonts/` + `img/`).
@@ -729,6 +880,19 @@ rm -rf src/main/resources/META-INF/resources/assets src/main/resources/META-INF/
 ./mvnw clean package -DskipTests -DskipUi=true    # must succeed, run zero npm
 ```
 
+**Dev-mode stale-file check (proves or disproves §0.6 F4 — run it, do not assume):**
+
+```bash
+echo "stale" > src/main/resources/META-INF/resources/manage.html   # simulate again, AFTER the clean above
+./mvnw quarkus:dev -DskipUi=true &                                  # needs MongoDB on 27017
+sleep 60; curl -s localhost:7070/manage | head -c 40; echo          # must NOT print "stale"
+kill %1; rm src/main/resources/META-INF/resources/manage.html
+```
+
+If it prints `stale`, dev mode serves the source tree and the `maven-clean-plugin` fileset in
+§7.2 is load-bearing (document "run `./mvnw clean` once" prominently in §7.4). If it does not,
+the fileset is belt-and-braces — keep it anyway; it is also what cleans `ui/*/dist`.
+
 Then a real container check: build the image, run it with MongoDB, and:
 
 ```bash
@@ -739,7 +903,11 @@ curl -s -o /dev/null -w "%{http_code}" localhost:7070/mockServiceWorker.js   # e
 ### 7.4 Developer-experience notes (document in AGENTS.md §7 update)
 
 - Per V17, **every** `mvnw compile/test/verify/quarkus:dev` now runs the frontend build
-  (~1–3 min) unless `-DskipUi=true`. Backend-only work: `./mvnw test -DskipUi=true`,
+  (**~2 min** measured: Manager `npm run build` is 112 s on a developer machine, V23; the Chat
+  adds seconds; `npm ci` adds more on a cold cache) unless `-DskipUi=true`.
+- **Once, after pulling the migration:** `./mvnw clean` — the clean plugin removes the
+  pre-migration generated files still on disk (§7.2). `git status` will show them as
+  untracked-and-ignored before, nothing after. Backend-only work: `./mvnw test -DskipUi=true`,
   `./mvnw quarkus:dev -DskipUi=true`.
 - Quarkus live-reload never rebuilds the UI. Frontend dev continues exactly as today:
   `npm run dev` in `ui/manager` (port 3000, proxies to :7070).
@@ -763,8 +931,9 @@ the reference tables exactly.
 
 ### 8.1 `detect-changes`
 
-- Add to the paths-filter: `ui: ['ui/**']`; expose as output `ui`, with the same tag-push
-  forcing as `code` (a tag must force `ui=true`).
+- Add to the paths-filter: `ui: ['ui/**', '.github/workflows/ci.yml']` (the workflow itself,
+  so a CI-only change exercises the UI job — §0.6 F9); expose as output `ui`, with the same
+  tag-push forcing as `code` (a tag must force `ui=true`).
 - Add `'ui/**'` to the existing `code:` filter list (a UI change must produce an image).
 
 ### 8.2 Add `-DskipUi=true` to every Maven job that doesn't ship the UI
@@ -863,12 +1032,17 @@ the previous `include:` mapping no longer has a static matrix to attach to.
 7. Always: dump `docker compose logs` on failure, upload Playwright report,
    `docker compose down -v`.
 
-In **both** compose files, parameterize the image:
+In **both** compose files, parameterize the image (the two guard opt-outs from §4.7 must
+already be there — if they are not, the backend exits(1) and every step below fails, V22):
 
 ```yaml
 services:
   eddi:
     image: ${EDDI_IMAGE:-labsai/eddi:latest}
+    environment:
+      EDDI_SECURITY_ALLOW_UNAUTHENTICATED: "true"
+      EDDI_MCP_ALLOW_UNAUTHENTICATED: "true"          # §4.7
+      EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED: "true"  # §4.7
 ```
 
 (Local `npm run infra:up:mongo` keeps working via the fallback.)
@@ -1023,7 +1197,8 @@ Own commit; independently revertible.
 
 ### 9.3 `CODEOWNERS`
 
-Add `ui/manager/` and `ui/chat/` entries mirroring the backend rules.
+**No change.** The file is a single `* @ginccc @rolandpickl` rule, which already covers
+`ui/**` (§0.6 F7). Add path-specific owners only if frontend ownership is meant to differ.
 
 ### 9.4 Documentation
 
@@ -1107,8 +1282,12 @@ Add `ui/manager/` and `ui/chat/` entries mirroring the backend rules.
 - [ ] Published image digest == digest E2E ran against
 - [ ] `release`, `smoke-test`, `preflight-push` still function on the first post-merge push
       (they consume re-exported outputs — §8.6)
-- [ ] Migration PR was merged with a **merge commit**; `git log ui/manager` shows original
-      Manager history with original SHAs
+- [ ] Migration PR was merged with a **merge commit**; `git log --oneline -- ui/manager/package.json | wc -l`
+      is > 1 and `git blame ui/manager/package.json` shows Manager commit messages (SHAs are
+      the rewritten ones from §5.1; the archived repo keeps the originals)
+- [ ] `git tag | wc -l` unchanged by the import (§5.1)
+- [ ] Both `ui/manager/docker-compose.integration*.yml` carry the two `HighValueSurfaceGuard`
+      opt-outs (§4.7) and `e2e-fullstack` reached "backend healthy" — not just "tests ran"
 - [ ] Branch-protection contexts updated (§10)
 - [ ] Old repos archived with pointer READMEs; `docs/changelog.md` records the migration
 
@@ -1119,10 +1298,14 @@ Add `ui/manager/` and `ui/chat/` entries mirroring the backend rules.
 | Risk | Severity | Mitigation |
 |---|---|---|
 | Squash-merge of the migration PR destroys imported history | **High** | §2 decision + §4.6 + PR description warning |
+| Importing with `git subtree add` silently loses path-scoped `git log` / `--follow` (V21) | **High** | §2 decision changed to `filter-repo` + unrelated-history merge; §5.1 asserts it |
+| `e2e-fullstack` red from day one because the compose files cannot boot current EDDI (V22) | **High** | §4.7 preparatory Manager PR; §8.5 env block |
+| Re-running `filter-repo` after the gitleaks scan changes every SHA and invalidates the fingerprints | Medium | §4.3/§5.1: rewrite once, scan that, merge that |
+| Migration PR too large for CodeRabbit/Copilot; `auto-approve-copilot` cannot approve it | Low | §4.6: human review of the listed reviewable surface |
 | Gitleaks scans 1,275 imported commits; ignores only honored from base branch | **High** | §4.3 pre-scan; land `.gitleaksignore` on main **first** |
 | dependency-review blocks the PR on npm CVEs/licenses — **confirmed live for Chat (§0.3)** | **High** | §4.4 pre-check in source repos; bump `react-router` ≥ 7.18.2 in Chat first |
 | Trivy fs scan newly gates backend releases on npm CVEs — **confirmed live for Chat (§0.3)** | **High** | §4.2 scratch scan before merge; same bump |
-| Subtree import fails because Chat's default branch is `master` | Low | §5.1 / V20 |
+| Import fails because Chat's default branch is `master` | Low | §5.1 / V20 |
 | 30+ orphaned Manager branches / in-flight local work | **High** | §4.1 freeze + `git am --directory=` recipe |
 | Matrixing the CodeQL job renames its check and wedges `main` on a required context that never reports | **High** | §9.2 warning — distinct job names + protection update in the same change |
 | Adding `ui-build-and-test` to `docker.needs` silently stops publishing on backend-only pushes (skipped dependency ⇒ skipped dependent) | **High** | §8.6b `ui-gate` aggregator |
