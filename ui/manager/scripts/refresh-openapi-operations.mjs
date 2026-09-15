@@ -23,18 +23,18 @@
  * ## Usage
  *
  *   docker compose -f docker-compose.integration.yml up -d --wait
- *   node .github/scripts/refresh-openapi-operations.mjs
+ *   node scripts/refresh-openapi-operations.mjs
  *
  * Or against any reachable instance:
  *
- *   EDDI_URL=http://localhost:7070 node .github/scripts/refresh-openapi-operations.mjs
+ *   EDDI_URL=http://localhost:7070 node scripts/refresh-openapi-operations.mjs
  */
 
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const OUT = path.join(ROOT, "src/test/mocks/openapi-operations.json");
 const EDDI_URL = process.env.EDDI_URL ?? "http://localhost:7070";
 const METHODS = ["get", "post", "put", "patch", "delete"];
@@ -95,7 +95,7 @@ fs.writeFileSync(
   OUT,
   JSON.stringify(
     {
-      "//": "Generated. Do not edit by hand — run: node .github/scripts/refresh-openapi-operations.mjs",
+      "//": "Generated. Do not edit by hand — run: node scripts/refresh-openapi-operations.mjs",
       eddiVersion: spec.info?.version ?? "unknown",
       operations,
     },

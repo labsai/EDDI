@@ -3,7 +3,7 @@ import {
   advisories,
   isAccepted,
   devOnlyAdvisories,
-} from "../../.github/scripts/audit-prod.mjs";
+} from "../../scripts/audit-prod.mjs";
 
 /**
  * The production-dependency audit gate (`npm run audit:prod`).

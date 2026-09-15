@@ -11,8 +11,11 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: resolve(__dirname, "../EDDI/src/main/resources/META-INF/resources"),
-    emptyOutDir: false, // Keep existing files (index.html, manage.html, dashboard, etc.)
+    // dist/ is copied into the Quarkus jar by maven-resources-plugin (pom.xml,
+    // execution copy-ui-bundles). It used to point straight at a sibling backend
+    // checkout, which is why emptyOutDir had to be off.
+    outDir: "dist",
+    emptyOutDir: true,
     rollupOptions: {
       input: resolve(__dirname, "chat.html"),
       output: {

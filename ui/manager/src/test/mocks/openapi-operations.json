@@ -1,5 +1,5 @@
 {
-  "//": "Generated. Do not edit by hand — run: node .github/scripts/refresh-openapi-operations.mjs",
+  "//": "Generated. Do not edit by hand — run: node scripts/refresh-openapi-operations.mjs",
   "eddiVersion": "6.3.0",
   "operations": [
     "DELETE /AgentTriggerStore/agenttriggers/{intent}",

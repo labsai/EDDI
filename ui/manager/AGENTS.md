@@ -43,7 +43,7 @@ All repos live under `c:\dev\git\`:
 1. **Read [`HANDOFF.md`](HANDOFF.md)** — current status, completed phases, test counts
 2. **Check git logs**: `git log -5 --oneline`
 3. **Check for uncommitted work**: `git status`
-4. **Cross-repo context**: [`../EDDI/AGENTS.md`](../EDDI/AGENTS.md) when touching API contracts
+4. **Backend context**: [`AGENTS.md` at the repo root](../../AGENTS.md) when touching API contracts — the backend lives in the same repository (this directory is `ui/manager/` of `labsai/EDDI`)
 
 ### During Work
 
@@ -77,9 +77,11 @@ restore them from the last lockfile CI accepted rather than regenerating.
 
 ### Quality Gates
 
-Every commit is validated by the pre-commit hook (`husky` + `lint-staged`):
+There is no pre-commit hook any more (the husky + lint-staged hook did not survive the move into the
+EDDI monorepo). CI's `UI Build & Test` job runs both of these on every PR that touches `ui/`, so run
+them yourself before pushing:
 
-1. **ESLint** — `eslint --max-warnings 0` on staged `.ts/.tsx` files
+1. **ESLint** — `npm run lint` (`--max-warnings 0`)
 2. **TypeScript** — `npm run typecheck` (`tsc -b`, full project type-check)
 
 > ⚠️ **`npx tsc --noEmit` checks nothing in this repo.** `tsconfig.json` is a
@@ -294,8 +296,8 @@ Two consequences worth knowing:
   now genuinely async: await it, and handle rejection (a chunk can 404 across a
   deploy).
 
-Chunks are content-hashed, so `deploy-to-local-eddi-repo.*` removes any hashed
-asset the new build did not produce, and `lazyPage` reloads once if a chunk 404s
+Chunks are content-hashed, and the Maven build copies a fresh `dist/` into the jar on every
+`./mvnw clean package`, so a stale hashed asset cannot ship; `lazyPage` reloads once if a chunk 404s
 (a tab held open across a deploy).
 
 #### 7. Tests

@@ -57,7 +57,7 @@ We will credit you in the security advisory unless you prefer to remain anonymou
 - EDDI backend vulnerabilities (report to [EDDI SECURITY.md](https://github.com/labsai/EDDI/blob/main/SECURITY.md))
 - Third-party LLM API vulnerabilities (OpenAI, Anthropic, etc.)
 - User configuration errors
-- Vulnerabilities in dependencies (report upstream; we monitor via [Renovate](renovate.json))
+- Vulnerabilities in dependencies (report upstream; we monitor via Dependabot, configured in the repo root's `.github/dependabot.yml`)
 
 ### Known accepted `npm audit` findings
 

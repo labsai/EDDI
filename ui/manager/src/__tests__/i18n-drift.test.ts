@@ -6,7 +6,7 @@ import {
   isSatisfied,
   isLegitimatePluralVariant,
   KNOWN_COLLISIONS,
-} from "../../.github/scripts/check-i18n.mjs";
+} from "../../scripts/check-i18n.mjs";
 
 /**
  * Runs the CI i18n gate as a unit test.
