@@ -266,7 +266,7 @@ grep -o -- '--color-warning[a-z-]*:' .design-sync/.cache/compiled.css | sort -u
 - **`cfg.dtsPropsFor` is hand-maintained and nothing verifies it against the source.** It
   is the highest-value thing in the config (see the section above) and the easiest to let
   rot — a prop renamed in `src/` leaves the design agent coding against the old name.
-- **`__APP_VERSION__` in `ds-entry.tsx` is a hardcoded `"6.3.0"`.** Cosmetic (it only feeds
+- **`__APP_VERSION__` in `ds-entry.tsx` is a hardcoded `"6.4.0"`.** Cosmetic (it only feeds
   the sidebar footer), but bump it when the app's major/minor moves, or accept the drift.
 - **`src/assets/logo_eddi.png` must stay importable.** Moving it back under `public/`
   silently reintroduces a broken image in every design using the expanded `Sidebar`.

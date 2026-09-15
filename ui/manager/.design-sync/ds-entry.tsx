@@ -15,7 +15,7 @@
 // component untouched. The value is cosmetic chrome; it is a static string and
 // will drift from package.json (recorded in NOTES.md's re-sync risks).
 (globalThis as unknown as { __APP_VERSION__?: string }).__APP_VERSION__ ??=
-  "6.3.0";
+  "6.4.0";
 
 // ── ui/ ────────────────────────────────────────────────────────────────────
 export { AccessibleDialog } from "@/components/ui/accessible-dialog";

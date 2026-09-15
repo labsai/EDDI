@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseRedactedJson } from "@/lib/redacted-json";
+import { parseLeadingJson, parseRedactedJson } from "@/lib/redacted-json";
 
 /**
  * The inputs below are what EDDI's `SecretRedactionFilter` actually emits, not
@@ -155,5 +155,45 @@ describe("parseRedactedJson", () => {
     const started = performance.now();
     expect(parseRedactedJson(big).ok).toBe(true);
     expect(performance.now() - started).toBeLessThan(2_000);
+  });
+});
+
+describe("parseLeadingJson", () => {
+  it("reads the value before a stray closing brace, and hands back what follows", () => {
+    expect(parseLeadingJson('{"a":1}}')).toEqual({ ok: true, value: { a: 1 }, trailing: "}" });
+  });
+
+  it("stops at the first complete value even when the rest reads like more fields", () => {
+    // What a reader that stops there would store: `b` is silently gone.
+    expect(parseLeadingJson('{"a":1},"b":2}')).toEqual({ ok: true, value: { a: 1 }, trailing: ',"b":2}' });
+  });
+
+  it("does not take a bracket inside a string for the end of the value", () => {
+    expect(parseLeadingJson('{"a":"}]","b":"\\"}"}}')).toEqual({
+      ok: true,
+      value: { a: "}]", b: '"}' },
+      trailing: "}",
+    });
+  });
+
+  it("repairs a redacted credential inside the leading value", () => {
+    expect(parseLeadingJson('{"apiKey=<REDACTED>"}}')).toEqual({
+      ok: true,
+      value: { apiKey: "<REDACTED>" },
+      trailing: "}",
+    });
+  });
+
+  it("fails for a body broken before its first value closes — the reported shape", () => {
+    // `{"tasks":[{…}}]}`: the extra brace sits inside the array, so there is no
+    // complete leading value to fall back to.
+    expect(parseLeadingJson('{"tasks":[{"id":"a"}}]}').ok).toBe(false);
+  });
+
+  it("fails for text that does not open as an object or array, or never closes", () => {
+    expect(parseLeadingJson("name=x&y=1").ok).toBe(false);
+    expect(parseLeadingJson('"a"}').ok).toBe(false);
+    expect(parseLeadingJson('{"a":1').ok).toBe(false);
+    expect(parseLeadingJson("   ").ok).toBe(false);
   });
 });

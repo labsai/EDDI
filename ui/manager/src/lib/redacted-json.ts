@@ -106,6 +106,45 @@ export function parseRedactedJson(content: string): ParseResult {
   return { ok: false };
 }
 
+export type LeadingParseResult = { ok: true; value: unknown; trailing: string } | { ok: false };
+
+/**
+ * The first complete JSON value at the start of a body, and the text after it.
+ *
+ * A JSON reader that stops at the end of the first value — Jackson's default —
+ * never looks at the rest, so `{"a":1}}` or `{"a":1},"b":2}` can be accepted
+ * as `{"a":1}` with whatever followed silently dropped. Treating such a body as
+ * simply "not JSON" would hide exactly the part that may be written.
+ *
+ * Meant for a body that already failed {@link parseRedactedJson}: one that
+ * parses has nothing trailing it. The leading value goes through the same
+ * redaction repair, and must itself parse — a body broken before its first
+ * value closes (the stray brace INSIDE a document) is still a failure.
+ */
+export function parseLeadingJson(content: string): LeadingParseResult {
+  const start = content.search(/\S/);
+  if (start < 0 || (content[start] !== "{" && content[start] !== "[")) return { ok: false };
+
+  let depth = 0;
+  for (let i = start; i < content.length; i++) {
+    const c = content[i];
+    if (c === '"') {
+      // Skip the string literal; the loop's own i++ steps past its closing quote.
+      i++;
+      while (i < content.length && content[i] !== '"') i += content[i] === "\\" ? 2 : 1;
+    } else if (c === "{" || c === "[") {
+      depth++;
+    } else if (c === "}" || c === "]") {
+      depth--;
+      if (depth === 0) {
+        const head = parseRedactedJson(content.slice(0, i + 1));
+        return head.ok ? { ok: true, value: head.value, trailing: content.slice(i + 1) } : { ok: false };
+      }
+    }
+  }
+  return { ok: false };
+}
+
 /**
  * Per-field choices to try, uniform ones first.
  *

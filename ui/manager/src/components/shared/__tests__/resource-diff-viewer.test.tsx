@@ -68,6 +68,13 @@ describe("ResourceDiffViewer", () => {
     expect(screen.getByText("+")).toBeInTheDocument();
   });
 
+  it("compares text that isn't trying to be JSON as it came, line breaks and spaces intact", () => {
+    renderDiff("line one\nline two changed", "line one\nline two");
+    expect(rowTexts("context")).toEqual(["line one"]);
+    expect(rowTexts("removed")).toEqual(["line two"]);
+    expect(rowTexts("added")).toEqual(["line two changed"]);
+  });
+
   it("handles one side being null (entirely new content)", () => {
     renderDiff('{"new": true}', null);
     // All lines should be additions
@@ -112,6 +119,54 @@ describe("ResourceDiffViewer", () => {
     it("says so when a side genuinely isn't JSON, rather than implying a rewrite", () => {
       renderDiff("not { json", '{"a": 1}');
       expect(screen.getByTestId("diff-raw-comparison")).toBeInTheDocument();
+    });
+
+    it("lays a body that isn't JSON out line by line, so only what differs is a change", () => {
+      // The reported case: a compact config body with one closing brace too
+      // many. Compared as it came, that was one added line against a fully
+      // removed stored document — no way to see the change, or the stray brace.
+      renderDiff('{"a":1,"b":{"c":2}}}', '{"a":1,"b":{"c":3}}');
+
+      expect(screen.getByTestId("diff-raw-comparison")).toBeInTheDocument();
+      expect(rowTexts("added")).toEqual(['    "c": 2', "}"]);
+      expect(rowTexts("removed")).toEqual(['    "c": 3']);
+      expect(rowTexts("context")).toContain('  "a": 1,');
+      expect(rowTexts().filter((line) => line.includes('"a"'))).toHaveLength(1);
+    });
+
+    it("does not report every line after a stray closing bracket as changed", () => {
+      // One `}` too many EARLY in a document re-indents everything after it one
+      // level short. That is layout, not content: only the extra bracket counts.
+      renderDiff('{"a":{"b":1}},"c":2,"d":3}', '{"a":{"b":1},"c":2,"d":3}');
+
+      expect(rowTexts("removed")).toEqual([]);
+      expect(rowTexts("added").map((line) => line.trim())).toEqual(["}"]);
+      expect(rowTexts("context").map((line) => line.trim())).toContain('"d": 3');
+    });
+
+    it("prints the parsed side in the broken side's key order, so a moved key is not a change", () => {
+      // Sorting the parsed side alphabetically put `a` before `b`, and both then
+      // read as changed against a body that wrote `b` first.
+      renderDiff('{"b":1,"a":2,"c":}', '{"a":2,"b":1,"c":3}');
+
+      expect(rowTexts("removed").map((line) => line.trim())).toEqual(['"c": 3']);
+      expect(rowTexts("added").map((line) => line.trim())).toEqual(['"c":']);
+    });
+
+    it("leaves the caveat out when the caller already warns about the invalid JSON", () => {
+      render(<ResourceDiffViewer sourceContent='{"a":1}}' targetContent='{"a": 1}' showRawComparisonNotice={false} />);
+      expect(screen.getAllByTestId("diff-line").length).toBeGreaterThan(0);
+      expect(screen.queryByTestId("diff-raw-comparison")).not.toBeInTheDocument();
+    });
+
+    it("does not sort the parsed side against one that can't be sorted", () => {
+      // Sorting only the valid side would move "z" below "a" and report both
+      // as changed; the broken side keeps the order it was written in.
+      renderDiff('{"z":1,"a":2,"b":}', '{"z":1,"a":2,"b":3}');
+
+      expect(rowTexts("context")).toContain('  "z": 1,');
+      expect(rowTexts().filter((line) => line.includes('"z"'))).toHaveLength(1);
+      expect(rowTexts("removed")).toEqual(['  "b": 3']);
     });
 
     it("shows no caveat when both sides parse", () => {
@@ -192,6 +247,56 @@ describe("ResourceDiffViewer", () => {
         />,
       );
       expect(screen.getByTestId("diff-context-gap")).toBeInTheDocument();
+    });
+  });
+
+  describe("within a changed line", () => {
+    /** The marked fragments on rows of one kind, in order. */
+    function changedWords(kind: "added" | "removed"): string[] {
+      return screen
+        .queryAllByTestId("diff-changed-words")
+        .filter((el) => el.closest('[data-testid="diff-line"]')?.getAttribute("data-diff-kind") === kind)
+        .map((el) => el.textContent ?? "");
+    }
+
+    it("marks only the words that changed, so an edit to a long line can be found", () => {
+      // A system prompt is one JSON string, so one changed word used to colour
+      // a paragraph-long line with nothing to say where in it the edit was.
+      renderDiff(
+        JSON.stringify({ systemMessage: "You are a friendly support agent who answers briefly." }),
+        JSON.stringify({ systemMessage: "You are a friendly sales agent who answers briefly." }),
+      );
+
+      expect(changedWords("removed")).toEqual(["sales"]);
+      expect(changedWords("added")).toEqual(["support"]);
+      // Announced as a change, not only coloured as one.
+      const [removed, added] = screen.getAllByTestId("diff-changed-words");
+      expect(removed!.tagName).toBe("DEL");
+      expect(added!.tagName).toBe("INS");
+      // The row still reads as the whole line.
+      expect(rowTexts("added")).toEqual(['  "systemMessage": "You are a friendly support agent who answers briefly."']);
+    });
+
+    it("colours a replaced line whole instead of highlighting fragments it merely shares", () => {
+      renderDiff('{"a": "a completely different sentence stands here"}', '{"a": 1}');
+      expect(screen.queryAllByTestId("diff-changed-words")).toHaveLength(0);
+    });
+
+    it("leaves lines that have no counterpart unmarked — the stray brace in the report", () => {
+      renderDiff('{"a":1,"b":{"c":2}}}', '{"a":1,"b":{"c":3}}');
+      expect(changedWords("added")).toEqual(["2"]);
+      expect(changedWords("removed")).toEqual(["3"]);
+      // The extra "}" is an added row with nothing to pair against.
+      expect(rowTexts("added")).toContain("}");
+    });
+  });
+
+  describe("summary", () => {
+    it("says how much changed AND how much did not", () => {
+      const many = Object.fromEntries(Array.from({ length: 20 }, (_, i) => [`k${String(i).padStart(2, "0")}`, i]));
+      renderDiff(JSON.stringify({ ...many, k00: 999 }), JSON.stringify(many));
+      // 22 printed lines: the braces and twenty keys, one of them changed.
+      expect(screen.getByTestId("diff-summary")).toHaveTextContent("Lines: 1 added · 1 removed · 21 unchanged");
     });
   });
 

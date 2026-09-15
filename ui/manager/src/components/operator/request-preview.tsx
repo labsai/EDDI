@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ShieldAlert, Loader2 } from "lucide-react";
 import { detectEscalationFlags } from "@/lib/operator/escalation-flags";
 import { resolveConfigWriteTarget, bodyHasRedactions } from "@/lib/operator/config-write-target";
+import { parseLeadingJson, parseRedactedJson } from "@/lib/redacted-json";
 import { ResourceDiffViewer } from "@/components/agents/resource-diff-viewer";
 import { getResource } from "@/lib/api/resources";
 import { useAuth } from "@/hooks/use-auth";
@@ -73,6 +74,24 @@ export function RequestPreview({ preview, pinned, callId }: RequestPreviewProps)
    * most of the config".
    */
   const writeTarget = preview.bodyTruncated ? null : resolveConfigWriteTarget(preview);
+  // A whole-document config write has to be JSON. When it is not, the capability
+  // scan can say nothing and the diff can only line text up — both quiet
+  // failures an approver would read as "looks fine". Observed: the operator sent
+  // an LLM config with one closing brace too many. A non-JSON body on any other
+  // call is ordinary (a form post), so this stays scoped to document writes.
+  //
+  // Two different outcomes, so two different warnings. Broken inside the
+  // document, the write fails. Complete but followed by more text, Jackson's
+  // default reader stops at the end of the document and never reads the rest —
+  // the write can succeed with the tail silently dropped.
+  const bodyIssue: "trailingText" | "notJson" | "notJsonRedacted" | null =
+    !writeTarget || !preview.body || parseRedactedJson(preview.body).ok
+      ? null
+      : parseLeadingJson(preview.body).ok
+        ? "trailingText"
+        : bodyHasRedactions(preview.body)
+          ? "notJsonRedacted"
+          : "notJson";
   // Reading the stored document needs eddi-admin/eddi-editor, and this surface
   // is used by eddi-approver — whose entire job is approving. Gate the fetch
   // rather than firing a 403 on every pause, and say plainly that the
@@ -168,6 +187,30 @@ export function RequestPreview({ preview, pinned, callId }: RequestPreviewProps)
           )}
         </p>
       )}
+      {bodyIssue && (
+        <p
+          className="flex items-start gap-1 rounded border border-warning/40 bg-warning/10 p-2 text-[11px] text-warning"
+          data-testid={`request-preview-body-issue-${callId}`}
+          data-issue={bodyIssue}
+          role="alert"
+        >
+          <ShieldAlert className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          {bodyIssue === "trailingText"
+            ? t(
+                "operator.approval.proposedTrailingText",
+                "The proposed document has extra text after its end. EDDI may store only the document before it and silently drop the rest, and only that part was scanned for capability grants — reject it and ask for a corrected request.",
+              )
+            : bodyIssue === "notJsonRedacted"
+              ? t(
+                  "operator.approval.proposedNotJsonRedacted",
+                  "The proposed document is not valid JSON, even allowing for the credentials redacted in this preview, so EDDI will most likely reject this write. It could not be scanned for capability grants either — reject it and ask for a corrected request.",
+                )
+              : t(
+                  "operator.approval.proposedNotJson",
+                  "The proposed document is not valid JSON, so EDDI will reject this write. It could not be scanned for capability grants either — reject it and ask for a corrected request.",
+                )}
+        </p>
+      )}
       {showDiff && (
         <div data-testid={`request-preview-diff-${callId}`}>
           <p className="mb-1 text-[10px] font-medium text-muted-foreground">
@@ -182,6 +225,7 @@ export function RequestPreview({ preview, pinned, callId }: RequestPreviewProps)
               target: t("operator.approval.diffStored", "Stored v{{version}}", { version: writeTarget!.version }),
               source: t("operator.approval.diffProposed", "Proposed"),
             }}
+            showRawComparisonNotice={!bodyIssue}
           />
           {bodyHasRedactions(preview.body) && (
             <p

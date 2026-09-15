@@ -1,5 +1,5 @@
 import { gateLooksInstalled } from "@/lib/api/operator";
-import { parseRedactedJson } from "@/lib/redacted-json";
+import { parseLeadingJson, parseRedactedJson } from "@/lib/redacted-json";
 import type { Agent } from "@/lib/api/agents";
 
 /**
@@ -285,9 +285,14 @@ export function detectEscalationFlags(body: string | null | undefined): Escalati
     flags.push({ id: "inlineCredential", path: credential });
   }
 
+  // A body with text after its first complete value can still be WRITTEN — a
+  // reader that stops at the end of that value never sees the rest — so the part
+  // that may be stored is scanned rather than none of it. One stray closing
+  // brace must not be a way past every check below.
   const result = parseRedactedJson(body);
-  if (!result.ok) return flags;
-  const parsed = result.value;
+  const readable = result.ok ? result : parseLeadingJson(body);
+  if (!readable.ok) return flags;
+  const parsed = readable.value;
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return flags;
 
   return [

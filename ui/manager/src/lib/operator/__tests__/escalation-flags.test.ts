@@ -96,6 +96,15 @@ describe("detectEscalationFlags", () => {
     expect(detectEscalationFlags("name=x&value=y")).toEqual([]);
   });
 
+  it("still scans a body with text trailing its document — a stray brace is not a way past the check", () => {
+    // A reader that stops at the end of the first value stores the grant and
+    // ignores the extra `}`; this scan used to skip the whole body instead.
+    const body = `${groupBody({ dynamicAgents: { enabled: true, allowCreation: true } })}}`;
+    expect(detectEscalationFlags(body)).toEqual([
+      { id: "dynamicAgentCreation", path: "dynamicAgents.allowCreation" },
+    ]);
+  });
+
   it("returns nothing for JSON that is not an object", () => {
     expect(detectEscalationFlags("[1,2,3]")).toEqual([]);
     expect(detectEscalationFlags('"a string"')).toEqual([]);

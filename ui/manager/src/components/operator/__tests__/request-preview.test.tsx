@@ -278,6 +278,62 @@ describe("RequestPreview — whole-document PUT diff", () => {
     expect(diff).toHaveTextContent("Stored v3");
     expect(diff).toHaveTextContent("Proposed");
     expect(diff).not.toHaveTextContent(/Target/);
+    expect(screen.queryByTestId("request-preview-body-issue-c1")).not.toBeInTheDocument();
+  });
+
+  describe("a proposed document that isn't JSON — the extra-brace report", () => {
+    // The operator sent an updateLlm body with one closing brace too many. It
+    // parsed on neither side of the approval, so the diff showed the compact
+    // body as a single added line and the capability scan found nothing.
+
+    it("says extra text after a complete document may be dropped on write, and still lines the diff up", async () => {
+      serveStored();
+      renderWithProviders(
+        <RequestPreview preview={putPreview({ body: `${JSON.stringify(PROPOSED)}}` })} pinned callId="c1" />,
+      );
+
+      const warning = await screen.findByTestId("request-preview-body-issue-c1");
+      expect(warning).toHaveAttribute("role", "alert");
+      expect(warning).toHaveAttribute("data-issue", "trailingText");
+      expect(warning).toHaveTextContent(/drop the rest/);
+
+      const diff = await screen.findByTestId("request-preview-diff-c1");
+      expect(diffRows(diff, "added")).toEqual(['  "threshold": 9,', "}"]);
+      expect(diffRows(diff, "removed")).toEqual(['  "threshold": 5,']);
+      expect(diffRows(diff).filter((line) => line.includes("unchanged"))).toHaveLength(1);
+      // Warned once, above the diff — not again inside it.
+      expect(within(diff).queryByTestId("diff-raw-comparison")).not.toBeInTheDocument();
+    });
+
+    it("says a document broken inside will be rejected", async () => {
+      serveStored();
+      renderWithProviders(
+        <RequestPreview
+          preview={putPreview({ body: JSON.stringify(PROPOSED).replace(/}$/, ",}") })}
+          pinned
+          callId="c1"
+        />,
+      );
+
+      const warning = await screen.findByTestId("request-preview-body-issue-c1");
+      expect(warning).toHaveAttribute("data-issue", "notJson");
+      expect(warning).toHaveTextContent(/will reject this write/);
+    });
+
+    it("hedges when redacted credentials are in the body, since the preview is not the exact request", async () => {
+      serveStored();
+      renderWithProviders(
+        <RequestPreview
+          preview={putPreview({ body: JSON.stringify(PROPOSED).replace(/}$/, ',"apiKey=<REDACTED>",}') })}
+          pinned
+          callId="c1"
+        />,
+      );
+
+      const warning = await screen.findByTestId("request-preview-body-issue-c1");
+      expect(warning).toHaveAttribute("data-issue", "notJsonRedacted");
+      expect(warning).toHaveTextContent(/most likely reject/);
+    });
   });
 
   it("survives the redaction filter's mangled credential field — the shape from the report", async () => {
