@@ -49,6 +49,19 @@ bottom of this file and are never archived.
 
 ---
 
+## 🏷️ chore: refresh README badges and set the project domain to eddi.technology (2026-09-15)
+
+**Repo:** EDDI (`chore/deps-and-version-6-4-0`)
+
+- `README.md` — the tests badge said `14,000+`; the last full unit run on this branch was 20,221
+  tests, so it now reads `21,000+`. The coverage badge names both gates, `>90% instr / >80% branch`,
+  matching the figures AGENTS.md already quotes.
+- `application.properties` — `systemRuntime.projectDomain` moves from `eddi.labs.ai` to
+  `eddi.technology`. Its only consumer is `HttpClientWrapper`, which builds the outbound
+  User-Agent from it, so outbound calls now identify as `EDDI.TECHNOLOGY/<version>`. The other
+  `eddi.labs.ai` references (OpenAPI contact URL, banner, Dockerfile image label, docs) are left
+  as they are in this change.
+
 ## 🔀 chore(merge): origin/main into the 6.4.0 dependency branch (2026-09-15)
 
 **Repo:** EDDI (`chore/deps-and-version-6-4-0`)
