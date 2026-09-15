@@ -96,10 +96,13 @@ argues for the opposite of a scope cut: it is the *cheap* half, and leaving it o
 V7–V10 (Chat build output shape, tracked `dist/`, `emptyOutDir`, byte drift) were re-read, not
 re-executed; the Chat repo has not changed since they were taken. V12's `deny-licenses`
 deprecation note still holds (the workflow now documents it inline). The §10 skipped-check
-question is still open: PR #670 is `APPROVED` but `DIRTY` (changelog conflict, resolved by the
-merge that carries this revision), so it has not yet been possible to observe whether a
-docs-only PR with a skipped `Build & Test` reaches `mergeStateStatus: CLEAN`. **Check it on
-#670 once this merge is pushed** — it is the first clean observation available.
+question is **now answered** (observed on #670 after this revision was pushed, 2026-09-15):
+with `Build & Test` reported as `SKIPPED` and `CodeQL Analysis` green, `mergeStateStatus`
+went from `BLOCKED` (while CodeQL was still running) to `UNSTABLE` — GitHub's "required
+checks satisfied, some non-required checks still pending" state — never `BLOCKED` on the
+skipped check. So a job-level `if:` skip satisfies a required context, and the path-gated
+jobs in §8 can be made required directly; the aggregator in §8.6b remains the right tool
+for the `docker` publish gate (that is a `needs` problem, not a protection problem).
 
 ### 0.6 Second pass — findings that changed the plan (2026-09-15, later the same day)
 
@@ -911,7 +914,7 @@ curl -s -o /dev/null -w "%{http_code}" localhost:7070/mockServiceWorker.js   # e
   `./mvnw quarkus:dev -DskipUi=true`.
 - Quarkus live-reload never rebuilds the UI. Frontend dev continues exactly as today:
   `npm run dev` in `ui/manager` (port 3000, proxies to :7070).
-- **Node versions:** Maven vendors `v20.19.0` (§7.1) and CI uses Node 20, matching the Manager's
+- **Node versions:** Maven vendors `v20.20.2` (§7.1) and CI uses Node 20, matching the Manager's
   own CI — but the Manager's `mise.toml` pins `node = "v25.9.0"` and both frontends are on
   Vite 6 (≥ 20.19 required). Local `mise` users therefore already build on a different major
   than CI. Reconcile in the root `mise.toml` (one `node` pin for the repo) as part of §9.4; the
@@ -1258,11 +1261,11 @@ Own commit; independently revertible.
 > `Build & Test: SKIPPED`. That block was attributable to `reviewDecision: REVIEW_REQUIRED`,
 > not the skipped check.
 >
-> **Confirm empirically before adding the contexts:** once #670 has an approving review, check
-> whether `mergeStateStatus` becomes `CLEAN`. If it does, skipped-as-satisfied is proven and
-> the contexts are safe to add. If it stays `BLOCKED`, do **not** add path-gated jobs as
-> required — instead add a tiny always-running job that depends on them and reports success
-> when they are skipped, and require *that* instead.
+> **Confirmed empirically on 2026-09-15 (§0.5):** with #670 approved, `Build & Test` skipped
+> and `CodeQL Analysis` green, `mergeStateStatus` was `UNSTABLE` (required checks satisfied),
+> not `BLOCKED`. Skipped-as-satisfied is proven; the path-gated contexts are safe to add
+> directly. Keep the always-running aggregator pattern only where a *`needs`* edge is involved
+> (§8.6b), since `needs` — unlike branch protection — treats a skipped dependency as a skip.
 
 ---
 
