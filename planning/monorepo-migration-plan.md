@@ -98,9 +98,9 @@ re-executed; the Chat repo has not changed since they were taken. V12's `deny-li
 deprecation note still holds (the workflow now documents it inline). The §10 skipped-check
 question is **now answered** (observed on #670 after this revision was pushed, 2026-09-15):
 with `Build & Test` reported as `SKIPPED` and `CodeQL Analysis` green, `mergeStateStatus`
-went from `BLOCKED` (while CodeQL was still running) to `UNSTABLE` — GitHub's "required
-checks satisfied, some non-required checks still pending" state — never `BLOCKED` on the
-skipped check. So a job-level `if:` skip satisfies a required context, and the path-gated
+went from `BLOCKED` (while CodeQL was still running) to `UNSTABLE` (required checks
+satisfied, CodeRabbit still pending) to **`CLEAN`** once CodeRabbit finished — never
+`BLOCKED` on the skipped check. So a job-level `if:` skip satisfies a required context, and the path-gated
 jobs in §8 can be made required directly; the aggregator in §8.6b remains the right tool
 for the `docker` publish gate (that is a `needs` problem, not a protection problem).
 
@@ -344,7 +344,7 @@ the migration PR if a finding is genuinely unactionable — but treat that as la
 ```bash
 git rev-parse HEAD                                        # backend baseline
 git -C ../EDDI-Manager rev-parse origin/main              # manager baseline
-git -C ../eddi-chat-ui rev-parse origin/main              # chat baseline
+git -C ../eddi-chat-ui rev-parse origin/master            # chat baseline (default branch is master, V20)
 git ls-files src/main/resources/META-INF/resources | wc -l   # 759 on 2026-09-15 (583 in Aug); record the actual number
 ```
 
@@ -630,8 +630,10 @@ Append to `.gitignore`:
 ui/node/
 ui/*/node_modules/
 ui/*/dist/
-# Protective: nothing writes here any more; stale local deploy scripts must not
-# be able to silently re-introduce committed assets.
+# Protective: nothing writes here any more; a stale local copy of the old
+# deploy-to-local-eddi-repo script must not be able to silently re-introduce
+# generated output — including the MSW worker, which the old script would copy
+# from a post-migration dist/ (it copies dist/* wholesale).
 src/main/resources/META-INF/resources/assets/
 src/main/resources/META-INF/resources/manage.html
 src/main/resources/META-INF/resources/welcome.html
@@ -639,7 +641,22 @@ src/main/resources/META-INF/resources/workforce.html
 src/main/resources/META-INF/resources/chat.html
 src/main/resources/META-INF/resources/scripts/js/chat-ui*.js
 src/main/resources/META-INF/resources/scripts/css/chat-ui*.css
+src/main/resources/META-INF/resources/mockServiceWorker.js
+src/main/resources/META-INF/resources/eddi-icon.ico
+src/main/resources/META-INF/resources/eddi-icon.svg
+src/main/resources/META-INF/resources/logo_eddi.png
+src/main/resources/META-INF/resources/fonts/
+src/main/resources/META-INF/resources/img/
 ```
+
+> What actually lingers, precisely: files that git **stops tracking** in the migration
+> commit are deleted from every developer's working tree on the next `git pull` (git removes
+> unmodified tracked files when the upstream commit deletes them). The stale-file risk is
+> therefore **not** "an upgraded checkout" by itself — it is an upgraded checkout on which
+> someone afterwards runs a stale local copy of the old deploy script, or a checkout whose
+> copies were locally modified (git then refuses the pull until they are dealt with). The
+> ignore rules, the §7.2 excludes and the §7.2 clean fileset all target that scenario, and
+> they list the *same* paths so the three cannot drift apart.
 
 > `ui/node/` (not `ui/*/node/`) — frontend-maven-plugin's `installDirectory` is `ui/`, so the
 > vendored Node lands at exactly `ui/node/`, which `ui/*/node/` does NOT match.
@@ -788,16 +805,27 @@ newest 20.x at implementation time. `frontend-maven-plugin` 1.15.1 is still the 
             <exclude>META-INF/resources/chat.html</exclude>
             <exclude>META-INF/resources/scripts/js/chat-ui*.js</exclude>
             <exclude>META-INF/resources/scripts/css/chat-ui*.css</exclude>
+            <!-- Same list as the .gitignore block in §6.4 and the clean fileset
+                 below. mockServiceWorker.js never lived here, but the old deploy
+                 script copies dist/* wholesale and would put it here now. -->
+            <exclude>META-INF/resources/mockServiceWorker.js</exclude>
+            <exclude>META-INF/resources/eddi-icon.ico</exclude>
+            <exclude>META-INF/resources/eddi-icon.svg</exclude>
+            <exclude>META-INF/resources/logo_eddi.png</exclude>
+            <exclude>META-INF/resources/fonts/**</exclude>
+            <exclude>META-INF/resources/img/**</exclude>
         </excludes>
     </resource>
 </resources>
 ```
 
 > **Why `.gitignore` is not enough.** Ignoring a path stops it being *committed*; it does
-> nothing to stop Maven copying it. Anyone who had the repo checked out before the migration
-> keeps the 562 generated files on disk, and the default `src/main/resources` copy would put
-> them in `target/classes` — an obsolete `index-<hash>.js` that no shell references, or worse
-> a stale `manage.html` pointing at it.
+> nothing to stop Maven copying it. A plain `git pull` of the migration deletes the formerly
+> tracked files (see the note under §6.4), but a stale local copy of the old deploy script
+> re-creates them — ignored, so invisible in `git status` — and the default
+> `src/main/resources` copy would then put them in `target/classes`: an obsolete
+> `index-<hash>.js` that no shell references, a stale `manage.html` pointing at it, or the
+> MSW worker.
 >
 > **`copy-resources` also never deletes.** It overwrites and adds; it does not prune. On an
 > incremental (non-`clean`) build, hashed assets from previous builds accumulate in
@@ -819,9 +847,10 @@ newest 20.x at implementation time. `frontend-maven-plugin` 1.15.1 is still the 
     <configuration>
         <filesets>
             <fileset>
-                <!-- Pre-monorepo checkouts still carry these on disk. They are
-                     gitignored (§6.4) and excluded from the resource copy above, but
-                     quarkus:dev serves src/main/resources directly, so remove them. -->
+                <!-- Same list as the .gitignore block (§6.4) and the excludes above.
+                     A stale deploy-script run re-creates these on disk, gitignored
+                     and excluded from the resource copy — but quarkus:dev watches
+                     src/main/resources directly, so remove them on clean. -->
                 <directory>src/main/resources/META-INF/resources</directory>
                 <includes>
                     <include>assets/**</include>
@@ -831,6 +860,12 @@ newest 20.x at implementation time. `frontend-maven-plugin` 1.15.1 is still the 
                     <include>chat.html</include>
                     <include>scripts/js/chat-ui*.js</include>
                     <include>scripts/css/chat-ui*.css</include>
+                    <include>mockServiceWorker.js</include>
+                    <include>eddi-icon.ico</include>
+                    <include>eddi-icon.svg</include>
+                    <include>logo_eddi.png</include>
+                    <include>fonts/**</include>
+                    <include>img/**</include>
                 </includes>
             </fileset>
             <fileset>
@@ -859,7 +894,10 @@ The two dist trees do not collide (Manager: three shells + `assets/**` + icons; 
 In `target/classes/META-INF/resources/` assert:
 - `manage.html`, `welcome.html`, `workforce.html`, `chat.html`, non-empty `assets/`
 - `index.html` still the redirect shell; `scripts/js/landing-redirect.js` present
-- `eddi-icon.svg`, `logo_eddi.png` (from Manager dist), `fonts/`, `img/` (from chat dist)
+- `eddi-icon.ico`, `eddi-icon.svg` (from Manager dist); `fonts/`, `img/favicon.ico`,
+  `img/logo_eddi.png` (from chat dist)
+- **no root `logo_eddi.png`** (deleted in §6.4; nothing references it) and
+  **no `img/loading-indicator.svg`**
 - **`mockServiceWorker.js` ABSENT**
 - **no `assets/index-*.js` or `assets/index-*.css`** — that is the pre-migration entry name
   (V3); its presence means a stale file leaked through, not a fresh build
@@ -1001,6 +1039,15 @@ Build the matrix as data instead. Have `detect-changes` emit it:
           fi
 ```
 
+and expose it as a job output — a step output is not visible to other jobs on its own:
+
+```yaml
+  detect-changes:
+    outputs:
+      # existing outputs (code, docs, ui, …) stay; add:
+      databases: ${{ steps.dbs.outputs.databases }}
+```
+
 and consume it:
 
 ```yaml
@@ -1021,15 +1068,29 @@ the previous `include:` mapping no longer has a static matrix to attach to.
 3. `EDDI_IMAGE=labsai/eddi:ci docker compose -f ui/manager/docker-compose.integration<-postgres>.yml up -d --wait`
 4. Reuse the existing 60×2s health poll on `/q/health/live`.
 5. **Shipped-shell verification** (closes the gap that Playwright's webServer is the Vite
-   *dev* server, so nothing else ever loads the built shells):
+   *dev* server, so nothing else ever loads the built shells). It follows **every**
+   same-origin `src`/`href` in each shell — the hashed entry, `/manage/__auth_config__.js`
+   (served by Quarkus, not by Vite: V25), the favicon, the loader logo — and every
+   same-origin `url()` inside the fetched stylesheets, which is where the Noto fonts live:
    ```bash
+   BASE=http://localhost:7070
+   # 1. collect every same-origin dependency once: src=/href= from the four shells
+   #    (hashed entry, /manage/__auth_config__.js, favicon, loader logo), plus every
+   #    same-origin url(...) from each stylesheet they load (the ~470 Noto font faces).
+   : > deps.txt
    for p in manage welcome workforce chat; do
-     HTML=$(curl -sf http://localhost:7070/$p) || { echo "::error::/$p failed"; exit 1; }
-     for a in $(echo "$HTML" | grep -o '/assets/[^"]*\|/scripts/[^"]*'); do
-       curl -sf -o /dev/null "http://localhost:7070$a" || { echo "::error::/$p asset $a failed"; exit 1; }
-     done
+     HTML=$(curl -sf "$BASE/$p") || { echo "::error::/$p failed"; exit 1; }
+     echo "$HTML" | grep -oE '(src|href)="/[^"]+"' | sed -E 's/^[a-z]+="//; s/"$//' >> deps.txt
    done
-   curl -s -o /dev/null -w "%{http_code}" http://localhost:7070/mockServiceWorker.js | grep -q 404
+   for css in $(grep -E '\.css$' deps.txt | sort -u); do
+     curl -sf "$BASE$css" | grep -oE 'url\(["'"'"']?/[^)"'"'"']+'        | sed -E 's/^url\(["'"'"']?//' >> deps.txt        || { echo "::error::$css failed"; exit 1; }
+   done
+   sort -u deps.txt > deps.uniq   # ~480 URLs (481 measured 2026-09-15); checked once each, 8 in parallel, ~50 s
+   # 2. every one of them must be 2xx
+   xargs -P 8 -I{} sh -c 'curl -sf -o /dev/null "'"$BASE"'{}" || { echo "::error::{} failed"; exit 1; }' < deps.uniq
+   # 3. things that must NOT be there
+   [ "$(curl -s -o /dev/null -w '%{http_code}' $BASE/mockServiceWorker.js)" = 404 ] || { echo "::error::MSW worker shipped"; exit 1; }
+   [ "$(curl -s -o /dev/null -w '%{http_code}' $BASE/logo_eddi.png)" = 404 ] || { echo "::error::root logo_eddi.png shipped"; exit 1; }
    ```
 6. `npm run test:e2e:integration` then `npm run test:e2e:fullstack` (both in `ui/manager`).
 7. Always: dump `docker compose logs` on failure, upload Playwright report,
@@ -1262,8 +1323,8 @@ Own commit; independently revertible.
 > not the skipped check.
 >
 > **Confirmed empirically on 2026-09-15 (§0.5):** with #670 approved, `Build & Test` skipped
-> and `CodeQL Analysis` green, `mergeStateStatus` was `UNSTABLE` (required checks satisfied),
-> not `BLOCKED`. Skipped-as-satisfied is proven; the path-gated contexts are safe to add
+> and `CodeQL Analysis` green, `mergeStateStatus` was `UNSTABLE` (required checks satisfied)
+> and then `CLEAN`, never `BLOCKED`. Skipped-as-satisfied is proven; the path-gated contexts are safe to add
 > directly. Keep the always-running aggregator pattern only where a *`needs`* edge is involved
 > (§8.6b), since `needs` — unlike branch protection — treats a skipped dependency as a skip.
 
