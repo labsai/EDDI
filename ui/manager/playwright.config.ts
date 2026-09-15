@@ -17,6 +17,17 @@ const PORT = Number(process.env.PORT) || 3000;
 const BASE_URL = `http://localhost:${PORT}`;
 
 /**
+ * `E2E_AGAINST_BACKEND=1` drives the app EDDI itself serves on `PORT` (CI sets
+ * `PORT=7070`) instead of a Vite dev server, and starts no dev server.
+ *
+ * The integration and full-stack tiers then exercise the bundle that ships in
+ * the image — the hashed chunks, the multi-page shells, `/manage/__auth_config__.js`
+ * — rather than a dev-mode build of the same source. The `ui` tier cannot run
+ * this way: it needs the dev server's MSW worker.
+ */
+const AGAINST_BACKEND = process.env.E2E_AGAINST_BACKEND === "1";
+
+/**
  * Seeded localStorage (onboarding already dismissed), re-pointed at whatever
  * port this run uses.
  *
@@ -151,9 +162,11 @@ export default defineConfig({
     // providing none is worse than none at all. Reinstate them together with the
     // browser install and a script that invokes them.
   ],
-  webServer: {
-    command: "npm run dev",
-    url: BASE_URL,
-    reuseExistingServer: !isCI,
-  },
+  webServer: AGAINST_BACKEND
+    ? undefined
+    : {
+        command: "npm run dev",
+        url: BASE_URL,
+        reuseExistingServer: !isCI,
+      },
 });

@@ -82,29 +82,15 @@ jobs:
               - '.trivyignore'
               - '.gitleaksignore'
               - 'licenses/**'
-              # Graded by unit tests, so they are build inputs rather than prose:
-              # ComposeStackTest parses README.md's compose commands, and
-              # BuildQualityGatesTest reads AGENTS.md 4.7 to check it still
-              # describes the Checkstyle import gate's real scope. Outside this
-              # filter, a PR that changes only one of them sets code=false and
-              # skips the very test that grades it, so a stale compose command or
-              # a gate description that no longer matches the pom merges with
-              # nothing having evaluated it.
-              - 'README.md'
-              - 'AGENTS.md'
-              # Same shape one file along: BuildQualityGatesTest grades both the
-              # pre-push hook's recorded 100755 mode and the remote its recovery
-              # fetch queries. .githooks/** is in `scripts` as well, but that job
-              # only lints shell — it cannot run the unit test that owns the
-              # hook's logic, so a hook-only PR would change it ungraded.
-              - '.githooks/**'
-            # `code` without the frontends, plus the UI markdown that
-            # DocumentationLinksTest and DocumentationAccuracyTest walk. On a pull
+            # Everything a Java test reads: `code` without the frontends, plus files
+            # that only tests read and that change nothing in the image. On a pull
             # request Build & Test and Integration Tests gate on this instead of
             # `code`, so a change confined to ui/ does not run the Java suite; on
             # push and on tags they still gate on `code`, so nothing is published
-            # untested. BuildQualityGatesTest keeps it equal to `code` minus
-            # 'ui/**' plus 'ui/**/*.md'.
+            # untested — and a change to only the test-read files below runs Build &
+            # Test and nothing that builds or publishes an image.
+            # BuildQualityGatesTest keeps this equal to `code` minus 'ui/**', plus
+            # the last four entries.
             backend:
               - 'src/**'
               - 'pom.xml'
@@ -123,10 +109,20 @@ jobs:
               - '.trivyignore'
               - '.gitleaksignore'
               - 'licenses/**'
+              # The UI markdown DocumentationLinksTest and DocumentationAccuracyTest walk.
+              - 'ui/**/*.md'
+              # Graded by unit tests, so they are test inputs rather than prose:
+              # ComposeStackTest parses README.md's compose commands, and
+              # BuildQualityGatesTest reads AGENTS.md 4.7 to check it still describes
+              # the Checkstyle import gate's real scope. Outside this filter, a PR that
+              # changes only one of them skips the very test that grades it.
               - 'README.md'
               - 'AGENTS.md'
+              # Same shape one file along: BuildQualityGatesTest grades both the
+              # pre-push hook's recorded 100755 mode and the remote its recovery fetch
+              # queries. .githooks/** is in `scripts` as well, but that job only lints
+              # shell — it cannot run the unit test that owns the hook's logic.
               - '.githooks/**'
-              - 'ui/**/*.md'
             # The installers are the README's headline `curl | bash` path and were
             # in NO filter at all, so a PR touching only them skipped the whole
             # pipeline — and a skipped required check still satisfies branch
@@ -600,6 +596,16 @@ jobs:
         # stand-ins under src/test/resources.
         run: ./mvnw clean test -DskipUi=true -B
 
+      # Integration Tests restores this instead of running the unit tests again: the
+      # merged 90/80 coverage gate needs their execution data, not a second run.
+      - name: Upload unit-test coverage data
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: unit-test-coverage-data
+          path: target/jacoco.exec
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -697,9 +703,25 @@ jobs:
           java-version: ${{ env.JAVA_VERSION }}
           cache: maven
 
+      # Build & Test already ran the unit tests on this commit (this job `needs` it).
+      # Their coverage data and reports are restored instead of re-running ~20k tests,
+      # so the merged coverage gate below sees exactly what it saw before.
+      - name: Download unit-test coverage data
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: unit-test-coverage-data
+          path: target
+
+      - name: Download unit-test reports
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: test-results
+          path: target/surefire-reports
+
       - name: Run integration tests
         # -DskipUi=true: the ITs are API-level, and ContainerBaseIT's image needs no UI.
-        run: ./mvnw verify -DskipITs=false -DskipUi=true -Dquarkus.bootstrap.effective-model-builder=true -B
+        # -DskipUTs=true: see the two steps above.
+        run: ./mvnw verify -DskipITs=false -DskipUTs=true -DskipUi=true -Dquarkus.bootstrap.effective-model-builder=true -B
         env:
           MAVEN_OPTS: "--enable-native-access=ALL-UNNAMED"
 
@@ -958,8 +980,12 @@ jobs:
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
 
+      # Two workers: the config's `workers: 1` on CI exists for the backend tiers,
+      # whose specs share state in serial groups. Every MSW test gets its own mocked
+      # page, and 234 tests measured 5.4 and 5.8 minutes at two workers (both green,
+      # no flakes) against 13.1 at one.
       - name: UI E2E (MSW, no backend)
-        run: npm run test:e2e
+        run: npm run test:e2e -- --workers=2
 
       - name: Upload Playwright report
         if: ${{ !cancelled() }}
@@ -1309,7 +1335,10 @@ jobs:
         #
         # STYLE_GATES_SKIP — see the note in the CodeQL job. Build & Test owns the
         # style verdict for this commit, and docker needs it before anything ships.
-        run: ./mvnw clean package -DskipTests -Dformatter.skip=true -Dcheckstyle.skip=true -Plicense-gen -B
+        #
+        # store-schema-directory writes the OpenAPI document to target/openapi, where the
+        # openapi-snapshot job checks the Manager's snapshot without booting a backend.
+        run: ./mvnw clean package -DskipTests -Dformatter.skip=true -Dcheckstyle.skip=true -Plicense-gen -Dquarkus.smallrye-openapi.store-schema-directory=target/openapi -B
 
       - name: Verify the built and packaged UI
         # What EDDI serves by exact name must exist: the three Manager shells and the
@@ -1347,6 +1376,14 @@ jobs:
           fi
           ls ui/chat/dist/chat.html ui/chat/dist/scripts/js/chat-ui.*.js ui/chat/dist/scripts/css/chat-ui.*.css > /dev/null
           echo "packaged assets match the build: $(echo "$built" | wc -l) hashed files, four shells, the Chat bundle"
+
+      - name: Upload the OpenAPI document
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: openapi-document
+          path: target/openapi/openapi.json
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Build Docker image
         # PRIMARY_TAG arrives through env:, never through ${{ }} interpolation — see
@@ -1389,6 +1426,56 @@ jobs:
           if-no-files-found: error
           # Not 1: re-running a Friday pipeline on Monday must still find it.
           retention-days: 7
+
+  # ─── Job 3a-openapi: OpenAPI snapshot ───────────────────────────
+  # The Manager's MSW handlers are checked against a committed snapshot of EDDI's
+  # operations (openapi-contract.test.ts). This compares that snapshot with the
+  # document the Quarkus build stored — seconds after Build Image, with no
+  # container — so an API change learns it must refresh the snapshot early. A job
+  # of its own, not a step in Build Image: a failing step there would withhold the
+  # image from every E2E tier. e2e-fullstack repeats the check against the running
+  # backend, which also guards the build-time and served documents agreeing.
+  openapi-snapshot:
+    name: OpenAPI Snapshot
+    runs-on: ubuntu-latest
+    needs: [detect-changes, build-image]
+    if: needs.detect-changes.outputs.code == 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Set up Node 20
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 20
+
+      - name: Download the OpenAPI document
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: openapi-document
+          path: target/openapi
+
+      - name: Check the snapshot matches this build
+        id: openapi
+        working-directory: ui/manager
+        env:
+          OPENAPI_FILE: ${{ github.workspace }}/target/openapi/openapi.json
+        run: |
+          node scripts/refresh-openapi-operations.mjs
+          if ! git diff --exit-code -I '"eddiVersion"' -- src/test/mocks/openapi-operations.json; then
+            echo "::error::EDDI's API surface changed and ui/manager/src/test/mocks/openapi-operations.json is stale."
+            echo "::error::Download the openapi-operations-refreshed artifact from this run and commit it, or run the script as its header describes."
+            exit 1
+          fi
+          echo "Snapshot operations match the OpenAPI document of this build."
+
+      - name: Upload the regenerated OpenAPI snapshot
+        if: ${{ failure() && steps.openapi.outcome == 'failure' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: openapi-operations-refreshed
+          path: ui/manager/src/test/mocks/openapi-operations.json
+          retention-days: 14
 
   # ─── Job 3a-e2e: Backend E2E ────────────────────────────────────
   # The Manager's API-integration and full-stack Playwright tiers, run against the
@@ -1452,8 +1539,8 @@ jobs:
           exit 1
 
       - name: Verify the shipped shells
-        # Playwright's webServer is the Vite DEV server, so nothing else ever loads
-        # the built shells out of the jar. This follows every same-origin dependency
+        # The Playwright tiers below drive the shipped bundle, but a browser only
+        # fetches what the pages it visits need. This follows every same-origin dependency
         # of the four shells — the hashed entry chunks, /manage/__auth_config__.js
         # (served by Quarkus, not Vite), icons, the loader logo, the chat fonts in
         # chat.html's inline <style> — plus every url() inside the stylesheets they
@@ -1509,12 +1596,20 @@ jobs:
         working-directory: ui/manager
         run: npx playwright install --with-deps chromium
 
+      # Against the app EDDI serves on :7070 — the bundle in this image — not a Vite
+      # dev server (see E2E_AGAINST_BACKEND in playwright.config.ts).
       - name: Run API integration tests
         working-directory: ui/manager
+        env:
+          PORT: "7070"
+          E2E_AGAINST_BACKEND: "1"
         run: npm run test:e2e:integration
 
       - name: Run full-stack tests
         working-directory: ui/manager
+        env:
+          PORT: "7070"
+          E2E_AGAINST_BACKEND: "1"
         run: npm run test:e2e:fullstack
 
       # Blocking, on pull requests too. In EDDI-Manager this was advisory on PRs,
@@ -1524,8 +1619,9 @@ jobs:
       # Operations only — `eddiVersion` moves with every pom bump.
       #
       # MongoDB leg only: the API surface does not depend on the datastore, and one
-      # failure is enough. On failure the regenerated file is uploaded, so whoever
-      # changed the API can commit it without a local backend or Node.
+      # failure is enough. The openapi-snapshot job makes the same comparison from
+      # the build-time document minutes earlier; this one also proves the served
+      # document still agrees with it.
       - name: Check the OpenAPI snapshot matches this backend
         id: openapi
         if: ${{ !cancelled() && steps.health.outcome == 'success' && matrix.database == 'mongodb' }}
@@ -1543,7 +1639,7 @@ jobs:
         if: ${{ failure() && steps.openapi.outcome == 'failure' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: openapi-operations-refreshed
+          name: openapi-operations-refreshed-runtime
           path: ui/manager/src/test/mocks/openapi-operations.json
           retention-days: 14
 
@@ -1575,7 +1671,7 @@ jobs:
   e2e-gate:
     name: E2E Gate
     runs-on: ubuntu-latest
-    needs: [detect-changes, build-image, e2e-fullstack]
+    needs: [detect-changes, build-image, openapi-snapshot, e2e-fullstack]
     if: always()
     steps:
       - name: Require E2E success whenever the code changed
@@ -1583,17 +1679,18 @@ jobs:
           DETECT: ${{ needs.detect-changes.result }}
           CODE: ${{ needs.detect-changes.outputs.code }}
           IMAGE: ${{ needs.build-image.result }}
+          OPENAPI: ${{ needs.openapi-snapshot.result }}
           E2E: ${{ needs.e2e-fullstack.result }}
         run: |
           if [ "$DETECT" != "success" ]; then
             echo "::error::detect-changes=$DETECT, so whether the code changed is unknown"
             exit 1
           fi
-          if [ "$CODE" = "true" ] && { [ "$IMAGE" != "success" ] || [ "$E2E" != "success" ]; }; then
-            echo "::error::the code changed but build-image=$IMAGE, e2e-fullstack=$E2E"
+          if [ "$CODE" = "true" ] && { [ "$IMAGE" != "success" ] || [ "$OPENAPI" != "success" ] || [ "$E2E" != "success" ]; }; then
+            echo "::error::the code changed but build-image=$IMAGE, openapi-snapshot=$OPENAPI, e2e-fullstack=$E2E"
             exit 1
           fi
-          echo "code changed=$CODE, build-image=$IMAGE, e2e-fullstack=$E2E — gate satisfied"
+          echo "code changed=$CODE, build-image=$IMAGE, openapi-snapshot=$OPENAPI, e2e-fullstack=$E2E — gate satisfied"
 
   # ─── Job 3: Docker Build & Push ─────────────────────────────────
   docker:
@@ -1609,9 +1706,10 @@ jobs:
     #   codeql-ui         SAST for ui/manager and ui/chat
     #   gitleaks          secret scanning
     #   build-image       the image this job publishes — it builds nothing itself
+    #   openapi-snapshot  the Manager's API snapshot against this build's document
     #   e2e-fullstack     the Manager driven against THAT image, on both stores
     #   ui-gate           the ui-* jobs, when the UI changed (see ui-gate)
-    needs: [detect-changes, build-and-test, integration-test, trivy-scan, codeql, codeql-ui, gitleaks, build-image, e2e-fullstack, ui-gate]
+    needs: [detect-changes, build-and-test, integration-test, trivy-scan, codeql, codeql-ui, gitleaks, build-image, openapi-snapshot, e2e-fullstack, ui-gate]
     # NOTE: deliberately no always(). always() cancelled the implicit
     # needs-success gate, and the tag branch then short-circuited the explicit
     # one — so a tag on a commit with failing tests still built, pushed, tagged

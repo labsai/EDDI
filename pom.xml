@@ -34,6 +34,12 @@
         <failsafe.useModulePath>false</failsafe.useModulePath>
         <quarkus-mcp-server.version>1.13.2</quarkus-mcp-server.version>
         <skipITs>true</skipITs>
+        <!-- skipUTs skips surefire alone, so CI's Integration Tests job can reuse the
+             unit-test coverage data Build & Test already produced (target/jacoco.exec)
+             instead of running ~20k unit tests a second time before the merged
+             coverage gate. It follows skipTests, so -DskipTests still skips both. -->
+        <skipTests>false</skipTests>
+        <skipUTs>${skipTests}</skipUTs>
         <!-- The Manager and Chat UIs (ui/manager, ui/chat) are built by Maven in
              prepare-package and copied into target/classes just before the jar is
              assembled. compile, test and quarkus:dev therefore never run npm, while
@@ -645,6 +651,7 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>${surefire-plugin.version}</version>
                 <configuration>
+                    <skipTests>${skipUTs}</skipTests>
                     <!-- @{argLine} preserves JaCoCo's injected agent arg -->
                     <argLine>@{argLine} -ea -XX:+EnableDynamicAgentLoading -Xshare:off --enable-native-access=ALL-UNNAMED</argLine>
                     <excludes>

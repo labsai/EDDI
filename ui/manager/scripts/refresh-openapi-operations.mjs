@@ -28,6 +28,12 @@
  * Or against any reachable instance:
  *
  *   EDDI_URL=http://localhost:7070 node scripts/refresh-openapi-operations.mjs
+ *
+ * Or, with no backend at all, from the document a Maven build stores (this is
+ * what CI's `openapi-snapshot` job does):
+ *
+ *   ./mvnw package -DskipTests -DskipUi=true -Dquarkus.smallrye-openapi.store-schema-directory=target/openapi
+ *   OPENAPI_FILE=../../target/openapi/openapi.json node scripts/refresh-openapi-operations.mjs
  */
 
 import fs from "node:fs";
@@ -37,23 +43,38 @@ import { fileURLToPath } from "node:url";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const OUT = path.join(ROOT, "src/test/mocks/openapi-operations.json");
 const EDDI_URL = process.env.EDDI_URL ?? "http://localhost:7070";
+const OPENAPI_FILE = process.env.OPENAPI_FILE;
 const METHODS = ["get", "post", "put", "patch", "delete"];
 
-const url = `${EDDI_URL}/openapi?format=json`;
-process.stdout.write(`Fetching ${url}\n`);
-
 let spec;
-try {
-  const res = await fetch(url, { signal: AbortSignal.timeout(30_000) });
-  if (!res.ok) {
-    console.error(`ERROR: ${url} responded ${res.status}`);
+if (OPENAPI_FILE) {
+  process.stdout.write(`Reading ${OPENAPI_FILE}\n`);
+  try {
+    spec = JSON.parse(fs.readFileSync(OPENAPI_FILE, "utf8"));
+  } catch (err) {
+    console.error(`ERROR: could not read ${OPENAPI_FILE} — ${err instanceof Error ? err.message : err}`);
     process.exit(1);
   }
-  spec = await res.json();
-} catch (err) {
-  console.error(`ERROR: could not reach ${url} — ${err instanceof Error ? err.message : err}`);
-  console.error("Start a backend first: docker compose -f docker-compose.integration.yml up -d --wait");
-  process.exit(1);
+} else {
+  spec = await fetchSpec();
+}
+
+async function fetchSpec() {
+  const url = `${EDDI_URL}/openapi?format=json`;
+  process.stdout.write(`Fetching ${url}\n`);
+
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+    if (!res.ok) {
+      console.error(`ERROR: ${url} responded ${res.status}`);
+      process.exit(1);
+    }
+    return await res.json();
+  } catch (err) {
+    console.error(`ERROR: could not reach ${url} — ${err instanceof Error ? err.message : err}`);
+    console.error("Start a backend first: docker compose -f docker-compose.integration.yml up -d --wait");
+    process.exit(1);
+  }
 }
 
 const operations = [];

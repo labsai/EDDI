@@ -49,6 +49,80 @@ bottom of this file and are never archived.
 
 ---
 
+## ⚡ perf(monorepo): the efficiency review follow-ups (2026-09-15)
+
+**Repo:** EDDI (`chore/monorepo-migration`) — the follow-ups from the two-reviewer efficiency review
+recorded in the monorepo entry below.
+
+### What changed
+
+- **The backend Playwright tiers drive the bundle that ships.** In `e2e-fullstack` the integration and
+  full-stack tiers now run with `PORT=7070 E2E_AGAINST_BACKEND=1`: `playwright.config.ts` then starts no
+  Vite dev server and every page load goes to the app EDDI serves out of the image — the hashed chunks,
+  the multi-page shells, `/manage/__auth_config__.js` — instead of a dev-mode build of the same source.
+  (`main.tsx` only falls back to mocks in a dev build, so the full-stack tier cannot silently run on
+  MSW this way.) Local runs without the variable are unchanged.
+- **`OpenAPI Snapshot`, a new job, checks the Manager's snapshot without a container.** `Build Image`
+  passes `-Dquarkus.smallrye-openapi.store-schema-directory=target/openapi` and uploads the document;
+  the job compares `ui/manager/src/test/mocks/openapi-operations.json` with it
+  (`refresh-openapi-operations.mjs` reads `OPENAPI_FILE`) and uploads the regenerated file when it
+  differs. A job of its own rather than a step in `Build Image`, so a stale snapshot does not withhold
+  the image from the E2E tiers; `E2E Gate` and `docker` require it. The runtime check in `e2e-fullstack`
+  stays on the MongoDB leg and now also guards that the served document agrees with the stored one.
+- **The MSW Playwright tier runs with two workers in CI** (`npm run test:e2e -- --workers=2`); the
+  config keeps one worker for the backend tiers, whose specs share state in serial groups.
+- **Dependabot npm entries** gain a cooldown (3 days, 14 for majors; security updates are never
+  delayed) and a `security-updates` group, so open advisories arrive as one PR per ecosystem.
+- **`README.md`, `AGENTS.md` and `.githooks/**` leave the `code` filter for `backend`.** Only unit tests
+  read them, so a change to only those files now runs `Build & Test` and nothing that builds, scans or
+  publishes an image. `BuildQualityGatesTest` checks the root documents against `backend` and keeps
+  `backend` equal to `code` without `ui/**`, plus `ui/**/*.md` and those three.
+- **`Integration Tests` no longer re-runs the ~20k unit tests.** A new `skipUTs` property (it follows
+  `skipTests`, so `-DskipTests` still skips everything) skips surefire alone. `Build & Test` uploads
+  `target/jacoco.exec`; `Integration Tests` restores it and the surefire reports before
+  `verify -DskipITs=false -DskipUTs=true`, so the merged 90/80 coverage gate grades the same data as
+  before. `BuildQualityGatesTest` fails if the job skips the unit tests without that hand-off.
+
+### Decisions
+
+- **Rejected: Vitest `css: false`.** Measured in a `node:20` container on the full Manager suite: 301 s
+  against 285 s with CSS processing on, and it broke a real test
+  (`export-dialog.test.tsx` › "toggle all checkbox selects and deselects resources").
+- **Two Playwright workers, measured before adopting:** 234 MSW tests passed twice at two workers, in
+  5.4 and 5.8 minutes, with no flaky results, against 13.1 minutes at one.
+- **The Dependabot keys were validated against the published schema** (`json.schemastore.org`
+  `dependabot-2.0.json`, checked with ajv, which rejects a deliberately invalid `cooldown` key) — an
+  unrecognised key invalidates the whole file and silently stops every update in it.
+
+### Verification
+
+All on 2026-09-15, locally (Windows 11, JDK 25.0.1) unless marked.
+
+- **Shipped-bundle E2E (follow-up 1).** The image built from this branch under the Manager's MongoDB
+  compose file, with `PORT=7070 E2E_AGAINST_BACKEND=1`: API integration **44/44 in 12.5 s**, full
+  stack **35/35 in 45 s**, and no Vite dev server started. The same tiers through the dev server had
+  taken 7.6 minutes, a retried serial group included.
+- **Build-time OpenAPI document (follow-up 2).** `refresh-openapi-operations.mjs` with `OPENAPI_FILE`
+  pointed at the document a `clean package` stored gives exactly the 344 operations of the snapshot
+  taken from the running backend ("No change"): the stored document is a faithful substitute for a
+  booted backend.
+- **Playwright workers and Vitest CSS (follow-up 3).** In a `node:20-bookworm` container: the MSW tier
+  at two workers passed 234/234 twice (5.4 and 5.8 min, no flaky tests); Vitest with `css: false`
+  took 301 s against 285 s and failed one test, so it was not adopted.
+- **Dependabot (follow-up 4).** The edited file validates against the published schema; both npm
+  entries carry the cooldown and the `security-updates` group.
+- **Coverage hand-off (follow-up 6).** `package -DskipTests` still reports "Tests are skipped". With a
+  unit-test `jacoco.exec` restored into a clean `target`, `verify -DskipITs=false -DskipUTs=true`
+  skipped surefire, the unit-test report loaded the restored file (1,263 classes, no class-mismatch
+  warning), and the `merge` execution loaded both `jacoco-it.exec` and `jacoco.exec` into
+  `jacoco-merged.exec`. The trial's single IT (`LogAdminIT`) could not boot Quarkus on this machine —
+  Netty could not open a selector, "Unable to establish loopback connection", the environmental failure
+  recorded in the monorepo entry below — so that build stopped before `merged-check`. The 90/80
+  evaluation on the full suites is first seen in this PR's CI run.
+- **Backend guard tests** on the final state (177, including the changed `backend`-filter tests and the new coverage hand-off test): only the 3 environmental PowerShell failures recorded below.
+- **Not verifiable locally:** the workflow graph itself — the new `OpenAPI Snapshot` job, the artifact
+  hand-offs between jobs, and how Dependabot applies the cooldown.
+
 ## 🧩 chore(monorepo): EDDI-Manager and EDDI-Chat-UI move into this repository as ui/manager and ui/chat (2026-09-15)
 
 **Repo:** EDDI (`chore/monorepo-migration`) — executes `planning/monorepo-migration-plan.md` (PR #670, Revision 3).

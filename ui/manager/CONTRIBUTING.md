@@ -331,12 +331,20 @@ The Manager's checks run in the EDDI repository's root workflow,
 | **UI Manager Checks** | `npm run audit:prod`, lint (`src/` + `e2e/`, `--max-warnings 0`), `npm run i18n:check`, `tsc -b` (app, node configs and `e2e/`), Vitest with coverage thresholds | Every PR and push that touches `ui/` or `ci.yml` |
 | **UI Manager E2E (MSW)** | The Playwright UI tier against MSW mocks | Same |
 | **Build Image**       | The production build of both UIs through Maven, and a check of what it emitted and packaged | Every change that affects the image |
-| **Backend E2E**       | Builds EDDI **from the same commit**, boots it, checks the shipped shells, then runs the Playwright API-integration and full-stack tiers and the OpenAPI snapshot check against it | MongoDB on every PR that changes code; MongoDB and PostgreSQL on push to main |
+| **OpenAPI Snapshot**  | Compares `src/test/mocks/openapi-operations.json` with the OpenAPI document the Maven build stores — no running backend, a minute after the image build | Every change that affects the image |
+| **Backend E2E**       | Builds EDDI **from the same commit**, boots it, checks the shipped shells, then runs the Playwright API-integration and full-stack tiers against the bundle that backend serves (not a Vite dev server), and re-checks the OpenAPI snapshot against the running API | MongoDB on every PR that changes code; MongoDB and PostgreSQL on push to main |
 
 The **OpenAPI snapshot check** is blocking everywhere. The backend under test is
 built from your branch, so a stale `src/test/mocks/openapi-operations.json` means
-your change altered the API surface: run `npm run openapi:refresh` against a
-backend built from the branch and commit the result.
+your change altered the API surface. Either download the `openapi-operations-refreshed`
+artifact from the failing run and commit it, or regenerate it locally — against a
+running backend with `npm run openapi:refresh`, or with no backend at all from the
+document a Maven build stores (the script header shows both commands).
+
+To run the backend tiers the way CI does — against the bundle EDDI serves rather
+than a Vite dev server — start a backend on :7070 built by `./mvnw package`, then:
+`PORT=7070 E2E_AGAINST_BACKEND=1 npm run test:e2e:fullstack` (or
+`test:e2e:integration`).
 
 Mutation testing is not currently run by CI; see the note under Mutation Testing.
 
