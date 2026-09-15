@@ -1,10 +1,98 @@
 # Monorepo Migration Plan — EDDI + EDDI-Manager + EDDI-Chat-UI
 
-> **Status:** Proposed, not started. **Revision 2** — after two adversarial review passes with
-> local dry-runs of the critical build steps (2026-08-11).
+> **Status:** Proposed, not started. **Revision 3** — re-verified against all three repos on
+> 2026-09-15, five weeks and 391 backend commits after Revision 2 (2026-08-11). See §0 for what
+> changed and why the plan still stands.
 > **Author context:** This document is self-contained. An implementing agent should need no
 > other conversation context. Read it top to bottom before touching anything.
 > **⚠ THE PR THAT LANDS THIS MUST BE MERGED WITH A MERGE COMMIT — NEVER SQUASH. See §2.**
+
+---
+
+## 0. Revision 3 — re-verification on 2026-09-15
+
+**Verdict: the plan is still the right move, and the case is stronger than when it was
+written.** Nothing in the five weeks since Revision 2 has removed a reason for the migration;
+three things have added to it. The mechanics were re-checked, one dry-run was re-executed, and
+the two Phase-0 scans that could be run without installing anything were run for real. The
+body of this document has been corrected in place wherever a fact changed; this section is the
+summary an implementer should read first.
+
+### 0.1 The problem got worse, not better
+
+| Then (2026-08-11) | Now (2026-09-15) | Source |
+|---|---|---|
+| 562 generated files committed under `META-INF/resources/assets/` | **738** (759 tracked files under `META-INF/resources` in total) | `git ls-files` on `main` @ `b2310a6ed` |
+| Asset syncs are hand-rolled submodule pointers | **18** `chore: update Manager UI assets (Manager@…)` commits on `main` in five weeks — roughly one every two days, each a human running a shell script | `git log --since=2026-08-11` |
+| Full-stack E2E runs against `labsai/eddi:latest`, so a backend break is caught late and blamed on the wrong repo | **The Manager's backend E2E on `main` has been red on every one of its last 15 runs (2026-08-26 → 2026-09-15).** Both DB legs fail on `resources-crud.fullstack` with *"Rules was created but never appeared in rulestore/rulesets/descriptors"*; the `API Integration` tier is skipped; only the MSW tier is green. Manager PRs stay green because they run MSW only — so the one cross-repo signal that exists is permanently red and, since no PR ever turns red, nobody is on the hook to fix it | `gh run list -R labsai/EDDI-Manager -w e2e.yml -b main` |
+| Mock drift is silent by construction | The Manager grew a **second hand-synced pointer**: `src/test/mocks/openapi-operations.json`, a snapshot of EDDI's OpenAPI operations that `openapi-contract.test.ts` checks the MSW handlers against. It is refreshed by hand against a *running* backend (`EDDI_URL=http://localhost:7070 npm run openapi:refresh`). Last refreshed **2026-08-25**; **14** backend commits have touched `IRest*.java` interfaces since. This is a well-built workaround for exactly the gap the monorepo closes — in one repo the snapshot is generated from the same commit in CI and drift becomes a red PR instead of a stale file | `.github/scripts/refresh-openapi-operations.mjs`, `git log -1 -- src/test/mocks/openapi-operations.json` |
+
+The Chat UI, by contrast, has gone **dormant**: zero commits on its default branch since
+2026-07-22, seven open PRs (six Renovate, one Mend), and the one in-flight human branch
+(`fix/release-6.2-polish`, two commits, pushed 2026-07-27) is still unmerged. That does not
+weaken the case for folding it in — it still cannot be built without a sibling backend
+checkout (§1) — but it does change the Phase-0 shape: the Chat half is cheap to port and its
+single blocker is a dependency CVE, not branch churn (§0.3).
+
+### 0.2 Corrections to facts the plan relied on
+
+Every row below has been folded into the body; this table exists so a reader of Revision 2
+can see what moved.
+
+| Was | Is | Plan sections touched |
+|---|---|---|
+| `EDDI-Chat-UI` default branch assumed `main` | **`master`** — `git fetch chat-origin main` in §5.1 would fail outright | §5.1 |
+| V1: three shell-serving resources | **Four** — `RestHtmlChatResource` serves `/chat` from `META-INF/resources/chat.html` by exact name, same pattern | §3 V1 |
+| V4/V5: Manager `public/` = ico + svg + `logo_eddi.png` + MSW worker | `logo_eddi.png` is **gone** from Manager `public/` (the sidebar now imports it from `src/assets/`). The backend's root `logo_eddi.png` is referenced by nothing — the shells use `/img/logo_eddi.png`, which Chat ships. Root copy is deleted, not single-sourced | §3 V4/V5, §6.4 |
+| V2/V3: multi-page build verified once; "same monolith" | **Re-executed 2026-09-15** on an isolated copy of Manager `main` @ `0870ae87`: still works — `main-<hash>.js/.css` shared by all three shells, `__auth_config__.js` and `.app-loader` preserved, no `dist/index.html`, 46 s. The bundle is **no longer a monolith**: Vite now emits a 4.3 MB `editor-registry-<hash>.js` chunk beside the entry. The §8.5 shipped-shell gate already follows every `/assets/*` reference in the HTML, so split chunks are covered as long as they are statically referenced; dynamically imported chunks are exercised only by the Playwright fullstack tier | §3 V2/V3 |
+| Manager `vite.config.ts` has no `build` block | It **has one** (`assetsInlineLimit` keeping woff2 fonts as files because EDDI's CSP is `font-src 'self'`) and already `define`s `__APP_VERSION__` from `pkg.version`. §6.2 merges into both, it does not add them | §6.2 |
+| `.github/scripts/` holds one script (`audit-prod`) | **Five**: `audit-prod.{mjs,d.mts}`, `check-i18n.{mjs,d.mts}`, `refresh-openapi-operations.mjs`, `assert-mutants-tested.mjs`; `package.json` references three of them (`audit:prod`, `i18n:check`, `openapi:refresh`) | §5.2, §8.3 |
+| Manager CI = `ci-cd.yml` + `e2e.yml` | Plus **`mutation.yml`** (Stryker on PRs + weekly cron + `assert-mutants-tested.mjs`), and `ci-cd.yml` now also runs `npm run i18n:check`. The Manager E2E workflow has **three** tiers (`UI E2E (MSW)`, `API Integration (mongodb)`, `Backend E2E (<db>)`), not two | §8.3, §8.5, §13 |
+| `ui/manager/.claude` is "local settings, never should have been tracked" | **Deliberately tracked** now: `launch.json`, `settings.local.json`, and three skills (`eddi-data`, `eddi-screens`, `eddi-ui`). Keep the skills and `launch.json`; only `settings.local.json` is a candidate for untracking | §5.2 |
+| Manager dependency updates: unspecified; §9.1 adds Dependabot | Manager (and Chat) run **Renovate** — `renovate.json` with automerge for minor/patch, 23 Renovate PRs to date, reviewer `kennethlynne`. EDDI runs Dependabot + `auto-approve-copilot.yml`. The monorepo must pick one; `renovate.json` is orphaned by the subtree unless the Renovate app is installed on `labsai/EDDI` | §9.1 |
+| "Keep Node 20" | Manager CI is still Node 20, but its own `mise.toml` now pins **`node = "v25.9.0"`**, and both frontends are on Vite 6 (needs ≥ 20.19). The decision stands (CI is the contract), but the Manager pin means local `mise` users already build on a different major — flag in §7.4 | §2, §7.4 |
+| V11: protection = `["CodeQL Analysis", "Build & Test"]` | **Unchanged.** Additionally `enforce_admins: true`. Two rulesets exist: one disabled, one (`Frozen release branches`) active on `refs/heads/release/*` only — no effect on `main` or this PR | §3 V11 |
+| V13: GitHub-managed CodeQL runs `Analyze (java-kotlin)` | Now also **`Analyze (python)`** (picked up `scripts/rotate-changelog.py`). Same conclusion: the settings-side surface auto-detects, and TypeScript must be enabled there too | §3 V13, §9.2 |
+| §8.6 re-exports `primary-tag` and `is-release` | `ci.yml` grew a **`redhat-publish`** job (reusable `redhat-certify.yml`) that reads `needs.docker.outputs.is-stable` and `.primary-tag` — **`is-stable` must be re-exported too**, and the job goes in the downstream-consumer table | §8.6 |
+| §8.8 "add a workflow-level concurrency group" | **Already present** (`ci-${{ github.workflow }}-${{ github.ref }}`, cancel on PRs only). Nothing to add | §8.8 |
+| `ci.yml` job list as of Revision 2 | Now also `shell-lint`, `manifest-lint` (`Deployment Manifests`), `redhat-publish`; ~1,700 lines. The `docker` job additionally cosign-signs and writes SLSA provenance — those steps stay in the publish job because they need the pushed digest; only the *build* moves to `build-image` (with `-Plicense-gen`, which the current command carries) | §8.4, §8.6 |
+| Pack growth "~90 MiB", "~1,079 commits" | Manager pack is **101.9 MiB**, 1,213 commits; Chat 1.95 MiB, 62 commits → **1,275** commits enter the gitleaks range | §4.3, §12 |
+| Manager: 30+ live branches | 28 remote branches, **5 open PRs** (4 Renovate + `#95 scheduled-ingest-service` from an external contributor, open since before Revision 2). Local checkout is clean and on `main` (the in-flight `feat/operator-write-scope` has landed) | §4.1 |
+
+### 0.3 Phase-0 scans run today (results, not predictions)
+
+| Gate | Manager | Chat | Consequence |
+|---|---|---|---|
+| `npm audit --omit=dev --audit-level=high` (§4.4) | **0 vulnerabilities** | **2 high** (`react-router-dom` → `react-router`) | `dependency-review` (`fail-on-severity: high`) **blocks the migration PR** as-is |
+| Trivy `fs` over both lockfiles, `--severity CRITICAL,HIGH --ignore-unfixed` (§4.2), run via `docker run aquasec/trivy` | **clean** | **6 HIGH** in `react-router 7.13.1` (CVE-2026-33245, -34077, -42211, -42342, -55685, GHSA-qwww-vcr4-c8h2; all fixed by **7.18.2**) | `trivy-scan` is `exit-code: 1` and gates `docker`: importing the Chat lockfile unfixed **stops every backend release** from the first push |
+| Gitleaks history scan (§4.3) | not run — `gitleaks` still not installed locally (V16) | same | Still a mandatory pre-step; 1,275 commits |
+
+The one concrete blocker is therefore a **single Chat bump**: `react-router-dom` / `react-router`
+to ≥ 7.18.2 in `labsai/EDDI-Chat-UI` (a Renovate PR for the router already sits open there),
+merged **before** the subtree import — or, as the last resort §4.2/§4.4 allow, in the import
+commit itself. Note the Chat audit above was run against the **committed** lockfile; the local
+checkout's lockfile is dirty (+227/−236) and must not be what gets imported.
+
+### 0.4 Was a smaller move considered?
+
+Yes, and rejected again. The alternatives to a monorepo are (a) have `e2e.yml` build the backend
+image from `labsai/EDDI` `main` instead of pulling `:latest`, and (b) publish a
+`labsai/eddi:main-<sha>` tag per push and pin it. Both fix *staleness* but not *attribution*:
+a backend PR still cannot run the Manager's tests before merging, so the red-on-main-only
+pattern of §0.1 persists — the failure just arrives sooner. Neither touches the 738 committed
+files, the manual OpenAPI snapshot, or the Chat UI's inability to build. The Chat's dormancy
+argues for the opposite of a scope cut: it is the *cheap* half, and leaving it out would keep
+`../EDDI` hard-wired into a repo nobody is maintaining.
+
+### 0.5 What this revision does not re-verify
+
+V7–V10 (Chat build output shape, tracked `dist/`, `emptyOutDir`, byte drift) were re-read, not
+re-executed; the Chat repo has not changed since they were taken. V12's `deny-licenses`
+deprecation note still holds (the workflow now documents it inline). The §10 skipped-check
+question is still open: PR #670 is `APPROVED` but `DIRTY` (changelog conflict, resolved by the
+merge that carries this revision), so it has not yet been possible to observe whether a
+docs-only PR with a skipped `Build & Test` reaches `mergeStateStatus: CLEAN`. **Check it on
+#670 once this merge is pushed** — it is the first clean observation available.
 
 ---
 
@@ -39,14 +127,14 @@ submodule pointers:
 2925707d7 chore: update Chat UI assets (chat-ui@71fa395)
 ```
 
-**562 files** sit in `src/main/resources/META-INF/resources/assets/` as committed build
-output. Nothing verifies they match the source that produced them — and they demonstrably
+**738 files** (562 when this plan was first written) sit in
+`src/main/resources/META-INF/resources/assets/` as committed build output. Nothing verifies they match the source that produced them — and they demonstrably
 don't stay in sync: a fresh build of `chat-ui.DHWeOytM.js` from the chat repo differs
 byte-wise from the committed copy of the **same filename** (line-ending normalization at
 commit time; see §3 evidence). That is the silent-drift failure mode in the wild.
 
 Neither frontend has an independent version, release, deployment, or consumer.
-`eddi-manager` is `"private": true`, version `6.2.0` — identical to `pom.xml`. Both ship
+`eddi-manager` is `"private": true`, version `6.4.0` — identical to `pom.xml`. Both ship
 inside the backend jar, in the backend's Docker image, under the backend's git tag. The
 standalone `Dockerfile` / `build-service.sh` in the Manager repo are confirmed relics.
 
@@ -54,6 +142,8 @@ standalone `Dockerfile` / `build-service.sh` in the Manager repo are confirmed r
 |---|---|
 | Full-stack E2E runs against `labsai/eddi:latest` pulled from Docker Hub — never the code under test | E2E runs against the image built from the PR's own commit |
 | Manager PRs are validated only against MSW mocks; mock drift is silent by construction | Same PR builds the real backend; the API-integration tier runs for free |
+| The Manager's backend E2E on `main` has been red on 15 consecutive runs (§0.1) with no PR ever going red for it | The break lands in the PR that causes it, on whichever side |
+| The Manager pins a hand-refreshed snapshot of EDDI's OpenAPI operations (`openapi-operations.json`, 3 weeks stale) | Generated from the same commit in CI; drift is a diff in the PR |
 | A backend PR that breaks a Manager contract is caught post-publish and blamed on the wrong repo | Caught in the PR that caused it |
 | Generated assets committed by a human running a shell script; provably drifted already | Built in CI, correct by construction |
 | Three HTML production shells orphaned from their source | They become Vite multi-page inputs (dry-run verified, §3) |
@@ -77,32 +167,34 @@ standalone `Dockerfile` / `build-service.sh` in the Manager repo are confirmed r
 
 ---
 
-## 3. Verified facts and dry-run evidence (2026-08-11)
+## 3. Verified facts and dry-run evidence (2026-08-11, re-checked 2026-09-15)
 
 An implementing agent can rely on these without re-deriving them. If reality disagrees with
 this table, stop and investigate before proceeding.
 
 | # | Fact | How verified |
 |---|---|---|
-| V1 | `/manage`, `/welcome/**`, `/workforce/**` are served by `RestManagerResource.java`, `RestWelcomeResource.java`, `RestWorkforceResource.java` reading `META-INF/resources/{manage,welcome,workforce}.html` from the classpath by exact name | grep of `src/main/java/ai/labs/eddi/ui/` |
-| V2 | **The multi-page Vite build works.** With `manage.html`/`welcome.html`/`workforce.html` as rollup inputs (each pointing at `/src/main.tsx`), `vite build` completed in ~29 s and emitted all three shells referencing one shared hashed entry (`/assets/main-<hash>.js` + `/assets/main-<hash>.css`), with `__auth_config__.js` and the `.app-loader` block preserved, and **no** `dist/index.html` | Executed locally in the Manager checkout, then reverted |
-| V3 | The entry chunk renames from `index-<hash>.js` to `main-<hash>.js` under multi-page inputs. Nothing references the old pattern (the deploy scripts that did are deleted by this plan). New bundle 8.36 MB vs committed 8.10 MB — same monolith, no regression | Dry-run output + `ls -la` on committed asset |
-| V4 | **Vite copies `public/` into dist root.** Manager `public/` = `eddi-icon.ico`, `eddi-icon.svg`, `logo_eddi.png`, **`mockServiceWorker.js`**. The MSW worker must be excluded from the shipped jar (§7.2) | Dry-run dist listing |
-| V5 | Manager `public/` icons are **byte-identical** to the backend's committed copies | `cmp` all three |
+| V1 | `/manage`, `/welcome/**`, `/workforce/**`, `/chat/**` are served by `RestManagerResource.java`, `RestWelcomeResource.java`, `RestWorkforceResource.java`, `RestHtmlChatResource.java` reading `META-INF/resources/{manage,welcome,workforce,chat}.html` from the classpath by exact name | grep of `src/main/java/ai/labs/eddi/ui/` (re-checked 2026-09-15) |
+| V2 | **The multi-page Vite build works.** With `manage.html`/`welcome.html`/`workforce.html` as rollup inputs (each pointing at `/src/main.tsx`), `vite build` emitted all three shells referencing one shared hashed entry (`/assets/main-<hash>.js` + `/assets/main-<hash>.css`), with `__auth_config__.js` and the `.app-loader` block preserved, and **no** `dist/index.html` | Executed 2026-08-11 in the Manager checkout (29 s); **re-executed 2026-09-15** on an isolated copy of Manager `main` @ `0870ae87` (46 s, same result) |
+| V3 | The entry chunk renames from `index-<hash>.js` to `main-<hash>.js` under multi-page inputs. Nothing references the old pattern (the deploy scripts that did are deleted by this plan). As of 2026-09-15 the bundle is **code-split** (a 4.3 MB `editor-registry-<hash>.js` chunk sits beside the entry) — the §8.5 gate follows every statically referenced `/assets/*` URL, so this needs no extra handling | Dry-run output, both dates |
+| V4 | **Vite copies `public/` into dist root.** Manager `public/` = `eddi-icon.ico`, `eddi-icon.svg`, **`mockServiceWorker.js`** (`logo_eddi.png` was removed from `public/` after Revision 2; the sidebar imports it from `src/assets/`). The MSW worker must be excluded from the shipped jar (§7.2) | Dry-run dist listing (2026-09-15) |
+| V5 | Manager `public/` icons are **byte-identical** to the backend's committed copies. The backend's root `logo_eddi.png` is referenced by nothing (all four shells use `/img/logo_eddi.png`, which Chat ships) and is deleted in §6.4 | `cmp` both icons; `grep logo_eddi` over shells + Manager `src/` |
 | V6 | Chat `public/` = `fonts/` (6 files) + `img/` (2 files), matching the backend's committed copies except `img/loading-indicator.svg`, which exists only in the backend and is **referenced nowhere** in any of the three repos | `diff -rq` + grep |
 | V7 | The chat build with `outDir: "dist"` emits exactly `chat.html` + `scripts/js/chat-ui.<hash>.js` + `scripts/css/chat-ui.<hash>.css` + the `public/` copy. (A `dist/index.html` seen mid-test was pre-existing tracked content, not Vite output) | Executed locally in the chat checkout, then reverted |
 | V8 | **`eddi-chat-ui` tracks files under `dist/`** (`dist/index.html`, `dist/assets/index-*.{js,css}`, `dist/fonts/**`, `dist/img/**`) despite `/dist` in its `.gitignore` — tracked files override ignore rules. These must be `git rm`'d (§5.2) | `git status` after test deletion showed `D dist/...` |
 | V9 | Chat sets `emptyOutDir: false` (to protect the old backend outDir). Must flip to `true` when retargeting to `dist/` (§6.3) | Read of `vite.config.ts:15` |
 | V10 | A fresh `chat-ui.DHWeOytM.js` differs byte-wise from the committed file of the same name — committed assets have already drifted (almost certainly LF/CRLF normalization at commit time) | `cmp` |
-| V11 | Branch protection on `labsai/EDDI` `main`: required checks are exactly `["CodeQL Analysis", "Build & Test"]` (job **names**), 1 review required, `required_linear_history: false`, all three merge methods allowed | `gh api repos/labsai/EDDI/branches/main/protection` |
+| V11 | Branch protection on `labsai/EDDI` `main`: required checks are exactly `["CodeQL Analysis", "Build & Test"]` (job **names**), 1 review required, `required_linear_history: false`, `enforce_admins: true`, all three merge methods allowed. Rulesets: one disabled; `Frozen release branches` is active but scoped to `refs/heads/release/*` (deletion + non-fast-forward only) and does not touch `main` | `gh api repos/labsai/EDDI/branches/main/protection` + `/rulesets` (re-checked 2026-09-15, unchanged) |
 | V12 | `dependency-review.yml` runs on every PR with `fail-on-severity: high` and `deny-licenses: GPL-3.0, AGPL-3.0` — the monorepo PR introduces the full npm dependency graphs to this gate at once. **Caveat:** the action now emits a deprecation warning that `deny-licenses` "is deprecated for possible removal in the next major release" (upstream issue 997), so do not build the license strategy on it long-term | Read of the workflow + the action's own PR comment on #670 |
-| V13 | There are **three** CodeQL surfaces, not two: the `codeql` job in `ci.yml`, the scheduled deep scan `codeql.yml` (both with their own `java-kotlin` language list), **and a GitHub-managed dynamic run** (`path: dynamic/github-code-scanning/codeql`, check name `Analyze (java-kotlin)`, surfaced as "Code Quality: PR #N"). The third is configured in **repo settings, not in any file in this repo**, so §9.2's TypeScript enablement is two file edits *plus* a settings change | Read of both workflows + `gh api repos/labsai/EDDI/actions/runs/<id>` on PR #670 |
+| V13 | There are **three** CodeQL surfaces, not two: the `codeql` job in `ci.yml`, the scheduled deep scan `codeql.yml` (both with their own `java-kotlin` language list), **and a GitHub-managed dynamic run** (`path: dynamic/github-code-scanning/codeql`, check names `Analyze (java-kotlin)` and — since a Python script landed under `scripts/` — `Analyze (python)`, surfaced as "Code Quality: PR #N"). The third is configured in **repo settings, not in any file in this repo**, so §9.2's TypeScript enablement is two file edits *plus* a settings change | Read of both workflows + check-runs on `main` @ `b2310a6ed` (2026-09-15) |
 | V13b | As of `00420daa5` the ci.yml `codeql` job is **deliberately ungated** — no `needs: detect-changes`, no `if:` — so it builds with Maven on *every* PR including docs-only ones (done so OpenSSF Scorecard sees a SAST run on each PR head SHA). This makes its `-DskipUi=true` (§8.2) load-bearing: without it, every docs-only PR would run the full npm build | Read of ci.yml on current main |
 | V14 | `sbom` job invokes `cyclonedx:makeBom` as a direct plugin goal — it runs **no lifecycle phases** and therefore will not trigger the frontend build; it needs no `skipUi` flag | Maven invocation semantics + workflow read |
 | V15 | `git subtree` is available in the local Git for Windows | `git subtree -h` |
 | V16 | `gitleaks` is **not** installed locally; the Phase-0 history pre-scan (§4.3) needs it installed first | `command -v gitleaks` |
 | V17 | Maven lifecycle: `generate-resources` precedes `compile`, so **every** `mvnw compile/test/verify` triggers the frontend build unless `-DskipUi=true` (§7.4) | Lifecycle definition |
-| V18 | `.gitattributes` has three `linguist-generated` entries pointing at the committed bundles, plus a comment claiming chat-ui is "a separate repo" — all stale after this migration (§6.5) | Read |
+| V18 | `.gitattributes` has three `linguist-generated` entries pointing at the committed bundles, plus a comment claiming chat-ui is "a separate repo" — all stale after this migration (§6.5) | Read (still true 2026-09-15) |
+| V19 | `pom.xml` (6.4.0) declares **no** `<resources>` block and no frontend plugin — §7.1/§7.2 add both; nothing to merge with | Read of `pom.xml` on `main` (2026-09-15) |
+| V20 | `labsai/EDDI-Chat-UI`'s default branch is **`master`**, not `main` | `gh repo view` (2026-09-15) |
 
 ---
 
@@ -120,10 +212,12 @@ this table, stop and investigate before proceeding.
 
 ### 4.1 Branch and worktree freeze
 
-`EDDI-Manager` has 30+ live branches, and **as of writing the local checkouts themselves sit
-on unmerged feature branches** (`EDDI-Manager` on `feat/operator-write-scope`, `eddi-chat-ui`
-on `fix/release-6.2-polish`) plus active `.claude/worktrees/` in the Manager. The migration
-orphans all of it.
+`EDDI-Manager` has 28 remote branches and 5 open PRs (as of 2026-09-15: four Renovate PRs and
+`#95 scheduled-ingest-service` from an external contributor). The Manager checkout is clean
+and on `main`, but **the Chat checkout still sits on the unmerged `fix/release-6.2-polish`**
+(two commits, pushed 2026-07-27, never merged — the committed backend bundle was built from
+`master` @ `71fa395`, so those two fixes have never shipped) with a dirty `package-lock.json`.
+The migration orphans all of it.
 
 1. Merge or close everything mergeable; land the two in-flight local branches.
 2. Announce a freeze on both repos.
@@ -148,14 +242,19 @@ checkout with both lockfiles copied in:
 trivy fs --severity CRITICAL,HIGH --ignore-unfixed --exit-code 1 .
 ```
 
-If it fails, fix or `.trivyignore` (with justification) **as a preparatory PR in
-EDDI-Manager** before the migration. Note `.trivyignore` is read from the PR checkout, so
+**Run on 2026-09-15 (via `docker run aquasec/trivy`, since `trivy` is not installed):** the
+Manager lockfile is clean; the Chat lockfile has **six HIGH** findings, all in `react-router
+7.13.1`, all fixed by **7.18.2** (§0.3). That bump is the one preparatory PR this gate needs.
+
+If it fails, fix or `.trivyignore` (with justification) **as a preparatory PR in the source
+repo** before the migration. Note `.trivyignore` is read from the PR checkout, so
 last-resort entries *can* ride in the migration PR itself — but prefer fixing first.
 
 ### 4.3 Gitleaks history pre-scan — **sequencing trap, read carefully**
 
 The `gitleaks` CI job scans `PR_BASE..PR_HEAD` — and for the migration PR that range contains
-**the entire imported history of both repos** (~1,079 commits). Any historical test fixture,
+**the entire imported history of both repos** (1,213 Manager + 62 Chat = **1,275** commits as
+of 2026-09-15). Any historical test fixture,
 MSW mock token, or storage-state file that pattern-matches a secret fails the PR.
 
 The trap: the CI job deliberately takes `.gitleaksignore` **from the base branch** on PRs
@@ -185,6 +284,9 @@ npx license-checker-rseidelsohn --production --excludePrivatePackages \
   --failOn 'GPL-3.0;AGPL-3.0'                  # or equivalent license sweep
 ```
 
+**Run on 2026-09-15:** Manager 0 vulnerabilities; Chat **2 high** (the same `react-router`
+chain as §4.2). License sweep not run.
+
 Resolve findings in the source repos first. Unlike gitleaks, this action's config lives in
 the workflow file and is read from the PR's merge ref, so a config adjustment *can* ride in
 the migration PR if a finding is genuinely unactionable — but treat that as last resort.
@@ -195,7 +297,7 @@ the migration PR if a finding is genuinely unactionable — but treat that as la
 git rev-parse HEAD                                        # backend baseline
 git -C ../EDDI-Manager rev-parse origin/main              # manager baseline
 git -C ../eddi-chat-ui rev-parse origin/main              # chat baseline
-git ls-files src/main/resources/META-INF/resources | wc -l   # expect 583
+git ls-files src/main/resources/META-INF/resources | wc -l   # 759 on 2026-09-15 (583 in Aug); record the actual number
 ```
 
 Record the current hashed asset names from `manage.html` (e.g. `index-CeAE4N_O.js`) — after
@@ -232,27 +334,33 @@ git checkout -b chore/monorepo-migration origin/main
 git remote add manager-origin https://github.com/labsai/EDDI-Manager.git
 git remote add chat-origin    https://github.com/labsai/EDDI-Chat-UI.git
 git fetch manager-origin main
-git fetch chat-origin main
+git fetch chat-origin master       # Chat's default branch is `master`, not `main` (V20)
 
 git subtree add --prefix=ui/manager manager-origin main
-git subtree add --prefix=ui/chat    chat-origin    main
+git subtree add --prefix=ui/chat    chat-origin    master
 
 git remote remove manager-origin
 git remote remove chat-origin
 ```
 
-> Use `main` from the **remotes** — the local sibling checkouts sit on feature branches.
+> Use the default branches from the **remotes** — the local Chat checkout sits on an
+> unmerged feature branch with a dirty lockfile (§4.1).
 
-Expect pack growth ~173 → ~260 MiB. Accepted (§2).
+Expect pack growth of roughly the Manager's 102 MiB plus the Chat's 2 MiB. Accepted (§2).
 
 ### 5.2 Delete what does not survive the move
 
-First, move the audit script that `package.json` references **before** deleting `.github`:
+First, move the **five** helper scripts that `package.json` and the workflows reference
+**before** deleting `.github` (there was one when this plan was written; §0.2):
 
 ```bash
 mkdir -p ui/manager/scripts
-git mv ui/manager/.github/scripts/audit-prod.mjs   ui/manager/scripts/audit-prod.mjs
-git mv ui/manager/.github/scripts/audit-prod.d.mts ui/manager/scripts/audit-prod.d.mts
+git mv ui/manager/.github/scripts/audit-prod.mjs                 ui/manager/scripts/
+git mv ui/manager/.github/scripts/audit-prod.d.mts               ui/manager/scripts/
+git mv ui/manager/.github/scripts/check-i18n.mjs                 ui/manager/scripts/
+git mv ui/manager/.github/scripts/check-i18n.d.mts               ui/manager/scripts/
+git mv ui/manager/.github/scripts/refresh-openapi-operations.mjs ui/manager/scripts/
+git mv ui/manager/.github/scripts/assert-mutants-tested.mjs      ui/manager/scripts/
 ```
 
 Then delete (use `git rm --ignore-unmatch` for the deploy scripts — some copies are
@@ -265,13 +373,21 @@ git rm --ignore-unmatch ui/manager/deploy-to-local-eddi-repo.sh ui/manager/deplo
 git rm -r ui/manager/.husky
 git rm --ignore-unmatch ui/chat/deploy-to-local-eddi-repo.ps1 ui/chat/deploy-to-local-eddi-repo.sh
 git rm -r --ignore-unmatch ui/chat/dist          # tracked build output (V8)
-git rm -r --cached --ignore-unmatch ui/manager/.claude   # local settings, never should have been tracked
+git rm --cached --ignore-unmatch ui/manager/.claude/settings.local.json   # machine-local; the skills and launch.json are deliberately tracked (§0.2)
 ```
+
+Also delete `ui/manager/renovate.json` once §9.1's decision is Dependabot (it is orphaned
+either way: the Renovate app is installed on the old repos, not on `labsai/EDDI`).
 
 In `ui/manager/package.json`:
 - `"audit:prod"` → `node scripts/audit-prod.mjs`
+- `"i18n:check"` → `node scripts/check-i18n.mjs`
+- `"openapi:refresh"` → `node scripts/refresh-openapi-operations.mjs`
 - remove `"prepare": "husky"`
 - remove the now-dead `"lint-staged"` config block
+
+`ui/manager/.github/workflows/mutation.yml` (Stryker) is deleted with the rest of `.github`;
+its replacement is a §13 follow-up, not part of the migration PR.
 
 > **Accepted loss:** the Manager's pre-commit hook (lint-staged + tsc). CI runs both anyway.
 
@@ -323,14 +439,17 @@ In each moved file, replace the two hashed asset tags:
 (Vite leaves absolute non-module scripts alone; Quarkus serves it at runtime), the inline
 `.app-loader` style block and loader markup, and the favicon link.
 
-### 6.2 Manager `vite.config.ts` — add the `build` block
+### 6.2 Manager `vite.config.ts` — extend the existing `build` block
 
-The file already imports `fileURLToPath, URL` from `node:url`. Add alongside the existing
-`server` block (everything else — the ~45 proxy entries, `define`, `resolve`, `optimizeDeps`,
-`worker` — stays untouched):
+The file already imports `fileURLToPath, URL` from `node:url` and — since Revision 2 —
+**already has a `build` block** (an `assetsInlineLimit` that keeps woff2 fonts as files
+because EDDI serves the Manager under `font-src 'self'`). Add `rollupOptions` **inside that
+block**; do not add a second `build` key, and keep `assetsInlineLimit` (everything else — the
+~45 proxy entries, `resolve`, `optimizeDeps`, `worker` — stays untouched):
 
 ```ts
   build: {
+    assetsInlineLimit: /* existing — keep */ ...,
     // dist/ is copied into the Quarkus jar by maven-resources-plugin (§7.2).
     // index.html is deliberately NOT an input — it is the dev-server entry only.
     // The backend keeps its own hand-written index.html redirect shell.
@@ -345,7 +464,8 @@ The file already imports `fileURLToPath, URL` from `node:url`. Add alongside the
 ```
 
 Also inject the Maven version so the sidebar's `EDDI Demo ${__APP_VERSION__}` stops drifting
-from `pom.xml` (§7.2 passes the env var):
+from `pom.xml` (§7.2 passes the env var). The `define` block **already exists** with
+`JSON.stringify(pkg.version)`; change that one expression:
 
 ```ts
   define: {
@@ -357,8 +477,11 @@ from `pom.xml` (§7.2 passes the env var):
 - `dist/manage.html`, `dist/welcome.html`, `dist/workforce.html` exist; **no `dist/index.html`**
 - all three reference the **same** `/assets/main-<hash>.js` and `/assets/main-<hash>.css`
 - `__auth_config__.js` + `.app-loader` present in each
-- `dist/` root additionally contains `eddi-icon.ico`, `eddi-icon.svg`, `logo_eddi.png`,
-  `mockServiceWorker.js` (the `public/` copy — the worker is excluded later at §7.2)
+- `dist/` root additionally contains `eddi-icon.ico`, `eddi-icon.svg`, `mockServiceWorker.js`
+  (the `public/` copy — the worker is excluded later at §7.2). `logo_eddi.png` is **not**
+  there any more (V4)
+- `dist/assets/` contains the entry **plus** at least one large split chunk
+  (`editor-registry-<hash>.js`, V3) — expected, not a leak
 
 ### 6.3 Chat `vite.config.ts` — verify only (already retargeted in §5.3)
 
@@ -375,8 +498,9 @@ Every static file gets exactly one source of truth. Ownership after this step:
 | File(s) | Single source | Rationale |
 |---|---|---|
 | `index.html` (redirect shell), `robots.txt`, `scripts/js/landing-redirect.js` | **backend** `src/main/resources` | Hand-written, no frontend build involved |
-| `eddi-icon.ico`, `eddi-icon.svg`, `logo_eddi.png` | **`ui/manager/public/`** | Byte-identical today (V5); Manager dist provides them |
-| `fonts/**`, `img/favicon.ico`, `img/logo_eddi.png` | **`ui/chat/public/`** | Chat dist provides them (V6) |
+| `eddi-icon.ico`, `eddi-icon.svg` | **`ui/manager/public/`** | Byte-identical today (V5); Manager dist provides them |
+| `fonts/**`, `img/favicon.ico`, `img/logo_eddi.png` | **`ui/chat/public/`** | Chat dist provides them (V6); all four shells reference `/img/logo_eddi.png` |
+| `logo_eddi.png` (root) | **deleted** | Manager no longer ships it (V4) and nothing references the root copy (V5) |
 | `img/loading-indicator.svg` | **deleted** | Referenced nowhere in any repo (V6) |
 | `assets/**`, `manage/welcome/workforce/chat.html`, `chat-ui.*` bundles | **build output** | Never committed again |
 
@@ -619,6 +743,11 @@ curl -s -o /dev/null -w "%{http_code}" localhost:7070/mockServiceWorker.js   # e
   `./mvnw quarkus:dev -DskipUi=true`.
 - Quarkus live-reload never rebuilds the UI. Frontend dev continues exactly as today:
   `npm run dev` in `ui/manager` (port 3000, proxies to :7070).
+- **Node versions:** Maven vendors `v20.19.0` (§7.1) and CI uses Node 20, matching the Manager's
+  own CI — but the Manager's `mise.toml` pins `node = "v25.9.0"` and both frontends are on
+  Vite 6 (≥ 20.19 required). Local `mise` users therefore already build on a different major
+  than CI. Reconcile in the root `mise.toml` (one `node` pin for the repo) as part of §9.4; the
+  §2 "keep Node 20" decision is about *CI*, and a later bump remains its own change.
 - `.dockerignore` needs no change (deny-all + `target/quarkus-app/**` allowlist; the UI now
   travels inside the app jar).
 
@@ -653,12 +782,16 @@ the reference tables exactly.
 Gated on `needs.detect-changes.outputs.ui == 'true'`. Node 20,
 `cache: npm`, `cache-dependency-path: ui/*/package-lock.json`.
 
-In `ui/manager`: `npm ci` → `npm run audit:prod` → `npm run lint` → `npm run typecheck` →
-`npx vitest run --coverage` → `npx playwright install --with-deps chromium` →
-`npm run test:e2e` (MSW tier, ~184 tests, no backend) → upload `playwright-report/` +
-`coverage/`. Then in `ui/chat`: `npm ci` → `npm run typecheck` → `npm test`.
+In `ui/manager`: `npm ci` → `npm run audit:prod` → `npm run lint` → `npm run i18n:check` →
+`npm run typecheck` → `npx vitest run --coverage` (this includes `openapi-contract.test.ts`,
+which checks the MSW handlers against the committed `openapi-operations.json` snapshot) →
+`npx playwright install --with-deps chromium` → `npm run test:e2e` (MSW tier, no backend) →
+upload `playwright-report/` + `coverage/`. Then in `ui/chat`: `npm ci` → `npm run typecheck`
+→ `npm test`.
 
-Replaces the old Manager `ci-cd.yml` and the `ui-tests` job of its `e2e.yml` one-for-one.
+Replaces the old Manager `ci-cd.yml` and the `UI E2E (MSW)` job of its `e2e.yml` one-for-one.
+The Manager's `mutation.yml` (Stryker, PR + weekly) is **not** carried over in the migration
+PR — see §13.
 
 ### 8.4 New job: `build-image`
 
@@ -760,6 +893,7 @@ short-circuit) and the no-`always()` comment. Change:
     outputs:
       primary-tag: ${{ needs.build-image.outputs.primary-tag }}
       is-release:  ${{ needs.build-image.outputs.is-release }}
+      is-stable:   ${{ needs.build-image.outputs.is-stable }}
 ```
 
 | Downstream consumer | What it reads | Breaks without re-export |
@@ -767,8 +901,11 @@ short-circuit) and the no-`always()` comment. Change:
 | `release` | `needs.docker.outputs.primary-tag` | GitHub Release body wrong/empty |
 | `smoke-test` | `needs.docker.outputs.primary-tag` | signature verify + run target empty |
 | `preflight-push` | `needs.docker.outputs.primary-tag`, `is-release` | pulls empty tag |
+| `redhat-publish` (added after Revision 2; reusable `redhat-certify.yml`) | `needs.docker.outputs.is-stable`, `primary-tag` | never runs on a stable tag, or certifies an empty version |
 
-`smoke-test`, `release`, `preflight-push` themselves need no other changes.
+`smoke-test`, `release`, `preflight-push`, `redhat-publish` themselves need no other changes.
+The cosign signature and SLSA attestation steps **stay in `docker`** — they sign the pushed
+digest, which does not exist until this job pushes.
 
 #### 8.6b Gating publish on UI health — use an aggregator, never a bare `needs`
 
@@ -811,15 +948,10 @@ duplicate Maven+npm+Docker build per PR and preflights the actual artifact.
 
 ### 8.8 Concurrency and notifications
 
-- Add a workflow-level concurrency group (the pipeline is now much heavier):
-
-```yaml
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-```
-
-  (Never cancel main/tag pipelines mid-publish.)
+- A workflow-level concurrency group **already exists** (`ci-${{ github.workflow }}-${{
+  github.ref }}`, cancel-in-progress on PRs only — added after Revision 2). Nothing to add;
+  just do not remove it, the pipeline is now much heavier and main/tag runs must never be
+  cancelled mid-publish.
 - `notify-slack`: add `ui-build-and-test`, `build-image`, `e2e-fullstack` to `needs:` and to
   the status-fields block, following the existing `status_icon` pattern.
 
@@ -830,6 +962,15 @@ concurrency:
 ## 9. Phase 5 — Repository housekeeping
 
 ### 9.1 `.github/dependabot.yml` — add npm ecosystems
+
+> **Decision required first (new since Revision 2):** the Manager and the Chat UI run
+> **Renovate** (`renovate.json`: pin devDependencies, automerge minor/patch once CI is green,
+> `react-router` majors blocked, reviewer `kennethlynne`; 23 Renovate PRs on the Manager so
+> far). EDDI runs **Dependabot** plus `auto-approve-copilot.yml`. Two bots on one repo is the
+> one option that is clearly wrong. Recommended: Dependabot (below), delete `renovate.json`
+> in §5.2, and accept that minor/patch automerge is lost unless `auto-approve-copilot.yml` is
+> extended to npm — check that before deciding, because Renovate's automerge is what kept the
+> Manager's dependency PR count at five.
 
 ```yaml
   - package-ecosystem: npm
@@ -978,9 +1119,10 @@ Add `ui/manager/` and `ui/chat/` entries mirroring the backend rules.
 | Risk | Severity | Mitigation |
 |---|---|---|
 | Squash-merge of the migration PR destroys imported history | **High** | §2 decision + §4.6 + PR description warning |
-| Gitleaks scans 1,079 imported commits; ignores only honored from base branch | **High** | §4.3 pre-scan; land `.gitleaksignore` on main **first** |
-| dependency-review blocks the PR on npm CVEs/licenses | **High** | §4.4 pre-check in source repos |
-| Trivy fs scan newly gates backend releases on npm CVEs | **High** | §4.2 scratch scan before merge |
+| Gitleaks scans 1,275 imported commits; ignores only honored from base branch | **High** | §4.3 pre-scan; land `.gitleaksignore` on main **first** |
+| dependency-review blocks the PR on npm CVEs/licenses — **confirmed live for Chat (§0.3)** | **High** | §4.4 pre-check in source repos; bump `react-router` ≥ 7.18.2 in Chat first |
+| Trivy fs scan newly gates backend releases on npm CVEs — **confirmed live for Chat (§0.3)** | **High** | §4.2 scratch scan before merge; same bump |
+| Subtree import fails because Chat's default branch is `master` | Low | §5.1 / V20 |
 | 30+ orphaned Manager branches / in-flight local work | **High** | §4.1 freeze + `git am --directory=` recipe |
 | Matrixing the CodeQL job renames its check and wedges `main` on a required context that never reports | **High** | §9.2 warning — distinct job names + protection update in the same change |
 | Adding `ui-build-and-test` to `docker.needs` silently stops publishing on backend-only pushes (skipped dependency ⇒ skipped dependent) | **High** | §8.6b `ui-gate` aggregator |
@@ -992,7 +1134,7 @@ Add `ui/manager/` and `ui/chat/` entries mirroring the backend rules.
 | CI/dev builds slow down from unconditional npm | Medium | §8.2 skipUi wiring + §7.4 dev docs |
 | Multi-page build regression blanks a shell | Medium | Dry-run verified (V2); §8.5 shipped-shell gate makes it permanent |
 | `ui/node/` accidentally committed | Low | §6.4 gitignore (exact-path entry) |
-| ~90 MiB pack growth | Low | Accepted; irreversible without forbidden history rewrite |
+| ~104 MiB pack growth | Low | Accepted; irreversible without forbidden history rewrite |
 | Version drift `pom.xml` ↔ UI footer | Low | §7.2 `EDDI_VERSION` injection |
 
 **Rollback:** every phase is its own commit; nothing force-pushed; `git revert` unwinds any
@@ -1003,7 +1145,12 @@ the source repos until the monorepo has been green for a full release cycle.
 
 ## 13. Explicitly out of scope (each is its own later change)
 
-- Node 20 → 22; npm workspaces
+- Node 20 → 22 (or the Manager's own `mise` pin of 25); npm workspaces
+- Porting the Manager's Stryker mutation workflow (`mutation.yml` + `assert-mutants-tested.mjs`)
+  as a path-gated, scheduled job in `ci.yml`
+- Generating `ui/manager/src/test/mocks/openapi-operations.json` in CI from the freshly built
+  image (the `e2e-fullstack` job already has a running backend) and failing on drift — this
+  replaces the hand-run `npm run openapi:refresh`
 - The 13 backend ITs with no PostgreSQL twin (`A2aEndpointIT`, `ComplexRulesAgentEngineIT`,
   `CreateApiAgentIT`, `GroupHitlIT`, `HitlPauseResumeIT`, `HitlToolPauseResumeIT`,
   `HttpCallsAgentEngineIT`, `ImportMergeIT`, `LlmAgentEngineIT`, `LogAdminIT`,
