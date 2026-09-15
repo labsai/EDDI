@@ -20,7 +20,7 @@ type: application
 # messagingType is not in-memory. An upgrade that keeps an old values file
 # either fails to render or silently drops a setting.
 version: 2.0.0
-appVersion: "6.3.0"
+appVersion: "6.4.0"
 home: https://eddi.labs.ai
 sources:
   - https://github.com/labsai/EDDI
