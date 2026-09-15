@@ -16,6 +16,9 @@ import ai.labs.eddi.configs.IRestVersionInfo;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.apicalls.IApiCallsStore;
+import ai.labs.eddi.configs.connections.IConnectionStore;
+import ai.labs.eddi.configs.connections.IRestConnectionStore;
+import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
 import ai.labs.eddi.configs.dictionary.IDictionaryStore;
 import ai.labs.eddi.configs.llm.ILlmStore;
 import ai.labs.eddi.configs.mcpcalls.IMcpCallsStore;
@@ -113,6 +116,12 @@ public class RestImportService extends AbstractBackupService implements IRestImp
      * Absent when it left out none, which is every import that does not filter.
      */
     static final String HEADER_SCHEDULES_SKIPPED = "X-Schedules-Skipped";
+    /**
+     * How many of the archive's connections were not imported — because a
+     * connection of that name already exists here, or because this deployment
+     * refused the document. Absent when every one landed.
+     */
+    static final String HEADER_CONNECTIONS_SKIPPED = "X-Connections-Skipped";
 
     private final Path tmpPath = Paths.get(FileUtilities.buildPath(System.getProperty("user.dir"), "tmp", "import"));
     private final IZipArchive zipArchive;
@@ -581,6 +590,10 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         // blows up.
         importSnippets(Paths.get(targetDirPath), isMerge, transaction);
 
+        // Connections are global too, and the configs about to be imported reference
+        // them by name — so they land first, and never over a live one.
+        int connectionsNotImported = importConnections(Paths.get(targetDirPath), transaction);
+
         URI lastAgentUri = null;
         int schedulesNotImported = 0;
         for (var agentFilePath : singleAgentFileIn(Paths.get(targetDirPath))) {
@@ -641,6 +654,12 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 // A script that restores an agent has no reason to read this instance's
                 // log, so the count travels with the answer it gets.
                 created.header(HEADER_SCHEDULES_SKIPPED, schedulesNotImported);
+            }
+            if (connectionsNotImported > 0) {
+                // Same reasoning: a connection that already existed, or that this
+                // deployment refused, is a decision the caller should learn from the
+                // answer rather than from the server log.
+                created.header(HEADER_CONNECTIONS_SKIPPED, connectionsNotImported);
             }
             return created.build();
         }
@@ -1163,6 +1182,200 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             return URI.create(IRestRagStore.resourceURI + localId + IRestRagStore.versionQueryParam + (localVersion + 1));
         }
         return createResourceDirect(IRagStore.class, config, IRestRagStore.resourceURI, transaction);
+    }
+
+    // ==================== Connection Import ====================
+
+    /**
+     * Creates the connections an archive carries — and only the ones this
+     * deployment does not have yet.
+     * <p>
+     * A connection document is configuration — a name, an auth shape, vault
+     * references and an allowlist — so it travels with the agent that references
+     * it; without this an httpcall header reading {@code ${connection:jira}}
+     * dangled after every import. Two rules keep it from being anything more:
+     * <ul>
+     * <li><b>Never overwrite.</b> A connection of the same name already on the
+     * target is a live credential configuration, possibly with linked accounts
+     * whose grants are filed under that name. The archived one is skipped whatever
+     * the strategy, and the skip is counted on the response.</li>
+     * <li><b>Same gate as REST.</b> The create goes through
+     * {@code RestConnectionStore.createConnection}, so the structural validation,
+     * the deployment checks (PER_USER and CALLER_SUPPLIED need OIDC, OAuth needs an
+     * active vault) and the durable name claim all apply. A refused connection is a
+     * skipped one with its reason in the log, not a failed import — the agent is
+     * still worth having, and the refusal names what to fix.</li>
+     * </ul>
+     * Grants are never in an archive, so nothing here touches them. The descriptor
+     * is normally written by {@code RestConnectionStore} itself, as part of the
+     * create; {@link #recordCreatedConnection} writes one only when it is missing,
+     * for the same reason {@link #createResourceDirect} writes one: the filter that
+     * otherwise does so runs on HTTP responses only, and a connection without a
+     * descriptor is invisible to {@code ${connection:…}} resolution.
+     *
+     * @return how many archived connections were NOT imported
+     */
+    private int importConnections(Path targetDirPath, ImportTransaction transaction) {
+        Path connectionsDir = findArchiveDir(targetDirPath, CONNECTIONS_DIR);
+        if (connectionsDir == null || !Files.exists(connectionsDir)) {
+            return 0;
+        }
+        int imported = 0;
+        int skipped = 0;
+        try (var files = Files.newDirectoryStream(connectionsDir, p -> p.toString().endsWith("." + CONNECTION_EXT + ".json"))) {
+            IRestConnectionStore restConnectionStore = getRestResourceStore(IRestConnectionStore.class);
+            IConnectionStore connectionStore = getRestResourceStore(IConnectionStore.class);
+            for (Path file : files) {
+                String name = null;
+                try {
+                    ConnectionConfiguration connection = jsonSerialization.deserialize(normalizeVaultReferences(readFile(file)),
+                            ConnectionConfiguration.class);
+                    if (connection == null || connection.getName() == null || connection.getName().isBlank()) {
+                        skipped++;
+                        LOGGER.warnf("Connection file %s carries no name and was not imported",
+                                LogSanitizer.sanitize(String.valueOf(file.getFileName())));
+                        continue;
+                    }
+                    name = connection.getName();
+                    if (connectionStore.idOfName(ConnectionConfiguration.effectiveTenant(connection), name) != null) {
+                        skipped++;
+                        LOGGER.infof("Connection '%s' already exists and was not imported: an archive never overwrites a live connection's "
+                                + "credential configuration", LogSanitizer.sanitize(name));
+                        continue;
+                    }
+                    Response response = restConnectionStore.createConnection(connection);
+                    checkIfCreatedResponse(response);
+                    recordCreatedConnection(response, connection, connectionStore, transaction);
+                    imported++;
+                } catch (ConnectionImportFailure e) {
+                    // Not a skip: a connection WAS created and could not be accounted for,
+                    // so the whole import fails and the outer rollback removes it.
+                    throw e;
+                } catch (WebApplicationException e) {
+                    // A 400 from validation or the deployment checks, or a 409 from the
+                    // name race: the reason is the message, and the agent is still worth
+                    // importing without it.
+                    skipped++;
+                    LOGGER.warnf("Connection '%s' from %s was refused and not imported: %s", LogSanitizer.sanitize(name),
+                            LogSanitizer.sanitize(String.valueOf(file.getFileName())), LogSanitizer.sanitize(e.getMessage()));
+                } catch (Exception e) {
+                    skipped++;
+                    LOGGER.warnf("Failed to import connection from %s: %s", LogSanitizer.sanitize(String.valueOf(file.getFileName())),
+                            LogSanitizer.sanitize(e.getMessage()));
+                }
+            }
+        } catch (IOException e) {
+            LOGGER.warnf("Could not read the archive's connections: %s", LogSanitizer.sanitize(e.getMessage()));
+        }
+        if (imported > 0 || skipped > 0) {
+            LOGGER.infof("Connections: imported %d, skipped %d", imported, skipped);
+        }
+        return skipped;
+    }
+
+    /**
+     * Records a connection this import created — so a later failure rolls it back —
+     * and makes sure it has a descriptor, without which the name never resolves.
+     * <p>
+     * {@code RestConnectionStore.createConnection} writes the descriptor itself,
+     * inside its name lock, so the usual outcome here is finding it and doing
+     * nothing. Writing one only when it is missing keeps the import self-sufficient
+     * — no response filter runs on an in-process call — without ever producing a
+     * second descriptor for one document.
+     * <p>
+     * A create this cannot account for fails the whole import rather than being
+     * logged: a 201 carrying no usable {@code X-Resource-URI}, or a descriptor that
+     * cannot be written. Either way a connection now exists that the import could
+     * not roll back, or whose name never resolves, and reporting success over it is
+     * how an import leaves one behind. The failure escapes the per-connection skip
+     * so the outer rollback runs. A descriptor the store already wrote is success.
+     */
+    private void recordCreatedConnection(Response createResponse, ConnectionConfiguration connection, IConnectionStore connectionStore,
+                                         ImportTransaction transaction) {
+        if (createResponse.getStatus() != 201) {
+            return;
+        }
+        String createdUri = createResponse.getHeaderString("X-Resource-URI");
+        URI resourceUri = null;
+        IResourceId resourceId = null;
+        if (createdUri != null && !createdUri.isBlank()) {
+            try {
+                resourceUri = URI.create(createdUri);
+                resourceId = RestUtilities.extractResourceId(resourceUri);
+            } catch (RuntimeException e) {
+                resourceId = null;
+            }
+        }
+        if (resourceId == null || resourceId.getId() == null) {
+            recordCreatedByName(connection, connectionStore, transaction);
+            throw new ConnectionImportFailure("Connection '" + connection.getName() + "' was created, but the create answer carried no "
+                    + "usable resource URI, so this import cannot account for it. The import is rolled back.");
+        }
+        transaction.recordCreated(IConnectionStore.class, resourceId);
+        try {
+            if (documentDescriptorStore.readDescriptor(resourceId.getId(), resourceId.getVersion()) != null) {
+                return;
+            }
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            // Absent: the store could not write it, so it falls to us.
+        } catch (Exception e) {
+            LOGGER.warnf("Could not check whether connection %s has a descriptor: %s", LogSanitizer.sanitize(resourceId.getId()),
+                    LogSanitizer.sanitize(e.getMessage()));
+        }
+        try {
+            documentDescriptorStore.createDescriptor(resourceId.getId(), resourceId.getVersion(),
+                    resourceAccessGuard.stampNewDescriptor(createDocumentDescriptor(resourceUri)));
+        } catch (Exception e) {
+            throw new ConnectionImportFailure("Connection '" + connection.getName() + "' (id " + resourceId.getId() + ") was created, but its "
+                    + "descriptor could not be written, so ${connection:" + connection.getName() + "} would never resolve to it. The import "
+                    + "is rolled back.", e);
+        }
+    }
+
+    /**
+     * Records a created connection the create answer did not identify, by the name
+     * it was created under, so the rollback can still remove it. The name was free
+     * immediately before the create, so its holder now is the document this request
+     * wrote.
+     */
+    private static void recordCreatedByName(ConnectionConfiguration connection, IConnectionStore connectionStore,
+                                            ImportTransaction transaction) {
+        try {
+            String id = connectionStore.idOfName(ConnectionConfiguration.effectiveTenant(connection), connection.getName());
+            if (id == null) {
+                return;
+            }
+            transaction.recordCreated(IConnectionStore.class, new IResourceId() {
+                @Override
+                public String getId() {
+                    return id;
+                }
+
+                @Override
+                public Integer getVersion() {
+                    return null;
+                }
+            });
+        } catch (Exception e) {
+            LOGGER.errorf("Created connection '%s' could not be found by name to roll it back (%s); it may need removing by hand",
+                    LogSanitizer.sanitize(connection.getName()), e.getClass().getSimpleName());
+        }
+    }
+
+    /**
+     * A connection this import created but cannot account for. Unlike every other
+     * failure in {@link #importConnections} it is not a skip: it escapes to the
+     * import's rollback, which removes the connection again.
+     */
+    private static final class ConnectionImportFailure extends RuntimeException {
+
+        ConnectionImportFailure(String message) {
+            super(message);
+        }
+
+        ConnectionImportFailure(String message, Throwable cause) {
+            super(message, cause);
+        }
     }
 
     // ==================== Snippet Import ====================
@@ -2259,7 +2472,29 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 Set<String> selectedSet = parseSelectedResources(selectedOriginIds);
                 List<String> workflowOrder = parseWorkflowOrder(workflowOrderString);
 
-                return upgradeResponse(upgradeExecutor.executeUpgrade(source, targetAgentId, selectedSet, workflowOrder));
+                // Connections first, exactly as on the create and merge path: the configs
+                // the upgrade writes reference them by name, and this path used to skip
+                // them, so an upgraded httpcall reading ${connection:jira} could land on
+                // a deployment with no jira at all. Same rules — never over an existing
+                // one, a refusal is a skip — and a connection this request created is
+                // removed again if the import or the upgrade throws. An upgrade that
+                // completes with per-resource failures (207) keeps them: part of it
+                // landed, and what landed may reference them.
+                var transaction = new ImportTransaction();
+                int connectionsNotImported;
+                UpgradeResult result;
+                try {
+                    connectionsNotImported = importConnections(targetDir.toPath(), transaction);
+                    result = upgradeExecutor.executeUpgrade(source, targetAgentId, selectedSet, workflowOrder);
+                } catch (RuntimeException e) {
+                    rollbackCreatedResources(transaction);
+                    throw e;
+                }
+                Response response = upgradeResponse(result);
+                if (connectionsNotImported > 0) {
+                    return Response.fromResponse(response).header(HEADER_CONNECTIONS_SKIPPED, connectionsNotImported).build();
+                }
+                return response;
             }
         } catch (WebApplicationException e) {
             throw e;

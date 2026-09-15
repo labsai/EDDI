@@ -20,10 +20,13 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Timestamp;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Calendar;
 import java.util.List;
 import java.util.Optional;
+import java.util.TimeZone;
 
 /**
  * PostgreSQL implementation of {@link IConnectionGrantStore}.
@@ -39,6 +42,9 @@ public class PostgresConnectionGrantStore implements IConnectionGrantStore {
 
     private static final Logger LOGGER = Logger.getLogger(PostgresConnectionGrantStore.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
+
+    /** The zone refresh_lease_expires_at is written and read in. */
+    private static final TimeZone UTC = TimeZone.getTimeZone("UTC");
 
     private static final String CREATE_TABLE = """
             CREATE TABLE IF NOT EXISTS connection_grants (
@@ -162,26 +168,43 @@ public class PostgresConnectionGrantStore implements IConnectionGrantStore {
     }
 
     @Override
-    public boolean claimRefresh(String tenantId, String connectionName, String principal, String claimantId, Instant leaseExpiresAt) {
+    public boolean claimRefresh(String tenantId, String connectionName, String principal, String claimantId, Duration lease) {
         // A null lease is not a shorter lease, it is a permanent one: the claim
-        // predicate asks whether the lease has expired, and in SQL
-        // `NULL < CURRENT_TIMESTAMP` is NULL rather than true, so a row claimed
-        // without an expiry can never be claimed by anyone again and refresh for
-        // that grant is wedged until something rewrites the row. Refused here
-        // rather than written, and refused the same way on both backends.
-        checkNotNull(leaseExpiresAt, "leaseExpiresAt");
+        // predicate asks whether the lease has expired, and in SQL `NULL < now` is
+        // NULL rather than true, so a row claimed without an expiry can never be
+        // claimed by anyone again and refresh for that grant is wedged until
+        // something rewrites the row. Refused here rather than written, and refused
+        // the same way on both backends.
+        checkNotNull(lease, "lease");
+        if (lease.isNegative() || lease.isZero()) {
+            throw new IllegalArgumentException("A refresh lease must be positive, was " + lease);
+        }
         createSchema();
         // One statement, so the predicate and the write happen under one row lock.
         // A SELECT followed by an UPDATE lets two replicas both see the lease free.
+        //
+        // One clock, the database's, on both sides: the expiry is WRITTEN as
+        // now + lease and COMPARED with now, and neither instant comes from a JVM.
+        // An expiry stamped by the claimant's clock and judged by a contender's frees
+        // a live lease early by the skew between the two replicas — a second refresh
+        // while the claimant is still in flight, which is what the claim prevents.
+        //
+        // The same KIND of timestamp on both sides, too. The column is TIMESTAMP
+        // (without time zone); CURRENT_TIMESTAMP is TIMESTAMPTZ, and letting Postgres
+        // cast between them uses each session's TimeZone, which the JDBC driver sets
+        // from each replica's JVM default. Both sides are therefore spelled
+        // `CURRENT_TIMESTAMP AT TIME ZONE 'UTC'`, a UTC wall clock no session setting
+        // can move, and toGrant reads the column back as UTC.
         String sql = """
                 UPDATE connection_grants
-                   SET refresh_in_progress = ?, refresh_lease_expires_at = ?
+                   SET refresh_in_progress = ?,
+                       refresh_lease_expires_at = (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') + (? * INTERVAL '1 millisecond')
                  WHERE tenant_id = ? AND connection_name = ? AND principal = ?
-                   AND (refresh_in_progress IS NULL OR refresh_lease_expires_at < CURRENT_TIMESTAMP)
+                   AND (refresh_in_progress IS NULL OR refresh_lease_expires_at < (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'))
                 """;
         try (Connection connection = dataSourceInstance.get().getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, claimantId);
-            statement.setTimestamp(2, toTimestamp(leaseExpiresAt));
+            statement.setLong(2, lease.toMillis());
             statement.setString(3, tenantId);
             statement.setString(4, connectionName);
             statement.setString(5, principal);
@@ -247,6 +270,24 @@ public class PostgresConnectionGrantStore implements IConnectionGrantStore {
             statement.setString(1, tenantId);
             statement.setString(2, connectionName);
             statement.setString(3, principal);
+            return statement.executeUpdate() > 0;
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to delete a connection grant", e);
+        }
+    }
+
+    @Override
+    public boolean deleteIfSealedWith(String tenantId, String connectionName, String principal, String accessTokenIv) {
+        if (accessTokenIv == null) {
+            return false;
+        }
+        createSchema();
+        String sql = "DELETE FROM connection_grants WHERE tenant_id = ? AND connection_name = ? AND principal = ? AND access_token_iv = ?";
+        try (Connection connection = dataSourceInstance.get().getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, tenantId);
+            statement.setString(2, connectionName);
+            statement.setString(3, principal);
+            statement.setString(4, accessTokenIv);
             return statement.executeUpdate() > 0;
         } catch (SQLException e) {
             throw new IllegalStateException("Failed to delete a connection grant", e);
@@ -342,6 +383,21 @@ public class PostgresConnectionGrantStore implements IConnectionGrantStore {
         }
     }
 
+    @Override
+    public long countByConnection(String tenantId, String connectionName) {
+        createSchema();
+        String sql = "SELECT COUNT(*) FROM connection_grants WHERE tenant_id = ? AND connection_name = ?";
+        try (Connection connection = dataSourceInstance.get().getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, tenantId);
+            statement.setString(2, connectionName);
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next() ? rows.getLong(1) : 0L;
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to count a connection's grants", e);
+        }
+    }
+
     private static ConnectionGrant toGrant(ResultSet rows) throws SQLException {
         var grant = new ConnectionGrant();
         grant.setId(rows.getString("id"));
@@ -362,7 +418,9 @@ public class PostgresConnectionGrantStore implements IConnectionGrantStore {
         grant.setLastRefreshAt(toInstant(rows.getTimestamp("last_refresh_at")));
         grant.setVersion(rows.getLong("version"));
         grant.setRefreshInProgress(rows.getString("refresh_in_progress"));
-        grant.setRefreshLeaseExpiresAt(toInstant(rows.getTimestamp("refresh_lease_expires_at")));
+        // Written as a UTC wall clock by claimRefresh, so read back as one; the
+        // driver's default would interpret it in this JVM's time zone.
+        grant.setRefreshLeaseExpiresAt(toInstant(rows.getTimestamp("refresh_lease_expires_at", Calendar.getInstance(UTC))));
         return grant;
     }
 

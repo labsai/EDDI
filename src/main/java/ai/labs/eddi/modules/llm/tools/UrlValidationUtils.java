@@ -8,6 +8,10 @@ import java.net.InetAddress;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.UnknownHostException;
+import java.util.Arrays;
+import java.util.Locale;
+import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * URL validation utilities to prevent SSRF (Server-Side Request Forgery)
@@ -71,28 +75,8 @@ public final class UrlValidationUtils {
      *             if the URL is invalid or targets a private address
      */
     public static InetAddress[] validateUrl(String url, HostResolver resolver) {
-        if (url == null || url.isBlank()) {
-            throw new IllegalArgumentException("URL must not be null or empty");
-        }
-
-        URI uri;
-        try {
-            uri = new URI(url);
-        } catch (URISyntaxException e) {
-            throw new IllegalArgumentException("Invalid URL syntax: " + e.getMessage());
-        }
-
-        // 1. Scheme check
-        String scheme = uri.getScheme();
-        if (scheme == null || (!scheme.equalsIgnoreCase("http") && !scheme.equalsIgnoreCase("https"))) {
-            throw new IllegalArgumentException("Only http and https URLs are allowed. Got: " + (scheme != null ? scheme : "<no scheme>"));
-        }
-
-        // 2. Host check
+        URI uri = validateUrlSyntax(url);
         String host = uri.getHost();
-        if (host == null || host.isBlank()) {
-            throw new IllegalArgumentException("URL must have a valid hostname");
-        }
 
         // 3. Block known internal hostnames
         String lowerHost = host.toLowerCase();
@@ -115,12 +99,161 @@ public final class UrlValidationUtils {
     }
 
     /**
+     * The syntactic half of {@link #validateUrl(String)} on its own: non-blank,
+     * parseable, an {@code http} or {@code https} scheme, and a host — and no
+     * address check whatsoever.
+     * <p>
+     * For a target that a rule <em>stricter</em> than the SSRF check has already
+     * approved: an operator-maintained allowlist of exact origins may legitimately
+     * name a host on a private network (an on-premises identity provider), which
+     * the address check would refuse. Nothing user- or config-controlled may use
+     * this without such a rule in front of it.
+     *
+     * @return the parsed URI
+     * @throws IllegalArgumentException
+     *             if the URL is blank, malformed, not http(s), or has no host
+     */
+    public static URI validateUrlSyntax(String url) {
+        if (url == null || url.isBlank()) {
+            throw new IllegalArgumentException("URL must not be null or empty");
+        }
+
+        URI uri;
+        try {
+            uri = new URI(url);
+        } catch (URISyntaxException e) {
+            throw new IllegalArgumentException("Invalid URL syntax: " + e.getMessage());
+        }
+
+        // 1. Scheme check
+        String scheme = uri.getScheme();
+        if (scheme == null || (!scheme.equalsIgnoreCase("http") && !scheme.equalsIgnoreCase("https"))) {
+            throw new IllegalArgumentException("Only http and https URLs are allowed. Got: " + (scheme != null ? scheme : "<no scheme>"));
+        }
+
+        // 2. Host check
+        String host = uri.getHost();
+        if (host == null || host.isBlank()) {
+            throw new IllegalArgumentException("URL must have a valid hostname");
+        }
+        return uri;
+    }
+
+    /**
      * Checks whether the hostname is a known internal/local hostname that should be
      * blocked.
      */
     static boolean isBlockedHostname(String host) {
         return host.equals("localhost") || host.equals("127.0.0.1") || host.equals("[::1]") || host.equals("::1") || host.endsWith(".local")
                 || host.endsWith(".internal") || host.equals("metadata.google.internal") || host.equals("169.254.169.254"); // Cloud metadata endpoint
+    }
+
+    /**
+     * Hostnames and literal addresses of cloud instance-metadata services: AWS,
+     * Azure, GCP and OpenStack share 169.254.169.254; AWS also serves IPv6
+     * fd00:ec2::254; Alibaba uses 100.100.100.200; GCP names its own.
+     */
+    private static final Set<String> METADATA_HOSTS = Set.of("169.254.169.254", "fd00:ec2::254", "100.100.100.200",
+            "metadata.google.internal", "metadata.goog");
+
+    /** fd00:ec2::254 — the AWS Nitro IPv6 metadata endpoint. */
+    private static final byte[] AWS_IPV6_METADATA = {(byte) 0xfd, 0x00, 0x0e, (byte) 0xc2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x02, 0x54};
+
+    /**
+     * Refuse a URL that targets a cloud instance-metadata service — always,
+     * independent of {@code eddi.security.ssrf-protection.enabled}.
+     * <p>
+     * That setting is opt-in because configured httpcalls, MCP servers and A2A
+     * peers legitimately reach private and loopback hosts. The metadata service is
+     * not one of those: it hands out the instance's cloud credentials, nobody
+     * configures it as an API, and one templated URL on a cloud VM is enough to
+     * reach it. So it is blocked on every outbound path, protection on or off. The
+     * whole link-local range (169.254.0.0/16, fe80::/10) goes with it: nothing
+     * addressed there is a real API, and it is where the metadata service lives.
+     * <p>
+     * Deliberately lenient about everything else — an unparseable URL or an
+     * unresolvable host is left for the caller's own checks and the request itself
+     * to reject. This checks one URL; with protection off redirects are still
+     * followed, so the httpcalls client applies it to every redirect hop as well
+     * ({@code HttpClientModule.refusingMetadataHops}).
+     *
+     * @throws IllegalArgumentException
+     *             when the host is, or resolves to, a metadata/link-local address
+     */
+    public static void rejectCloudMetadataTarget(String url) {
+        rejectCloudMetadataTarget(url, DEFAULT_RESOLVER);
+    }
+
+    /**
+     * {@link #rejectCloudMetadataTarget(String)} with an injectable resolver.
+     */
+    public static void rejectCloudMetadataTarget(String url, HostResolver resolver) {
+        if (url == null || url.isBlank()) {
+            return;
+        }
+        String host;
+        try {
+            host = new URI(url.trim()).getHost();
+        } catch (URISyntaxException e) {
+            return;
+        }
+        if (host == null || host.isBlank()) {
+            return;
+        }
+        String bareHost = host.toLowerCase(Locale.ROOT);
+        if (bareHost.startsWith("[") && bareHost.endsWith("]")) {
+            bareHost = bareHost.substring(1, bareHost.length() - 1);
+        }
+        if (METADATA_HOSTS.contains(bareHost)) {
+            throw metadataRefusal(host);
+        }
+        try {
+            // An IP literal is checked as written, without the resolver: parsing a
+            // literal needs no DNS, and a resolver that cannot answer must not let
+            // 169.254.170.2 (the ECS credentials endpoint) through.
+            InetAddress[] addresses = isIpLiteral(bareHost) ? new InetAddress[]{InetAddress.getByName(bareHost)} : resolver.resolveAll(bareHost);
+            for (InetAddress address : addresses) {
+                if (isMetadataAddress(address)) {
+                    throw metadataRefusal(host);
+                }
+            }
+        } catch (UnknownHostException e) {
+            // Unresolvable: the request itself fails, nothing to protect against here.
+        }
+    }
+
+    /**
+     * Link-local (which contains 169.254.169.254), AWS's IPv6 metadata address, or
+     * Alibaba's 100.100.100.200 — including their IPv4-mapped IPv6 forms.
+     */
+    static boolean isMetadataAddress(InetAddress address) {
+        if (address.isLinkLocalAddress()) {
+            return true;
+        }
+        byte[] bytes = address.getAddress();
+        if (bytes.length == 16 && isIPv4Mapped(bytes)) {
+            bytes = Arrays.copyOfRange(bytes, 12, 16);
+        }
+        if (bytes.length == 4) {
+            int b0 = bytes[0] & 0xFF;
+            int b1 = bytes[1] & 0xFF;
+            boolean linkLocal = b0 == 169 && b1 == 254;
+            boolean alibaba = b0 == 100 && b1 == 100 && (bytes[2] & 0xFF) == 100 && (bytes[3] & 0xFF) == 200;
+            return linkLocal || alibaba;
+        }
+        return Arrays.equals(bytes, AWS_IPV6_METADATA);
+    }
+
+    /** A dotted-quad IPv4 or (colon-bearing) IPv6 literal — never a hostname. */
+    private static boolean isIpLiteral(String host) {
+        return host.indexOf(':') >= 0 || IPV4_LITERAL.matcher(host).matches();
+    }
+
+    private static final Pattern IPV4_LITERAL = Pattern.compile("\\d{1,3}(?:\\.\\d{1,3}){3}");
+
+    private static IllegalArgumentException metadataRefusal(String host) {
+        return new IllegalArgumentException("Access to the cloud instance-metadata service is never allowed, whatever "
+                + "eddi.security.ssrf-protection.enabled says: " + host);
     }
 
     /**

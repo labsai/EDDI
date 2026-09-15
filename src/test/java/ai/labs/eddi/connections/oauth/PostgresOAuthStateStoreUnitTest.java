@@ -60,6 +60,7 @@ class PostgresOAuthStateStoreUnitTest {
     private static final String STATE_TOKEN = "state-aaaaaaaaaaaa";
     private static final String TENANT = "tenant-1";
     private static final String CONNECTION = "google-mail";
+    private static final String CONNECTION_ID = "68a1b2c3d4e5f60718293a4b";
     private static final String PRINCIPAL = "user@example.com";
     private static final String VERIFIER = "verifier-abc";
     private static final String REDIRECT_URI = "https://eddi.example.com/connections/callback";
@@ -113,20 +114,23 @@ class PostgresOAuthStateStoreUnitTest {
     // ==================== schema ====================
 
     @Test
-    @DisplayName("schema — the table, the retrofitted nonce column and the expiry index are created in that order")
+    @DisplayName("schema — the table, the retrofitted nonce and connection-id columns and the expiry index are created in that order")
     void createsSchemaOnFirstUse() throws Exception {
         store.deleteExpired();
 
         ArgumentCaptor<String> ddl = ArgumentCaptor.forClass(String.class);
-        verify(statement, times(3)).execute(ddl.capture());
+        verify(statement, times(4)).execute(ddl.capture());
         List<String> executed = ddl.getAllValues();
 
         assertTrue(executed.get(0).contains("CREATE TABLE IF NOT EXISTS connection_oauth_states"), executed.get(0));
-        // The ALTER follows the CREATE because a deployment that predates browser
-        // binding already has the table; without this step every account link would
-        // fail on an insert naming a column that does not exist.
+        // The ALTERs follow the CREATE because a deployment that predates browser
+        // binding, or connection-id binding, already has the table; without them every
+        // account link would fail on an insert naming a column that does not exist.
         assertTrue(executed.get(1).contains("ADD COLUMN IF NOT EXISTS nonce_hash"), executed.get(1));
-        assertTrue(executed.get(2).contains("CREATE INDEX IF NOT EXISTS idx_oauth_state_expires"), executed.get(2));
+        assertTrue(executed.get(2).contains("ADD COLUMN IF NOT EXISTS connection_id VARCHAR(255)"), executed.get(2));
+        assertTrue(executed.get(3).contains("CREATE INDEX IF NOT EXISTS idx_oauth_state_expires"), executed.get(3));
+        assertTrue(executed.get(0).contains("connection_id VARCHAR(255),"),
+                "a fresh table carries the column too, nullable so a pre-existing row still maps: " + executed.get(0));
 
         // The primary key is what stops two rows sharing a state token, which would
         // let the same token be claimed twice and defeat single use outright.
@@ -146,7 +150,7 @@ class PostgresOAuthStateStoreUnitTest {
         // Three DDL round trips per swept hour would be pure waste; the volatile flag
         // is what keeps the cost to one per JVM.
         verify(connection, times(1)).createStatement();
-        verify(statement, times(3)).execute(anyString());
+        verify(statement, times(4)).execute(anyString());
     }
 
     @Test
@@ -162,7 +166,7 @@ class PostgresOAuthStateStoreUnitTest {
         store.deleteExpired();
 
         verify(connection, times(2)).createStatement();
-        verify(statement, times(4)).execute(anyString());
+        verify(statement, times(5)).execute(anyString());
     }
 
     @Test
@@ -203,6 +207,8 @@ class PostgresOAuthStateStoreUnitTest {
         verify(preparedStatement).setString(8, NONCE_HASH);
         verify(preparedStatement).setTimestamp(9, Timestamp.from(CREATED_AT));
         verify(preparedStatement).setTimestamp(10, Timestamp.from(EXPIRES_AT));
+        assertTrue(sql.getValue().contains("connection_id"), sql.getValue());
+        verify(preparedStatement).setString(11, CONNECTION_ID);
         verify(preparedStatement).executeUpdate();
 
         InOrder order = inOrder(connection);
@@ -243,6 +249,8 @@ class PostgresOAuthStateStoreUnitTest {
         assertTrue(claimSql.contains("consumed_at IS NULL"), "without this clause a redeemed state could be redeemed again: " + claimSql);
         assertTrue(claimSql.contains("expires_at > ?"), "expiry is enforced in the predicate, not by a later read: " + claimSql);
         assertTrue(claimSql.contains("RETURNING"), "the row must come back from the same statement that claimed it: " + claimSql);
+        assertTrue(claimSql.substring(claimSql.indexOf("RETURNING")).contains("connection_id"),
+                "the callback needs the bound connection id back from the claim: " + claimSql);
         // A SELECT followed by an UPDATE is the bug this shape exists to prevent: two
         // concurrent callbacks would both read consumed_at NULL and both proceed.
         verify(connection, times(1)).prepareStatement(anyString());
@@ -272,6 +280,7 @@ class PostgresOAuthStateStoreUnitTest {
         assertEquals(STATE_TOKEN, claimed.getState());
         assertEquals(TENANT, claimed.getTenantId());
         assertEquals(CONNECTION, claimed.getConnectionName());
+        assertEquals(CONNECTION_ID, claimed.getConnectionId());
         // Tenant, connection and principal come off the row, never off the callback's
         // query string — that is the entire reason the row exists.
         assertEquals(PRINCIPAL, claimed.getPrincipal());
@@ -338,6 +347,7 @@ class PostgresOAuthStateStoreUnitTest {
         assertNull(claimed.getExpiresAt());
         assertNull(claimed.getConsumedAt());
         assertNull(claimed.getNonceHash(), "an unbound row reads as unbound, which the caller rejects on its own terms");
+        assertNull(claimed.getConnectionId(), "a row from before the column existed reads as having no id, which the caller refuses");
     }
 
     @Test
@@ -400,6 +410,7 @@ class PostgresOAuthStateStoreUnitTest {
         when(resultSet.getString("state")).thenReturn(STATE_TOKEN);
         when(resultSet.getString("tenant_id")).thenReturn(TENANT);
         when(resultSet.getString("connection_name")).thenReturn(CONNECTION);
+        when(resultSet.getString("connection_id")).thenReturn(CONNECTION_ID);
         when(resultSet.getString("principal")).thenReturn(PRINCIPAL);
         when(resultSet.getString("code_verifier")).thenReturn(VERIFIER);
         when(resultSet.getString("redirect_uri")).thenReturn(REDIRECT_URI);
@@ -415,6 +426,7 @@ class PostgresOAuthStateStoreUnitTest {
         state.setState(STATE_TOKEN);
         state.setTenantId(TENANT);
         state.setConnectionName(CONNECTION);
+        state.setConnectionId(CONNECTION_ID);
         state.setPrincipal(PRINCIPAL);
         state.setCodeVerifier(VERIFIER);
         state.setRedirectUri(REDIRECT_URI);

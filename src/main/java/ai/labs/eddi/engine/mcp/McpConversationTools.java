@@ -53,6 +53,7 @@ import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 import static ai.labs.eddi.engine.mcp.McpToolUtils.*;
 
@@ -71,6 +72,10 @@ public class McpConversationTools {
 
     private static final Logger LOGGER = Logger.getLogger(McpConversationTools.class);
     private static final int CONVERSATION_TIMEOUT_SECONDS = 60;
+    private static final String SECTION_CONVERSATION_OUTPUTS = "conversationOutputs";
+    /** The snapshot sections {@code returningFields} can select as a whole. */
+    private static final Set<String> CONVERSATION_SECTIONS = Set.of("conversationSteps", SECTION_CONVERSATION_OUTPUTS,
+            "conversationProperties");
 
     private final IConversationService conversationService;
     private final IRestAgentAdministration agentAdmin;
@@ -313,8 +318,10 @@ public class McpConversationTools {
                                    @ToolArg(description = "Deprecated — ignored, resolved from conversation") String environment,
                                    @ToolArg(description = "Return only the current (latest) step? (default: true)") Boolean currentStepOnly,
                                    @ToolArg(description = "Return detailed internal data? (default: false)") Boolean returnDetailed,
-                                   @ToolArg(description = "Comma-separated list of fields to return (e.g. 'input,output,actions'). "
-                                           + "Empty = all fields.") String returningFields) {
+                                   @ToolArg(description = "Comma-separated list of what to return. Section names "
+                                           + "(conversationSteps, conversationOutputs, conversationProperties) return whole sections; "
+                                           + "output keys (e.g. 'input,output,actions') return only those keys of conversationOutputs. "
+                                           + "Empty = everything.") String returningFields) {
         requireRole(identity, authEnabled, "eddi-viewer");
         try {
             conversationAccessGuard.requireConversationOwner(conversationId);
@@ -324,36 +331,38 @@ public class McpConversationTools {
 
             List<String> fields = Collections.emptyList();
             if (returningFields != null && !returningFields.isBlank()) {
-                fields = List.of(returningFields.split(","));
+                fields = Arrays.stream(returningFields.split(",")).map(String::trim).filter(f -> !f.isEmpty()).toList();
             }
 
-            var snapshot = conversationService.readConversation(conversationId, detailed, stepOnly, fields);
+            // The service filters by SECTION only. Handing it output keys such as
+            // "input,output" (the example this tool advertises) matched no section, so
+            // every section was dropped and the caller got an empty snapshot. Split
+            // the two: sections go to the service; output keys select within
+            // conversationOutputs, which is therefore always fetched when any are named.
+            List<String> sections = fields.stream().filter(CONVERSATION_SECTIONS::contains).collect(Collectors.toCollection(ArrayList::new));
+            List<String> outputKeys = fields.stream().filter(f -> !CONVERSATION_SECTIONS.contains(f)).toList();
+            boolean wholeOutputsRequested = sections.contains(SECTION_CONVERSATION_OUTPUTS);
+            if (!outputKeys.isEmpty() && !wholeOutputsRequested) {
+                sections.add(SECTION_CONVERSATION_OUTPUTS);
+            }
 
-            // Apply field-level filtering on conversationOutputs when specific
-            // field names are requested (e.g. "input", "output", "actions").
-            // The service layer only handles section-level filtering
-            // (conversationSteps, conversationOutputs, conversationProperties).
-            // Create filtered copies to avoid mutating the original snapshot.
-            if (!fields.isEmpty() && snapshot.getConversationOutputs() != null) {
-                var trimmedFields = fields.stream().map(String::trim).toList();
-                // If the caller requested a section-level name (e.g. "conversationOutputs"),
-                // skip field-level filtering — the caller wants the full section.
-                boolean requestedFullSection = trimmedFields.stream()
-                        .anyMatch(f -> f.equals("conversationOutputs") || f.equals("conversationSteps")
-                                || f.equals("conversationProperties"));
-                if (!requestedFullSection) {
-                    var filteredOutputs = snapshot.getConversationOutputs().stream()
-                            .map(output -> {
-                                var filtered = new ConversationOutput();
-                                output.forEach((key, value) -> {
-                                    if (key instanceof String s && trimmedFields.stream().anyMatch(f -> s.equals(f) || s.startsWith(f + ":"))) {
-                                        filtered.put(key, value);
-                                    }
-                                });
-                                return filtered;
-                            }).toList();
-                    snapshot.setConversationOutputs(filteredOutputs);
-                }
+            var snapshot = conversationService.readConversation(conversationId, detailed, stepOnly, List.copyOf(sections));
+
+            // Field-level filtering on conversationOutputs, on filtered copies so the
+            // original snapshot is not mutated. An explicitly requested
+            // conversationOutputs section is returned whole.
+            if (!outputKeys.isEmpty() && !wholeOutputsRequested && snapshot.getConversationOutputs() != null) {
+                var filteredOutputs = snapshot.getConversationOutputs().stream()
+                        .map(output -> {
+                            var filtered = new ConversationOutput();
+                            output.forEach((key, value) -> {
+                                if (key instanceof String s && outputKeys.stream().anyMatch(f -> s.equals(f) || s.startsWith(f + ":"))) {
+                                    filtered.put(key, value);
+                                }
+                            });
+                            return filtered;
+                        }).toList();
+                snapshot.setConversationOutputs(filteredOutputs);
             }
 
             return jsonSerialization.serialize(snapshot);

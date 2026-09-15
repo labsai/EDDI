@@ -76,6 +76,7 @@ applies in dev mode only.
 |---|---|---|
 | `eddi.conversations.maximumLifeTimeOfIdleConversationsInDays` | `90` | Idle conversations are closed after this many days |
 | `eddi.conversations.deleteEndedConversationsOnceOlderThanDays` | `365` | Ended conversations are permanently deleted after this many days |
+| `eddi.conversations.max-input-chars` | `200000` | Longest turn input, in characters, a caller may send to an existing conversation. Longer input is refused before anything reaches the model: **413** `input_too_large` on the REST and streaming conversation endpoints, **400** `input_too_large` on the OpenAI-compatible API, invalid params over A2A; other surfaces built on those entry points report the refusal as an error. `0` or negative disables the limit. Turns the engine drives itself for group members and sub-agents are exempt |
 | `eddi.usermemories.deleteOlderThanDays` | `-1` | Persistent user memories older than this are deleted. **`-1` disables the sweep** — memories are kept forever until you set a positive number. Relevant to [GDPR](gdpr-compliance.md) and [HIPAA](hipaa-compliance.md) |
 | `eddi.coordinator.max-active-conversations` | `10000` | Ceiling on concurrently tracked conversations |
 | `eddi.coordinator.max-dead-letters` | `1000` | Retained dead-letter entries. `-1` unbounded, `0` retain none |
@@ -132,7 +133,7 @@ Full narrative and metrics: [scheduling.md → Deployment Configuration](schedul
 | Property | Default | Description |
 |---|---|---|
 | `eddi.security.allow-unauthenticated` | `false` | Permits running with OIDC disabled outside dev. `AuthStartupGuard` refuses a production boot without it |
-| `eddi.security.ssrf-protection.enabled` | `false` | **Opt-in.** Validates the fully resolved target of httpCalls, MCP and A2A calls and stops following redirects. Off by default because configured targets legitimately reach internal hosts — **turn it on if any outbound URL is influenced by conversation input.** See [security.md → SSRF Protection](security.md#ssrf-protection--urlvalidationutils) |
+| `eddi.security.ssrf-protection.enabled` | `false` | **Opt-in.** Validates the fully resolved target of httpCalls, MCP and A2A calls and stops following redirects. Off by default because configured targets legitimately reach internal hosts — **turn it on if any outbound URL is influenced by conversation input.** The cloud instance-metadata service (and the link-local range it lives in) is refused regardless of this setting. See [security.md → SSRF Protection](security.md#ssrf-protection--urlvalidationutils) |
 | `eddi.mcp.allow-unauthenticated` | `false` | Exposes the MCP server without auth. Needs its own opt-in on top of `eddi.security.allow-unauthenticated` — inheriting one flag must not be enough to open agent CRUD |
 | `eddi.secretstore.allow-unauthenticated` | `false` | Same, for the secrets vault REST surface |
 | `eddi.caller-identity.enabled` | `true` | Enables `${caller:token}` / `${caller:userId}` in httpCall headers. See [httpcalls.md](httpcalls.md) |
@@ -336,12 +337,25 @@ Full guide: [open-webui-integration.md](open-webui-integration.md).
 
 Full guide: [connections.md](connections.md).
 
+The first four are **runtime settings**: an administrator changes them without a
+restart through `PUT /connectionstore/settings` (or the Manager's Connections page).
+Setting the property **pins** the value instead — it wins over the stored one, and
+the endpoint refuses to change it (409). Unset and unstored, each takes the default
+below. See [Enabling connections](connections.md#enabling-connections).
+
 | Property | Default | Description |
 |---|---|---|
-| `eddi.connections.enabled` | `false` | Master switch for the connection credential model |
-| `eddi.connections.public-base-url` | *(empty)* | Externally reachable base URL for OAuth redirect URIs |
-| `eddi.connections.credential-endpoint-allowlist` | *(empty)* | Hosts permitted to receive resolved credentials |
+| `eddi.connections.enabled` | `false` | Master switch for the connection credential model. Runtime setting `enabled` |
+| `eddi.connections.public-base-url` | *(none)* | Externally reachable base URL for OAuth redirect URIs. Runtime setting `publicBaseUrl`. A pinned value that is not a bare https origin refuses the boot; without one, per-user account linking answers 400 |
+| `eddi.connections.credential-endpoint-allowlist` | *(empty)* | Origins that may receive the **client secret** — a connection's token and authorization endpoints, and only those (RFC 9728 resource-metadata discovery is not implemented). Not where the access token goes: that is each connection's own `baseUrlAllowlist`. Runtime setting `credentialEndpointAllowlist` |
+| `eddi.connections.allow-plaintext-remote-origins` | `false` | Whether a connection's `baseUrlAllowlist` may send its credential over plaintext `http://` to a non-loopback host. While `false` such an origin is refused at save time (400), refused per request (`TARGET_NOT_ALLOWED`) and reported at ERROR at boot; `true` accepts it with a WARN. Loopback `http://` is always allowed. Runtime setting `allowPlaintextRemoteOrigins`. **Upgrade note:** existing connections with a remote `http://` origin stop resolving until this is set |
+| `eddi.connections.settings.allow-unauthenticated-writes` | `false` | Whether `PUT /connectionstore/settings` accepts a write with no verified identity. Outside dev and test, while `authorization.enabled=false`, such a write is refused (403) unless this is `true` — `@RolesAllowed` is a no-op without OIDC, and an anonymous caller must not be able to approve a credential endpoint. Not a runtime setting |
 | `eddi.connections.state-sweep-interval` | `1h` | How often expired OAuth state entries are cleared |
+
+> **Upgrade note.** Any of the first four properties that is *set* — even to its
+> default, e.g. `EDDI_CONNECTIONS_ENABLED=false` copied from an old example — now
+> **pins** that value, and the settings page shows it read-only. Unset it to let
+> administrators manage the value at runtime.
 
 ---
 

@@ -25,9 +25,17 @@ abstract class AbstractBackupService {
     static final String RAG_EXT = "rag";
     static final String SNIPPET_EXT = "snippet";
     static final String SCHEDULE_EXT = "schedule";
+    static final String CONNECTION_EXT = "connection";
 
     /** Directory inside an export archive that holds the agent's schedules. */
     static final String SCHEDULES_DIR = "schedules";
+
+    /**
+     * Directory inside an export archive that holds the connections the agent's
+     * configurations reference as {@code ${connection:name}}. Documents only —
+     * references, never resolved secrets, never grants.
+     */
+    static final String CONNECTIONS_DIR = "connections";
 
     // ---- V6 canonical URI patterns ----
     static final Pattern DICTIONARY_URI_PATTERN = Pattern.compile("\"eddi://ai.labs.dictionary/dictionarystore/dictionaries/.*?\"");

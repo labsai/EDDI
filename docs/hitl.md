@@ -130,7 +130,7 @@ Status codes are discriminating: `400` invalid body (missing verdict, note > 4 K
   ```
   `actions` is the `ACTIONS` data of the paused step.
 
-`GET /agents/pending-approvals` entries also carry `pauseType` (`RULE`/`TOOL_CALL`, `null` for legacy) and `toolNames` (names only, no arguments) so inbox UIs can badge tool-call pauses without a second round trip.
+`GET /agents/pending-approvals` entries also carry `pauseType` (`RULE`/`TOOL_CALL`; a pause stored without a type — rule pauses before 6.4 — is reported as `RULE`) and `toolNames` (names only, no arguments) so inbox UIs can badge tool-call pauses without a second round trip.
 
 ### What the Agent Sees After a Decision
 

@@ -87,6 +87,16 @@ public class ConnectionResolver {
     @Inject
     ResolutionPrincipalContext resolutionPrincipalContext;
 
+    /**
+     * Deployment settings, read for
+     * {@value ConnectionsConfig#ALLOW_PLAINTEXT_REMOTE_ORIGINS}. Field-injected for
+     * the same reason as {@link #resolutionPrincipalContext}; a resolver built
+     * without a container reads the property as {@code false}, the refusing
+     * default.
+     */
+    @Inject
+    ConnectionsConfig connectionsConfig;
+
     @Inject
     public ConnectionResolver(ConnectionRegistry connectionRegistry, CredentialReferenceResolver credentialReferenceResolver,
             CallerIdentityContext callerIdentityContext, MeterRegistry meterRegistry, AccessTokenSupplier accessTokenSupplier,
@@ -174,19 +184,48 @@ public class ConnectionResolver {
      *             list
      */
     public Optional<ResolvedCredential> resolveForDiscovery(String reference, URI targetUrl) {
-        ConnectionReference parsed = ConnectionReference.parse(reference);
         // Read the binding without resolving. An unknown name falls through to
         // resolve(), which throws NOT_FOUND and counts it — swallowing it here would
         // reintroduce the empty-tool-list-with-no-explanation failure by a new route.
-        Binding binding = connectionRegistry.find(parsed).map(ConnectionConfiguration::getBinding).orElse(null);
+        Binding binding = bindingOf(reference).orElse(null);
         // CALLER_SUPPLIED is withheld from discovery for exactly the reason PER_USER
         // is: the handshake's result is cached and replayed for every conversation
         // that follows, so whichever caller happened to trigger it would pin their
         // credential — and their permissions — onto everybody after them.
-        if (binding == Binding.PER_USER || binding == Binding.CALLER_SUPPLIED) {
+        if (isWithheldFromDiscovery(binding)) {
             return Optional.empty();
         }
         return Optional.of(resolve(reference, targetUrl, null));
+    }
+
+    /**
+     * Whether a connection of this binding contributes nothing to a shared, cached
+     * session.
+     */
+    public static boolean isWithheldFromDiscovery(Binding binding) {
+        return binding == Binding.PER_USER || binding == Binding.CALLER_SUPPLIED;
+    }
+
+    /**
+     * The binding a reference names, without resolving anything — so a caller that
+     * was handed nothing by {@link #resolveForDiscovery} can say <em>why</em> in
+     * its own log line, naming the actual binding rather than guessing
+     * {@code PER_USER}.
+     *
+     * @return the binding, or empty when no connection of that name exists
+     * @throws ConnectionException
+     *             when the registry could not be read at all — counted as a lookup
+     *             failure, exactly as {@link #resolve} counts it, so a store outage
+     *             on the discovery path does not present as a flat dashboard
+     */
+    public Optional<Binding> bindingOf(String reference) {
+        ConnectionReference parsed = ConnectionReference.parse(reference);
+        try {
+            return connectionRegistry.find(parsed).map(ConnectionConfiguration::getBinding);
+        } catch (ConnectionException e) {
+            countLookupFailure(e);
+            throw e;
+        }
     }
 
     private ResolvedCredential resolveCredential(ConnectionConfiguration connection, String principalOverride) {
@@ -198,11 +237,41 @@ public class ConnectionResolver {
             return callerSuppliedCredential(connection);
         }
         return switch (connection.getAuthType()) {
-            case STATIC -> new ResolvedCredential(connection.getStaticAuth().getHeaderName(),
-                    resolveReferences(connection.getStaticAuth().getValueTemplate(), connection));
+            case STATIC -> staticCredential(connection);
             case BASIC -> basicCredential(connection);
             case OAUTH2_CLIENT_CREDENTIALS, OAUTH2_AUTHORIZATION_CODE -> oauthCredential(connection, principalOverride);
         };
+    }
+
+    /**
+     * The STATIC header, guarded the way the CALLER_SUPPLIED branch is.
+     * <p>
+     * The registry serves cached documents and never re-runs {@code validate()}, so
+     * a document written before the validation rules existed — or straight into the
+     * store — can lack {@code staticAuth} entirely. Dereferenced unguarded that was
+     * an NPE, which is not a {@link ConnectionException}: the MCP manager's failure
+     * classifier could not recognise it as a credential problem and fed it to the
+     * circuit breaker, which then told the operator the server was down and
+     * suppressed discovery for everybody configured against it.
+     */
+    private ResolvedCredential staticCredential(ConnectionConfiguration connection) {
+        StaticAuth staticAuth = requireStaticAuth(connection, "STATIC");
+        if (staticAuth.getValueTemplate() == null || staticAuth.getValueTemplate().isBlank()) {
+            throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION,
+                    "Connection '" + connection.getName() + "' is STATIC but has no staticAuth.valueTemplate, so there is no credential to "
+                            + "send. Re-save the connection to apply the current validation rules.");
+        }
+        return new ResolvedCredential(staticAuth.getHeaderName(), resolveReferences(staticAuth.getValueTemplate(), connection));
+    }
+
+    private static StaticAuth requireStaticAuth(ConnectionConfiguration connection, String authType) {
+        StaticAuth staticAuth = connection.getStaticAuth();
+        if (staticAuth == null || staticAuth.getHeaderName() == null || staticAuth.getHeaderName().isBlank()) {
+            throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION,
+                    "Connection '" + connection.getName() + "' is " + authType + " but names no staticAuth.headerName, so there is no "
+                            + "header to send the credential in. Re-save the connection to apply the current validation rules.");
+        }
+        return staticAuth;
     }
 
     /**
@@ -236,6 +305,20 @@ public class ConnectionResolver {
         CallerIdentity caller = callerIdentityContext == null ? null : callerIdentityContext.current();
         String value = caller == null ? null : caller.connectionCredential(connection.getName());
         if (value == null) {
+            if (!authorizationEnabled) {
+                // The header may well have been sent. CallerIdentityContext.capture()
+                // drops every connection credential on an anonymous request, correctly:
+                // a caller that has not authenticated must not make EDDI spend a
+                // credential on its behalf. With authorization disabled EVERY request is
+                // anonymous, so "this request carried no credential" sends the operator
+                // to check a header that is going out fine.
+                throw new ConnectionException(ConnectionException.Reason.NO_CALLER_CREDENTIAL,
+                        "Connection '" + connection.getName() + "' is CALLER_SUPPLIED, but this deployment cannot accept a caller-supplied "
+                                + "credential: authorization.enabled=false, so no caller is authenticated and any '"
+                                + CallerIdentityContext.CONNECTION_CREDENTIAL_HEADER + "' header is dropped as unauthenticated input. "
+                                + "Enable OIDC (authorization.enabled=true) so the calling system is authenticated, or bind the "
+                                + "connection to a SERVICE credential instead.");
+            }
             throw new ConnectionException(ConnectionException.Reason.NO_CALLER_CREDENTIAL,
                     "Connection '" + connection.getName() + "' is CALLER_SUPPLIED, but this request carried no credential for it. "
                             + "The calling system must send a '" + CallerIdentityContext.CONNECTION_CREDENTIAL_HEADER + ": "
@@ -256,7 +339,19 @@ public class ConnectionResolver {
      * something that does not look like one.
      */
     private ResolvedCredential basicCredential(ConnectionConfiguration connection) {
-        StaticAuth staticAuth = connection.getStaticAuth();
+        StaticAuth staticAuth = requireStaticAuth(connection, "BASIC");
+        // A null username would be sent as the literal "null:password" — an
+        // authentication failure with no visible cause. Refused instead.
+        if (staticAuth.getUsername() == null || staticAuth.getUsername().isBlank()) {
+            throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION,
+                    "Connection '" + connection.getName() + "' is BASIC but has no staticAuth.username. Re-save the connection to apply the "
+                            + "current validation rules.");
+        }
+        if (staticAuth.getPasswordRef() == null || staticAuth.getPasswordRef().isBlank()) {
+            throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION,
+                    "Connection '" + connection.getName() + "' is BASIC but has no staticAuth.passwordRef. Re-save the connection to apply "
+                            + "the current validation rules.");
+        }
         String password = resolveReferences(staticAuth.getPasswordRef(), connection);
         String encoded = Base64.getEncoder()
                 .encodeToString((staticAuth.getUsername() + ":" + password).getBytes(StandardCharsets.UTF_8));
@@ -378,11 +473,32 @@ public class ConnectionResolver {
             // same origin, and a comparison that says otherwise looks like a working
             // allowlist that blocks everything.
             if (canonicalise(allowed, connection).equals(origin)) {
+                requireEncryptedUnlessPermitted(connection, origin);
                 return;
             }
         }
         throw new ConnectionException(ConnectionException.Reason.TARGET_NOT_ALLOWED, "Connection '" + connection.getName() + "' may not be sent to "
                 + origin + ". Add that origin to its baseUrlAllowlist if it is intended.");
+    }
+
+    /**
+     * An allowlisted origin is still refused when it would carry the credential in
+     * the clear to another host, unless the deployment has said that is acceptable.
+     * <p>
+     * Checked here as well as at the write boundary, because a document written
+     * before the property existed — or imported, or written straight to the store —
+     * never faced that check. Loopback is exempt: it never leaves the machine.
+     */
+    private void requireEncryptedUnlessPermitted(ConnectionConfiguration connection, String canonicalOrigin) {
+        if (!ConnectionConfiguration.isPlaintextRemoteOrigin(canonicalOrigin)
+                || (connectionsConfig != null && connectionsConfig.isAllowPlaintextRemoteOrigins())) {
+            return;
+        }
+        throw new ConnectionException(ConnectionException.Reason.TARGET_NOT_ALLOWED, "Connection '" + connection.getName() + "' may not be sent to "
+                + canonicalOrigin + ": that is plaintext http to a host other than this one, so the credential would cross the network "
+                + "unencrypted. The origin is on the connection's baseUrlAllowlist, but allowPlaintextRemoteOrigins is off — "
+                + ConnectionsConfig.describe("allowPlaintextRemoteOrigins", ConnectionsConfig.ALLOW_PLAINTEXT_REMOTE_ORIGINS)
+                + ". Use an https origin, or turn it on to accept an unencrypted credential deliberately.");
     }
 
     private static String originOf(URI targetUrl, ConnectionConfiguration connection) {

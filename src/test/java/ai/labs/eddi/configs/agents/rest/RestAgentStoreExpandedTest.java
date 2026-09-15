@@ -17,6 +17,7 @@ import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
+import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
@@ -68,7 +69,7 @@ class RestAgentStoreExpandedTest {
 
         sut = new RestAgentStore(agentStore, restWorkflowStore, documentDescriptorStore,
                 jsonSchemaCreator, scheduleStore, capabilityRegistryService, deploymentStore, permissiveGuard(),
-                mock(AgentSigningService.class), "default");
+                mock(AgentSigningService.class), mock(IAgentFactory.class), "default");
         try {
             // The Agent is live at v1. A cascade only runs against the CURRENT version —
             // it tears workflows and schedules down before the delete's own version check.

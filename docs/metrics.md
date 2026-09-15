@@ -213,7 +213,7 @@ sum(rate(eddi_tool_ratelimit_allowed_total[5m]))
 
 ```text
 eddi_tool_calls_total                       # Total tool calls
-eddi_tool_costs_total                       # Cumulative cost
+eddi_tool_costs_accrued                     # Cumulative cost in USD since start (gauge)
 eddi_tool_budget_exceeded_total             # Budget exceeded events
 ```
 
@@ -226,13 +226,14 @@ eddi_tool_calls_total{tool="weather"}       # Calls per tool
 eddi_tool_costs_total{tool="weather"}       # Cost per tool
 ```
 
-> **`eddi_tool_costs_total` is two meters under one name.** The code registers a
-> counter `eddi.tool.costs` (tagged by `tool`) *and* a gauge
-> `eddi.tool.costs.total`. Micrometer appends `_total` to the counter and leaves
-> the gauge alone, so both land on `eddi_tool_costs_total`. Treat a query on that
-> name as ambiguous until the collision is resolved in the code: use the
-> `tool`-tagged series for per-tool cost, and prefer
-> `GET /llm/tools/costs` when you need the authoritative total.
+> **The total-cost gauge was renamed to `eddi_tool_costs_accrued`.** It used to
+> be registered as `eddi.tool.costs.total`, which the exposition renders as
+> `eddi_tool_costs_total` — the same name as the `tool`-tagged counter above.
+> Prometheus refuses two meters under one name with different tag keys, so the
+> first priced tool call threw, and the tool returned that error instead of its
+> result. `eddi_tool_costs_total` now always means the per-tool counter; take the
+> all-tools total from the gauge, or as `sum(eddi_tool_costs_total)`. A dashboard
+> or alert written against the old gauge must switch to `eddi_tool_costs_accrued`.
 
 ### Group Discussion Metrics
 
@@ -601,6 +602,10 @@ eddi_summarization_duration_seconds         # Summarization duration (timer)
 eddi_connection_resolve_count_total         # Connection resolutions; tags: authType, binding, outcome
 eddi_connection_resolve_time_seconds        # Connection resolution duration (timer); tags: authType, binding
 eddi_connection_grant_missing_count_total   # Resolutions refused for a missing grant; tag: binding
+eddi_connection_oauth_authorize_count_total # Per-user OAuth link flows started; tags: outcome (issued), authType
+eddi_connection_oauth_callback_count_total  # OAuth callback outcomes; tags: outcome (success, bad_state, binding_mismatch, provider_error, exchange_failed), authType
+eddi_connection_token_refresh_count_total   # Token endpoint outcomes; tag: outcome (success, minted, invalid_grant, transient)
+eddi_connection_token_refresh_claim_count_total # Refresh lease protocol; tag: outcome (claimed, awaited, lease_released, lease_expired)
 ```
 
 ### Deployed Agents
@@ -676,7 +681,7 @@ groups:
           summary: "No successful tool executions in 2 minutes"
 
       - alert: BudgetExceeded
-        expr: eddi_tool_costs_total > 10
+        expr: eddi_tool_costs_accrued > 10
         labels:
           severity: critical
         annotations:
@@ -819,7 +824,7 @@ histogram_quantile(0.99,
 
 **Cost Per Hour:**
 ```promql
-rate(eddi_tool_costs_total[1h])
+sum(rate(eddi_tool_costs_total[1h]))
 ```
 
 ---

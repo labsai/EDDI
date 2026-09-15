@@ -4,13 +4,20 @@
  */
 package ai.labs.eddi.modules.llm.tools;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.micrometer.prometheus.PrometheusConfig;
+import io.micrometer.prometheus.PrometheusMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * Unit tests for {@link ToolCostTracker} covering cost tracking, budget checks,
@@ -37,6 +44,60 @@ class ToolCostTrackerTest {
     /** Same, for {@code WebScraperTool#extractWebPageText}. */
     private static final ToolInvocation SCRAPE = new ToolInvocation("extractWebPageText", "webscraper", null);
 
+    /**
+     * The gauge used to be {@code eddi.tool.costs.total}, which Prometheus renders
+     * as {@code eddi_tool_costs_total} — the same name as the tagged
+     * {@code eddi.tool.costs} counter. SimpleMeterRegistry tolerates that; the
+     * production registry threw on the first priced call, failing the tool. Only a
+     * real Prometheus registry reproduces it.
+     */
+    @Nested
+    @DisplayName("against a Prometheus registry")
+    class PrometheusRegistry {
+
+        @Test
+        @DisplayName("a priced call registers both meters and scrapes cleanly")
+        void pricedCallScrapesWithoutCollision() {
+            var prometheus = new PrometheusMeterRegistry(PrometheusConfig.DEFAULT);
+            var prometheusTracker = new ToolCostTracker();
+            prometheusTracker.meterRegistry = prometheus;
+            prometheusTracker.init();
+
+            double cost = assertDoesNotThrow(() -> prometheusTracker.trackToolCall(SEARCH_WEB, "conv-prom"));
+            assertDoesNotThrow(() -> prometheusTracker.trackToolCall(SCRAPE, "conv-prom"));
+
+            assertTrue(cost > 0, "websearch is priced");
+            String scrape = prometheus.scrape();
+            assertTrue(scrape.contains("eddi_tool_costs_accrued"), "the accrued-cost gauge must be exported:\n" + scrape);
+            // Prefix match: this Prometheus client renders the label set as
+            // {tool="searchWeb",}.
+            assertTrue(scrape.contains("eddi_tool_costs_total{tool=\"searchWeb\""), "the per-tool counter must be exported:\n" + scrape);
+            assertEquals(0.003, prometheusTracker.getTotalCost(), 1e-9);
+        }
+    }
+
+    @Nested
+    @DisplayName("when the metrics backend fails")
+    class MetricsFailure {
+
+        @Test
+        @DisplayName("cost accounting and budget checks still work")
+        void accountingSurvivesMeterFailures() {
+            MeterRegistry failing = mock(MeterRegistry.class);
+            when(failing.counter(anyString(), any(String[].class))).thenThrow(new IllegalArgumentException("meter collision"));
+            var failingTracker = new ToolCostTracker();
+            failingTracker.meterRegistry = failing;
+            failingTracker.init();
+
+            double cost = assertDoesNotThrow(() -> failingTracker.trackToolCall(SEARCH_WEB, "conv-fail"));
+
+            assertEquals(0.001, cost, 1e-9);
+            assertEquals(0.001, failingTracker.getConversationCosts("conv-fail").getTotalCost(), 1e-9);
+            assertFalse(assertDoesNotThrow(() -> failingTracker.isWithinBudget("conv-fail", 0.0005)),
+                    "the over-budget verdict must not be lost with the budget-exceeded meter");
+        }
+    }
+
     @Nested
     @DisplayName("trackToolCall")
     class TrackToolCall {
@@ -62,6 +123,21 @@ class ToolCostTrackerTest {
         void unmappedDispatchNameIsFree() {
             assertEquals(0.0, tracker.trackToolCall(ToolInvocation.of("searchWeb"), "conv-1"), 0.0001,
                     "without the canonical mapping there is nothing to price against — this is the pre-fix behaviour");
+        }
+
+        @Test
+        @DisplayName("costs are found by slug too, aggregating every dispatch name priced under it")
+        void toolCostsBySlug() {
+            tracker.trackToolCall(SEARCH_WEB, "conv-1");
+            tracker.trackToolCall(new ToolInvocation("searchNews", "websearch", null), "conv-1");
+
+            assertEquals(2, tracker.getToolCosts("websearch").getCallCount());
+            assertEquals(0.002, tracker.getToolCosts("websearch").getTotalCost(), 1e-9);
+            assertEquals(1, tracker.getToolCosts("searchWeb").getCallCount());
+            assertNull(tracker.getToolCosts("never-called"));
+
+            tracker.resetAll();
+            assertNull(tracker.getToolCosts("websearch"));
         }
 
         @Test
@@ -168,7 +244,10 @@ class ToolCostTrackerTest {
             tracker.trackToolCall(SEARCH_WEB, "conv-keys");
 
             assertNotNull(tracker.getToolCosts("searchWeb"));
-            assertNull(tracker.getToolCosts("websearch"));
+            // The accounting key stays the dispatch name; the slug is a lookup alias over
+            // it (the vocabulary /cache/ttl and toolPricing use), not a separate series.
+            assertEquals(tracker.getToolCosts("searchWeb").getCallCount(), tracker.getToolCosts("websearch").getCallCount());
+            assertNull(tracker.getConversationCosts("conv-keys").getToolUsage().get("websearch"));
             assertEquals(1, tracker.getConversationCosts("conv-keys").getToolUsage().get("searchWeb"));
         }
     }

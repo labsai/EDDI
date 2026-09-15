@@ -17,6 +17,7 @@ import ai.labs.eddi.utils.CollectionUtilities;
 import ai.labs.eddi.utils.RestUtilities;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import jakarta.ws.rs.BadRequestException;
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 
 import java.net.URI;
@@ -53,14 +54,23 @@ public class RestAction implements IRestAction {
         // sets and dictionaries it references, reading those stores directly. The
         // workflow is the entry point the caller named, so it is what access is
         // decided against — without this the helper reads any workflow, unguarded.
+        if (workflowId == null || workflowId.isBlank()) {
+            throw new BadRequestException("workflowId is required");
+        }
         accessGuard.requireAccess(workflowId, AccessLevel.VIEW, "workflow");
         try {
             var workflowConfiguration = workflowStore.read(workflowId, workflowVersion);
 
             List<String> actions;
             for (var workflowStep : workflowConfiguration.getWorkflowSteps()) {
-                var type = workflowStep.getType().toString();
+                // Parser and templating steps carry no resource URI, and every real
+                // workflow starts with the parser — reading config.get("uri") blindly
+                // turned the whole request into a 500 for any ordinary agent.
                 var resourceId = extractUriFromConfig(workflowStep);
+                if (resourceId == null) {
+                    continue;
+                }
+                var type = workflowStep.getType().toString();
                 var id = resourceId.getId();
                 var version = resourceId.getVersion();
 
@@ -85,9 +95,15 @@ public class RestAction implements IRestAction {
         }
     }
 
+    /**
+     * The step's resource id, or {@code null} for a step without a resource URI.
+     */
     private static IResourceStore.IResourceId extractUriFromConfig(WorkflowStep workflowStep) {
         var config = workflowStep.getConfig();
-        var uri = URI.create(config.get("uri").toString());
-        return RestUtilities.extractResourceId(uri);
+        Object uri = config != null ? config.get("uri") : null;
+        if (workflowStep.getType() == null || uri == null || uri.toString().isBlank()) {
+            return null;
+        }
+        return RestUtilities.extractResourceId(URI.create(uri.toString()));
     }
 }

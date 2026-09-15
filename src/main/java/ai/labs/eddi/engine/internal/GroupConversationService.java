@@ -280,7 +280,7 @@ public class GroupConversationService implements IGroupConversationService {
     /**
      * I1: lifetime dollars attributed across all discussions this instance ran.
      * Cumulative, not a live in-flight sum — mirrors {@code ToolCostTracker}'s
-     * {@code eddi.tool.costs.total} gauge, which is the closest existing pattern.
+     * {@code eddi.tool.costs.accrued} gauge, which is the closest existing pattern.
      */
     private final DoubleAdder groupCostDollars = new DoubleAdder();
 
@@ -449,7 +449,15 @@ public class GroupConversationService implements IGroupConversationService {
         GroupConversation gc = createGroupConversation(groupId, question, userId, depth);
         materializeAttachments(gc, attachments);
         gc.setInheritedCostCeiling(inheritedCostCeiling);
-        return executeDiscussion(gc, config, phases, question, listener, 0);
+        // Artifacts live in their own collection and are attached at read time; the
+        // discuss response is a read of the finished discussion too, and without this
+        // it reported "artifacts": [] for a discussion that had created some.
+        return withArtifacts(executeDiscussion(gc, config, phases, question, listener, 0));
+    }
+
+    private GroupConversation withArtifacts(GroupConversation gc) {
+        populateArtifacts(gc);
+        return gc;
     }
 
     /**
@@ -1639,7 +1647,7 @@ public class GroupConversationService implements IGroupConversationService {
                                                 GroupDiscussionEventListener listener)
             throws GroupDiscussionException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
         rejectIfShuttingDown();
-        return lifecycleOps().continueDiscussion(groupConversationId, question, listener);
+        return withArtifacts(lifecycleOps().continueDiscussion(groupConversationId, question, listener));
     }
 
     @Override
@@ -2274,7 +2282,7 @@ public class GroupConversationService implements IGroupConversationService {
             throws GroupDiscussionException, IResourceStore.ResourceStoreException,
             IResourceStore.ResourceNotFoundException, IResourceStore.ResourceModifiedException {
         rejectIfShuttingDown();
-        return hitlCoordinator.submitHumanInput(groupConversationId, memberId, content, submittedBy, null);
+        return withArtifacts(hitlCoordinator.submitHumanInput(groupConversationId, memberId, content, submittedBy, null));
     }
 
     @Override

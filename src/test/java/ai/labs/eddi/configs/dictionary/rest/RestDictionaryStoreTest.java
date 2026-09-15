@@ -174,6 +174,18 @@ class RestDictionaryStoreTest {
         }
 
         @Test
+        @DisplayName("a missing operation is a caller error (400), not a NullPointerException (500)")
+        void missingOperationIsIllegalArgument() throws Exception {
+            when(dictionaryStore.read("dict-1", 1)).thenReturn(new DictionaryConfiguration());
+
+            var instruction = new PatchInstruction<DictionaryConfiguration>();
+            instruction.setDocument(new DictionaryConfiguration());
+
+            assertThrows(IllegalArgumentException.class, () -> restStore.patchRegularDictionary("dict-1", 1, List.of(instruction)));
+            verify(dictionaryStore, never()).update(any(), any(), any());
+        }
+
+        @Test
         @DisplayName("DELETE operation — removes words and phrases")
         void deleteOperation_removesWordsAndPhrases() throws Exception {
             var existing = new DictionaryConfiguration();

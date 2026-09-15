@@ -4,6 +4,9 @@
  */
 package ai.labs.eddi.connections.grants;
 
+import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
+
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -79,18 +82,29 @@ public class InMemoryConnectionGrantStore implements IConnectionGrantStore {
     }
 
     @Override
-    public synchronized boolean claimRefresh(String tenantId, String connectionName, String principal, String claimantId, Instant leaseExpiresAt) {
+    public synchronized boolean claimRefresh(String tenantId, String connectionName, String principal, String claimantId, Duration lease) {
+        // Validated first, before the grant is looked up or touched, exactly as both
+        // real stores do. Checked any later, a null lease threw from now.plus(lease)
+        // after refreshInProgress was already set, leaving a claim with no expiry
+        // behind; and a non-positive lease was accepted where both stores refuse it.
+        checkNotNull(lease, "lease");
+        if (lease.isNegative() || lease.isZero()) {
+            throw new IllegalArgumentException("A refresh lease must be positive, was " + lease);
+        }
         ConnectionGrant grant = grants.get(key(tenantId, connectionName, principal));
         if (grant == null) {
             return false;
         }
+        // One clock for writing and comparing the expiry, as in the real stores —
+        // here the only clock there is.
+        Instant now = Instant.now();
         boolean free = grant.getRefreshInProgress() == null
-                || (grant.getRefreshLeaseExpiresAt() != null && grant.getRefreshLeaseExpiresAt().isBefore(Instant.now()));
+                || (grant.getRefreshLeaseExpiresAt() != null && grant.getRefreshLeaseExpiresAt().isBefore(now));
         if (!free) {
             return false;
         }
         grant.setRefreshInProgress(claimantId);
-        grant.setRefreshLeaseExpiresAt(leaseExpiresAt);
+        grant.setRefreshLeaseExpiresAt(now.plus(lease));
         return true;
     }
 
@@ -126,6 +140,17 @@ public class InMemoryConnectionGrantStore implements IConnectionGrantStore {
     @Override
     public synchronized boolean delete(String tenantId, String connectionName, String principal) {
         return grants.remove(key(tenantId, connectionName, principal)) != null;
+    }
+
+    @Override
+    public synchronized boolean deleteIfSealedWith(String tenantId, String connectionName, String principal, String accessTokenIv) {
+        String mapKey = key(tenantId, connectionName, principal);
+        ConnectionGrant stored = grants.get(mapKey);
+        if (accessTokenIv == null || stored == null || !accessTokenIv.equals(stored.getAccessTokenIv())) {
+            return false;
+        }
+        grants.remove(mapKey);
+        return true;
     }
 
     @Override
@@ -181,6 +206,12 @@ public class InMemoryConnectionGrantStore implements IConnectionGrantStore {
     @Override
     public synchronized long countByStatus(String tenantId, ConnectionGrant.Status status) {
         return grants.values().stream().filter(g -> tenantId.equals(g.getTenantId()) && g.getStatus() == status).count();
+    }
+
+    @Override
+    public synchronized long countByConnection(String tenantId, String connectionName) {
+        String prefix = tenantId + "|" + connectionName + "|";
+        return grants.keySet().stream().filter(k -> k.startsWith(prefix)).count();
     }
 
     /** Places a grant directly, for arranging a test. */

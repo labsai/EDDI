@@ -6,6 +6,8 @@ package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.engine.security.CallerIdentity;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
+import ai.labs.eddi.engine.security.ResolutionPrincipal;
+import ai.labs.eddi.engine.security.ResolutionPrincipalContext;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
@@ -256,6 +258,60 @@ class ConversationServiceResumeTest {
             // Assert: memory was stored after resume — via the state-guarded store so
             // a concurrent terminal end/cancel can never be clobbered.
             verify(conversationMemoryStore).storeConversationMemorySnapshotIfState(any(), eq(ConversationState.IN_PROGRESS));
+        }
+
+        @Test
+        @DisplayName("the resumed turn runs under the STORED conversation principal and the approver's caller identity")
+        void approvedResume_bindsStoredPrincipalAndApproversCaller() throws Exception {
+            // The two are different people by design: the approver drives the request
+            // (audit, ${caller:token}), the conversation's owner owns the PER_USER
+            // credentials the approved call may spend. Reading the request identity
+            // for the principal ran approved calls against the approver's SaaS account.
+            var principalContext = new ResolutionPrincipalContext();
+            principalContext.clear();
+            conversationService.resolutionPrincipalContext = principalContext;
+            doReturn(true).when(conversationMemoryStore).compareAndSetState(
+                    CONVERSATION_ID, ConversationState.AWAITING_HUMAN, ConversationState.IN_PROGRESS);
+            var snapshot = createResumeSnapshot();
+            snapshot.setResolutionProvenance(ResolutionPrincipal.Provenance.VERIFIED);
+            doReturn(snapshot).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+
+            IAgent agent = mock(IAgent.class);
+            IConversation conversation = mock(IConversation.class);
+            doReturn(agent).when(agentFactory).getAgent(ENV, AGENT_ID, AGENT_VERSION);
+            doReturn(conversation).when(agent).continueConversation(any(IConversationMemory.class), any(), any());
+            var principalDuringResume = new AtomicReference<ResolutionPrincipal>();
+            var callerDuringResume = new AtomicReference<CallerIdentity>();
+            doAnswer(inv -> {
+                principalDuringResume.set(principalContext.current());
+                callerDuringResume.set(callerIdentityContext.current());
+                return null;
+            }).when(conversation).resume(any());
+
+            var approver = new CallerIdentity("approver-token", "admin-approver", "https://eddi.example:443");
+            callerIdentityContext.bind(approver);
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<Callable<Void>> callableCaptor = ArgumentCaptor.forClass(Callable.class);
+            HitlDecision decision = new HitlDecision();
+            decision.setVerdict(HitlVerdict.APPROVED);
+
+            try {
+                conversationService.resumeConversation(CONVERSATION_ID, decision, null);
+                verify(conversationCoordinator).submitInOrder(eq(CONVERSATION_ID), callableCaptor.capture());
+                // Nothing bound on the executing thread: the callable must carry both.
+                callerIdentityContext.clear();
+                principalContext.clear();
+                callableCaptor.getValue().call();
+            } finally {
+                principalContext.clear();
+                callerIdentityContext.clear();
+            }
+
+            assertEquals(new ResolutionPrincipal(USER_ID, ResolutionPrincipal.Provenance.VERIFIED), principalDuringResume.get(),
+                    "the principal must come from the STORED conversation — its owner and provenance — never from the resuming request");
+            assertEquals(approver, callerDuringResume.get(),
+                    "the caller must be the approver who drove the resume, for audit and ${caller:token}");
+            assertNull(principalContext.current(), "the pooled thread must be left with no principal");
         }
 
         @Test

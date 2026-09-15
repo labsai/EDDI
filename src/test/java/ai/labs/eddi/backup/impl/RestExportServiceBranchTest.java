@@ -6,6 +6,7 @@ package ai.labs.eddi.backup.impl;
 
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.backup.IZipArchive;
+import ai.labs.eddi.configs.connections.IConnectionStore;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.apicalls.IApiCallsStore;
@@ -94,7 +95,7 @@ class RestExportServiceBranchTest {
                 dictionaryStore, ruleSetStore, apiCallsStore, llmStore,
                 propertySetterStore, outputStore, mcpCallsStore, ragStore,
                 snippetStore, jsonSerialization, zipArchive, secretScrubber,
-                scheduleStore, mock(ResourceAccessGuard.class), mock(BackupMetrics.class));
+                scheduleStore, mock(ResourceAccessGuard.class), mock(BackupMetrics.class), mock(IConnectionStore.class));
     }
 
     // =========================================================

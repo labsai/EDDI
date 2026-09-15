@@ -4,6 +4,9 @@
  */
 package ai.labs.eddi.datastore;
 
+import ai.labs.eddi.configs.connections.names.IConnectionNameClaimStore;
+import ai.labs.eddi.configs.connections.names.MongoConnectionNameClaimStore;
+import ai.labs.eddi.configs.connections.names.PostgresConnectionNameClaimStore;
 import ai.labs.eddi.configs.deployment.IDeploymentStorage;
 import ai.labs.eddi.configs.deployment.mongo.MongoDeploymentStorage;
 import ai.labs.eddi.configs.migration.IMigrationLogStore;
@@ -57,6 +60,9 @@ import ai.labs.eddi.connections.oauth.MongoOAuthStateStore;
 import ai.labs.eddi.connections.oauth.PostgresOAuthStateStore;
 import ai.labs.eddi.connections.grants.MongoConnectionGrantStore;
 import ai.labs.eddi.connections.grants.PostgresConnectionGrantStore;
+import ai.labs.eddi.connections.settings.IConnectionSettingsStore;
+import ai.labs.eddi.connections.settings.MongoConnectionSettingsStore;
+import ai.labs.eddi.connections.settings.PostgresConnectionSettingsStore;
 import ai.labs.eddi.secrets.persistence.ISecretPersistence;
 import ai.labs.eddi.secrets.persistence.MongoSecretPersistence;
 import ai.labs.eddi.secrets.persistence.PostgresSecretPersistence;
@@ -151,7 +157,21 @@ public class DataStoreProducers {
 
     @Produces
     @ApplicationScoped
+    public IConnectionNameClaimStore connectionNameClaimStore(Instance<MongoConnectionNameClaimStore> mongo,
+                                                              Instance<PostgresConnectionNameClaimStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
     public IOAuthStateStore oauthStateStore(Instance<MongoOAuthStateStore> mongo, Instance<PostgresOAuthStateStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
+    public IConnectionSettingsStore connectionSettingsStore(Instance<MongoConnectionSettingsStore> mongo,
+                                                            Instance<PostgresConnectionSettingsStore> postgres) {
         return isPostgres() ? postgres.get() : mongo.get();
     }
 

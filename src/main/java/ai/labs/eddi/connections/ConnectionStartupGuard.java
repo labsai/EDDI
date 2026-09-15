@@ -5,16 +5,17 @@
 package ai.labs.eddi.connections;
 
 import ai.labs.eddi.configs.connections.IConnectionStore;
+import ai.labs.eddi.configs.connections.model.AuthType;
 import ai.labs.eddi.configs.connections.model.Binding;
 import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
 import ai.labs.eddi.configs.connections.mongo.ConnectionStore;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.connections.oauth.CredentialEndpointAllowlist;
+import ai.labs.eddi.connections.settings.ConnectionSettingsRules;
 import ai.labs.eddi.datastore.serialization.IDescriptorStore;
 import ai.labs.eddi.integrations.openai.OpenAiCompatConfig;
 import ai.labs.eddi.secrets.ISecretProvider;
-import io.quarkus.runtime.LaunchMode;
 import io.quarkus.runtime.StartupEvent;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.annotation.Priority;
@@ -91,47 +92,57 @@ public class ConnectionStartupGuard {
         requireStoredConnectionsAreSupportable();
 
         if (endpointAllowlist.isEmpty()) {
-            LOGGER.warn("[CONNECTIONS] eddi.connections.credential-endpoint-allowlist is empty, so no OAuth connection can resolve. "
-                    + "STATIC and BASIC connections are unaffected.");
+            LOGGER.warnf("[CONNECTIONS] The credential endpoint allowlist, %s, is empty, so no OAuth connection can resolve. "
+                    + "STATIC and BASIC connections are unaffected.",
+                    ConnectionsConfig.describe("credentialEndpointAllowlist", ConnectionsConfig.CREDENTIAL_ENDPOINT_ALLOWLIST));
         } else {
             LOGGER.infof("[CONNECTIONS] Enabled. Credential endpoints allowed: %s", endpointAllowlist.origins());
         }
     }
 
     /**
+     * Refuses a <em>pinned</em> base URL a provider would not match; reports a
+     * missing or unusable stored one.
+     * <p>
      * {@code redirect_uri} must match the provider's registration exactly, so EDDI
      * has to know its own public base URL — it cannot derive one from an inbound
-     * request without letting a {@code Host} header steer it.
+     * request without letting a {@code Host} header steer it. The shape rules live
+     * in {@link ConnectionSettingsRules#requireBarePublicOrigin}.
      * <p>
-     * Parsed rather than prefix-matched. {@code startsWith("https://")} accepts a
-     * path, a query, a fragment, userinfo and a malformed authority, every one of
-     * which produces a redirect URI the provider will not match — and the failure
-     * surfaces as a user-facing OAuth error, not as a config problem.
+     * The two sources are treated differently on purpose. A pinned value is
+     * operator configuration that only a restart changes, so the boot is where its
+     * author is looking. A stored value is an administrator's, validated at the
+     * write boundary and changeable at runtime; refusing the boot over it — or over
+     * its absence — turned one missing setting into an outage for every connection
+     * type, when only authorization-code linking needs it, and that route already
+     * answers 400 naming the setting.
      */
     private void requirePublicBaseUrl() {
-        String publicBaseUrl = connectionsConfig.getPublicBaseUrl();
-        if (publicBaseUrl.isBlank()) {
-            throw new IllegalStateException("eddi.connections.enabled=true requires eddi.connections.public-base-url. It becomes the OAuth "
-                    + "redirect_uri, which the provider matches exactly, so it cannot be inferred from an inbound request.");
-        }
-        URI base;
-        try {
-            base = new URI(publicBaseUrl);
-        } catch (Exception e) {
-            throw new IllegalStateException("eddi.connections.public-base-url is not a valid URL: " + publicBaseUrl, e);
-        }
-        if (isDevOrTest()) {
-            // http://localhost is the normal shape while developing, and refusing it
-            // would make the feature untestable outside a TLS-terminating proxy.
+        String pinnedBaseUrl = connectionsConfig.pinnedSettings().getPublicBaseUrl();
+        if (pinnedBaseUrl != null) {
+            try {
+                ConnectionSettingsRules.requireBarePublicOrigin(pinnedBaseUrl, ConnectionsConfig.PUBLIC_BASE_URL, isDevOrTest());
+            } catch (IllegalArgumentException e) {
+                throw new IllegalStateException(e.getMessage(), e);
+            }
             return;
         }
-        boolean bareHttpsOrigin = "https".equals(base.getScheme()) && base.getUserInfo() == null && base.getQuery() == null
-                && base.getFragment() == null && (base.getPath() == null || base.getPath().isEmpty() || "/".equals(base.getPath()))
-                && base.getHost() != null;
-        if (!bareHttpsOrigin) {
-            throw new IllegalStateException("eddi.connections.public-base-url must be a bare https origin (scheme://host[:port]) — got: "
-                    + publicBaseUrl);
-        }
+        connectionsConfig.publicBaseUrlProblem()
+                .ifPresent(problem -> LOGGER.warnf("[CONNECTIONS] %s Linking an account to an OAUTH2_AUTHORIZATION_CODE connection is "
+                        + "refused until it is set; every other connection type is unaffected.", problem));
+    }
+
+    /**
+     * The stored-connection reports, for a feature switched on at runtime.
+     * <p>
+     * {@link #onStart} makes them only when connections are already enabled at
+     * boot. Enabled later through {@code PUT /connectionstore/settings}, a stored
+     * {@code PER_USER} connection on a deployment without OIDC, or an OAuth one
+     * with an inert vault, would otherwise go unreported until the next restart.
+     * Log lines only, like at boot: every condition still fails closed per request.
+     */
+    public void reportStoredConnections() {
+        requireStoredConnectionsAreSupportable();
     }
 
     /**
@@ -159,6 +170,7 @@ public class ConnectionStartupGuard {
      */
     private void requireStoredConnectionsAreSupportable() {
         List<ConnectionConfiguration> connections = readAll();
+        reportPlaintextOrigins(connections);
         boolean anyPerUser = connections.stream().anyMatch(connection -> connection.getBinding() == Binding.PER_USER);
         boolean anyOAuth = connections.stream()
                 .anyMatch(connection -> connection.getAuthType() != null && connection.getAuthType().isOAuth());
@@ -183,11 +195,75 @@ public class ConnectionStartupGuard {
                     + "user's tokens (see OpenAiAuthFilter's trust-user-headers caveat). Enable OIDC, or change the connection to SERVICE "
                     + "binding.");
         }
+        // Validation runs on the write path only, so a first-release document that
+        // paired the authorization-code flow with SERVICE binding — the default
+        // binding, before the model refused the pair — still loads. It resolves
+        // every call against the __service__ principal, which no consent screen can
+        // ever produce a grant for, so it fails every call as "not connected" with
+        // nothing naming the cause.
+        for (ConnectionConfiguration connection : connections) {
+            if (connection.getAuthType() == AuthType.OAUTH2_AUTHORIZATION_CODE && connection.getBinding() != Binding.PER_USER) {
+                LOGGER.errorf("[CONNECTIONS] Connection '%s' pairs authType OAUTH2_AUTHORIZATION_CODE with binding %s, which the model no "
+                        + "longer accepts. It will fail every call as not connected: the flow files its grant under the user who consented, "
+                        + "and a %s-bound resolution looks under a principal nothing can ever create a grant for. Re-save it as PER_USER.",
+                        sanitize(connection.getName()), connection.getBinding(), connection.getBinding());
+            }
+        }
+        boolean anyCallerSupplied = connections.stream().anyMatch(connection -> connection.getBinding() == Binding.CALLER_SUPPLIED);
+        if (anyCallerSupplied && !authorizationEnabled) {
+            LOGGER.error("[CONNECTIONS] A CALLER_SUPPLIED connection is stored, but authorization.enabled=false. The credential travels in "
+                    + "the X-EDDI-Connection-Credential header, which is only read from an authenticated caller — an anonymous request "
+                    + "has it dropped — so every call through it will be REFUSED at request time as NO_CALLER_CREDENTIAL. Enable OIDC, "
+                    + "or change the connection to SERVICE binding with a vaulted key.");
+        }
         if (anyOAuth && !secretProvider.isAvailable()) {
             LOGGER.error("[CONNECTIONS] An OAuth connection is stored, but the SecretsVault is inactive (EDDI_VAULT_MASTER_KEY is unset). "
                     + "Every grant it would store or read will be REFUSED at request time: grants are envelope-encrypted with the tenant "
                     + "DEK and there is deliberately no plaintext fallback. This is the one place the autoVaultSecret pattern of degrading "
                     + "to plaintext is not acceptable, because these are refresh tokens.");
+        }
+    }
+
+    /**
+     * A credential allowed to travel in the clear is accepted at save time with a
+     * warning; this repeats it at boot, where the operator reading the log is not
+     * necessarily the author who saw the first one.
+     */
+    private void reportPlaintextOrigins(List<ConnectionConfiguration> connections) {
+        for (ConnectionConfiguration connection : connections) {
+            if (connection.getBaseUrlAllowlist() == null) {
+                continue;
+            }
+            for (String origin : connection.getBaseUrlAllowlist()) {
+                // Per entry, because a stored document never re-ran validation: an
+                // origin such as "http://[" makes URI parsing throw, and one bad entry
+                // used to abort this report — and the startup observer with it — for
+                // every connection after it.
+                boolean plaintextRemote;
+                try {
+                    plaintextRemote = ConnectionConfiguration.isPlaintextRemoteOrigin(origin);
+                } catch (RuntimeException e) {
+                    LOGGER.warnf("[CONNECTIONS] Connection '%s' has a baseUrlAllowlist entry that could not be classified (%s): %s. It is "
+                            + "skipped by this report; resolution refuses a malformed entry as INVALID_CONFIGURATION. Re-save the "
+                            + "connection with a bare origin.", sanitize(connection.getName()), e.getClass().getSimpleName(), sanitize(origin));
+                    continue;
+                }
+                if (!plaintextRemote) {
+                    continue;
+                }
+                if (connectionsConfig.isAllowPlaintextRemoteOrigins()) {
+                    LOGGER.warnf("[CONNECTIONS] Connection '%s' allows its credential to be sent over plaintext http to %s; the credential "
+                            + "crosses the network unencrypted. Prefer an https origin.", sanitize(connection.getName()), sanitize(origin));
+                } else {
+                    // ERROR, not WARN: with the property off this is not a risk being
+                    // accepted but a connection that fails every call to that origin — and
+                    // after an upgrade, one that used to work.
+                    LOGGER.errorf("[CONNECTIONS] Connection '%s' allows its credential to be sent over plaintext http to %s, but %s=false, "
+                            + "so every call through it to that origin is REFUSED at request time as TARGET_NOT_ALLOWED. Change the origin to "
+                            + "https, or set %s=true to accept an unencrypted credential deliberately.", sanitize(connection.getName()),
+                            sanitize(origin), ConnectionsConfig.ALLOW_PLAINTEXT_REMOTE_ORIGINS, ConnectionsConfig.ALLOW_PLAINTEXT_REMOTE_ORIGINS);
+                }
+            }
         }
     }
 
@@ -263,7 +339,6 @@ public class ConnectionStartupGuard {
 
     /** Package-private so a test can drive production mode without a container. */
     boolean isDevOrTest() {
-        LaunchMode mode = LaunchMode.current();
-        return mode == LaunchMode.DEVELOPMENT || mode == LaunchMode.TEST;
+        return ConnectionSettingsRules.isDevOrTest();
     }
 }

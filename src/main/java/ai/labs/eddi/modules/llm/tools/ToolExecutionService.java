@@ -137,7 +137,10 @@ public class ToolExecutionService {
         // Caching additionally requires a scope tag to partition the entry by. When
         // one cannot be resolved the cache is skipped on both the read and the write
         // side, so an unattributable result is neither served nor stored.
-        boolean cacheable = enableCaching && cacheScopeTag != null;
+        // Stateful tools (artifacts, group tasks, dynamic agents, memory) are never
+        // cached: their result changes with what peers do, and a cache hit would skip a
+        // side effect. See ToolCacheService#isCacheable.
+        boolean cacheable = enableCaching && cacheScopeTag != null && ToolCacheService.isCacheable(invocation);
         if (enableCaching && cacheScopeTag == null) {
             meterRegistry.counter("eddi.tool.cache.bypassed", "tool", toolName).increment();
         }
@@ -169,9 +172,18 @@ public class ToolExecutionService {
                 cacheService.put(cacheScopeTag, invocation, arguments, result);
             }
 
-            // 5. Track cost (price from the canonical slug or the operator override)
+            // 5. Track cost (price from the canonical slug or the operator override).
+            // Its own try: the tool has ALREADY run and its side effects are done, so
+            // a tracking failure must not replace the result with an error — that
+            // discarded real work and, since the result was already cached, a retry
+            // was served from the cache without ever being charged.
             if (enableCostTracking && conversationId != null) {
-                costTracker.trackToolCall(invocation, conversationId);
+                try {
+                    costTracker.trackToolCall(invocation, conversationId);
+                } catch (RuntimeException trackingFailure) {
+                    LOGGER.errorf("Cost tracking failed for tool '%s'; the tool result is returned unchanged: %s", toolName,
+                            trackingFailure.getMessage());
+                }
             }
 
             long executionTime = System.currentTimeMillis() - startTime;

@@ -102,7 +102,9 @@ public class GroupContextBuilder {
                 ? phase.inputTemplate()
                 : isDebateJudgment(phase, speaker, transcript, phaseIdx, allMembers)
                         ? DiscussionStylePresets.TEMPLATE_DEBATE_JUDGMENT
-                        : selectDefaultTemplate(phase, transcript, phaseIdx);
+                        : phase.type() == PhaseType.CRITIQUE && target == null
+                                ? DiscussionStylePresets.TEMPLATE_CRITIQUE_PANEL
+                                : selectDefaultTemplate(phase, transcript, phaseIdx);
 
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("question", question);
@@ -121,6 +123,11 @@ public class GroupContextBuilder {
                     data.put("targetName", target.displayName());
                     String targetResponse = findLatestResponse(transcript, target.agentId());
                     data.put("targetResponse", targetResponse != null ? targetResponse : "(no response)");
+                } else {
+                    // No assigned target (targetEachPeer off): nothing filled targetName or
+                    // targetResponse, so every member was asked to critique "the response"
+                    // of nobody and reported it blank. Review every peer instead.
+                    data.put("peerResponses", peerResponses(transcript, speaker, allMembers));
                 }
             }
             case REVISION -> {
@@ -292,6 +299,40 @@ public class GroupContextBuilder {
      * the transcript would have to guess at both. See {@link #isDebateJudgment},
      * which {@link #buildPhaseInput} consults first.
      */
+    /**
+     * The latest response of every peer except {@code speaker}, for a CRITIQUE
+     * phase without {@code targetEachPeer}. Peers come from the roster when it is
+     * known, otherwise from who has spoken; a peer with no response yet is left
+     * out.
+     */
+    List<Map<String, Object>> peerResponses(List<TranscriptEntry> transcript, GroupMember speaker, List<GroupMember> allMembers) {
+        Map<String, String> peerNames = new LinkedHashMap<>();
+        if (allMembers != null) {
+            for (GroupMember member : allMembers) {
+                if (member != null && member.agentId() != null && !member.agentId().equals(speaker.agentId())) {
+                    peerNames.putIfAbsent(member.agentId(), member.displayName());
+                }
+            }
+        } else if (transcript != null) {
+            for (TranscriptEntry entry : transcript) {
+                if (entry != null && entry.speakerAgentId() != null && !entry.speakerAgentId().equals(speaker.agentId())) {
+                    peerNames.putIfAbsent(entry.speakerAgentId(), entry.speakerDisplayName());
+                }
+            }
+        }
+        List<Map<String, Object>> peers = new ArrayList<>();
+        peerNames.forEach((agentId, displayName) -> {
+            String response = transcript != null ? findLatestResponse(transcript, agentId) : null;
+            if (response != null) {
+                Map<String, Object> peer = new LinkedHashMap<>();
+                peer.put("speaker", displayName != null ? displayName : agentId);
+                peer.put("content", response);
+                peers.add(peer);
+            }
+        });
+        return peers;
+    }
+
     public String selectDefaultTemplate(DiscussionPhase phase, List<TranscriptEntry> transcript, int phaseIdx) {
         if (phase.type() == PhaseType.OPINION) {
             // Use independent template if no context, or context template if

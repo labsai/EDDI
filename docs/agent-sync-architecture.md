@@ -126,6 +126,10 @@ The `IResourceSource` interface is the only transport abstraction. All downstrea
       <extId>.descriptor.json          (per-extension)
   snippets/
     <snippetId>.snippet.json
+  schedules/
+    <scheduleId>.schedule.json
+  connections/
+    <connectionId>.connection.json   (ZIP import/export only — live sync does not carry connections)
 ```
 
 ## API Endpoints

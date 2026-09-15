@@ -33,6 +33,7 @@ import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IRestAgentAdministration;
+import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.tenancy.QuotaRefusal;
@@ -650,8 +651,30 @@ public class McpAdminTools {
                 var env = parseEnvironment(environment);
                 try {
                     Response deployResponse = agentAdmin.deployAgent(env, agentId, newAgentVersion, true, true);
-                    result.put("redeployed", deployResponse.getStatus() == 200);
+                    // A waited deploy answers 200 whether or not it worked — a timeout or a
+                    // failed build is reported in the body (status + error). Reading the
+                    // HTTP status alone said "redeployed: true" for a deployment that had
+                    // failed.
+                    Object deployStatus = null;
+                    Object deployError = null;
+                    if (deployResponse.getEntity() instanceof Map<?, ?> body) {
+                        deployStatus = body.get("status");
+                        deployError = body.get("error");
+                    }
+                    boolean redeployed = deployResponse.getStatus() == 200 && deployError == null
+                            && Deployment.Status.READY.name().equals(String.valueOf(deployStatus));
+                    result.put("redeployed", redeployed);
                     result.put("environment", env.name());
+                    if (deployStatus != null) {
+                        result.put("deploymentStatus", String.valueOf(deployStatus));
+                    }
+                    if (deployError != null) {
+                        result.put("deployError", String.valueOf(deployError));
+                    }
+                    // The previous version stays deployed (deploy never retires a
+                    // version; undeploying would also disable the agent's schedules), so
+                    // say so rather than leave the caller to discover it.
+                    result.put("previousVersionStillDeployed", redeployed);
                 } catch (Exception deployErr) {
                     result.put("redeployed", false);
                     result.put("deployError", "Redeployment failed: " + deployErr.getMessage());
@@ -819,27 +842,37 @@ public class McpAdminTools {
     }
 
     /**
-     * Map a workflow extension type URI to the MCP resource type slug. E.g.,
-     * "eddi://ai.labs.rules" → "behavior"
+     * Workflow step type (the authority of its {@code eddi://} URI) → the resource
+     * type slug {@code read_resource}/{@code update_resource} accept. Both the v6
+     * names and their legacy aliases are listed.
      */
-    private static String uriToResourceType(String typeUri) {
+    private static final Map<String, String> STEP_TYPE_TO_RESOURCE_TYPE = Map.ofEntries(
+            Map.entry("ai.labs.rules", "behavior"), Map.entry("ai.labs.behavior", "behavior"),
+            Map.entry("ai.labs.llm", "langchain"), Map.entry("ai.labs.langchain", "langchain"),
+            Map.entry("ai.labs.apicalls", "httpcalls"), Map.entry("ai.labs.httpcalls", "httpcalls"),
+            Map.entry("ai.labs.mcpcalls", "mcpcalls"),
+            Map.entry("ai.labs.output", "output"),
+            Map.entry("ai.labs.property", "propertysetter"),
+            Map.entry("ai.labs.dictionary", "dictionaries"), Map.entry("ai.labs.parser", "dictionaries"));
+
+    /**
+     * Map a workflow extension type URI to the MCP resource type slug. E.g.,
+     * "eddi://ai.labs.rules" → "behavior".
+     * <p>
+     * An exact lookup on the step type. The substring matching this replaced missed
+     * every v6 name ({@code ai.labs.rules}, {@code ai.labs.llm},
+     * {@code ai.labs.apicalls}), so {@code list_agent_resources} labelled the
+     * resources of every newly created agent "unknown".
+     */
+    static String uriToResourceType(String typeUri) {
         if (typeUri == null)
             return "unknown";
-        if (typeUri.contains("behavior"))
-            return "behavior";
-        if (typeUri.contains("langchain"))
-            return "langchain";
-        if (typeUri.contains("httpcalls"))
-            return "httpcalls";
-        if (typeUri.contains("mcpcalls"))
-            return "mcpcalls";
-        if (typeUri.contains("output"))
-            return "output";
-        if (typeUri.contains("property"))
-            return "propertysetter";
-        if (typeUri.contains("dictionary") || typeUri.contains("parser"))
-            return "dictionaries";
-        return "unknown";
+        String stepType = typeUri.startsWith("eddi://") ? typeUri.substring("eddi://".length()) : typeUri;
+        int end = stepType.indexOf('/');
+        if (end >= 0) {
+            stepType = stepType.substring(0, end);
+        }
+        return STEP_TYPE_TO_RESOURCE_TYPE.getOrDefault(stepType, "unknown");
     }
 
     private String resultJson(String action, Map<String, Object> data) {

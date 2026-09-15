@@ -121,6 +121,80 @@ public class TaskForceEngine {
     }
 
     /**
+     * Turn the group's configured {@code tasks} into the discussion's task list:
+     * create every item, resolve {@code dependsOn} subjects to ids, then assign by
+     * role (round-robin for {@code ALL}), leaving BID-mode tasks for the auction.
+     * <p>
+     * Shared by the PLAN phase and by an EXECUTE phase that runs with no plan
+     * before it — see {@link #executeTaskExecutionPhase}.
+     */
+    void materializeConfiguredTasks(GroupConversation gc, AgentGroupConfiguration config, int phaseIdx, DiscussionPhase phase) {
+        if (gc.getTaskList() == null) {
+            gc.setTaskList(new SharedTaskList());
+        }
+        // First pass: create all TaskItems
+        List<TaskItem> createdItems = new ArrayList<>();
+        for (TaskDefinition td : config.getTasks()) {
+            TaskItem task = new TaskItem(td.subject(), td.description(), td.priority());
+            gc.getTaskList().addTask(task);
+            createdItems.add(task);
+        }
+
+        // Second pass: resolve dependsOn subjects to task IDs
+        for (int i = 0; i < config.getTasks().size(); i++) {
+            TaskDefinition td = config.getTasks().get(i);
+            TaskItem original = createdItems.get(i);
+            if (td.dependsOn() != null && !td.dependsOn().isEmpty()) {
+                List<String> resolvedDepIds = td.dependsOn().stream()
+                        .map(depSubject -> createdItems.stream()
+                                .filter(ci -> ci.subject().equalsIgnoreCase(depSubject))
+                                .map(TaskItem::id)
+                                .findFirst().orElse(null))
+                        .filter(Objects::nonNull)
+                        .toList();
+                if (!resolvedDepIds.isEmpty()) {
+                    // Replace with dependency-aware TaskItem
+                    TaskItem withDeps = new TaskItem(
+                            original.id(), original.subject(), original.description(),
+                            original.status(), original.assignedAgentId(), original.assignedDisplayName(),
+                            resolvedDepIds, original.result(), original.verificationNote(),
+                            original.verified(), original.priority(), original.createdAt(), original.completedAt());
+                    gc.getTaskList().updateTask(withDeps); // replace with dependency-aware version
+                }
+            }
+        }
+
+        // Third pass: resolve assignments with round-robin for "ALL"
+        for (int i = 0; i < createdItems.size(); i++) {
+            TaskItem task = createdItems.get(i);
+            TaskDefinition td = config.getTasks().get(i);
+            // I18: BID-mode tasks are deliberately left unassigned — the
+            // EXECUTE wave announces them and awards by bid; assigning here
+            // would preempt the auction with the planner's guess.
+            if (TaskBidEngine.effectiveMode(td, config) == AgentGroupConfiguration.AssignmentMode.BID) {
+                LOGGER.debugf("Task '%s' is BID-mode — left for the execution wave's auction", task.subject());
+                continue;
+            }
+            String assignedAgentId = resolveTaskAssignment(
+                    td.assignToRole(), config.getMembers(), config.getModeratorAgentId(), i);
+            if (assignedAgentId != null) {
+                GroupMember assignedMember = findMember(config.getMembers(), assignedAgentId);
+                String displayName = assignedMember != null ? assignedMember.displayName() : assignedAgentId;
+                gc.getTaskList().assignTask(task.id(), assignedAgentId, displayName);
+            } else {
+                LOGGER.warnf("Could not resolve assignment for task '%s' with role '%s'",
+                        task.subject(), td.assignToRole());
+            }
+        }
+
+        gc.getTranscript().add(new TranscriptEntry(
+                "system", "System",
+                "Pre-configured task plan: " + config.getTasks().size() + " tasks",
+                phaseIdx, phase.name(), TranscriptEntryType.PLAN,
+                Instant.now(), null, null));
+    }
+
+    /**
      * PLAN phase: Decompose the goal into tasks. If pre-configured tasks exist in
      * the group config, uses those directly (skipping LLM planning). Otherwise, the
      * moderator agent decomposes the goal via its pipeline and the output is parsed
@@ -147,67 +221,7 @@ public class TaskForceEngine {
 
         if (preConfigured) {
             // Config-driven tasks — skip LLM planning
-            // First pass: create all TaskItems
-            List<TaskItem> createdItems = new ArrayList<>();
-            for (TaskDefinition td : config.getTasks()) {
-                TaskItem task = new TaskItem(td.subject(), td.description(), td.priority());
-                gc.getTaskList().addTask(task);
-                createdItems.add(task);
-            }
-
-            // Second pass: resolve dependsOn subjects to task IDs
-            for (int i = 0; i < config.getTasks().size(); i++) {
-                TaskDefinition td = config.getTasks().get(i);
-                TaskItem original = createdItems.get(i);
-                if (td.dependsOn() != null && !td.dependsOn().isEmpty()) {
-                    List<String> resolvedDepIds = td.dependsOn().stream()
-                            .map(depSubject -> createdItems.stream()
-                                    .filter(ci -> ci.subject().equalsIgnoreCase(depSubject))
-                                    .map(TaskItem::id)
-                                    .findFirst().orElse(null))
-                            .filter(Objects::nonNull)
-                            .toList();
-                    if (!resolvedDepIds.isEmpty()) {
-                        // Replace with dependency-aware TaskItem
-                        TaskItem withDeps = new TaskItem(
-                                original.id(), original.subject(), original.description(),
-                                original.status(), original.assignedAgentId(), original.assignedDisplayName(),
-                                resolvedDepIds, original.result(), original.verificationNote(),
-                                original.verified(), original.priority(), original.createdAt(), original.completedAt());
-                        gc.getTaskList().updateTask(withDeps); // replace with dependency-aware version
-                    }
-                }
-            }
-
-            // Third pass: resolve assignments with round-robin for "ALL"
-            for (int i = 0; i < createdItems.size(); i++) {
-                TaskItem task = createdItems.get(i);
-                TaskDefinition td = config.getTasks().get(i);
-                // I18: BID-mode tasks are deliberately left unassigned — the
-                // EXECUTE wave announces them and awards by bid; assigning here
-                // would preempt the auction with the planner's guess.
-                if (TaskBidEngine.effectiveMode(td, config) == AgentGroupConfiguration.AssignmentMode.BID) {
-                    LOGGER.debugf("Task '%s' is BID-mode — left for the execution wave's auction", task.subject());
-                    continue;
-                }
-                String assignedAgentId = resolveTaskAssignment(
-                        td.assignToRole(), config.getMembers(), config.getModeratorAgentId(), i);
-                if (assignedAgentId != null) {
-                    GroupMember assignedMember = findMember(config.getMembers(), assignedAgentId);
-                    String displayName = assignedMember != null ? assignedMember.displayName() : assignedAgentId;
-                    gc.getTaskList().assignTask(task.id(), assignedAgentId, displayName);
-                } else {
-                    LOGGER.warnf("Could not resolve assignment for task '%s' with role '%s'",
-                            task.subject(), td.assignToRole());
-                }
-            }
-
-            gc.getTranscript().add(new TranscriptEntry(
-                    "system", "System",
-                    "Pre-configured task plan: " + config.getTasks().size() + " tasks",
-                    phaseIdx, phase.name(), TranscriptEntryType.PLAN,
-                    Instant.now(), null, null));
-
+            materializeConfiguredTasks(gc, config, phaseIdx, phase);
         } else {
             // LLM-driven planning via moderator
             if (speakers.isEmpty()) {
@@ -312,6 +326,19 @@ public class TaskForceEngine {
                                           GroupDiscussionEventListener listener, AtomicInteger turnCounter, int maxTurns)
             throws GroupDiscussionException {
 
+        if ((gc.getTaskList() == null || gc.getTaskList().isEmpty()) && config.getTasks() != null && !config.getTasks().isEmpty()) {
+            // A CUSTOM group with an EXECUTE phase and configured tasks but no PLAN
+            // phase: only PLAN used to turn config.tasks into the task list, so the
+            // configured work silently never ran. Materialize it here — the same
+            // code path PLAN uses for pre-configured tasks.
+            LOGGER.infof("EXECUTE phase '%s' runs without a preceding PLAN — materializing the %d configured tasks", phase.name(),
+                    config.getTasks().size());
+            materializeConfiguredTasks(gc, config, phaseIdx, phase);
+            List<String> cycles = gc.getTaskList().detectCycles();
+            if (!cycles.isEmpty()) {
+                throw new GroupDiscussionException("Circular task dependencies detected: " + String.join(" → ", cycles));
+            }
+        }
         if (gc.getTaskList() == null || gc.getTaskList().isEmpty()) {
             LOGGER.warn("EXECUTE phase: no tasks to execute");
             return;

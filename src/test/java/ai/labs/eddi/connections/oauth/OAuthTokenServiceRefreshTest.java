@@ -41,6 +41,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.doAnswer;
@@ -444,7 +445,7 @@ class OAuthTokenServiceRefreshTest {
         // polling for somebody else's refresh.
         grantStore = new InterferingGrantStore(2, store -> store.delete(TENANT, CONNECTION, PRINCIPAL));
         seedExpiredGrant();
-        grantStore.claimRefresh(TENANT, CONNECTION, PRINCIPAL, "another-replica", Instant.now().plus(Duration.ofSeconds(60)));
+        grantStore.claimRefresh(TENANT, CONNECTION, PRINCIPAL, "another-replica", Duration.ofSeconds(60));
 
         long start = System.nanoTime();
         var error = assertThrows(ConnectionException.class, () -> service().accessToken(connection(), PRINCIPAL));
@@ -465,7 +466,7 @@ class OAuthTokenServiceRefreshTest {
         grantStore = new InterferingGrantStore(2,
                 store -> store.releaseRefresh(TENANT, CONNECTION, PRINCIPAL, "another-replica"));
         seedExpiredGrant();
-        grantStore.claimRefresh(TENANT, CONNECTION, PRINCIPAL, "another-replica", Instant.now().plus(Duration.ofSeconds(60)));
+        grantStore.claimRefresh(TENANT, CONNECTION, PRINCIPAL, "another-replica", Duration.ofSeconds(60));
         when(tokenClient.refresh(any(), anyString(), anyString())).thenAnswer(invocation -> {
             tokenRequests.incrementAndGet();
             return new TokenResponse("fresh-access", "new-refresh", Duration.ofHours(1), List.of());
@@ -478,6 +479,203 @@ class OAuthTokenServiceRefreshTest {
         assertEquals(1, tokenRequests.get(), "the waiter must take the lease over and refresh, exactly once");
         assertTrue(elapsedMillis < OAuthTokenService.AWAIT_TIMEOUT.toMillis() / 2,
                 "must not wait out the deadline for a refresh nobody is performing: took " + elapsedMillis + "ms");
+    }
+
+    @Test
+    @DisplayName("an access token that will not unseal inside the claim is transient and leaves the grant ACTIVE")
+    void undecryptableAccessTokenInsideTheClaimIsTransient() throws Exception {
+        // The claimant re-reads the row inside its lease and finds a token another
+        // replica refreshed a moment ago — usable, but sealed under a DEK this
+        // replica cannot open right now. That is a vault problem, not a revoked
+        // grant: reporting it as GRANT_UNUSABLE reached handleRefreshFailure, which
+        // wrote REFRESH_FAILED and demanded a reconnect for a blip.
+        grantStore = new InterferingGrantStore(2, store -> {
+            var refreshedElsewhere = new ConnectionGrant();
+            refreshedElsewhere.setTenantId(TENANT);
+            refreshedElsewhere.setConnectionName(CONNECTION);
+            refreshedElsewhere.setPrincipal(PRINCIPAL);
+            refreshedElsewhere.setEncryptedAccessToken("unopenable");
+            refreshedElsewhere.setAccessTokenIv("iv");
+            refreshedElsewhere.setEncryptedRefreshToken("sealed:new-refresh");
+            refreshedElsewhere.setRefreshTokenIv("iv");
+            refreshedElsewhere.setDekId(ACTIVE_DEK);
+            refreshedElsewhere.setExpiresAt(Instant.now().plus(Duration.ofHours(1)));
+            refreshedElsewhere.setLastRefreshAt(Instant.now());
+            refreshedElsewhere.setStatus(ConnectionGrant.Status.ACTIVE);
+            store.seed(refreshedElsewhere);
+        });
+        seedExpiredGrant();
+        // doAnswer, not when(...): the latter invokes the setUp answer with null
+        // arguments while the stub is being recorded.
+        doAnswer(i -> {
+            throw new ISecretProvider.SecretProviderException("DEK generation not available");
+        }).when(secretProvider).unseal(anyString(), argThat(sealed -> sealed != null && "unopenable".equals(sealed.ciphertext())));
+
+        var error = assertThrows(ConnectionException.class, () -> service().accessToken(connection(), PRINCIPAL));
+
+        assertEquals(ConnectionException.Reason.TOKEN_ENDPOINT_UNAVAILABLE, error.getReason(),
+                "ciphertext that will not open is a vault problem the next request may not have, not a dead grant");
+        assertEquals(ConnectionGrant.Status.ACTIVE, grantStore.find(TENANT, CONNECTION, PRINCIPAL).orElseThrow().getStatus(),
+                "the grant must not be marked REFRESH_FAILED over a token the provider never rejected");
+        assertEquals(0, tokenRequests.get(), "nothing was sent to the provider, so nothing about the grant can have changed");
+    }
+
+    @Test
+    @DisplayName("a live access token that will not unseal outside the claim is transient too")
+    void undecryptableLiveAccessTokenIsTransient() throws Exception {
+        var grant = new ConnectionGrant();
+        grant.setTenantId(TENANT);
+        grant.setConnectionName(CONNECTION);
+        grant.setPrincipal(PRINCIPAL);
+        grant.setEncryptedAccessToken("unopenable");
+        grant.setAccessTokenIv("iv");
+        grant.setDekId(STORED_DEK);
+        grant.setExpiresAt(Instant.now().plus(Duration.ofHours(1)));
+        grant.setStatus(ConnectionGrant.Status.ACTIVE);
+        grantStore.seed(grant);
+        doAnswer(i -> {
+            throw new ISecretProvider.SecretProviderException("vault sealed");
+        }).when(secretProvider).unseal(anyString(), any());
+
+        var error = assertThrows(ConnectionException.class, () -> service().accessToken(connection(), PRINCIPAL));
+
+        assertEquals(ConnectionException.Reason.TOKEN_ENDPOINT_UNAVAILABLE, error.getReason(),
+                "telling the user to reconnect over a vault blip is the same conflation as calling an outage invalid_grant");
+        assertEquals(ConnectionGrant.Status.ACTIVE, grantStore.find(TENANT, CONNECTION, PRINCIPAL).orElseThrow().getStatus());
+    }
+
+    @Test
+    @DisplayName("a failure inside the claim that is not a ConnectionException is reported as transient, not as a 500")
+    void unexpectedFailureInsideTheClaimIsTransient() {
+        seedExpiredGrant();
+        when(tokenClient.refresh(any(), anyString(), anyString())).thenThrow(new IllegalStateException("resolver blew up"));
+
+        var error = assertThrows(ConnectionException.class, () -> service().accessToken(connection(), PRINCIPAL));
+
+        assertEquals(ConnectionException.Reason.TOKEN_ENDPOINT_UNAVAILABLE, error.getReason(),
+                "an unclassified failure used to escape the transient/terminal split entirely and reach a REST caller as a 500");
+        assertEquals(IllegalStateException.class, error.getCause().getClass(), "the cause must be kept for the log");
+        assertEquals(ConnectionGrant.Status.ACTIVE, grantStore.find(TENANT, CONNECTION, PRINCIPAL).orElseThrow().getStatus(),
+                "the grant is untouched, which is what makes the failure transient");
+    }
+
+    @Test
+    @DisplayName("a grant gone by the claimant's re-read fails as NOT_CONNECTED and still releases the lease")
+    void emptyReReadInsideTheClaimReleasesTheLease() {
+        // The first read (the caller's) finds the expired grant; the second — the
+        // claimant's re-read after the claim landed — finds nothing. The row itself is
+        // left in place, so whether the lease was released is observable afterwards.
+        var reads = new AtomicInteger();
+        grantStore = new InMemoryConnectionGrantStore() {
+            @Override
+            public synchronized Optional<ConnectionGrant> find(String tenantId, String connectionName, String principal) {
+                return reads.incrementAndGet() == 2 ? Optional.empty() : super.find(tenantId, connectionName, principal);
+            }
+        };
+        seedExpiredGrant();
+
+        var error = assertThrows(ConnectionException.class, () -> service().accessToken(connection(), PRINCIPAL));
+
+        assertEquals(ConnectionException.Reason.NOT_CONNECTED, error.getReason());
+        assertEquals(null, grantStore.find(TENANT, CONNECTION, PRINCIPAL).orElseThrow().getRefreshInProgress(),
+                "the lease must be released, or every other caller of this grant waits out a lease nobody is using");
+        assertEquals(0, tokenRequests.get());
+    }
+
+    @Test
+    @DisplayName("a store failure on the claimant's re-read is transient, keeps its cause, and still releases the lease")
+    void throwingReReadInsideTheClaimIsTransientAndReleasesTheLease() {
+        var reads = new AtomicInteger();
+        grantStore = new InMemoryConnectionGrantStore() {
+            @Override
+            public synchronized Optional<ConnectionGrant> find(String tenantId, String connectionName, String principal) {
+                if (reads.incrementAndGet() == 2) {
+                    throw new IllegalStateException("Failed to read connection grant");
+                }
+                return super.find(tenantId, connectionName, principal);
+            }
+        };
+        seedExpiredGrant();
+
+        var error = assertThrows(ConnectionException.class, () -> service().accessToken(connection(), PRINCIPAL),
+                "a raw store exception must not escape the transient/terminal classification");
+
+        assertEquals(ConnectionException.Reason.TOKEN_ENDPOINT_UNAVAILABLE, error.getReason());
+        assertEquals(IllegalStateException.class, error.getCause().getClass(), "the cause must be kept for the log");
+        var after = grantStore.find(TENANT, CONNECTION, PRINCIPAL).orElseThrow();
+        assertEquals(null, after.getRefreshInProgress(), "the lease must be released on this path too");
+        assertEquals(ConnectionGrant.Status.ACTIVE, after.getStatus(), "a store blip must not mark the grant dead");
+        assertEquals(0, tokenRequests.get());
+    }
+
+    @Test
+    @DisplayName("a lease that outlives its holder is reclaimed after the deadline, once, and counted as lease_expired")
+    void reclaimsAnExpiredLeaseAfterTheDeadline() {
+        // A claimant that crashed or hung: the row keeps refresh_in_progress set and
+        // the waiter's poll never sees a token or a released lease. After the await
+        // deadline it retries the CLAIM rather than refreshing blind, so exactly one
+        // caller proceeds even now.
+        seedExpiredGrant();
+        var registry = new SimpleMeterRegistry();
+        OAuthTokenService service = service(registry);
+        service.awaitTimeoutForTests(Duration.ofMillis(600));
+        // Held by a dead replica whose lease expires before the deadline does.
+        grantStore.claimRefresh(TENANT, CONNECTION, PRINCIPAL, "dead-replica", Duration.ofMillis(300));
+        when(tokenClient.refresh(any(), anyString(), anyString())).thenAnswer(invocation -> {
+            tokenRequests.incrementAndGet();
+            return new TokenResponse("fresh-access", "new-refresh", Duration.ofHours(1), List.of());
+        });
+
+        assertEquals("fresh-access", service.accessToken(connection(), PRINCIPAL));
+
+        assertEquals(1, tokenRequests.get(), "the waiter must take the expired lease over and refresh, exactly once");
+        var expired = registry.find("eddi.connection.token.refresh.claim.count").tag("outcome", "lease_expired").counter();
+        assertTrue(expired != null && expired.count() == 1, "a lease that outlived its holder is the signal a crashed replica leaves behind");
+    }
+
+    @Test
+    @DisplayName("a lease still held past the deadline fails transiently rather than refreshing blind")
+    void heldLeasePastTheDeadlineIsTransient() {
+        seedExpiredGrant();
+        OAuthTokenService service = service();
+        service.awaitTimeoutForTests(Duration.ofMillis(600));
+        // Held, and still live long after the waiter gives up.
+        grantStore.claimRefresh(TENANT, CONNECTION, PRINCIPAL, "another-replica", Duration.ofHours(1));
+
+        var error = assertThrows(ConnectionException.class, () -> service.accessToken(connection(), PRINCIPAL));
+
+        assertEquals(ConnectionException.Reason.TOKEN_ENDPOINT_UNAVAILABLE, error.getReason(),
+                "a second refresh while another node holds the lease is the double refresh the claim exists to prevent");
+        assertTrue(error.getMessage().contains("holds the refresh lease"), error.getMessage());
+        assertEquals(0, tokenRequests.get(), "the waiter must not refresh blind");
+    }
+
+    @Test
+    @DisplayName("a store that cannot record REFRESH_FAILED does not turn the provider's verdict into a 500")
+    void terminalVerdictSurvivesAStoreFailureWhileMarkingTheGrant() {
+        grantStore = new InMemoryConnectionGrantStore() {
+            @Override
+            public synchronized boolean completeRefresh(ConnectionGrant grant, long expectedVersion) {
+                throw new IllegalStateException("Failed to write connection grant");
+            }
+        };
+        seedExpiredGrant();
+        when(tokenClient.refresh(any(), anyString(), anyString())).thenThrow(
+                new ConnectionException(ConnectionException.Reason.GRANT_UNUSABLE, "The provider rejected the grant"));
+
+        var error = assertThrows(ConnectionException.class, () -> service().accessToken(connection(), PRINCIPAL));
+
+        assertEquals(ConnectionException.Reason.GRANT_UNUSABLE, error.getReason(),
+                "the one fact the caller needs — reconnect required — must not be replaced by the bookkeeping failure");
+    }
+
+    private OAuthTokenService service(SimpleMeterRegistry registry) {
+        SecretResolver secretResolver = mock(SecretResolver.class);
+        GlobalVariableResolver globalVariableResolver = mock(GlobalVariableResolver.class);
+        lenient().when(globalVariableResolver.resolveValue(anyString())).thenAnswer(i -> i.getArgument(0));
+        lenient().when(secretResolver.resolveValue(anyString())).thenReturn("client-secret-value");
+        return new OAuthTokenService(grantStore, tokenClient, secretProvider, new CredentialReferenceResolver(secretResolver, globalVariableResolver),
+                registry);
     }
 
     /**

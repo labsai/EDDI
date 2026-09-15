@@ -6,6 +6,10 @@ package ai.labs.eddi.engine.security;
 
 import io.quarkus.security.credential.TokenCredential;
 import io.quarkus.security.identity.SecurityIdentity;
+import io.quarkus.vertx.http.runtime.CurrentVertxRequest;
+import io.vertx.core.http.HttpServerRequest;
+import io.vertx.core.http.impl.headers.HeadersMultiMap;
+import io.vertx.ext.web.RoutingContext;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -112,6 +116,52 @@ class CallerIdentityContextTest {
             // a fire-and-forget batch fail closed for no visible reason.
             assertEquals(identity, executor.submit(work).get());
         } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    @DisplayName("propagate() carries the turn's ResolutionPrincipal across the hop as well as the caller")
+    void propagateCarriesTheResolutionPrincipalToo() throws Exception {
+        // A model cascade step and a fire-and-forget batch are dispatched with
+        // propagate(). It used to carry only the caller, so a PER_USER connection
+        // resolved inside either found no principal and was refused as if the turn
+        // were a scheduled run — with advice about scheduled runs.
+        var principals = new ResolutionPrincipalContext();
+        var principal = new ResolutionPrincipal("alice", ResolutionPrincipal.Provenance.VERIFIED);
+        context.bind(new CallerIdentity("alice-token", "alice", "https://eddi.example:443"));
+        principals.bind(principal);
+        try {
+            var work = context.propagate(principals::current);
+            var executor = Executors.newSingleThreadExecutor();
+            try {
+                assertEquals(principal, executor.submit(work).get(),
+                        "the conversation's principal must reach the dispatched work, or PER_USER connections refuse inside a cascade");
+                assertNull(executor.submit(principals::current).get(), "and the pooled thread must not keep it afterwards");
+            } finally {
+                executor.shutdownNow();
+            }
+        } finally {
+            principals.clear();
+        }
+    }
+
+    @Test
+    @DisplayName("propagate() with no principal bound masks a stale principal on the worker rather than inheriting it")
+    void propagateWithoutPrincipalMasksRatherThanInherits() throws Exception {
+        var principals = new ResolutionPrincipalContext();
+        principals.clear();
+        var wrapped = context.propagate(principals::current);
+
+        var executor = Executors.newSingleThreadExecutor();
+        try {
+            var stale = new ResolutionPrincipal("mallory", ResolutionPrincipal.Provenance.VERIFIED);
+            executor.submit(() -> principals.bind(stale)).get();
+            assertEquals(stale, executor.submit(principals::current).get(), "the worker really is carrying a stale principal");
+
+            assertNull(executor.submit(wrapped).get(), "must not pick up the previous occupant's conversation owner");
+        } finally {
+            executor.submit(principals::clear).get();
             executor.shutdownNow();
         }
     }
@@ -286,6 +336,91 @@ class CallerIdentityContextTest {
         var securityIdentity = mock(SecurityIdentity.class);
         when(securityIdentity.isAnonymous()).thenReturn(true);
         assertNull(new CallerIdentityContext(securityIdentity, null).capture());
+    }
+
+    // ==================== X-EDDI-Connection-Credential parsing
+    // ====================
+
+    /** An authenticated request carrying the given credential header lines. */
+    private static CallerIdentityContext requestWith(boolean anonymous, String... credentialLines) {
+        var securityIdentity = mock(SecurityIdentity.class);
+        when(securityIdentity.isAnonymous()).thenReturn(anonymous);
+        when(securityIdentity.getPrincipal()).thenReturn(() -> "alice");
+        var headers = HeadersMultiMap.httpHeaders();
+        for (String line : credentialLines) {
+            headers.add(CallerIdentityContext.CONNECTION_CREDENTIAL_HEADER, line);
+        }
+        var request = mock(HttpServerRequest.class);
+        when(request.headers()).thenReturn(headers);
+        when(request.scheme()).thenReturn("https");
+        var routingContext = mock(RoutingContext.class);
+        when(routingContext.request()).thenReturn(request);
+        var currentVertxRequest = mock(CurrentVertxRequest.class);
+        when(currentVertxRequest.getCurrent()).thenReturn(routingContext);
+        return new CallerIdentityContext(securityIdentity, currentVertxRequest);
+    }
+
+    @Test
+    @DisplayName("the connection name runs to the first space; everything after it is the whole value")
+    void credentialSplitsOnTheFirstSpace() {
+        var identity = requestWith(false, "gnowbe key-id:secret");
+        assertNotNull(identity.capture());
+        assertEquals("key-id:secret", identity.capture().connectionCredential("gnowbe"));
+    }
+
+    @Test
+    @DisplayName("a value containing spaces is kept intact, so 'Bearer abc' needs no escaping")
+    void valueWithSpacesIsKeptWhole() {
+        assertEquals("Bearer abc def", requestWith(false, "gnowbe Bearer abc def").capture().connectionCredential("gnowbe"));
+    }
+
+    @Test
+    @DisplayName("a connection supplied twice is dropped entirely rather than resolved by header order")
+    void duplicateNameIsDropped() {
+        var identity = requestWith(false, "gnowbe first", "gnowbe second", "other keep-me").capture();
+        assertNull(identity.connectionCredential("gnowbe"), "which of two credentials a call is made with must never depend on ordering");
+        assertEquals("keep-me", identity.connectionCredential("other"), "an unrelated connection on the same request is unaffected");
+    }
+
+    @Test
+    @DisplayName("more than sixteen credential headers are all dropped")
+    void moreThanTheCapIsDroppedWholesale() {
+        var sixteen = new String[16];
+        for (int i = 0; i < 16; i++) {
+            sixteen[i] = "connection-" + i + " value-" + i;
+        }
+        assertEquals("value-0", requestWith(false, sixteen).capture().connectionCredential("connection-0"), "sixteen is within the cap");
+
+        var seventeen = new String[17];
+        for (int i = 0; i < 17; i++) {
+            seventeen[i] = "connection-" + i + " value-" + i;
+        }
+        assertNull(requestWith(false, seventeen).capture().connectionCredential("connection-0"),
+                "a hostile client must not make header parsing the expensive part of a request");
+    }
+
+    @Test
+    @DisplayName("a value over 8192 characters is dropped")
+    void overlongValueIsDropped() {
+        String atCap = "x".repeat(8192);
+        assertEquals(atCap, requestWith(false, "gnowbe " + atCap).capture().connectionCredential("gnowbe"), "8192 is within the cap");
+        assertNull(requestWith(false, "gnowbe " + atCap + "x").capture().connectionCredential("gnowbe"));
+    }
+
+    @Test
+    @DisplayName("a malformed line — no space, or nothing after it — is dropped without affecting the rest")
+    void malformedLinesAreDropped() {
+        var identity = requestWith(false, "no-space-at-all", "trailing-space ", "good value").capture();
+        assertNull(identity.connectionCredential("no-space-at-all"));
+        assertNull(identity.connectionCredential("trailing-space"));
+        assertEquals("value", identity.connectionCredential("good"));
+    }
+
+    @Test
+    @DisplayName("an anonymous request's credentials are dropped with the identity — nobody unauthenticated may spend one")
+    void anonymousRequestDropsCredentials() {
+        assertNull(requestWith(true, "gnowbe key-id:secret").capture(),
+                "a caller that has not authenticated must not make EDDI spend a credential on its behalf");
     }
 
     /** Build a context over a mocked identity and capture from it. */

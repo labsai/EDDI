@@ -399,7 +399,7 @@ public class EmbeddingStoreFactory {
         Map<String, String> rawParams = config.getStoreParameters() != null ? config.getStoreParameters() : Map.of();
         Map<String, String> resolved = globalVariableResolver.resolveAll(rawParams);
         ConnectionParameterGuard.rejectConnectionReferences(resolved);
-        return secretResolver.resolveSecrets(resolved);
+        return SecretResolver.requireResolved(secretResolver.resolveSecrets(resolved), "vector store '" + config.getStoreType() + "'");
     }
 
     private ChromaApiVersion parseChromaApiVersion(String apiVersionStr) {

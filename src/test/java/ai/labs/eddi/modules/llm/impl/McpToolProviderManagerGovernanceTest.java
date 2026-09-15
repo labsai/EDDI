@@ -88,6 +88,14 @@ class McpToolProviderManagerGovernanceTest {
             var manager = withSsrfProtection(false);
             manager.validateServerUrl("http://localhost:7070/mcp");
         }
+
+        @Test
+        @DisplayName("the cloud metadata service is rejected even with SSRF protection disabled")
+        void rejectsMetadataWhenProtectionOff() {
+            var manager = withSsrfProtection(false);
+            assertThrows(IllegalArgumentException.class, () -> manager.validateServerUrl("http://169.254.169.254/latest/meta-data/"));
+            assertThrows(IllegalArgumentException.class, () -> manager.validateServerUrl("http://metadata.google.internal/mcp"));
+        }
     }
 
     @Nested

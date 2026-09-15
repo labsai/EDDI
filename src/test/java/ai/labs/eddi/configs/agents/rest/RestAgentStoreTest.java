@@ -14,10 +14,17 @@ import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
+import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
+import ai.labs.eddi.engine.model.Deployment;
+import ai.labs.eddi.engine.runtime.IAgent;
+import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.ForbiddenException;
+import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
@@ -63,6 +70,8 @@ class RestAgentStoreTest {
     private IDeploymentStore deploymentStore;
     @Mock
     private AgentSigningService agentSigningService;
+    @Mock
+    private IAgentFactory agentFactory;
 
     private RestAgentStore restAgentStore;
 
@@ -70,7 +79,7 @@ class RestAgentStoreTest {
     void setUp() throws Exception {
         openMocks(this);
         restAgentStore = new RestAgentStore(AgentStore, restWorkflowStore, documentDescriptorStore, jsonSchemaCreator, scheduleStore,
-                capabilityRegistryService, deploymentStore, mock(ResourceAccessGuard.class), agentSigningService, "default");
+                capabilityRegistryService, deploymentStore, mock(ResourceAccessGuard.class), agentSigningService, agentFactory, "default");
         // The Agent is live at v1: a cascade is only allowed against the CURRENT
         // version, since it tears down workflows and schedules before the delete —
         // the only place the version used to be checked — has run.
@@ -115,6 +124,149 @@ class RestAgentStoreTest {
      * Whether the Agent under test has been deleted yet; see {@link #referrers}.
      */
     private final AtomicBoolean agentDeleted = new AtomicBoolean();
+
+    private static DeploymentInfo deployed(Deployment.Environment environment, String agentId, int version) {
+        DeploymentInfo info = new DeploymentInfo();
+        info.setEnvironment(environment);
+        info.setAgentId(agentId);
+        info.setAgentVersion(version);
+        info.setDeploymentStatus(DeploymentInfo.DeploymentStatus.deployed);
+        return info;
+    }
+
+    /**
+     * Deleting an Agent removed its deployment records but left it running: the
+     * deleted Agent kept answering in its environment until a restart, and no
+     * undeploy path could stop it because each starts by reading the deleted
+     * configuration.
+     */
+    @Nested
+    @DisplayName("deleting a deployed Agent")
+    class DeleteUndeploysLiveVersions {
+
+        private static final String OTHER_AGENT_ID = "cc00112233445566dd88";
+
+        @Test
+        @DisplayName("undeploys every recorded or running version of the Agent, and nothing else")
+        void undeploysRecordedAndRunningVersions() throws Exception {
+            when(deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed))
+                    .thenReturn(List.of(deployed(Deployment.Environment.production, AGENT_ID, 1),
+                            deployed(Deployment.Environment.production, OTHER_AGENT_ID, 3)));
+            IAgent runningWithoutRecord = mock(IAgent.class);
+            when(runningWithoutRecord.getAgentId()).thenReturn(AGENT_ID);
+            when(runningWithoutRecord.getAgentVersion()).thenReturn(1);
+            IAgent unrelated = mock(IAgent.class);
+            when(unrelated.getAgentId()).thenReturn(OTHER_AGENT_ID);
+            when(unrelated.getAgentVersion()).thenReturn(3);
+            when(agentFactory.getAllLatestAgents(Deployment.Environment.test)).thenReturn(List.of(runningWithoutRecord, unrelated));
+            when(agentFactory.getAllLatestAgents(Deployment.Environment.production)).thenReturn(List.of());
+
+            restAgentStore.deleteAgent(AGENT_ID, 1, true, false);
+
+            verify(agentFactory).undeployAgent(Deployment.Environment.production, AGENT_ID, 1);
+            verify(agentFactory).undeployAgent(Deployment.Environment.test, AGENT_ID, 1);
+            verify(agentFactory, never()).undeployAgent(any(), eq(OTHER_AGENT_ID), anyInt());
+        }
+
+        @Test
+        @DisplayName("does not undeploy the same version twice when a record and the runtime both name it")
+        void deduplicatesRecordAndRuntime() throws Exception {
+            when(deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed))
+                    .thenReturn(List.of(deployed(Deployment.Environment.production, AGENT_ID, 1)));
+            IAgent running = mock(IAgent.class);
+            when(running.getAgentId()).thenReturn(AGENT_ID);
+            when(running.getAgentVersion()).thenReturn(1);
+            when(agentFactory.getAllLatestAgents(Deployment.Environment.production)).thenReturn(List.of(running));
+            when(agentFactory.getAllLatestAgents(Deployment.Environment.test)).thenReturn(List.of());
+
+            restAgentStore.deleteAgent(AGENT_ID, 1, false, false);
+
+            verify(agentFactory, times(1)).undeployAgent(Deployment.Environment.production, AGENT_ID, 1);
+        }
+
+        @Test
+        @DisplayName("a refused delete leaves the Agent running")
+        void refusedDeleteKeepsAgentRunning() throws Exception {
+            when(deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed))
+                    .thenReturn(List.of(deployed(Deployment.Environment.production, AGENT_ID, 1)));
+            doThrow(new IResourceStore.ResourceModifiedException("not the latest version")).when(AgentStore).delete(AGENT_ID, 1);
+
+            assertThrows(IResourceStore.ResourceModifiedException.class, () -> restAgentStore.deleteAgent(AGENT_ID, 1, false, false));
+
+            verify(agentFactory, never()).undeployAgent(any(), anyString(), anyInt());
+        }
+
+        @Test
+        @DisplayName("an undeploy failure does not fail the delete")
+        void undeployFailureIsNotFatal() throws Exception {
+            when(deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed))
+                    .thenReturn(List.of(deployed(Deployment.Environment.production, AGENT_ID, 1)));
+            doThrow(new IllegalAccessException("busy")).when(agentFactory).undeployAgent(Deployment.Environment.production, AGENT_ID, 1);
+
+            assertDoesNotThrow(() -> restAgentStore.deleteAgent(AGENT_ID, 1, false, false));
+
+            verify(deploymentStore).deleteDeploymentInfos(AGENT_ID);
+        }
+    }
+
+    /**
+     * A create or update naming a workflow that does not exist used to be accepted
+     * with 201, moving the failure to an opaque deployment ERROR.
+     */
+    @Nested
+    @DisplayName("workflow references on create and update")
+    class WorkflowReferencesMustResolve {
+
+        private AgentConfiguration referencing(String workflowId) {
+            AgentConfiguration config = new AgentConfiguration();
+            config.setWorkflows(new ArrayList<>(List.of(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + workflowId + "?version=1"))));
+            return config;
+        }
+
+        @Test
+        @DisplayName("update checks EDIT on the agent before looking any workflow up — no existence oracle")
+        void updateChecksAgentAccessBeforeWorkflowLookup() {
+            ResourceAccessGuard denyingGuard = mock(ResourceAccessGuard.class);
+            doThrow(new ForbiddenException("no")).when(denyingGuard).requireAccess(eq("agent-x"), eq(AccessLevel.EDIT), any());
+            var guardedStore = new RestAgentStore(AgentStore, restWorkflowStore, documentDescriptorStore, jsonSchemaCreator, scheduleStore,
+                    capabilityRegistryService, deploymentStore, denyingGuard, agentSigningService, agentFactory, "default");
+
+            assertThrows(ForbiddenException.class, () -> guardedStore.updateAgent("agent-x", 1, referencing(PKG1_ID)));
+
+            verify(restWorkflowStore, never()).readWorkflow(anyString(), anyInt());
+        }
+
+        @Test
+        @DisplayName("create names the missing workflow in a 400")
+        void createRejectsMissingWorkflow() {
+            when(restWorkflowStore.readWorkflow(PKG1_ID, 1)).thenThrow(new NotFoundException());
+
+            BadRequestException e = assertThrows(BadRequestException.class, () -> restAgentStore.createAgent(referencing(PKG1_ID)));
+
+            assertEquals(400, e.getResponse().getStatus());
+            assertTrue(String.valueOf(e.getResponse().getEntity()).contains(PKG1_ID));
+            verifyNoInteractions(capabilityRegistryService);
+        }
+
+        @Test
+        @DisplayName("update names the missing workflow in a 400")
+        void updateRejectsMissingWorkflow() {
+            when(restWorkflowStore.readWorkflow(PKG2_ID, 1)).thenThrow(new NotFoundException());
+
+            BadRequestException e = assertThrows(BadRequestException.class,
+                    () -> restAgentStore.updateAgent(AGENT_ID, 1, referencing(PKG2_ID)));
+
+            assertTrue(String.valueOf(e.getResponse().getEntity()).contains(PKG2_ID));
+        }
+
+        @Test
+        @DisplayName("a store failure while resolving is not reported as a missing workflow")
+        void storeFailureIsNotABadRequest() {
+            when(restWorkflowStore.readWorkflow(PKG1_ID, 1)).thenThrow(new IllegalStateException("store down"));
+
+            assertThrows(IllegalStateException.class, () -> restAgentStore.createAgent(referencing(PKG1_ID)));
+        }
+    }
 
     /**
      * The reverse lookup's answer, as the real store gives it: {@code total} counts

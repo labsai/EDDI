@@ -65,6 +65,7 @@ class MongoOAuthStateStoreTest {
     private static final String STATE_TOKEN = "state-aaaaaaaaaaaa";
     private static final String TENANT = "tenant-1";
     private static final String CONNECTION = "google-mail";
+    private static final String CONNECTION_ID = "68a1b2c3d4e5f60718293a4b";
     private static final String PRINCIPAL = "user@example.com";
     private static final String VERIFIER = "verifier-abc";
     private static final String REDIRECT_URI = "https://eddi.example.com/connections/callback";
@@ -136,6 +137,8 @@ class MongoOAuthStateStoreTest {
         assertEquals(STATE_TOKEN, row.getString("state"));
         assertEquals(TENANT, row.getString("tenantId"));
         assertEquals(CONNECTION, row.getString("connectionName"));
+        assertEquals(CONNECTION_ID, row.getString("connectionId"),
+                "the callback compares it with the connection now holding the name; a row without it is refused");
         assertEquals(PRINCIPAL, row.getString("principal"));
         assertEquals(VERIFIER, row.getString("codeVerifier"), "the PKCE verifier is replayed on exchange, so losing it strands the flow");
         assertEquals(REDIRECT_URI, row.getString("redirectUri"));
@@ -211,6 +214,7 @@ class MongoOAuthStateStoreTest {
         assertEquals(STATE_TOKEN, claimed.getState());
         assertEquals(TENANT, claimed.getTenantId());
         assertEquals(CONNECTION, claimed.getConnectionName());
+        assertEquals(CONNECTION_ID, claimed.getConnectionId());
         // Tenant, connection and principal come off the row, never off the callback's
         // query string — that is the entire reason the row exists.
         assertEquals(PRINCIPAL, claimed.getPrincipal());
@@ -269,6 +273,7 @@ class MongoOAuthStateStoreTest {
         assertNull(claimed.getExpiresAt());
         assertNull(claimed.getConsumedAt());
         assertNull(claimed.getNonceHash(), "an unbound row reads as unbound, which the caller rejects on its own terms");
+        assertNull(claimed.getConnectionId(), "a row from before connection ids reads as having none, which the caller refuses");
     }
 
     @Test
@@ -375,6 +380,7 @@ class MongoOAuthStateStoreTest {
         state.setState(STATE_TOKEN);
         state.setTenantId(TENANT);
         state.setConnectionName(CONNECTION);
+        state.setConnectionId(CONNECTION_ID);
         state.setPrincipal(PRINCIPAL);
         state.setCodeVerifier(VERIFIER);
         state.setRedirectUri(REDIRECT_URI);
@@ -393,6 +399,7 @@ class MongoOAuthStateStoreTest {
         return new Document("state", STATE_TOKEN)
                 .append("tenantId", TENANT)
                 .append("connectionName", CONNECTION)
+                .append("connectionId", CONNECTION_ID)
                 .append("principal", PRINCIPAL)
                 .append("codeVerifier", VERIFIER)
                 .append("redirectUri", REDIRECT_URI)

@@ -54,11 +54,22 @@ public final class VoteTallyEngine {
     /** Two weighted totals within this of each other are the same total (a tie). */
     private static final double TALLY_EPSILON = 1e-9;
 
-    /** {@code Option A: text} / {@code Option 2 - text} lines in a synthesis. */
-    private static final Pattern OPTION_LINE = Pattern.compile("^\\s*Option\\s+([A-Za-z0-9]+)\\s*[:\\-]\\s*(.+?)\\s*$",
-            Pattern.MULTILINE);
-    /** A ballot voting by label ("Option A") instead of the option's text. */
-    private static final Pattern OPTION_LABEL = Pattern.compile("^\\s*Option\\s+([A-Za-z0-9]+)\\s*$", Pattern.CASE_INSENSITIVE);
+    /**
+     * {@code Option A: text} / {@code Option 2 - text} lines in a synthesis — also
+     * in the shapes models actually write them: markdown emphasis
+     * ({@code **Option A:** text}, {@code **Option A**: text}), a list marker in
+     * front ({@code - Option A: …}, {@code 1. Option A: …}), a period or closing
+     * parenthesis as the separator, any letter case. The strict form found "0
+     * options" in most real syntheses, so the vote could not run.
+     */
+    private static final Pattern OPTION_LINE = Pattern.compile(
+            "^\\s*(?:[-*+•]\\s+|\\d+[.)]\\s+)?[*_]{0,2}Option\\s+([A-Za-z0-9]+)[*_]{0,2}\\s*[:.)\\-–—]\\s*[*_]{0,2}\\s*(.+?)\\s*[*_]{0,2}\\s*$",
+            Pattern.MULTILINE | Pattern.CASE_INSENSITIVE);
+    /**
+     * A ballot voting by label ("Option A", also emphasised) instead of the
+     * option's text.
+     */
+    private static final Pattern OPTION_LABEL = Pattern.compile("^\\s*[*_]{0,2}Option\\s+([A-Za-z0-9]+)[*_]{0,2}\\s*$", Pattern.CASE_INSENSITIVE);
 
     private static final ObjectMapper MAPPER = JsonMapper.builder()
             .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)

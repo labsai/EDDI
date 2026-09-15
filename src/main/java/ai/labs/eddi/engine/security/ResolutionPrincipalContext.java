@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.security;
 import jakarta.enterprise.context.ApplicationScoped;
 
 import java.util.concurrent.Callable;
+import java.util.function.Supplier;
 
 /**
  * Carries the {@link ResolutionPrincipal} of the conversation turn being
@@ -91,5 +92,50 @@ public class ResolutionPrincipalContext {
                 bind(previous);
             }
         };
+    }
+
+    /**
+     * {@link #withPrincipal(ResolutionPrincipal, Callable)} for a {@link Supplier},
+     * as used by {@code CompletableFuture.supplyAsync}. Named apart from the
+     * overloads for the same reason {@code CallerIdentityContext} names its own: a
+     * value-returning lambda satisfies both {@link Callable} and {@link Supplier}.
+     */
+    public <T> Supplier<T> withPrincipalSupplying(ResolutionPrincipal principal, Supplier<T> work) {
+        return () -> {
+            final ResolutionPrincipal previous = current();
+            bind(principal);
+            try {
+                return work.get();
+            } finally {
+                bind(previous);
+            }
+        };
+    }
+
+    /**
+     * Wrap work that will run on another thread so it keeps this thread's
+     * principal.
+     * <p>
+     * The mid-pipeline dispatches — a model cascade step on a virtual thread, a
+     * fire-and-forget batch on the runtime — used to carry only the
+     * {@link CallerIdentity}. The principal stayed behind, so a {@code PER_USER}
+     * connection resolved from inside either was refused as if the turn were a
+     * scheduled run, with advice about scheduled runs. Snapshotted at wrap time,
+     * like {@code CallerIdentityContext#propagate}; a {@code null} snapshot binds
+     * null rather than passing through, so the work cannot inherit whatever the
+     * destination thread's previous occupant left behind.
+     */
+    public <T> Callable<T> propagate(Callable<T> work) {
+        return withPrincipal(current(), work);
+    }
+
+    /** {@link #propagate(Callable)} for work dispatched as a {@link Runnable}. */
+    public Runnable propagate(Runnable work) {
+        return withPrincipal(current(), work);
+    }
+
+    /** {@link #propagate(Callable)} for work dispatched as a {@link Supplier}. */
+    public <T> Supplier<T> propagateSupplying(Supplier<T> work) {
+        return withPrincipalSupplying(current(), work);
     }
 }

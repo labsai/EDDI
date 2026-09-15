@@ -14,6 +14,8 @@ import jakarta.inject.Inject;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
 
 /**
  * Removes credential material from a resolved request — headers, query
@@ -128,12 +130,44 @@ public class RequestRedactor {
 
     /** Redact every header in a name-to-value map. */
     public Map<String, String> redactHeaders(Map<String, ?> headers) {
+        return redactHeaders(headers, Set.of());
+    }
+
+    /**
+     * Redact every header in a name-to-value map, treating the named headers as
+     * credentials whatever their name or value look like.
+     * <p>
+     * A header whose value came from a {@code ${connection:name}} is a credential
+     * by construction — that is the only thing a connection resolves to — but
+     * nothing about it need <em>look</em> like one. The connection owns the header
+     * name, and {@code X-Amp-Id} or {@code X-Gnowbe-Key} matches no conventional
+     * credential pattern; the value is whatever the provider issued, and an opaque
+     * key matches no value shape either. Relying on the heuristics here wrote such
+     * a credential to MongoDB and showed it to a HITL approver in full. So the
+     * executor, which knows which headers it filled from a connection, says so, and
+     * every one of them is redacted unconditionally. Names are compared
+     * case-insensitively, as HTTP does.
+     *
+     * @param connectionOwnedHeaders
+     *            the names of headers whose value a connection supplied; may be
+     *            {@code null} or empty
+     */
+    public Map<String, String> redactHeaders(Map<String, ?> headers, Set<String> connectionOwnedHeaders) {
         var redacted = new HashMap<String, String>();
         if (headers == null) {
             return redacted;
         }
+        Set<String> owned = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
+        if (connectionOwnedHeaders != null) {
+            owned.addAll(connectionOwnedHeaders);
+        }
         for (var entry : headers.entrySet()) {
-            redacted.put(entry.getKey(), redactHeaderValue(entry.getKey(), entry.getValue()));
+            String name = entry.getKey();
+            if (name != null && owned.contains(name)) {
+                redacted.put(name, REDACTED);
+                continue;
+            }
+            redacted.put(name, redactHeaderValue(name, entry.getValue()));
         }
         return redacted;
     }
@@ -173,8 +207,16 @@ public class RequestRedactor {
      * corrupt the request that is about to be sent — while swapping the entry in
      * this (freshly built) outer map cannot.
      */
-    @SuppressWarnings("unchecked")
     public void redactRequestMap(Map<String, Object> requestMap) {
+        redactRequestMap(requestMap, Set.of());
+    }
+
+    /**
+     * {@link #redactRequestMap(Map)}, additionally redacting the headers a
+     * connection supplied — see {@link #redactHeaders(Map, Set)}.
+     */
+    @SuppressWarnings("unchecked")
+    public void redactRequestMap(Map<String, Object> requestMap, Set<String> connectionOwnedHeaders) {
         if (requestMap == null) {
             return;
         }
@@ -185,7 +227,7 @@ public class RequestRedactor {
             requestMap.put(IRequest.KEY_URI, redactUri(uri));
         }
         if (requestMap.get(IRequest.KEY_HEADERS) instanceof Map<?, ?> headers) {
-            requestMap.put(IRequest.KEY_HEADERS, redactHeaders((Map<String, ?>) headers));
+            requestMap.put(IRequest.KEY_HEADERS, redactHeaders((Map<String, ?>) headers, connectionOwnedHeaders));
         }
         if (requestMap.get(IRequest.KEY_QUERY_PARAMS) instanceof Map<?, ?> queryParams) {
             requestMap.put(IRequest.KEY_QUERY_PARAMS, redactQueryParams((Map<String, ?>) queryParams));

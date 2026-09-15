@@ -972,6 +972,8 @@ public class McpToolProviderManager {
         if (!lower.startsWith("http://") && !lower.startsWith("https://")) {
             throw new IllegalArgumentException("MCP server URL must use http or https: " + url);
         }
+        // ...and never the cloud instance-metadata service, whatever the setting.
+        UrlValidationUtils.rejectCloudMetadataTarget(url);
     }
 
     /**
@@ -1164,8 +1166,13 @@ public class McpToolProviderManager {
                 // withholding it only produced a 401 and an agent with no tools at all.
                 var discovery = connectionResolver.resolveForDiscovery(configuredKey, URI.create(config.getUrl()));
                 if (discovery.isEmpty()) {
-                    LOGGER.warnf("MCP server '%s' is bound to a PER_USER connection, so discovery is sent unauthenticated. If the server "
-                            + "requires a token to list tools, bind it to a SERVICE connection instead.", sanitize(config.getName()));
+                    // The ACTUAL binding, not an assumed PER_USER: CALLER_SUPPLIED is
+                    // withheld for the same reason, and a warning that names the wrong
+                    // one sends the operator to look for an OAuth grant that does not
+                    // exist.
+                    String binding = connectionResolver.bindingOf(configuredKey).map(Enum::name).orElse("PER_USER or CALLER_SUPPLIED");
+                    LOGGER.warnf("MCP server '%s' is bound to a %s connection, so discovery is sent unauthenticated. If the server "
+                            + "requires a token to list tools, bind it to a SERVICE connection instead.", sanitize(config.getName()), binding);
                     return Map.of();
                 }
                 return Map.of(discovery.get().headerName(), discovery.get().headerValue());

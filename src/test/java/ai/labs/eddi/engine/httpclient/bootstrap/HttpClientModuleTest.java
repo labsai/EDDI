@@ -5,18 +5,38 @@
 package ai.labs.eddi.engine.httpclient.bootstrap;
 
 import ai.labs.eddi.engine.httpclient.impl.VertxHttpClient;
+import io.vertx.core.Future;
+import io.vertx.core.Vertx;
+import io.vertx.core.http.HttpClient;
+import io.vertx.core.http.HttpClientOptions;
+import io.vertx.core.http.HttpClientResponse;
+import io.vertx.core.http.RequestOptions;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Disposes;
 import jakarta.enterprise.inject.Produces;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentCaptor;
 
 import java.lang.reflect.Method;
 import java.util.Arrays;
+import java.util.concurrent.Callable;
+import java.util.function.Function;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
  * The CDI wiring of the one and only {@link VertxHttpClient} producer — i.e. of
@@ -81,5 +101,69 @@ class HttpClientModuleTest {
         assertTrue(Arrays.stream(disposer.getParameters())
                 .anyMatch(p -> VertxHttpClient.class.isAssignableFrom(p.getType())),
                 "the disposer must dispose the type the producer produces");
+    }
+
+    /**
+     * A Vertx whose blocking section runs inline, so the veto is observable
+     * synchronously.
+     */
+    @SuppressWarnings("unchecked")
+    private static Vertx inlineBlockingVertx() {
+        Vertx vertx = mock(Vertx.class);
+        when(vertx.executeBlocking(any(Callable.class), anyBoolean())).thenAnswer(invocation -> {
+            try {
+                return Future.succeededFuture(((Callable<Object>) invocation.getArgument(0)).call());
+            } catch (Exception e) {
+                return Future.failedFuture(e);
+            }
+        });
+        return vertx;
+    }
+
+    @ParameterizedTest(name = "a hop to {0} is refused")
+    @ValueSource(strings = {"169.254.169.254", "169.254.170.2", "fd00:ec2::254", "[fd00:ec2::254]", "metadata.google.internal"})
+    @DisplayName("a redirect hop to the metadata service or the link-local range is refused")
+    void metadataHopIsRefused(String host) {
+        assertThrows(IllegalArgumentException.class, () -> HttpClientModule.requireNotMetadataHop(new RequestOptions().setHost(host)));
+    }
+
+    @Test
+    @DisplayName("an ordinary hop is followed unchanged")
+    void ordinaryHopIsFollowed() {
+        RequestOptions ordinary = new RequestOptions().setHost("93.184.216.34");
+
+        assertSame(ordinary, HttpClientModule.requireNotMetadataHop(ordinary));
+    }
+
+    @Test
+    @DisplayName("a response the default handler does not follow stays unfollowed")
+    void unfollowedResponseStaysUnfollowed() {
+        Function<HttpClientResponse, Future<RequestOptions>> notFollowed = response -> null;
+
+        assertNull(HttpClientModule.refusingMetadataHops(inlineBlockingVertx(), notFollowed).apply(mock(HttpClientResponse.class)));
+    }
+
+    @Test
+    @DisplayName("the produced client vetoes every redirect hop, not only the first target the call validated")
+    @SuppressWarnings("unchecked")
+    void producedClientRefusesARedirectToTheMetadataService() {
+        Vertx vertx = inlineBlockingVertx();
+        HttpClient httpClient = mock(HttpClient.class);
+        HttpClientOptions options = new HttpClientOptions();
+        when(vertx.createHttpClient(options)).thenReturn(httpClient);
+        // What the default handler returns for "302 Location:
+        // http://169.254.169.254/latest/meta-data/".
+        Function<HttpClientResponse, Future<RequestOptions>> followsToMetadata = response -> Future
+                .succeededFuture(new RequestOptions().setHost("169.254.169.254").setURI("/latest/meta-data/"));
+        when(httpClient.redirectHandler()).thenReturn(followsToMetadata);
+
+        // The client provideHttpClient wraps into its WebClient.
+        assertSame(httpClient, HttpClientModule.guardedHttpClient(vertx, options));
+
+        ArgumentCaptor<Function<HttpClientResponse, Future<RequestOptions>>> installed = ArgumentCaptor.forClass(Function.class);
+        verify(httpClient).redirectHandler(installed.capture());
+        Future<RequestOptions> hop = installed.getValue().apply(mock(HttpClientResponse.class));
+        assertTrue(hop.failed(), "the redirect must not be followed");
+        assertInstanceOf(IllegalArgumentException.class, hop.cause());
     }
 }

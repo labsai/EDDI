@@ -167,6 +167,26 @@ class ConnectionResolverTest {
         }
 
         @Test
+        @DisplayName("with authorization disabled the refusal names the deployment, not a header the caller did send")
+        void namesTheDisabledAuthorizationWhenNoCallerCanBeAuthenticated() {
+            // CallerIdentityContext.capture() drops every connection credential on an
+            // anonymous request, and with authorization.enabled=false every request is
+            // anonymous. The operator can see the header going out; a message saying
+            // the request carried none sends them to debug the wrong system.
+            register(gnowbeConnection());
+            when(callerIdentityContext.current()).thenReturn(null);
+
+            var error = assertThrows(ConnectionException.class, () -> resolver(false).resolve("${connection:gnowbe}", GNOWBE_TARGET, null));
+
+            assertEquals(ConnectionException.Reason.NO_CALLER_CREDENTIAL, error.getReason());
+            assertTrue(error.getMessage().contains("authorization.enabled=false"),
+                    "the message must name the deployment setting that drops the credential: " + error.getMessage());
+            assertTrue(error.getMessage().contains("authorization.enabled=true"), "and the fix: " + error.getMessage());
+            assertFalse(error.getMessage().contains("carried no credential"),
+                    "it must not claim the request carried nothing; it may well have: " + error.getMessage());
+        }
+
+        @Test
         @DisplayName("a credential for a different connection is not borrowed")
         void doesNotBorrowAnotherConnectionsCredential() {
             register(gnowbeConnection());
@@ -295,6 +315,64 @@ class ConnectionResolverTest {
         }
 
         @Test
+        @DisplayName("a STATIC document with no staticAuth is a configuration error, not an NPE")
+        void staticWithoutStaticAuthIsAConfigurationError() {
+            // A cached document written before the validation rules, or straight into
+            // the store. An NPE here is not a ConnectionException, so the MCP failure
+            // classifier could not tell it from an outage and tripped the breaker.
+            var cases = new LinkedHashMap<String, StaticAuth>();
+            cases.put("no staticAuth block", null);
+            var blankHeader = new StaticAuth();
+            blankHeader.setHeaderName(" ");
+            blankHeader.setValueTemplate("Bearer ${vault:jira-token}");
+            cases.put("blank headerName", blankHeader);
+            var noTemplate = new StaticAuth();
+            noTemplate.setHeaderName("Authorization");
+            cases.put("no valueTemplate", noTemplate);
+
+            for (var entry : cases.entrySet()) {
+                var connection = staticConnection();
+                connection.setStaticAuth(entry.getValue());
+                register(connection);
+
+                var error = assertThrows(ConnectionException.class,
+                        () -> resolver(false).resolve("${connection:jira}", ALLOWED_TARGET, null), entry.getKey());
+
+                assertEquals(ConnectionException.Reason.INVALID_CONFIGURATION, error.getReason(), entry.getKey());
+                assertTrue(error.getMessage().contains("staticAuth"), entry.getKey() + ": " + error.getMessage());
+            }
+        }
+
+        @Test
+        @DisplayName("BASIC with no username refuses rather than sending 'null:password'")
+        void basicWithoutUsernameIsAConfigurationError() {
+            var cases = new LinkedHashMap<String, StaticAuth>();
+            cases.put("no staticAuth block", null);
+            var noUser = new StaticAuth();
+            noUser.setHeaderName("Authorization");
+            noUser.setPasswordRef("${vault:jira-password}");
+            cases.put("null username", noUser);
+            var noPassword = new StaticAuth();
+            noPassword.setHeaderName("Authorization");
+            noPassword.setUsername("svc-eddi");
+            cases.put("no passwordRef", noPassword);
+
+            for (var entry : cases.entrySet()) {
+                var connection = staticConnection();
+                connection.setAuthType(AuthType.BASIC);
+                connection.setStaticAuth(entry.getValue());
+                register(connection);
+
+                var error = assertThrows(ConnectionException.class,
+                        () -> resolver(false).resolve("${connection:jira}", ALLOWED_TARGET, null), entry.getKey());
+
+                assertEquals(ConnectionException.Reason.INVALID_CONFIGURATION, error.getReason(), entry.getKey());
+                assertTrue(error.getMessage().contains("staticAuth"), entry.getKey() + ": " + error.getMessage());
+            }
+            verify(secretResolver, never()).resolveValue(anyString());
+        }
+
+        @Test
         @DisplayName("an unresolved GLOBAL VARIABLE is refused too, not only a vault key")
         void refusesUnresolvedGlobalVariable() {
             // Checking only ${vault:} left half the guard missing: an unresolved
@@ -371,6 +449,47 @@ class ConnectionResolverTest {
             register(staticConnection());
 
             assertThrows(ConnectionException.class, () -> resolver(false).resolve("${connection:jira}", null, null));
+        }
+
+        @Test
+        @DisplayName("an allowlisted plaintext http target on a remote host is refused by default, naming the property, before any secret resolves")
+        void refusesPlaintextRemoteTargetByDefault() {
+            var connection = staticConnection();
+            connection.setBaseUrlAllowlist(List.of("http://api.internal.example"));
+            register(connection);
+
+            var error = assertThrows(ConnectionException.class,
+                    () -> resolver(false).resolve("${connection:jira}", URI.create("http://api.internal.example/issue/1"), null));
+
+            assertEquals(ConnectionException.Reason.TARGET_NOT_ALLOWED, error.getReason());
+            assertTrue(error.getMessage().contains("eddi.connections.allow-plaintext-remote-origins"), error.getMessage());
+            verify(secretResolver, never()).resolveValue(anyString());
+        }
+
+        @Test
+        @DisplayName("the same target resolves once the deployment allows plaintext remote origins")
+        void resolvesPlaintextRemoteTargetWhenAllowed() {
+            var connection = staticConnection();
+            connection.setBaseUrlAllowlist(List.of("http://api.internal.example"));
+            register(connection);
+            var resolver = resolver(false);
+            resolver.connectionsConfig = new ConnectionsConfig(true, "https://eddi.example.com", true);
+
+            assertEquals("Bearer live-token",
+                    resolver.resolve("${connection:jira}", URI.create("http://api.internal.example/issue/1"), null).headerValue());
+        }
+
+        @Test
+        @DisplayName("a plaintext http target on loopback resolves with the property at its default")
+        void resolvesLoopbackHttpTargetByDefault() {
+            var connection = staticConnection();
+            connection.setBaseUrlAllowlist(List.of("http://localhost:8080"));
+            register(connection);
+            var resolver = resolver(false);
+            resolver.connectionsConfig = new ConnectionsConfig(true, "https://eddi.example.com", false);
+
+            assertEquals("Bearer live-token",
+                    resolver.resolve("${connection:jira}", URI.create("http://localhost:8080/issue/1"), null).headerValue());
         }
     }
 
@@ -552,6 +671,38 @@ class ConnectionResolverTest {
 
         assertTrue(credential.isPresent(), "withholding this is what left the tool list empty");
         assertEquals("Bearer live-token", credential.get().headerValue());
+    }
+
+    @Test
+    @DisplayName("a store failure on the discovery path is counted as a lookup failure, not silently NOT_FOUND")
+    void discoveryCountsAStoreFailure() {
+        // resolveForDiscovery reads the binding through registry.find, which turns a
+        // store outage into a NOT_FOUND ConnectionException. resolve() counts that;
+        // the discovery path did not, so an MCP server failing every handshake over a
+        // database blip showed a flat dashboard.
+        var meterRegistry = new SimpleMeterRegistry();
+        when(registry.find(any(ConnectionReference.class)))
+                .thenThrow(new ConnectionException(ConnectionException.Reason.NOT_FOUND, "Could not read connection 'jira': store down"));
+        var resolver = new ConnectionResolver(registry, new CredentialReferenceResolver(secretResolver, globalVariableResolver),
+                callerIdentityContext, meterRegistry, accessTokenSupplier, false);
+
+        assertThrows(ConnectionException.class, () -> resolver.resolveForDiscovery("${connection:jira}", ALLOWED_TARGET));
+
+        var counter = meterRegistry.find("eddi.connection.resolve.count").tag("outcome", "not_found").counter();
+        assertTrue(counter != null && counter.count() == 1, "a discovery lookup failure must reach the same counter a tool-call lookup failure does");
+    }
+
+    @Test
+    @DisplayName("bindingOf names the binding a caller was withheld a credential for")
+    void bindingOfNamesTheActualBinding() {
+        var connection = staticConnection();
+        connection.setBinding(Binding.CALLER_SUPPLIED);
+        connection.getStaticAuth().setValueTemplate(null);
+        register(connection);
+
+        assertEquals(Optional.of(Binding.CALLER_SUPPLIED), resolver(true).bindingOf("${connection:jira}"),
+                "a warning that assumes PER_USER for a CALLER_SUPPLIED connection sends the operator looking for an OAuth grant");
+        assertTrue(resolver(true).resolveForDiscovery("${connection:jira}", ALLOWED_TARGET).isEmpty());
     }
 
     @Test

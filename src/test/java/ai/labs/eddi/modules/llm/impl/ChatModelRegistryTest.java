@@ -95,7 +95,7 @@ class ChatModelRegistryTest {
 
         // Create pass-through mocks
         SecretResolver secretResolver = mock(SecretResolver.class);
-        when(secretResolver.resolveSecrets(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(secretResolver.resolveSecrets(any())).thenAnswer(inv -> resolvingVault(inv.getArgument(0)));
         GlobalVariableResolver globalVariableResolver = mock(GlobalVariableResolver.class);
         when(globalVariableResolver.resolveAll(any())).thenAnswer(inv -> inv.getArgument(0));
 
@@ -159,6 +159,21 @@ class ChatModelRegistryTest {
     }
 
     /**
+     * A working vault: every {@code ${vault:...}} value resolves to a stand-in
+     * secret. ChatModelRegistry refuses to build a model from a reference that
+     * survived resolution, so a resolver stub that returns its argument unchanged
+     * now models a vault that cannot find the key — not a pass-through.
+     */
+    private static Map<String, String> resolvingVault(Map<String, String> params) {
+        if (params == null) {
+            return null;
+        }
+        var resolved = new HashMap<>(params);
+        resolved.replaceAll((key, value) -> value != null && value.contains("${vault:") ? "resolved-secret" : value);
+        return resolved;
+    }
+
+    /**
      * A registry wired with pass-through secret/global resolvers and
      * caller-supplied builders. Used by tests that need a builder with custom
      * behaviour — e.g. one that triggers an invalidation from inside
@@ -166,7 +181,7 @@ class ChatModelRegistryTest {
      */
     private static ChatModelRegistry passThroughRegistry(Map<String, Provider<ILanguageModelBuilder>> builders) {
         SecretResolver secretResolver = mock(SecretResolver.class);
-        when(secretResolver.resolveSecrets(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(secretResolver.resolveSecrets(any())).thenAnswer(inv -> resolvingVault(inv.getArgument(0)));
         GlobalVariableResolver globalVariableResolver = mock(GlobalVariableResolver.class);
         when(globalVariableResolver.resolveAll(any())).thenAnswer(inv -> inv.getArgument(0));
         return new ChatModelRegistry(builders, globalVariableResolver, secretResolver);
@@ -809,7 +824,7 @@ class ChatModelRegistryTest {
             });
 
             SecretResolver secretResolver = mock(SecretResolver.class);
-            when(secretResolver.resolveSecrets(any())).thenAnswer(inv -> inv.getArgument(0));
+            when(secretResolver.resolveSecrets(any())).thenAnswer(inv -> resolvingVault(inv.getArgument(0)));
             GlobalVariableResolver globalVariableResolver = mock(GlobalVariableResolver.class);
             when(globalVariableResolver.resolveAll(any())).thenAnswer(inv -> inv.getArgument(0));
             invalidationRegistry = new ChatModelRegistry(builders, globalVariableResolver, secretResolver);

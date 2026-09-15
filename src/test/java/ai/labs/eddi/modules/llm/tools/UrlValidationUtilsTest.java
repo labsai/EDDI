@@ -23,6 +23,62 @@ class UrlValidationUtilsTest {
             InetAddress.getByAddress(new byte[]{8, 8, 8, 8})};
 
     @Nested
+    @DisplayName("rejectCloudMetadataTarget — on whatever ssrf-protection says")
+    class CloudMetadataAlwaysBlocked {
+
+        private final UrlValidationUtils.HostResolver unresolvable = host -> {
+            throw new UnknownHostException(host);
+        };
+
+        @ParameterizedTest
+        @ValueSource(strings = {"http://169.254.169.254/latest/meta-data/", "http://metadata.google.internal/computeMetadata/v1/",
+                "http://[fd00:ec2::254]/latest/meta-data/", "http://100.100.100.200/latest/meta-data/", "https://METADATA.GOOGLE.INTERNAL/",
+                "http://169.254.170.2/v2/credentials"})
+        @DisplayName("metadata hosts and link-local literals are refused without any DNS lookup")
+        void metadataTargetsAreRefused(String url) {
+            var e = assertThrows(IllegalArgumentException.class, () -> UrlValidationUtils.rejectCloudMetadataTarget(url, unresolvable));
+            assertTrue(e.getMessage().contains("instance-metadata"), e.getMessage());
+        }
+
+        @Test
+        @DisplayName("a hostname that resolves to the metadata address is refused")
+        void hostnameResolvingToMetadataIsRefused() {
+            UrlValidationUtils.HostResolver rebinding = host -> new InetAddress[]{
+                    InetAddress.getByAddress(new byte[]{(byte) 169, (byte) 254, (byte) 169, (byte) 254})};
+            assertThrows(IllegalArgumentException.class,
+                    () -> UrlValidationUtils.rejectCloudMetadataTarget("http://rebind.example.com/", rebinding));
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {"http://10.0.0.5/api", "http://127.0.0.1:7070/agents", "http://localhost:8080/", "https://api.example.com/v1"})
+        @DisplayName("private, loopback and public targets stay reachable — they are what opting out of protection is for")
+        void ordinaryTargetsPass(String url) {
+            UrlValidationUtils.HostResolver privateNetwork = host -> new InetAddress[]{InetAddress.getByAddress(new byte[]{10, 0, 0, 9})};
+            assertDoesNotThrow(() -> UrlValidationUtils.rejectCloudMetadataTarget(url, privateNetwork));
+        }
+
+        @Test
+        @DisplayName("an unparseable URL or unresolvable host is left to the caller's own checks")
+        void unusableUrlsAreLeftToTheCaller() {
+            assertDoesNotThrow(() -> UrlValidationUtils.rejectCloudMetadataTarget("http://exa mple.com/", unresolvable));
+            assertDoesNotThrow(() -> UrlValidationUtils.rejectCloudMetadataTarget("http://nope.invalid/", unresolvable));
+            assertDoesNotThrow(() -> UrlValidationUtils.rejectCloudMetadataTarget(null));
+            assertDoesNotThrow(() -> UrlValidationUtils.rejectCloudMetadataTarget("  "));
+        }
+
+        @Test
+        @DisplayName("IPv4-mapped and IPv6 forms of the metadata addresses are recognised")
+        void addressFormsAreRecognised() throws Exception {
+            assertTrue(UrlValidationUtils.isMetadataAddress(InetAddress.getByName("fd00:ec2::254")));
+            assertTrue(UrlValidationUtils.isMetadataAddress(InetAddress.getByName("fe80::1")));
+            assertTrue(UrlValidationUtils.isMetadataAddress(InetAddress.getByAddress(
+                    new byte[]{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, (byte) 0xff, (byte) 0xff, (byte) 169, (byte) 254, (byte) 169, (byte) 254})));
+            assertFalse(UrlValidationUtils.isMetadataAddress(InetAddress.getByName("10.0.0.5")));
+            assertFalse(UrlValidationUtils.isMetadataAddress(InetAddress.getByName("100.100.100.199")));
+        }
+    }
+
+    @Nested
     @DisplayName("validateUrl — null/blank/invalid")
     class NullBlankInvalidTests {
 

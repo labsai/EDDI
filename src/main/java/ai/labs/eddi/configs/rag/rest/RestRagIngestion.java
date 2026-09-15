@@ -81,6 +81,14 @@ public class RestRagIngestion implements IRestRagIngestion {
         // it, and the caller names the RAG config in the path — so check it.
         resourceAccessGuard.requireAccess(ragConfigId, AccessLevel.VIEW, "RAG configuration");
         String status = ragIngestionService.getStatus(ingestionId);
+        if (RagIngestionService.STATUS_UNKNOWN.equals(status)) {
+            // Never started here, or its status has already expired. A 200 with
+            // status "unknown" read as "still in flight" to every polling client.
+            return Response.status(Response.Status.NOT_FOUND)
+                    .entity(Map.of("ingestionId", ingestionId, "status", status, "error",
+                            "No ingestion with this id is known (statuses are kept for one hour)"))
+                    .build();
+        }
         return Response.ok(Map.of("ingestionId", ingestionId, "status", status)).build();
     }
 }

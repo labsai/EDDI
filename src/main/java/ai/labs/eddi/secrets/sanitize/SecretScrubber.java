@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.secrets.sanitize;
 
+import ai.labs.eddi.connections.model.ConnectionReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -72,12 +73,24 @@ public class SecretScrubber {
     private static final Pattern KEY_LIKE_PATTERN = Pattern.compile("[a-zA-Z0-9_.+/~$\\-]{14,1022}");
 
     /**
+     * A value that is exactly one {@code ${connection:…}} reference — the only
+     * shape of connection reference any outbound path accepts, and therefore the
+     * only one worth keeping legible. See {@link #scrubTextValue}.
+     */
+    private static final Pattern SOLE_CONNECTION_REFERENCE = Pattern.compile("\\s*" + ConnectionReference.CONNECTION_PATTERN + "\\s*");
+
+    /**
      * Fields whose value is a schema-fixed identifier — a discriminator, a name, or
      * a memory path — and therefore never a credential. Exempt from the entropy
      * heuristic; see {@link #isStructuralFieldName(String)} for why.
      */
     private static final Set<String> STRUCTURAL_FIELD_NAMES = Set.of("type", "subtype", "name", "action", "actions", "expressions",
-            "fromobjectpath", "toobjectpath", "behaviorrulename", "scope", "uri", "occurrence");
+            "fromobjectpath", "toobjectpath", "behaviorrulename", "scope", "uri", "occurrence",
+            // Model identifiers. "claude-sonnet-5" scores over the entropy threshold, so an
+            // export rewrote modelName to ${vault:REDACTED} and the imported agent failed
+            // every turn with "model not found". Credential-shaped names (apiKey, token,
+            // ...) are still caught by the name checks, which run before this exemption.
+            "modelname", "model", "modelid", "deploymentname", "embeddingmodel", "embeddingmodelname");
 
     /** Known secret field names (case-insensitive matching) */
     private static final Set<String> SECRET_FIELD_NAMES = Set.of("apikey", "api_key", "apitoken", "api_token", "password", "passwd", "secret",
@@ -200,7 +213,21 @@ public class SecretScrubber {
      */
     private String scrubTextValue(String fieldName, String parentFieldName, String textValue) {
         // A vault reference is a pointer to a secret, not a secret, and is left
-        // legible so an operator can still see WHICH key the config used.
+        // legible so an operator can still see WHICH key the config used. A
+        // connection reference is the same kind of pointer one level up — the
+        // connection document holds the vault references — and it sits in exactly
+        // the fields this scrubber otherwise redacts (an Authorization header, an
+        // apiKey), so without its own exemption every exported httpcall header
+        // reading ${connection:jira} came back as ${vault:REDACTED} and the
+        // reference was lost before the archive was even written.
+        //
+        // The two exemptions differ in width, on purpose. "Bearer ${vault:k}" is a
+        // legitimate shape, so a vault reference exempts the value it sits in. A
+        // connection reference is legitimate ONLY on its own — every outbound path
+        // refuses "Bearer sk-… ${connection:jira}" through
+        // ConnectionReference.requireSole — so exempting a value that merely contains
+        // one would keep a literal credential legible for the sake of a config that
+        // cannot run. A sole reference passes; a mixed value is judged like any other.
         //
         // The exemption speaks for one value, and a URL is not one value: it is a
         // host, a path and a set of independent query parameters. Read over a whole
@@ -209,7 +236,8 @@ public class SecretScrubber {
         // `?api_key=${vault:k}&access_token=<plaintext>` was exported intact. A URL
         // is therefore always handed to the part-by-part pass below, which judges
         // each parameter on its own.
-        if (!looksLikeUrl(textValue) && (textValue.contains("${vault:") || textValue.contains("${eddivault:"))) {
+        if (!looksLikeUrl(textValue) && (textValue.contains("${vault:") || textValue.contains("${eddivault:")
+                || SOLE_CONNECTION_REFERENCE.matcher(textValue).matches())) {
             return null;
         }
 

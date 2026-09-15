@@ -17,6 +17,9 @@ import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.engine.security.spaces.DescriptorAccess;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.apicalls.IApiCallsStore;
+import ai.labs.eddi.configs.connections.IConnectionStore;
+import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
+import ai.labs.eddi.connections.model.ConnectionReference;
 import ai.labs.eddi.configs.llm.ILlmStore;
 import ai.labs.eddi.configs.mcpcalls.IMcpCallsStore;
 import ai.labs.eddi.configs.output.IOutputStore;
@@ -36,6 +39,7 @@ import ai.labs.eddi.datastore.serialization.IDescriptorStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.secrets.sanitize.SecretScrubber;
 import ai.labs.eddi.utils.FileUtilities;
+import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.utils.RestUtilities;
 import io.quarkus.scheduler.Scheduled;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -131,8 +135,15 @@ public class RestExportService extends AbstractBackupService implements IRestExp
      */
     private static final Pattern SNIPPET_REF_PATTERN = Pattern.compile("snippets\\.([a-zA-Z0-9_\\-]+)");
 
+    /**
+     * {@code ${connection:name}} or {@code ${connection:tenant/name}}, wherever it
+     * sits.
+     */
+    private static final Pattern CONNECTION_REFERENCE_PATTERN = Pattern.compile(ConnectionReference.CONNECTION_PATTERN);
+
     private final ResourceAccessGuard resourceAccessGuard;
     private final BackupMetrics metrics;
+    private final IConnectionStore connectionStore;
 
     @Inject
     public RestExportService(IDocumentDescriptorStore documentDescriptorStore, IAgentStore agentStore, IWorkflowStore workflowStore,
@@ -140,9 +151,10 @@ public class RestExportService extends AbstractBackupService implements IRestExp
             IPropertySetterStore propertySetterStore, IOutputStore outputStore, IMcpCallsStore mcpCallsStore, IRagStore ragStore,
             IPromptSnippetStore snippetStore, IJsonSerialization jsonSerialization, IZipArchive zipArchive,
             SecretScrubber secretScrubber, IScheduleStore scheduleStore, ResourceAccessGuard resourceAccessGuard,
-            BackupMetrics metrics) {
+            BackupMetrics metrics, IConnectionStore connectionStore) {
         this.metrics = metrics;
         this.resourceAccessGuard = resourceAccessGuard;
+        this.connectionStore = connectionStore;
         this.documentDescriptorStore = documentDescriptorStore;
         this.agentStore = agentStore;
         this.workflowStore = workflowStore;
@@ -284,6 +296,8 @@ public class RestExportService extends AbstractBackupService implements IRestExp
 
             // Collect all serialized extension configs to scan for snippet references
             List<String> allExtensionConfigs = new ArrayList<>();
+            // And every archived config, for connection references.
+            List<String> connectionScanConfigs = new ArrayList<>();
 
             for (IResourceId resourceId : workflowConfigurations.keySet()) {
                 WorkflowConfiguration workflowConfig = workflowConfigurations.get(resourceId);
@@ -342,6 +356,16 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                 collectSelectedConfigs(allExtensionConfigs, httpCallsConfigs, selectedIds);
                 collectSelectedConfigs(allExtensionConfigs, propertyConfigs, selectedIds);
                 collectSelectedConfigs(allExtensionConfigs, outputConfigs, selectedIds);
+
+                // Every config the archive carries is scanned for ${connection:…}: a
+                // reference can sit in an httpcall header, an mcpcalls or A2A apiKey, or
+                // anywhere an author put one — and only the selected copies count, or a
+                // deselected config would still pull its connection into the archive.
+                connectionScanConfigs.add(workflowConfigString);
+                for (Map<IResourceId, String> configs : List.of(dictionaryConfigs, behaviorConfigs, httpCallsConfigs, llmConfigs,
+                        propertyConfigs, outputConfigs, mcpConfigs, ragConfigs)) {
+                    collectSelectedConfigs(connectionScanConfigs, configs, selectedIds);
+                }
             }
 
             // Export only snippets actually referenced by the exported configs — and,
@@ -355,6 +379,10 @@ public class RestExportService extends AbstractBackupService implements IRestExp
             // Export schedules for this agent, likewise filtered only by the caller's
             // own schedule selection.
             exportSchedules(agentId, agentPath, selectedSchedules);
+
+            // Export the connections the archived configs reference, so an httpcall
+            // header reading ${connection:jira} does not dangle after import.
+            exportConnections(agentPath, connectionScanConfigs);
 
             sweepExpiredArchives();
             Path archiveDir = Files.createDirectories(archiveDirectory());
@@ -934,6 +962,97 @@ public class RestExportService extends AbstractBackupService implements IRestExp
             }
         } catch (Exception e) {
             LOGGER.warnf("Failed to export snippets: %s", e.getMessage());
+        }
+    }
+
+    /**
+     * Every {@code ${connection:…}} reference in the archived configs, in
+     * first-seen order.
+     */
+    private static Set<ConnectionReference> extractConnectionReferences(List<String> configStrings) {
+        Set<ConnectionReference> references = new LinkedHashSet<>();
+        for (String config : configStrings) {
+            if (config == null || config.isEmpty()) {
+                continue;
+            }
+            Matcher matcher = CONNECTION_REFERENCE_PATTERN.matcher(config);
+            while (matcher.find()) {
+                try {
+                    references.add(ConnectionReference.parse(matcher.group()));
+                } catch (IllegalArgumentException e) {
+                    LOGGER.debugf("Skipping an unparseable connection reference in an exported config: %s",
+                            LogSanitizer.sanitize(e.getMessage()));
+                }
+            }
+        }
+        return references;
+    }
+
+    /**
+     * Writes the connections the archived configs reference into
+     * {@code connections/}, so that {@code ${connection:jira}} in an httpcall
+     * header still names something after the archive is imported elsewhere.
+     * <p>
+     * A connection <em>document</em> only. It carries references
+     * ({@code ${vault:…}}) and public identifiers, never a resolved secret, and it
+     * is scrubbed on the way out like every other config as a second line of
+     * defence. Grants — the tokens — live in a different store with a different
+     * lifecycle and are never in an archive; a user links their account again on
+     * the target.
+     * <p>
+     * Default-tenant references only, matching what the write path accepts today. A
+     * reference that names no existing connection is logged rather than fatal: the
+     * archive is still worth having, and the import side will say the same thing
+     * when the reference dangles there.
+     * <p>
+     * That is the only failure skipped. A store, serialization, scrubbing or file
+     * failure propagates, so {@code exportAgent} fails and removes its scratch
+     * tree: swallowing it produced a ZIP silently missing a connection its configs
+     * reference, which is a broken archive that looks like a good one.
+     */
+    private void exportConnections(Path agentPath, List<String> configStrings) throws IResourceStore.ResourceStoreException, IOException {
+        Set<ConnectionReference> references = extractConnectionReferences(configStrings);
+        if (references.isEmpty()) {
+            return;
+        }
+        Path connectionsDir = null;
+        int exported = 0;
+        for (ConnectionReference reference : references) {
+            if (!ConnectionReference.DEFAULT_TENANT.equals(reference.tenantId())) {
+                LOGGER.warnf("Not exporting %s: only default-tenant connections are exported",
+                        LogSanitizer.sanitize(reference.toReferenceString()));
+                continue;
+            }
+            String id = connectionStore.idOfName(reference.tenantId(), reference.name());
+            // Authorised against the connection itself. The agent's own workflows and
+            // extension configs are covered by the VIEW check on the agent; a connection
+            // is a separately owned resource the agent merely names, so naming one in a
+            // config must not be a way to read it. Checked only for a connection that
+            // exists — there is nothing to authorise for one that does not, and that
+            // case is skipped below.
+            if (id != null) {
+                resourceAccessGuard.requireAccess(id, AccessLevel.VIEW, "connection");
+            }
+            ConnectionConfiguration connection = id == null ? null : connectionStore.readByName(reference.tenantId(), reference.name());
+            if (connection == null) {
+                LOGGER.warnf("The agent references %s but no such connection exists; the reference will dangle on import",
+                        LogSanitizer.sanitize(reference.toReferenceString()));
+                continue;
+            }
+            if (connectionsDir == null) {
+                connectionsDir = Files.createDirectories(Paths.get(agentPath.toString(), CONNECTIONS_DIR));
+            }
+            String json = secretScrubber.scrubJson(jsonSerialization.serialize(connection));
+            Path filePath = Paths.get(connectionsDir.toString(), id + "." + CONNECTION_EXT + ".json");
+            deleteFileIfExists(filePath);
+            try (BufferedWriter writer = Files.newBufferedWriter(filePath)) {
+                writer.write(json);
+            }
+            exported++;
+        }
+        if (exported > 0) {
+            LOGGER.infof("Exported %d connection(s) (referenced: %s)", exported,
+                    LogSanitizer.sanitize(references.stream().map(ConnectionReference::toReferenceString).toList().toString()));
         }
     }
 

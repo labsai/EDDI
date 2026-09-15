@@ -36,6 +36,14 @@ public final class MemoryKeys {
     /** Normalized user input (after normalizers). Written by InputParserTask. */
     public static final MemoryKey<String> INPUT_NORMALIZED = MemoryKey.of("input:normalized");
 
+    /**
+     * What replaces user input that must not be persisted: a client-flagged secret
+     * input in the echoed output, and the raw input once a {@code scope: "secret"}
+     * property has vaulted it. {@code input:initial} holding exactly this value is
+     * how later stages (the audit ledger) know the turn's input was a secret.
+     */
+    public static final String SECRET_INPUT_PLACEHOLDER = "<secret input>";
+
     // ---- Parser ----
 
     /**

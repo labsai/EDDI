@@ -394,6 +394,19 @@ public class AgentGroupConfiguration {
      */
     public record GroupMember(String agentId, String displayName, Integer speakingOrder, String role, MemberType memberType) {
 
+        /**
+         * An absent {@code memberType} is an AGENT, as the Javadoc above has always
+         * said. Without this the canonical constructor — the one Jackson and template
+         * instantiation use — kept the null, and every check of the form
+         * {@code memberType() == AGENT} silently excluded the member: the packaged
+         * ops-task-force template found zero bidders and never auctioned.
+         */
+        public GroupMember {
+            if (memberType == null) {
+                memberType = MemberType.AGENT;
+            }
+        }
+
         /** Convenience constructor defaulting to AGENT member type. */
         public GroupMember(String agentId, String displayName, Integer speakingOrder, String role) {
             this(agentId, displayName, speakingOrder, role, MemberType.AGENT);

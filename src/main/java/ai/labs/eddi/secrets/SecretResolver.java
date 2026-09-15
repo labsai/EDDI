@@ -126,6 +126,57 @@ public class SecretResolver {
     }
 
     /**
+     * Fail closed on a vault reference that survived resolution.
+     * <p>
+     * {@link #resolveSecrets} leaves a reference it cannot resolve in place (the
+     * secret does not exist, the provider failed, or the vault is not configured at
+     * all). For a parameter map about to configure an outbound client — an LLM,
+     * embedding model or vector store — that means the literal
+     * {@code ${vault:name}} is sent to the provider as the credential, and the
+     * failure surfaces as the provider's "invalid API key" instead of EDDI's own,
+     * actionable reason. Call this on the RESOLVED map before building the client.
+     * <p>
+     * The message names the parameter and the reference, never a value: a reference
+     * is a name, not a secret.
+     *
+     * @param resolvedParams
+     *            the output of {@link #resolveSecrets}
+     * @param usedFor
+     *            what the parameters configure, for the message (e.g.
+     *            {@code "embedding model 'openai'"})
+     * @return {@code resolvedParams}, for chaining
+     * @throws UnresolvedSecretReferenceException
+     *             when any value still carries a vault reference
+     */
+    public static Map<String, String> requireResolved(Map<String, String> resolvedParams, String usedFor) {
+        if (resolvedParams == null) {
+            return null;
+        }
+        for (var entry : resolvedParams.entrySet()) {
+            if (SecretReference.isVaultReference(entry.getValue())) {
+                Matcher matcher = VAULT_PATTERN.matcher(entry.getValue());
+                String reference = matcher.find() ? matcher.group(0) : "a vault reference";
+                throw new UnresolvedSecretReferenceException(String.format(
+                        "Parameter '%s' of %s references %s, which could not be resolved — the secret does not exist, the vault "
+                                + "failed, or the vault is not configured (EDDI_VAULT_MASTER_KEY). Refusing to send the "
+                                + "unresolved reference to the provider.",
+                        entry.getKey(), usedFor, reference));
+            }
+        }
+        return resolvedParams;
+    }
+
+    /**
+     * A vault reference is still present after resolution. See
+     * {@link #requireResolved}.
+     */
+    public static class UnresolvedSecretReferenceException extends IllegalStateException {
+        public UnresolvedSecretReferenceException(String message) {
+            super(message);
+        }
+    }
+
+    /**
      * Resolve vault references in a single string value. Supports both the short
      * form ({@code ${vault:keyName}}) and full form
      * ({@code ${vault:tenantId/keyName}}), and multiple references within the same

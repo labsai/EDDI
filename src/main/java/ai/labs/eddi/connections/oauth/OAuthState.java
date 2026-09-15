@@ -17,8 +17,8 @@ import java.time.Instant;
  * This row is the callback's <em>only</em> guard: the redirect arrives as a
  * top-level browser GET with no bearer token, so the endpoint cannot be
  * {@code @Authenticated}. The row therefore binds the tenant, the connection
- * and the principal, and the callback never trusts a request parameter for
- * identity.
+ * (by resource id, not only by name) and the principal, and the callback never
+ * trusts a request parameter for identity.
  */
 public class OAuthState {
 
@@ -27,6 +27,22 @@ public class OAuthState {
 
     private String tenantId;
     private String connectionName;
+
+    /**
+     * The resource id of the connection the flow was started for.
+     * <p>
+     * The name alone does not identify it. Grants are filed under the name, so if
+     * the connection is deleted and a new one created under the same name while the
+     * user sits on the provider's consent screen, a name-only binding files a token
+     * issued for the old connection's client under the new connection — whose
+     * allowlist may send it to a different service. The callback refuses unless the
+     * name still belongs to this id.
+     * <p>
+     * A row written before this field existed carries none, and is refused as an
+     * invalid state rather than grandfathered: rows live ten minutes, and the user
+     * simply starts again.
+     */
+    private String connectionId;
 
     /**
      * Who will own the resulting grant. Read from the row, never from the query.
@@ -94,6 +110,14 @@ public class OAuthState {
 
     public void setConnectionName(String connectionName) {
         this.connectionName = connectionName;
+    }
+
+    public String getConnectionId() {
+        return connectionId;
+    }
+
+    public void setConnectionId(String connectionId) {
+        this.connectionId = connectionId;
     }
 
     public String getPrincipal() {
