@@ -11,7 +11,9 @@ import ai.labs.eddi.datastore.IResourceStore;
 import java.util.List;
 
 /**
- * @author ginccc
+ * Persistence store for which agent versions are deployed in each environment.
+ * {@code AgentDeploymentManagement} and the administration REST API read and
+ * write these records when an agent is deployed, undeployed, or deleted.
  */
 public interface IDeploymentStore {
 

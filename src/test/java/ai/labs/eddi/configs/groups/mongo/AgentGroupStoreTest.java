@@ -18,12 +18,25 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.TiePolicy;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.TurnOrder;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.VoteConfig;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.VoteMethod;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ArtifactConfig;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DynamicAgentConfig;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.GroupTaskConfig;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig;
+import ai.labs.eddi.datastore.IResourceStorage;
+import ai.labs.eddi.datastore.IResourceStorageFactory;
+import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.when;
 
 /**
  * Tests for {@link AgentGroupStore}'s save-time config checks (I3).
@@ -50,6 +63,90 @@ class AgentGroupStoreTest {
     private DiscussionPhase phase(String name, String participants) {
         return new DiscussionPhase(name, PhaseType.SYNTHESIS, participants, TurnOrder.SEQUENTIAL,
                 ContextScope.FULL, false, null, 1, false);
+    }
+
+    // ==================== B9 / B15 / W5 / W6 ====================
+
+    @Test
+    void groupMemberWithoutTypeIsAnAgent() {
+        assertEquals(MemberType.AGENT, new GroupMember("a", "A", 1, null, null).memberType());
+        assertEquals(MemberType.HUMAN, new GroupMember("h", "H", 1, null, MemberType.HUMAN).memberType());
+    }
+
+    @Test
+    void memberWithoutAgentIdAndNegativeLimitsAreRejected() {
+        var c = config(DiscussionStyle.ROUND_TABLE, null, "mod");
+        c.setMembers(List.of(new GroupMember(null, "Nameless", 1, null), new GroupMember("a", "A", 2, null)));
+        c.setMaxRounds(-1);
+        c.setProtocol(new ProtocolConfig(30, null, -2, null, -5));
+        var dynamic = new DynamicAgentConfig();
+        dynamic.setMaxCreatedAgentsPerDiscussion(-3);
+        c.setDynamicAgents(dynamic);
+
+        String problems = String.join("; ", AgentGroupStore.memberAndLimitProblems(c));
+
+        assertTrue(problems.contains("members[0] needs an agentId"), problems);
+        assertTrue(problems.contains("maxRounds"), problems);
+        assertTrue(problems.contains("protocol.maxRetries"), problems);
+        assertTrue(problems.contains("protocol.maxTurns"), problems);
+        assertTrue(problems.contains("dynamicAgents.maxCreatedAgentsPerDiscussion"), problems);
+        assertThrows(IllegalArgumentException.class, () -> AgentGroupStore.validateMembersAndLimits(c));
+    }
+
+    @Test
+    void validRosterAndLimitsPass() {
+        var c = config(DiscussionStyle.ROUND_TABLE, null, "mod");
+        c.setMembers(List.of(new GroupMember("a", "A", 1, null), new GroupMember("h", "Human", 2, null, MemberType.HUMAN)));
+        c.setProtocol(new ProtocolConfig(30, null, 0, null, 0));
+        assertTrue(AgentGroupStore.memberAndLimitProblems(c).isEmpty());
+    }
+
+    @Test
+    void presetStylesNeedTheRolesTheyAreBuiltOn() {
+        var debate = config(DiscussionStyle.DEBATE, null, "judge");
+        debate.setMembers(List.of(new GroupMember("a", "A", 1, "PRO"), new GroupMember("b", "B", 2, null)));
+        assertEquals(1, AgentGroupStore.presetRoleProblems(debate).size());
+        debate.setMembers(List.of(new GroupMember("a", "A", 1, "pro"), new GroupMember("b", "B", 2, "CON")));
+        assertTrue(AgentGroupStore.presetRoleProblems(debate).isEmpty());
+
+        var devil = config(DiscussionStyle.DEVIL_ADVOCATE, null, "mod");
+        devil.setMembers(List.of(new GroupMember("a", "A", 1, null)));
+        assertEquals(1, AgentGroupStore.presetRoleProblems(devil).size());
+
+        // Explicit phases route roles however they like.
+        var custom = config(DiscussionStyle.DEBATE, List.of(phase("Wrap", "MODERATOR")), "judge");
+        custom.setMembers(List.of(new GroupMember("a", "A", 1, null)));
+        assertTrue(AgentGroupStore.presetRoleProblems(custom).isEmpty());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void nestingCycleIsRejectedOnUpdate() {
+        IResourceStorageFactory storageFactory = mock(IResourceStorageFactory.class);
+        when(storageFactory.create(eq("groups"), any(), eq(AgentGroupConfiguration.class))).thenReturn(mock(IResourceStorage.class));
+        var store = spy(new AgentGroupStore(storageFactory, mock(IDocumentBuilder.class)));
+
+        // g1 → g2 → g1
+        var child = config(DiscussionStyle.ROUND_TABLE, null, "m");
+        child.setMembers(List.of(new GroupMember("g1", "Parent", 1, null, MemberType.GROUP)));
+        doReturn(child).when(store).readChildConfig("g2");
+        doReturn(null).when(store).readChildConfig("g1");
+        var parent = config(DiscussionStyle.ROUND_TABLE, null, "m");
+        parent.setMembers(List.of(new GroupMember("g2", "Child", 1, null, MemberType.GROUP)));
+
+        var e = assertThrows(IllegalArgumentException.class, () -> store.rejectNestingCycle("g1", parent));
+        assertTrue(e.getMessage().contains("g1"), e.getMessage());
+        assertDoesNotThrow(() -> store.rejectNestingCycle("g3", parent));
+    }
+
+    @Test
+    void toolBackedFeaturesAreNamed() {
+        var c = config(DiscussionStyle.ROUND_TABLE, null, "m");
+        assertTrue(AgentGroupStore.builtInToolFeatures(c).isEmpty());
+        c.setArtifactConfig(new ArtifactConfig(true, 5, List.of()));
+        c.setTaskListConfig(new GroupTaskConfig(true, 5, 2));
+        c.setDynamicAgents(new DynamicAgentConfig());
+        assertEquals(List.of("shared artifacts", "agent task creation", "dynamic agents"), AgentGroupStore.builtInToolFeatures(c));
     }
 
     @Test
@@ -142,13 +239,24 @@ class AgentGroupStoreTest {
         assertTrue(ex.getMessage().contains("2 options"), ex.getMessage());
     }
 
+    /**
+     * The rejection stands, but its stated reason must not: HUMAN members ship (I6
+     * — this same class validates them), so blaming their absence tells a config
+     * author a shipped feature is missing. What is actually absent is the resume
+     * path a paused tie-break would need. Asserting on the alternatives rather than
+     * on prose keeps this test from pinning the wording again.
+     */
     @Test
-    void votePhase_humanDecides_isRejectedUntilI6() {
+    void votePhase_humanDecides_isRejectedPendingResumePath() {
         var ex = assertThrows(IllegalArgumentException.class, () -> AgentGroupStore.validateVotePhases(voteGroup(
                 votePhase(TurnOrder.PARALLEL, ContextScope.NONE,
                         new VoteConfig(VoteMethod.MAJORITY, OptionsSource.EXPLICIT, List.of("A", "B"), 0.5, Map.of(), false,
                                 TiePolicy.HUMAN_DECIDES)))));
-        assertTrue(ex.getMessage().contains("I6"), ex.getMessage());
+        assertTrue(ex.getMessage().contains("HUMAN_DECIDES"), ex.getMessage());
+        assertTrue(ex.getMessage().contains("MODERATOR_DECIDES"), ex.getMessage());
+        assertTrue(ex.getMessage().contains("NO_DECISION"), ex.getMessage());
+        assertFalse(ex.getMessage().contains("not available yet"),
+                "must not claim HUMAN members are unavailable — they ship: " + ex.getMessage());
     }
 
     @Test

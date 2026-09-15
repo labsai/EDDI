@@ -8,7 +8,6 @@ import ai.labs.eddi.configs.groups.IGroupConversationStore;
 import ai.labs.eddi.configs.groups.IGroupWorkspaceStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.TaskDefinition;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
-import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
 import ai.labs.eddi.configs.groups.model.GroupWorkspace;
 import ai.labs.eddi.configs.groups.model.GroupWorkspace.Cadence;
 import ai.labs.eddi.configs.groups.model.GroupWorkspace.MemberStats;
@@ -182,10 +181,19 @@ public class TeamCadenceService {
             }
 
             // 1. Reconcile a previous run before anything else.
+            //
+            // Read the running id BEFORE reconciling. reconcile() returns false for two
+            // different reasons — a discussion genuinely in flight, and a settle CAS this
+            // caller lost — and in the second case settle() has already cleared
+            // runningDiscussionId on this very object. Reading it afterwards therefore
+            // produced "Previous cadence discussion is still running", with an empty id,
+            // for precisely the case an operator most needs to tell apart.
+            String previousDiscussionId = workspace.getRunningDiscussionId();
             if (!reconcile(workspace)) {
                 cadenceRunsSkipped.increment();
                 return CadenceResult.skipped(groupId, cadenceId,
-                        "Previous cadence discussion " + workspace.getRunningDiscussionId() + " is still running");
+                        "Previous cadence discussion " + previousDiscussionId
+                                + " still holds the workspace (either still running, or settled concurrently by another reconciler)");
             }
 
             Cadence cadence = workspace.getCadences().stream()

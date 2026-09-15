@@ -116,12 +116,42 @@ public record AuditEntry(String id, String conversationId, String agentId, Integ
     }
 
     /**
+     * Return a copy of this entry with its recorded payload replaced. Used by
+     * {@code TurnAuditBuffer} to redact a secret user input BEFORE the entry is
+     * submitted — never after: once signed, an entry's payload is immutable.
+     */
+    public AuditEntry withPayload(Map<String, Object> newInput, Map<String, Object> newOutput, Map<String, Object> newLlmDetail,
+                                  Map<String, Object> newToolCalls) {
+        return new AuditEntry(id, conversationId, agentId, agentVersion, userId, environment, stepIndex, taskId, taskType, taskIndex, durationMs,
+                newInput, newOutput, newLlmDetail, newToolCalls, actions, cost, timestamp, hmac, agentSignature, sequence);
+    }
+
+    /**
      * Return a copy of this entry with the HMAC integrity hash set. Used by
      * AuditLedgerService after computing the HMAC.
      */
     public AuditEntry withHmac(String hmacValue) {
         return new AuditEntry(id, conversationId, agentId, agentVersion, userId, environment, stepIndex, taskId, taskType, taskIndex, durationMs,
                 input, output, llmDetail, toolCalls, actions, cost, timestamp, hmacValue, agentSignature, sequence);
+    }
+
+    /**
+     * Return a copy of this entry with a different timestamp.
+     * <p>
+     * Two callers, both in {@code AuditHmac}. On the write path,
+     * {@code withStorablePrecision} floors the timestamp to the precision the
+     * signature covers and the backends can store, so the row that is signed is the
+     * row that is stored. On the read path, the v3 legacy-recovery search
+     * reconstructs the sub-precision digits a backend truncated away, so an old row
+     * can still prove it is the one that was written.
+     * <p>
+     * Not a general-purpose setter: an entry's timestamp records when the event
+     * happened, and moving it after the fact is exactly what the signature exists
+     * to detect.
+     */
+    public AuditEntry withTimestamp(Instant newTimestamp) {
+        return new AuditEntry(id, conversationId, agentId, agentVersion, userId, environment, stepIndex, taskId, taskType, taskIndex, durationMs,
+                input, output, llmDetail, toolCalls, actions, cost, newTimestamp, hmac, agentSignature, sequence);
     }
 
     /**

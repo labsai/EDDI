@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 package ai.labs.eddi.secrets;
+import ai.labs.eddi.configs.agents.IAgentStore;
 
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.apicalls.IApiCallsStore;
@@ -10,9 +11,17 @@ import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.llm.ILlmStore;
 import ai.labs.eddi.configs.mcpcalls.IMcpCallsStore;
 import ai.labs.eddi.configs.mcpcalls.model.McpCallsConfiguration;
+import ai.labs.eddi.configs.rag.IRagStore;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
+import ai.labs.eddi.configs.connections.IConnectionStore;
+import ai.labs.eddi.configs.connections.model.AuthType;
+import ai.labs.eddi.configs.connections.model.Binding;
+import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
+import ai.labs.eddi.configs.connections.model.OAuthConfig;
+import ai.labs.eddi.configs.variables.GlobalVariableResolver;
+import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.secrets.model.SecretMetadata;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -31,7 +40,9 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -55,7 +66,9 @@ class VaultGrantCheckerTest {
     private ILlmStore llmStore;
     private IApiCallsStore apiCallsStore;
     private IMcpCallsStore mcpCallsStore;
-    private ai.labs.eddi.configs.agents.IAgentStore agentStore;
+    private IAgentStore agentStore;
+    private IConnectionStore connectionStore;
+    private GlobalVariableResolver globalVariableResolver;
     private VaultGrantChecker checker;
 
     @BeforeEach
@@ -68,9 +81,167 @@ class VaultGrantCheckerTest {
         apiCallsStore = mock(IApiCallsStore.class);
         mcpCallsStore = mock(IMcpCallsStore.class);
 
-        agentStore = mock(ai.labs.eddi.configs.agents.IAgentStore.class);
+        agentStore = mock(IAgentStore.class);
+        connectionStore = mock(IConnectionStore.class);
+        globalVariableResolver = mock(GlobalVariableResolver.class);
+        // Pass-through by default: an unknown variable is left as-is by the real
+        // resolver too.
+        when(globalVariableResolver.resolveValue(anyString(), anyString())).thenAnswer(i -> i.getArgument(0));
         checker = new VaultGrantChecker(secretProvider, agentStore, workflowStore, llmStore, apiCallsStore, mcpCallsStore,
-                mock(ai.labs.eddi.configs.rag.IRagStore.class));
+                mock(IRagStore.class), connectionStore, globalVariableResolver);
+    }
+
+    /**
+     * An httpcall config referencing {@code ${connection:jira}} in the default
+     * tenant.
+     */
+    private AgentConfiguration agentReferencingTheConnection() throws Exception {
+        var agent = agentWithStep("ai.labs.httpcalls", LLM_ID);
+        var apiCalls = new ApiCallsConfiguration();
+        apiCalls.setTargetServerUrl("https://api.example.com/${connection:jira}");
+        when(apiCallsStore.read(eq(LLM_ID), anyInt())).thenReturn(apiCalls);
+        return agent;
+    }
+
+    private static ConnectionConfiguration oauthConnection(String clientSecret) {
+        var connection = new ConnectionConfiguration();
+        connection.setName("jira");
+        connection.setAuthType(AuthType.OAUTH2_CLIENT_CREDENTIALS);
+        connection.setBinding(Binding.SERVICE);
+        connection.setBaseUrlAllowlist(List.of("https://api.example.com"));
+        var oauth = new OAuthConfig();
+        oauth.setTokenUrl("https://auth.example.com/token");
+        oauth.setClientId("client");
+        oauth.setClientSecret(clientSecret);
+        connection.setOauth(oauth);
+        return connection;
+    }
+
+    @Nested
+    @DisplayName("the ${connection:…} hop")
+    class ConnectionHop {
+
+        @Test
+        @DisplayName("a connection's vault client secret is checked as if the agent named it directly")
+        void followsTheHop() throws Exception {
+            givenGrant(List.of("agent-owner"));
+            var agent = agentReferencingTheConnection();
+            when(connectionStore.readByName("default", "jira")).thenReturn(oauthConnection(VAULT_REF));
+
+            assertEquals(List.of(VAULT_REF), checker.findUngrantedReferences(agent, "some-other-agent"),
+                    "without the hop an agent uses a credential it was never granted simply by naming somebody else's connection");
+        }
+
+        @Test
+        @DisplayName("a client secret held behind a global variable is expanded and checked too")
+        void expandsGlobalVariablesInsideTheConnection() throws Exception {
+            // CredentialReferenceResolver resolves ${vars:} FIRST, so a variable holding
+            // a vault reference is what actually reaches the vault — and it was
+            // invisible to a scan that only looked for the literal ${vault:} text.
+            givenGrant(List.of("agent-owner"));
+            var agent = agentReferencingTheConnection();
+            when(connectionStore.readByName("default", "jira")).thenReturn(oauthConnection("${vars:jira-client-secret}"));
+            when(globalVariableResolver.resolveValue("${vars:jira-client-secret}", "default")).thenReturn(VAULT_REF);
+
+            assertEquals(List.of(VAULT_REF), checker.findUngrantedReferences(agent, "some-other-agent"),
+                    "a ${vars:} indirection must not hide a vault reference from grant enforcement");
+        }
+
+        @Test
+        @DisplayName("a ${vars:} whose value is a ${connection:…} does not hide the hop to an ungranted vault secret")
+        void followsAConnectionReferenceBehindAVariable() throws Exception {
+            givenGrant(List.of("agent-owner"));
+            var agent = agentWithStep("ai.labs.httpcalls", LLM_ID);
+            var apiCalls = new ApiCallsConfiguration();
+            apiCalls.setTargetServerUrl("https://api.example.com/${vars:jira-connection}");
+            when(apiCallsStore.read(eq(LLM_ID), anyInt())).thenReturn(apiCalls);
+            when(globalVariableResolver.resolveValue("${vars:jira-connection}", "default")).thenReturn("${connection:jira}");
+            when(connectionStore.readByName("default", "jira")).thenReturn(oauthConnection(VAULT_REF));
+
+            assertEquals(List.of(VAULT_REF), checker.findUngrantedReferences(agent, "some-other-agent"),
+                    "variables were expanded only before the vault scan, so a connection named through one was never followed");
+        }
+
+        @Test
+        @DisplayName("a connection's ${vars:} is expanded in the connection's own tenant, not the default one")
+        void expandsVariablesInTheConnectionsTenant() throws Exception {
+            givenGrant(List.of("agent-owner"));
+            var agent = agentWithStep("ai.labs.httpcalls", LLM_ID);
+            var apiCalls = new ApiCallsConfiguration();
+            apiCalls.setTargetServerUrl("https://api.example.com/${connection:acme/jira}");
+            when(apiCallsStore.read(eq(LLM_ID), anyInt())).thenReturn(apiCalls);
+            var connection = oauthConnection("${vars:jira-client-secret}");
+            connection.setTenantId("acme");
+            when(connectionStore.readByName("acme", "jira")).thenReturn(connection);
+            // The same variable name holds nothing secret in the default tenant, so a
+            // default-tenant expansion finds nothing to check.
+            when(globalVariableResolver.resolveValue("${vars:jira-client-secret}", "default")).thenReturn("not-a-reference");
+            when(globalVariableResolver.resolveValue("${vars:jira-client-secret}", "acme")).thenReturn(VAULT_REF);
+
+            assertEquals(List.of(VAULT_REF), checker.findUngrantedReferences(agent, "some-other-agent"),
+                    "the runtime resolves the connection's variables in its own tenant, so the grant check must too");
+        }
+
+        @Test
+        @DisplayName("a connection that cannot be read is a violation naming the connection, not a silent pass")
+        void unreadableConnectionFailsClosed() throws Exception {
+            givenGrant(List.of("*"));
+            var agent = agentReferencingTheConnection();
+            when(connectionStore.readByName("default", "jira")).thenThrow(new ResourceStoreException("store down"));
+
+            List<String> violations = checker.findUngrantedReferences(agent, "some-other-agent");
+
+            assertEquals(1, violations.size(), "an unreadable connection used to be skipped at DEBUG, which counted its secrets as granted");
+            assertTrue(violations.get(0).contains("${connection:jira}"), violations.get(0));
+            assertTrue(violations.get(0).contains("could not be read"), violations.get(0));
+        }
+
+        @Test
+        @DisplayName("a connection that does not exist is not a grant violation — the runtime refuses it as NOT_FOUND")
+        void absentConnectionIsNotAViolation() throws Exception {
+            givenGrant(List.of("*"));
+            var agent = agentReferencingTheConnection();
+            when(connectionStore.readByName("default", "jira")).thenReturn(null);
+
+            assertTrue(checker.findUngrantedReferences(agent, "some-other-agent").isEmpty());
+        }
+    }
+
+    @Nested
+    @DisplayName("${vars:…} expansion on the direct scan")
+    class VariableExpansion {
+
+        @Test
+        @DisplayName("an LLM apiKey held behind a global variable that expands to a vault reference is checked")
+        void expandsGlobalVariablesInExtensionConfigs() throws Exception {
+            givenGrant(List.of("agent-owner"));
+            var agent = agentWithStep("ai.labs.llm", LLM_ID);
+            var task = new LlmConfiguration.Task();
+            task.setType("anthropic");
+            task.setParameters(new LinkedHashMap<>(Map.of("apiKey", "${vars:anthropic-key}")));
+            when(llmStore.read(eq(LLM_ID), anyInt())).thenReturn(new LlmConfiguration(List.of(task)));
+            when(globalVariableResolver.resolveValue("${vars:anthropic-key}", "default")).thenReturn(VAULT_REF);
+
+            assertEquals(List.of(VAULT_REF), checker.findUngrantedReferences(agent, "some-other-agent"),
+                    "the general scan had the same blind spot as the connection hop");
+        }
+
+        @Test
+        @DisplayName("a variable that expands to plain text contributes nothing")
+        void plainVariableIsIgnored() throws Exception {
+            givenGrant(List.of("agent-owner"));
+            var agent = agentWithStep("ai.labs.llm", LLM_ID);
+            var task = new LlmConfiguration.Task();
+            task.setType("anthropic");
+            task.setParameters(new LinkedHashMap<>(Map.of("modelName", "${vars:default-model}")));
+            when(llmStore.read(eq(LLM_ID), anyInt())).thenReturn(new LlmConfiguration(List.of(task)));
+            when(globalVariableResolver.resolveValue("${vars:default-model}", "default")).thenReturn("claude-sonnet-4-6");
+
+            assertTrue(checker.findUngrantedReferences(agent, "some-other-agent").isEmpty());
+            // Without this the test passes with expansion skipped entirely: the default
+            // pass-through stub also yields no vault reference.
+            verify(globalVariableResolver, atLeastOnce()).resolveValue("${vars:default-model}", "default");
+        }
     }
 
     /**

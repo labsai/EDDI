@@ -111,6 +111,14 @@ public final class TaskToolApprovalsResolver {
 
     /** Pure overload — the whole contract, testable without a config source. */
     public static ToolApprovalsConfig resolve(ToolApprovalsConfig agentLevel, ToolApprovalsConfig taskLevel, Mode mode) {
+        // A policy we failed to READ outranks everything, REPLACE mode included. A
+        // task-level config is authored inside the very agent whose policy could not
+        // be loaded, so it is no evidence that gating is unnecessary — and REPLACE
+        // would hand an ungated config straight back, undoing the fail-closed
+        // fallback. See ToolApprovalsConfig#UNDETERMINED.
+        if (ToolApprovalsConfig.isUndetermined(agentLevel)) {
+            return agentLevel;
+        }
         if (taskLevel == null) {
             return agentLevel;
         }

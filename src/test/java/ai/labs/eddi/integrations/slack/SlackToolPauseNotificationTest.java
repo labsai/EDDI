@@ -20,6 +20,8 @@ import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.integrations.channels.ChannelTargetRouter;
+import ai.labs.eddi.integrations.channels.ObserveGate;
+import ai.labs.eddi.modules.llm.tools.ToolCostTracker;
 import ai.labs.eddi.integrations.channels.ChannelTargetRouter.ResolvedTarget;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -128,7 +130,12 @@ class SlackToolPauseNotificationTest {
         var call = new PendingToolCall();
         call.setToolName("transfer_funds");
         call.setArgumentsRaw("{\"amount\":250,\"secret\":\"RAW_SECRET_VALUE_NEVER_SHOWN\"}");
-        call.setArgumentsRedacted("{\"amount\":250,\"secret\":\"[REDACTED]\"}");
+        // The project's canonical marker (RequestRedactor.REDACTED /
+        // SecretRedactionFilter), not a look-alike: the card re-runs the filter at
+        // send time so a stored pause cannot outlive a filter improvement, and a
+        // non-canonical "[REDACTED]" fixture was itself rewritten to the real
+        // marker — leaving the assertion below looking for a string no longer there.
+        call.setArgumentsRedacted("{\"amount\":250,\"secret\":\"<REDACTED>\"}");
         var batch = new PendingToolCallBatch();
         batch.setCalls(List.of(call));
 
@@ -139,7 +146,7 @@ class SlackToolPauseNotificationTest {
         String rendered = renderBlocksToText(blocks);
         assertFalse(rendered.contains("RAW_SECRET_VALUE_NEVER_SHOWN"),
                 "raw argument value must never reach the Slack approval card");
-        assertTrue(rendered.contains("[REDACTED]"));
+        assertTrue(rendered.contains("<REDACTED>"), rendered);
     }
 
     @Test
@@ -342,11 +349,15 @@ class SlackToolPauseNotificationTest {
         when(cacheFactory.getCache(anyString(), any(Duration.class))).thenReturn(new FakeCache<>());
         return new SlackEventHandler(
                 mock(ChannelTargetRouter.class),
+                mock(ObserveGate.class),
+                mock(ToolCostTracker.class),
                 slackApi,
                 mock(IConversationService.class),
                 mock(IGroupConversationService.class),
                 mock(IUserConversationStore.class),
-                cacheFactory);
+                cacheFactory,
+                new SlackConfig(SlackConfig.DEFAULT_REQUEST_TIMEOUT_SECONDS, SlackConfig.DEFAULT_GROUP_COMPLETION_TIMEOUT_SECONDS,
+                        SlackConfig.DEFAULT_API_MAX_RETRIES, SlackConfig.DEFAULT_API_RETRY_BASE_MS));
     }
 
     private static ResolvedTarget resolvedWithApprovalChannel() {

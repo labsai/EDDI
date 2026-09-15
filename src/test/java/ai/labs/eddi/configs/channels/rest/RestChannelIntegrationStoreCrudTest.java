@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.channels.rest;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.channels.IChannelIntegrationStore;
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.channels.model.ChannelTarget;
@@ -48,7 +49,7 @@ class RestChannelIntegrationStoreCrudTest {
     void setUp() {
         channelStore = mock(IChannelIntegrationStore.class);
         documentDescriptorStore = mock(IDocumentDescriptorStore.class);
-        sut = new RestChannelIntegrationStore(channelStore, documentDescriptorStore);
+        sut = new RestChannelIntegrationStore(channelStore, documentDescriptorStore, mock(ResourceAccessGuard.class));
     }
 
     private static ChannelIntegrationConfiguration validConfig() {
@@ -90,7 +91,7 @@ class RestChannelIntegrationStoreCrudTest {
         @DisplayName("should delegate to documentDescriptorStore")
         void delegatesToStore() throws Exception {
             var descriptors = List.of(new DocumentDescriptor());
-            when(documentDescriptorStore.readDescriptors("ai.labs.channel", "filter", 0, 10, false))
+            when(documentDescriptorStore.readDescriptors(eq("ai.labs.channel"), eq("filter"), eq(0), eq(10), eq(false), any()))
                     .thenReturn(descriptors);
 
             List<DocumentDescriptor> result = sut.readChannelDescriptors("filter", 0, 10);
@@ -167,6 +168,28 @@ class RestChannelIntegrationStoreCrudTest {
             Response response = sut.updateChannel(CHANNEL_ID, 1, config);
 
             assertEquals(200, response.getStatus());
+        }
+
+        /**
+         * On update the descriptor still lives at the previous version until
+         * DocumentDescriptorFilter promotes it after the call. Reading only the new
+         * version failed, was swallowed, and channel descriptors kept an empty name.
+         */
+        @Test
+        @DisplayName("syncs name and description onto the descriptor still at version-1")
+        void updateSyncsOntoPreviousVersionDescriptor() throws Exception {
+            var config = validConfig();
+            when(channelStore.update(eq(CHANNEL_ID), eq(1), any())).thenReturn(2);
+            when(channelStore.getCurrentResourceId(CHANNEL_ID)).thenReturn(dummyResourceId(CHANNEL_ID, 2));
+            when(documentDescriptorStore.readDescriptor(CHANNEL_ID, 2)).thenThrow(new IResourceStore.ResourceNotFoundException("not yet"));
+            when(documentDescriptorStore.readDescriptor(CHANNEL_ID, 1)).thenReturn(new DocumentDescriptor());
+            lenient().when(documentDescriptorStore.readDescriptors(eq("ai.labs.channel"), eq(""), eq(0), eq(IDescriptorStore.NO_LIMIT), eq(false)))
+                    .thenReturn(List.of());
+
+            sut.updateChannel(CHANNEL_ID, 1, config);
+
+            verify(documentDescriptorStore).setDescriptor(eq(CHANNEL_ID), eq(1),
+                    argThat(d -> "My Slack Hub".equals(d.getName()) && "slack integration".equals(d.getDescription())));
         }
 
         @Test
@@ -423,6 +446,39 @@ class RestChannelIntegrationStoreCrudTest {
 
             // Should not throw — descriptor sync failure is logged, not rethrown
             assertDoesNotThrow(() -> sut.createChannel(config));
+        }
+    }
+
+    // ==================== O2: plaintext secrets warn, never reject
+    // ====================
+
+    /**
+     * A plaintext {@code botToken} produces a WARN pointing at the vault — it must
+     * never become a rejection. Every existing integration stores its credentials
+     * this way; a well-meaning "hardening" that turns the warning into a 400 would
+     * brick them all on their next update, which is why the non-throwing half of
+     * this behaviour is pinned and not just the log line.
+     */
+    @Nested
+    @DisplayName("plaintext platformConfig secrets")
+    class PlaintextSecretWarning {
+
+        @Test
+        @DisplayName("a plaintext botToken passes validation — warn, don't reject")
+        void plaintextTokenIsNotRejected() {
+            var config = validConfig();
+            config.setPlatformConfig(Map.of("botToken", "xoxb-plaintext-not-a-vault-ref"));
+
+            assertDoesNotThrow(() -> sut.validateConfiguration(config));
+        }
+
+        @Test
+        @DisplayName("a vault reference passes validation too")
+        void vaultReferencePasses() {
+            var config = validConfig();
+            config.setPlatformConfig(Map.of("botToken", "${vault:slack-bot-token}"));
+
+            assertDoesNotThrow(() -> sut.validateConfiguration(config));
         }
     }
 }

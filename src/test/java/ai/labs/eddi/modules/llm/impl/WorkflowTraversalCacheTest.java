@@ -4,9 +4,9 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
-import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
-import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
+import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
@@ -38,8 +38,8 @@ import static org.mockito.Mockito.when;
 @DisplayName("WorkflowTraversal — one traversal per turn (F12)")
 class WorkflowTraversalCacheTest {
 
-    private IRestAgentStore agentStore;
-    private IRestWorkflowStore workflowStore;
+    private IAgentStore agentStore;
+    private IWorkflowStore workflowStore;
     private IResourceClientLibrary resourceClientLibrary;
     private IConversationMemory memory;
     private String agentId;
@@ -47,8 +47,8 @@ class WorkflowTraversalCacheTest {
     @BeforeEach
     void setUp() throws Exception {
         WorkflowTraversal.clearCache();
-        agentStore = mock(IRestAgentStore.class);
-        workflowStore = mock(IRestWorkflowStore.class);
+        agentStore = mock(IAgentStore.class);
+        workflowStore = mock(IWorkflowStore.class);
         resourceClientLibrary = mock(IResourceClientLibrary.class);
         memory = mock(IConversationMemory.class);
 
@@ -59,11 +59,11 @@ class WorkflowTraversalCacheTest {
 
         var agentConfig = new AgentConfiguration();
         agentConfig.setWorkflows(List.of(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/aaaabbbbccccddddeeeeffff?version=1")));
-        when(agentStore.readAgent(anyString(), anyInt())).thenReturn(agentConfig);
+        when(agentStore.read(anyString(), anyInt())).thenReturn(agentConfig);
 
         var workflowConfig = new WorkflowConfiguration();
         workflowConfig.setWorkflowSteps(List.of());
-        when(workflowStore.readWorkflow(anyString(), anyInt())).thenReturn(workflowConfig);
+        when(workflowStore.read(anyString(), anyInt())).thenReturn(workflowConfig);
     }
 
     /**
@@ -81,14 +81,14 @@ class WorkflowTraversalCacheTest {
     void nonNumericVersionDoesNotAbortDiscovery() throws Exception {
         var agentConfig = new AgentConfiguration();
         agentConfig.setWorkflows(List.of(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/aaaabbbbccccddddeeeeffff?version=abc")));
-        when(agentStore.readAgent(anyString(), anyInt())).thenReturn(agentConfig);
+        when(agentStore.read(anyString(), anyInt())).thenReturn(agentConfig);
 
         var configs = WorkflowTraversal.discoverConfigs(memory, "eddi://ai.labs.httpcalls", Object.class,
                 agentStore, workflowStore, resourceClientLibrary);
 
         assertNotNull(configs, "discovery must return a result, not blow up the turn");
         assertTrue(configs.isEmpty(), "the unusable workflow contributes nothing");
-        verify(workflowStore, never()).readWorkflow(anyString(), anyInt());
+        verify(workflowStore, never()).read(anyString(), anyInt());
     }
 
     /**
@@ -102,14 +102,14 @@ class WorkflowTraversalCacheTest {
     void lookalikeParamIsNotReadAsVersion() throws Exception {
         var agentConfig = new AgentConfiguration();
         agentConfig.setWorkflows(List.of(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/aaaabbbbccccddddeeeeffff?subversion=123")));
-        when(agentStore.readAgent(anyString(), anyInt())).thenReturn(agentConfig);
+        when(agentStore.read(anyString(), anyInt())).thenReturn(agentConfig);
 
         var configs = WorkflowTraversal.discoverConfigs(memory, "eddi://ai.labs.httpcalls", Object.class,
                 agentStore, workflowStore, resourceClientLibrary);
 
         assertNotNull(configs);
         assertTrue(configs.isEmpty());
-        verify(workflowStore, never()).readWorkflow(anyString(), anyInt());
+        verify(workflowStore, never()).read(anyString(), anyInt());
     }
 
     @Test
@@ -117,13 +117,13 @@ class WorkflowTraversalCacheTest {
     void versionAfterAnotherParamIsStillRead() throws Exception {
         var agentConfig = new AgentConfiguration();
         agentConfig.setWorkflows(List.of(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/aaaabbbbccccddddeeeeffff?foo=x&version=1")));
-        when(agentStore.readAgent(anyString(), anyInt())).thenReturn(agentConfig);
+        when(agentStore.read(anyString(), anyInt())).thenReturn(agentConfig);
 
         WorkflowTraversal.discoverConfigs(memory, "eddi://ai.labs.httpcalls", Object.class,
                 agentStore, workflowStore, resourceClientLibrary);
 
         // Anchoring must not break the ordinary multi-param case.
-        verify(workflowStore).readWorkflow(anyString(), eq(1));
+        verify(workflowStore).read(anyString(), eq(1));
     }
 
     @Test
@@ -132,14 +132,14 @@ class WorkflowTraversalCacheTest {
         var agentConfig = new AgentConfiguration();
         agentConfig.setWorkflows(
                 List.of(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/aaaabbbbccccddddeeeeffff?version=99999999999999")));
-        when(agentStore.readAgent(anyString(), anyInt())).thenReturn(agentConfig);
+        when(agentStore.read(anyString(), anyInt())).thenReturn(agentConfig);
 
         var configs = WorkflowTraversal.discoverConfigs(memory, "eddi://ai.labs.httpcalls", Object.class,
                 agentStore, workflowStore, resourceClientLibrary);
 
         assertNotNull(configs);
         assertTrue(configs.isEmpty());
-        verify(workflowStore, never()).readWorkflow(anyString(), anyInt());
+        verify(workflowStore, never()).read(anyString(), anyInt());
     }
 
     @Test
@@ -150,8 +150,8 @@ class WorkflowTraversalCacheTest {
                     agentStore, workflowStore, resourceClientLibrary);
         }
 
-        verify(agentStore, times(1)).readAgent(anyString(), anyInt());
-        verify(workflowStore, times(1)).readWorkflow(anyString(), anyInt());
+        verify(agentStore, times(1)).read(anyString(), anyInt());
+        verify(workflowStore, times(1)).read(anyString(), anyInt());
     }
 
     @Test
@@ -162,7 +162,7 @@ class WorkflowTraversalCacheTest {
         WorkflowTraversal.discoverConfigs(memory, "eddi://ai.labs.mcpcalls", Object.class,
                 agentStore, workflowStore, resourceClientLibrary);
 
-        verify(agentStore, times(2)).readAgent(anyString(), anyInt());
+        verify(agentStore, times(2)).read(anyString(), anyInt());
     }
 
     @Test
@@ -174,7 +174,7 @@ class WorkflowTraversalCacheTest {
         WorkflowTraversal.discoverConfigs(memory, "eddi://ai.labs.httpcalls", Object.class,
                 agentStore, workflowStore, resourceClientLibrary);
 
-        verify(agentStore, times(2)).readAgent(anyString(), anyInt());
+        verify(agentStore, times(2)).read(anyString(), anyInt());
     }
 
     @Test
@@ -186,7 +186,7 @@ class WorkflowTraversalCacheTest {
         WorkflowTraversal.discoverConfigs(memory, "eddi://ai.labs.httpcalls", Object.class,
                 agentStore, workflowStore, resourceClientLibrary);
 
-        verify(agentStore, times(2)).readAgent(anyString(), anyInt());
+        verify(agentStore, times(2)).read(anyString(), anyInt());
     }
 
     @Test

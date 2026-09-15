@@ -21,6 +21,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import jakarta.enterprise.context.ApplicationScoped;
+import io.quarkus.security.Authenticated;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
@@ -41,7 +43,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @Tag(name = "Integrations / A2A Protocol", description = "Agent-to-Agent protocol endpoints")
-@jakarta.enterprise.context.ApplicationScoped
+@ApplicationScoped
 public class RestA2AEndpoint {
 
     private static final Logger LOGGER = Logger.getLogger(RestA2AEndpoint.class);
@@ -182,7 +184,7 @@ public class RestA2AEndpoint {
      */
     @POST
     @Path("a2a/agents/{agentId}")
-    @io.quarkus.security.Authenticated
+    @Authenticated
     public Response handleJsonRpc(@PathParam("agentId") String agentId, JsonRpcRequest request) {
         if (!a2aEnabled) {
             return jsonRpcError(request.id(), A2AModels.ERROR_METHOD_NOT_FOUND, "A2A is disabled");

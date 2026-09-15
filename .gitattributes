@@ -10,3 +10,9 @@ src/main/resources/META-INF/resources/assets/** linguist-generated
 # Install scripts -- enforce correct line endings per platform
 *.sh text eol=lf
 *.ps1 text eol=crlf
+
+# Git hooks have no extension, so *.sh above does not reach them. They are LF in
+# the repo today only by luck: a CRLF hook is not merely untidy, it fails to
+# execute on Linux and macOS ("bad interpreter"), which would silently disarm the
+# force-push guard for everyone who activated it.
+.githooks/** text eol=lf

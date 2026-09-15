@@ -26,6 +26,7 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
+import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
@@ -41,6 +42,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -133,7 +135,7 @@ class GroupConversationServiceAbstentionTest {
 
     /** Routes each agent's reply through {@code responder}, keyed by agent id. */
     private void stubTurns(Function<String, String> responder) throws Exception {
-        doReturn(mock(ai.labs.eddi.engine.runtime.IAgent.class)).when(agentFactory).getLatestReadyAgent(any(), anyString());
+        doReturn(mock(IAgent.class)).when(agentFactory).getLatestReadyAgent(any(), anyString());
         doReturn(new IConversationService.ConversationResult("member-conv", null))
                 .when(conversationService).startConversation(any(), any(), any(), any());
         doAnswer(inv -> {
@@ -164,7 +166,7 @@ class GroupConversationServiceAbstentionTest {
 
         var byAgent = gc.getTranscript().stream()
                 .filter(e -> e.speakerAgentId() != null)
-                .collect(java.util.stream.Collectors.toMap(e -> e.speakerAgentId(), e -> e, (a, b) -> a));
+                .collect(Collectors.toMap(e -> e.speakerAgentId(), e -> e, (a, b) -> a));
         assertEquals(TranscriptEntryType.ABSTAINED, byAgent.get(AGENT_A).type());
         assertNull(byAgent.get(AGENT_A).content(),
                 "recording 'PASS' as content would put a non-answer into the record that peers and the synthesizer read as a position");

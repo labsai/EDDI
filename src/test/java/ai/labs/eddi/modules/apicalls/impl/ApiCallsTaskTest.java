@@ -416,4 +416,23 @@ class ApiCallsTaskTest {
         assertEquals("Http Calls", descriptor.getDisplayName());
         assertTrue(descriptor.getConfigs().containsKey("uri"));
     }
+
+    /**
+     * The result map doubles as the LLM tool contract, which now populates
+     * body/httpCode on FAILURES too — but this task's cross-call template merge
+     * predates that contract and never included error text. isFailureResult is the
+     * guard keeping a failed call's error body from overwriting a previous
+     * successful call's {body} in template data.
+     */
+    @Test
+    void isFailureResult_classifiesByHttpCode() {
+        assertTrue(ApiCallsTask.isFailureResult(Map.of("httpCode", 400, "body", "boom")));
+        assertTrue(ApiCallsTask.isFailureResult(Map.of("httpCode", 503)));
+        assertFalse(ApiCallsTask.isFailureResult(Map.of("httpCode", 200, "body", "ok")));
+        assertFalse(ApiCallsTask.isFailureResult(Map.of("httpCode", 204)));
+        // No code is NOT failure: fire-and-forget returns an empty map, and
+        // pre-contract results carried no code at all.
+        assertFalse(ApiCallsTask.isFailureResult(Map.of("body", "legacy")));
+        assertFalse(ApiCallsTask.isFailureResult(Map.of()));
+    }
 }

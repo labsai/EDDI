@@ -4,7 +4,9 @@
  */
 package ai.labs.eddi.configs.groups.rest;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.IGroupWorkspaceStore;
 import ai.labs.eddi.configs.groups.model.GroupWorkspace;
@@ -44,7 +46,8 @@ class RestAgentGroupStoreTest {
         jsonSchemaCreator = mock(IJsonSchemaCreator.class);
         workspaceStore = mock(IGroupWorkspaceStore.class);
         scheduleStore = mock(IScheduleStore.class);
-        restStore = new RestAgentGroupStore(groupStore, documentDescriptorStore, jsonSchemaCreator, workspaceStore, scheduleStore);
+        restStore = new RestAgentGroupStore(groupStore, documentDescriptorStore, jsonSchemaCreator, workspaceStore, scheduleStore,
+                mock(ResourceAccessGuard.class));
     }
 
     @Nested
@@ -254,7 +257,7 @@ class RestAgentGroupStoreTest {
 
             // Capture the descriptor that was created
             var descriptorCaptor = org.mockito.ArgumentCaptor.forClass(
-                    ai.labs.eddi.configs.descriptors.model.DocumentDescriptor.class);
+                    DocumentDescriptor.class);
             verify(documentDescriptorStore).createDescriptor(eq(newId), eq(newVersion), descriptorCaptor.capture());
 
             var descriptor = descriptorCaptor.getValue();

@@ -10,6 +10,7 @@ import ai.labs.eddi.engine.internal.GroupApprovalRequest;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.memory.model.Attachment;
+import ai.labs.eddi.engine.model.PendingApprovalSummary;
 
 import java.util.List;
 
@@ -206,7 +207,7 @@ public interface IGroupConversationService {
      * @param limit
      *            maximum number of summaries to return (clamped to [1, 1000])
      */
-    List<ai.labs.eddi.engine.model.PendingApprovalSummary> listGroupPendingApprovals(String groupId, int limit)
+    List<PendingApprovalSummary> listGroupPendingApprovals(String groupId, int limit)
             throws IResourceStore.ResourceStoreException;
 
     // --- Event listener for SSE streaming ---

@@ -27,15 +27,19 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDepthExceededException;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionException;
+import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.lifecycle.model.DiscussionControlToken;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
+import ai.labs.eddi.engine.memory.model.ConversationOutput;
+import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import java.time.Duration;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -43,7 +47,10 @@ import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -141,12 +148,12 @@ class GroupConversationServiceHitlCoverageTest {
     }
 
     @SuppressWarnings("unchecked")
-    private java.util.concurrent.ConcurrentHashMap<String, DiscussionControlToken> activeTokens(
-                                                                                                GroupConversationService svc)
+    private ConcurrentHashMap<String, DiscussionControlToken> activeTokens(
+                                                                           GroupConversationService svc)
             throws Exception {
         var field = GroupConversationService.class.getDeclaredField("activeTokens");
         field.setAccessible(true);
-        return (java.util.concurrent.ConcurrentHashMap<String, DiscussionControlToken>) field.get(svc);
+        return (ConcurrentHashMap<String, DiscussionControlToken>) field.get(svc);
     }
 
     private GroupApprovalRequest approvedRequest() {
@@ -228,7 +235,7 @@ class GroupConversationServiceHitlCoverageTest {
         doReturn(gc).when(conversationStore).read("gc-phase-with-taskapprovals");
 
         var request = approvedRequest();
-        request.setTaskApprovals(java.util.Map.of("whatever", "APPROVED"));
+        request.setTaskApprovals(Map.of("whatever", "APPROVED"));
 
         var ex = assertThrows(IllegalArgumentException.class,
                 () -> service.resumeDiscussion("gc-phase-with-taskapprovals", request, null));
@@ -245,7 +252,7 @@ class GroupConversationServiceHitlCoverageTest {
         doReturn(gc).when(conversationStore).read("gc-no-tasklist");
 
         var request = approvedRequest();
-        request.setTaskApprovals(java.util.Map.of("whatever", "APPROVED"));
+        request.setTaskApprovals(Map.of("whatever", "APPROVED"));
 
         var ex = assertThrows(IllegalArgumentException.class,
                 () -> service.resumeDiscussion("gc-no-tasklist", request, null));
@@ -363,10 +370,10 @@ class GroupConversationServiceHitlCoverageTest {
     }
 
     private void stubAgentSay() throws Exception {
-        var snapshot = new ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot();
-        var output = new ai.labs.eddi.engine.memory.model.ConversationOutput();
+        var snapshot = new SimpleConversationMemorySnapshot();
+        var output = new ConversationOutput();
         output.put("output", List.of("Test response"));
-        snapshot.setConversationOutputs(new java.util.ArrayList<>(List.of(output)));
+        snapshot.setConversationOutputs(new ArrayList<>(List.of(output)));
         doAnswer(inv -> {
             IConversationService.ConversationResponseHandler handler = inv.getArgument(8);
             if (handler != null) {
@@ -451,7 +458,7 @@ class GroupConversationServiceHitlCoverageTest {
         var gc = pausedPhaseGc("gc-past-due");
         gc.setHitlTimeoutPolicy(HitlTimeoutPolicy.AUTO_REJECT);
         gc.setHitlApprovalTimeout("PT1M");
-        gc.setPausedAt(Instant.now().minus(java.time.Duration.ofHours(2))); // long past due
+        gc.setPausedAt(Instant.now().minus(Duration.ofHours(2))); // long past due
 
         var m = GroupConversationService.class.getDeclaredMethod(
                 "scheduleGroupHitlTimeout", GroupConversation.class);
@@ -477,7 +484,7 @@ class GroupConversationServiceHitlCoverageTest {
 
     /** The listener parameter type used by the private convert overload. */
     private Class<?> IGroupConversationServiceListenerType() {
-        return ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener.class;
+        return IGroupConversationService.GroupDiscussionEventListener.class;
     }
 
     @Test

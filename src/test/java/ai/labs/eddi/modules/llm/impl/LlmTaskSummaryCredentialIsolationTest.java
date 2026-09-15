@@ -4,9 +4,9 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
-import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
-import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
+import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
@@ -111,7 +111,7 @@ class LlmTaskSummaryCredentialIsolationTest {
 
         llmTask = new LlmTask(resourceClientLibrary, dataFactory, memoryItemConverter,
                 templatingEngine, jsonSerialization, prePostUtils, chatModelRegistry,
-                mock(IApiCallExecutor.class), mock(IRestAgentStore.class), mock(IRestWorkflowStore.class),
+                mock(IApiCallExecutor.class), mock(IAgentStore.class), mock(IWorkflowStore.class),
                 ragContextProvider, new TokenCounterFactory(), conversationSummarizer,
                 promptSnippetService, globalVariableResolver, counterweightService,
                 identityMaskingService, agentOrchestrator, new ConversationHistoryBuilder(),

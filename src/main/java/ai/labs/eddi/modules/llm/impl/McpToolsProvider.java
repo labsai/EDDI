@@ -4,15 +4,16 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
-import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.mcpcalls.model.McpCallsConfiguration;
-import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
+import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
 import ai.labs.eddi.modules.llm.tools.spi.ProviderFailure;
 import ai.labs.eddi.modules.llm.tools.spi.ToolAssemblyContext;
 import ai.labs.eddi.modules.llm.tools.spi.ToolContribution;
+import ai.labs.eddi.modules.llm.tools.spi.ToolRequestResolver;
 import ai.labs.eddi.modules.llm.tools.spi.ToolSourceProvider;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.service.tool.ToolExecutor;
@@ -52,15 +53,15 @@ class McpToolsProvider implements ToolSourceProvider {
     private static final Logger LOGGER = Logger.getLogger(McpToolsProvider.class);
     private static final String MCPCALLS_TYPE = "eddi://ai.labs.mcpcalls";
 
-    private final IRestAgentStore restAgentStore;
-    private final IRestWorkflowStore restWorkflowStore;
+    private final IAgentStore agentStore;
+    private final IWorkflowStore workflowStore;
     private final IResourceClientLibrary resourceClientLibrary;
     private final McpToolProviderManager mcpToolProviderManager;
 
-    McpToolsProvider(IRestAgentStore restAgentStore, IRestWorkflowStore restWorkflowStore,
+    McpToolsProvider(IAgentStore agentStore, IWorkflowStore workflowStore,
             IResourceClientLibrary resourceClientLibrary, McpToolProviderManager mcpToolProviderManager) {
-        this.restAgentStore = restAgentStore;
-        this.restWorkflowStore = restWorkflowStore;
+        this.agentStore = agentStore;
+        this.workflowStore = workflowStore;
         this.resourceClientLibrary = resourceClientLibrary;
         this.mcpToolProviderManager = mcpToolProviderManager;
     }
@@ -76,9 +77,10 @@ class McpToolsProvider implements ToolSourceProvider {
         if (!enabled) {
             return ToolContribution.empty();
         }
-        var result = discover(ctx.memory());
+        var resolvers = new HashMap<String, ToolRequestResolver>();
+        var result = discover(ctx.memory(), resolvers);
         return new ToolContribution(result.toolSpecs(), result.executors(), Map.of(), Map.of(),
-                asProviderFailures(result.failures()), Map.of());
+                asProviderFailures(result.failures()), Map.of(), resolvers);
     }
 
     /**
@@ -99,6 +101,7 @@ class McpToolsProvider implements ToolSourceProvider {
                     case INVALID_CONFIGURATION -> ProviderFailure.Kind.INVALID_CONFIGURATION;
                     case CONNECTION_FAILURE -> ProviderFailure.Kind.CONNECTION_FAILURE;
                     case CIRCUIT_OPEN -> ProviderFailure.Kind.CIRCUIT_OPEN;
+                    case AUTHENTICATION_REQUIRED -> ProviderFailure.Kind.AUTHENTICATION_REQUIRED;
                 }, f.message()))
                 .toList();
     }
@@ -112,6 +115,19 @@ class McpToolsProvider implements ToolSourceProvider {
      * apply whitelist/blacklist → return filtered tools.
      */
     McpToolProviderManager.McpToolsResult discover(IConversationMemory memory) {
+        return discover(memory, new HashMap<>());
+    }
+
+    /**
+     * As {@link #discover(IConversationMemory)}, additionally populating
+     * {@code resolversOut} with one {@link ToolRequestResolver} per surviving tool.
+     * <p>
+     * Separate overload rather than a fourth component on {@code McpToolsResult}:
+     * that record is the manager's public shape and is consumed by the REST
+     * discovery endpoint and the orchestrator's legacy delegator, neither of which
+     * has any use for a resolver.
+     */
+    McpToolProviderManager.McpToolsResult discover(IConversationMemory memory, Map<String, ToolRequestResolver> resolversOut) {
         List<ToolSpecification> toolSpecs = new ArrayList<>();
         Map<String, ToolExecutor> executors = new HashMap<>();
         // Accumulated across servers so a misconfigured or unreachable one has a
@@ -121,7 +137,7 @@ class McpToolsProvider implements ToolSourceProvider {
         try {
             LOGGER.infof("Discovering mcpcalls tools for agent: %s v%s", memory.getAgentId(), memory.getAgentVersion());
 
-            var stepConfigs = WorkflowTraversal.discoverConfigs(memory, MCPCALLS_TYPE, McpCallsConfiguration.class, restAgentStore, restWorkflowStore,
+            var stepConfigs = WorkflowTraversal.discoverConfigs(memory, MCPCALLS_TYPE, McpCallsConfiguration.class, agentStore, workflowStore,
                     resourceClientLibrary);
 
             for (var stepConfig : stepConfigs) {
@@ -170,6 +186,11 @@ class McpToolsProvider implements ToolSourceProvider {
                     }
                     toolSpecs.add(spec);
                     executors.put(name, executor);
+                    // Pin the call: without this the approver saw a tool name and
+                    // nothing else, and the pre-execution re-check had nothing to
+                    // compare against.
+                    resolversOut.put(name, RemoteToolRequestResolvers.forMcp(mcpCallsConfig.getMcpServerUrl(), name,
+                            mcpCallsConfig.getApiKey() != null && !mcpCallsConfig.getApiKey().isBlank()));
                 }
 
                 // Resource bridge — explicit opt-in per config, and deliberately NOT
@@ -189,6 +210,8 @@ class McpToolsProvider implements ToolSourceProvider {
                             }
                             toolSpecs.add(spec);
                             executors.put(spec.name(), executor);
+                            resolversOut.put(spec.name(), RemoteToolRequestResolvers.forMcp(mcpCallsConfig.getMcpServerUrl(), spec.name(),
+                                    mcpCallsConfig.getApiKey() != null && !mcpCallsConfig.getApiKey().isBlank()));
                         }
                     } catch (IllegalArgumentException e) {
                         // Same static-configuration rejection discoverTools reports for

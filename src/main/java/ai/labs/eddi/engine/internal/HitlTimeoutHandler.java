@@ -5,7 +5,10 @@
 package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
+import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
+import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -25,10 +28,10 @@ public class HitlTimeoutHandler {
     private static final Logger LOGGER = Logger.getLogger(HitlTimeoutHandler.class);
 
     @Inject
-    ai.labs.eddi.engine.api.IConversationService conversationService;
+    IConversationService conversationService;
 
     @Inject
-    ai.labs.eddi.engine.api.IGroupConversationService groupConversationService;
+    IGroupConversationService groupConversationService;
 
     @Inject
     MeterRegistry meterRegistry;
@@ -96,7 +99,7 @@ public class HitlTimeoutHandler {
         try {
             if ("ABORT".equals(policyStr)) {
                 boolean cancelled = groupConversationService.cancelDiscussion(gcId,
-                        ai.labs.eddi.engine.lifecycle.model.ControlSignal.CANCEL_GRACEFUL);
+                        ControlSignal.CANCEL_GRACEFUL);
                 LOGGER.infof("Human-turn timeout ABORT for group conversation %s%s", gcId,
                         cancelled ? "" : " skipped — already terminal");
                 return;
@@ -136,7 +139,7 @@ public class HitlTimeoutHandler {
         String conversationId = (String) metadata.get(HitlSchedules.METADATA_CONVERSATION_ID_KEY);
         try {
             conversationService.cancelConversation(conversationId,
-                    ai.labs.eddi.engine.lifecycle.model.ControlSignal.CANCEL_GRACEFUL, "system:timeout");
+                    ControlSignal.CANCEL_GRACEFUL, "system:timeout");
             LOGGER.infof("HITL timeout ABORT for conversation %s", conversationId);
         } catch (Exception e) {
             LOGGER.errorf(e, "Failed to abort conversation %s on HITL timeout", conversationId);
@@ -147,7 +150,7 @@ public class HitlTimeoutHandler {
         String gcId = (String) metadata.get(HitlSchedules.METADATA_CONVERSATION_ID_KEY);
         try {
             boolean cancelled = groupConversationService.cancelDiscussion(gcId,
-                    ai.labs.eddi.engine.lifecycle.model.ControlSignal.CANCEL_GRACEFUL);
+                    ControlSignal.CANCEL_GRACEFUL);
             if (cancelled) {
                 LOGGER.infof("HITL timeout ABORT for group conversation %s", gcId);
             } else {

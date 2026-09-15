@@ -173,7 +173,12 @@ class RestAgentEngineStreamingExtendedTest {
             handler.onToken("Hello");
 
             verify(eventBuilder).name("token");
-            verify(eventBuilder).data(eq(String.class), eq("Hello"));
+            // Payloads go out with one space per line prepended: RESTEasy writes
+            // "data:" with no separator, and every consumer strips one leading
+            // space, so an unpadded token beginning with a space arrived one short
+            // — which broke Markdown list markers ("-" + " alpha" -> "-alpha").
+            // See RestAgentEngineStreaming#padDataLines.
+            verify(eventBuilder).data(eq(String.class), eq(" Hello"));
         }
 
         @Test

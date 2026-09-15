@@ -231,6 +231,19 @@ class CallerIdentityResolverTest {
     }
 
     @Test
+    @DisplayName("an over-long caller key cannot slip past the rejection by outrunning the pattern")
+    void overlongCallerReferenceIsStillRejected() {
+        // The scan is bounded to keep it linear, and this pattern is used only to
+        // REJECT — so a reference too long for the bound is not "allowed", it is
+        // INVISIBLE, and an invisible reference is shipped to the API as a literal
+        // placeholder. Making the bound the bypass would defeat the check.
+        String overlong = "${caller:" + "x".repeat(65) + "}";
+
+        assertThrows(CallerIdentityException.class, () -> resolver.rejectAnyReference(overlong, "a request body"));
+        assertThrows(CallerIdentityException.class, () -> resolver.rejectUnsupportedReference(overlong));
+    }
+
+    @Test
     @DisplayName("the bare Qute form is rejected, not shipped as text")
     void rejectsBareQuteFormInABody() {
         // {caller:token} is the natural Qute namespace syntax, so it is an easy
@@ -311,5 +324,33 @@ class CallerIdentityResolverTest {
         withCaller(new CallerIdentity("jwt-abc", "alice", SELF));
         assertNull(resolver.redactCallerToken(null, "<REDACTED>"));
         assertEquals("", resolver.redactCallerToken("", "<REDACTED>"));
+    }
+
+    @Test
+    @DisplayName("a config value built to make the reference scan quadratic is still checked in linear time")
+    void unsupportedReferenceScanDoesNotDegrade() {
+        // The optional leading $ means a bare "{caller:" also starts a match, so an
+        // unbounded span gave one scan of the rest of the string per occurrence.
+        // A header value is author-supplied, so that is reachable from configuration.
+        String hostile = "{{caller:".repeat(20_000);
+
+        long startedAt = System.nanoTime();
+        // Rejected, not ignored: this really is a malformed caller reference, and
+        // the bounded pattern has to SEE it in order to say so. The guard being
+        // made here is that neither the scan nor the verdict depends on how long
+        // the value is.
+        assertThrows(CallerIdentityException.class, () -> resolver.rejectUnsupportedReference(hostile));
+        long elapsedMillis = (System.nanoTime() - startedAt) / 1_000_000;
+
+        assertTrue(elapsedMillis < 2_000,
+                "scanning 20k repetitions took " + elapsedMillis + "ms; the reference span is unbounded again");
+    }
+
+    @Test
+    @DisplayName("a typo is still reported, which is the whole reason the scan exists")
+    void stillReportsATypo() {
+        var error = assertThrows(CallerIdentityException.class, () -> resolver.rejectUnsupportedReference("Bearer ${caller:tokn}"));
+
+        assertTrue(error.getMessage().contains("tokn"), error.getMessage());
     }
 }

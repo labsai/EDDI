@@ -131,6 +131,43 @@ class HttpClientWrapperRequestWrapperTest {
             assertTrue(queryParams.containsKey("key"));
         }
 
+        /**
+         * The query was decoded TWICE: {@code uri.getQuery()} already returns a decoded
+         * string, and each pair was then run through URLDecoder again. For
+         * {@code ?q=100%25} that second pass saw the bare "100%" and threw "Incomplete
+         * trailing escape (%) pattern" — out of this constructor, up through
+         * ApiCallExecutor.buildRequest, and into a LifecycleException that failed the
+         * whole ApiCallsTask turn for a perfectly valid URI.
+         */
+        @Test
+        @DisplayName("percent-encoded '%' does not abort the request")
+        void encodedPercentSign() {
+            IRequest request = assertDoesNotThrow(
+                    () -> wrapper.newRequest(URI.create("http://example.com/search?filter=100%25")));
+
+            @SuppressWarnings("unchecked")
+            var queryParams = (Map<String, ?>) request.toMap().get("queryParams");
+            assertEquals("[100%]", String.valueOf(queryParams.get("filter")));
+        }
+
+        /**
+         * Double decoding also silently mangled what was RECORDED: an encoded '+'
+         * turned into a space, and an encoded '&' split one parameter into two — so the
+         * ResolvedRequest fingerprint shown to a human approver did not match what was
+         * actually sent.
+         */
+        @Test
+        @DisplayName("encoded '+' and '&' are recorded verbatim, not re-split")
+        void encodedPlusAndAmpersand() {
+            IRequest request = wrapper.newRequest(URI.create("http://example.com/path?r=a%2Bb&s=a%26b"));
+
+            @SuppressWarnings("unchecked")
+            var queryParams = (Map<String, ?>) request.toMap().get("queryParams");
+            assertEquals(2, queryParams.size(), "an encoded '&' must not create a third parameter: " + queryParams);
+            assertEquals("[a+b]", String.valueOf(queryParams.get("r")));
+            assertEquals("[a&b]", String.valueOf(queryParams.get("s")));
+        }
+
         @Test
         @DisplayName("URI with URL-encoded query params — decoded correctly")
         void urlEncodedParams() {
@@ -247,6 +284,31 @@ class HttpClientWrapperRequestWrapperTest {
             IRequest result = request.setTimeout(5, TimeUnit.SECONDS);
             assertSame(result, request);
             verify(mockVertxRequest).timeout(5000L);
+        }
+    }
+
+    @Nested
+    @DisplayName("RequestWrapper — send")
+    class SendTests {
+
+        /**
+         * An unknown body encoding is a configuration error in the agent's httpCall,
+         * and it has to arrive as an {@link IRequest.HttpRequestException} naming the
+         * encoding. Letting the raw {@code IllegalArgumentException} out of the buffer
+         * construction would escape the request's own failure channel, so the caller
+         * never sees it as a request failure and the offending encoding is named
+         * nowhere. Nothing may be sent either.
+         */
+        @Test
+        @DisplayName("unknown body encoding fails the request, naming the encoding")
+        void invalidBodyEncodingIsReportedAsARequestFailure() {
+            IRequest request = wrapper.newRequest(URI.create("http://example.com"));
+            request.setBodyEntity("payload", "no-such-charset", "text/plain");
+
+            var thrown = assertThrows(IRequest.HttpRequestException.class, request::send);
+
+            assertTrue(thrown.getMessage().contains("no-such-charset"), thrown.getMessage());
+            verify(mockVertxRequest, never()).sendBuffer(any(), any());
         }
     }
 

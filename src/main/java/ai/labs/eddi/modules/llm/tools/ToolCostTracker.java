@@ -15,6 +15,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import java.util.Comparator;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.DoubleAdder;
 
@@ -50,16 +51,59 @@ public class ToolCostTracker {
             "pdfreader", 0.001 // $0.001 per PDF
     );
 
+    /**
+     * Gauge of the USD accrued by every priced tool call since start.
+     * <p>
+     * It was {@code eddi.tool.costs.total}, which Prometheus renders as
+     * {@code eddi_tool_costs_total} — exactly the name it gives the tagged counter
+     * {@code eddi.tool.costs{tool}} below, since counters gain a {@code _total}
+     * suffix. Two meters under one name with different tag keys is illegal, so the
+     * first priced call threw "Prometheus requires that all meters with the same
+     * name have the same set of tag keys" — and because that happened inside the
+     * tool wrapper, every priced tool (websearch, weather, webscraper, pdfreader,
+     * anything given a {@code toolPricing} override) returned the exception text to
+     * the model instead of its result, and budget enforcement never saw a cost.
+     */
+    static final String ACCRUED_COST_GAUGE = "eddi.tool.costs.accrued";
+
     private final Map<String, ToolCostMetrics> toolCosts = new ConcurrentHashMap<>();
+    /**
+     * The same costs keyed by configuration slug ({@code websearch}), aggregating
+     * every dispatch name priced under it. The REST lookup accepts either name:
+     * {@code /cache/ttl} and {@code toolPricing} speak slugs, so a slug lookup that
+     * found nothing looked like a tool that had never run.
+     */
+    private final Map<String, ToolCostMetrics> canonicalToolCosts = new ConcurrentHashMap<>();
     private final Map<String, ConversationCostMetrics> conversationCosts = new ConcurrentHashMap<>();
     private final DoubleAdder totalCost = new DoubleAdder();
 
+    /**
+     * Warns once per process, not once per call, when a meter cannot be recorded.
+     */
+    private final AtomicBoolean meterFailureWarned = new AtomicBoolean();
+
     @PostConstruct
     public void init() {
-        // Register gauge for total cost
-        meterRegistry.gauge("eddi.tool.costs.total", totalCost, DoubleAdder::sum);
+        meterRegistry.gauge(ACCRUED_COST_GAUGE, totalCost, DoubleAdder::sum);
 
         LOGGER.info("Tool cost tracker initialized with metrics");
+    }
+
+    /**
+     * Records a meter without letting a metrics-backend failure escape.
+     * <p>
+     * Cost accounting is the part budget enforcement depends on and is done before
+     * any meter is touched; a meter that cannot be registered or incremented must
+     * cost observability, never the tool result or the accounting.
+     */
+    private void recordMeter(Runnable recording) {
+        try {
+            recording.run();
+        } catch (RuntimeException e) {
+            if (meterFailureWarned.compareAndSet(false, true)) {
+                LOGGER.warnf("Tool cost metric could not be recorded (further failures are not logged): %s", sanitize(e.getMessage()));
+            }
+        }
     }
 
     /**
@@ -188,6 +232,9 @@ public class ToolCostTracker {
 
         // Track per-tool costs
         toolCosts.computeIfAbsent(toolName, ToolCostMetrics::new).addCost(cost);
+        if (!toolName.equals(invocation.canonicalName())) {
+            canonicalToolCosts.computeIfAbsent(invocation.canonicalName(), ToolCostMetrics::new).addCost(cost);
+        }
 
         // Track per-conversation costs
         conversationCosts.computeIfAbsent(conversationId, ConversationCostMetrics::new).addToolCost(toolName, cost);
@@ -199,10 +246,10 @@ public class ToolCostTracker {
         totalCost.add(cost);
 
         // Record per-tool metrics (aggregate available via PromQL sum)
-        meterRegistry.counter("eddi.tool.calls", "tool", toolName).increment();
+        recordMeter(() -> meterRegistry.counter("eddi.tool.calls", "tool", toolName).increment());
 
         if (cost > 0) {
-            meterRegistry.counter("eddi.tool.costs", "tool", toolName).increment(cost);
+            recordMeter(() -> meterRegistry.counter("eddi.tool.costs", "tool", toolName).increment(cost));
             if (LOGGER.isDebugEnabled()) {
                 LOGGER.debugf("Tool '%s' cost: $%.4f", sanitize(toolName), cost);
             }
@@ -212,10 +259,13 @@ public class ToolCostTracker {
     }
 
     /**
-     * Get cost for a specific tool
+     * Get cost for a specific tool, by dispatch name ({@code searchWeb}) or by
+     * configuration slug ({@code websearch}). A slug aggregates every dispatch name
+     * priced under it; a dispatch name wins when a string is both.
      */
     public ToolCostMetrics getToolCosts(String toolName) {
-        return toolCosts.get(toolName);
+        ToolCostMetrics byDispatchName = toolCosts.get(toolName);
+        return byDispatchName != null ? byDispatchName : canonicalToolCosts.get(toolName);
     }
 
     /**
@@ -251,7 +301,7 @@ public class ToolCostTracker {
 
         if (!withinBudget) {
             // Record budget exceeded event
-            meterRegistry.counter("eddi.tool.budget.exceeded").increment();
+            recordMeter(() -> meterRegistry.counter("eddi.tool.budget.exceeded").increment());
 
             LOGGER.warn(String.format("Conversation %s exceeded budget: $%.4f > $%.4f", sanitize(conversationId), metrics.getTotalCost(), maxBudget));
         }
@@ -308,6 +358,7 @@ public class ToolCostTracker {
      */
     public void resetAll() {
         toolCosts.clear();
+        canonicalToolCosts.clear();
         conversationCosts.clear();
         totalCost.reset();
         LOGGER.info("Reset all tool cost tracking");

@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.memory.model.Attachment;
 import ai.labs.eddi.engine.model.Context;
+import java.util.Base64;
 import org.junit.jupiter.api.Test;
 
 import java.util.LinkedHashMap;
@@ -48,7 +49,7 @@ class GroupAttachmentBinderTest {
         var inline = new Attachment();
         inline.setMimeType("image/png");
         inline.setFileName("a.png");
-        inline.setBase64Data(java.util.Base64.getEncoder().encodeToString("png".getBytes()));
+        inline.setBase64Data(Base64.getEncoder().encodeToString("png".getBytes()));
         var gc = gc("gc-1");
 
         binder.materializeAttachments(gc, List.of(inline));

@@ -99,4 +99,26 @@ class LanguageUtilitiesTest {
             assertEquals(Optional.empty(), LanguageUtilities.extractOrdinalValue(input));
         }
     }
+
+    /**
+     * The hour alternation read "[2]?2[0-3]" — an OPTIONAL '2' followed by a
+     * LITERAL '2' — so p1/p2 accepted "220h".."223h" as times. p2 matched, the 'h'
+     * was rewritten to ":00", and p3 then rejected the result, so the expression
+     * was silently dropped rather than never recognised. The intent was "[2][0-3]",
+     * which is what p3 already used.
+     */
+    @Test
+    void isTimeExpression_rejectsThreeDigitHours() {
+        assertNull(LanguageUtilities.isTimeExpression("220h"));
+        assertNull(LanguageUtilities.isTimeExpression("223h"));
+        assertNull(LanguageUtilities.isTimeExpression("2215h30"));
+    }
+
+    @Test
+    void isTimeExpression_stillAcceptsRealHours() {
+        assertNotNull(LanguageUtilities.isTimeExpression("15h"));
+        assertNotNull(LanguageUtilities.isTimeExpression("23h"));
+        assertNotNull(LanguageUtilities.isTimeExpression("12h10"));
+        assertNull(LanguageUtilities.isTimeExpression("24h"));
+    }
 }

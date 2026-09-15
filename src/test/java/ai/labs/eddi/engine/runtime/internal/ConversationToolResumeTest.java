@@ -323,6 +323,316 @@ class ConversationToolResumeTest {
     }
 
     @Test
+    @DisplayName("APPROVED tool resume drops ONLY the placeholder — the model's interim narration written ahead of it survives")
+    void approvedResumeKeepsInterimText() throws Exception {
+        // The narration ("the config checks out, I'll now start a test conversation")
+        // is legitimate output written by pauseConversation ahead of the placeholder;
+        // the drop must be surgical. Also exercises the Data-twin strip: the stored
+        // Data is [interim, placeholder], not [placeholder] alone, and the old
+        // "blank when equal to [placeholder]" branch would have left the twin
+        // untouched — inconsistent with the list.
+        memory.setConversationState(ConversationState.READY);
+        var effective = new ToolApprovalsConfig();
+        effective.setPendingMessage("Approval required for {toolNames}");
+        String interim = "Config checks out — deleting the record next, which needs your approval.";
+        doAnswer(inv -> {
+            var call = new PendingToolCallBatch.PendingToolCall();
+            call.setToolName("delete_record");
+            var b = new PendingToolCallBatch();
+            b.setLlmTaskId("ai.labs.llm");
+            b.setLlmTaskIndex(0);
+            b.setCalls(List.of(call));
+            b.setEffectiveToolApprovals(effective);
+            b.setInterimText(interim);
+            memory.setHitlPendingToolCalls(b);
+            throw new ConversationPauseException("wf1", 0, "gated tool call",
+                    ConversationPauseException.PauseOrigin.TOOL_CALL);
+        }).when(lifecycleManager).executeLifecycle(any(), any());
+        var conv = createConversation();
+        conv.say("delete it", Map.of());
+        assertEquals(List.of(interim, PENDING), outputList().stream().map(String::valueOf).toList(),
+                "paused: narration then placeholder");
+
+        String finalAnswer = "Record deleted successfully.";
+        doAnswer(inv -> {
+            memory.getCurrentStep().addConversationOutputList(
+                    MemoryKeys.OUTPUT_PREFIX, List.of(new TextOutputItem(finalAnswer, 0)));
+            return null;
+        }).when(lifecycleManager).executeLifecycleFromIndex(eq(memory), anyInt());
+
+        conv.resume(decision(HitlVerdict.APPROVED));
+
+        var out = outputList().stream().map(String::valueOf).toList();
+        assertEquals(List.of(interim, finalAnswer), out,
+                "resumed: narration kept, placeholder gone, answer appended; got: " + out);
+        // The Data twin agrees with the list.
+        var data = memory.getCurrentStep().getData(MemoryKeys.OUTPUT_PREFIX);
+        assertNotNull(data);
+        assertEquals(List.of(interim), data.getResult(),
+                "the Data twin must have had ONLY the placeholder stripped; got: " + data.getResult());
+    }
+
+    @Test
+    @DisplayName("a two-pause turn keeps BOTH explanations retrospectively — only the one-line asks are ever removed, on both channels")
+    void twoPauseTurnKeepsEveryExplanation() throws Exception {
+        // The record the admin reads afterwards must show everything the model
+        // said it was doing: [expl1, expl2, answer]. Only the one-sentence asks
+        // come and go. And the output list and its Data twin must agree at every
+        // step: the twin used to be REPLACED by each pause (keeping only the
+        // latest explanation in the detailed step view) while the list appended.
+        memory.setConversationState(ConversationState.READY);
+        var effective = new ToolApprovalsConfig();
+        effective.setPendingMessage("Approval required for {toolNames}");
+        String expl1 = "Creating the agent first — that is a write, so it needs your approval.";
+        String expl2 = "Agent created and deployed. Now starting a test conversation to verify it — approval needed.";
+        String ask1 = "Approval required for setupAgent";
+        String ask2 = "Approval required for startConversation";
+
+        // Pause 1 (via say).
+        doAnswer(inv -> {
+            var call = new PendingToolCallBatch.PendingToolCall();
+            call.setToolName("setupAgent");
+            var b = new PendingToolCallBatch();
+            b.setLlmTaskId("ai.labs.llm");
+            b.setLlmTaskIndex(0);
+            b.setCalls(List.of(call));
+            b.setEffectiveToolApprovals(effective);
+            b.setInterimText(expl1);
+            memory.setHitlPendingToolCalls(b);
+            throw new ConversationPauseException("wf1", 0, "gated", ConversationPauseException.PauseOrigin.TOOL_CALL);
+        }).when(lifecycleManager).executeLifecycle(any(), any());
+        var conv = createConversation();
+        conv.say("create an agent and test it", Map.of());
+        assertEquals(List.of(expl1, ask1), strings(outputList()));
+        assertEquals(List.of(expl1, ask1), strings(dataList()));
+
+        // Approve 1 → the resumed turn runs setupAgent, then re-pauses on
+        // startConversation.
+        doAnswer(inv -> {
+            var call = new PendingToolCallBatch.PendingToolCall();
+            call.setToolName("startConversation");
+            var b = new PendingToolCallBatch();
+            b.setLlmTaskId("ai.labs.llm");
+            b.setLlmTaskIndex(0);
+            b.setCalls(List.of(call));
+            b.setEffectiveToolApprovals(effective);
+            b.setInterimText(expl2);
+            b.setPauseCountThisTurn(2);
+            memory.setHitlPendingToolCalls(b);
+            throw new ConversationPauseException("wf1", 0, "gated", ConversationPauseException.PauseOrigin.TOOL_CALL);
+        }).when(lifecycleManager).executeLifecycleFromIndex(eq(memory), anyInt());
+        conv.resume(decision(HitlVerdict.APPROVED));
+        assertEquals(ConversationState.AWAITING_HUMAN, memory.getConversationState());
+        // ask1 gone, expl1 kept, expl2 + ask2 appended — on both channels.
+        assertEquals(List.of(expl1, expl2, ask2), strings(outputList()), "after re-pause: list");
+        assertEquals(List.of(expl1, expl2, ask2), strings(dataList()), "after re-pause: Data twin");
+
+        // Approve 2 → the final answer.
+        String answer = "Done: agent created, deployed and verified.";
+        doAnswer(inv -> {
+            memory.getCurrentStep().addConversationOutputList(
+                    MemoryKeys.OUTPUT_PREFIX, List.of(new TextOutputItem(answer, 0)));
+            return null;
+        }).when(lifecycleManager).executeLifecycleFromIndex(eq(memory), anyInt());
+        conv.resume(decision(HitlVerdict.APPROVED));
+
+        assertEquals(List.of(expl1, expl2, answer), strings(outputList()), "final record: list");
+        assertEquals(List.of(expl1, expl2), strings(dataList()), "final record: Data twin (answer is written via the list by LlmTask)");
+    }
+
+    @Test
+    @DisplayName("the drop removes the LAST placeholder occurrence, never an earlier entry that merely reads the same")
+    void dropRemovesLastOccurrenceOnly() throws Exception {
+        // Adversarial: the model's narration is byte-identical to a placeholder
+        // CANDIDATE (the pre-tool-named build's constant, which the resume path must
+        // still recognise for upgrade safety) while the real trailing placeholder is
+        // the current rendering. A first-match removal deletes the narration and
+        // strands the placeholder; a remove-every-match deletes both. Only the
+        // trailing one may go, on both channels.
+        memory.setConversationState(ConversationState.READY);
+        // No configured pendingMessage → the DEFAULT applies, so BOTH the current
+        // tool-named default and the legacy constant are candidates.
+        String legacyConstant = "This action requires human approval before it can proceed. "
+                + "You will receive the result once a reviewer decides.";
+        String currentPlaceholder = "I need your approval before I can run delete_record. "
+                + "You will receive the result once a reviewer decides.";
+        doAnswer(inv -> {
+            var call = new PendingToolCallBatch.PendingToolCall();
+            call.setToolName("delete_record");
+            var b = new PendingToolCallBatch();
+            b.setLlmTaskId("ai.labs.llm");
+            b.setLlmTaskIndex(0);
+            b.setCalls(List.of(call));
+            b.setInterimText(legacyConstant); // narration that happens to equal a legacy candidate
+            memory.setHitlPendingToolCalls(b);
+            throw new ConversationPauseException("wf1", 0, "gated", ConversationPauseException.PauseOrigin.TOOL_CALL);
+        }).when(lifecycleManager).executeLifecycle(any(), any());
+        var conv = createConversation();
+        conv.say("delete it", Map.of());
+        assertEquals(List.of(legacyConstant, currentPlaceholder), strings(outputList()), "paused shape");
+
+        String answer = "Record deleted successfully.";
+        doAnswer(inv -> {
+            memory.getCurrentStep().addConversationOutputList(
+                    MemoryKeys.OUTPUT_PREFIX, List.of(new TextOutputItem(answer, 0)));
+            return null;
+        }).when(lifecycleManager).executeLifecycleFromIndex(eq(memory), anyInt());
+        conv.resume(decision(HitlVerdict.APPROVED));
+
+        // The narration (legacy-equal) survives; the trailing current placeholder is
+        // gone.
+        assertEquals(List.of(legacyConstant, answer), strings(outputList()), "list");
+        assertEquals(List.of(legacyConstant), strings(dataList()), "Data twin");
+    }
+
+    private static List<String> strings(List<?> items) {
+        return items == null ? List.of() : items.stream().map(String::valueOf).toList();
+    }
+
+    private List<?> dataList() {
+        var data = memory.getCurrentStep().getData(MemoryKeys.OUTPUT_PREFIX);
+        return data == null ? null : (List<?>) data.getResult();
+    }
+
+    /**
+     * The version boundary the determinism argument silently skipped: a pause
+     * PERSISTED by a previous build holds that build's placeholder wording, and
+     * recomputing with the current code produces a different string — so the
+     * removal no-ops and the resolved turn renders [stale placeholder, answer]. Two
+     * releases changed the default (tool-named, then the repeat ordinal); the
+     * resume path must recognise both predecessors.
+     */
+    @Test
+    @DisplayName("upgrade boundary: a placeholder written by the PRE-tool-named build is still dropped")
+    void preToolNamedPlaceholderStillDropped() throws Exception {
+        var conv = pauseViaToolCallWithDefaultMessage(1);
+        // Swap the freshly written placeholder for the old build's constant — the
+        // step output now looks exactly as a pre-upgrade pause left it.
+        String legacy = "This action requires human approval before it can proceed. "
+                + "You will receive the result once a reviewer decides.";
+        var out = outputList();
+        out.clear();
+        out.add(legacy);
+
+        doAnswer(inv -> {
+            memory.getCurrentStep().addConversationOutputList(
+                    MemoryKeys.OUTPUT_PREFIX, List.of(new TextOutputItem("Done.", 0)));
+            return null;
+        }).when(lifecycleManager).executeLifecycleFromIndex(eq(memory), anyInt());
+
+        conv.resume(decision(HitlVerdict.APPROVED));
+
+        var after = outputList();
+        assertFalse(after.stream().anyMatch(o -> String.valueOf(o).equals(legacy)),
+                "the previous build's placeholder must be recognised and dropped; got: " + after);
+        assertEquals(1, after.size(), "only the answer remains; got: " + after);
+    }
+
+    @Test
+    @DisplayName("upgrade boundary: a repeat-pause placeholder written WITHOUT the ordinal suffix is still dropped")
+    void preOrdinalPlaceholderStillDropped() throws Exception {
+        // pauseCountThisTurn predates the suffix (it was persisted for cap
+        // enforcement), so a repeat pause persisted by the pre-ordinal build
+        // re-reads ordinal 2 today and recomputes a suffixed string the stored
+        // text never had.
+        var conv = pauseViaToolCallWithDefaultMessage(2);
+        String suffixless = "I need your approval before I can run delete_record. "
+                + "You will receive the result once a reviewer decides.";
+        var out = outputList();
+        out.clear();
+        out.add(suffixless);
+
+        doAnswer(inv -> {
+            memory.getCurrentStep().addConversationOutputList(
+                    MemoryKeys.OUTPUT_PREFIX, List.of(new TextOutputItem("Done.", 0)));
+            return null;
+        }).when(lifecycleManager).executeLifecycleFromIndex(eq(memory), anyInt());
+
+        conv.resume(decision(HitlVerdict.APPROVED));
+
+        var after = outputList();
+        assertFalse(after.stream().anyMatch(o -> String.valueOf(o).equals(suffixless)),
+                "the pre-ordinal placeholder must be recognised and dropped; got: " + after);
+        assertEquals(1, after.size(), "only the answer remains; got: " + after);
+    }
+
+    /**
+     * Pauses with NO configured pendingMessage (the default applies) at the given
+     * persisted pause ordinal — the shape both upgrade-boundary tests need.
+     */
+    private Conversation pauseViaToolCallWithDefaultMessage(int pauseCountThisTurn) throws Exception {
+        memory.setConversationState(ConversationState.READY);
+        doAnswer(inv -> {
+            var call = new PendingToolCallBatch.PendingToolCall();
+            call.setToolName("delete_record");
+            var b = new PendingToolCallBatch();
+            b.setLlmTaskId("ai.labs.llm");
+            b.setLlmTaskIndex(0);
+            b.setCalls(List.of(call));
+            b.setPauseCountThisTurn(pauseCountThisTurn);
+            memory.setHitlPendingToolCalls(b);
+            throw new ConversationPauseException("wf1", 0, "gated tool call",
+                    ConversationPauseException.PauseOrigin.TOOL_CALL);
+        }).when(lifecycleManager).executeLifecycle(any(), any());
+        var conv = createConversation();
+        conv.say("do it", Map.of());
+        return conv;
+    }
+
+    /**
+     * The drop is by exact-string match against a RECOMPUTED
+     * {@code resolvePendingMessage}, so the DEFAULT message has to be just as
+     * deterministic as a configured one. It now names the gated tool — read off the
+     * batch, which is still on memory at both call sites — and this pins that: make
+     * the default depend on anything that changes between pause and resume (a pause
+     * counter, a timestamp, the decision) and the recomputed string stops matching,
+     * stranding the placeholder above the answer.
+     */
+    @Test
+    @DisplayName("APPROVED resume drops the placeholder for the UNCONFIGURED default too")
+    void approvedResumeDropsUnconfiguredDefaultPlaceholder() throws Exception {
+        memory.setConversationState(ConversationState.READY);
+        doAnswer(inv -> {
+            var call = new PendingToolCallBatch.PendingToolCall();
+            call.setToolName("delete_record");
+            var b = new PendingToolCallBatch();
+            b.setLlmTaskId("ai.labs.llm");
+            b.setLlmTaskIndex(0);
+            b.setCalls(List.of(call));
+            // A REPEAT pause: the default gains its "(approval 2 this turn)" suffix,
+            // and the drop must still match — the ordinal comes off the batch, which
+            // is identical at pause time and at resume time.
+            b.setPauseCountThisTurn(2);
+            // No effectiveToolApprovals and no agent-level config: the default applies.
+            memory.setHitlPendingToolCalls(b);
+            throw new ConversationPauseException("wf1", 0, "gated tool call",
+                    ConversationPauseException.PauseOrigin.TOOL_CALL);
+        }).when(lifecycleManager).executeLifecycle(any(), any());
+        var conv = createConversation();
+        conv.say("delete it", Map.of());
+
+        var paused = outputList();
+        assertNotNull(paused);
+        assertTrue(paused.stream().anyMatch(o -> String.valueOf(o).contains("delete_record")),
+                "the default placeholder must name the gated tool; got: " + paused);
+
+        String finalAnswer = "Record deleted successfully.";
+        doAnswer(inv -> {
+            memory.getCurrentStep().addConversationOutputList(
+                    MemoryKeys.OUTPUT_PREFIX, List.of(new TextOutputItem(finalAnswer, 0)));
+            return null;
+        }).when(lifecycleManager).executeLifecycleFromIndex(eq(memory), anyInt());
+
+        conv.resume(decision(HitlVerdict.APPROVED));
+
+        var out = outputList();
+        assertEquals(1, out.size(),
+                "the recomputed default must match and be removed, leaving only the answer; got: " + out);
+        assertTrue(out.stream().anyMatch(o -> String.valueOf(o).equals(finalAnswer)),
+                "the final answer must be present; got: " + out);
+    }
+
+    @Test
     @DisplayName("REJECTED tool resume: the graceful answer replaces the placeholder (only the answer remains)")
     void rejectedResumeDropsPlaceholder() throws Exception {
         var conv = pauseViaToolCall();

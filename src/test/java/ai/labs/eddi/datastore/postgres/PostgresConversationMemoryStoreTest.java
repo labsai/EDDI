@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.datastore.serialization.JsonSerialization;
+import ai.labs.eddi.datastore.serialization.SerializationCustomizer;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
@@ -18,7 +19,10 @@ import org.junit.jupiter.api.*;
 
 import javax.sql.DataSource;
 import java.sql.SQLException;
+import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -42,7 +46,7 @@ class PostgresConversationMemoryStoreTest extends PostgresTestBase {
         var dsInstance = createDataSourceInstance();
         ds = dsInstance.get();
         IJsonSerialization json = new JsonSerialization(
-                ai.labs.eddi.datastore.serialization.SerializationCustomizer.configureObjectMapper(new ObjectMapper(), false));
+                SerializationCustomizer.configureObjectMapper(new ObjectMapper(), false));
         store = new PostgresConversationMemoryStore(dsInstance, json);
     }
 
@@ -374,7 +378,7 @@ class PostgresConversationMemoryStoreTest extends PostgresTestBase {
         @DisplayName("findPendingApprovalSummaries projects the bookmark incl. approvalTimeout and honors the limit")
         void findPendingApprovalSummaries() throws Exception {
             var pausedSnapshot = createSnapshot(null, "agent1", 1, "user1", ConversationState.AWAITING_HUMAN);
-            pausedSnapshot.setHitlPausedAt(java.time.Instant.now());
+            pausedSnapshot.setHitlPausedAt(Instant.now());
             pausedSnapshot.setHitlPauseReason("needs review");
             pausedSnapshot.setHitlTimeoutPolicy(HitlTimeoutPolicy.AUTO_REJECT);
             pausedSnapshot.setHitlApprovalTimeout("PT30M");
@@ -448,7 +452,7 @@ class PostgresConversationMemoryStoreTest extends PostgresTestBase {
             // real JSON<->JSONB round-trip.
             var snapshot = createSnapshot(null, "agent1", 1, "user1", ConversationState.AWAITING_HUMAN);
             snapshot.setHitlPauseType("TOOL_CALL");
-            snapshot.setHitlPausedAt(java.time.Instant.now());
+            snapshot.setHitlPausedAt(Instant.now());
             snapshot.setHitlPauseReason("gated tool calls awaiting review");
             snapshot.setHitlTimeoutPolicy(HitlTimeoutPolicy.AUTO_REJECT);
             snapshot.setHitlApprovalTimeout("PT30M");
@@ -489,16 +493,16 @@ class PostgresConversationMemoryStoreTest extends PostgresTestBase {
             // traceSoFar: a nested Map<String,Object> — the field most likely to lose
             // fidelity across a real JSON round-trip (numeric widening, boolean/string
             // coercion, nested structures).
-            var nested = new java.util.LinkedHashMap<String, Object>();
+            var nested = new LinkedHashMap<String, Object>();
             nested.put("stringField", "value");
             nested.put("intField", 42);
             nested.put("boolField", true);
             nested.put("nestedList", List.of("a", "b", "c"));
-            var traceEntry1 = new java.util.LinkedHashMap<String, Object>();
+            var traceEntry1 = new LinkedHashMap<String, Object>();
             traceEntry1.put("type", "tool_call");
             traceEntry1.put("tool", "readOnlyLookup");
             traceEntry1.put("detail", nested);
-            var traceEntry2 = new java.util.LinkedHashMap<String, Object>();
+            var traceEntry2 = new LinkedHashMap<String, Object>();
             traceEntry2.put("type", "hitl_gate_tripped");
             traceEntry2.put("gatedCount", 2);
             batch.setTraceSoFar(List.of(traceEntry1, traceEntry2));
@@ -548,7 +552,7 @@ class PostgresConversationMemoryStoreTest extends PostgresTestBase {
             assertEquals("tool_call", loadedTrace1.get("type"));
             assertEquals("readOnlyLookup", loadedTrace1.get("tool"));
             @SuppressWarnings("unchecked")
-            var loadedNested = (java.util.Map<String, Object>) loadedTrace1.get("detail");
+            var loadedNested = (Map<String, Object>) loadedTrace1.get("detail");
             assertNotNull(loadedNested, "the nested Map<String,Object> inside traceSoFar must survive");
             assertEquals("value", loadedNested.get("stringField"));
             assertEquals(42, ((Number) loadedNested.get("intField")).intValue());
@@ -564,7 +568,7 @@ class PostgresConversationMemoryStoreTest extends PostgresTestBase {
         @DisplayName("clearHitlBookmark removes the bookmark fields but keeps the conversation")
         void clearHitlBookmark() throws Exception {
             var snapshot = createSnapshot(null, "agent1", 1, "user1", ConversationState.AWAITING_HUMAN);
-            snapshot.setHitlPausedAt(java.time.Instant.now());
+            snapshot.setHitlPausedAt(Instant.now());
             snapshot.setHitlPauseReason("needs review");
             snapshot.setHitlTimeoutPolicy(HitlTimeoutPolicy.AUTO_REJECT);
             snapshot.setHitlApprovalTimeout("PT30M");

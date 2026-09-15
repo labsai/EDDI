@@ -50,7 +50,7 @@ import static org.mockito.Mockito.when;
  * is a real improvement: the author hears about a broken condition on save
  * instead of on a failed deploy. But it also means any ruleset that was
  * accepted before and is now refused turns into a 400, and EDDI ships rulesets
- * of its own — as IT fixtures, as the documented Agent Father reference config,
+ * of its own — as IT fixtures, as the documented rule-based reference config,
  * and as the config the agent setup wizard builds and posts through its
  * internal REST clients.
  * <p>

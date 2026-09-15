@@ -19,6 +19,7 @@ import org.jboss.logging.Logger;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Shared LLM summarization infrastructure.
@@ -56,9 +57,9 @@ public class SummarizationService {
 
     @PostConstruct
     void initMetrics() {
-        callCounter = meterRegistry.counter("summarization.calls");
-        errorCounter = meterRegistry.counter("summarization.errors");
-        durationTimer = meterRegistry.timer("summarization.duration");
+        callCounter = meterRegistry.counter("eddi.summarization.calls");
+        errorCounter = meterRegistry.counter("eddi.summarization.errors");
+        durationTimer = meterRegistry.timer("eddi.summarization.duration");
     }
 
     /**
@@ -209,7 +210,7 @@ public class SummarizationService {
                     llmProvider, llmModel, e.getMessage());
             throw new RuntimeException(e);
         } finally {
-            durationTimer.record(System.nanoTime() - start, java.util.concurrent.TimeUnit.NANOSECONDS);
+            durationTimer.record(System.nanoTime() - start, TimeUnit.NANOSECONDS);
         }
     }
 }

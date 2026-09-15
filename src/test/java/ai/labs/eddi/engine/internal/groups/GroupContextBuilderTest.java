@@ -22,6 +22,7 @@ import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -65,6 +66,37 @@ class GroupContextBuilderTest {
 
     private TranscriptEntry entry(String agentId, String name, String content, TranscriptEntryType type, String targetAgentId) {
         return new TranscriptEntry(agentId, name, content, 0, "P", type, Instant.now(), null, targetAgentId);
+    }
+
+    @Test
+    @DisplayName("CRITIQUE without a target reviews every peer instead of an empty 'their response'")
+    @SuppressWarnings("unchecked")
+    void critiqueWithoutTarget_reviewsEveryPeer() throws Exception {
+        when(templatingEngine.processTemplate(any(), any(), eq(ITemplatingEngine.TemplateMode.TEXT))).thenReturn("rendered");
+        var transcript = List.of(
+                entry(AGENT_A, "Agent A", "my own view", TranscriptEntryType.OPINION, null),
+                entry("agent-b", "Agent B", "b's view", TranscriptEntryType.OPINION, null),
+                entry("agent-c", "Agent C", "c's view", TranscriptEntryType.OPINION, null));
+
+        builder.buildPhaseInput(phase(PhaseType.CRITIQUE, ContextScope.FULL), member(), "Q?", transcript, 1, null);
+
+        ArgumentCaptor<Map<String, Object>> data = ArgumentCaptor.forClass(Map.class);
+        verify(templatingEngine).processTemplate(eq(DiscussionStylePresets.TEMPLATE_CRITIQUE_PANEL), data.capture(),
+                eq(ITemplatingEngine.TemplateMode.TEXT));
+        assertEquals(List.of(Map.of("speaker", "Agent B", "content", "b's view"), Map.of("speaker", "Agent C", "content", "c's view")),
+                data.getValue().get("peerResponses"));
+    }
+
+    @Test
+    @DisplayName("CRITIQUE with a target keeps the single-target template")
+    void critiqueWithTarget_keepsSingleTargetTemplate() throws Exception {
+        when(templatingEngine.processTemplate(any(), any(), eq(ITemplatingEngine.TemplateMode.TEXT))).thenReturn("rendered");
+        var target = new GroupMember("agent-b", "Agent B", 2, null);
+
+        builder.buildPhaseInput(phase(PhaseType.CRITIQUE, ContextScope.FULL), member(), "Q?",
+                List.of(entry("agent-b", "Agent B", "b's view", TranscriptEntryType.OPINION, null)), 1, target);
+
+        verify(templatingEngine).processTemplate(eq(DiscussionStylePresets.TEMPLATE_CRITIQUE), any(), eq(ITemplatingEngine.TemplateMode.TEXT));
     }
 
     @Test
@@ -234,7 +266,7 @@ class GroupContextBuilderTest {
         // Expected visibility for an entry belonging to the CURRENT
         // (still-running) phase — the strictest case for VOTE/BID, which are
         // only conditionally hidden (see the two dedicated tests below).
-        var expected = new java.util.LinkedHashMap<TranscriptEntryType, Boolean>();
+        var expected = new LinkedHashMap<TranscriptEntryType, Boolean>();
         expected.put(TranscriptEntryType.QUESTION, false);
         expected.put(TranscriptEntryType.OPINION, true);
         expected.put(TranscriptEntryType.CRITIQUE, true);

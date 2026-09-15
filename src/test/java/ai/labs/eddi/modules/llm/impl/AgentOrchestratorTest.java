@@ -4,12 +4,13 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
-import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Property;
-import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
+import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.memory.MemorySnapshotService;
@@ -33,6 +34,7 @@ import org.mockito.MockitoAnnotations;
 import java.lang.reflect.Method;
 import java.util.*;
 
+import dev.langchain4j.service.tool.ToolExecutor;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -72,9 +74,9 @@ class AgentOrchestratorTest {
     @Mock
     private A2AToolProviderManager a2aToolProviderManager;
     @Mock
-    private IRestAgentStore restAgentStore;
+    private IAgentStore restAgentStore;
     @Mock
-    private IRestWorkflowStore restWorkflowStore;
+    private IWorkflowStore restWorkflowStore;
     @Mock
     private IResourceClientLibrary resourceClientLibrary;
     @Mock
@@ -108,12 +110,12 @@ class AgentOrchestratorTest {
                 webScraperTool, textSummarizerTool, pdfReaderTool, weatherTool,
                 fetchToolResponsePageTool,
                 toolExecutionService, mcpToolProviderManager, a2aToolProviderManager,
-                restAgentStore, restWorkflowStore, resourceClientLibrary,
+                restWorkflowStore, resourceClientLibrary,
                 apiCallExecutor, jsonSerialization, memoryItemConverter,
                 userMemoryStore, toolResponseTruncator, tenantQuotaService,
                 memorySnapshotService,
                 null, null, null, null, null,
-                mock(ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore.class), new ConversationHistoryBuilder(), new TokenCounterFactory());
+                mock(IHitlToolJournalStore.class), new ConversationHistoryBuilder(), new TokenCounterFactory());
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -519,12 +521,12 @@ class AgentOrchestratorTest {
                 webScraperTool, textSummarizerTool, pdfReaderTool, weatherTool,
                 fetchToolResponsePageTool,
                 toolExecutionService, mcpToolProviderManager, a2aToolProviderManager,
-                restAgentStore, restWorkflowStore, resourceClientLibrary,
+                restWorkflowStore, resourceClientLibrary,
                 apiCallExecutor, jsonSerialization, memoryItemConverter,
                 null, // null userMemoryStore
                 toolResponseTruncator, tenantQuotaService, memorySnapshotService,
                 null, null, null, null, null,
-                mock(ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore.class), new ConversationHistoryBuilder(), new TokenCounterFactory());
+                mock(IHitlToolJournalStore.class), new ConversationHistoryBuilder(), new TokenCounterFactory());
 
         var task = new LlmConfiguration.Task();
         task.setEnableBuiltInTools(true);
@@ -739,7 +741,7 @@ class AgentOrchestratorTest {
         ToolSpecification spec = ToolSpecification.builder()
                 .name("test_tool").description("desc").build();
         List<ToolSpecification> specs = List.of(spec);
-        Map<String, dev.langchain4j.service.tool.ToolExecutor> executors = Map.of();
+        Map<String, ToolExecutor> executors = Map.of();
 
         var result = new AgentOrchestrator.HttpCallToolsResult(specs, executors, Map.of(), Map.of());
 

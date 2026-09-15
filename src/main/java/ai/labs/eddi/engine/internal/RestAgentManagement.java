@@ -33,7 +33,7 @@ import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 import java.net.URI;
 import java.util.List;
 import java.util.Map;
-import java.util.Random;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.UUID;
 
 import static ai.labs.eddi.engine.model.Deployment.Environment.production;
@@ -283,7 +283,10 @@ public class RestAgentManagement implements IRestAgentManagement {
     }
 
     private AgentDeployment getRandom(List<AgentDeployment> agentDeployments) {
-        return agentDeployments.get(new Random().nextInt(agentDeployments.size()));
+        // ThreadLocalRandom: this picks a deployment per incoming request on an
+        // application-scoped bean, so a per-call Random both allocates and shares
+        // its seed lock across concurrent callers.
+        return agentDeployments.get(ThreadLocalRandom.current().nextInt(agentDeployments.size()));
     }
 
     private AgentTriggerConfiguration getAgentTrigger(String intent) {

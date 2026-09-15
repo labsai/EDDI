@@ -13,6 +13,10 @@ import io.quarkus.qute.Engine;
 import io.quarkus.qute.ReflectionValueResolver;
 import org.junit.jupiter.api.Test;
 
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -381,5 +385,84 @@ class DiscussionStylePresetsTest {
         // The reasoning is the discussion's answer, so a length cap here would
         // quietly shorten the output of every existing DEBATE config.
         assertFalse(t.contains("2-3 sentences"), "reasoning must stay uncapped: " + t);
+    }
+
+    // ---------------------------------------------------------------- templateFor
+
+    private static DiscussionPhase phaseWithTemplate(PhaseType type, String template) {
+        return new DiscussionPhase("Test", type, "ALL", TurnOrder.SEQUENTIAL, ContextScope.FULL, false, template, 1);
+    }
+
+    /**
+     * {@code templateFor} exists so no engine can reach for
+     * {@link DiscussionStylePresets#defaultTemplate} directly and bypass the
+     * designer's override. TaskForceEngine did exactly that at all three of its
+     * phases — PLAN, EXECUTE and VERIFY, which is the whole TASK_FORCE style — so
+     * for that style the phase-template mechanism was inert end to end. Save-time
+     * validation did not object, and the preset produces plausible output, so the
+     * only symptom was a transcript in the wrong language or the wrong format.
+     */
+    @Test
+    void templateForPrefersTheDesignersTemplate() {
+        var phase = phaseWithTemplate(PhaseType.PLAN, "Zerlege die Aufgabe auf Deutsch.");
+
+        assertEquals("Zerlege die Aufgabe auf Deutsch.", DiscussionStylePresets.templateFor(phase, PhaseType.PLAN),
+                "an explicit inputTemplate is the documented way to steer a phase and must win over the preset");
+    }
+
+    @Test
+    void templateForFallsBackToThePresetWhenNoneIsConfigured() {
+        var phase = phaseWithTemplate(PhaseType.EXECUTE, null);
+
+        assertEquals(DiscussionStylePresets.defaultTemplate(PhaseType.EXECUTE), DiscussionStylePresets.templateFor(phase, PhaseType.EXECUTE));
+    }
+
+    @Test
+    void templateForToleratesANullPhase() {
+        assertEquals(DiscussionStylePresets.defaultTemplate(PhaseType.VERIFY), DiscussionStylePresets.templateFor(null, PhaseType.VERIFY));
+    }
+
+    /**
+     * The override has to reach every task-force phase, not just the one someone
+     * remembered. Asserting each type separately is what would have caught the
+     * original defect, which was three independent call sites rather than one.
+     */
+    /**
+     * The helper only helps if the engines use it. Reaching for a preset without
+     * consulting {@code inputTemplate()} is the bypass this change removes, and it
+     * is invisible at runtime — the preset renders fine, it is simply not what the
+     * designer asked for.
+     * <p>
+     * The rule is "consults the override", not "calls templateFor".
+     * {@code GroupContextBuilder} resolves the fallback itself, because a DEBATE
+     * judgment turn needs a different preset from the same phase type — but it
+     * still checks {@code phase.inputTemplate()} first, which is the property that
+     * matters.
+     */
+    @Test
+    void noPhaseEngineReachesPastTemplateFor() throws Exception {
+        Path engines = Path.of("").toAbsolutePath().resolve(Path.of("src", "main", "java", "ai", "labs", "eddi", "engine", "internal", "groups"));
+        assertTrue(Files.isDirectory(engines), "the group engines package moved; update this guard");
+
+        var offenders = new ArrayList<String>();
+        try (var files = Files.list(engines)) {
+            for (Path f : files.filter(x -> x.getFileName().toString().endsWith(".java")).toList()) {
+                String body = Files.readString(f, StandardCharsets.UTF_8);
+                if (body.contains("DiscussionStylePresets.defaultTemplate(") && !body.contains("inputTemplate()")) {
+                    offenders.add(f.getFileName().toString());
+                }
+            }
+        }
+        assertTrue(offenders.isEmpty(), "these reach for a style preset without ever consulting phase.inputTemplate(), so a "
+                + "configured template is silently discarded; use DiscussionStylePresets.templateFor(phase, type): " + offenders);
+    }
+
+    @Test
+    void templateForHonoursTheOverrideAtEveryTaskForcePhase() {
+        for (PhaseType type : List.of(PhaseType.PLAN, PhaseType.EXECUTE, PhaseType.VERIFY)) {
+            var phase = phaseWithTemplate(type, "custom for " + type);
+            assertEquals("custom for " + type, DiscussionStylePresets.templateFor(phase, type),
+                    type + " must honour a configured inputTemplate");
+        }
     }
 }

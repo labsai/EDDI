@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.rag.rest;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.rag.IRagStore;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
@@ -46,7 +47,8 @@ class RestRagStoreWriteValidationTest {
     @BeforeEach
     void setUp() throws Exception {
         ragStore = mock(IRagStore.class);
-        restRagStore = new RestRagStore(ragStore, mock(IDocumentDescriptorStore.class), mock(IJsonSchemaCreator.class));
+        restRagStore = new RestRagStore(ragStore, mock(IDocumentDescriptorStore.class), mock(IJsonSchemaCreator.class),
+                mock(ResourceAccessGuard.class));
 
         when(ragStore.create(any())).thenReturn(resourceId(RAG_ID, 1));
         when(ragStore.update(anyString(), anyInt(), any())).thenReturn(2);

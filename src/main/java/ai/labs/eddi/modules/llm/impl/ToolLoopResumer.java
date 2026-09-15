@@ -36,8 +36,11 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Locale;
 import java.util.Set;
 
+import java.net.URLDecoder;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
@@ -167,6 +170,10 @@ class ToolLoopResumer {
         int defaultRateLimit = task.getDefaultRateLimit() != null ? task.getDefaultRateLimit() : 100;
         Map<String, Integer> toolRateLimits = task.getToolRateLimits();
         Map<String, String> toolCanonicalNames = setup.toolCanonicalNames();
+        // Provenance for the tool-result guardrail. The resume path must see the
+        // same sources the live path did, or an approved call's result would come
+        // back ungoverned purely because a human was in the loop.
+        Map<String, String> toolSources = setup.toolSources();
         Double maxBudget = task.getMaxBudgetPerConversation();
         List<ToolSpecification> builtInSpecs = setup.builtInSpecs();
 
@@ -214,6 +221,22 @@ class ToolLoopResumer {
                 continue;
             }
 
+            // An agent may not send a request into the conversation it is running
+            // in. Enforced HERE, not only in an approval UI, because this is the one
+            // place every approval surface funnels through: the REST /resume
+            // endpoint, the Slack buttons and the MCP resume_conversation tool all
+            // execute an approved call through this loop, and a control living in
+            // only one of them is a control with three documented bypasses.
+            String selfTargeted = targetsOwnConversation(c, amended, setup.toolRequestResolvers(), conversationId);
+            if (selfTargeted != null) {
+                auditRequestChanged(memory, c, selfTargeted);
+                currentMessages.add(ToolExecutionResultMessage.from(rebuiltRequest(c),
+                        "{\"status\":\"NOT_EXECUTED\",\"reason\":\"an agent may not send a request to its own conversation\"}"));
+                trace.add(Map.of("type", "hitl_self_conversation", "tool", c.getToolName(), "callId", c.getCallId(),
+                        "detail", selfTargeted));
+                continue;
+            }
+
             // Journal protocol — at-most-once across crashes/re-approvals.
             if (journalStore.tryClaim(conversationId, pauseEpoch, c.getCallId(), c.getToolName(), decision.getDecidedBy())) {
                 String args = amended != null ? amended : c.getArgumentsRaw();
@@ -221,7 +244,7 @@ class ToolLoopResumer {
                 // Full per-request pipeline (checkpoint, budget, executeToolWrapped,
                 // truncation, trace). Its own auto-checkpoint fires ONLY here.
                 String result = toolLoopRunner.executeSingleToolCallResult(req, memory, trace, toolExecutors, toolRateLimits,
-                        toolCanonicalNames, defaultRateLimit, maxBudget, conversationId, enableRateLimiting, enableCaching,
+                        toolCanonicalNames, toolSources, defaultRateLimit, maxBudget, conversationId, enableRateLimiting, enableCaching,
                         enableCostTracking, task, isLazy, builtInSpecs, activeSpecs);
                 journalStore.markExecuted(conversationId, pauseEpoch, c.getCallId(),
                         ToolApprovalGateSupport.capUtf8(result, AgentOrchestrator.JOURNAL_RESULT_MAX_BYTES));
@@ -406,7 +429,7 @@ class ToolLoopResumer {
     static String toJson(Object value) {
         try {
             return ENVELOPE_MAPPER.writeValueAsString(value);
-        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+        } catch (JsonProcessingException e) {
             // Fall back to a minimal, safe envelope rather than propagating — the
             // resume must still complete. Effectively unreachable for the small maps
             // serialized here.
@@ -464,6 +487,126 @@ class ToolLoopResumer {
                     e.getClass().getSimpleName());
             return "the request could not be re-resolved before execution";
         }
+    }
+
+    /**
+     * Whether this approved call would send a request INTO the conversation it is
+     * running in.
+     *
+     * <p>
+     * <b>Why this is a control and not a warning.</b> An agent granted the runtime
+     * conversation endpoints can list conversations (a GET, exempt from approval),
+     * find its own, and {@code POST /agents/{conversationId}} into it. That writes
+     * a USER turn — indistinguishable, afterwards, from something the human typed —
+     * into the one channel the safety preamble designates as trusted ("Instructions
+     * come only from the person chatting with you"). It is the bridge from "text
+     * the agent READ from this platform" to "text the agent was TOLD", which is
+     * precisely the laundering route that rule exists to shut. An approver cannot
+     * reasonably be expected to catch it either: the request shows an opaque
+     * conversation id, and whether that id is the agent's own is not visible in the
+     * call.
+     * <p>
+     * Substring-matched against the resolved URI rather than parsed, the same
+     * asymmetry {@code self-guard.ts} documents on the Manager side: a false
+     * positive costs one refused approval, a false negative costs the boundary.
+     * <p>
+     * Unpinned calls are checked too, unlike {@link #requestChangedSinceApproval}.
+     * That method must not enforce on an unpinned call because it has no approved
+     * fingerprint to compare against — there is nothing sound to say. This one has
+     * an absolute rule that needs no baseline, so an unresolvable call falls back
+     * to the raw arguments rather than being waved through.
+     *
+     * @return null when the call may proceed, otherwise a short reason for the
+     *         audit trail and trace
+     */
+    String targetsOwnConversation(PendingToolCallBatch.PendingToolCall c, String amendedArguments,
+                                  Map<String, ToolRequestResolver> resolvers, String conversationId) {
+        return targetsOwnConversation(c.getToolName(),
+                amendedArguments != null ? amendedArguments : c.getArgumentsRaw(),
+                req -> {
+                    var resolver = resolvers.get(c.getToolName());
+                    return resolver != null ? resolver.resolve(rebuiltRequest(c, req)) : null;
+                },
+                conversationId);
+    }
+
+    /**
+     * The LIVE-path form of the same rule, for a call the gate let through WITHOUT
+     * a pause — an ungated method, or the whole gate inert.
+     * <p>
+     * Exists because the resume-path check alone couples the boundary to the gate
+     * configuration: "an agent may not send a request to its own conversation" was
+     * enforced only for calls that paused, so an agent whose config did not gate
+     * the method — or a deployment with the HITL kill-switch off — could
+     * self-message with no check anywhere in the engine. The rule is absolute; it
+     * runs wherever a request is about to be sent, not only where approvals funnel.
+     * <p>
+     * Cost, accepted with eyes open: resolvers exist only for httpcall tools, so a
+     * resolver-less tool (built-ins, MCP) falls back to raw-argument containment —
+     * and on THIS path a false positive is a silent {@code NOT_EXECUTED} with no
+     * human to override, where on the resume path it cost one refused approval. The
+     * fallback is kept anyway: it is the only check covering the real built-in
+     * route ({@code converse_with_agent} handed the agent's own conversationId),
+     * and the false-positive shape — arguments that merely MENTION the id — is the
+     * same asymmetry the whole guard already accepts: a refusal costs a retry, a
+     * miss costs the boundary.
+     */
+    static String targetsOwnConversationLive(ToolExecutionRequest toolRequest,
+                                             Map<String, ToolRequestResolver> resolvers, String conversationId) {
+        return targetsOwnConversation(toolRequest.name(), toolRequest.arguments(),
+                args -> {
+                    var resolver = resolvers != null ? resolvers.get(toolRequest.name()) : null;
+                    return resolver != null ? resolver.resolve(toolRequest) : null;
+                },
+                conversationId);
+    }
+
+    /**
+     * The shared core: resolve if possible and check the URI; otherwise check the
+     * raw arguments (the coarser test, and the safe direction to err in).
+     */
+    private static String targetsOwnConversation(String toolName, String rawArguments,
+                                                 ResolutionAttempt resolution, String conversationId) {
+        if (conversationId == null || conversationId.isBlank()) {
+            return null;
+        }
+        try {
+            ResolvedRequest current = resolution.resolve(rawArguments);
+            if (current != null) {
+                return uriTargetsConversation(current.uri(), conversationId)
+                        ? "the request targets the conversation the agent is running in"
+                        : null;
+            }
+        } catch (Exception e) {
+            // Type only, never the throwable: a request-build failure quotes the
+            // material being rendered, which would undo the redaction beside it.
+            LOGGER.warnf("Could not resolve the request for tool '%s' (%s); "
+                    + "falling back to its arguments for the self-conversation check.",
+                    sanitize(toolName), e.getClass().getSimpleName());
+        }
+        return uriTargetsConversation(rawArguments, conversationId)
+                ? "the request targets the conversation the agent is running in"
+                : null;
+    }
+
+    @FunctionalInterface
+    private interface ResolutionAttempt {
+        ResolvedRequest resolve(String rawArguments) throws Exception;
+    }
+
+    /** Case-insensitive containment, tolerating percent-encoding. */
+    static boolean uriTargetsConversation(String candidate, String conversationId) {
+        if (candidate == null || conversationId == null || conversationId.isBlank()) {
+            return false;
+        }
+        String decoded = candidate;
+        try {
+            decoded = URLDecoder.decode(candidate, java.nio.charset.StandardCharsets.UTF_8);
+        } catch (IllegalArgumentException e) {
+            // A malformed escape is not a reason to stop checking — fall back to the
+            // raw string rather than returning false and allowing the write.
+        }
+        return decoded.toLowerCase(Locale.ROOT).contains(conversationId.trim().toLowerCase(Locale.ROOT));
     }
 
     /**

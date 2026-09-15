@@ -27,6 +27,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
 
+import java.io.IOException;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -273,13 +274,13 @@ class PrePostUtilsTest {
     class PropertyTypeTests {
 
         private IConversationMemory memory;
-        private ai.labs.eddi.engine.memory.model.ConversationProperties conversationProperties;
+        private ConversationProperties conversationProperties;
         private Map<String, Object> templateData;
 
         @BeforeEach
         void setupMemory() throws Exception {
             memory = mock(IConversationMemory.class);
-            conversationProperties = mock(ai.labs.eddi.engine.memory.model.ConversationProperties.class);
+            conversationProperties = mock(ConversationProperties.class);
             when(memory.getConversationProperties()).thenReturn(conversationProperties);
             when(conversationProperties.toMap()).thenReturn(new HashMap<>());
             templateData = new HashMap<>();
@@ -351,7 +352,7 @@ class PrePostUtilsTest {
             instruction.setScope(Property.Scope.conversation);
             instruction.setConvertToObject(true);
 
-            when(jsonSerialization.deserialize("{invalid}")).thenThrow(new java.io.IOException("parse error"));
+            when(jsonSerialization.deserialize("{invalid}")).thenThrow(new IOException("parse error"));
 
             prePostUtils.executePropertyInstructions(List.of(instruction), 0, false, memory, templateData);
 

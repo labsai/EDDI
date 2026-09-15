@@ -309,7 +309,7 @@ class AgentOrchestratorToolGovernanceTest {
                 null, null, null, null,
                 null,
                 null, null, null,
-                null, null, null,
+                null, null,
                 null, null, null,
                 null, null, null,
                 null,

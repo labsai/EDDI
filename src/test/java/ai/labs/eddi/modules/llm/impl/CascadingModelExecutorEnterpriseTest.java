@@ -32,6 +32,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+import dev.langchain4j.model.output.TokenUsage;
+import dev.langchain4j.model.output.FinishReason;
+import dev.langchain4j.model.chat.response.ChatResponseMetadata;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -413,8 +416,8 @@ class CascadingModelExecutorEnterpriseTest {
         ChatModel cheap = mock(ChatModel.class);
         when(cheap.chat(anyList())).thenReturn(ChatResponse.builder()
                 .aiMessage(AiMessage.from("The full answer is definitely that we should"))
-                .metadata(dev.langchain4j.model.chat.response.ChatResponseMetadata.builder()
-                        .finishReason(dev.langchain4j.model.output.FinishReason.LENGTH).build())
+                .metadata(ChatResponseMetadata.builder()
+                        .finishReason(FinishReason.LENGTH).build())
                 .build());
 
         ChatModelRegistry registry = mock(ChatModelRegistry.class);
@@ -441,8 +444,8 @@ class CascadingModelExecutorEnterpriseTest {
     private static ChatModel modelReturning(String text, int in, int out, int total) {
         ChatModel model = mock(ChatModel.class);
         when(model.chat(anyList())).thenReturn(ChatResponse.builder().aiMessage(AiMessage.from(text))
-                .metadata(dev.langchain4j.model.chat.response.ChatResponseMetadata.builder()
-                        .tokenUsage(new dev.langchain4j.model.output.TokenUsage(in, out, total)).build())
+                .metadata(ChatResponseMetadata.builder()
+                        .tokenUsage(new TokenUsage(in, out, total)).build())
                 .build());
         return model;
     }

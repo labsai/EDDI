@@ -24,6 +24,7 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionException;
+import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationState;
@@ -864,7 +865,7 @@ class GroupConversationServiceBranchCoverageTest {
                     .thenReturn(null);
 
             var listener = mock(
-                    ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener.class);
+                    IGroupConversationService.GroupDiscussionEventListener.class);
 
             var gc = serviceWithSigning.startAndDiscussAsync(GROUP_ID, QUESTION, USER_ID, listener);
             assertNotNull(gc);

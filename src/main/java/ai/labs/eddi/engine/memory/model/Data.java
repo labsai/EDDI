@@ -9,7 +9,7 @@ import ai.labs.eddi.engine.memory.IData;
 import java.util.Collections;
 import java.util.Date;
 import java.util.List;
-import java.util.Random;
+import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * @author ginccc
@@ -45,9 +45,9 @@ public class Data<T> implements IData<T> {
 
     private T chooseRandomResult(List<T> results) {
         if (!results.isEmpty()) {
-            Random random = new Random();
-            int randNumber = random.nextInt(results.size());
-            return results.get(randNumber);
+            // ThreadLocalRandom avoids allocating (and seeding) a Random for every
+            // Data instance constructed during a turn.
+            return results.get(ThreadLocalRandom.current().nextInt(results.size()));
         }
 
         return null;

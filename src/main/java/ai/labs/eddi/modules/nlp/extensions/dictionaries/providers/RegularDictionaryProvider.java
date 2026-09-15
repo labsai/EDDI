@@ -22,6 +22,7 @@ import jakarta.inject.Inject;
 import java.net.URI;
 import java.util.HashMap;
 import java.util.Map;
+import org.jboss.logging.Logger;
 
 /**
  * @author ginccc
@@ -132,5 +133,5 @@ public class RegularDictionaryProvider implements IDictionaryProvider {
         return resourceClientLibrary.getResource(resourceURI, DictionaryConfiguration.class);
     }
 
-    private static final org.jboss.logging.Logger log = org.jboss.logging.Logger.getLogger(RegularDictionaryProvider.class);
+    private static final Logger log = Logger.getLogger(RegularDictionaryProvider.class);
 }

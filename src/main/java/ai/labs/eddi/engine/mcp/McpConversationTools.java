@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.mcp;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.triggermanagement.IRestAgentTriggerStore;
 import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
@@ -20,13 +21,16 @@ import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.audit.rest.IRestAuditStore;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
+import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.model.*;
 import ai.labs.eddi.engine.triggermanagement.model.AgentTriggerConfiguration;
 import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
 import ai.labs.eddi.engine.model.LogEntry;
 import ai.labs.eddi.engine.memory.rest.IRestConversationStore;
+import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.runtime.BoundedLogStore;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
@@ -38,15 +42,18 @@ import io.quarkiverse.mcp.server.Tool;
 import io.quarkiverse.mcp.server.ToolArg;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
-import io.smallrye.common.annotation.Blocking;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.util.*;
+import java.util.ArrayList;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 import static ai.labs.eddi.engine.mcp.McpToolUtils.*;
 
@@ -65,10 +72,15 @@ public class McpConversationTools {
 
     private static final Logger LOGGER = Logger.getLogger(McpConversationTools.class);
     private static final int CONVERSATION_TIMEOUT_SECONDS = 60;
+    private static final String SECTION_CONVERSATION_OUTPUTS = "conversationOutputs";
+    /** The snapshot sections {@code returningFields} can select as a whole. */
+    private static final Set<String> CONVERSATION_SECTIONS = Set.of("conversationSteps", SECTION_CONVERSATION_OUTPUTS,
+            "conversationProperties");
 
     private final IConversationService conversationService;
     private final IRestAgentAdministration agentAdmin;
     private final IRestAgentStore agentStore;
+    private final ResourceAccessGuard resourceAccessGuard;
     private final IRestInterfaceFactory restInterfaceFactory;
     private final IJsonSerialization jsonSerialization;
     private final BoundedLogStore boundedLogStore;
@@ -91,7 +103,9 @@ public class McpConversationTools {
             IRestInterfaceFactory restInterfaceFactory, IJsonSerialization jsonSerialization, BoundedLogStore boundedLogStore,
             IRestAuditStore auditStore, IRestAgentTriggerStore agentTriggerStore, IUserConversationStore userConversationStore,
             IRestAgentEngine restAgentEngine, SecurityIdentity identity, ConversationAccessGuard conversationAccessGuard,
+            ResourceAccessGuard resourceAccessGuard,
             @ConfigProperty(name = "authorization.enabled", defaultValue = "false") boolean authEnabled) {
+        this.resourceAccessGuard = resourceAccessGuard;
         this.conversationService = conversationService;
         this.agentAdmin = agentAdmin;
         this.agentStore = agentStore;
@@ -130,7 +144,7 @@ public class McpConversationTools {
             return jsonSerialization.serialize(statuses);
         } catch (Exception e) {
             LOGGER.error("MCP list_agents failed", e);
-            return errorJson("Failed to list agents: " + e.getMessage());
+            return errorJson("Failed to list agents", e);
         }
     }
 
@@ -142,11 +156,11 @@ public class McpConversationTools {
         try {
             int limitInt = limit != null ? limit : 20;
             String filterStr = filter != null ? filter : "";
-            List<DocumentDescriptor> descriptors = agentStore.readAgentDescriptors(filterStr, 0, limitInt);
+            List<DocumentDescriptor> descriptors = agentStore.readAgentDescriptors(filterStr, 0, limitInt, "");
             return jsonSerialization.serialize(descriptors);
         } catch (Exception e) {
             LOGGER.error("MCP list_agent_configs failed", e);
-            return errorJson("Failed to list Agent configs: " + e.getMessage());
+            return errorJson("Failed to list Agent configs", e);
         }
     }
 
@@ -164,17 +178,20 @@ public class McpConversationTools {
             // engine then assigns an anonymous id, as before). Without this, an
             // MCP-created conversation would belong to nobody and its own creator
             // could never read it back once the ownership gate applies.
+            // The same USE gate the REST start endpoint applies. Without it an MCP client
+            // holding only eddi-viewer — the lowest tier — could hold a full conversation
+            // with any private agent by id, which is 403 over REST.
+            resourceAccessGuard.requireAgentUseAccess(agentId);
             String ownerUserId = conversationAccessGuard.resolveOwnerUserId(null);
             ConversationResult result = conversationService.startConversation(env, agentId, ownerUserId, Collections.emptyMap());
             return jsonSerialization.serialize(Map.of("conversationId", result.conversationId(), "conversationUri",
                     result.conversationUri().toString(), "agentId", agentId, "environment", env.name()));
         } catch (Exception e) {
             LOGGER.error("MCP create_conversation failed for Agent " + agentId, e);
-            return errorJson("Failed to create conversation: " + e.getMessage());
+            return errorJson("Failed to create conversation", e);
         }
     }
 
-    @Blocking
     @Tool(name = "talk_to_agent", description = "Send a message to a Agent in an existing conversation and get the agent's response. "
             + "You must first call create_conversation to get a conversationId, " + "or use chat_with_agent for a single-call alternative.")
     public String talkToAgent(@ToolArg(description = "Agent ID (required)") String agentId,
@@ -221,11 +238,10 @@ public class McpConversationTools {
             return skippedResultJson(conversationId, e.state());
         } catch (Exception e) {
             LOGGER.error("MCP talk_to_agent failed for Agent " + agentId + " conversation " + conversationId, e);
-            return errorJson("Failed to talk to agent: " + e.getMessage());
+            return errorJson("Failed to talk to agent", e);
         }
     }
 
-    @Blocking
     @Tool(name = "chat_with_agent", description = "Send a message to an agent, automatically creating a new conversation if needed. "
             + "This is the simplest way to interact with a Agent — combines create_conversation + "
             + "talk_to_agent into a single call. Returns the Agent response and conversationId " + "for follow-up messages.")
@@ -249,6 +265,7 @@ public class McpConversationTools {
             // owner. An existing conversation must instead be owned by the caller:
             // continuing another user's conversation is a write into it.
             if (convId == null || convId.isBlank()) {
+                resourceAccessGuard.requireAgentUseAccess(agentId);
                 String ownerUserId = conversationAccessGuard.resolveOwnerUserId(null);
                 ConversationResult convResult = conversationService.startConversation(env, agentId, ownerUserId, Collections.emptyMap());
                 convId = convResult.conversationId();
@@ -289,7 +306,7 @@ public class McpConversationTools {
             return skippedResultJson(convId, e.state());
         } catch (Exception e) {
             LOGGER.error("MCP chat_with_agent failed for Agent " + agentId, e);
-            return errorJson("Failed to chat with agent: " + e.getMessage());
+            return errorJson("Failed to chat with agent", e);
         }
     }
 
@@ -301,8 +318,10 @@ public class McpConversationTools {
                                    @ToolArg(description = "Deprecated — ignored, resolved from conversation") String environment,
                                    @ToolArg(description = "Return only the current (latest) step? (default: true)") Boolean currentStepOnly,
                                    @ToolArg(description = "Return detailed internal data? (default: false)") Boolean returnDetailed,
-                                   @ToolArg(description = "Comma-separated list of fields to return (e.g. 'input,output,actions'). "
-                                           + "Empty = all fields.") String returningFields) {
+                                   @ToolArg(description = "Comma-separated list of what to return. Section names "
+                                           + "(conversationSteps, conversationOutputs, conversationProperties) return whole sections; "
+                                           + "output keys (e.g. 'input,output,actions') return only those keys of conversationOutputs. "
+                                           + "Empty = everything.") String returningFields) {
         requireRole(identity, authEnabled, "eddi-viewer");
         try {
             conversationAccessGuard.requireConversationOwner(conversationId);
@@ -312,36 +331,38 @@ public class McpConversationTools {
 
             List<String> fields = Collections.emptyList();
             if (returningFields != null && !returningFields.isBlank()) {
-                fields = List.of(returningFields.split(","));
+                fields = Arrays.stream(returningFields.split(",")).map(String::trim).filter(f -> !f.isEmpty()).toList();
             }
 
-            var snapshot = conversationService.readConversation(conversationId, detailed, stepOnly, fields);
+            // The service filters by SECTION only. Handing it output keys such as
+            // "input,output" (the example this tool advertises) matched no section, so
+            // every section was dropped and the caller got an empty snapshot. Split
+            // the two: sections go to the service; output keys select within
+            // conversationOutputs, which is therefore always fetched when any are named.
+            List<String> sections = fields.stream().filter(CONVERSATION_SECTIONS::contains).collect(Collectors.toCollection(ArrayList::new));
+            List<String> outputKeys = fields.stream().filter(f -> !CONVERSATION_SECTIONS.contains(f)).toList();
+            boolean wholeOutputsRequested = sections.contains(SECTION_CONVERSATION_OUTPUTS);
+            if (!outputKeys.isEmpty() && !wholeOutputsRequested) {
+                sections.add(SECTION_CONVERSATION_OUTPUTS);
+            }
 
-            // Apply field-level filtering on conversationOutputs when specific
-            // field names are requested (e.g. "input", "output", "actions").
-            // The service layer only handles section-level filtering
-            // (conversationSteps, conversationOutputs, conversationProperties).
-            // Create filtered copies to avoid mutating the original snapshot.
-            if (!fields.isEmpty() && snapshot.getConversationOutputs() != null) {
-                var trimmedFields = fields.stream().map(String::trim).toList();
-                // If the caller requested a section-level name (e.g. "conversationOutputs"),
-                // skip field-level filtering — the caller wants the full section.
-                boolean requestedFullSection = trimmedFields.stream()
-                        .anyMatch(f -> f.equals("conversationOutputs") || f.equals("conversationSteps")
-                                || f.equals("conversationProperties"));
-                if (!requestedFullSection) {
-                    var filteredOutputs = snapshot.getConversationOutputs().stream()
-                            .map(output -> {
-                                var filtered = new ai.labs.eddi.engine.memory.model.ConversationOutput();
-                                output.forEach((key, value) -> {
-                                    if (key instanceof String s && trimmedFields.stream().anyMatch(f -> s.equals(f) || s.startsWith(f + ":"))) {
-                                        filtered.put(key, value);
-                                    }
-                                });
-                                return filtered;
-                            }).toList();
-                    snapshot.setConversationOutputs(filteredOutputs);
-                }
+            var snapshot = conversationService.readConversation(conversationId, detailed, stepOnly, List.copyOf(sections));
+
+            // Field-level filtering on conversationOutputs, on filtered copies so the
+            // original snapshot is not mutated. An explicitly requested
+            // conversationOutputs section is returned whole.
+            if (!outputKeys.isEmpty() && !wholeOutputsRequested && snapshot.getConversationOutputs() != null) {
+                var filteredOutputs = snapshot.getConversationOutputs().stream()
+                        .map(output -> {
+                            var filtered = new ConversationOutput();
+                            output.forEach((key, value) -> {
+                                if (key instanceof String s && outputKeys.stream().anyMatch(f -> s.equals(f) || s.startsWith(f + ":"))) {
+                                    filtered.put(key, value);
+                                }
+                            });
+                            return filtered;
+                        }).toList();
+                snapshot.setConversationOutputs(filteredOutputs);
             }
 
             return jsonSerialization.serialize(snapshot);
@@ -349,7 +370,7 @@ public class McpConversationTools {
             return accessDenied("read_conversation", conversationId);
         } catch (Exception e) {
             LOGGER.error("MCP read_conversation failed for conversation " + conversationId, e);
-            return errorJson("Failed to read conversation: " + e.getMessage());
+            return errorJson("Failed to read conversation", e);
         }
     }
 
@@ -368,7 +389,7 @@ public class McpConversationTools {
             return accessDenied("read_conversation_log", conversationId);
         } catch (Exception e) {
             LOGGER.error("MCP read_conversation_log failed for conversation " + conversationId, e);
-            return errorJson("Failed to read conversation log: " + e.getMessage());
+            return errorJson("Failed to read conversation log", e);
         }
     }
 
@@ -401,7 +422,7 @@ public class McpConversationTools {
             try {
                 convStore = restInterfaceFactory.get(IRestConversationStore.class);
             } catch (RestInterfaceFactory.RestInterfaceFactoryException e) {
-                return errorJson("Failed to get conversation store: " + e.getMessage());
+                return errorJson("Failed to get conversation store", e);
             }
 
             // Ownership filtering is enforced by the conversation store itself:
@@ -421,7 +442,7 @@ public class McpConversationTools {
             return jsonSerialization.serialize(result);
         } catch (Exception e) {
             LOGGER.error("MCP list_conversations failed for Agent " + agentId, e);
-            return errorJson("Failed to list conversations: " + e.getMessage());
+            return errorJson("Failed to list conversations", e);
         }
     }
 
@@ -457,7 +478,7 @@ public class McpConversationTools {
             return jsonSerialization.serialize(result);
         } catch (Exception e) {
             LOGGER.error("MCP get_agent failed for Agent " + agentId, e);
-            return errorJson("Failed to get agent: " + e.getMessage());
+            return errorJson("Failed to get agent", e);
         }
     }
 
@@ -515,7 +536,7 @@ public class McpConversationTools {
             return accessDenied("read_agent_logs", conversationId);
         } catch (Exception e) {
             LOGGER.error("MCP read_agent_logs failed", e);
-            return errorJson("Failed to read Agent logs: " + e.getMessage());
+            return errorJson("Failed to read Agent logs", e);
         }
     }
 
@@ -545,7 +566,7 @@ public class McpConversationTools {
             return accessDenied("read_audit_trail", conversationId);
         } catch (Exception e) {
             LOGGER.error("MCP read_audit_trail failed for conversation " + conversationId, e);
-            return errorJson("Failed to read audit trail: " + e.getMessage());
+            return errorJson("Failed to read audit trail", e);
         }
     }
 
@@ -610,11 +631,10 @@ public class McpConversationTools {
             return jsonSerialization.serialize(result);
         } catch (Exception e) {
             LOGGER.error("MCP discover_agents failed", e);
-            return errorJson("Failed to discover agents: " + e.getMessage());
+            return errorJson("Failed to discover agents", e);
         }
     }
 
-    @Blocking
     @Tool(name = "chat_managed", description = "Send a message to a Agent using intent-based managed conversations. "
             + "Unlike chat_with_agent (which requires a agentId and creates multiple conversations), this "
             + "tool uses an 'intent' to find the right Agent and maintains exactly ONE conversation "
@@ -690,7 +710,7 @@ public class McpConversationTools {
             return errorJson("Access denied: you do not own this managed conversation");
         } catch (Exception e) {
             LOGGER.errorv("MCP chat_managed failed for intent={0}, userId={1}: {2}", intent, userId, e.getMessage());
-            return errorJson("Failed to chat via managed agent: " + e.getMessage());
+            return errorJson("Failed to chat via managed agent", e);
         }
     }
 
@@ -782,8 +802,8 @@ public class McpConversationTools {
         var batch = snapshot.getHitlPendingToolCalls();
         if (batch != null && batch.getCalls() != null) {
             var toolNames = batch.getCalls().stream()
-                    .map(ai.labs.eddi.engine.memory.model.PendingToolCallBatch.PendingToolCall::getToolName)
-                    .filter(java.util.Objects::nonNull)
+                    .map(PendingToolCallBatch.PendingToolCall::getToolName)
+                    .filter(Objects::nonNull)
                     .toList();
             if (!toolNames.isEmpty()) {
                 result.put("tools", toolNames);
@@ -851,7 +871,8 @@ public class McpConversationTools {
         // Start a new conversation — use ConversationService directly to avoid
         // the JAX-RS layer which converts exceptions to HTTP responses that are
         // hard to inspect programmatically.
-        var initialContext = new HashMap<String, ai.labs.eddi.engine.model.Context>(deployment.getInitialContext());
+        resourceAccessGuard.requireAgentUseAccess(agentId);
+        var initialContext = new HashMap<String, Context>(deployment.getInitialContext());
         var convResult = conversationService.startConversation(usedEnv, agentId, userId, initialContext);
         String conversationId = convResult.conversationId();
 
@@ -901,7 +922,7 @@ public class McpConversationTools {
 
         try {
             return responseFuture.get(CONVERSATION_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-        } catch (java.util.concurrent.ExecutionException e) {
+        } catch (ExecutionException e) {
             // Unwrap the skip signal so callers can catch it directly.
             if (e.getCause() instanceof ConversationSkippedException cse) {
                 throw cse;
@@ -972,7 +993,7 @@ public class McpConversationTools {
             // Agent response text — extract text strings from output items
             var outputItems = lastOutput.get("output");
             if (outputItems instanceof List<?> items) {
-                var texts = new java.util.ArrayList<String>();
+                var texts = new ArrayList<String>();
                 for (var item : items) {
                     if (item instanceof Map<?, ?> map && map.containsKey("text")) {
                         texts.add(String.valueOf(map.get("text")));
@@ -989,7 +1010,7 @@ public class McpConversationTools {
             // QuickReplies — extract value strings for easy AI consumption
             var quickReplies = lastOutput.get("quickReplies");
             if (quickReplies instanceof List<?> qrList && !qrList.isEmpty()) {
-                var qrValues = new java.util.ArrayList<String>();
+                var qrValues = new ArrayList<String>();
                 for (var qr : qrList) {
                     if (qr instanceof Map<?, ?> map && map.containsKey("value")) {
                         qrValues.add(String.valueOf(map.get("value")));

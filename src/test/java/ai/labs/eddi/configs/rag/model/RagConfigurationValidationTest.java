@@ -40,6 +40,29 @@ class RagConfigurationValidationTest {
     }
 
     @Test
+    @DisplayName("an unknown embeddingProvider is refused at save time, not at the first ingestion")
+    void unknownEmbeddingProviderIsUnsupported() {
+        var config = new RagConfiguration();
+        config.setName("kb");
+        config.setEmbeddingProvider("carrier-pigeon");
+
+        String message = config.findUnsupportedSettings();
+
+        assertTrue(message != null && message.contains("carrier-pigeon") && message.contains("openai"), message);
+        assertThrows(IllegalArgumentException.class, config::validate);
+    }
+
+    @Test
+    @DisplayName("every provider the embedding factory builds is accepted")
+    void supportedEmbeddingProvidersAreAccepted() {
+        for (String provider : RagConfiguration.SUPPORTED_EMBEDDING_PROVIDERS) {
+            var config = new RagConfiguration();
+            config.setEmbeddingProvider(provider);
+            assertNull(config.findUnsupportedSettings(), provider);
+        }
+    }
+
+    @Test
     @DisplayName("chunkStrategy is matched case-insensitively and trimmed")
     void supportedStrategyIsNormalizedForComparison() {
         var config = new RagConfiguration();

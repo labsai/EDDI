@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.runtime.internal;
 
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
+import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.lifecycle.IConversation.ConversationNotReadyException;
 import ai.labs.eddi.engine.lifecycle.ILifecycleManager;
@@ -200,6 +201,63 @@ class ConversationHitlCoverageTest {
     }
 
     // =====================================================================
+    // Turn audit buffering — entries are submitted after the whole turn ran
+    // =====================================================================
+
+    @Nested
+    @DisplayName("audit entries of a turn")
+    class TurnAudit {
+
+        /**
+         * Low-entropy on purpose: a realistic-looking fake key trips Secret Scanning.
+         */
+        private static final String SECRET = "sk-aaaa_aaaa.1111";
+
+        private AuditEntry parserEntry() {
+            return new AuditEntry("e1", "conv1", "agent1", 1, "user1", null, 1, "ai.labs.parser", "parser", 0, 1L,
+                    Map.of("userInput", SECRET), null, null, null, List.of(), 0.0, Instant.now(), null, null);
+        }
+
+        @Test
+        @DisplayName("say: a secret vaulted later in the turn is redacted from the entry an earlier task produced")
+        void sayRedactsSecretFromEarlierEntries() throws Exception {
+            memory.setConversationState(ConversationState.READY);
+            List<AuditEntry> ledger = new ArrayList<>();
+            memory.setAuditCollector(ledger::add);
+            doAnswer(inv -> {
+                // The parser is audited first...
+                memory.getAuditCollector().collect(parserEntry());
+                assertTrue(ledger.isEmpty(), "nothing may be submitted mid-turn");
+                // ...then the property setter vaults the input and scrubs the step.
+                memory.getCurrentStep().storeData(new Data<>(MemoryKeys.INPUT_INITIAL.key(), MemoryKeys.SECRET_INPUT_PLACEHOLDER));
+                return null;
+            }).when(lifecycleManager).executeLifecycle(any(), any());
+
+            createConversation().say(SECRET, Map.of());
+
+            assertEquals(1, ledger.size());
+            assertEquals(MemoryKeys.SECRET_INPUT_PLACEHOLDER, ledger.getFirst().input().get("userInput"));
+        }
+
+        @Test
+        @DisplayName("say: entries of a turn that pauses are still submitted")
+        void pausedTurnStillSubmitsItsEntries() throws Exception {
+            memory.setConversationState(ConversationState.READY);
+            List<AuditEntry> ledger = new ArrayList<>();
+            memory.setAuditCollector(ledger::add);
+            doAnswer(inv -> {
+                memory.getAuditCollector().collect(parserEntry());
+                throw new ConversationPauseException("wf1", 1, "rule gate");
+            }).when(lifecycleManager).executeLifecycle(any(), any());
+
+            createConversation().say("go", Map.of());
+
+            assertEquals(1, ledger.size());
+            assertEquals(ConversationState.AWAITING_HUMAN, memory.getConversationState());
+        }
+    }
+
+    // =====================================================================
     // pauseConversation — RULE branch (hitl:status marker + tool-state clear)
     // =====================================================================
 
@@ -226,6 +284,9 @@ class ConversationHitlCoverageTest {
             // clearToolPauseState() ran on the RULE branch.
             assertNull(memory.getHitlPendingToolCalls());
             assertEquals(ConversationState.AWAITING_HUMAN, memory.getConversationState());
+            // ...but the pause type it also clears is restored: inbox entries and clients
+            // tell a rule pause from a tool pause by it.
+            assertEquals("RULE", memory.getHitlPauseType());
         }
     }
 
@@ -428,6 +489,33 @@ class ConversationHitlCoverageTest {
 
             assertNull(memory.getCurrentStep().getLatestData("hitl:status"));
             assertFalse(memory.getCurrentStep().getConversationOutput().containsKey("hitl:status"));
+        }
+
+        @Test
+        @DisplayName("a resolved RULE pause does not leave hitlPauseType=RULE on the READY conversation")
+        void resolvedRulePauseClearsPauseType() throws Exception {
+            memory.setConversationState(ConversationState.AWAITING_HUMAN);
+            memory.setHitlPausedWorkflowId("wf1");
+            memory.setHitlPausedAbsoluteTaskIndex(0);
+            memory.setHitlPauseType("RULE");
+
+            createConversation().resume(decision(HitlVerdict.APPROVED));
+
+            assertNotEquals(ConversationState.AWAITING_HUMAN, memory.getConversationState());
+            assertNull(memory.getHitlPauseType());
+        }
+
+        @Test
+        @DisplayName("a rejected RULE pause does not leave hitlPauseType=RULE behind either")
+        void rejectedRulePauseClearsPauseType() throws Exception {
+            memory.setConversationState(ConversationState.AWAITING_HUMAN);
+            memory.setHitlPausedWorkflowId("wf1");
+            memory.setHitlPausedAbsoluteTaskIndex(0);
+            memory.setHitlPauseType("RULE");
+
+            createConversation().resume(decision(HitlVerdict.REJECTED));
+
+            assertNull(memory.getHitlPauseType());
         }
     }
 

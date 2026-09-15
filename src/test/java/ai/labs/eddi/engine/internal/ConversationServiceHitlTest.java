@@ -32,6 +32,8 @@ import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.engine.audit.model.AuditEntry;
+import ai.labs.eddi.engine.events.HitlResumeCompletedEvent;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -45,6 +47,7 @@ import java.time.Instant;
 import java.util.Date;
 import java.util.List;
 
+import jakarta.enterprise.event.Event;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -96,14 +99,14 @@ class ConversationServiceHitlTest {
     private ConversationService conversationService;
     // Held reference (not the shared no-op fixture) so the cancel-path HITL event
     // firing (G5) can be verified.
-    private jakarta.enterprise.event.Event<ai.labs.eddi.engine.events.HitlResumeCompletedEvent> hitlResumeCompletedEvent;
+    private Event<HitlResumeCompletedEvent> hitlResumeCompletedEvent;
 
     @BeforeEach
     @SuppressWarnings("unchecked")
     void setUp() {
         MockitoAnnotations.openMocks(this);
         doReturn(conversationStateCache).when(cacheFactory).getCache("conversationState");
-        hitlResumeCompletedEvent = mock(jakarta.enterprise.event.Event.class);
+        hitlResumeCompletedEvent = mock(Event.class);
         conversationService = new ConversationService(
                 agentFactory, conversationMemoryStore, conversationDescriptorStore,
                 userMemoryStore, conversationCoordinator, conversationSetup,
@@ -185,16 +188,16 @@ class ConversationServiceHitlTest {
 
             // G4-parity audit: the cancel is attributed to the actor with a CANCELLED
             // verdict.
-            ArgumentCaptor<ai.labs.eddi.engine.audit.model.AuditEntry> auditCaptor = ArgumentCaptor
-                    .forClass(ai.labs.eddi.engine.audit.model.AuditEntry.class);
+            ArgumentCaptor<AuditEntry> auditCaptor = ArgumentCaptor
+                    .forClass(AuditEntry.class);
             verify(auditLedgerService).submit(auditCaptor.capture());
             assertEquals("alice", auditCaptor.getValue().output().get("decidedBy"));
             assertEquals("CANCELLED", auditCaptor.getValue().output().get("verdict"));
 
             // G5: the terminal resume-completed event fires with a null verdict and the
             // actor.
-            ArgumentCaptor<ai.labs.eddi.engine.events.HitlResumeCompletedEvent> eventCaptor = ArgumentCaptor
-                    .forClass(ai.labs.eddi.engine.events.HitlResumeCompletedEvent.class);
+            ArgumentCaptor<HitlResumeCompletedEvent> eventCaptor = ArgumentCaptor
+                    .forClass(HitlResumeCompletedEvent.class);
             verify(hitlResumeCompletedEvent).fireAsync(eventCaptor.capture());
             assertNull(eventCaptor.getValue().verdict());
             assertEquals("alice", eventCaptor.getValue().decidedBy());

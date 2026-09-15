@@ -153,7 +153,11 @@ public class ToolRateLimiter {
      * be called while holding it.
      * </p>
      */
-    private static class RateLimitBucket {
+    // Package-private (not private) so the overflow regression test can drive it
+    // directly: reproducing a ~107-day idle bucket through the public API is not
+    // possible, and the alternative — reflecting into a private field — pins the
+    // field name rather than the behaviour.
+    static class RateLimitBucket {
         private int limit;
         private double tokens;
         private long lastRefillNanos;
@@ -162,6 +166,21 @@ public class ToolRateLimiter {
             this.limit = Math.max(0, limit);
             this.tokens = this.limit;
             this.lastRefillNanos = System.nanoTime();
+        }
+
+        /**
+         * Backdate this bucket's last refill, so idle-window behaviour is provable
+         * without waiting for the window. Same test seam as
+         * {@code WorkflowTraversal.discoverConfigs(..., nowMillis)}: an explicit clock
+         * reading rather than a sleep.
+         */
+        synchronized void backdateLastRefill(long nanosAgo) {
+            lastRefillNanos -= nanosAgo;
+        }
+
+        /** Raw token count, for assertions that need sub-integer precision. */
+        synchronized double tokenCount() {
+            return tokens;
         }
 
         /**
@@ -188,7 +207,12 @@ public class ToolRateLimiter {
                 return;
             }
             lastRefillNanos = now;
-            tokens = Math.min(limit, tokens + elapsedNanos * limit / WINDOW_NANOS);
+            // (double) on elapsedNanos: `elapsedNanos * limit` is long arithmetic and
+            // overflows once a bucket has been idle for ~107 days at the default
+            // limit of 1000. The wrapped negative would drive `tokens` below zero and
+            // tryAcquire would refuse every call from then on — a bucket that silently
+            // locks shut rather than refilling.
+            tokens = Math.min(limit, tokens + (double) elapsedNanos * limit / WINDOW_NANOS);
         }
 
         synchronized boolean tryAcquire() {

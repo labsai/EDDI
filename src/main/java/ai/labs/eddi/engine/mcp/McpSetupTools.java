@@ -47,7 +47,7 @@ public class McpSetupTools {
     @Tool(name = "setup_agent", description = "Create a fully working, deployed Agent in a single call. "
             + "This creates all necessary resources (behavior rules, LLM connection, "
             + "output set, package, agent), names them, and optionally deploys the agent. "
-            + "This is the fastest way to get a new Agent running — equivalent to the Agent Father workflow.")
+            + "This is the fastest way to get a new Agent running.")
     public String setupAgent(@ToolArg(description = "Agent name (required)") String agentName,
                              @ToolArg(description = "System prompt / role for the LLM (required). "
                                      + "Describes the agent's personality and purpose.") String systemPrompt,
@@ -59,7 +59,11 @@ public class McpSetupTools {
                              @ToolArg(description = "API key for the LLM provider. Required for most cloud providers "
                                      + "(anthropic, openai, gemini, mistral). Not needed for bedrock (uses IAM), "
                                      + "oracle-genai (uses OCI auth), or local LLMs (ollama, jlama). "
-                                     + "Can be a vault reference like '${vault:openai-key}'.") String apiKey,
+                                     + "Can be a vault reference like '${vault:openai-key}'. To put several agents on ONE key, "
+                                     + "pass the apiKeyVaultReference returned by an earlier setup_agent call here — that always "
+                                     + "reuses the named entry. A plaintext key the vault already holds is reused too, but only "
+                                     + "when the deployment leaves eddi.setup.vault-key-reuse at 'checksum' and the existing entry "
+                                     + "is granted to all agents; otherwise it is stored as a new entry.") String apiKey,
                              @ToolArg(description = "Base URL for the LLM provider (optional). "
                                      + "Useful for ollama when running in Docker (e.g. 'http://host.docker.internal:11434')") String baseUrl,
                              @ToolArg(description = "Greeting message shown when a conversation starts (optional)") String introMessage,
@@ -89,14 +93,26 @@ public class McpSetupTools {
             // ungated agent at will. Provisioning a gated agent goes through the
             // REST setup endpoint.
             var request = new SetupAgentRequest(agentName, systemPrompt, provider, model, apiKey, baseUrl, introMessage, enableBuiltInTools,
-                    builtInToolsWhitelist, enableQuickReplies, enableSentimentAnalysis, mcpServerUrls, deploy, environment, null);
+                    builtInToolsWhitelist, enableQuickReplies, enableSentimentAnalysis, mcpServerUrls, deploy, environment, null,
+                    // vaultKeyName is not exposed here. Not for reuse — apiKey already
+                    // accepts a ${vault:...} reference (see its description), so an
+                    // MCP caller can put an agent on an existing key today, and a
+                    // plaintext apiKey de-duplicates by checksum wherever the
+                    // deployment has that enabled. What vaultKeyName adds
+                    // is choosing the NAME of a newly created entry and a
+                    // value-must-match check on an existing one — and these tools are
+                    // reachable by eddi-editor while REST setup is eddi-admin. Neither
+                    // is needed to provision an agent, and neither belongs on the
+                    // lower tier: name-squatting an entry an operator intends to create,
+                    // and a per-request "does key X hold value V" oracle.
+                    null);
             var result = agentSetupService.setupAgent(request);
             return jsonSerialization.serialize(result);
         } catch (AgentSetupException e) {
             return errorJson(e.getMessage());
         } catch (Exception e) {
             LOGGER.error("MCP setup_agent failed", e);
-            return errorJson("Failed to set up agent: " + e.getMessage());
+            return errorJson("Failed to set up agent", e);
         }
     }
 
@@ -114,7 +130,8 @@ public class McpSetupTools {
                                  @ToolArg(description = "Model name (default: 'claude-sonnet-4-6')") String model,
                                  @ToolArg(description = "LLM API key (required for most cloud providers: anthropic, openai, gemini, mistral). "
                                          + "Not needed for bedrock (IAM) or oracle-genai (OCI auth). "
-                                         + "Use vault reference: '${vault:key-name}'.") String apiKey,
+                                         + "Use vault reference: '${vault:key-name}', e.g. the apiKeyVaultReference returned by an "
+                                         + "earlier setup call, to share one key across agents.") String apiKey,
                                  @ToolArg(description = "Override the API base URL from the spec (optional)") String apiBaseUrl,
                                  @ToolArg(description = "Authorization header for API calls, e.g. 'Bearer token123' (optional). "
                                          + "Use vault reference: '${vault:api-token}'.") String apiAuth,
@@ -136,15 +153,19 @@ public class McpSetupTools {
             // the caller choose the approval gate would turn it into a complete escape
             // from whatever allow-list governs the agent doing the calling. Provisioning
             // a gated agent goes through the REST setup-api endpoint.
+            // Trailing null: maxToolIterations is not exposed on this MCP tool either —
+            // a model provisioning an agent must not raise its own iteration budget.
             var request = new CreateApiAgentRequest(agentName, systemPrompt, openApiSpec, provider, model, apiKey, apiBaseUrl, apiAuth, endpoints,
-                    enableQuickReplies, enableSentimentAnalysis, deploy, environment, llmBaseUrl, null, mcpServerUrls);
+                    enableQuickReplies, enableSentimentAnalysis, deploy, environment, llmBaseUrl, null, mcpServerUrls, null,
+                    null, // vaultKeyName — withheld for the reason given on setup_agent
+                    null); // apiAuthHeader — withheld for the reason given on the record
             var result = agentSetupService.createApiAgent(request);
             return jsonSerialization.serialize(result);
         } catch (AgentSetupException e) {
             return errorJson(e.getMessage());
         } catch (Exception e) {
             LOGGER.error("MCP create_api_agent failed", e);
-            return errorJson("Failed to create API agent: " + e.getMessage());
+            return errorJson("Failed to create API agent", e);
         }
     }
 

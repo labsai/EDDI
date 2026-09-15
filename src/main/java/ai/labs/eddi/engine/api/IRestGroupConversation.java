@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.api;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.engine.internal.GroupApprovalRequest;
 import ai.labs.eddi.engine.memory.model.validation.MaxInlineAttachmentSize;
+import ai.labs.eddi.engine.model.PendingApprovalSummary;
 import jakarta.annotation.security.RolesAllowed;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
@@ -118,7 +119,9 @@ public interface IRestGroupConversation {
 
     @DELETE
     @Path("/{groupId}/conversations/{groupConversationId}")
-    @Operation(summary = "Delete a group conversation", description = "Deletes a group conversation and its member conversations.")
+    @Operation(summary = "Delete a group conversation", description = "Deletes the group conversation, its shared "
+            + "artifacts and any ephemeral agents created for it. The members' own conversations are ENDED, not "
+            + "deleted, and stay readable afterwards.")
     @APIResponse(responseCode = "200", description = "Group conversation deleted.")
     @APIResponse(responseCode = "404", description = "Group conversation not found.")
     @APIResponse(responseCode = "409", description = "Another operation (follow-up / continue / close) is in progress — retry.")
@@ -369,10 +372,10 @@ public interface IRestGroupConversation {
     @Operation(summary = "List pending HITL approvals",
                description = "Lists this group's conversations currently awaiting human approval (summaries).")
     @APIResponse(responseCode = "200", description = "List of pending approval summaries.")
-    List<ai.labs.eddi.engine.model.PendingApprovalSummary> listGroupPendingApprovals(
-                                                                                     @PathParam("groupId") String groupId,
-                                                                                     @QueryParam("limit")
-                                                                                     @DefaultValue("100") Integer limit);
+    List<PendingApprovalSummary> listGroupPendingApprovals(
+                                                           @PathParam("groupId") String groupId,
+                                                           @QueryParam("limit")
+                                                           @DefaultValue("100") Integer limit);
 
     /**
      * Cross-group HITL inbox (#21): all group conversations currently awaiting
@@ -389,7 +392,7 @@ public interface IRestGroupConversation {
     @Operation(summary = "List all pending group HITL approvals",
                description = "Lists group conversations awaiting human approval across all groups (summaries).")
     @APIResponse(responseCode = "200", description = "List of pending approval summaries.")
-    List<ai.labs.eddi.engine.model.PendingApprovalSummary> listAllGroupPendingApprovals(
-                                                                                        @QueryParam("limit")
-                                                                                        @DefaultValue("100") Integer limit);
+    List<PendingApprovalSummary> listAllGroupPendingApprovals(
+                                                              @QueryParam("limit")
+                                                              @DefaultValue("100") Integer limit);
 }

@@ -7,11 +7,14 @@ package ai.labs.eddi.engine.internal;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.api.IRestGroupConversation;
 import ai.labs.eddi.engine.api.IRestGroupConversation.AttachmentRef;
 import ai.labs.eddi.engine.api.IRestGroupConversation.DiscussRequest;
 import ai.labs.eddi.engine.api.IRestGroupConversation.FollowUpRequest;
+import ai.labs.eddi.engine.hitl.HitlAccessGuard;
+import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.model.Attachment;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import io.quarkus.security.ForbiddenException;
@@ -25,7 +28,9 @@ import org.mockito.ArgumentCaptor;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeoutException;
 
+import java.security.Principal;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -47,10 +52,10 @@ class RestGroupConversationTest {
         identity = mock(SecurityIdentity.class);
         ownershipValidator = mock(OwnershipValidator.class);
         when(ownershipValidator.validateAndResolveUserId(any(), any())).thenAnswer(inv -> inv.getArgument(1));
-        var hitlAccessGuard = new ai.labs.eddi.engine.hitl.HitlAccessGuard(
+        var hitlAccessGuard = new HitlAccessGuard(
                 identity, ownershipValidator,
-                mock(ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore.class),
-                mock(ai.labs.eddi.engine.api.IConversationService.class),
+                mock(IConversationDescriptorStore.class),
+                mock(IConversationService.class),
                 groupService);
         restGroupConversation = new RestGroupConversation(
                 groupService, jsonSerialization, identity, ownershipValidator, hitlAccessGuard);
@@ -328,7 +333,7 @@ class RestGroupConversationTest {
             when(ownershipValidator.isAuthEnabled()).thenReturn(true);
             when(identity.isAnonymous()).thenReturn(false);
             when(identity.hasRole("eddi-admin")).thenReturn(false);
-            var principal = mock(java.security.Principal.class);
+            var principal = mock(Principal.class);
             when(principal.getName()).thenReturn("user-1");
             when(identity.getPrincipal()).thenReturn(principal);
 
@@ -437,7 +442,7 @@ class RestGroupConversationTest {
             when(groupService.readGroupConversation("gc-1")).thenReturn(gcInGroup("group-1"));
             when(groupService.followUpWithMember("gc-1", "agentA", "q"))
                     .thenThrow(new IGroupConversationService.GroupTimeoutException(
-                            "Follow-up timed out for agent 'agentA'", new java.util.concurrent.TimeoutException()));
+                            "Follow-up timed out for agent 'agentA'", new TimeoutException()));
 
             Response response = restGroupConversation.followUpWithMember("group-1", "gc-1",
                     new FollowUpRequest("q", "agentA", "user-1"));
@@ -502,7 +507,7 @@ class RestGroupConversationTest {
             when(groupService.readGroupConversation("gc-1")).thenReturn(gcInGroup("group-1"));
             when(groupService.continueDiscussion("gc-1", "q", null))
                     .thenThrow(new IGroupConversationService.GroupTimeoutException(
-                            "timed out", new java.util.concurrent.TimeoutException()));
+                            "timed out", new TimeoutException()));
 
             Response response = restGroupConversation.continueDiscussion("group-1", "gc-1",
                     new DiscussRequest("q", "user-1"));

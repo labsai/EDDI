@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.llm.tools;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DynamicAgentConfig;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResult;
+import ai.labs.eddi.engine.memory.ConversationOutputExtractor;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch.PendingToolCall;
@@ -25,6 +26,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -193,7 +196,7 @@ public class ConverseWithAgentTool {
             inputData.setContext(new HashMap<>(delegationContext));
 
             CompletableFuture<SimpleConversationMemorySnapshot> responseFuture = new CompletableFuture<>();
-            final java.util.concurrent.atomic.AtomicBoolean skipped = new java.util.concurrent.atomic.AtomicBoolean();
+            final AtomicBoolean skipped = new AtomicBoolean();
             final String convId = conversationId;
 
             // Finding H7: a busy-skip (onSkipped, e.g. IN_PROGRESS) must NOT be
@@ -260,7 +263,7 @@ public class ConverseWithAgentTool {
             // Already-paused at submit — no snapshot available here, so we cannot
             // determine the pause type; report the base (RULE-shaped) message.
             return pausedForApprovalMessage(conversationId, null);
-        } catch (java.util.concurrent.TimeoutException e) {
+        } catch (TimeoutException e) {
             LOGGER.warnf("[CONVERSE] Timeout waiting for agent '%s' response", agentId);
             // The number has to come from the same config the wait used, or the
             // message tells the model a limit that was never applied — which is how
@@ -322,6 +325,6 @@ public class ConverseWithAgentTool {
      * Delegates to shared utility.
      */
     private String extractResponse(SimpleConversationMemorySnapshot snapshot) {
-        return ai.labs.eddi.engine.memory.ConversationOutputExtractor.extractResponse(snapshot);
+        return ConversationOutputExtractor.extractResponse(snapshot);
     }
 }

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.mcp;
 
+import ai.labs.eddi.configs.rest.StrictConfigurationParser;
 import ai.labs.eddi.configs.groups.IGroupWorkspaceStore;
 import ai.labs.eddi.configs.groups.IRestAgentGroupStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
@@ -30,7 +31,6 @@ import io.quarkiverse.mcp.server.Tool;
 import io.quarkiverse.mcp.server.ToolArg;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
-import io.smallrye.common.annotation.Blocking;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -60,6 +60,13 @@ public class McpGroupTools {
     private final IRestAgentGroupStore groupStore;
     private final IGroupConversationService groupConversationService;
     private final IJsonSerialization jsonSerialization;
+
+    /**
+     * Strict deserialisation for the config bodies this surface accepts — the same
+     * check REST's {@code StrictConfigurationBodyInterceptor} applies, which never
+     * fires for these in-process calls. See {@code StrictConfigurationParser}.
+     */
+    private final StrictConfigurationParser configParser;
     private final SecurityIdentity identity;
     private final OwnershipValidator ownershipValidator;
     private final IGroupWorkspaceStore workspaceStore;
@@ -68,9 +75,10 @@ public class McpGroupTools {
 
     @Inject
     public McpGroupTools(IRestAgentGroupStore groupStore, IGroupConversationService groupConversationService, IJsonSerialization jsonSerialization,
-            SecurityIdentity identity, OwnershipValidator ownershipValidator, IGroupWorkspaceStore workspaceStore,
-            GroupTemplateService templateService,
+            StrictConfigurationParser configParser, SecurityIdentity identity, OwnershipValidator ownershipValidator,
+            IGroupWorkspaceStore workspaceStore, GroupTemplateService templateService,
             @ConfigProperty(name = "authorization.enabled", defaultValue = "false") boolean authEnabled) {
+        this.configParser = configParser;
         this.groupStore = groupStore;
         this.groupConversationService = groupConversationService;
         this.jsonSerialization = jsonSerialization;
@@ -122,8 +130,8 @@ public class McpGroupTools {
     // --- Discovery ---
 
     @Tool(description = "Describe all available discussion styles for agent " + "groups. Returns the name, phase flow, and recommended use case "
-            + "for each style (ROUND_TABLE, PEER_REVIEW, DEVIL_ADVOCATE, " + "DELPHI, DEBATE, TASK_FORCE). Call this before create_group to "
-            + "choose the right style.")
+            + "for each style (ROUND_TABLE, PEER_REVIEW, DEVIL_ADVOCATE, " + "DELPHI, DEBATE, TASK_FORCE, NEGOTIATION, plus CUSTOM). Call this "
+            + "before create_group to choose the right style.")
     public String describe_discussion_styles() {
         requireRole(identity, authEnabled, "eddi-viewer");
         return """
@@ -163,6 +171,22 @@ public class McpGroupTools {
                 Member roles: none required. Moderator handles planning and synthesis.
                 Optional: pass pre-configured tasks via the `tasks` parameter to skip the
                 PLAN phase entirely.
+
+                ### NEGOTIATION
+                Flow: Positions & Interests → Opening Proposals → Bargaining (N rounds) → Arbitration → Synthesis
+                Trade, not win/lose. Members state interests independently (they do not see each
+                other first), then exchange proposals and bargain with a concession ledger tracking
+                what each side gave up. Arbitration is SKIPPED when agreement is reached — the
+                moderator only rules when bargaining failed to converge.
+                Use when: surfacing trade-offs, splitting scarce budget or scope, drafting a
+                compromise both sides can sign.
+                Member roles: none required. Moderator arbitrates and synthesizes.
+
+                ### CUSTOM
+                Flow: whatever you define via the `phases` parameter.
+                Use when: none of the presets fit — you need your own phase sequence, per-phase
+                turn order, context scope, voting, or approval gates.
+                Member roles: as your phases require.
 
                 ## Nested Groups (Group-of-Groups)
                 Members can be other groups (memberTypes=GROUP). The sub-group runs its
@@ -229,7 +253,8 @@ public class McpGroupTools {
                                        + "(default) or GROUP for nested groups (optional)") String memberTypes,
                                @ToolArg(description = "Moderator agent ID (optional)") String moderatorAgentId,
                                @ToolArg(description = "Discussion style: ROUND_TABLE, PEER_REVIEW, "
-                                       + "DEVIL_ADVOCATE, DELPHI, DEBATE, TASK_FORCE (default ROUND_TABLE)") String style,
+                                       + "DEVIL_ADVOCATE, DELPHI, DEBATE, TASK_FORCE, NEGOTIATION, CUSTOM "
+                                       + "(default ROUND_TABLE). All eight work; see describe_discussion_styles") String style,
                                @ToolArg(description = "Max rounds (default 2)") String maxRounds,
                                @ToolArg(description = "Maximum total agent turns across all phases (default 50). "
                                        + "Safety cap to prevent runaway discussions.") String maxTurns,
@@ -285,7 +310,7 @@ public class McpGroupTools {
                     TaskDefinition[] taskArray = jsonSerialization.deserialize(tasks, TaskDefinition[].class);
                     config.setTasks(List.of(taskArray));
                 } catch (Exception ex) {
-                    return errorJson("Invalid tasks JSON: " + ex.getMessage());
+                    return errorJson("Invalid tasks JSON", ex);
                 }
             }
 
@@ -320,12 +345,17 @@ public class McpGroupTools {
         requireRole(identity, authEnabled, "eddi-editor");
         try {
             int ver = parseIntOrDefault(version, 0);
-            AgentGroupConfiguration config = jsonSerialization.deserialize(configJson, AgentGroupConfiguration.class);
+            // Same strictness as PUT /groupstore/groups — AgentGroupConfiguration is a
+            // first-party config model, so a typo'd key must be rejected here too
+            // rather than dropped into a silently different group.
+            AgentGroupConfiguration config = configParser.parse(configJson, AgentGroupConfiguration.class);
             groupStore.updateGroup(groupId, ver, config);
             return "Updated group " + groupId;
         } catch (Exception e) {
             LOGGER.errorf("update_group failed: %s", e.getMessage());
-            return errorJson(e.getMessage());
+            // describe(), not getMessage(): the strict parser's rejection travels as a
+            // response entity, and getMessage() on that is just "HTTP 400 Bad Request".
+            return errorJson("Failed to update group", e);
         }
     }
 
@@ -345,7 +375,6 @@ public class McpGroupTools {
 
     // --- Group Conversation ---
 
-    @Blocking
     @Tool(description = "Start a structured multi-agent discussion and wait for it to complete. "
             + "All configured member agents participate using the group's discussion style. "
             + "Returns the full GroupConversation including transcript, task list (for TASK_FORCE), "
@@ -373,7 +402,8 @@ public class McpGroupTools {
     @Tool(description = "Read a group conversation including its full transcript, task list "
             + "(for TASK_FORCE discussions with per-task status, assignments, and results), "
             + "dynamic agent tracking (createdAgentIds, retainedAgentIds), synthesized answer, "
-            + "structured decision record (verdict/vote/agreement/award, if one was reached), "
+            + "the structured decision record in the 'decision' field "
+            + "(verdict/vote/agreement/award, if one was reached), "
             + "and conversation state. Use this to poll for completion after start_group_discussion, "
             + "or to inspect task-level results after a TASK_FORCE discussion.")
     public String read_group_conversation(
@@ -438,7 +468,7 @@ public class McpGroupTools {
         try {
             String user = resolveOwner(userId);
             GroupConversation gc = groupConversationService.startAndDiscussAsync(groupId, question, user, null);
-            return jsonSerialization.serialize(java.util.Map.of(
+            return jsonSerialization.serialize(Map.of(
                     "groupConversationId", gc.getId(),
                     "state", String.valueOf(gc.getState()),
                     "message", "Discussion started. Poll read_group_conversation with this ID to check progress."));
@@ -450,8 +480,9 @@ public class McpGroupTools {
         }
     }
 
-    @Tool(description = "Delete a group conversation and cascade-delete all member "
-            + "conversations created during the discussion.")
+    @Tool(description = "Delete a group conversation. Its shared artifacts and any ephemeral agents "
+            + "created for it are deleted; the members' own conversations are ENDED, not deleted, and "
+            + "remain readable afterwards.")
     public String delete_group_conversation(
                                             @ToolArg(description = "Group conversation ID to delete") String groupConversationId) {
         requireRole(identity, authEnabled, "eddi-editor");
@@ -469,7 +500,6 @@ public class McpGroupTools {
 
     // --- Follow-up Operations ---
 
-    @Blocking
     @Tool(description = "Ask a follow-up question to a specific member agent in a "
             + "completed group conversation. The agent retains full context from "
             + "the discussion. Both the question and response are recorded on the "
@@ -496,7 +526,6 @@ public class McpGroupTools {
         }
     }
 
-    @Blocking
     @Tool(description = "Continue a completed group conversation with a new question. "
             + "All agents re-run through the full discussion phases, retaining memory "
             + "of prior rounds. The round counter increments. Returns the updated "
@@ -544,7 +573,6 @@ public class McpGroupTools {
     @Tool(description = "Add a task to a standing team's backlog (I13). The backlog persists across "
             + "discussions; scheduled cadences pull executable tasks from it into task-force runs. "
             + "Higher priority runs earlier. Returns the created task.")
-    @Blocking
     public String add_team_task(@ToolArg(description = "Group configuration ID") String groupId,
                                 @ToolArg(description = "Task subject (short, unique within the backlog)") String subject,
                                 @ToolArg(description = "Task description (optional)") String description,
@@ -592,7 +620,6 @@ public class McpGroupTools {
 
     @Tool(description = "List a standing team's backlog (I13): every task with its status, priority, "
             + "assignee and verification outcome.")
-    @Blocking
     public String list_team_backlog(@ToolArg(description = "Group configuration ID") String groupId) {
         requireRole(identity, authEnabled, "eddi-viewer");
         try {
@@ -628,7 +655,6 @@ public class McpGroupTools {
     @Tool(description = "Create a group from a packaged template (I10) by assigning agents to its named roles. "
             + "roleAssignments is a JSON object mapping role -> agent id (for HUMAN roles: the principal id). "
             + "Saves through the normal store path, so every save-time validation applies.")
-    @Blocking
     public String create_group_from_template(@ToolArg(description = "Template id, e.g. 'research-pod'") String templateId,
                                              @ToolArg(description = "Name for the new group (optional)") String name,
                                              @ToolArg(description = "JSON object: role -> agent id") String roleAssignments) {

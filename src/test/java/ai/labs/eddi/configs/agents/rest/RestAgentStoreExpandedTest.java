@@ -4,13 +4,20 @@
  */
 package ai.labs.eddi.configs.agents.rest;
 
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.any;
+import ai.labs.eddi.engine.security.spaces.AccessScope;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.configs.agents.AgentSigningService;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
+import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
+import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
@@ -61,7 +68,15 @@ class RestAgentStoreExpandedTest {
         deploymentStore = mock(IDeploymentStore.class);
 
         sut = new RestAgentStore(agentStore, restWorkflowStore, documentDescriptorStore,
-                jsonSchemaCreator, scheduleStore, capabilityRegistryService, deploymentStore);
+                jsonSchemaCreator, scheduleStore, capabilityRegistryService, deploymentStore, permissiveGuard(),
+                mock(AgentSigningService.class), mock(IAgentFactory.class), "default");
+        try {
+            // The Agent is live at v1. A cascade only runs against the CURRENT version —
+            // it tears workflows and schedules down before the delete's own version check.
+            when(agentStore.getCurrentResourceId(AGENT_ID)).thenReturn(dummyResourceId(AGENT_ID, 1));
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     private IResourceStore.IResourceId dummyResourceId(String id, int version) {
@@ -113,10 +128,10 @@ class RestAgentStoreExpandedTest {
         @Test
         @DisplayName("should delegate to document descriptor store")
         void standard() throws Exception {
-            when(documentDescriptorStore.readDescriptors("ai.labs.agent", "filter", 0, 20, false))
+            when(documentDescriptorStore.readDescriptors(eq("ai.labs.agent"), eq("filter"), eq(0), eq(20), eq(false), any()))
                     .thenReturn(List.of(new DocumentDescriptor()));
 
-            List<DocumentDescriptor> result = sut.readAgentDescriptors("filter", 0, 20);
+            List<DocumentDescriptor> result = sut.readAgentDescriptors("filter", 0, 20, "");
 
             assertEquals(1, result.size());
         }
@@ -136,7 +151,7 @@ class RestAgentStoreExpandedTest {
         @Test
         @DisplayName("should reject non-workflow URI")
         void nonWorkflowUri() {
-            // Not a workflow URI — createMalFormattedResourceUriException throws
+            // Not a workflow URI — malformedResourceUri is thrown
             // BadRequestException
             assertThrows(BadRequestException.class, () -> sut.readAgentDescriptors("", 0, 20,
                     "eddi://ai.labs.rules/rulestore/rulesets/abc?version=1", false));
@@ -145,7 +160,7 @@ class RestAgentStoreExpandedTest {
         @Test
         @DisplayName("should reject malformed URI")
         void malformedUri() {
-            // Malformed URI — createMalFormattedResourceUriException throws
+            // Malformed URI — malformedResourceUri is thrown
             // BadRequestException
             assertThrows(BadRequestException.class, () -> sut.readAgentDescriptors("", 0, 20, "not-a-valid-uri", false));
         }
@@ -271,7 +286,7 @@ class RestAgentStoreExpandedTest {
             config.setWorkflows(new ArrayList<>(List.of(
                     URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG_ID + "?version=1"))));
             var hitl = new AgentConfiguration.HitlConfig();
-            var toolApprovals = new ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig();
+            var toolApprovals = new ToolApprovalsConfig();
             toolApprovals.setRequireApproval(List.of("http.post:*", "http.put:*", "http.delete:*"));
             toolApprovals.setExempt(List.of("http.get:*"));
             hitl.setToolApprovals(toolApprovals);
@@ -454,68 +469,25 @@ class RestAgentStoreExpandedTest {
         }
     }
 
-    // ─── populateCapabilityRegistry ────────────────────────────────────────────
+    // Capability-registry seeding used to be a @PostConstruct on this class and is
+    // now an @Observes StartupEvent on CapabilityRegistryService itself (a lazily
+    // instantiated JAX-RS bean never ran it, so a fresh node had an empty index).
+    // Its tests moved with it — see CapabilityRegistryServiceTest.StartupSeeding.
 
-    @Nested
-    @DisplayName("populateCapabilityRegistry (@PostConstruct)")
-    class CapabilityRegistryInit {
-
-        @Test
-        @DisplayName("should register agents with capabilities on startup")
-        void registersCapabilities() throws Exception {
-            var descriptor = new DocumentDescriptor();
-            descriptor.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/" + AGENT_ID + "?version=1"));
-            when(documentDescriptorStore.readDescriptors("ai.labs.agent", null, 0, 0, false))
-                    .thenReturn(List.of(descriptor));
-
-            var config = new AgentConfiguration();
-            config.setCapabilities(List.of(
-                    new AgentConfiguration.Capability("greeting", Map.of(), "medium"),
-                    new AgentConfiguration.Capability("farewell", Map.of(), "medium")));
-            when(agentStore.read(AGENT_ID, 1)).thenReturn(config);
-
-            sut.populateCapabilityRegistry();
-
-            verify(capabilityRegistryService).register(AGENT_ID, config);
-        }
-
-        @Test
-        @DisplayName("should skip agents without capabilities")
-        void skipsNonCapableAgents() throws Exception {
-            var descriptor = new DocumentDescriptor();
-            descriptor.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/" + AGENT_ID + "?version=1"));
-            when(documentDescriptorStore.readDescriptors("ai.labs.agent", null, 0, 0, false))
-                    .thenReturn(List.of(descriptor));
-
-            var config = new AgentConfiguration();
-            // No capabilities set
-            when(agentStore.read(AGENT_ID, 1)).thenReturn(config);
-
-            sut.populateCapabilityRegistry();
-
-            verify(capabilityRegistryService, never()).register(anyString(), any());
-        }
-
-        @Test
-        @DisplayName("should handle individual agent read failure gracefully")
-        void individualAgentFailure() throws Exception {
-            var descriptor = new DocumentDescriptor();
-            descriptor.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/" + AGENT_ID + "?version=1"));
-            when(documentDescriptorStore.readDescriptors("ai.labs.agent", null, 0, 0, false))
-                    .thenReturn(List.of(descriptor));
-            when(agentStore.read(AGENT_ID, 1))
-                    .thenThrow(new IResourceStore.ResourceNotFoundException("not found"));
-
-            assertDoesNotThrow(() -> sut.populateCapabilityRegistry());
-        }
-
-        @Test
-        @DisplayName("should handle complete registry population failure gracefully")
-        void totalFailure() throws Exception {
-            when(documentDescriptorStore.readDescriptors("ai.labs.agent", null, 0, 0, false))
-                    .thenThrow(new RuntimeException("db error"));
-
-            assertDoesNotThrow(() -> sut.populateCapabilityRegistry());
-        }
+    /**
+     * A guard that admits everything. {@code visibleOnly} filters with
+     * {@code canAccess}, which a bare Mockito mock answers {@code false} to —
+     * correct for a security check, wrong for a test that is not about the security
+     * check.
+     */
+    private static ResourceAccessGuard permissiveGuard() {
+        ResourceAccessGuard guard = mock(ResourceAccessGuard.class);
+        lenient().when(guard.seesEverything()).thenReturn(true);
+        lenient().when(guard.canAccess(any(), any())).thenReturn(true);
+        // A real guard never returns null here, and the space-narrowing overload
+        // chains straight off it. Left unstubbed the mock answers null and the
+        // listing NPEs, which reads as a production bug rather than a bare mock.
+        lenient().when(guard.listingScope()).thenReturn(AccessScope.unrestricted());
+        return guard;
     }
 }

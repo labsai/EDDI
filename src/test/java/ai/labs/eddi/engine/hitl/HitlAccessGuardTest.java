@@ -21,6 +21,7 @@ import java.security.Principal;
 import java.time.Instant;
 import java.util.List;
 
+import jakarta.ws.rs.NotFoundException;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -211,7 +212,7 @@ class HitlAccessGuardTest {
         when(gc.getGroupId()).thenReturn("g2");
         when(groupConversationService.readGroupConversation("gc1")).thenReturn(gc);
 
-        assertThrows(jakarta.ws.rs.NotFoundException.class,
+        assertThrows(NotFoundException.class,
                 () -> guard.requireGroupConversationHitlAccess("g1", "gc1"));
         verify(ownershipValidator, never()).requireOwnerAdminOrApprover(any(), any(), any());
     }
@@ -279,7 +280,7 @@ class HitlAccessGuardTest {
         humanPausedGc();
         callerNamed("hannah");
 
-        assertThrows(jakarta.ws.rs.NotFoundException.class,
+        assertThrows(NotFoundException.class,
                 () -> guard.requireGroupHumanInputAccess("other-group", "gc1", "hannah"));
     }
 
@@ -296,7 +297,7 @@ class HitlAccessGuardTest {
     void readAccess_pendingMemberMayReadTheStatusOfTheirTurn() throws Exception {
         var gc = humanPausedGc();
         gc.setPendingHumanInput(new GroupConversation.PendingHumanInput("hannah", "Hannah", 0, 0, 1,
-                "OPINION", "the prompt", "SKIP_TURN", java.time.Instant.now()));
+                "OPINION", "the prompt", "SKIP_TURN", Instant.now()));
         callerNamed("hannah");
         // Not owner, not admin, not approver — the strict guard would refuse.
         doThrow(new ForbiddenException("no"))
@@ -309,13 +310,13 @@ class HitlAccessGuardTest {
     void readAccess_strangerStillRefused_andWrongGroup404s() throws Exception {
         var gc = humanPausedGc();
         gc.setPendingHumanInput(new GroupConversation.PendingHumanInput("hannah", "Hannah", 0, 0, 1,
-                "OPINION", "the prompt", "SKIP_TURN", java.time.Instant.now()));
+                "OPINION", "the prompt", "SKIP_TURN", Instant.now()));
         callerNamed("mallory");
         doThrow(new ForbiddenException("no"))
                 .when(ownershipValidator).requireOwnerAdminOrApprover(any(), any(), any());
 
         assertThrows(ForbiddenException.class, () -> guard.requireGroupConversationReadAccess("g1", "gc1"));
-        assertThrows(jakarta.ws.rs.NotFoundException.class,
+        assertThrows(NotFoundException.class,
                 () -> guard.requireGroupConversationReadAccess("other-group", "gc1"));
     }
 

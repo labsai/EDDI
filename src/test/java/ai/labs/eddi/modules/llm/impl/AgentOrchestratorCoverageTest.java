@@ -5,11 +5,11 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.modules.llm.tools.spi.ToolRequestResolver;
-import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
-import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
+import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.hitl.tools.ChatTranscriptCodec;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
@@ -28,10 +28,12 @@ import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
+import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
 import ai.labs.eddi.modules.apicalls.impl.RequestRedactor;
 import ai.labs.eddi.modules.apicalls.impl.ResolvedRequest;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
+import ai.labs.eddi.modules.llm.tools.ToolCostTracker;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
 import ai.labs.eddi.modules.llm.tools.ToolInvocation;
 import ai.labs.eddi.modules.llm.tools.impl.*;
@@ -64,6 +66,7 @@ import java.util.logging.Level;
 import java.util.logging.LogRecord;
 import java.util.logging.Logger;
 
+import io.micrometer.core.instrument.Counter;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
@@ -128,9 +131,9 @@ class AgentOrchestratorCoverageTest {
     @Mock
     private A2AToolProviderManager a2aToolProviderManager;
     @Mock
-    private IRestAgentStore restAgentStore;
+    private IAgentStore restAgentStore;
     @Mock
-    private IRestWorkflowStore restWorkflowStore;
+    private IWorkflowStore restWorkflowStore;
     @Mock
     private IResourceClientLibrary resourceClientLibrary;
     @Mock
@@ -167,7 +170,7 @@ class AgentOrchestratorCoverageTest {
                 webScraperTool, textSummarizerTool, pdfReaderTool, weatherTool,
                 fetchToolResponsePageTool,
                 toolExecutionService, mcpToolProviderManager, a2aToolProviderManager,
-                restAgentStore, restWorkflowStore, resourceClientLibrary,
+                restWorkflowStore, resourceClientLibrary,
                 apiCallExecutor, jsonSerialization, memoryItemConverter,
                 userMemoryStore, toolResponseTruncator, tenantQuotaService,
                 memorySnapshotService,
@@ -269,8 +272,8 @@ class AgentOrchestratorCoverageTest {
     }
 
     @SuppressWarnings("unchecked")
-    private ai.labs.eddi.engine.memory.IData<Integer> dataOfInt(int v) {
-        var d = mock(ai.labs.eddi.engine.memory.IData.class);
+    private IData<Integer> dataOfInt(int v) {
+        var d = mock(IData.class);
         lenient().when(d.getResult()).thenReturn(v);
         return d;
     }
@@ -378,14 +381,14 @@ class AgentOrchestratorCoverageTest {
      * {@code isWithinBudget}, not from accumulated cost. That the budget can be
      * reached by real spend at all is proved by
      * {@code AgentOrchestratorToolCostTest}, which drives the same loop against a
-     * REAL {@link ai.labs.eddi.modules.llm.tools.ToolCostTracker}.
+     * REAL {@link ToolCostTracker}.
      */
     @Test
     void toolCall_perConversationBudgetExceeded_returnsBudgetError() throws Exception {
         var task = calcOnlyTask();
         task.setMaxBudgetPerConversation(1.0);
         task.setEnforceBudget(true);
-        var costTracker = mock(ai.labs.eddi.modules.llm.tools.ToolCostTracker.class);
+        var costTracker = mock(ToolCostTracker.class);
         when(toolExecutionService.getCostTracker()).thenReturn(costTracker);
         when(costTracker.isWithinBudget(eq("conv-1"), eq(1.0))).thenReturn(false);
 
@@ -689,7 +692,7 @@ class AgentOrchestratorCoverageTest {
         var task = calcOnlyTask();
         task.setMaxBudgetPerConversation(1.0);
         task.setEnforceBudget(false);
-        var costTracker = mock(ai.labs.eddi.modules.llm.tools.ToolCostTracker.class);
+        var costTracker = mock(ToolCostTracker.class);
         lenient().when(toolExecutionService.getCostTracker()).thenReturn(costTracker);
         lenient().when(costTracker.isWithinBudget(anyString(), anyDouble())).thenReturn(false);
 
@@ -731,7 +734,7 @@ class AgentOrchestratorCoverageTest {
         var task = calcOnlyTask();
         task.setMaxBudgetPerConversation(1.0);
         // deliberately no setEnforceBudget(...)
-        var costTracker = mock(ai.labs.eddi.modules.llm.tools.ToolCostTracker.class);
+        var costTracker = mock(ToolCostTracker.class);
         lenient().when(toolExecutionService.getCostTracker()).thenReturn(costTracker);
         lenient().when(costTracker.isWithinBudget(nullable(String.class), anyDouble())).thenReturn(false);
 
@@ -824,8 +827,17 @@ class AgentOrchestratorCoverageTest {
         var result = orchestrator.executeIfToolsEnabled(chatModel, "sys", List.of(UserMessage.from("hi")), task, memory);
 
         assertNotNull(result);
-        // Last message is a tool result (not an AiMessage) -> sentinel string.
-        assertEquals("Max tool iterations reached", result.response());
+        // Last message is a tool result (not an AiMessage) → the budget-spent
+        // message. Equality against the producer keeps the wording in ONE place;
+        // the properties that matter are pinned separately: the user must learn
+        // the configured cap, that completed work stands, and how to resume.
+        assertEquals(ToolLoopRunner.iterationBudgetSpentMessage(2), result.response());
+        assertTrue(result.response().contains("2 tool-calling rounds"),
+                "the message must name the configured cap, not a generic limit");
+        assertTrue(result.response().contains("not rolled back"),
+                "the user must learn that completed calls have taken effect");
+        assertTrue(result.response().toLowerCase().contains("continue"),
+                "the message must say how to resume the work");
     }
 
     @Test
@@ -860,7 +872,7 @@ class AgentOrchestratorCoverageTest {
                 webScraperTool, textSummarizerTool, pdfReaderTool, weatherTool,
                 fetchToolResponsePageTool,
                 toolExecutionService, mcpToolProviderManager, a2aToolProviderManager,
-                restAgentStore, restWorkflowStore, resourceClientLibrary,
+                restWorkflowStore, resourceClientLibrary,
                 apiCallExecutor, jsonSerialization, memoryItemConverter,
                 userMemoryStore, toolResponseTruncator, tenantQuotaService,
                 null,
@@ -888,7 +900,7 @@ class AgentOrchestratorCoverageTest {
                 webScraperTool, textSummarizerTool, pdfReaderTool, weatherTool,
                 fetchToolResponsePageTool,
                 toolExecutionService, mcpToolProviderManager, a2aToolProviderManager,
-                restAgentStore, restWorkflowStore, resourceClientLibrary,
+                restWorkflowStore, resourceClientLibrary,
                 apiCallExecutor, jsonSerialization, memoryItemConverter,
                 userMemoryStore, toolResponseTruncator, null,
                 memorySnapshotService,
@@ -1353,10 +1365,10 @@ class AgentOrchestratorCoverageTest {
     /** Delta of the named decision-tagged counter across whatever `action` does. */
     private static double approvalCountDelta(String decision, Runnable action) {
         double before = Metrics.globalRegistry.find("eddi.operator.write.approval").tag("decision", decision).counters().stream()
-                .mapToDouble(io.micrometer.core.instrument.Counter::count).sum();
+                .mapToDouble(Counter::count).sum();
         action.run();
         double after = Metrics.globalRegistry.find("eddi.operator.write.approval").tag("decision", decision).counters().stream()
-                .mapToDouble(io.micrometer.core.instrument.Counter::count).sum();
+                .mapToDouble(Counter::count).sum();
         return after - before;
     }
 

@@ -16,6 +16,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.*;
+import java.util.Objects;
 
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
@@ -502,12 +503,12 @@ public class ContextMatcherTest {
             if (o == null || getClass() != o.getClass())
                 return false;
             MockData<?> that = (MockData<?>) o;
-            return java.util.Objects.equals(key, that.key) && java.util.Objects.equals(result, that.result);
+            return Objects.equals(key, that.key) && Objects.equals(result, that.result);
         }
 
         @Override
         public int hashCode() {
-            return java.util.Objects.hash(key, result);
+            return Objects.hash(key, result);
         }
     }
 }

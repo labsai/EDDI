@@ -3,6 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 package ai.labs.eddi.engine.internal;
+import ai.labs.eddi.configs.agents.AgentSigningService;
+import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.configs.agents.crypto.NonceCacheService;
 
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
@@ -49,6 +52,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import io.micrometer.core.instrument.Timer;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Counter;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -93,17 +99,17 @@ class GroupConversationServiceUncoveredBranchTest {
     @Mock
     private IJsonSerialization jsonSerialization;
     @Mock
-    private ai.labs.eddi.configs.agents.AgentSigningService agentSigningService;
+    private AgentSigningService agentSigningService;
     @Mock
-    private ai.labs.eddi.configs.agents.IAgentStore agentStore;
+    private IAgentStore agentStore;
     @Mock
-    private ai.labs.eddi.configs.agents.crypto.NonceCacheService nonceCacheService;
+    private NonceCacheService nonceCacheService;
     @Mock
-    private io.micrometer.core.instrument.MeterRegistry meterRegistry;
+    private MeterRegistry meterRegistry;
     @Mock
-    private io.micrometer.core.instrument.Timer timer;
+    private Timer timer;
     @Mock
-    private io.micrometer.core.instrument.Counter counter;
+    private Counter counter;
 
     private GroupConversationService service;
 

@@ -46,11 +46,12 @@ The [README "Maven Command Reference"](README.md#maven-command-reference) is the
 | Command | What it does |
 | ------- | ------------ |
 | `./mvnw compile quarkus:dev` | Start dev mode with live reload — app on port **7070**, Dev UI at `/q/dev` |
-| `./mvnw compile` | Compile only (fast feedback) — run before every commit per §2 rule 6 |
+| `./mvnw compile` | Compile only (fast feedback) — run before every commit per §2 rule 6. It is also where the style gates fire: Checkstyle's import rules and `formatter:validate` are both bound to the `validate` phase, which `compile` runs through, so an unused import or an unformatted file **fails the build here** rather than being silently rewritten. Fix with `./mvnw formatter:format` (formatting) or by deleting the import (Checkstyle) |
 | `./mvnw test` | Unit tests (excludes `*IT.java`); JaCoCo report at `target/site/jacoco/index.html` |
 | `./mvnw test -Dtest=ClassName` | Run a single test class |
-| `./mvnw verify` | Full build **including** integration tests — requires Docker |
-| `./mvnw validate` · `./mvnw formatter:format` | Checkstyle check · auto-format with the project Eclipse formatter |
+| `./mvnw verify` | Compile + unit tests + package. **Integration tests do NOT run** — `skipITs` defaults to `true` |
+| `./mvnw verify -DskipITs=false` | Full build **including** integration tests — requires Docker. The command CI runs |
+| `./mvnw validate` · `./mvnw formatter:format` | The two blocking style gates — Checkstyle (`UnusedImports`/`RedundantImport` are `severity="error"`; `FileLength`/`LineLength` stay advisory) and `formatter:validate`, which **reports** drift and never edits your files · auto-format with the project Eclipse formatter, i.e. the fix for a `formatter:validate` failure |
 
 > **Sandbox caveat:** integration tests (`*IT.java`) and any test that binds a loopback/HTTP socket need Docker and frequently cannot run in sandboxed agent environments — CI verifies those. Locally, rely on `./mvnw test` (unit tests) and treat a green CI run as the source of truth for the rest.
 
@@ -62,7 +63,7 @@ The [README "Maven Command Reference"](README.md#maven-command-reference) is the
 
 1. **Read the key docs**:
    - [`docs/project-philosophy.md`](docs/project-philosophy.md) — **Supreme directive.** 9 architectural pillars governing all EDDI development
-   - [`docs/changelog.md`](docs/changelog.md) — **Read the most recent entries first** (newest are at the top). Running log of changes, decisions, and reasoning across all repos and sessions. It is long (hundreds of entries) — skim the top 2–3 entries for current context rather than reading the whole file.
+   - [`docs/changelog.md`](docs/changelog.md) — **Read the most recent entries first** (newest are at the top). Running log of changes, decisions, and reasoning across all repos and sessions. It holds only recent work, capped at 250 KB; older entries are archived per month under [`docs/changelog/`](docs/changelog/) and are indexed in an Archive table at the top of the live file. Skim the top 2–3 entries for current context — do not read the archives unless you are chasing a specific past decision.
    - [`docs/architecture.md`](docs/architecture.md) — Architecture overview, configuration model, pipeline, and DB-agnostic design
    - If working on **EDDI-Manager**: also read `EDDI-Manager/AGENTS.md` in the Manager repo
 2. **Check git status**: Run `git status` and `git log -5 --oneline` to see current branch state and recent work.
@@ -90,9 +91,14 @@ The [README "Maven Command Reference"](README.md#maven-command-reference) is the
    - Stage files individually: `git add path/to/file1 path/to/file2`
    - Run `git status` before committing — if any staged file is not part of your task, unstage it
    - Run `git log --stat -1` after committing to confirm the commit only contains your files
-6. **Each commit must build**: Run `./mvnw compile` (or `./mvnw test` for backend) before committing. Never commit broken code.
+6. **Each commit must build**: Run `./mvnw compile` (or `./mvnw test` for backend) before committing. Never commit broken code. `compile` passes through the `validate` phase, so it also enforces the two style gates — an unused import fails Checkstyle and an unformatted file fails `formatter:validate`. Neither rewrites your sources: run `./mvnw formatter:format` to fix formatting, and delete the import Checkstyle names. (The formatter used to run its `format` goal on every build, which edited tracked files behind your back and put them in `git status` next to your real work — the reason rule 5 forbids `git add .`.)
 7. **Verify factual claims against authoritative sources**: When writing documentation about the project's technology stack, dependencies, or CI configuration, **always verify against the canonical source** (`pom.xml` for dependencies, `ci.yml` for CI behavior, `Dockerfile` for container config). **Never infer from codebase grep results** — migration code, comments about "previous implementations," and backward-compatibility references describe what the project *used to* use, not what it currently uses. If a term appears 40 times in the codebase but zero times in `pom.xml`, the project does not use it.
-8. **Update the changelog immediately before committing**: Edit [`docs/changelog.md`](docs/changelog.md) and include it in the commit that contains the changes being documented. The changelog must land on the **same branch** as the work it documents — never on a different branch after the fact. Each entry should include:
+8. **Update the changelog immediately before committing**: Edit [`docs/changelog.md`](docs/changelog.md) and include it in the commit that contains the changes being documented. The changelog must land on the **same branch** as the work it documents — never on a different branch after the fact.
+   - **Add the entry directly below the `---` that closes the header**, above the most recent existing entry. Never append to a file under `docs/changelog/` — those are archives, and nothing reads them for current context.
+   - **The live file is capped at 250 KB**, enforced by `ChangelogRotationTest`. This rule is why the cap exists: it obliges every session to add and never to remove, which once grew a single file to 1.9 MB (~500k tokens). If the test fails, **rotate — do not raise the cap**: run `python scripts/rotate-changelog.py`, which moves the oldest entries into `docs/changelog/<YYYY-MM>.md` by date, re-depths their relative links (leaving code spans alone), and regenerates the Archive table. Add any newly created archive file to `docs/SUMMARY.md`.
+   - **`## Decision Log` and `## Regression Notes` at the bottom are running registers, not entries.** They are never rotated out; append rows to them in place.
+
+   Each entry should include:
    - Date and short title
    - Repo and branch
    - What changed (files + reasoning)
@@ -134,15 +140,18 @@ Follow this order unless the user explicitly requests something different.
 | 5     | NATS JetStream           | Event bus abstraction, async processing, coordinator dashboard                                      |
 | 6     | DB-Agnostic Architecture | PostgreSQL adapter, MongoDB sync driver, Caffeine cache, Lombok removal, langchain4j core migration |
 | 7     | Security & Compliance    | Secrets Vault, Audit Ledger (EU AI Act), tenant quota stub                                          |
-| 8     | MCP Integration          | MCP Server (60+ tools), MCP Client, agent discovery, managed conversations                           |
+| 8     | MCP Integration          | MCP Server (80+ tools), MCP Client, agent discovery, managed conversations                           |
 | 8c    | RAG Foundation           | Config-driven vector store retrieval, pgvector, httpCall RAG                                        |
-| 10    | Group Conversations      | Multi-agent debate orchestration, 6 styles (incl. Task Force), group-of-groups                      |
+| 10    | Group Conversations      | Multi-agent debate orchestration, 7 styles (incl. Task Force, Negotiation), group-of-groups         |
 | 10b   | Dynamic Agents           | Runtime agent creation/recruitment/delegation, DynamicAgentConfig guardrails, lifecycle policies, SharedTaskList |
+| 10c   | Group Deliberation       | `VOTE` phases + VoteTallyEngine (quorum, weights, tie policies), NEGOTIATION style + NegotiationEngine, facilitator with bounded moves, humans as group members, dissent recording, transcript windowing |
+| 10d   | Group Work Products      | Shared artifacts (CAS + declarative validators), bid-based task assignment (CNP-lite), `RETRO` → team-owned group memory, standing teams (backlog + cron cadences + metrics), 5 preset group templates |
 | —     | A2A Protocol             | Agent-to-Agent peer communication, Agent Cards, skill discovery                                     |
 | —     | Multi-Model Cascading    | Sequential model escalation with confidence routing                                                 |
 | —     | LLM Provider Expansion   | Added Mistral, Azure OpenAI, Bedrock, Oracle GenAI (12 providers; see `docs/langchain.md`)                                     |
 | —     | Quarkus LTS              | LTS platform upgrade, Java 25 module fix (version pinned in `pom.xml`)                              |
 | 12    | CI/CD                    | GitHub Actions unified pipeline, Docker Hub push, CircleCI removed                                  |
+| —     | OpenTelemetry Tracing    | Per-task `eddi.pipeline.task` spans from `LifecycleManager`, MCP circuit breakers — see [`docs/monitoring/monitoring-guide.md`](docs/monitoring/monitoring-guide.md) |
 | 11a   | Persistent Memory        | IUserMemoryStore, UserMemoryTool, DreamService, McpMemoryTools, Property.Visibility                 |
 | —     | Conversation Windows     | Token-aware windowing, rolling summary, ConversationRecallTool                                      |
 | —     | Agentic Improvements 1–5 | Counterweights, MCP governance, capability registry, multimodal attachments, agent signing          |
@@ -152,7 +161,7 @@ Follow this order unless the user explicitly requests something different.
 | —     | GDPR/CCPA Framework      | Cascading erasure, data portability, Art. 18 restriction, per-category retention                    |
 | —     | Commit Flags             | Strict write discipline for memory — uncommit failed task data, error digest injection              |
 | —     | Template Preview         | REST endpoint for previewing resolved system prompts with sample/live data                          |
-| —     | Test Coverage            | 12,000+ tests, >90% instruction / >80% branch coverage, OpenSSF Gold compliance                     |
+| —     | Test Coverage            | 14,000+ tests, >90% instruction / >80% branch coverage, OpenSSF Gold compliance                     |
 | —     | Security Hardening v6.0.2 | SSRF prevention, SafeHttpClient, auth guard, vault salt, security headers, CodeQL + Trivy CI       |
 | 9b    | HITL Framework           | Two human-approval gates (turn-level `PAUSE_CONVERSATION` + per-tool-call gating), timeout/no-progress policies, audit ledger, Slack + MCP approval surfaces, crash recovery — see [`docs/hitl.md`](docs/hitl.md) |
 | —     | OpenAI-Compatible API    | `/v1` adapter presenting deployed agents as OpenAI models for Open WebUI and OpenAI SDK clients; per-chat conversation isolation, streaming, multimodal, HITL-aware — see [`docs/open-webui-integration.md`](docs/open-webui-integration.md) |
@@ -164,8 +173,8 @@ Follow this order unless the user explicitly requests something different.
 | —     | Memory Architecture       | Commit flags, RAG threshold, context selection, auto-compaction, property consolidation (see `planning/memory-architecture-plan.md`) |
 | —     | Session Forking           | State snapshotting, conversation forking (see `planning/agentic-improvements-plan.md` §7)                                                 |
 | —     | Conversation Chaining     | Cross-session context carry-over (see `planning/conversation-window-management.md` Strategy 3)                                       |
-| 9     | DAG Pipeline              | Parallel tasks, circuit breakers, OpenTelemetry tracing                                                                                   |
-| —     | HITL — remaining          | EDDI-Manager approvals UI (Manager repo) and the reserved `inGroupTurns: INBOX` group-approval mode (core framework shipped — see Completed)              |
+| 9     | DAG Pipeline              | Parallel task execution and the dependency graph. OpenTelemetry tracing and MCP circuit breakers already shipped — see Completed          |
+| —     | HITL — remaining          | EDDI-Manager approvals UI (Manager repo) and the reserved `inGroupTurns: INBOX` mode for member *tool-call* pauses. Core framework shipped; humans as group *members* shipped in 10c — see Completed. `VoteConfig.tiePolicy: HUMAN_DECIDES` is likewise still save-time rejected pending its own resume machinery |
 | —     | Guardrails                | Config-driven input/output guardrails in LlmTask (see `planning/guardrails-architecture.md`)                                         |
 | 11b   | Multi-Channel             | Teams adapter (Slack already ships via HITL approval channels; see `planning/multi-agent-ux-improvements.md`)                        |
 | 13    | Debugging & Visualization | Time-traveling debugger, visual pipeline builder                                                                                          |
@@ -324,6 +333,7 @@ Several infrastructure components are already built and should be reused, not du
 - `GroupConversationService.discuss()` creates individual conversations for each member agent
 - Group context (groupId, discussion phase, peer responses) is injected via the conversation's `Context` map
 - `GroupConversationEventSink` streams SSE events for real-time group discussion visibility
+- **Collaboration surfaces are opt-in by absence — but check which kind of absence.** For the two that expose **tools**, `artifactConfig` and `taskListConfig`, a null config means the tools are never *assembled*: they cost no prompt tokens and cannot be argued with, whereas a tool that exists and always says no invites retries. For `contextWindow` and `facilitator`, null means the behaviour does not run at all — no windowing pass, no checkpoint. But `retroConfig` and `humanMemberConfig` are **defaults, not switches**: a null `retroConfig` runs a RETRO phase with the default caps, and a null `humanMemberConfig` still pauses for a HUMAN member's turn — it just waits indefinitely. When adding a group capability, decide which of the three shapes you mean and say so in the field's Javadoc.
 
 When a feature needs to know which group an agent belongs to (e.g., persistent memory with `group` visibility), the groupId comes from the `GroupConversation` context — not from `AgentConfiguration`. The group is a runtime concern, not a static configuration.
 
@@ -597,7 +607,7 @@ When implementing a new feature, provide:
 
 - **Always reference types and annotations by their simple name with a top-level `import`** — never inline a fully-qualified name (e.g. write `@Inject IAttachmentStore store;` with the imports, not `@jakarta.inject.Inject ai.labs.eddi.engine.attachments.IAttachmentStore store;`). FQNs in field declarations, method signatures, annotations, and generics hurt readability and are a common review comment.
 - The **only** acceptable inline FQN is disambiguating two classes that share a simple name and are both used in the same file — and even then, prefer restructuring so only one is imported.
-- Don't leave unused imports behind after a refactor; run `./mvnw formatter:format` and `./mvnw validate` (Checkstyle) before committing.
+- Don't leave unused imports behind after a refactor; run `./mvnw formatter:format` and `./mvnw validate` (Checkstyle) before committing. Both are enforced, not advisory: `UnusedImports` and `RedundantImport` carry `severity="error"` in `checkstyle.xml` and the plugin fails on them, and `formatter:validate` fails on unformatted sources instead of rewriting them — so any `./mvnw compile`, `test` or `verify` will stop on either. **Mind the scopes, they differ:** `formatter:validate` grades `src/main/java` *and* `src/test/java`, but the Checkstyle gate sets `includeTestSourceDirectory=false`, so its import rules grade **`src/main/java` only** — an unused import in a test still compiles and still merges. Keep test imports clean by hand; the flag stays off until the 163 pre-existing violations in `src/test/java` are cleared, and `BuildQualityGatesTest` fails if the flag and this sentence ever disagree.
 
 #### Production-Scale Thinking
 
@@ -617,12 +627,11 @@ When designing any new feature, always consider these before finalizing the desi
 | ------------------------------------------- | ----------------------------------------------------------- |
 | `src/main/docker/Dockerfile`                | Production JVM container image (digest-pinned base)         |
 | `src/main/resources/application.properties` | Quarkus config (CORS, health, OpenAPI, MongoDB)             |
-| `src/main/resources/initial-agents/`        | Agent Father and sample agent configs                       |
 | `.github/workflows/ci.yml`                  | CI/CD pipeline (build, test, Docker push, smoke test)       |
 | `docs/`                                     | Markdown documentation, published at docs.labs.ai           |
 | `docker-compose.yml`                        | EDDI + MongoDB local setup                                  |
 | `mise.toml`                                 | Optional [mise](https://mise.jdx.dev) toolchain (pinned JDK 25 + Maven) + task shortcuts |
-| `docs/agent-configs/`                       | Agent config sources (e.g. Agent Father) — reference for AI |
+| `docs/agent-configs/`                       | Worked agent config sources — reference for AI; partially swept by two unit tests (scope in §5.6) |
 | `src/main/java/.../httpclient/SafeHttpClient.java` | Centralized SSRF-safe HTTP client wrapper              |
 | `src/main/java/.../security/AuthStartupGuard.java` | Production auth enforcement guard                      |
 | `.env.example`                              | Docker Compose env var reference (copy to `.env`; optional for basic local dev) |
@@ -631,10 +640,14 @@ When designing any new feature, always consider these before finalizing the desi
 
 #### Base Image Management
 
-The production image (`Dockerfile`) uses a Red Hat UBI 9 base pinned by **SHA256 digest** for OpenSSF supply-chain compliance. This means:
+The production image (`Dockerfile`) uses a Red Hat UBI 10 base pinned by **SHA256 digest** for OpenSSF supply-chain compliance. This means:
 
-- The `FROM` line must always include `@sha256:...` — never use a bare tag like `:1.24`
+- Every `FROM` line must include `@sha256:...` — never use a bare tag like `:1.24`
+- The build is multi-stage (`docs` and `runtime`) and **both stages carry the same pin**. Move them together: `base-image-check.yml` reads the last `FROM` but its `sed` rewrites every line carrying the pin, so bumping one leaves a stale base in the image and desynchronises the automation
 - Red Hat periodically republishes the same tag with security patches baked in
+- `ContainerBaseIT` builds its image from this file via `EddiImageDockerfile.forTestContext()`, so the pin cannot drift — never restate the image reference in test code
+
+RHEL 10 carries two constraints the `FROM` line documents in full and that any change here must preserve: a **x86-64-v3 host CPU floor** (glibc refuses to start below it) and a crypto policy that **disables the static-RSA TLS 1.2 suites** for the JVM as well as the OS.
 
 #### Trivy CVE Remediation Procedure
 
@@ -642,7 +655,7 @@ When Trivy (CI container scan) flags a base image CVE:
 
 1. **Check for a newer digest first** — pull the latest image for the same tag and compare:
    ```bash
-   docker pull registry.access.redhat.com/ubi9/openjdk-25-runtime:1.24
+   docker pull registry.access.redhat.com/ubi10/openjdk-25-runtime:1.24
    # Check the digest in the pull output
    docker run --rm <image> rpm -q <vulnerable-package>
    ```
@@ -793,7 +806,7 @@ Matcher:      "actions" : "ask_for_model"
 | `longTerm`     | Persisted to `usermemories` collection across conversations                                                                                   |
 | `secret`       | Auto-vaulted: plaintext stored in SecretsVault, raw input scrubbed from memory, vault reference (`${vault:...}`) stored as property value |
 
-> **Warning**: `scope: "secret"` requires the vault to be active (`EDDI_VAULT_MASTER_KEY` env var set). If vault is disabled (common in dev mode), `autoVaultSecret()` fails and falls back to storing plaintext — but logs an ERROR that may confuse users. For wizard-style agents that collect API keys and pass them to an endpoint (like the Agent Father), prefer `scope: "conversation"` and delegate vaulting to the receiving service.
+> **Warning**: `scope: "secret"` requires the vault to be active (`EDDI_VAULT_MASTER_KEY` env var set). If the vault is disabled — which is the shipped default — `autoVaultSecret()` **fails closed**: it scrubs the plaintext from the conversation step, logs an ERROR, and throws a `LifecycleException` naming `EDDI_VAULT_MASTER_KEY`. The whole turn fails; the plaintext is never persisted. (An earlier release persisted the plaintext instead; that behaviour was removed deliberately — see the comment in `PropertySetterTask.autoVaultSecret` and `docs/properties.md`.) For wizard-style agents that collect API keys and pass them to an endpoint (see §5.6), prefer `scope: "conversation"` and delegate vaulting to the receiving service — a dev instance without a master key cannot complete a secret-scoped turn at all.
 
 #### Capturing user input vs. setting fixed values
 
@@ -811,8 +824,10 @@ Matcher:      "actions" : "ask_for_model"
 #### Qute template safety in HTTP call bodies
 
 When embedding `{properties.x}` in HTTP call body templates, be aware:
-- `quarkus.qute.strict-rendering=false` renders missing properties as empty strings (no error). This is set once in `application.properties` and applies to **every profile** — there is deliberately no `%prod` override, so dev, test and production all render leniently and fail identically. (Earlier releases turned strict rendering **on** in prod only, which meant a missing property rendered blank in dev but leaked the raw `{properties.x}` literal to the end user in production.)
-- Do NOT use `.orEmpty` on properties — it's for Qute iterables, not strings, and fails on `NOT_FOUND`
+- A missing property renders as an **empty string**, in every profile. This takes *two* settings in `application.properties`, and both are deliberate:
+  - `quarkus.qute.strict-rendering=false` stops the render from throwing. There is no `%prod` override — dev, test and production must fail identically. (Earlier releases turned strict rendering **on** in prod only, which meant a missing property rendered blank in dev but leaked the raw `{properties.x}` literal to the end user in production.)
+  - `quarkus.qute.property-not-found-strategy=NOOP` decides what is written instead. Without it a missing value resolves to Qute's NotFound sentinel and the **literal string `NOT_FOUND`** reaches the output — system prompts, HTTP call bodies and user-visible replies alike ("Your favourite programming language is: NOT_FOUND."). Dev mode defaults to throwing instead, so the two did not even agree. This was a live defect, not a hypothetical.
+- Do NOT use `.orEmpty` on properties — it's for Qute iterables, not strings, and fails on `NOT_FOUND`. If you want an explicit fallback in the template itself, the Qute idiom is the elvis operator: `{properties.x ?: 'unknown'}`
 - User-entered text containing `{` or `}` will be interpreted as Qute expressions, potentially eating content
 
 #### Calling an API as the signed-in user
@@ -870,7 +885,7 @@ Supported `subType` values: `"password"`, `"text"`, `"email"`. When the UI recei
 
 ### 5.5 ZIP Structure for Agent Import
 
-Agent ZIP files are imported via `RestImportService`. **All IDs in URIs and filenames must be valid hex identifiers** (24-char hex strings like MongoDB ObjectIds, or UUIDs). The import service validates IDs via `RestUtilities.isValidId()` which requires ≥18 hex characters (`0-9a-fA-F` and dashes). Semantic names like `agent-father-wf1` will be rejected.
+Agent ZIP files are imported via `RestImportService`. **All IDs in URIs and filenames must be valid hex identifiers** (24-char hex strings like MongoDB ObjectIds, or UUIDs). The import service validates IDs via `RestUtilities.isValidId()` which requires ≥18 hex characters (`0-9a-fA-F` and dashes). Semantic names like `my-agent-wf1` will be rejected.
 
 The file naming convention is `{id}.{type}.json` where `{id}` matches the last path segment of the resource URI:
 
@@ -891,7 +906,22 @@ The file naming convention is `{id}.{type}.json` where `{id}` matches the last p
     {outputId}.descriptor.json
     {llmId}.langchain.json        → LLM configuration (file ext stays "langchain", URI uses "llm")
     {llmId}.descriptor.json
+    {dictionaryId}.regulardictionary.json → Regular dictionary (URI uses "dictionary")
+    {dictionaryId}.descriptor.json
+    {mcpId}.mcpcalls.json         → MCP tool calls
+    {mcpId}.descriptor.json
+    {ragId}.rag.json              → RAG retrieval configuration
+    {ragId}.descriptor.json
+snippets/
+  {snippetId}.snippet.json        → Prompt snippets (root, agent, or version level)
+schedules/
+  {scheduleId}.schedule.json      → Agent schedules
+connections/
+  {connectionId}.connection.json  → Connections the configs reference as ${connection:name} (references only — never resolved secrets, never grants; skipped on import when the name already exists)
 ```
+
+> The authoritative list of file extensions is `AbstractBackupService`'s `*_EXT` constants —
+> thirteen of them. Check against that file rather than against this block if the two ever disagree.
 
 > **Important**: File extensions use legacy names (`behavior`, `httpcalls`, `langchain`) while URIs use v6 names (`rules`, `apicalls`, `llm`). The import service maps between them via `AbstractBackupService` constants.
 
@@ -925,16 +955,20 @@ Always use v6 canonical URIs in new configs:
 | `eddi://ai.labs.httpcalls` | `eddi://ai.labs.apicalls/...` | Optional — API calls        |
 | `eddi://ai.labs.output`    | `eddi://ai.labs.output/...`   | Usually yes — user messages |
 | `eddi://ai.labs.llm`       | `eddi://ai.labs.llm/...`      | Optional — LLM interaction  |
+| `eddi://ai.labs.mcpcalls`  | `eddi://ai.labs.mcpcalls/...` | Optional — MCP tool calls   |
+| `eddi://ai.labs.templating`| — (no config URI)             | Yes when any output or system prompt contains `{…}` placeholders — must be last |
 
 ### 5.6 Reference Implementation
 
-The **Agent Father** (`docs/agent-configs/agent-father/`) is a complete, working, rule-based agent config. Use it as the canonical reference for:
+`docs/agent-configs/rule-based-reference/` is a complete, working, rule-based agent config — a conversational wizard that provisions another agent over EDDI's own REST API. It is a **reference and test fixture only**: nothing ships or deploys it, and agents are created in practice through the Manager's Platform Operator, its agent wizard, or the setup API. Use it as the canonical reference for:
 
 - Behavior rule patterns with `actionmatcher` + `inputmatcher`
 - Property setter capturing free-text input via `{memory.current.input}` (it uses `scope: "conversation"` throughout and delegates secret vaulting to the receiving `create_agent` HTTP call — the wizard pattern from §5.4, deliberately **not** `scope: "secret"`)
 - HTTP call template syntax
 - Output with quick replies
-- Provider-aware branching (local vs. cloud LLM providers)
+- Provider-aware branching (local vs. cloud LLM providers). Its chooser offers 11 options, which is not the same as the "12 providers" quoted elsewhere — the two are counted differently (the chooser splits `gemini` / `gemini_vertex`; the platform figure folds in OpenAI-compatible endpoints such as DeepSeek and Cohere). Don't reconcile them by editing this fixture: it is a worked example, not a provider catalogue. `docs/langchain.md` is the source of truth for what EDDI supports.
+
+Two unit tests sweep `docs/agent-configs`, so breaking this config fails the plain unit run — but mind what they actually check. `StrictBoundaryShippedConfigsTest` parses only files whose suffix is in its `BY_SUFFIX` map (descriptors, patches and unmapped names are counted as *skipped*, not passed), and `RuleSetStoreShippedRulesetsTest` validates only documents containing `behaviorGroups`. Neither opens a ZIP. So a green sweep means "the config documents this fixture supplies still parse and still save", not "every file here is valid".
 
 ---
 

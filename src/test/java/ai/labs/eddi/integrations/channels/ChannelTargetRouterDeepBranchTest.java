@@ -4,7 +4,7 @@
  */
 package ai.labs.eddi.integrations.channels;
 
-import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.channels.IChannelIntegrationStore;
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.channels.model.ChannelTarget;
@@ -22,6 +22,7 @@ import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Field;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -42,7 +43,7 @@ class ChannelTargetRouterDeepBranchTest {
         var channelStore = mock(IChannelIntegrationStore.class);
         var descriptorStore = mock(IDocumentDescriptorStore.class);
         var agentAdmin = mock(IRestAgentAdministration.class);
-        var agentStore = mock(IRestAgentStore.class);
+        var agentStore = mock(IAgentStore.class);
         var secretResolver = mock(SecretResolver.class);
         var cacheFactory = mock(ICacheFactory.class);
         threadTargetLock = mock(ICache.class);
@@ -179,7 +180,7 @@ class ChannelTargetRouterDeepBranchTest {
         @Test
         @DisplayName("colon, trigger is null in list → skip that trigger")
         void nullTriggerInList() {
-            var triggerList = new java.util.ArrayList<String>();
+            var triggerList = new ArrayList<String>();
             triggerList.add(null);
             triggerList.add("gpt4");
             var target = createTarget("gpt4", triggerList);

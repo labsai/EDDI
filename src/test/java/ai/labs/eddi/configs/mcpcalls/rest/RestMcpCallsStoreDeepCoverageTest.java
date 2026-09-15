@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.configs.mcpcalls.rest;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.configs.mcpcalls.model.McpToolDiscoveryRequest;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.mcpcalls.IMcpCallsStore;
 import ai.labs.eddi.configs.mcpcalls.model.McpCallsConfiguration;
@@ -20,6 +22,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 import java.util.Map;
 
+import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -38,7 +41,8 @@ class RestMcpCallsStoreDeepCoverageTest {
         var documentDescriptorStore = mock(IDocumentDescriptorStore.class);
         jsonSchemaCreator = mock(IJsonSchemaCreator.class);
         mcpToolProviderManager = mock(McpToolProviderManager.class);
-        restStore = new RestMcpCallsStore(mcpCallsStore, documentDescriptorStore, jsonSchemaCreator, mcpToolProviderManager);
+        restStore = new RestMcpCallsStore(mcpCallsStore, documentDescriptorStore, jsonSchemaCreator, mcpToolProviderManager,
+                mock(ResourceAccessGuard.class));
     }
 
     @Nested
@@ -49,7 +53,7 @@ class RestMcpCallsStoreDeepCoverageTest {
         @DisplayName("returns tool list with parameters")
         void successWithParams() throws Exception {
             var spec1 = ToolSpecification.builder().name("tool1").description("desc1").build();
-            var paramSchema = dev.langchain4j.model.chat.request.json.JsonObjectSchema.builder()
+            var paramSchema = JsonObjectSchema.builder()
                     .addStringProperty("param1")
                     .build();
             var spec2 = ToolSpecification.builder().name("tool2").description("desc2")
@@ -59,7 +63,7 @@ class RestMcpCallsStoreDeepCoverageTest {
             var result = new McpToolProviderManager.McpToolsResult(List.of(spec1, spec2), Map.of());
             doReturn(result).when(mcpToolProviderManager).discoverTools(any());
 
-            Response response = restStore.discoverTools("http://remote:8080", "http", null);
+            Response response = restStore.discoverTools(new McpToolDiscoveryRequest("http://remote:8080", "http"), null);
             assertEquals(200, response.getStatus());
 
             @SuppressWarnings("unchecked")
@@ -81,7 +85,7 @@ class RestMcpCallsStoreDeepCoverageTest {
             var result = new McpToolProviderManager.McpToolsResult(List.of(spec), Map.of());
             doReturn(result).when(mcpToolProviderManager).discoverTools(any());
 
-            Response response = restStore.discoverTools("http://remote:8080", "sse", "my-api-key");
+            Response response = restStore.discoverTools(new McpToolDiscoveryRequest("http://remote:8080", "sse"), "my-api-key");
             assertEquals(200, response.getStatus());
         }
 
@@ -92,7 +96,7 @@ class RestMcpCallsStoreDeepCoverageTest {
             var result = new McpToolProviderManager.McpToolsResult(List.of(spec), Map.of());
             doReturn(result).when(mcpToolProviderManager).discoverTools(any());
 
-            Response response = restStore.discoverTools("http://remote:8080", null, null);
+            Response response = restStore.discoverTools(new McpToolDiscoveryRequest("http://remote:8080", null), null);
             assertEquals(200, response.getStatus());
         }
 
@@ -102,7 +106,7 @@ class RestMcpCallsStoreDeepCoverageTest {
             var result = new McpToolProviderManager.McpToolsResult(List.of(), Map.of());
             doReturn(result).when(mcpToolProviderManager).discoverTools(any());
 
-            Response response = restStore.discoverTools("http://remote:8080", "http", null);
+            Response response = restStore.discoverTools(new McpToolDiscoveryRequest("http://remote:8080", "http"), null);
             assertEquals(200, response.getStatus());
 
             @SuppressWarnings("unchecked")

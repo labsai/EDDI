@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.nlp.internal.matches;
 
 import java.util.*;
+import java.util.Objects;
 
 /**
  * @author ginccc
@@ -42,12 +43,12 @@ public class MatchMatrix implements Iterable<Suggestion> {
             if (o == null || getClass() != o.getClass())
                 return false;
             Match that = (Match) o;
-            return index == that.index && java.util.Objects.equals(inputTerm, that.inputTerm);
+            return index == that.index && Objects.equals(inputTerm, that.inputTerm);
         }
 
         @Override
         public int hashCode() {
-            return java.util.Objects.hash(index, inputTerm);
+            return Objects.hash(index, inputTerm);
         }
     }
 

@@ -28,7 +28,9 @@ import ai.labs.eddi.engine.security.CallerIdentityContext;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -632,7 +634,7 @@ class PhaseExecutionEngineTest {
                 ContextScope.FULL, true, null, 1, false, null, true);
 
         // 9 abstentions is what the loop actually produces; the exit must fire on it.
-        var entries = new java.util.ArrayList<TranscriptEntry>();
+        var entries = new ArrayList<TranscriptEntry>();
         for (int i = 0; i < 9; i++) {
             entries.add(new TranscriptEntry("a", "a", null, 0, "P", TranscriptEntryType.ABSTAINED, Instant.now(), null, null));
         }
@@ -649,7 +651,7 @@ class PhaseExecutionEngineTest {
 
     private DiscussionPhase votePhase() {
         var voteConfig = new VoteConfig(VoteMethod.MAJORITY, OptionsSource.EXPLICIT,
-                List.of("Adopt PostgreSQL", "Stay on MongoDB"), 0.5, java.util.Map.of(), false, TiePolicy.MODERATOR_DECIDES);
+                List.of("Adopt PostgreSQL", "Stay on MongoDB"), 0.5, Map.of(), false, TiePolicy.MODERATOR_DECIDES);
         return new DiscussionPhase("Ballot", PhaseType.VOTE, "ALL", TurnOrder.PARALLEL, ContextScope.NONE,
                 false, null, 1, false, null, false, voteConfig);
     }

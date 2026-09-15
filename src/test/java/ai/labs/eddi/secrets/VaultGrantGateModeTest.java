@@ -5,6 +5,8 @@
 package ai.labs.eddi.secrets;
 
 import ai.labs.eddi.secrets.VaultGrantGate.Mode;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -80,10 +82,10 @@ class VaultGrantGateModeTest {
     @Test
     @DisplayName("the bundled application.properties matches the code fallback")
     void bundledPropertyMatchesTheCodeFallback() throws Exception {
-        var shippedProperties = java.nio.file.Path.of("src", "main", "resources", "application.properties");
-        assertTrue(java.nio.file.Files.exists(shippedProperties), "expected the shipped application.properties at " + shippedProperties);
+        var shippedProperties = Path.of("src", "main", "resources", "application.properties");
+        assertTrue(Files.exists(shippedProperties), "expected the shipped application.properties at " + shippedProperties);
 
-        var configured = java.nio.file.Files.readAllLines(shippedProperties).stream()
+        var configured = Files.readAllLines(shippedProperties).stream()
                 .map(String::trim)
                 .filter(line -> line.startsWith("eddi.vault.grant-enforcement="))
                 .map(line -> line.substring(line.indexOf('=') + 1).trim())

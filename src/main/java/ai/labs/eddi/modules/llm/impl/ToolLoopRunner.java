@@ -15,12 +15,15 @@ import ai.labs.eddi.engine.hitl.tools.ToolApprovalGate;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalRules;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
+import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import ai.labs.eddi.engine.memory.MemorySnapshotService;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.modules.llm.capability.JsonResponseFormatPolicy;
 import ai.labs.eddi.modules.llm.impl.orchestration.ToolApprovalGateSupport;
 import ai.labs.eddi.modules.llm.impl.orchestration.ToolContextBudget;
+import ai.labs.eddi.modules.llm.governance.ToolResultProvenance;
+import ai.labs.eddi.modules.llm.guardrails.ToolResultGuardrail;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.tools.ToolCacheService;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
@@ -86,11 +89,12 @@ class ToolLoopRunner {
     private final ToolApprovalGate toolApprovalGate;
     private final ToolApprovalGateSupport gateSupport;
     private final ToolContextBudget toolContextBudgetGuard;
+    private final ToolResultGuardrail toolResultGuardrail;
 
     ToolLoopRunner(ToolExecutionService toolExecutionService, ToolResponseTruncator toolResponseTruncator,
             TenantQuotaService tenantQuotaService, MemorySnapshotService memorySnapshotService,
             ToolApprovalGate toolApprovalGate, ToolApprovalGateSupport gateSupport,
-            ToolContextBudget toolContextBudgetGuard) {
+            ToolContextBudget toolContextBudgetGuard, ToolResultGuardrail toolResultGuardrail) {
         this.toolExecutionService = toolExecutionService;
         this.toolResponseTruncator = toolResponseTruncator;
         this.tenantQuotaService = tenantQuotaService;
@@ -98,6 +102,7 @@ class ToolLoopRunner {
         this.toolApprovalGate = toolApprovalGate;
         this.gateSupport = gateSupport;
         this.toolContextBudgetGuard = toolContextBudgetGuard;
+        this.toolResultGuardrail = toolResultGuardrail;
     }
 
     /**
@@ -365,8 +370,25 @@ class ToolLoopRunner {
                         } else {
                             // 1) execute the ungated calls of this batch normally
                             for (ToolExecutionRequest allowedReq : gateResult.allowed()) {
+                                // Same absolute rule as the main allowed() loop below.
+                                // This branch runs BEFORE the pause is thrown, and its
+                                // results are frozen into the batch the resume replays
+                                // — a self-conversation call slipping through here is
+                                // never checked again anywhere. A mixed batch (one
+                                // gated call, one ungated self-message) was exactly
+                                // the remaining hole.
+                                String selfTargetedPre = ToolLoopResumer.targetsOwnConversationLive(
+                                        allowedReq, setup.toolRequestResolvers(), conversationId);
+                                if (selfTargetedPre != null) {
+                                    LOGGER.warnf("Refusing ungated tool '%s': %s", sanitize(allowedReq.name()), selfTargetedPre);
+                                    currentMessages.add(ToolExecutionResultMessage.from(allowedReq,
+                                            "{\"status\":\"NOT_EXECUTED\",\"reason\":\"an agent may not send a request to its own conversation\"}"));
+                                    trace.add(Map.of("type", "hitl_self_conversation", "tool", allowedReq.name(),
+                                            "detail", selfTargetedPre));
+                                    continue;
+                                }
                                 executeSingleToolCall(allowedReq, memory, currentMessages, trace, toolExecutors,
-                                        toolRateLimits, toolCanonicalNames, defaultRateLimit, maxBudget, conversationId,
+                                        toolRateLimits, toolCanonicalNames, toolSources, defaultRateLimit, maxBudget, conversationId,
                                         enableRateLimiting, enableCaching, enableCostTracking, task, isLazy, builtInSpecs, activeSpecs);
                             }
                             // Abandoned-thread guard: a cascade step that timed out (or
@@ -419,8 +441,25 @@ class ToolLoopRunner {
                             throw new LifecycleException("Agent execution cancelled (interrupted) before tool: " + toolRequest.name());
                         }
 
+                        // "An agent may not send a request to its own conversation" is
+                        // an ABSOLUTE rule, and this loop is the one place it was not
+                        // enforced: a call the gate lets through live (ungated method,
+                        // or the whole gate inert) executed with no check anywhere.
+                        // The resume path has its own copy; a rule enforced only where
+                        // approvals funnel is a rule that vanishes with the gate.
+                        String selfTargeted = ToolLoopResumer.targetsOwnConversationLive(
+                                toolRequest, setup.toolRequestResolvers(), conversationId);
+                        if (selfTargeted != null) {
+                            LOGGER.warnf("Refusing ungated tool '%s': %s", sanitize(toolRequest.name()), selfTargeted);
+                            currentMessages.add(ToolExecutionResultMessage.from(toolRequest,
+                                    "{\"status\":\"NOT_EXECUTED\",\"reason\":\"an agent may not send a request to its own conversation\"}"));
+                            trace.add(Map.of("type", "hitl_self_conversation", "tool", toolRequest.name(),
+                                    "detail", selfTargeted));
+                            continue;
+                        }
+
                         executeSingleToolCall(toolRequest, memory, currentMessages, trace, toolExecutors,
-                                toolRateLimits, toolCanonicalNames, defaultRateLimit, maxBudget, conversationId,
+                                toolRateLimits, toolCanonicalNames, toolSources, defaultRateLimit, maxBudget, conversationId,
                                 enableRateLimiting, enableCaching, enableCostTracking, task, isLazy, builtInSpecs, activeSpecs);
                     }
                 } else {
@@ -431,12 +470,35 @@ class ToolLoopRunner {
             // Loop exhausted its iteration budget. The last message is usually the
             // model's final AiMessage; on resume with a spent budget it may instead be
             // a verdict-applied tool result — guard the cast either way.
+            //
+            // The fallback is user-visible: it becomes the turn's whole answer when
+            // the model was still mid-tool-call at the cap. The old bare "Max tool
+            // iterations reached" read like an internal error code and hid the two
+            // facts the user actually needs — the tool calls that already ran HAVE
+            // taken effect (nothing rolls back), and the work can be resumed by
+            // asking to continue. Observed live: the Platform Operator building an
+            // agent died at the cap after 22 calls, with real resources created and a
+            // four-word answer.
             ChatMessage last = currentMessages.get(currentMessages.size() - 1);
-            if (last instanceof AiMessage aiLast) {
-                return aiLast.text() != null ? aiLast.text() : "Max tool iterations reached";
+            if (last instanceof AiMessage aiLast && aiLast.text() != null) {
+                return aiLast.text();
             }
-            return "Max tool iterations reached";
+            return iterationBudgetSpentMessage(maxIterations);
         }, task, "Agent execution");
+    }
+
+    /**
+     * The turn's answer when the tool loop hits its iteration cap mid-work. Kept
+     * honest and actionable rather than apologetic: what stopped, what state the
+     * work is in, and how to go on. The cap itself is configurable per task
+     * ({@code maxToolIterations}) — mentioning it here is deliberate, so an agent
+     * designer seeing this repeatedly knows which knob exists.
+     */
+    static String iterationBudgetSpentMessage(int maxIterations) {
+        return "I stopped after reaching the limit of " + maxIterations + " tool-calling rounds for a single turn, "
+                + "before finishing the task. Everything I already did has taken effect — completed calls are not "
+                + "rolled back. Say \"continue\" and I will pick up where I stopped. If this task regularly needs "
+                + "more rounds, the agent's maxToolIterations setting can be raised.";
     }
 
     /**
@@ -452,14 +514,15 @@ class ToolLoopRunner {
     void executeSingleToolCall(ToolExecutionRequest toolRequest, IConversationMemory memory,
                                List<ChatMessage> currentMessages, List<Map<String, Object>> trace,
                                Map<String, ToolExecutor> toolExecutors, Map<String, Integer> toolRateLimits,
-                               Map<String, String> toolCanonicalNames,
+                               Map<String, String> toolCanonicalNames, Map<String, String> toolSources,
                                int defaultRateLimit, Double maxBudget, String conversationId,
                                boolean enableRateLimiting, boolean enableCaching, boolean enableCostTracking,
                                LlmConfiguration.Task task, boolean isLazy,
                                List<ToolSpecification> builtInSpecs, List<ToolSpecification> activeSpecs) {
-        // Live path: run the full pipeline, then append the raw result verbatim.
+        // Live path: run the full pipeline, then append the governed result. It is
+        // no longer appended verbatim — see executeSingleToolCallResult.
         String toolResult = executeSingleToolCallResult(toolRequest, memory, trace, toolExecutors, toolRateLimits,
-                toolCanonicalNames, defaultRateLimit, maxBudget, conversationId, enableRateLimiting, enableCaching,
+                toolCanonicalNames, toolSources, defaultRateLimit, maxBudget, conversationId, enableRateLimiting, enableCaching,
                 enableCostTracking, task, isLazy, builtInSpecs, activeSpecs);
         currentMessages.add(ToolExecutionResultMessage.from(toolRequest, toolResult));
     }
@@ -478,11 +541,18 @@ class ToolLoopRunner {
     String executeSingleToolCallResult(ToolExecutionRequest toolRequest, IConversationMemory memory,
                                        List<Map<String, Object>> trace,
                                        Map<String, ToolExecutor> toolExecutors, Map<String, Integer> toolRateLimits,
-                                       Map<String, String> toolCanonicalNames,
+                                       Map<String, String> toolCanonicalNames, Map<String, String> toolSources,
                                        int defaultRateLimit, Double maxBudget, String conversationId,
                                        boolean enableRateLimiting, boolean enableCaching, boolean enableCostTracking,
                                        LlmConfiguration.Task task, boolean isLazy,
                                        List<ToolSpecification> builtInSpecs, List<ToolSpecification> activeSpecs) {
+        // Live "Using {tool}…" signal for streaming clients — name only, before
+        // execution, so the status line moves the moment work starts rather than
+        // when the whole loop summarizes at turn end.
+        if (memory != null && memory.getEventSink() != null) {
+            memory.getEventSink().onToolCall(toolRequest.name());
+        }
+
         // Auto-checkpoint before tool execution (Wave 4)
         if (memorySnapshotService != null) {
             try {
@@ -498,7 +568,12 @@ class ToolLoopRunner {
         Map<String, Object> callStep = new HashMap<>();
         callStep.put("type", "tool_call");
         callStep.put("tool", toolRequest.name());
-        callStep.put("arguments", toolRequest.arguments());
+        // The trace is a DISPLAY/audit record (task summaries, SSE, memory,
+        // traceSoFar merge on resume) — never an execution input, so it takes
+        // the redacted form. Execution keeps using toolRequest directly; a
+        // model that embeds a credential in its arguments must not have it
+        // echoed through every surface that renders the trace.
+        callStep.put("arguments", SecretRedactionFilter.redact(toolRequest.arguments()));
         trace.add(callStep);
 
         // Check per-conversation TOOL budget before executing tool.
@@ -530,7 +605,16 @@ class ToolLoopRunner {
         if (tenantQuotaService != null) {
             var costCheck = tenantQuotaService.checkCostBudget(tenantQuotaService.getDefaultTenantId());
             if (!costCheck.allowed()) {
-                LOGGER.warnf("Tenant cost budget exceeded during tool call: %s", costCheck.reason());
+                // The reason string already distinguishes the two, but the log line
+                // in front of it did not: an operator grepping for "cost budget
+                // exceeded" was told a tenant had spent its allowance when in fact
+                // the quota store could not answer.
+                if (costCheck.accountingUnavailable()) {
+                    LOGGER.warnf("Tenant cost accounting unavailable during tool call, refusing: %s",
+                            costCheck.reason());
+                } else {
+                    LOGGER.warnf("Tenant cost budget exceeded during tool call: %s", costCheck.reason());
+                }
 
                 Map<String, Object> quotaStep = new HashMap<>();
                 quotaStep.put("type", "tool_error");
@@ -570,24 +654,130 @@ class ToolLoopRunner {
             toolResult = "Error: Tool '" + toolRequest.name() + "' not found";
         }
 
-        // Apply response truncation (MCP governance)
+        // Apply response truncation (MCP governance).
+        //
+        // The provenance envelope is added AFTER this, so the budget handed to the
+        // truncator is reduced by the envelope's worst case. Otherwise a configured
+        // ceiling is exceeded by every single result — small individually, kilobytes
+        // across a long tool loop, and exactly the drift the ceiling exists to stop.
         toolResult = toolResponseTruncator.truncateIfNeeded(
-                toolRequest.name(), toolResult, task.getToolResponseLimits(),
+                toolRequest.name(), toolResult, reserveEnvelopeBudget(task.getToolResponseLimits(), task),
                 task.getType(), task.getParameters());
 
         Map<String, Object> resultStep = new HashMap<>();
         resultStep.put("type", "tool_result");
         resultStep.put("tool", toolRequest.name());
-        resultStep.put("result", toolResult);
+        // Redacted for the same reason as the call step's arguments: an API
+        // response can echo a credential (its own, or one the request carried).
+        // The MODEL still receives the raw result — the return value below is
+        // untouched; only the display record is filtered.
+        resultStep.put("result", SecretRedactionFilter.redact(toolResult));
         trace.add(resultStep);
 
-        // LAZY mode: after discover_tools returns, activate the matching built-in specs
+        // LAZY mode: after discover_tools returns, activate the matching built-in
+        // specs.
+        //
+        // Deliberately BEFORE the guardrail: discover_tools' output is an
+        // EDDI-authored control message this loop parses itself, and wrapping it in
+        // a provenance envelope first would make that parse fail. The envelope is
+        // for the model's benefit, and the model still gets one.
         if (isLazy && "discover_tools".equals(toolRequest.name())) {
             activateDiscoveredTools(toolResult, builtInSpecs, activeSpecs);
         }
 
-        return toolResult;
+        // Govern what comes back. Until now the comment on the live loop's caller
+        // read "append the raw result verbatim", which made every tool a
+        // prompt-injection channel: third-party bulk text arrived in the same
+        // position as a system instruction with nothing to distinguish it.
+        //
+        // This is the single shared per-request pipeline, so one call here covers
+        // every tool source, both the live loop and the resume path, and — because
+        // the MCP resource bridge's executors return ordinary tool results —
+        // resource content and listings for free.
+        //
+        // Applied AFTER the trace entry above on purpose: the trace is a display
+        // record of what the TOOL returned, and showing an operator EDDI's own
+        // envelope back would obscure that.
+        String source = toolSources == null ? null : toolSources.get(toolRequest.name());
+        var outcome = toolResultGuardrail.inspect(toolRequest.name(), source, toolResult,
+                task.getToolResultGuardrails());
+        if (!ToolResultGuardrail.ACTION_ALLOW.equals(outcome.action())) {
+            Map<String, Object> guardrailStep = new HashMap<>();
+            guardrailStep.put("type", "tool_result_guardrail");
+            guardrailStep.put("tool", toolRequest.name());
+            guardrailStep.put("action", outcome.action());
+            trace.add(guardrailStep);
+        }
+
+        return outcome.result();
     }
+
+    /**
+     * A copy of the task's response limits with room left for the provenance
+     * envelope.
+     * <p>
+     * A copy, not a mutation: {@code LlmConfiguration.Task} is shared configuration
+     * read by every concurrent conversation on this agent, and shrinking its limits
+     * in place would shrink them again on the next turn, and the next.
+     * <p>
+     * Returns the original when governance will not wrap anything, so an agent that
+     * turned provenance marking off keeps exactly the ceiling it configured.
+     */
+    private static LlmConfiguration.ToolResponseLimits reserveEnvelopeBudget(LlmConfiguration.ToolResponseLimits limits,
+                                                                             LlmConfiguration.Task task) {
+        var guardrails = task.getToolResultGuardrails();
+        boolean willWrap = guardrails == null
+                || (!Boolean.FALSE.equals(guardrails.getEnabled()) && !Boolean.FALSE.equals(guardrails.getMarkProvenance()));
+        if (limits == null || !willWrap) {
+            return limits;
+        }
+        var reserved = new LlmConfiguration.ToolResponseLimits();
+        reserved.setDefaultMaxChars(reduce(limits.getDefaultMaxChars()));
+        reserved.setTruncationStrategy(limits.getTruncationStrategy());
+        reserved.setSummarizerModel(limits.getSummarizerModel());
+        if (limits.getPerToolLimits() != null) {
+            var perTool = new HashMap<String, Integer>();
+            // A null entry — legal in the agent's JSON as {"fetch_page": null} — is
+            // dropped rather than carried over, so the tool resolves to the default
+            // ceiling. Copying it forward only preserved a key whose sole effect is
+            // to say "no limit configured".
+            limits.getPerToolLimits().forEach((tool, limit) -> {
+                if (limit != null) {
+                    perTool.put(tool, reduce(limit));
+                }
+            });
+            reserved.setPerToolLimits(perTool);
+        }
+        return reserved;
+    }
+
+    /**
+     * Makes room for the envelope inside one configured ceiling.
+     * <p>
+     * A NON-POSITIVE limit means "no limit" and must pass through untouched:
+     * {@code ToolResponseTruncator.truncateIfNeeded} returns early on
+     * {@code maxChars <= 0}, and {@code 0 = disabled} is the documented idiom.
+     * Subtracting from it produced a negative number, the floor below then clamped
+     * it to 256, and an agent that had deliberately turned truncation OFF had every
+     * tool result cut to 256 characters. That omission is why this is the first
+     * statement and not a footnote.
+     * <p>
+     * Otherwise never below a floor: a ceiling smaller than the envelope would
+     * truncate to nothing.
+     */
+    private static int reduce(int limit) {
+        if (limit <= 0) {
+            return limit;
+        }
+        return Math.max(limit - ToolResultProvenance.MAX_ENVELOPE_CHARS, MINIMUM_TOOL_RESULT_CHARS);
+    }
+
+    /**
+     * Smallest useful tool result after the envelope is reserved. Below this the
+     * result is no longer an answer, so an operator who configured a tiny ceiling
+     * gets a tiny answer rather than an empty one.
+     */
+    private static final int MINIMUM_TOOL_RESULT_CHARS = 256;
 
     /**
      * Resolves the per-minute rate limit for one call: an entry keyed on the

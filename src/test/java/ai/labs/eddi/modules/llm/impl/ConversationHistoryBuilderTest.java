@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import static ai.labs.eddi.engine.memory.model.ConversationLog.ConversationPart.ContentType.text;
 import static org.junit.jupiter.api.Assertions.*;
@@ -105,6 +106,78 @@ class ConversationHistoryBuilderTest {
             assertFalse(messages.isEmpty());
             assertInstanceOf(SystemMessage.class, messages.getFirst());
             assertEquals("You are helpful", ((SystemMessage) messages.getFirst()).text());
+        }
+
+        /**
+         * A turn whose output was written with
+         * {@code addConversationOutputString("output", …)} holds a plain String — the
+         * shape every HITL-gated turn has. This caller used to pre-filter on
+         * {@code output instanceof List}, silently dropping such turns from the model's
+         * own chat history while the summary and recall tool kept them: the Operator
+         * then reported an approved change "was never created".
+         */
+        @Test
+        @DisplayName("a String-shaped output still reaches the model as an AiMessage")
+        void buildMessages_stringOutputTurnIsNotDropped() {
+            IConversationMemory memory = mock(IConversationMemory.class);
+
+            var output = new ConversationOutput();
+            output.put("input", "create the group");
+            output.put("output", "Waiting for your approval.");
+            when(memory.getConversationOutputs()).thenReturn(List.of(output));
+
+            List<ChatMessage> messages = builder.buildMessages(memory, null, null, -1, true);
+
+            assertEquals(2, messages.size(), "user turn AND assistant turn — the assistant half used to vanish");
+            assertInstanceOf(AiMessage.class, messages.get(1));
+            assertEquals("Waiting for your approval.", ((AiMessage) messages.get(1)).text());
+        }
+
+        /**
+         * The summarized-window path ({@code skipSteps > 0}) has its own render loop —
+         * the one that carried the {@code instanceof List} pre-filter. A rolling
+         * summary is exactly when losing turns hurts most: the summarized prefix is
+         * gone by design, so a dropped recent turn has no other copy anywhere in the
+         * prompt.
+         */
+        @Test
+        @DisplayName("the skipSteps window keeps String-shaped turns too")
+        void buildMessages_skipStepsWindowKeepsStringOutputs() {
+            IConversationMemory memory = mock(IConversationMemory.class);
+
+            var summarized = new ConversationOutput();
+            summarized.put("input", "old turn");
+            summarized.put("output", List.of(Map.of("text", "old answer")));
+
+            var hitlShaped = new ConversationOutput();
+            hitlShaped.put("input", "create the group");
+            hitlShaped.put("output", "Waiting for your approval.");
+
+            when(memory.getConversationOutputs()).thenReturn(List.of(summarized, hitlShaped));
+            when(memory.getAllSteps()).thenReturn(mock(IConversationMemory.IConversationStepStack.class));
+
+            List<ChatMessage> messages = builder.buildMessages(memory, null, null, -1, true, "summary of older turns", 1);
+
+            // system(summary) + user + assistant — the assistant half used to vanish.
+            assertEquals(3, messages.size());
+            assertInstanceOf(AiMessage.class, messages.get(2));
+            assertEquals("Waiting for your approval.", ((AiMessage) messages.get(2)).text());
+        }
+
+        @Test
+        @DisplayName("a mixed String-then-Map output list is joined, not truncated")
+        void buildMessages_mixedOutputListFullyRendered() {
+            IConversationMemory memory = mock(IConversationMemory.class);
+
+            var output = new ConversationOutput();
+            output.put("input", "hi");
+            output.put("output", List.of("Paused for approval.", Map.of("text", "Group created.")));
+            when(memory.getConversationOutputs()).thenReturn(List.of(output));
+
+            List<ChatMessage> messages = builder.buildMessages(memory, null, null, -1, true);
+
+            assertEquals(2, messages.size());
+            assertEquals("Paused for approval. Group created.", ((AiMessage) messages.get(1)).text());
         }
 
         @Test

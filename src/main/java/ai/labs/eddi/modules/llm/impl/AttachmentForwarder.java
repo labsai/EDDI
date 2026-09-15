@@ -15,6 +15,7 @@ import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.modules.llm.capability.ModelCapabilityService;
 import ai.labs.eddi.modules.llm.tools.impl.AttachmentTextExtractor;
 import ai.labs.eddi.modules.llm.tools.impl.AttachmentTextExtractor.AttachmentExtractionException;
+import ai.labs.eddi.utils.LogSanitizer;
 import dev.langchain4j.data.message.AudioContent;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.Content;
@@ -82,6 +83,7 @@ public class AttachmentForwarder {
     private final long maxForwardBytes;
     private final long maxAggregateBytes;
     private final Counter forwardedCounter;
+    private final Counter reinlinedCounter;
     private final Counter errorsCounter;
 
     @Inject
@@ -99,6 +101,11 @@ public class AttachmentForwarder {
         this.textExtractor = textExtractor;
         this.httpClient = httpClient;
         this.forwardedCounter = meterRegistry != null ? meterRegistry.counter("eddi.attachment.forwarded") : null;
+        // Separate from `forwarded`: a re-inline repeats every attachment-free
+        // turn, so folding it into the first-time counter would quietly turn one
+        // screenshot in a 20-turn conversation into ~20 "forwarded" attachments
+        // for anyone alerting on that meter.
+        this.reinlinedCounter = meterRegistry != null ? meterRegistry.counter("eddi.attachment.reinlined") : null;
         this.errorsCounter = meterRegistry != null ? meterRegistry.counter("eddi.attachment.errors") : null;
         this.maxForwardBytes = maxForwardBytes;
         this.maxAggregateBytes = maxAggregateBytes;
@@ -139,7 +146,7 @@ public class AttachmentForwarder {
         }
         List<Attachment> attachments = readAttachments(memory);
         if (attachments.isEmpty()) {
-            noteAttachmentsFromEarlierTurns(messages, memory);
+            noteAttachmentsFromEarlierTurns(messages, memory, provider, model, visionOverride);
             return;
         }
         int lastUserIdx = lastUserMessageIndex(messages);
@@ -180,17 +187,31 @@ public class AttachmentForwarder {
     private static final int MAX_EARLIER_ATTACHMENTS_NOTED = 10;
 
     /**
-     * On a turn that carries no attachments of its own, remind the model of the
-     * files uploaded earlier in this conversation and point it at the
-     * {@code readAttachment} tool.
+     * How many earlier-turn IMAGES are re-inlined for a vision model on a later
+     * turn. Text documents have {@code readAttachment}; an image has no tool-shaped
+     * fallback — there is no OCR — so without re-inlining, "attach a screenshot,
+     * then ask about it" dead-ends in "no readable content". Most-recent-first, so
+     * the cap keeps the flow (the screenshot just discussed) while an old
+     * image-heavy conversation does not re-pay its whole gallery every turn.
+     */
+    private static final int MAX_EARLIER_IMAGES_REINLINED = 3;
+
+    /**
+     * On a turn that carries no attachments of its own, re-inline the most recent
+     * earlier-turn images when the model has vision, and remind the model of the
+     * remaining files with a pointer at the {@code readAttachment} tool.
      * <p>
      * A document is inlined only on the turn it arrives — re-sending it every turn
-     * would burn the context window. But with no trace of it in the message at all,
-     * a model asked "summarize the PDF" one turn later will confidently answer that
-     * no PDF was ever shared. This one-line note is the cheap middle ground: the
-     * content stays out of the prompt, the knowledge that it exists does not.
+     * would burn the context window, and its text stays reachable through
+     * {@code readAttachment}. Images are the exception (see
+     * {@link #MAX_EARLIER_IMAGES_REINLINED}): a vision model gets the recent ones
+     * again as real image content, because no tool can substitute for seeing them.
+     * Everything else gets the one-line note: the content stays out of the prompt,
+     * the knowledge that it exists does not.
      */
-    private void noteAttachmentsFromEarlierTurns(List<ChatMessage> messages, IConversationMemory memory) {
+    private void noteAttachmentsFromEarlierTurns(List<ChatMessage> messages, IConversationMemory memory,
+                                                 String provider, String model,
+                                                 ModelCapabilityService.Support visionOverride) {
         List<Attachment> earlier = AttachmentContextExtractor.attachmentsFromPreviousTurns(memory);
         if (earlier.isEmpty()) {
             return;
@@ -200,31 +221,79 @@ public class AttachmentForwarder {
             return;
         }
 
-        StringBuilder note = new StringBuilder(
-                "[Files shared earlier in this conversation and still available: ");
-        int named = Math.min(earlier.size(), MAX_EARLIER_ATTACHMENTS_NOTED);
-        for (int i = 0; i < named; i++) {
-            Attachment att = earlier.get(i);
-            if (i > 0) {
-                note.append(", ");
-            }
-            note.append(att.getFileName() != null ? att.getFileName() : "unnamed");
-            if (att.getMimeType() != null) {
-                note.append(" (").append(att.getMimeType()).append(')');
+        boolean vision = capabilityService.supportsVision(provider, model, visionOverride);
+        List<Attachment> reinline = new ArrayList<>();
+        List<Attachment> noteOnly = new ArrayList<>();
+        for (Attachment att : earlier) {
+            String mime = att.getMimeType() == null ? "" : att.getMimeType().toLowerCase(Locale.ROOT);
+            if (vision && mime.startsWith("image/") && reinline.size() < MAX_EARLIER_IMAGES_REINLINED) {
+                reinline.add(att);
+            } else {
+                noteOnly.add(att);
             }
         }
-        if (earlier.size() > named) {
-            note.append(", and ").append(earlier.size() - named).append(" more");
-        }
-        note.append(". Their content is not included in this message — use the readAttachment tool ")
-                .append("to read one, or listAttachments to see them all. Do not claim no file was shared.]");
 
         UserMessage original = (UserMessage) messages.get(lastUserIdx);
         List<Content> contents = new ArrayList<>(original.contents());
-        contents.add(TextContent.from(note.toString()));
-        messages.set(lastUserIdx, UserMessage.from(contents));
-        LOGGER.debugf("Noted %d attachment(s) from earlier turns for conversation='%s'",
-                earlier.size(), memory.getConversationId());
+
+        List<String> errors = new ArrayList<>();
+        long[] aggregate = {0L};
+        int inlined = 0;
+        for (Attachment att : reinline) {
+            // Same caps, byte resolution and vision gating as a current-turn
+            // image; a resolve failure degrades to the skip note, never a throw.
+            Content content = process(att, memory.getConversationId(), provider, model, aggregate,
+                    new ArrayList<>(), errors, visionOverride,
+                    ModelCapabilityService.Support.AUTO, ModelCapabilityService.Support.AUTO);
+            if (content != null) {
+                contents.add(content);
+                // Only an actual image counts as re-inlined: a failed store load
+                // or cap skip comes back as a TextContent note — the model is
+                // told, but counting it would claim "1 image re-inlined" (and
+                // increment the counter) on every remaining turn of a
+                // conversation whose blob is permanently gone.
+                if (content instanceof ImageContent) {
+                    inlined++;
+                }
+            }
+        }
+
+        if (!noteOnly.isEmpty()) {
+            StringBuilder note = new StringBuilder(
+                    "[Files shared earlier in this conversation and still available: ");
+            int named = Math.min(noteOnly.size(), MAX_EARLIER_ATTACHMENTS_NOTED);
+            for (int i = 0; i < named; i++) {
+                Attachment att = noteOnly.get(i);
+                if (i > 0) {
+                    note.append(", ");
+                }
+                note.append(att.getFileName() != null ? att.getFileName() : "unnamed");
+                if (att.getMimeType() != null) {
+                    note.append(" (").append(att.getMimeType()).append(')');
+                }
+            }
+            if (noteOnly.size() > named) {
+                note.append(", and ").append(noteOnly.size() - named).append(" more");
+            }
+            note.append(". Their content is not included in this message — use the readAttachment tool ")
+                    .append("to read one, or listAttachments to see them all. Do not claim no file was shared.]");
+            contents.add(TextContent.from(note.toString()));
+        }
+
+        // The message is updated whenever ANYTHING was added — including a
+        // failure note for an image that could not be re-inlined.
+        if (contents.size() > original.contents().size()) {
+            messages.set(lastUserIdx, UserMessage.from(contents));
+        }
+        if (reinlinedCounter != null && inlined > 0) {
+            reinlinedCounter.increment(inlined);
+        }
+        if (errorsCounter != null && !errors.isEmpty()) {
+            errorsCounter.increment(errors.size());
+        }
+        persist(memory.getCurrentStep(), List.of(), errors);
+        LOGGER.debugf("Earlier-turn attachments for conversation='%s': %d image(s) re-inlined, %d noted",
+                LogSanitizer.sanitize(memory.getConversationId()), inlined, noteOnly.size());
     }
 
     private void recordMetrics(int forwarded, int errored) {

@@ -13,11 +13,13 @@ import ai.labs.eddi.datastore.IResourceStorage;
 import ai.labs.eddi.datastore.IResourceStorageFactory;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.datastore.serialization.JsonSerialization;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -173,8 +175,8 @@ class HitlConfigValidationWiringTest {
                     + "\"approvalTimeout\":\"30 minutes\"}}";
 
             // Deserialize via the SAME serializer the import service uses.
-            IJsonSerialization jsonSerialization = new ai.labs.eddi.datastore.serialization.JsonSerialization(
-                    new com.fasterxml.jackson.databind.ObjectMapper());
+            IJsonSerialization jsonSerialization = new JsonSerialization(
+                    new ObjectMapper());
             AgentConfiguration imported = jsonSerialization.deserialize(agentJson, AgentConfiguration.class);
 
             var ex = assertThrows(IllegalArgumentException.class,
@@ -186,8 +188,8 @@ class HitlConfigValidationWiringTest {
         @Test
         @DisplayName("an imported agent config with NO hitlConfig imports cleanly (backward compat)")
         void importAcceptsMissingHitl() throws Exception {
-            IJsonSerialization jsonSerialization = new ai.labs.eddi.datastore.serialization.JsonSerialization(
-                    new com.fasterxml.jackson.databind.ObjectMapper());
+            IJsonSerialization jsonSerialization = new JsonSerialization(
+                    new ObjectMapper());
             AgentConfiguration imported = jsonSerialization.deserialize("{}", AgentConfiguration.class);
 
             // Absent hitlConfig is a no-op — agents predating HITL must keep importing.

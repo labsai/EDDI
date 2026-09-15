@@ -24,12 +24,13 @@ EDDI includes a built-in secrets vault for managing sensitive values like API ke
 | -------------------------------------- | ------------------ | --------------------------------------------------------------- |
 | `SecretReference`                      | `secrets.model`    | Value object: `tenantId/keyName` URI parsing                    |
 | `EnvelopeCrypto`                       | `secrets.crypto`   | AES-256-GCM encryption with envelope key wrapping               |
-| `ISecretProvider`                      | `secrets`          | SPI for reading/writing encrypted secrets                       |
+| `ISecretProvider`                      | `secrets`          | SPI for reading/writing encrypted secrets, plus `seal`/`unseal` |
+| `SealedDataRotationParticipant`        | `secrets`          | SPI joining DEK rotation's sweep — implemented by anything else that stores `seal`-ed data |
 | `VaultSecretProvider`                  | `secrets.impl`     | Production implementation with envelope crypto + persistence    |
 | `SecretResolver`                       | `secrets`          | Resolves `${vault:...}` references to plaintext at runtime  |
 | `IRestSecretStore` / `RestSecretStore` | `secrets.rest`     | JAX-RS endpoints for secret CRUD and key rotation               |
-| `SecretScrubber`                       | `secrets.sanitize` | Removes `${vault:...}` references from export payloads      |
-| `SecretRedactionFilter`                | `secrets.sanitize` | Regex-based log redaction for API keys, tokens, vault refs      |
+| `SecretScrubber`                       | `secrets.sanitize` | Removes plaintext secrets from export payloads (leaves `${vault:...}` references intact) |
+| `SecretRedactionFilter`                | `secrets.sanitize` | Regex-based log redaction for API keys and tokens                |
 | `ISecretPersistence`                   | `secrets.persist.` | DB abstraction (MongoDB default, PostgreSQL via profile)        |
 
 ## Secret References
@@ -136,8 +137,14 @@ Secret → tenant DEK → AES-256-GCM encrypt → ciphertext
                 │
                 └→ KEK wraps DEK → encrypted DEK
                         │
-                        └→ stored: { encryptedDek, iv, ciphertext }
+                        └→ stored: { encryptedDek, iv, ciphertext, dekId }
 ```
+
+`dekId` is `<tenantId>#g<generation>` — readable on purpose, so `default#g3` in a
+database row tells an operator exactly what it means. A tenant holds one DEK row per
+generation because [rotation adds one rather than replacing the key](#dek-rotation-is-additive--it-adds-a-generation),
+and ciphertext therefore has to say which key sealed it. A value written before
+generations existed carries no generation and reads as generation 1.
 
 ### Configuration
 
@@ -192,9 +199,14 @@ eddi.vault.cache-max-size=1000
 # Whether an agent referencing a secret it is not granted may deploy:
 # off | warn | enforce (default). See "Agent Grants" above.
 eddi.vault.grant-enforcement=enforce
+
+# Whether agent setup reuses a vault entry that already holds the same
+# plaintext key: checksum (default) | never.
+# See "Reusing one key across agents" below.
+eddi.setup.vault-key-reuse=checksum
 ```
 
-> **⚠️ Important:** The vault master key encrypts all stored API keys. If the master key is lost, all encrypted secrets become **permanently unrecoverable**. Back up your `~/.eddi/.env` file.
+> **⚠️ Important:** The vault master key encrypts all stored API keys. If the master key is lost, all encrypted secrets become **permanently unrecoverable**. Back up your `~/.eddi/.env` file. If the key has already changed and the old one is unavailable, `POST /secretstore/secrets/{tenantId}/reset` (see [REST API](#rest-api)) clears the unrecoverable entries so the tenant can start fresh.
 
 ## Secret Input (Agent Conversations)
 
@@ -224,9 +236,12 @@ To signal the chat UI to show a password field, use the `inputField` output type
 {
   "type": "inputField",
   "subType": "password",
-  "text": "Please enter your API key:"
+  "label": "API Key",
+  "placeholder": "Paste your API key here"
 }
 ```
+
+The explanatory sentence ("Please enter your API key:") belongs in a sibling `text` output item in the same action's output set — the `inputField` item only controls how the input is rendered.
 
 ### Chat UI: Password Fields + Secret Mode
 
@@ -250,16 +265,18 @@ Both **eddi-chat-ui** and the **EDDI-Manager chat panel** support secret input:
 - No secret values are stored in browser `localStorage` or `sessionStorage`
 - `autoComplete="new-password"` prevents browser caching
 
-### Agent Father Example
+### Example: collecting a key in a conversation
 
-The default Agent Father agent demonstrates vault integration during API key setup:
+An agent that asks the user for an API key mid-conversation wires it up like this:
 
 ```json
 // Output configuration — prompts with a password field
+// (pair it with a sibling `text` item that explains what to enter)
 {
   "type": "inputField",
   "subType": "password",
-  "text": "Please enter your API key:"
+  "label": "API Key",
+  "placeholder": "Paste your API key here"
 }
 
 // Property setter — auto-vaults the input
@@ -274,22 +291,66 @@ The `scope: secret` instruction causes `PropertySetterTask` to store the API key
 
 ## Auto-Vaulting (Agent Setup)
 
-When creating agents through the **Agent Father** wizard or the Setup API, API keys are **automatically stored in the vault**. You don't need to manually create vault entries.
+When creating agents through the Manager's agent wizard, the Platform Operator, or the Setup API directly (`POST /administration/agents/setup` and `/setup-api`), API keys are **automatically stored in the vault**. You don't need to manually create vault entries.
 
 ### How It Works
 
 1. User provides an API key during agent setup
-2. `AgentSetupService.vaultApiKey()` stores the key in the vault
-3. A vault reference (`${vault:setup.<agent-name>.<timestamp>.apiKey}`) is written to the LLM configuration
+2. `AgentSetupService.vaultApiKey()` resolves it against the vault (see *Reusing one key across agents* below)
+3. A vault reference (`${vault:setup.<agent-name>.<timestamp>-<random>.apiKey}`, or the name you chose) is written to the LLM configuration
 4. When the vault is enabled, the plaintext key is never persisted in MongoDB — only the vault reference is stored
+
+### Reusing one key across agents
+
+One provider key usually serves many agents, so setup avoids storing it many times. Three ways to say "use this key", in the order setup considers them:
+
+| What you pass | What setup does |
+| ------------- | --------------- |
+| `vaultKeyName: "openai-prod"` (with or without `apiKey`) | Uses that entry. With `apiKey` it **creates** the entry under exactly that name; without one, the entry must already exist. Never overwrites an entry holding a different value — the request is rejected instead, because other agents may already point at it. Accepts the `${vault:openai-prod}` form too. |
+| `apiKey: "${vault:openai-prod}"` | Used as-is, never re-vaulted. Surrounding whitespace is trimmed first, so a pasted reference still counts as one. If the key does not exist the setup still succeeds (you may vault it afterwards) but a warning is logged — the agent cannot resolve its credential until it does. |
+| `apiKey: "sk-…"` (plaintext) | Reused if the vault already holds that exact value, otherwise stored under a generated name. |
+
+Plaintext reuse is matched on the SHA-256 checksum the vault already stores per entry — nothing is decrypted to make the decision — and only entries with `allowedAgents` unset or `["*"]` are candidates, since referencing a narrowed grant from a new agent produces a config that [grant enforcement](#agent-grants-allowedagents) rejects at deploy time. When several entries match, the oldest wins, so repeated setups converge on one entry rather than depending on listing order.
+
+Set `eddi.setup.vault-key-reuse=never` to switch plaintext reuse off and give every agent its own entry again — appropriate when two agents hold the same-valued key today but must be able to rotate independently. Neither setting affects the first two rows above: those are explicit caller decisions. Any other value fails startup, as `eddi.vault.grant-enforcement` does — a typo must not silently switch de-duplication off.
+
+Every setup response carries **`apiKeyVaultReference`** — the reference the created agent's LLM config actually points at, whether this call vaulted the key or reused an entry that already held it. Pass it straight back as `vaultKeyName` (or as `apiKey`) on the next setup to put another agent on the same credential.
+
+It is `null` in two cases: the provider needs no key at all (`ollama`, `jlama`, `bedrock`, `oracle-genai`, …), and the vault is disabled so the key was stored in plaintext — a plaintext key is a secret and is never echoed back in a response body.
+
+A setup can also return **`resources.vaultWarning`**: the chosen key does not exist, or it is granted only to other agents. Neither fails the setup — see *Reusing one key across agents* above — but both end in an agent that was created and cannot use its credential, so both are reported rather than only logged.
+
+`vaultKeyName` accepts three shapes:
+
+| Shape | Parsed as |
+| --- | --- |
+| `openai-prod` | key `openai-prod` in the `default` tenant |
+| `${vault:openai-prod}` | the same — the wrapper is unwrapped, not stored |
+| `${vault:acme/openai-prod}` | key `openai-prod` in tenant `acme` |
+
+The **tenant and key components** must each match `[a-zA-Z0-9._-]{1,128}` — the same charset the secrets REST API enforces on create. (The `${vault:…}` wrapper itself is of course not expected to match; it is stripped first.) The constraint is not cosmetic: the components are re-embedded into `${vault:<tenant>/<key>}`, where a `/` inside a *bare* name would re-parse as a tenant separator and a `}` would truncate the reference, leaving the agent pointing at a different secret or none.
+
+Naming one key in `vaultKeyName` and a *different* one in `apiKey` is rejected rather than silently resolved in favour of either.
+
+`vaultKeyName` is a REST-only field (`eddi-admin`). The MCP `setup_agent` / `create_api_agent` tools do not carry it — not to prevent reuse, which their `apiKey` already supports as a `${vault:...}` reference, but because the two things it *adds* (choosing the name of a newly created entry, and a value-must-match check on an existing one) are not needed to provision an agent and do not belong on the `eddi-editor` tier those tools are open to: name-squatting an entry an operator intends to create, and a per-request "does key X hold value V" oracle.
+
+Naming, or pasting a reference to, a secret whose `allowedAgents` is narrowed is accepted — the legitimate flow is setup without deploy, widen the grant to the new agent's ID, deploy — but a brand-new agent cannot be on any existing grant list, so under `enforce` a `deploy: true` setup will end as `deployed: false`. The response says so up front in `resources.vaultWarning`. (Plaintext reuse simply skips such entries.)
+
+### What rollback does with the vault
+
+A setup that fails part-way rolls back the documents it created. It also removes the secret it vaulted — but only when nothing else can be referencing it: under `never` (unique per-agent names) it does; under `checksum` a freshly stored entry is a shared resource the moment a second setup with the same key runs, so it is left in place — a retry finds it by value and reuses it, and at worst it is one orphan. A caller-named entry is never rolled back for the same reason.
 
 ### Collision Prevention
 
-Each vault key includes an epoch-millisecond timestamp suffix. This prevents key collisions when two agents share the same name — each gets a unique vault entry.
+A generated vault key is named `setup.<agent>.<timestamp>-<random>.apiKey`. The timestamp alone was not sufficient: two setups for agents with the same name landing in the same millisecond produced the same name, and `store` is an upsert, so one silently overwrote the other's credential. The random suffix is what makes the name unique; the timestamp is kept because it tells you when the entry was made.
+
+A **caller-chosen** `vaultKeyName` has no such suffix, by design — that is the point of naming it. Creating one is read-then-write rather than a conditional insert, so two setups naming the same new key with different values can race; the loser is detected on read-back and fails before anything is created, but a write landing after that read is not caught (an atomic create-if-absent for the vault SPI is tracked in [issue #700](https://github.com/labsai/EDDI/issues/700)). Prefer creating a shared key through the secrets REST API first, then naming it.
 
 ### Graceful Degradation
 
-When the vault is disabled (no `EDDI_VAULT_MASTER_KEY`), the setup service logs a warning and falls back to plaintext storage. This ensures the Agent Father wizard works in local development without requiring vault configuration.
+When the vault is disabled (no `EDDI_VAULT_MASTER_KEY`), the setup service logs a warning and falls back to plaintext storage. This ensures agent setup works in local development without requiring vault configuration.
+
+A request carrying `vaultKeyName` is the exception: it fails with a clear error instead. Naming a vault entry is a request for one specific shared secret, and quietly writing the key in plaintext is not a smaller version of that.
 
 > **Production recommendation:** Always set `EDDI_VAULT_MASTER_KEY` in production. The installer does this automatically.
 
@@ -303,19 +364,30 @@ All endpoints are under the base path `/secretstore/secrets`. All endpoints requ
 
 | Method   | Path                         | Description                                            |
 | -------- | ---------------------------- | ------------------------------------------------------ |
-| `PUT`    | `/{tenantId}/{keyName}`      | Store a secret (body = plaintext value)                |
+| `PUT`    | `/{tenantId}/{keyName}`      | Store a secret (JSON body: `{"value": …, "description": …, "allowedAgents": …}`) |
 | `DELETE` | `/{tenantId}/{keyName}`      | Delete a secret                                        |
 | `GET`    | `/{tenantId}/{keyName}`      | Get secret **metadata only** (never returns plaintext) |
 | `GET`    | `/{tenantId}`                | List all secrets for a tenant (metadata only)          |
 | `GET`    | `/health`                    | Vault health check (provider status)                   |
-| `POST`   | `/{tenantId}/rotate-dek`     | Rotate the tenant's Data Encryption Key                |
+| `POST`   | `/{tenantId}/rotate-dek`     | Install the tenant's next DEK generation and sweep rows onto it |
 | `POST`   | `/admin/rotate-kek`          | Rotate the Master Key (KEK) — **TLS required**         |
+| `POST`   | `/{tenantId}/reset`          | Delete **ALL** secrets and the DEK for a tenant — destructive; use when the master key changed and the old key is unavailable |
 
 > **⚠️ Important:** The `GET` endpoints return **metadata only** (`keyName`, `createdAt`, `lastAccessedAt`, `checksum`). Secret values are **write-only** — they can be stored and used by the engine but never retrieved via API.
 
 ### Response Examples
 
-**`PUT /{tenantId}/{keyName}`** — returns the vault reference:
+**`PUT /{tenantId}/{keyName}`** — the request body carries the plaintext value, an optional description, and the optional agent grant list (`allowedAgents` defaults to `["*"]` when omitted):
+
+```json
+{
+  "value": "sk-...",
+  "description": "OpenAI production key",
+  "allowedAgents": ["*"]
+}
+```
+
+It returns the vault reference:
 
 ```json
 {
@@ -349,13 +421,33 @@ All endpoints are under the base path `/secretstore/secrets`. All endpoints requ
 }
 ```
 
-**`POST /{tenantId}/rotate-dek`** — rotates the tenant's DEK:
+**`POST /{tenantId}/reset`** — deletes every secret and the DEK for the tenant:
+
+```json
+{
+  "tenantId": "default",
+  "secretsDeleted": 5,
+  "message": "Vault reset for tenant 'default'. 5 secret(s) deleted, DEK removed. The next secret store operation will generate a fresh DEK with the current master key."
+}
+```
+
+**`POST /{tenantId}/rotate-dek`** — installs the tenant's next DEK generation and
+sweeps existing rows onto it:
 
 ```json
 {
   "tenantId": "default",
   "secretsReEncrypted": 5,
   "message": "DEK rotated successfully. 5 secrets re-encrypted."
+}
+```
+
+If the sweep does not finish, the call answers **500** and says so — the new
+generation is still active, nothing is lost, and re-running finishes the migration:
+
+```json
+{
+  "error": "DEK rotation failed: DEK rotation for tenant 'default': generation 3 is now the active key and every new value is sealed with it, but at least 2 sealed row(s) still name an older generation. Nothing is lost — those rows still decrypt with the generation they name, which has not been deleted — and the operation is safe to re-run to finish the migration."
 }
 ```
 
@@ -381,19 +473,76 @@ Response:
 
 ### Key Rotation
 
-EDDI supports two levels of key rotation:
+EDDI supports two levels of key rotation.
 
-**DEK Rotation** (`POST /{tenantId}/rotate-dek`):
-- Generates a new Data Encryption Key for the tenant
-- Re-encrypts all secrets with the new DEK
+#### DEK rotation is additive — it adds a generation
+
+`POST /{tenantId}/rotate-dek` does **not** replace the tenant's key. A tenant holds
+one DEK row per **generation**, and every ciphertext — a stored secret, and any
+other sealed value written through a `SealedDataRotationParticipant`, such as an
+[OAuth connection grant](connections.md#rotating-the-key-that-holds-them) — records
+the generation that sealed it. Reading opens a value with the generation
+it names, not with whichever one is newest.
+
+Rotation runs three phases, and only the middle one is irreversible:
+
+1. **Verify** — every existing generation is opened with the current KEK, so a wrong
+   `EDDI_VAULT_MASTER_KEY` is discovered before anything is written. Every
+   generation, not just the newest: the sweep below has to open the older ones, and
+   finding that out mid-sweep is a discovery that belongs before the commit point.
+2. **Commit** — the next generation is *inserted*. One statement, guarded by a
+   unique key on `(tenant, generation)`, so two racing rotations produce one winner
+   and one clean refusal. From here new values seal with the new key while every
+   existing row still names a generation that exists and decrypts.
+3. **Sweep** — rows move onto the new generation one at a time, each write guarded on
+   the state the row was read in, so a `store` that landed in between is never
+   overwritten with a re-seal of the value it replaced.
+
+**Old generations are never deleted.** That is precisely what makes a half-finished
+sweep harmless: a row the sweep did not reach still names a key that opens it.
+Deleting the generation a row still names is the one action that would make a
+partly swept tenant unreadable, so nothing here does it — and a resolve that finds
+a named generation missing says so by name rather than failing as a decryption
+error one layer down.
+
+**A partial sweep is reported, and re-running finishes it.** The endpoint answers
+**500** with a message stating that the new generation is active and every new value
+seals with it, that at least *N* sealed rows still name an older generation, that
+nothing is lost, and that the operation is safe to re-run. Re-running picks up
+exactly the rows the previous run left. Rows are swept individually so that one
+secret nobody can open does not strand the rest of the tenant on an older
+generation for every future rotation as well.
+
 - Does NOT require a restart
 - Recommended: rotate periodically or after personnel changes
 
-**KEK Rotation** (`POST /admin/rotate-kek`):
-- Re-encrypts all tenant DEKs with a new master key
+#### KEK rotation
+
+`POST /admin/rotate-kek` re-encrypts all tenant DEKs with a new master key:
+
+- **Every generation of every tenant is re-wrapped**, not just the newest. A tenant
+  part-way through a DEK sweep still has rows depending on an older generation, and
+  leaving one behind on the old KEK is exactly the orphaned-key failure generations
+  exist to prevent.
 - Secret ciphertexts are NOT modified — only DEK wrappers change
 - Requires an application restart with the new `EDDI_VAULT_MASTER_KEY` after rotation
-- Both operations use a verify-then-commit pattern: all decryption is validated before any writes occur
+- Verify-then-commit: every DEK is decrypted and re-encrypted in memory before any
+  write occurs, so a wrong old key fails before it can half-rewrite the set
+
+#### Schema
+
+Generations need one column and one index, and both are created on boot. Nothing to
+run by hand on either backend:
+
+| Backend | On boot |
+| --- | --- |
+| PostgreSQL | Adds `generation INTEGER NOT NULL DEFAULT 1` to `secret_vault_deks`, drops the column-level `UNIQUE (tenant_id)` constraint, and creates a unique index on `(tenant_id, generation)`. The old constraint is the blocker: while it stands a tenant cannot hold a second generation, so rotation has nowhere to write. It is an index rather than a constraint because only an index can be declared `IF NOT EXISTS`, and Postgres accepts one as an `ON CONFLICT` target just the same. |
+| MongoDB | Backfills `generation` on existing DEK documents, *then* drops the legacy unique-on-`tenantId` index and creates a unique compound index on `(tenantId, generation)`. That order matters — the backfill runs first so every pre-generation document has a generation to be indexed on. |
+
+A row written before generations existed reads as generation 1, which is what lets
+every already-stored ciphertext keep working with no migration of the ciphertext
+itself. During a rolling upgrade the two spellings coexist: a document with no
+`generation` field and a document holding `generation: 1` both match generation 1.
 
 ### Input Validation
 
@@ -457,11 +606,12 @@ The EDDI Manager includes a dedicated **Secrets Admin** page at `/manage/secrets
 | Anthropic keys (`sk-ant-...`) | `sk-ant-<REDACTED>`       | `sk-ant-api03-...` → `sk-ant-<REDACTED>`                |
 | Bearer tokens                 | `Bearer <REDACTED>`       | `Bearer eyJhb...` → `Bearer <REDACTED>`                 |
 | API key params                | `apikey=<REDACTED>`       | `apikey=secret123` → `apikey=<REDACTED>`                |
-| Vault references              | `${vault:<REDACTED>}` | `${vault:t/key}` → `${vault:<REDACTED>}`        |
+
+> A bare `${vault:...}` reference is deliberately **not** redacted — it is a pointer, not a secret, and hiding it removes exactly the information an approver needs to judge a request. A reference followed by extra value material (`${vault:k}SECRET-TAIL`) **is** redacted as a whole.
 
 ### Export Sanitization
 
-`SecretScrubber` removes vault references from agent export (backup) payloads, replacing them with `<SECRET_REMOVED>`. This prevents secrets from leaking when agents are shared or exported.
+`SecretScrubber` removes plaintext secrets from agent export (backup) payloads — detected by field name, by credentials embedded in a URL, and by Shannon entropy — replacing each with `${vault:REDACTED}`. This prevents secrets from leaking when agents are shared or exported. Existing `${vault:...}` / `${eddivault:...}` references are deliberately left intact: a reference is a pointer to a secret, not the secret itself.
 
 ### Memory Protection
 

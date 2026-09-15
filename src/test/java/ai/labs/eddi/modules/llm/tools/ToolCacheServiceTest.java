@@ -8,6 +8,9 @@ import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.caching.TestCaches;
 import ai.labs.eddi.engine.caching.TestCaches.FakeTicker;
+import ai.labs.eddi.modules.llm.tools.impl.ArtifactTools;
+import ai.labs.eddi.modules.llm.tools.impl.GroupTaskTools;
+import dev.langchain4j.agent.tool.Tool;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -33,6 +36,47 @@ import static org.mockito.Mockito.*;
  */
 @DisplayName("ToolCacheService")
 class ToolCacheServiceTest {
+
+    @Nested
+    @DisplayName("isCacheable")
+    class IsCacheable {
+
+        @Test
+        @DisplayName("the artifact tools behind the E2E defect are not cacheable")
+        void artifactToolsAreNotCacheable() {
+            assertFalse(ToolCacheService.isCacheable(ToolInvocation.of("listArtifacts")));
+            assertFalse(ToolCacheService.isCacheable(ToolInvocation.of("createArtifact")));
+            assertFalse(ToolCacheService.isCacheable(ToolInvocation.of("readArtifact")));
+            assertFalse(ToolCacheService.isCacheable(ToolInvocation.of("proposeArtifactUpdate")));
+        }
+
+        @Test
+        @DisplayName("every @Tool method of every stateful tool class is covered")
+        void everyStatefulToolMethodIsCovered() {
+            for (Class<?> toolClass : new Class<?>[]{ArtifactTools.class, GroupTaskTools.class, CreateSubAgentTool.class,
+                    ConverseWithAgentTool.class, RecruitAgentTool.class, TeardownAgentTool.class, FindAgentsByCapabilityTool.class,
+                    UserMemoryTool.class, ConversationRecallTool.class}) {
+                long toolMethods = 0;
+                for (var method : toolClass.getMethods()) {
+                    if (method.isAnnotationPresent(Tool.class)) {
+                        toolMethods++;
+                        assertFalse(ToolCacheService.isCacheable(ToolInvocation.of(method.getName())),
+                                toolClass.getSimpleName() + "#" + method.getName() + " must not be cacheable");
+                    }
+                }
+                assertTrue(toolMethods > 0, toolClass.getSimpleName() + " declares no @Tool methods — the list is stale");
+            }
+        }
+
+        @Test
+        @DisplayName("pure tools stay cacheable, by dispatch name and by slug")
+        void pureToolsStayCacheable() {
+            assertTrue(ToolCacheService.isCacheable(new ToolInvocation("searchWeb", "websearch", null)));
+            assertTrue(ToolCacheService.isCacheable(new ToolInvocation("calculate", "calculator", null)));
+            assertTrue(ToolCacheService.isCacheable(ToolInvocation.of("someMcpTool")));
+            assertFalse(ToolCacheService.isCacheable(null));
+        }
+    }
 
     /** A representative resolved USER scope tag. */
     private static final String SCOPE_A = "u:0123456789abcdef0123456789abcdef";

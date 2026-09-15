@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.mcp;
 
+import ai.labs.eddi.configs.rest.StrictConfigurationParser;
 import ai.labs.eddi.configs.groups.IGroupWorkspaceStore;
 import ai.labs.eddi.configs.groups.IRestAgentGroupStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
@@ -13,6 +14,7 @@ import ai.labs.eddi.configs.groups.model.SharedTaskList;
 import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskItem;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
+import ai.labs.eddi.configs.groups.templates.GroupTemplateService;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.security.OwnershipValidator;
@@ -22,9 +24,15 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.io.IOException;
 import java.net.URI;
 import java.util.List;
+import java.util.Map;
 
+import java.security.Principal;
+import io.smallrye.common.annotation.NonBlocking;
+import io.smallrye.common.annotation.Blocking;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -41,9 +49,9 @@ class McpGroupToolsTest {
     private IGroupWorkspaceStore workspaceStore;
     private McpGroupTools tools;
 
-    private static ai.labs.eddi.configs.groups.templates.GroupTemplateService templateService() {
-        var service = new ai.labs.eddi.configs.groups.templates.GroupTemplateService(
-                new com.fasterxml.jackson.databind.ObjectMapper());
+    private static GroupTemplateService templateService() {
+        var service = new GroupTemplateService(
+                new ObjectMapper());
         service.loadTemplates();
         return service;
     }
@@ -56,12 +64,12 @@ class McpGroupToolsTest {
         workspaceStore = mock(IGroupWorkspaceStore.class);
         lenient().when(jsonSerialization.serialize(any())).thenReturn("{}");
 
-        var mockIdentity = mock(io.quarkus.security.identity.SecurityIdentity.class);
+        var mockIdentity = mock(SecurityIdentity.class);
         lenient().when(mockIdentity.isAnonymous()).thenReturn(true);
         // authorization disabled — OwnershipValidator's checks are no-ops, matching the
         // pre-existing tests. Ownership enforcement is covered separately below.
-        tools = new McpGroupTools(groupStore, groupConversationService, jsonSerialization, mockIdentity,
-                new OwnershipValidator(false), workspaceStore, templateService(), false);
+        tools = new McpGroupTools(groupStore, groupConversationService, jsonSerialization, strictConfigurationParser(),
+                mockIdentity, new OwnershipValidator(false), workspaceStore, templateService(), false);
     }
 
     // --- describe_discussion_styles ---
@@ -78,6 +86,23 @@ class McpGroupToolsTest {
         assertTrue(result.contains("DELPHI"));
         assertTrue(result.contains("DEBATE"));
         assertTrue(result.contains("TASK_FORCE"));
+    }
+
+    /**
+     * Enumerating the enum rather than listing the styles by hand: the previous
+     * test hardcoded six names and stayed green for the whole life of NEGOTIATION,
+     * which the tool never described. A caller picks a style from this text, so a
+     * style missing from it is a style that effectively does not exist over MCP.
+     * Driving the assertion off {@code DiscussionStyle} means the next style added
+     * fails here until it is described.
+     */
+    @Test
+    void describeDiscussionStyles_describesEveryDiscussionStyle() {
+        String result = tools.describe_discussion_styles();
+
+        for (AgentGroupConfiguration.DiscussionStyle style : AgentGroupConfiguration.DiscussionStyle.values()) {
+            assertTrue(result.contains(style.name()), "describe_discussion_styles omits the style " + style.name());
+        }
     }
 
     // --- list_groups ---
@@ -344,7 +369,7 @@ class McpGroupToolsTest {
         gc.setId("gc-async-1");
         gc.setState(GroupConversation.GroupConversationState.IN_PROGRESS);
         when(groupConversationService.startAndDiscussAsync("g1", "Build it", "user1", null)).thenReturn(gc);
-        when(jsonSerialization.serialize(any(java.util.Map.class))).thenReturn(
+        when(jsonSerialization.serialize(any(Map.class))).thenReturn(
                 "{\"groupConversationId\":\"gc-async-1\",\"state\":\"IN_PROGRESS\",\"message\":\"Discussion started.\"}");
 
         String result = tools.start_group_discussion("g1", "Build it", "user1");
@@ -355,7 +380,7 @@ class McpGroupToolsTest {
 
         // Verify the Map passed to serialize contains the right keys
         @SuppressWarnings("unchecked")
-        ArgumentCaptor<java.util.Map<String, Object>> captor = ArgumentCaptor.forClass(java.util.Map.class);
+        ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
         verify(jsonSerialization).serialize(captor.capture());
         var map = captor.getValue();
         assertEquals("gc-async-1", map.get("groupConversationId"));
@@ -439,20 +464,69 @@ class McpGroupToolsTest {
         assertTrue(result.contains("Not found"));
     }
 
-    // --- @Blocking annotation ---
+    // --- execution model (must stay off the Vert.x event loop) ---
 
+    /**
+     * These two tests used to assert the presence/absence of {@code @Blocking}.
+     * That was asserting the wrong thing, and it became actively wrong twice over.
+     * <p>
+     * quarkus-mcp-server resolves a {@code @Tool} method's execution model in this
+     * order (see {@code McpServerProcessor.executionModel}):
+     * {@code @RunOnVirtualThread} → {@code @Blocking} → {@code @NonBlocking} →
+     * {@code @Transactional} → {@code hasBlockingSignature()}. That last step
+     * treats every non-parameterized return type as blocking, so a
+     * {@code String}-returning tool already resolves to {@code WORKER_THREAD} —
+     * {@code @Blocking} added nothing. It also means the old "no {@code @Blocking},
+     * therefore async" premise was false: {@code
+     * start_group_discussion} runs on a worker thread too, for exactly the same
+     * reason.
+     * <p>
+     * The redundant annotations were removed because Quarkus 3.38's
+     * {@code ExecutionModelAnnotationsProcessor} rejects them outright, which
+     * stopped {@code quarkus:dev} from starting at all. So assert the property that
+     * actually keeps these off the event loop: a blocking signature, and no
+     * {@code @NonBlocking}.
+     */
     @Test
-    void discussWithGroup_hasBlockingAnnotation() throws Exception {
+    void discussWithGroup_staysOffTheEventLoop() throws Exception {
         var method = McpGroupTools.class.getMethod("discuss_with_group", String.class, String.class, String.class);
-        assertNotNull(method.getAnnotation(io.smallrye.common.annotation.Blocking.class),
-                "discuss_with_group must be annotated with @Blocking to avoid blocking the Vert.x event loop");
+        assertEquals(String.class, method.getReturnType(),
+                "discuss_with_group must keep a non-reactive return type; returning Uni/Multi would make "
+                        + "quarkus-mcp-server schedule this blocking work on the Vert.x event loop");
+        assertNull(method.getAnnotation(NonBlocking.class),
+                "discuss_with_group does blocking work and must never be marked @NonBlocking");
     }
 
     @Test
-    void startGroupDiscussion_doesNotHaveBlockingAnnotation() throws Exception {
+    void startGroupDiscussion_staysOffTheEventLoop() throws Exception {
         var method = McpGroupTools.class.getMethod("start_group_discussion", String.class, String.class, String.class);
-        assertNull(method.getAnnotation(io.smallrye.common.annotation.Blocking.class),
-                "start_group_discussion is async and should NOT have @Blocking");
+        assertEquals(String.class, method.getReturnType(),
+                "start_group_discussion must keep a non-reactive return type for the same reason");
+        assertNull(method.getAnnotation(NonBlocking.class),
+                "start_group_discussion must never be marked @NonBlocking");
+    }
+
+    /**
+     * Regression guard for the dev-mode breakage: re-adding {@code @Blocking} to
+     * any MCP tool method makes Quarkus 3.38's lint fail the build, and
+     * {@code quarkus:dev} will not start. It buys nothing either — see the note
+     * above. Fails here, in the plain unit suite, rather than the next time someone
+     * runs dev mode.
+     */
+    @Test
+    void noMcpToolMethodCarriesBlocking() {
+        // EVERY class carrying @Tool methods — the javadoc's "any MCP tool method"
+        // claim was previously a 3-of-8 sweep, so a @Blocking added to the other
+        // five broke quarkus:dev with no unit-test red.
+        for (Class<?> toolClass : List.of(McpGroupTools.class, McpHitlTools.class, McpConversationTools.class,
+                McpAdminTools.class, McpSetupTools.class, McpMemoryTools.class, McpDocTools.class, McpGdprTools.class)) {
+            for (var method : toolClass.getDeclaredMethods()) {
+                assertNull(method.getAnnotation(Blocking.class),
+                        toolClass.getSimpleName() + "." + method.getName() + " carries @Blocking. It is redundant "
+                                + "(a non-reactive return type already resolves to WORKER_THREAD) and Quarkus 3.38's "
+                                + "ExecutionModelAnnotationsProcessor rejects it, breaking quarkus:dev.");
+            }
+        }
     }
 
     // --- ownership enforcement (MCP must match the REST surface) ---
@@ -464,12 +538,12 @@ class McpGroupToolsTest {
     private McpGroupTools toolsAsUser(String callerId, String role) {
         var identity = mock(SecurityIdentity.class);
         lenient().when(identity.isAnonymous()).thenReturn(false);
-        var principal = mock(java.security.Principal.class);
+        var principal = mock(Principal.class);
         lenient().when(principal.getName()).thenReturn(callerId);
         lenient().when(identity.getPrincipal()).thenReturn(principal);
         lenient().when(identity.hasRole(role)).thenReturn(true);
-        return new McpGroupTools(groupStore, groupConversationService, jsonSerialization, identity,
-                new OwnershipValidator(true), workspaceStore, templateService(), true);
+        return new McpGroupTools(groupStore, groupConversationService, jsonSerialization, strictConfigurationParser(),
+                identity, new OwnershipValidator(true), workspaceStore, templateService(), true);
     }
 
     /**
@@ -479,12 +553,12 @@ class McpGroupToolsTest {
     private McpGroupTools toolsAsAdmin(String callerId) {
         var identity = mock(SecurityIdentity.class);
         lenient().when(identity.isAnonymous()).thenReturn(false);
-        var principal = mock(java.security.Principal.class);
+        var principal = mock(Principal.class);
         lenient().when(principal.getName()).thenReturn(callerId);
         lenient().when(identity.getPrincipal()).thenReturn(principal);
         lenient().when(identity.hasRole(anyString())).thenReturn(true);
-        return new McpGroupTools(groupStore, groupConversationService, jsonSerialization, identity,
-                new OwnershipValidator(true), workspaceStore, templateService(), true);
+        return new McpGroupTools(groupStore, groupConversationService, jsonSerialization, strictConfigurationParser(),
+                identity, new OwnershipValidator(true), workspaceStore, templateService(), true);
     }
 
     @Test
@@ -806,5 +880,22 @@ class McpGroupToolsTest {
         when(workspaceStore.find("g1")).thenReturn(null);
         String result = tools.list_team_backlog("g1");
         assertFalse(result.contains("error"), "no workspace is an empty backlog, not an error: " + result);
+    }
+
+    /**
+     * A parser that defers to this test's {@code jsonSerialization} mock, so the
+     * existing {@code when(jsonSerialization.deserialize(...))} stubs keep
+     * describing what these dispatch tests are about. Strictness itself is covered
+     * by {@code StrictConfigurationParserTest}.
+     */
+    private StrictConfigurationParser strictConfigurationParser() {
+        var parser = mock(StrictConfigurationParser.class);
+        try {
+            lenient().when(parser.parse(anyString(), any()))
+                    .thenAnswer(invocation -> jsonSerialization.deserialize(invocation.getArgument(0), invocation.getArgument(1)));
+        } catch (IOException e) {
+            throw new IllegalStateException(e);
+        }
+        return parser;
     }
 }

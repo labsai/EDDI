@@ -7,8 +7,10 @@ package ai.labs.eddi.modules.llm.impl;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.ToolResponseLimits;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.HashMap;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -107,5 +109,48 @@ class ToolResponseTruncatorTest {
     void truncateIfNeeded_defaultMaxChars_is50000() {
         var limits = new ToolResponseLimits();
         assertEquals(50000, limits.getDefaultMaxChars());
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // A per-tool entry that is present but null. This is the authoritative guard
+    // — ToolLoopRunner drops such entries before it gets here, but nothing
+    // obliges every caller to.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("a per-tool entry present but null falls back to the default limit")
+    void truncateIfNeeded_nullPerToolEntry_usesDefaultLimit() {
+        // perToolLimits is deserialized from agent JSON, where
+        // {"myTool": null} is a legal document. The containsKey-then-get form
+        // unboxed that null and turned one character of config into an NPE that
+        // failed the whole turn.
+        var limits = new ToolResponseLimits();
+        limits.setDefaultMaxChars(10);
+        var perToolLimits = new HashMap<String, Integer>();
+        perToolLimits.put("myTool", null);
+        limits.setPerToolLimits(perToolLimits);
+
+        String result = truncator.truncateIfNeeded("myTool", "a".repeat(100), limits, TASK_TYPE, TASK_PARAMS);
+
+        assertTrue(result.startsWith("a".repeat(10)), result);
+        assertTrue(result.contains("limit is 10"),
+                "the default ceiling must be what applies, not a limit derived from the null entry: " + result);
+    }
+
+    @Test
+    @DisplayName("a null entry for one tool leaves another tool's own override intact")
+    void truncateIfNeeded_nullPerToolEntry_doesNotDisturbOtherTools() {
+        var limits = new ToolResponseLimits();
+        limits.setDefaultMaxChars(1000);
+        var perToolLimits = new HashMap<String, Integer>();
+        perToolLimits.put("brokenEntry", null);
+        perToolLimits.put("verboseTool", 5);
+        limits.setPerToolLimits(perToolLimits);
+        String input = "a".repeat(50);
+
+        assertTrue(truncator.truncateIfNeeded("verboseTool", input, limits, TASK_TYPE, TASK_PARAMS).contains("limit is 5"),
+                "the sibling override must still apply");
+        assertEquals(input, truncator.truncateIfNeeded("brokenEntry", input, limits, TASK_TYPE, TASK_PARAMS),
+                "and the null entry must read as 'no limit configured', leaving the 1000-char default in force");
     }
 }

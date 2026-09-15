@@ -21,6 +21,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static ai.labs.eddi.engine.memory.MemoryKeys.ACTIONS;
 import static org.junit.jupiter.api.Assertions.*;
@@ -155,7 +156,7 @@ class LifecycleManagerHitlTest {
             when(pauseActionData.getResult()).thenReturn(List.of(IConversation.PAUSE_CONVERSATION));
 
             // Track which task was last executed to determine what getLatestData returns
-            java.util.concurrent.atomic.AtomicInteger lastExecutedTask = new java.util.concurrent.atomic.AtomicInteger(-1);
+            AtomicInteger lastExecutedTask = new AtomicInteger(-1);
             doAnswer(inv -> {
                 lastExecutedTask.set(0);
                 return null;

@@ -8,13 +8,17 @@ import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig.ApprovalRule;
 import ai.labs.eddi.engine.hitl.tools.TaskToolApprovalsResolver.Mode;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * The strict-vs-replace combination contract for task-level
@@ -238,5 +242,55 @@ class TaskToolApprovalsResolverTest {
         assertEquals(Mode.STRICT, Mode.parse("strict"));
         assertEquals(Mode.STRICT, Mode.parse(null));
         assertEquals(Mode.STRICT, Mode.parse("bogus"));
+    }
+
+    // ── undetermined policy (a FAILED read, not an absent one) ───────────
+
+    /**
+     * REPLACE is the one path that hands the task config back wholesale, so it is
+     * the one that could undo the fail-closed fallback. A task config lives inside
+     * the very agent whose policy could not be loaded — it is no evidence that
+     * gating is unnecessary.
+     */
+    @Test
+    void undeterminedAgentPolicySurvivesReplaceMode() {
+        var task = new ToolApprovalsConfig();
+        task.setRequireApproval(List.of());
+
+        assertSame(ToolApprovalsConfig.UNDETERMINED,
+                TaskToolApprovalsResolver.resolve(ToolApprovalsConfig.UNDETERMINED, task, Mode.REPLACE),
+                "an ungating task config replaced a policy that could not be read");
+    }
+
+    @Test
+    void undeterminedAgentPolicySurvivesStrictMerge() {
+        var task = new ToolApprovalsConfig();
+        task.setExempt(List.of("*"));
+
+        assertSame(ToolApprovalsConfig.UNDETERMINED,
+                TaskToolApprovalsResolver.resolve(ToolApprovalsConfig.UNDETERMINED, task, Mode.STRICT),
+                "a task-level exemption weakened a policy that could not be read");
+    }
+
+    @Test
+    @DisplayName("the sentinel gates everything on its values alone, not only by identity")
+    void undeterminedFailsClosedOnValuesToo() {
+        assertEquals(List.of("*"), ToolApprovalsConfig.UNDETERMINED.getRequireApproval());
+        assertNull(ToolApprovalsConfig.UNDETERMINED.getExempt(),
+                "an exemption on the fail-closed sentinel would let calls through");
+        assertTrue(ToolApprovalsConfig.isUndetermined(ToolApprovalsConfig.UNDETERMINED));
+    }
+
+    @Test
+    @DisplayName("an ordinary config carrying [*] is a strict policy, not a failed read")
+    void lookalikeConfigIsNotTreatedAsUndetermined() {
+        var lookalike = new ToolApprovalsConfig();
+        lookalike.setRequireApproval(List.of("*"));
+
+        assertFalse(ToolApprovalsConfig.isUndetermined(lookalike));
+        // ...so it still merges normally instead of short-circuiting.
+        var task = new ToolApprovalsConfig();
+        task.setRequireApproval(List.of("delete_*"));
+        assertNotSame(lookalike, TaskToolApprovalsResolver.resolve(lookalike, task, Mode.STRICT));
     }
 }

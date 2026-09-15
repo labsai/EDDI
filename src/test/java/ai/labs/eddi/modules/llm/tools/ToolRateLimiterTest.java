@@ -396,4 +396,73 @@ class ToolRateLimiterTest {
             assertEquals(0, rateLimiter.scanCandidateCount("toolB"));
         }
     }
+
+    /**
+     * A refill computed as {@code elapsedNanos * limit / WINDOW_NANOS} in long
+     * arithmetic overflows once a bucket has been idle long enough — about 107 days
+     * at the default limit of 1000, sooner at a higher one. The wrapped product is
+     * negative, so instead of refilling, the bucket's token count is driven below
+     * zero and {@code tryAcquire} refuses every subsequent call.
+     * <p>
+     * The failure mode is the nasty kind: a rate limiter that silently latches shut
+     * and denies a tool forever, with no error and nothing in the logs to connect
+     * it to elapsed time.
+     */
+    @Nested
+    @DisplayName("refill over a long idle window")
+    class LongIdleRefill {
+
+        private static final long NANOS_PER_DAY = 86_400L * 1_000_000_000L;
+
+        @Test
+        @DisplayName("a bucket idle past the long-overflow threshold refills instead of latching shut")
+        void idleBucketRefillsRatherThanLatchingShut() {
+            var bucket = new ToolRateLimiter.RateLimitBucket(1000);
+
+            // Drain it, so a broken refill cannot be masked by a full bucket.
+            for (int i = 0; i < 1000; i++) {
+                assertTrue(bucket.tryAcquire(), "bucket should start with its full allowance");
+            }
+            assertFalse(bucket.tryAcquire(), "drained bucket denies until it refills");
+
+            // 200 days idle: past the ~107-day point where elapsedNanos * 1000
+            // exceeds Long.MAX_VALUE.
+            bucket.backdateLastRefill(200 * NANOS_PER_DAY);
+
+            assertTrue(bucket.tryAcquire(),
+                    "after a long idle window the bucket must be full again, not permanently denied");
+            assertTrue(bucket.tokenCount() >= 0.0,
+                    "token count must never go negative — that is the latched-shut state");
+        }
+
+        @Test
+        @DisplayName("the refill saturates at the limit rather than overshooting")
+        void longIdleRefillIsStillCappedAtLimit() {
+            var bucket = new ToolRateLimiter.RateLimitBucket(10);
+            assertTrue(bucket.tryAcquire());
+
+            bucket.backdateLastRefill(3650 * NANOS_PER_DAY); // ten years
+
+            assertEquals(10, bucket.getRemaining(),
+                    "an arbitrarily long idle period grants the limit, never more");
+        }
+
+        @Test
+        @DisplayName("a normal short idle window still refills proportionally")
+        void shortIdleRefillIsUnchanged() {
+            var bucket = new ToolRateLimiter.RateLimitBucket(60);
+            for (int i = 0; i < 60; i++) {
+                assertTrue(bucket.tryAcquire());
+            }
+            assertFalse(bucket.tryAcquire());
+
+            // Half a window back should return roughly half the allowance; the
+            // guard against the overflow fix accidentally changing normal maths.
+            bucket.backdateLastRefill(30_000L * 1_000_000L);
+
+            int remaining = bucket.getRemaining();
+            assertTrue(remaining >= 25 && remaining <= 35,
+                    "half a window should restore about half the allowance, got " + remaining);
+        }
+    }
 }

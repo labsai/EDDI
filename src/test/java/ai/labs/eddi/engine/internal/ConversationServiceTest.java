@@ -43,6 +43,11 @@ import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.engine.audit.model.AuditEntry;
+import ai.labs.eddi.engine.events.HitlResumeCompletedEvent;
+import ai.labs.eddi.engine.memory.model.ConversationProperties;
+import ai.labs.eddi.engine.model.InputData;
+import ai.labs.eddi.engine.runtime.service.ServiceException;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -53,7 +58,9 @@ import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
 import java.util.*;
+import java.util.Stack;
 
+import jakarta.enterprise.event.Event;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -105,14 +112,14 @@ class ConversationServiceTest {
     private ConversationService conversationService;
     // Held reference (not the shared no-op fixture) so HITL event-firing paths
     // (G5) can be verified.
-    private jakarta.enterprise.event.Event<ai.labs.eddi.engine.events.HitlResumeCompletedEvent> hitlResumeCompletedEvent;
+    private Event<HitlResumeCompletedEvent> hitlResumeCompletedEvent;
 
     @BeforeEach
     @SuppressWarnings("unchecked")
     void setUp() {
         MockitoAnnotations.openMocks(this);
         doReturn(conversationStateCache).when(cacheFactory).getCache("conversationState");
-        hitlResumeCompletedEvent = mock(jakarta.enterprise.event.Event.class);
+        hitlResumeCompletedEvent = mock(Event.class);
         conversationService = new ConversationService(
                 agentFactory, conversationMemoryStore, conversationDescriptorStore,
                 userMemoryStore, conversationCoordinator, conversationSetup,
@@ -120,6 +127,76 @@ class ConversationServiceTest {
                 gdprComplianceService, tenantQuotaService, scheduleStore, agentStore,
                 jsonSerialization,
                 new SimpleMeterRegistry(), hitlResumeCompletedEvent, new CallerIdentityContext(null, null), AGENT_TIMEOUT);
+    }
+
+    // =========================================================================
+    // input length limit (eddi.conversations.max-input-chars)
+    // =========================================================================
+
+    /**
+     * A multi-megabyte message used to be accepted and forwarded to the model,
+     * which refused it after the round trip. The conversationId entry points now
+     * refuse it first.
+     */
+    @Nested
+    @DisplayName("input length limit")
+    class InputLengthLimit {
+
+        private InputData inputOf(int length) {
+            InputData input = new InputData();
+            input.setInput("x".repeat(length));
+            return input;
+        }
+
+        @Test
+        @DisplayName("say refuses input above the limit, naming length and limit")
+        void sayRejectsOversizedInput() {
+            conversationService.maxInputChars = 10;
+
+            var ex = assertThrows(IConversationService.InputTooLargeException.class,
+                    () -> conversationService.say(CONVERSATION_ID, false, true, List.of(), inputOf(11), false,
+                            mock(IConversationService.ConversationResponseHandler.class)));
+
+            assertEquals(11, ex.getLength());
+            assertEquals(10, ex.getLimit());
+            verifyNoInteractions(conversationCoordinator);
+        }
+
+        @Test
+        @DisplayName("sayStreaming refuses input above the limit")
+        void sayStreamingRejectsOversizedInput() {
+            conversationService.maxInputChars = 10;
+
+            assertThrows(IConversationService.InputTooLargeException.class,
+                    () -> conversationService.sayStreaming(CONVERSATION_ID, false, true, List.of(), inputOf(11),
+                            mock(IConversationService.StreamingResponseHandler.class)));
+            verifyNoInteractions(conversationCoordinator);
+        }
+
+        @Test
+        @DisplayName("input exactly at the limit is accepted")
+        void inputAtLimitPasses() {
+            conversationService.maxInputChars = 10;
+
+            assertDoesNotThrow(() -> conversationService.requireInputWithinLimit(inputOf(10)));
+        }
+
+        @Test
+        @DisplayName("a limit of zero disables the check")
+        void zeroDisablesTheLimit() {
+            conversationService.maxInputChars = 0;
+
+            assertDoesNotThrow(() -> conversationService.requireInputWithinLimit(inputOf(5_000_000)));
+        }
+
+        @Test
+        @DisplayName("null input and null text are not counted")
+        void nullInputIsIgnored() {
+            conversationService.maxInputChars = 1;
+
+            assertDoesNotThrow(() -> conversationService.requireInputWithinLimit(null));
+            assertDoesNotThrow(() -> conversationService.requireInputWithinLimit(new InputData()));
+        }
     }
 
     // =========================================================================
@@ -161,9 +238,9 @@ class ConversationServiceTest {
             doReturn(conversation).when(agent).startConversation(eq(USER_ID), anyMap(), any(), isNull());
             doReturn(memory).when(conversation).getConversationMemory();
             doReturn(ConversationState.READY).when(memory).getConversationState();
-            doReturn(new java.util.Stack<>()).when(memory).getRedoCache();
+            doReturn(new Stack<>()).when(memory).getRedoCache();
             doReturn(mock(IConversationMemory.IConversationStepStack.class)).when(memory).getAllSteps();
-            doReturn(new ai.labs.eddi.engine.memory.model.ConversationProperties(memory)).when(memory).getConversationProperties();
+            doReturn(new ConversationProperties(memory)).when(memory).getConversationProperties();
             doReturn(CONVERSATION_ID).when(conversationMemoryStore).storeConversationMemorySnapshot(any());
 
             // Act — null context should NOT throw
@@ -226,9 +303,9 @@ class ConversationServiceTest {
             doReturn(conversation).when(agent).startConversation(eq(USER_ID), eq(context), any(), isNull());
             doReturn(memory).when(conversation).getConversationMemory();
             doReturn(ConversationState.READY).when(memory).getConversationState();
-            doReturn(new java.util.Stack<>()).when(memory).getRedoCache();
+            doReturn(new Stack<>()).when(memory).getRedoCache();
             doReturn(mock(IConversationMemory.IConversationStepStack.class)).when(memory).getAllSteps();
-            doReturn(new ai.labs.eddi.engine.memory.model.ConversationProperties(memory)).when(memory).getConversationProperties();
+            doReturn(new ConversationProperties(memory)).when(memory).getConversationProperties();
             doReturn(CONVERSATION_ID).when(conversationMemoryStore).storeConversationMemorySnapshot(any());
 
             ConversationResult result = conversationService.startConversation(ENV, AGENT_ID, USER_ID, context);
@@ -292,8 +369,8 @@ class ConversationServiceTest {
             verify(conversationMemoryStore).clearHitlBookmark(CONVERSATION_ID);
 
             // G4: an hitl.approval cancellation is audited attributed to the actor.
-            ArgumentCaptor<ai.labs.eddi.engine.audit.model.AuditEntry> auditCaptor = ArgumentCaptor
-                    .forClass(ai.labs.eddi.engine.audit.model.AuditEntry.class);
+            ArgumentCaptor<AuditEntry> auditCaptor = ArgumentCaptor
+                    .forClass(AuditEntry.class);
             verify(auditLedgerService).submit(auditCaptor.capture());
             var detail = auditCaptor.getValue().output(); // hitl.approval detail is carried in the 'output' map
             assertEquals("alice", detail.get("decidedBy"));
@@ -301,8 +378,8 @@ class ConversationServiceTest {
 
             // G5: the terminal resume-completed event fires with a null verdict and
             // the actor so channel observers (Slack) can render the outcome.
-            ArgumentCaptor<ai.labs.eddi.engine.events.HitlResumeCompletedEvent> eventCaptor = ArgumentCaptor
-                    .forClass(ai.labs.eddi.engine.events.HitlResumeCompletedEvent.class);
+            ArgumentCaptor<HitlResumeCompletedEvent> eventCaptor = ArgumentCaptor
+                    .forClass(HitlResumeCompletedEvent.class);
             verify(hitlResumeCompletedEvent).fireAsync(eventCaptor.capture());
             assertNull(eventCaptor.getValue().verdict(), "cancel/end fires a null verdict");
             assertEquals("alice", eventCaptor.getValue().decidedBy());
@@ -318,8 +395,8 @@ class ConversationServiceTest {
 
             conversationService.endConversation(CONVERSATION_ID);
 
-            ArgumentCaptor<ai.labs.eddi.engine.audit.model.AuditEntry> auditCaptor = ArgumentCaptor
-                    .forClass(ai.labs.eddi.engine.audit.model.AuditEntry.class);
+            ArgumentCaptor<AuditEntry> auditCaptor = ArgumentCaptor
+                    .forClass(AuditEntry.class);
             verify(auditLedgerService).submit(auditCaptor.capture());
             assertEquals("system:end", auditCaptor.getValue().output().get("decidedBy"));
         }
@@ -695,7 +772,7 @@ class ConversationServiceTest {
             snapshot.setEnvironment(ENV);
             doReturn(snapshot).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
 
-            var inputData = new ai.labs.eddi.engine.model.InputData("hello", new LinkedHashMap<>());
+            var inputData = new InputData("hello", new LinkedHashMap<>());
 
             // The env-based say will fail because no agent is deployed.
             // We just verify the snapshot was loaded by the single-arg overload.
@@ -718,7 +795,7 @@ class ConversationServiceTest {
             snapshot.setEnvironment(ENV);
             doReturn(snapshot).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
 
-            var inputData = new ai.labs.eddi.engine.model.InputData("hello", new LinkedHashMap<>());
+            var inputData = new InputData("hello", new LinkedHashMap<>());
 
             assertThrows(IConversationService.AgentNotReadyException.class,
                     () -> conversationService.sayStreaming(CONVERSATION_ID, false, false, null, inputData, null));
@@ -869,7 +946,7 @@ class ConversationServiceTest {
             doReturn(USER_ID).when(conversationSetup).computeAnonymousUserIdIfEmpty(eq(USER_ID), isNull());
             doReturn(false).when(gdprComplianceService).isProcessingRestricted(USER_ID);
             doReturn(new HashMap<>()).when(contextLogger).createLoggingContext(any(), any(), any(), any());
-            doThrow(new ai.labs.eddi.engine.runtime.service.ServiceException("agent factory boom"))
+            doThrow(new ServiceException("agent factory boom"))
                     .when(agentFactory).getLatestReadyAgent(ENV, AGENT_ID);
 
             var ex = assertThrows(ResourceStoreException.class,

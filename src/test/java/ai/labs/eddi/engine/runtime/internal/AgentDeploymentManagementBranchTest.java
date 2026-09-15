@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.migration.ChannelConnectorMigration;
+import ai.labs.eddi.configs.migration.WorkspaceAccessIndexMigration;
 import ai.labs.eddi.configs.migration.IMigrationManager;
 import ai.labs.eddi.configs.migration.V6QuteMigration;
 import ai.labs.eddi.configs.migration.V6RenameMigration;
@@ -31,6 +32,7 @@ import org.mockito.Mock;
 
 import java.util.Date;
 import java.util.List;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 
 import static ai.labs.eddi.configs.deployment.model.DeploymentInfo.DeploymentStatus.deployed;
@@ -75,13 +77,14 @@ class AgentDeploymentManagementBranchTest {
     @BeforeEach
     void setUp() {
         openMocks(this);
-        var scheduledExecutorService = mock(java.util.concurrent.ScheduledExecutorService.class);
+        var scheduledExecutorService = mock(ScheduledExecutorService.class);
         when(runtime.getScheduledExecutorService()).thenReturn(scheduledExecutorService);
 
         management = new AgentDeploymentManagement(
                 deploymentStore, agentFactory, agentStore, agentsReadiness,
                 conversationMemoryStore, documentDescriptorStore, migrationManager,
-                v6RenameMigration, v6QuteMigration, channelConnectorMigration, runtime, workflowStore, ruleSetStore, 30);
+                v6RenameMigration, v6QuteMigration, channelConnectorMigration, mock(WorkspaceAccessIndexMigration.class),
+                runtime, workflowStore, ruleSetStore, 30);
     }
 
     @Nested

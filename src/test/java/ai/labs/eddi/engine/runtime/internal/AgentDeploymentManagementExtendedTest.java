@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.runtime.internal;
 
+import ai.labs.eddi.configs.migration.WorkspaceAccessIndexMigration;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
@@ -72,7 +73,8 @@ class AgentDeploymentManagementExtendedTest {
         management = new AgentDeploymentManagement(
                 deploymentStore, agentFactory, agentStore, agentsReadiness,
                 conversationMemoryStore, documentDescriptorStore,
-                migrationManager, v6Rename, v6Qute, channelMigration, runtime, workflowStore, ruleSetStore, 30);
+                migrationManager, v6Rename, v6Qute, channelMigration, mock(WorkspaceAccessIndexMigration.class),
+                runtime, workflowStore, ruleSetStore, 30);
     }
 
     // ─── manageAgentDeployments ─────────────────────────────

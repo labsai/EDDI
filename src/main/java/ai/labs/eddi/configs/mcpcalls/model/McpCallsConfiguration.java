@@ -7,6 +7,8 @@ package ai.labs.eddi.configs.mcpcalls.model;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * Configuration for connecting to an external MCP server and optionally
@@ -38,9 +40,11 @@ public class McpCallsConfiguration {
      * Transport type. Only StreamableHTTP is implemented, so the accepted tokens
      * are {@link #SUPPORTED_TRANSPORTS} — {@code "http"} (the default),
      * {@code "https"}, {@code "streamable-http"} or {@code "streamablehttp"}.
-     * {@code "sse"} and {@code "stdio"} were once documented here but never
-     * implemented; a stored config carrying one still loads (with a logged error)
-     * but its MCP server will not connect.
+     * {@code "sse"} is additionally accepted as a deprecated alias and served over
+     * StreamableHTTP, because it was once documented and stored configs carry it.
+     * {@code "stdio"} is rejected: EDDI does not spawn child processes, and a
+     * stdio-only MCP server is reached through a bridge sidecar instead — see
+     * {@code docs/mcp-client.md}.
      */
     private String transport = "http";
 
@@ -95,6 +99,28 @@ public class McpCallsConfiguration {
     public static final Set<String> SUPPORTED_TRANSPORTS = Set.of("http", "https", "streamable-http", "streamablehttp");
 
     /**
+     * Tokens the RUNTIME still accepts as backward-compatible aliases, served over
+     * StreamableHTTP with a one-time deprecation warning.
+     * <p>
+     * {@code "sse"} was the documented alternative in
+     * {@code LlmConfiguration.McpServerConfig}, so agents written against that doc
+     * are in the wild, and {@code McpToolProviderManager} deliberately keeps
+     * honouring it rather than stripping every tool from such an agent. This
+     * write-boundary validator did not, which made the two disagree: the REST write
+     * path returned 400 for a value the engine would have run. A stored config was
+     * therefore un-editable — read it, save it back unchanged, get a rejection.
+     * <p>
+     * Accepted, not silently rewritten: rewriting {@code sse} to {@code http} on
+     * write would edit an author's document behind their back, and the runtime
+     * warning is what tells them to change it.
+     */
+    public static final Set<String> DEPRECATED_TRANSPORT_ALIASES = Set.of("sse");
+
+    /** Every token a write is allowed to carry. */
+    public static final Set<String> ACCEPTED_TRANSPORTS = Stream.concat(SUPPORTED_TRANSPORTS.stream(), DEPRECATED_TRANSPORT_ALIASES.stream())
+            .collect(Collectors.toUnmodifiableSet());
+
+    /**
      * Validate this configuration.
      * <p>
      * This is the <em>write-boundary</em> validator: it is meant for REST
@@ -125,9 +151,10 @@ public class McpCallsConfiguration {
         if (!lowerUrl.startsWith("http://") && !lowerUrl.startsWith("https://")) {
             throw new IllegalArgumentException("mcpServerUrl must use http or https (the MCP client only speaks StreamableHTTP): " + mcpServerUrl);
         }
-        if (transport != null && !transport.isBlank() && !SUPPORTED_TRANSPORTS.contains(transport.trim().toLowerCase(Locale.ROOT))) {
+        if (transport != null && !transport.isBlank() && !ACCEPTED_TRANSPORTS.contains(transport.trim().toLowerCase(Locale.ROOT))) {
             throw new IllegalArgumentException("Unsupported MCP transport '" + transport + "'. Only StreamableHTTP is implemented — "
-                    + "use \"http\" (supported: " + SUPPORTED_TRANSPORTS + ").");
+                    + "use \"http\" (supported: " + SUPPORTED_TRANSPORTS + "; deprecated aliases: " + DEPRECATED_TRANSPORT_ALIASES
+                    + "). For a stdio-only MCP server, run a stdio→HTTP bridge as a sidecar — see docs/mcp-client.md.");
         }
     }
 

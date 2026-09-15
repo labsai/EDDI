@@ -14,8 +14,13 @@ public class LanguageUtilities {
     private static final Pattern ORDINAL_DOT_PATTERN = Pattern.compile("(\\d{0,2})(\\.)"); // e.g. 3.
 
     private interface TimeRecognition {
-        Pattern p1 = Pattern.compile("^(([0-1]?[0-9]|[2]?2[0-3])(h)([0-5][0-9]))$", Pattern.CASE_INSENSITIVE | Pattern.DOTALL); // e.g. 12h10
-        Pattern p2 = Pattern.compile("^(([0-1]?[0-9]|[2]?2[0-3])(h))$", Pattern.CASE_INSENSITIVE | Pattern.DOTALL); // e.g. 15h
+        // The hour alternation is [2][0-3], matching p3 below. It read "[2]?2[0-3]"
+        // — an OPTIONAL '2' followed by a literal '2' — which accepted "220h".."223h"
+        // as times; p2 matched them, the 'h' was rewritten to ":00", and then p3
+        // rejected the result, so the expression was silently dropped instead of
+        // never being recognised in the first place.
+        Pattern p1 = Pattern.compile("^(([0-1]?[0-9]|[2][0-3])(h)([0-5][0-9]))$", Pattern.CASE_INSENSITIVE | Pattern.DOTALL); // e.g. 12h10
+        Pattern p2 = Pattern.compile("^(([0-1]?[0-9]|[2][0-3])(h))$", Pattern.CASE_INSENSITIVE | Pattern.DOTALL); // e.g. 15h
         Pattern p3 = Pattern.compile("^([0-1]?[0-9]|[2][0-3]):([0-5][0-9])$", Pattern.CASE_INSENSITIVE | Pattern.DOTALL); // e.g. 19:50
         Pattern p4 = Pattern.compile("(([0-1][0-9])|([2][0-3])):([0-5][0-9]):([0-5][0-9])", Pattern.CASE_INSENSITIVE | Pattern.DOTALL); // e.g.
                                                                                                                                         // 13:50:12

@@ -22,7 +22,10 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.security.Principal;
+import java.util.List;
+import java.util.Map;
 
+import java.io.IOException;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -151,7 +154,7 @@ class McpHitlToolsTest {
 
     @Test
     void listPendingApprovals_delegatesToGuard() throws Exception {
-        when(guard.listScopedPendingApprovals(anyInt())).thenReturn(java.util.List.of());
+        when(guard.listScopedPendingApprovals(anyInt())).thenReturn(List.of());
         when(json.serialize(any())).thenReturn("[]");
         String out = tools.listPendingApprovals("50");
         assertEquals("[]", out);
@@ -189,7 +192,7 @@ class McpHitlToolsTest {
 
     @Test
     void approveGroup_malformedTaskApprovals_returnsBadRequest() throws Exception {
-        when(json.deserialize(eq("{bad"), eq(java.util.Map.class))).thenThrow(new java.io.IOException("parse"));
+        when(json.deserialize(eq("{bad"), eq(Map.class))).thenThrow(new IOException("parse"));
         String out = tools.approveGroupPhase("g1", "gc1", "APPROVED", null, "{bad");
         assertTrue(out.contains("\"errorCode\":\"BAD_REQUEST\""), out);
         verifyNoInteractions(groupConversationService);
@@ -208,7 +211,7 @@ class McpHitlToolsTest {
 
     @Test
     void listAllGroupPendingApprovals_delegatesToGuardWithNullGroup() throws Exception {
-        when(guard.listScopedGroupPendingApprovals(isNull(), anyInt())).thenReturn(java.util.List.of());
+        when(guard.listScopedGroupPendingApprovals(isNull(), anyInt())).thenReturn(List.of());
         when(json.serialize(any())).thenReturn("[]");
         String out = tools.listAllGroupPendingApprovals("100");
         assertEquals("[]", out);

@@ -30,7 +30,7 @@ import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
-import ai.labs.eddi.engine.tenancy.QuotaExceededException;
+import ai.labs.eddi.engine.tenancy.QuotaRefusal;
 import io.micrometer.core.instrument.Counter;
 import org.jboss.logging.Logger;
 
@@ -275,9 +275,16 @@ public class MemberTurnExecutor {
                 var result = conversationService.startConversation(DEFAULT_ENV, member.agentId(), gc.getUserId(), groupContext);
                 privateConvId = result.conversationId();
                 gc.getMemberConversationIds().put(convKey, privateConvId);
-            } catch (QuotaExceededException qe) {
-                throw new GroupDiscussionException("Tenant quota exceeded: " + qe.getMessage(), qe);
             } catch (Exception e) {
+                // Any quota refusal — over a limit OR the store unable to answer —
+                // affects every member, so it aborts the discussion instead of
+                // becoming this member's SKIPPED entry. Matched on the marker rather
+                // than on QuotaExceededException: the accounting-outage type extends
+                // RejectedExecutionException, so a type-by-type guard silently stopped
+                // covering it and an outage degraded into a discussion that "completed".
+                if (e instanceof QuotaRefusal refusal) {
+                    throw new GroupDiscussionException(refusal.refusalSummary() + ": " + e.getMessage(), e);
+                }
                 return handleAgentFailure(member, phaseIdx, phase, protocol, e, "Failed to start conversation", targetAgentId);
             }
         }
@@ -514,9 +521,12 @@ public class MemberTurnExecutor {
                     throw new GroupConversationService.MemberTurnCancelledException();
                 }
                 Throwable cause = e instanceof ExecutionException ? e.getCause() : e;
-                // Quota errors are non-retryable and affect all agents — abort immediately
-                if (cause instanceof QuotaExceededException) {
-                    throw new GroupDiscussionException("Tenant quota exceeded: " + cause.getMessage(), cause);
+                // Quota errors are non-retryable and affect all agents — abort
+                // immediately. QuotaRefusal covers the accounting outage too: retrying a
+                // member maxRetries times against a store that cannot answer pays a
+                // connection-acquisition timeout per attempt on the phase thread.
+                if (cause instanceof QuotaRefusal refusal) {
+                    throw new GroupDiscussionException(refusal.refusalSummary() + ": " + cause.getMessage(), cause);
                 }
                 if (protocol.onAgentFailure() == ProtocolConfig.MemberFailurePolicy.RETRY && retries < maxRetries) {
                     retries++;

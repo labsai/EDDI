@@ -21,8 +21,10 @@ import org.mockito.ArgumentCaptor;
 
 import java.util.Date;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Objects;
 
 import static ai.labs.eddi.modules.templating.ITemplatingEngine.TemplateMode.HTML;
 import static ai.labs.eddi.modules.templating.ITemplatingEngine.TemplateMode.TEXT;
@@ -230,12 +232,12 @@ public class OutputTemplateTaskTest {
             if (o == null || getClass() != o.getClass())
                 return false;
             MockData<?> that = (MockData<?>) o;
-            return java.util.Objects.equals(key, that.key) && java.util.Objects.equals(result, that.result);
+            return Objects.equals(key, that.key) && Objects.equals(result, that.result);
         }
 
         @Override
         public int hashCode() {
-            return java.util.Objects.hash(key, result);
+            return Objects.hash(key, result);
         }
     }
 
@@ -302,7 +304,7 @@ public class OutputTemplateTaskTest {
     public void executeTask_withMapOutput() throws Exception {
         when(currentStep.getAllData(eq("context"))).thenReturn(null);
 
-        var mapOutput = new java.util.LinkedHashMap<String, Object>();
+        var mapOutput = new LinkedHashMap<String, Object>();
         mapOutput.put("key1", "value with {template}");
         mapOutput.put("key2", 42); // non-string value - should not be templated
 

@@ -5,12 +5,14 @@
 package ai.labs.eddi.configs.agents.model;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;
 
+import java.net.URI;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
@@ -189,7 +191,7 @@ class AgentConfigurationTest {
         @Test
         void setters() {
             var cc = new AgentConfiguration.ChannelConnector();
-            cc.setType(java.net.URI.create("eddi://channel/slack"));
+            cc.setType(URI.create("eddi://channel/slack"));
             cc.setConfig(Map.of("token", "xoxb-123"));
             assertEquals("eddi://channel/slack", cc.getType().toString());
             assertEquals("xoxb-123", cc.getConfig().get("token"));
@@ -221,7 +223,7 @@ class AgentConfigurationTest {
             umc.setMaxEntriesPerUser(1000);
             umc.setOnCapReached("reject");
             umc.setRecallOrder("most_relevant");
-            umc.setAutoRecallCategories(java.util.List.of("preference"));
+            umc.setAutoRecallCategories(List.of("preference"));
             umc.setGuardrails(new AgentConfiguration.Guardrails());
             umc.setDream(new AgentConfiguration.DreamConfig());
             assertEquals("global", umc.getDefaultVisibility());
@@ -248,7 +250,7 @@ class AgentConfigurationTest {
             g.setMaxKeyLength(50);
             g.setMaxValueLength(500);
             g.setMaxWritesPerTurn(5);
-            g.setAllowedCategories(java.util.List.of("fact"));
+            g.setAllowedCategories(List.of("fact"));
             assertEquals(50, g.getMaxKeyLength());
             assertEquals(500, g.getMaxValueLength());
             assertEquals(5, g.getMaxWritesPerTurn());

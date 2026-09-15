@@ -4,8 +4,10 @@
  */
 package ai.labs.eddi.configs.groups.templates;
 
+import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.GroupMember;
+import ai.labs.eddi.datastore.IResourceStore;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
@@ -30,8 +32,9 @@ import java.util.Map;
  * each template against the save-time validators doubles as an integration test
  * of the whole Wave 1–3 config surface.
  * <p>
- * Templates live on the classpath under {@code group-templates/} (the
- * {@code initial-agents/} pattern: an index file naming each resource). A
+ * Templates live on the classpath under {@code group-templates/}, listed by an
+ * index file that names each resource — a classpath directory cannot be
+ * enumerated portably from inside a JAR, so the index is the manifest. A
  * template file carries a {@code manifest} (id, title, description,
  * requiredRoles) and a {@code config} — a complete, valid
  * {@link AgentGroupConfiguration} whose member {@code agentId}s (and
@@ -55,6 +58,13 @@ public class GroupTemplateService {
 
     /** Insertion-ordered: the index file's order is the display order. */
     private final Map<String, GroupTemplate> templates = new LinkedHashMap<>();
+
+    /**
+     * Used to reject rosters naming agents that do not exist. Field-injected: a
+     * directly constructed service (tests) has none and skips the check.
+     */
+    @Inject
+    IAgentStore agentStore;
 
     @Inject
     public GroupTemplateService(ObjectMapper objectMapper) {
@@ -191,10 +201,59 @@ public class GroupTemplateService {
             config.setMembers(resolved);
         }
         config.setModeratorAgentId(resolvePlaceholder(config.getModeratorAgentId(), assignments, templateId));
+        List<String> unknownAgents = unknownAgents(config);
+        if (!unknownAgents.isEmpty()) {
+            throw new IllegalArgumentException("Assigned agent(s) do not exist: " + String.join(", ", unknownAgents)
+                    + " — assign the id of an existing agent to each role");
+        }
         if (name != null && !name.isBlank()) {
             config.setName(name.trim());
         }
         return config;
+    }
+
+    /**
+     * The AGENT members (and moderator) of an instantiated roster that name no
+     * existing agent. A typo'd or deleted id used to save fine and fail only when
+     * the discussion reached that member — for a negotiation template, at the
+     * arbitration step, after every paid round before it. HUMAN members carry a
+     * principal id, not an agent, and are not checked. A store that cannot answer
+     * does not block instantiation.
+     */
+    private List<String> unknownAgents(AgentGroupConfiguration config) {
+        if (agentStore == null) {
+            return List.of();
+        }
+        List<String> candidates = new ArrayList<>();
+        List<String> humans = new ArrayList<>();
+        if (config.getMembers() != null) {
+            for (GroupMember member : config.getMembers()) {
+                if (member == null || member.agentId() == null) {
+                    continue;
+                }
+                if (member.memberType() == AgentGroupConfiguration.MemberType.AGENT) {
+                    candidates.add(member.agentId());
+                } else if (member.memberType() == AgentGroupConfiguration.MemberType.HUMAN) {
+                    humans.add(member.agentId());
+                }
+            }
+        }
+        String moderator = config.getModeratorAgentId();
+        if (moderator != null && !moderator.isBlank() && !humans.contains(moderator)) {
+            candidates.add(moderator);
+        }
+        return candidates.stream().distinct().filter(agentId -> !agentExists(agentId)).toList();
+    }
+
+    private boolean agentExists(String agentId) {
+        try {
+            return agentStore.getCurrentResourceId(agentId) != null;
+        } catch (IResourceStore.ResourceNotFoundException | IllegalArgumentException e) {
+            return false;
+        } catch (Exception e) {
+            LOGGER.debugf("Could not check whether agent '%s' exists: %s", agentId, e.getMessage());
+            return true;
+        }
     }
 
     /**

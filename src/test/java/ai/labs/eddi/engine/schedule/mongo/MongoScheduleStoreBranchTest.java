@@ -9,6 +9,7 @@ import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
+import com.mongodb.ReadPreference;
 import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
@@ -54,6 +55,26 @@ class MongoScheduleStoreBranchTest {
         doReturn(scheduleCollection).when(database).getCollection("eddi_schedules");
         doReturn(fireLogCollection).when(database).getCollection("eddi_schedule_fire_logs");
 
+        // The store keeps a primary-read view of the schedule collection for the two
+        // reads the erasure guarantee rests on. One logical node here, so the two
+        // views are the same mock and the stubs below apply to both; that they are
+        // distinct on a replica set is pinned in MongoScheduleStoreTest.
+        doReturn(scheduleCollection).when(scheduleCollection).withReadPreference(any(ReadPreference.class));
+
+        // Every delete path now cascades to the schedule's fire logs (they are
+        // unreachable once the schedule row is gone, and each carries a
+        // conversationId). Permissive defaults; tests that care re-stub them.
+        DeleteResult noneDeleted = mock(DeleteResult.class);
+        when(noneDeleted.getDeletedCount()).thenReturn(0L);
+        when(fireLogCollection.deleteMany(any(Bson.class))).thenReturn(noneDeleted);
+        when(scheduleCollection.deleteOne(any(Bson.class))).thenReturn(noneDeleted);
+        FindIterable<Document> empty = mock(FindIterable.class);
+        MongoCursor<Document> emptyCursor = mock(MongoCursor.class);
+        when(emptyCursor.hasNext()).thenReturn(false);
+        when(empty.projection(any())).thenReturn(empty);
+        when(empty.iterator()).thenReturn(emptyCursor);
+        when(scheduleCollection.find(any(Bson.class))).thenReturn(empty);
+
         store = new MongoScheduleStore(database, jsonSerialization, documentBuilder, 100);
     }
 
@@ -84,8 +105,13 @@ class MongoScheduleStoreBranchTest {
     @Test
     @DisplayName("updateSchedule wraps RuntimeException in ResourceStoreException")
     void updateScheduleRuntimeException() throws Exception {
+        // The failure is provoked at the write, not at serialization: updateSchedule is
+        // now an explicit $set of the editable fields and never serializes the object.
+        // Stubbing serialize() here still "passed" afterwards, but only because the
+        // unstubbed updateOne returned null and the NPE happened to be wrapped too.
         ScheduleConfiguration config = new ScheduleConfiguration();
-        doThrow(new RuntimeException("serialize fail")).when(jsonSerialization).serialize(any());
+        doThrow(new RuntimeException("db error")).when(scheduleCollection)
+                .updateOne(any(Bson.class), any(Bson.class));
 
         assertThrows(IResourceStore.ResourceStoreException.class,
                 () -> store.updateSchedule("s1", config));

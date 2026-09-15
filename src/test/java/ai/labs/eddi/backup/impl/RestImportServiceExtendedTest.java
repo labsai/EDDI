@@ -4,23 +4,29 @@
  */
 package ai.labs.eddi.backup.impl;
 
+import ai.labs.eddi.engine.schedule.IScheduleStore;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.engine.security.spaces.SpaceContext;
 import ai.labs.eddi.backup.IZipArchive;
 import ai.labs.eddi.backup.model.ImportPreview;
+import ai.labs.eddi.backup.model.UpgradeResult;
 import ai.labs.eddi.backup.model.ImportPreview.DiffAction;
 import ai.labs.eddi.backup.model.ImportPreview.ResourceDiff;
 import ai.labs.eddi.backup.model.SyncMapping;
 import ai.labs.eddi.backup.model.SyncRequest;
+import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.migration.IMigrationManager;
 import ai.labs.eddi.configs.migration.TemplateSyntaxMigrator;
+import ai.labs.eddi.configs.snippets.IRestPromptSnippetStore;
+import ai.labs.eddi.configs.snippets.model.PromptSnippet;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
-import ai.labs.eddi.engine.api.IRestAgentAdministration;
-import ai.labs.eddi.engine.runtime.internal.IDeploymentListener;
+import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
@@ -36,6 +42,8 @@ import java.nio.file.Files;
 import java.util.List;
 import java.util.Set;
 
+import jakarta.enterprise.inject.spi.CDI;
+import jakarta.enterprise.inject.Instance;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -53,25 +61,23 @@ class RestImportServiceExtendedTest {
     private IDocumentDescriptorStore documentDescriptorStore;
     private StructuralMatcher structuralMatcher;
     private UpgradeExecutor upgradeExecutor;
-    private IRestAgentAdministration restAgentAdministration;
     private RestImportService importService;
 
     @BeforeEach
     void setUp() {
         zipArchive = mock(IZipArchive.class);
         jsonSerialization = mock(IJsonSerialization.class);
-        restAgentAdministration = mock(IRestAgentAdministration.class);
         var migrationManager = mock(IMigrationManager.class);
-        var deploymentListener = mock(IDeploymentListener.class);
         documentDescriptorStore = mock(IDocumentDescriptorStore.class);
         var templateSyntaxMigrator = mock(TemplateSyntaxMigrator.class);
         structuralMatcher = mock(StructuralMatcher.class);
         upgradeExecutor = mock(UpgradeExecutor.class);
 
         importService = new RestImportService(
-                zipArchive, jsonSerialization, restAgentAdministration,
-                migrationManager, deploymentListener, documentDescriptorStore,
-                templateSyntaxMigrator, structuralMatcher, upgradeExecutor);
+                zipArchive, jsonSerialization,
+                migrationManager, documentDescriptorStore,
+                templateSyntaxMigrator, structuralMatcher, upgradeExecutor, mock(IScheduleStore.class), mock(BackupMetrics.class),
+                mock(ResourceAccessGuard.class), mock(SpaceContext.class));
     }
 
     // ==================== normalizeVaultReferences ====================
@@ -220,7 +226,10 @@ class RestImportServiceExtendedTest {
                     "https://example.com", mappings, null);
 
             assertEquals(1, results.size());
-            assertTrue(results.getFirst().sourceAgentName().startsWith("Error:"));
+            assertNull(results.getFirst().sourceAgentName());
+            // The failure is a real field now: prefixing the agent NAME with "Error: "
+            // made a client string-match to tell a failed row from a successful one.
+            assertNotNull(results.getFirst().error());
         }
     }
 
@@ -378,7 +387,7 @@ class RestImportServiceExtendedTest {
     class ImportMerge {
 
         @Test
-        @DisplayName("merge strategy with empty zip returns ok response")
+        @DisplayName("merge strategy with empty zip is rejected, not reported as success")
         void mergeEmptyZip() throws Exception {
             doAnswer(inv -> {
                 File dir = inv.getArgument(1);
@@ -386,12 +395,10 @@ class RestImportServiceExtendedTest {
                 return null;
             }).when(zipArchive).unzip(any(InputStream.class), any(File.class));
 
-            Response response = importService.importAgent(
-                    new ByteArrayInputStream(new byte[0]), "merge", null, null, null);
-
-            assertNotNull(response);
-            // No agent files → returns 200
-            assertEquals(200, response.getStatus());
+            // An archive with no agent file is rejected. Answering 200 with an empty
+            // resourceUri is how a whole class of broken archives went unnoticed.
+            assertThrows(BadRequestException.class, () -> importService.importAgent(
+                    new ByteArrayInputStream(new byte[0]), "merge", null, null, null));
         }
 
         @Test
@@ -403,11 +410,8 @@ class RestImportServiceExtendedTest {
                 return null;
             }).when(zipArchive).unzip(any(InputStream.class), any(File.class));
 
-            Response response = importService.importAgent(
-                    new ByteArrayInputStream(new byte[0]), "create", "res1,res2", null, null);
-
-            assertNotNull(response);
-            assertEquals(200, response.getStatus());
+            assertThrows(BadRequestException.class, () -> importService.importAgent(
+                    new ByteArrayInputStream(new byte[0]), "create", "res1,res2", null, null));
         }
     }
 
@@ -424,7 +428,7 @@ class RestImportServiceExtendedTest {
             URI resultUri = URI.create("eddi://ai.labs.agent/agentstore/agents/target-1?version=2");
             when(upgradeExecutor.executeUpgrade(any(), eq("target-1"),
                     eq(Set.of("res1", "res2")), eq(List.of("wf1", "wf2"))))
-                    .thenReturn(resultUri);
+                    .thenReturn(new UpgradeResult(resultUri, true, 1, 0, 0, List.of()));
 
             doAnswer(inv -> {
                 File dir = inv.getArgument(1);
@@ -577,26 +581,26 @@ class RestImportServiceExtendedTest {
                     .thenThrow(new IResourceStore.ResourceNotFoundException("nf"));
 
             // Snippet deserialization
-            var snippet = new ai.labs.eddi.configs.snippets.model.PromptSnippet();
+            var snippet = new PromptSnippet();
             snippet.setName("cautious_mode");
             snippet.setContent("Be cautious");
             when(jsonSerialization.deserialize(
                     eq("{\"name\":\"cautious_mode\",\"content\":\"Be cautious\"}"),
-                    eq(ai.labs.eddi.configs.snippets.model.PromptSnippet.class)))
+                    eq(PromptSnippet.class)))
                     .thenReturn(snippet);
 
             // Mock CDI for IRestPromptSnippetStore (used by addSnippetDiffs →
             // getRestResourceStore)
-            var snippetStore = mock(ai.labs.eddi.configs.snippets.IRestPromptSnippetStore.class);
+            var snippetStore = mock(IRestPromptSnippetStore.class);
             // readSnippetDescriptors returns empty → no existing snippets
             when(snippetStore.readSnippetDescriptors(eq(""), eq(0), eq(0))).thenReturn(List.of());
 
-            try (var cdiMock = org.mockito.Mockito.mockStatic(jakarta.enterprise.inject.spi.CDI.class)) {
-                var cdi = mock(jakarta.enterprise.inject.spi.CDI.class);
-                cdiMock.when(jakarta.enterprise.inject.spi.CDI::current).thenReturn(cdi);
-                var instance = (jakarta.enterprise.inject.Instance<ai.labs.eddi.configs.snippets.IRestPromptSnippetStore>) mock(
-                        jakarta.enterprise.inject.Instance.class);
-                when(cdi.select(ai.labs.eddi.configs.snippets.IRestPromptSnippetStore.class)).thenReturn(instance);
+            try (var cdiMock = org.mockito.Mockito.mockStatic(CDI.class)) {
+                var cdi = mock(CDI.class);
+                cdiMock.when(CDI::current).thenReturn(cdi);
+                var instance = (Instance<IRestPromptSnippetStore>) mock(
+                        Instance.class);
+                when(cdi.select(IRestPromptSnippetStore.class)).thenReturn(instance);
                 when(instance.get()).thenReturn(snippetStore);
 
                 ImportPreview result = importService.previewImport(
@@ -646,16 +650,16 @@ class RestImportServiceExtendedTest {
                     .thenThrow(new IResourceStore.ResourceNotFoundException("nf"));
 
             // Snippet deserialization
-            var snippet = new ai.labs.eddi.configs.snippets.model.PromptSnippet();
+            var snippet = new PromptSnippet();
             snippet.setName("safety_prompt");
             snippet.setContent("Be safe");
             when(jsonSerialization.deserialize(
                     eq("{\"name\":\"safety_prompt\",\"content\":\"Be safe\"}"),
-                    eq(ai.labs.eddi.configs.snippets.model.PromptSnippet.class)))
+                    eq(PromptSnippet.class)))
                     .thenReturn(snippet);
 
             // Mock CDI for snippet store
-            var snippetStore = mock(ai.labs.eddi.configs.snippets.IRestPromptSnippetStore.class);
+            var snippetStore = mock(IRestPromptSnippetStore.class);
             // Existing snippet descriptor
             String existingSnippetId = "eeee11112222333344445555";
             var existingDesc = new DocumentDescriptor();
@@ -665,16 +669,16 @@ class RestImportServiceExtendedTest {
                     .thenReturn(List.of(existingDesc));
 
             // readSnippet returns a snippet with the same name
-            var existingSnippet = new ai.labs.eddi.configs.snippets.model.PromptSnippet();
+            var existingSnippet = new PromptSnippet();
             existingSnippet.setName("safety_prompt");
             when(snippetStore.readSnippet(existingSnippetId, 1)).thenReturn(existingSnippet);
 
-            try (var cdiMock = org.mockito.Mockito.mockStatic(jakarta.enterprise.inject.spi.CDI.class)) {
-                var cdi = mock(jakarta.enterprise.inject.spi.CDI.class);
-                cdiMock.when(jakarta.enterprise.inject.spi.CDI::current).thenReturn(cdi);
-                var instance = (jakarta.enterprise.inject.Instance<ai.labs.eddi.configs.snippets.IRestPromptSnippetStore>) mock(
-                        jakarta.enterprise.inject.Instance.class);
-                when(cdi.select(ai.labs.eddi.configs.snippets.IRestPromptSnippetStore.class)).thenReturn(instance);
+            try (var cdiMock = org.mockito.Mockito.mockStatic(CDI.class)) {
+                var cdi = mock(CDI.class);
+                cdiMock.when(CDI::current).thenReturn(cdi);
+                var instance = (Instance<IRestPromptSnippetStore>) mock(
+                        Instance.class);
+                when(cdi.select(IRestPromptSnippetStore.class)).thenReturn(instance);
                 when(instance.get()).thenReturn(snippetStore);
 
                 ImportPreview result = importService.previewImport(
@@ -766,7 +770,7 @@ class RestImportServiceExtendedTest {
             }).when(zipArchive).unzip(any(InputStream.class), any(File.class));
 
             when(upgradeExecutor.executeUpgrade(any(), eq(targetAgentId), isNull(), isNull()))
-                    .thenReturn(resultUri);
+                    .thenReturn(new UpgradeResult(resultUri, true, 1, 0, 0, List.of()));
 
             Response response = importService.importAgent(
                     new ByteArrayInputStream(new byte[0]), "upgrade", null, targetAgentId, null);
@@ -838,7 +842,7 @@ class RestImportServiceExtendedTest {
                     .thenReturn(zipDescriptor);
 
             // Mock CDI for IAgentStore.create
-            var agentStore = mock(ai.labs.eddi.configs.agents.IAgentStore.class);
+            var agentStore = mock(IAgentStore.class);
             IResourceId createdId = testResourceId(newAgentId, 1);
             when(agentStore.create(any())).thenReturn(createdId);
 
@@ -852,13 +856,13 @@ class RestImportServiceExtendedTest {
                     "eddi://ai.labs.agent/agentstore/agents/" + newAgentId + "?version=1"));
             when(documentDescriptorStore.readDescriptor(newAgentId, 1)).thenReturn(existingDescriptor);
 
-            try (var cdiMock = org.mockito.Mockito.mockStatic(jakarta.enterprise.inject.spi.CDI.class)) {
-                var cdi = mock(jakarta.enterprise.inject.spi.CDI.class);
-                cdiMock.when(jakarta.enterprise.inject.spi.CDI::current).thenReturn(cdi);
+            try (var cdiMock = org.mockito.Mockito.mockStatic(CDI.class)) {
+                var cdi = mock(CDI.class);
+                cdiMock.when(CDI::current).thenReturn(cdi);
 
-                var agentStoreInstance = (jakarta.enterprise.inject.Instance<ai.labs.eddi.configs.agents.IAgentStore>) mock(
-                        jakarta.enterprise.inject.Instance.class);
-                when(cdi.select(ai.labs.eddi.configs.agents.IAgentStore.class)).thenReturn(agentStoreInstance);
+                var agentStoreInstance = (Instance<IAgentStore>) mock(
+                        Instance.class);
+                when(cdi.select(IAgentStore.class)).thenReturn(agentStoreInstance);
                 when(agentStoreInstance.get()).thenReturn(agentStore);
 
                 Response response = importService.importAgent(
@@ -890,12 +894,11 @@ class RestImportServiceExtendedTest {
                 return null;
             }).when(zipArchive).unzip(any(InputStream.class), any(File.class));
 
-            ImportPreview result = importService.previewImport(
-                    new ByteArrayInputStream(new byte[0]), null);
-
-            assertNotNull(result);
-            assertNull(result.sourceAgentId());
-            assertTrue(result.resources().isEmpty());
+            var ex = assertThrows(BadRequestException.class, () -> importService.previewImport(
+                    new ByteArrayInputStream(new byte[0]), null));
+            // The message has to name what was looked for: an empty preview told the
+            // operator there was nothing to import, which is not the same thing.
+            assertTrue(ex.getMessage().contains(".agent.json"), ex.getMessage());
         }
     }
 
@@ -992,8 +995,8 @@ class RestImportServiceExtendedTest {
                     "https://example.com", mappings, null);
 
             assertEquals(2, results.size());
-            assertTrue(results.get(0).sourceAgentName().startsWith("Error:"));
-            assertTrue(results.get(1).sourceAgentName().startsWith("Error:"));
+            assertNotNull(results.get(0).error());
+            assertNotNull(results.get(1).error());
             assertEquals("agent-1", results.get(0).sourceAgentId());
             assertEquals("agent-2", results.get(1).sourceAgentId());
         }
@@ -1111,11 +1114,8 @@ class RestImportServiceExtendedTest {
             }).when(zipArchive).unzip(any(InputStream.class), any(File.class));
 
             // With spaces around commas — still works
-            Response response = importService.importAgent(
-                    new ByteArrayInputStream(new byte[0]), "create", " res1 , res2 , res3 ", null, null);
-
-            assertNotNull(response);
-            assertEquals(200, response.getStatus());
+            assertThrows(BadRequestException.class, () -> importService.importAgent(
+                    new ByteArrayInputStream(new byte[0]), "create", " res1 , res2 , res3 ", null, null));
         }
 
         @Test
@@ -1127,11 +1127,8 @@ class RestImportServiceExtendedTest {
                 return null;
             }).when(zipArchive).unzip(any(InputStream.class), any(File.class));
 
-            Response response = importService.importAgent(
-                    new ByteArrayInputStream(new byte[0]), "create", "", null, null);
-
-            assertNotNull(response);
-            assertEquals(200, response.getStatus());
+            assertThrows(BadRequestException.class, () -> importService.importAgent(
+                    new ByteArrayInputStream(new byte[0]), "create", "", null, null));
         }
     }
 

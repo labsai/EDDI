@@ -4,7 +4,7 @@
 
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/12355/badge?v=2)](https://www.bestpractices.dev/projects/12355) [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/labsai/EDDI/badge)](https://securityscorecards.dev/viewer/?uri=github.com/labsai/EDDI) [![Codacy Badge](https://app.codacy.com/project/badge/Grade/2c5d183d4bd24dbaa77427cfbf5d4074)](https://app.codacy.com/organizations/gh/labsai/dashboard?utm_source=github.com&utm_medium=referral&utm_content=labsai/EDDI&utm_campaign=Badge_Grade)
 
-[![CI](https://github.com/labsai/EDDI/actions/workflows/ci.yml/badge.svg)](https://github.com/labsai/EDDI/actions/workflows/ci.yml) [![CodeQL](https://github.com/labsai/EDDI/actions/workflows/codeql.yml/badge.svg)](https://github.com/labsai/EDDI/actions/workflows/codeql.yml) ![Tests](https://img.shields.io/badge/tests-11%2C000%2B-brightgreen) ![Coverage](https://img.shields.io/badge/coverage-%3E90%25-brightgreen)
+[![CI](https://github.com/labsai/EDDI/actions/workflows/ci.yml/badge.svg)](https://github.com/labsai/EDDI/actions/workflows/ci.yml) [![CodeQL](https://github.com/labsai/EDDI/actions/workflows/codeql.yml/badge.svg)](https://github.com/labsai/EDDI/actions/workflows/codeql.yml) ![Tests](https://img.shields.io/badge/tests-21%2C000%2B-brightgreen) ![Coverage](https://img.shields.io/badge/coverage-%3E90%25%20instr%20%2F%20%3E80%25%20branch-brightgreen)
 
 [![Docker Pulls](https://img.shields.io/docker/pulls/labsai/eddi)](https://hub.docker.com/r/labsai/eddi) [![Latest Release](https://img.shields.io/github/v/release/labsai/EDDI?label=latest&color=blue)](https://github.com/labsai/EDDI/releases) [![Repository: AI Ready](https://img.shields.io/badge/Repository-AI_Ready-blueviolet?logo=robot)](AGENTS.md)
 
@@ -38,7 +38,7 @@ Built with **Java 25** and **Quarkus**. Ships as a **Red Hat-certified Docker im
 
 ## 🏁 Quick Start
 
-The fastest way to get EDDI running is the **one-command installer**. It sets up EDDI + your choice of database via Docker Compose, deploys the [Agent Father](docs/agent-father-deep-dive.md) starter agent, and walks you through creating your first AI agent.
+The fastest way to get EDDI running is the **one-command installer**. It sets up EDDI + your choice of database via Docker Compose and points you at the dashboard, where the **Platform Operator** (or the form-based agent wizard) creates your first AI agent for you.
 
 **Linux / macOS / WSL2:**
 
@@ -118,8 +118,9 @@ If you prefer manual control over Docker Compose:
 # Default (EDDI + MongoDB)
 docker compose up
 
-# PostgreSQL instead of MongoDB
-EDDI_DATASTORE_TYPE=postgres docker compose -f docker-compose.yml -f docker-compose.postgres.yml up
+# PostgreSQL instead of MongoDB — a complete stack, so it is NOT layered on
+# docker-compose.yml (an overlay cannot un-declare the base's mongodb service)
+docker compose -f docker-compose.postgres-only.yml up
 
 # With Keycloak authentication
 docker compose -f docker-compose.yml -f docker-compose.auth.yml up
@@ -127,12 +128,18 @@ docker compose -f docker-compose.yml -f docker-compose.auth.yml up
 # With Prometheus + Grafana monitoring
 docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up
 
-# Full stack (all overlays)
+# With a local LLM — Ollama on the same Docker network, reachable as
+# http://ollama:11434 (no host.docker.internal needed)
+docker compose -f docker-compose.yml -f docker-compose.ollama.yml up -d
+
+# Auth + monitoring + NATS together (overlays stack in any combination)
 docker compose -f docker-compose.yml -f docker-compose.auth.yml \
   -f docker-compose.monitoring.yml -f docker-compose.nats.yml up
 ```
 
-Available compose overlays: `docker-compose.auth.yml` (Keycloak), `docker-compose.monitoring.yml` (Prometheus+Grafana), `docker-compose.nats.yml` (NATS JetStream), `docker-compose.postgres.yml` / `docker-compose.postgres-only.yml`, `docker-compose.local.yml` (build from source).
+Available compose overlays: `docker-compose.auth.yml` (Keycloak), `docker-compose.monitoring.yml` (Prometheus+Grafana), `docker-compose.nats.yml` (NATS JetStream), `docker-compose.ollama.yml` (local LLM), `docker-compose.chroma.yml` (vector store), `docker-compose.local.yml` (build from source). `docker-compose.postgres-only.yml` is a complete standalone stack rather than an overlay — use it on its own, not with `-f docker-compose.yml`.
+
+The Ollama overlay pulls `llama3.2:3b` on first start and keeps models in a named volume; override with `OLLAMA_PULL_MODEL=qwen3:4b`, or set it empty to skip the pull. It also sets `EDDI_OLLAMA_DEFAULT_BASE_URL`, so the agent wizard and the setup API pre-fill a base URL that resolves from inside the container — the one thing that trips up every first local-LLM agent, because `localhost` there is the container, not the host.
 
 ```bash
 docker pull labsai/eddi    # Pull latest from Docker Hub
@@ -248,14 +255,23 @@ Most multi-agent frameworks (LangGraph, CrewAI, AutoGen) are Python/Node librari
 ### 🤖 Multi-Agent Orchestration
 
 - 🔀 **Intelligent Routing** — Direct conversations to different agents based on context, rules, and intent
-- 🗣️ **Group Conversations** — Multi-agent debates with 6 built-in discussion styles: Round Table, Peer Review, Devil's Advocate, Delphi, Debate, and Task Force
+- 🗣️ **Group Conversations** — Multi-agent debates with 7 built-in discussion styles: Round Table, Peer Review, Devil's Advocate, Delphi, Debate, Task Force, and Negotiation
 - 🔄 **Follow-up & Continue** — After a group discussion completes, follow up with any specific member agent or continue all phases with a new question — agents retain full context across rounds
 - 💬 **Slack Integration** — Deploy agents to Slack channels and run multi-agent debates directly in threads
 - 🪆 **Nested Groups** — Compose groups of groups for tournament brackets, red-team vs blue-team, and panel reviews
 - 🤖 **Dynamic Agents** — Create, recruit, and delegate to new agents at runtime during group discussions with configurable guardrails
+- 🗳️ **Group Voting** — `VOTE` phases collect explicit ballots (majority or approval, weighted, quorum-gated) and record a decision with the full tally, the raw ballots, and the losing side's dissents
+- 📋 **Shared Artifacts** — A blackboard members co-edit through tools, with compare-and-set concurrency and declarative JSON-Schema, regex, or max-length validators — never an LLM merge
+- 🧑‍🤝‍🧑 **Humans as Members** — A person can hold a seat in the group: their turn pauses the discussion until they answer, or the configured timeout policy resolves it
+- 🎚️ **Facilitator** — An optional facilitator agent is briefed at checkpoints and picks one move from a config-enumerated list (end, extend, call a vote, recruit, escalate) — bounded adaptation, never free-form orchestration
+- 🤝 **Negotiation** — Typed two-party bargaining: positions → proposals → a quoted concession ledger → signed acceptances, with arbitration skipped once agreement is reached
+- 🎯 **Bid-Based Assignment** — Contract-Net-lite task auctions: eligible members bid blind in parallel, highest confidence wins, with deterministic tie-break and fallback to role assignment
+- 🎓 **Team Memory** — A `RETRO` phase distils lessons into team-owned group memory, so they surface in every member's later discussions — institutional knowledge that compounds run over run
+- 🏢 **Standing Teams** — A persistent workspace per group: a backlog that survives between discussions, cron cadences that pull from it, cross-run retry of unverified work, and running team metrics
+- 📦 **Preset Group Templates** — Five packaged, validated group configs (research pod, editorial team, ops task force, decision board, negotiation table) — instantiate by assigning agents to named roles, not by hand-writing phases
 - 👥 **Managed Conversations** — Intent-based auto-routing with one conversation per user per intent
 - 🎯 **Capability Matching** — Discover and route to agents by skill, confidence score, and custom attributes
-- 🧙 **Agent Father** — Meta-agent that creates other agents through conversation (ships out of the box)
+- 🧙 **Platform Operator** — Meta-agent that reads and operates the deployment — including creating other agents — with every write behind a human approval gate
 
 ### 🧠 LLM Provider Support (12 Providers)
 
@@ -277,11 +293,11 @@ EDDI implements open standards — not proprietary APIs:
 
 | Standard                                                             | Role                            | What It Enables                                                                                          |
 | -------------------------------------------------------------------- | ------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| **[MCP](https://modelcontextprotocol.io/)** (Model Context Protocol) | Server (60+ tools) + Client    | Control EDDI from Antigravity, Claude Desktop, Cursor, Windsurf, or any MCP client — [setup guide](docs/mcp-server.md#client-configuration). Connect agents to external MCP tool servers |
+| **[MCP](https://modelcontextprotocol.io/)** (Model Context Protocol) | Server (80+ tools) + Client    | Control EDDI from Antigravity, Claude Desktop, Cursor, Windsurf, or any MCP client — [setup guide](docs/mcp-server.md#client-configuration). Connect agents to external MCP tool servers |
 | **[A2A](https://google.github.io/A2A/)** (Agent-to-Agent Protocol)   | Full implementation             | Cross-platform agent communication, Agent Cards, and skill discovery                                     |
 | **[OpenAPI](https://www.openapis.org/)** 3.1                         | Native generation + consumption | Auto-generated spec. Paste any OpenAPI spec → get a fully deployed API-calling agent                     |
 | **OAuth 2.0 / OIDC**                                                 | Keycloak integration            | Authentication, authorization, and multi-tenant isolation                                                |
-| **SSE** (Server-Sent Events)                                         | Streaming transport             | Real-time chat responses, group discussion feeds, and live log streaming                                 |
+| **SSE** (Server-Sent Events)                                         | Streaming transport             | Token-by-token chat responses, including most tool-enabled turns, which stream over the provider's streaming transport instead of going silent until the tool loop finishes (a single-chunk fallback still applies to cascade agents, providers without a streaming builder, and a few other configurations) — plus a live `tool_call` event for "Using {tool}…" status, group discussion feeds, and live log streaming |
 
 ### 💭 Memory & Context Management
 
@@ -349,6 +365,7 @@ EDDI implements open standards — not proprietary APIs:
 - 🚦 **Turn-Level Approval** — `PAUSE_CONVERSATION` action halts the entire pipeline; new user input returns `409 Conflict` until a human resumes
 - 🔧 **Per-Tool-Call Gating** — Individual tool invocations can require human approval before execution, with glob-pattern allow/exempt lists across built-in, HTTP, MCP, A2A, dynamic, and memory tools
 - 👥 **Group Phase Approval** — Multi-agent discussion phases can require human sign-off at `PHASE` or `TASK` granularity
+- 🧑‍🤝‍🧑 **Humans in the Room** — Beyond approving, a human can be a full group member with their own speaking turn; a facilitator can also pause a discussion to put a question to a named principal
 - ⏱️ **Timeout Policies** — `WAIT_INDEFINITELY`, `AUTO_APPROVE`, `AUTO_REJECT`, or `ABORT` when humans don't respond in time
 - 🔁 **No-Progress Guard** — Detects infinite approval loops (identical pause fingerprints after automated decisions) and breaks the cycle
 - 💬 **Slack Approvals** — Interactive Block Kit cards with redacted argument previews and approver whitelists
@@ -400,10 +417,10 @@ EDDI implements open standards — not proprietary APIs:
 
 ### 🚀 Cloud-Native & Observable
 
-- 🐳 **One-Command Install** — Interactive wizard sets up EDDI + database + starter agent via Docker
-- ☸️ **Kubernetes / OpenShift** — Kustomize overlays, Helm charts, HPA, PDB, NetworkPolicy
+- 🐳 **One-Command Install** — Interactive wizard sets up EDDI + database via Docker
+- ☸️ **Kubernetes / OpenShift** — Kustomize overlays, Helm charts, PDB, NetworkPolicy (no HPA: EDDI is single-writer per conversation, so both delivery paths pin one replica)
 - 📊 **Prometheus & Grafana** — 50+ Micrometer metrics at `/q/metrics` (tools, vault, memory, scheduling, conversations). Pre-built [Grafana dashboard](docs/monitoring/eddi-grafana-dashboard.json) included
-- 🔭 **OpenTelemetry Tracing** — Per-task distributed traces via OTLP (Jaeger, Tempo, Datadog). Every pipeline task emits spans with `task.id`, `task.type`, `conversation.id`, and `agent.id`
+- 🔭 **OpenTelemetry Tracing** — Per-task distributed traces via OTLP (Jaeger, Tempo, Datadog). Every pipeline task emits a span named `eddi.pipeline.task` carrying `eddi.task.id`, `eddi.task.type`, `eddi.task.index`, `eddi.conversation.id` and `eddi.agent.id`. The equivalent *metric* tags are un-prefixed (`task.id`, `task.type`)
 - 🩺 **Health Checks** — Liveness & readiness probes at `/q/health/live` and `/q/health/ready`
 - 🔄 **NATS JetStream** — Async event bus for distributed processing
 - 🛟 **Error Handling & Recovery** — Automatic retry with exponential backoff, MCP circuit breakers (3 failures / 60s cooldown), LLM response validation (`onEmpty` / `onTruncation` / `onRefusal`), streaming timeout retry, and admin endpoint to reset stuck conversations
@@ -435,10 +452,11 @@ EDDI implements open standards — not proprietary APIs:
 | **[Behavior Rules](docs/behavior-rules.md)**                 | Configuring agent routing logic                    |
 | **[HTTP Calls](docs/httpcalls.md)**                          | External API integration                           |
 | **[RAG](docs/rag.md)**                                       | Knowledge base retrieval setup                     |
-| **[MCP Server](docs/mcp-server.md)**                         | 60+ tools for AI-assisted agent management         |
+| **[MCP Server](docs/mcp-server.md)**                         | 80+ tools for AI-assisted agent management         |
 | **[A2A Protocol](docs/a2a-protocol.md)**                     | Agent-to-Agent peer communication                  |
+| **[OpenAI-Compatible API](docs/open-webui-integration.md)**  | Agents as OpenAI models for Open WebUI & SDKs      |
 | **[Slack Integration](docs/slack-integration.md)**           | Deploy agents to Slack and run group discussions   |
-| **[Group Conversations](docs/group-conversations.md)**       | Multi-agent debate orchestration                   |
+| **[Group Conversations](docs/group-conversations.md)**       | Debate, voting, artifacts, standing teams          |
 | **[User Memory](docs/user-memory.md)**                       | Cross-conversation fact retention                  |
 | **[Memory Policy](docs/memory-policy.md)**                   | Commit flags and strict write discipline            |
 | **[Model Cascading](docs/model-cascade.md)**                 | Cost-optimized multi-model routing                 |
@@ -455,7 +473,6 @@ EDDI implements open standards — not proprietary APIs:
 | **[Kubernetes](docs/kubernetes.md)**                         | Deploy with Kustomize or Helm                      |
 | **[Monitoring & Tracing](docs/monitoring/monitoring-guide.md)** | Prometheus, Grafana, OpenTelemetry, alerting     |
 | **[Red Hat & OpenShift](docs/redhat-openshift.md)**          | RHEL support, certified container, automated release |
-| **[Agent Father Deep Dive](docs/agent-father-deep-dive.md)** | How the meta-agent works                           |
 | **[Full Documentation](https://docs.labs.ai/)**              | Complete documentation site                        |
 
 ---
@@ -528,13 +545,13 @@ Dev mode also enables:
 | Command                                                       | What It Does                                                                |
 | ------------------------------------------------------------- | --------------------------------------------------------------------------- |
 | `./mvnw compile quarkus:dev`                                  | **Start dev mode** with live reload (port 7070)                             |
-| `./mvnw compile`                                              | Compile sources only (fast feedback)                                        |
+| `./mvnw compile`                                              | Compile sources only (fast feedback). Also runs the two `validate`-phase style gates, so it **fails** on an unused import (Checkstyle) or an unformatted file (`formatter:validate`) — neither edits your sources; run `./mvnw formatter:format` to fix formatting |
 | `./mvnw clean compile`                                        | Clean build — delete `target/` and recompile from scratch                   |
 | `./mvnw test`                                                 | Run **unit tests** (excludes `*IT.java` integration tests)                  |
-| `./mvnw verify -DskipITs`                                     | Compile + unit tests + package (no integration tests)                       |
-| `./mvnw verify`                                               | **Full build** — compile + unit tests + integration tests (requires Docker) |
-| `./mvnw validate`                                             | Run **Checkstyle** code style checks                                        |
-| `./mvnw formatter:format`                                     | **Auto-format** Java sources using the project Eclipse formatter            |
+| `./mvnw verify`                                               | Compile + unit tests + package. **Integration tests are skipped** — `skipITs` defaults to `true` in `pom.xml` |
+| `./mvnw verify -DskipITs=false`                               | **Full build** — adds the `*IT.java` integration tests (requires Docker). This is what CI runs |
+| `./mvnw validate`                                             | Run the **blocking style gates** — Checkstyle (`UnusedImports`/`RedundantImport` fail the build; `FileLength`/`LineLength` stay advisory) and `formatter:validate`, which reports unformatted files without touching them |
+| `./mvnw formatter:format`                                     | **Auto-format** Java sources using the project Eclipse formatter — the fix for a `formatter:validate` failure |
 | `./mvnw package -DskipTests`                                  | Build the JAR without running tests (for `install.sh --local`)              |
 | `./mvnw clean package '-Dquarkus.container-image.build=true'` | Build the app **+ Docker image**                                            |
 | `./mvnw package -Plicense-gen -DskipTests`                    | Generate **third-party licenses** (Red Hat certification)                   |
@@ -558,7 +575,8 @@ target/site/jacoco/index.html
 | Property                                    | Default                     | Description                                    |
 | ------------------------------------------- | --------------------------- | ---------------------------------------------- |
 | `-Dquarkus.http.port=<port>`                | `7070`                      | Override the HTTP port                         |
-| `-Dquarkus.mongodb.connection-string=<uri>` | `mongodb://localhost:27017` | MongoDB connection                             |
+| `-Dmongodb.connectionString=<uri>`          | dev: `mongodb://localhost:27017/eddi`  | MongoDB connection, read by `PersistenceModule`. `quarkus.mongodb.connection-string` is a different key that only the health check reads |
+| `-Dmongodb.database=<name>`                 | `eddi`                      | MongoDB database name                          |
 | `-Dquarkus.profile=<profile>`               | `dev`                       | Active Quarkus profile (`dev`, `test`, `prod`) |
 | `-DskipTests`                               | `false`                     | Skip all tests                                 |
 | `-DskipITs`                                 | `true`                      | Skip integration tests only                    |
@@ -580,20 +598,30 @@ target/site/jacoco/index.html
 
 ### ☸️ Kubernetes
 
-```bash
-# Quickstart (one-file deployment)
-kubectl apply -f https://raw.githubusercontent.com/labsai/EDDI/main/k8s/quickstart.yaml
+No shipped manifest creates the `eddi-secrets` Secret that holds the vault master
+key — a Secret in the manifests would be reconciled on every `kubectl apply` and
+overwrite a live key, making everything already encrypted with it undecryptable.
+So the Secret is created out-of-band, **before** the first apply. Without it the
+EDDI pod sits in `ContainerCreating` (`MountVolume.SetUp failed: secret
+"eddi-secrets" not found`) and never starts.
 
-# Kustomize overlays
+```bash
+# Kustomize overlays — create the vault Secret first, then apply
+bash k8s/create-secrets.sh                 # PowerShell 7: pwsh -File .\k8s\create-secrets.ps1
 kubectl apply -k k8s/overlays/mongodb/     # MongoDB backend
 kubectl apply -k k8s/overlays/postgres/    # PostgreSQL backend
 
-# Helm
-helm install eddi ./helm/eddi --namespace eddi --create-namespace
+# Quickstart (one-file manifest; same Secret step, see the Kubernetes Guide)
+kubectl apply -f https://raw.githubusercontent.com/labsai/EDDI/main/k8s/quickstart.yaml
+
+# Helm (renders the Secret itself, so the key is a required value)
+helm install eddi ./helm/eddi \
+  --set eddi.vaultMasterKey="$(openssl rand -base64 24)" \
+  --namespace eddi --create-namespace
 ```
 
-Includes overlays for auth (Keycloak), monitoring (Prometheus/Grafana), NATS messaging, Ingress, and production hardening (HPA, PDB, NetworkPolicy).
-See the [Kubernetes Guide](docs/kubernetes.md) for details.
+Includes overlays for auth (Keycloak), monitoring (Prometheus/Grafana), NATS messaging, Ingress, and production hardening (PDB, NetworkPolicy — deliberately no HPA).
+See the [Kubernetes Guide](docs/kubernetes.md) for details, including the Keycloak upgrade note for existing installs.
 
 ---
 

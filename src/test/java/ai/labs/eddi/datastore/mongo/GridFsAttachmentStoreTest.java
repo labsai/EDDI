@@ -23,6 +23,7 @@ import java.io.ByteArrayInputStream;
 import java.io.OutputStream;
 import java.lang.reflect.Field;
 import java.util.List;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -138,7 +139,7 @@ class GridFsAttachmentStoreTest {
 
         assertNotNull(result);
         // storageRef is a random UUID, not the ObjectId hex
-        assertDoesNotThrow(() -> java.util.UUID.fromString(result.storageRef()));
+        assertDoesNotThrow(() -> UUID.fromString(result.storageRef()));
         assertEquals("test.txt", result.filename());
         assertEquals("application/octet-stream", result.mimeType());
         assertEquals(data.length, result.sizeBytes());

@@ -53,10 +53,13 @@ public class Deployment {
 
         /**
          * Backwards-compatible deserialization, used by Jackson ({@code @JsonCreator})
-         * and by JAX-RS parameter conversion. Delegates the known mappings to
-         * {@link #parseStrict(String)} and, unlike it, falls back to
-         * {@link #production} for an unknown value — but logs a warning first, so the
-         * fallback is never silent.
+         * for data that is read back. Request parameters do NOT come through here:
+         * {@code EnvironmentParamConverterProvider} binds every JAX-RS
+         * {@code environment} path/query parameter through
+         * {@link #parseStrict(String)}, because an environment named in a request is
+         * acted on. Delegates the known mappings to {@link #parseStrict(String)} and,
+         * unlike it, falls back to {@link #production} for an unknown value — but logs
+         * a warning first, so the fallback is never silent.
          * <p>
          * {@code unrestricted} and {@code restricted} predate this two-value enum and
          * still appear in stored documents and exported ZIPs; both map to

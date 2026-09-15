@@ -9,6 +9,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import static org.junit.jupiter.api.Assertions.*;
 
 @DisplayName("HitlDecision")
@@ -179,7 +180,7 @@ class HitlDecisionTest {
     @DisplayName("Jackson deserialization round-trip")
     class JacksonRoundTrip {
 
-        private final com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        private final ObjectMapper mapper = new ObjectMapper();
 
         @Test
         @DisplayName("request body with lowercase verdict deserializes via @JsonCreator")

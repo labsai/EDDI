@@ -9,9 +9,13 @@ import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.lifecycle.TaskId;
+import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
+import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
+import ai.labs.eddi.engine.model.PendingApprovalSummary;
 
 import java.net.URI;
 import java.util.List;
@@ -30,6 +34,18 @@ public interface IConversationService {
 
     /**
      * Start a new conversation with the latest ready Agent version.
+     * <p>
+     * {@code userId} is taken as given, but how much it is worth is decided here
+     * and recorded with the conversation for the rest of its life: it counts as
+     * verified only when an authenticated caller's own principal name is what was
+     * passed. A caller that names some other user — the {@code /v1} adapter
+     * believing {@code X-OpenWebUI-User-Id}, a webhook relaying a third-party id —
+     * has asserted that user, not proved them, and the conversation is marked
+     * accordingly. Per-user SaaS credentials are released against that mark, so a
+     * caller cannot mint a conversation as somebody else and spend their tokens. A
+     * conversation started from inside a running pipeline turn inherits the parent
+     * conversation's mark instead, since a pipeline thread has no caller to judge
+     * by.
      *
      * @throws AgentNotReadyException
      *             if no version of the Agent is deployed
@@ -178,6 +194,10 @@ public interface IConversationService {
                                   String errorType, String errorSummary) {
         }
 
+        /** One tool call is about to execute — see ConversationEventSink#onToolCall. */
+        default void onToolCall(String toolName) {
+        }
+
         /**
          * The turn was dropped without consuming the input (see
          * {@link ConversationResponseHandler#onSkipped}). Defaults to
@@ -283,7 +303,7 @@ public interface IConversationService {
      *             on persistence failures
      */
     default CancelOutcome cancelConversation(String conversationId,
-                                             ai.labs.eddi.engine.lifecycle.model.ControlSignal mode)
+                                             ControlSignal mode)
             throws ResourceStoreException {
         return cancelConversation(conversationId, mode, null);
     }
@@ -295,7 +315,7 @@ public interface IConversationService {
      * recorded as {@code unknown}.
      */
     CancelOutcome cancelConversation(String conversationId,
-                                     ai.labs.eddi.engine.lifecycle.model.ControlSignal mode,
+                                     ControlSignal mode,
                                      String cancelledBy)
             throws ResourceStoreException;
 
@@ -328,7 +348,7 @@ public interface IConversationService {
      *             if the conversation is not found
      */
     void resumeConversation(String conversationId,
-                            ai.labs.eddi.engine.lifecycle.model.HitlDecision decision,
+                            HitlDecision decision,
                             ConversationResponseHandler responseHandler)
             throws ResourceStoreException, ResourceNotFoundException;
 
@@ -340,7 +360,7 @@ public interface IConversationService {
      * @throws ResourceNotFoundException
      *             if the conversation is not found
      */
-    ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot getConversationMemorySnapshot(String conversationId)
+    ConversationMemorySnapshot getConversationMemorySnapshot(String conversationId)
             throws ResourceStoreException, ResourceNotFoundException;
 
     /**
@@ -352,7 +372,7 @@ public interface IConversationService {
      * @throws ResourceStoreException
      *             on persistence failures
      */
-    java.util.List<ai.labs.eddi.engine.model.PendingApprovalSummary> listPendingApprovals(int limit)
+    List<PendingApprovalSummary> listPendingApprovals(int limit)
             throws ResourceStoreException;
 
     /**
@@ -361,7 +381,7 @@ public interface IConversationService {
      * restriction — a non-admin caller's approval inbox cannot be starved by other
      * users' backlog.
      */
-    java.util.List<ai.labs.eddi.engine.model.PendingApprovalSummary> listPendingApprovals(String ownerUserId, int limit)
+    List<PendingApprovalSummary> listPendingApprovals(String ownerUserId, int limit)
             throws ResourceStoreException;
 
     // --- Domain exceptions (no JAX-RS dependency) ---
@@ -381,6 +401,43 @@ public interface IConversationService {
     class AgentMismatchException extends Exception {
         public AgentMismatchException(String message) {
             super(message);
+        }
+    }
+
+    /**
+     * Throws {@link InputTooLargeException} when {@code inputData}'s text exceeds
+     * {@code eddi.conversations.max-input-chars}. The conversationId entry points
+     * apply it themselves; callers that drive the agent-id overloads on behalf of
+     * an external party (A2A) call it before they do.
+     */
+    void requireInputWithinLimit(InputData inputData);
+
+    /**
+     * A turn's input is longer than {@code eddi.conversations.max-input-chars}.
+     * <p>
+     * Unchecked, like {@link ConversationNotFoundException}, so it travels through
+     * every caller of {@code say} without widening their signatures; the REST
+     * surfaces answer it with 413. Without a limit a multi-megabyte message was
+     * accepted and forwarded to the model — which refused it, after the request had
+     * been paid for in time and, on providers that bill rejected prompts, in money.
+     */
+    class InputTooLargeException extends RuntimeException {
+        private final int length;
+        private final int limit;
+
+        public InputTooLargeException(int length, int limit) {
+            super("Input is " + length + " characters long; this deployment accepts at most " + limit
+                    + " per turn (eddi.conversations.max-input-chars).");
+            this.length = length;
+            this.limit = limit;
+        }
+
+        public int getLength() {
+            return length;
+        }
+
+        public int getLimit() {
+            return limit;
         }
     }
 

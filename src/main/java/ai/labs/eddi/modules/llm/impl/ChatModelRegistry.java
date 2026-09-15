@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
+import ai.labs.eddi.connections.ConnectionParameterGuard;
 import ai.labs.eddi.modules.llm.impl.builder.ILanguageModelBuilder;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.model.SecretReference;
@@ -215,7 +216,8 @@ public class ChatModelRegistry {
         // Resolve global variable references, then vault secrets (late-binding:
         // after Qute, before builder.build())
         var resolvedParams = globalVariableResolver.resolveAll(builderParams(filteredParams));
-        resolvedParams = secretResolver.resolveSecrets(resolvedParams);
+        ConnectionParameterGuard.rejectConnectionReferences(resolvedParams);
+        resolvedParams = SecretResolver.requireResolved(secretResolver.resolveSecrets(resolvedParams), "LLM provider '" + type + "'");
         var modelBuilder = languageModelApiConnectorBuilders.get(type).get();
         modelBuilder.warnAboutUnrecognisedParameters(type, resolvedParams);
         var rawModel = modelBuilder.build(resolvedParams);
@@ -267,7 +269,8 @@ public class ChatModelRegistry {
             // Resolve global variable references, then vault secrets (late-binding:
             // after Qute, before builder.build())
             var resolvedParams = globalVariableResolver.resolveAll(builderParams(filteredParams));
-            resolvedParams = secretResolver.resolveSecrets(resolvedParams);
+            ConnectionParameterGuard.rejectConnectionReferences(resolvedParams);
+            resolvedParams = SecretResolver.requireResolved(secretResolver.resolveSecrets(resolvedParams), "LLM provider '" + type + "'");
             var modelBuilder = languageModelApiConnectorBuilders.get(type).get();
             modelBuilder.warnAboutUnrecognisedParameters(type, resolvedParams);
             var rawModel = modelBuilder.buildStreaming(resolvedParams);

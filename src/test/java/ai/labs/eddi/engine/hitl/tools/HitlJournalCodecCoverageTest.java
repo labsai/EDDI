@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 package ai.labs.eddi.engine.hitl.tools;
+import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore.JournalEntry;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore.Status;
@@ -28,8 +29,15 @@ import org.mockito.Mock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
+import org.bson.BsonString;
+import org.bson.BsonDouble;
+import dev.langchain4j.agent.tool.ToolExecutionRequest;
+import com.mongodb.ServerAddress;
+import com.mongodb.MongoClientSettings;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -80,10 +88,10 @@ class HitlJournalCodecCoverageTest {
      */
     private static MongoCommandException commandException(int code) {
         BsonDocument response = new BsonDocument()
-                .append("ok", new org.bson.BsonDouble(0))
+                .append("ok", new BsonDouble(0))
                 .append("code", new BsonInt32(code))
-                .append("errmsg", new org.bson.BsonString("simulated code " + code));
-        return new MongoCommandException(response, new com.mongodb.ServerAddress());
+                .append("errmsg", new BsonString("simulated code " + code));
+        return new MongoCommandException(response, new ServerAddress());
     }
 
     @Nested
@@ -230,7 +238,7 @@ class HitlJournalCodecCoverageTest {
             var updateCaptor = org.mockito.ArgumentCaptor.forClass(Bson.class);
             verify(collection).updateOne(any(Bson.class), updateCaptor.capture());
             BsonDocument rendered = updateCaptor.getValue()
-                    .toBsonDocument(Document.class, com.mongodb.MongoClientSettings.getDefaultCodecRegistry());
+                    .toBsonDocument(Document.class, MongoClientSettings.getDefaultCodecRegistry());
             String cappedResult = rendered.getDocument("$set").getString("resultCapped").getValue();
             assertEquals(small, cappedResult, "an under-cap value must be stored verbatim");
         }
@@ -245,7 +253,7 @@ class HitlJournalCodecCoverageTest {
             var updateCaptor = org.mockito.ArgumentCaptor.forClass(Bson.class);
             verify(collection).updateOne(any(Bson.class), updateCaptor.capture());
             BsonDocument rendered = updateCaptor.getValue()
-                    .toBsonDocument(Document.class, com.mongodb.MongoClientSettings.getDefaultCodecRegistry());
+                    .toBsonDocument(Document.class, MongoClientSettings.getDefaultCodecRegistry());
             assertTrue(rendered.getDocument("$set").isNull("resultCapped"),
                     "a null result must be stored as BSON null, not a string");
         }
@@ -290,12 +298,12 @@ class HitlJournalCodecCoverageTest {
     @DisplayName("ToolApprovalGate branches")
     class Gate {
 
-        private static dev.langchain4j.agent.tool.ToolExecutionRequest req(String id, String name) {
-            return dev.langchain4j.agent.tool.ToolExecutionRequest.builder().id(id).name(name).arguments("{}").build();
+        private static ToolExecutionRequest req(String id, String name) {
+            return ToolExecutionRequest.builder().id(id).name(name).arguments("{}").build();
         }
 
-        private static ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig cfg(List<String> require, List<String> exempt) {
-            var c = new ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig();
+        private static ToolApprovalsConfig cfg(List<String> require, List<String> exempt) {
+            var c = new ToolApprovalsConfig();
             c.setRequireApproval(require);
             c.setExempt(exempt);
             return c;
@@ -306,9 +314,9 @@ class HitlJournalCodecCoverageTest {
         void exemptPrecedenceAllows() {
             var gate = new ToolApprovalGate();
             var batch = List.of(req("1", "read_file"));
-            var sources = java.util.Map.of("read_file", "mcp");
+            var sources = Map.of("read_file", "mcp");
             var result = gate.classify(batch, sources,
-                    cfg(List.of("mcp:*"), List.of("mcp:read_*")), java.util.Set.of());
+                    cfg(List.of("mcp:*"), List.of("mcp:read_*")), Set.of());
             assertTrue(result.gated().isEmpty(), "exempt must beat require");
             assertEquals(1, result.allowed().size());
         }
@@ -318,8 +326,8 @@ class HitlJournalCodecCoverageTest {
         void clearedCallIdAllowed() {
             var gate = new ToolApprovalGate();
             var batch = List.of(req("1", "delete_account"));
-            var result = gate.classify(batch, java.util.Map.of("delete_account", "http"),
-                    cfg(List.of("delete_*"), null), java.util.Set.of("1"));
+            var result = gate.classify(batch, Map.of("delete_account", "http"),
+                    cfg(List.of("delete_*"), null), Set.of("1"));
             assertTrue(result.gated().isEmpty());
             assertEquals(1, result.allowed().size());
         }
@@ -329,8 +337,8 @@ class HitlJournalCodecCoverageTest {
         void gatedNonNullIdRecordsReason() {
             var gate = new ToolApprovalGate();
             var batch = List.of(req("call-9", "delete_account"));
-            var result = gate.classify(batch, java.util.Map.of("delete_account", "http"),
-                    cfg(List.of("delete_*"), null), java.util.Set.of());
+            var result = gate.classify(batch, Map.of("delete_account", "http"),
+                    cfg(List.of("delete_*"), null), Set.of());
             assertEquals(1, result.gated().size());
             assertEquals("delete_*", result.gateReasonByCallId().get("call-9"),
                     "the matched require-pattern must be recorded as the gate reason");

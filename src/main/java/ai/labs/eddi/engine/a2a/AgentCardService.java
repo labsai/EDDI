@@ -4,8 +4,9 @@
  */
 package ai.labs.eddi.engine.a2a;
 
-import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.engine.a2a.A2AModels.AgentAuthentication;
 import ai.labs.eddi.engine.a2a.A2AModels.AgentCapabilities;
@@ -22,6 +23,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
  * Generates A2A Agent Cards from deployed EDDI agent configurations.
@@ -33,17 +35,19 @@ public class AgentCardService {
 
     private static final Logger LOGGER = Logger.getLogger(AgentCardService.class);
 
-    private final IRestAgentStore restAgentStore;
+    private final IAgentStore agentStore;
+    private final IDocumentDescriptorStore documentDescriptorStore;
     private final String baseUrl;
     private final boolean authEnabled;
     private final String oidcAuthServerUrl;
 
     @Inject
-    public AgentCardService(IRestAgentStore restAgentStore,
+    public AgentCardService(IAgentStore agentStore, IDocumentDescriptorStore documentDescriptorStore,
             @ConfigProperty(name = "eddi.a2a.base-url", defaultValue = "http://localhost:7070") String baseUrl,
             @ConfigProperty(name = "authorization.enabled", defaultValue = "false") boolean authEnabled,
             @ConfigProperty(name = "quarkus.oidc.auth-server-url") Optional<String> oidcAuthServerUrl) {
-        this.restAgentStore = restAgentStore;
+        this.agentStore = agentStore;
+        this.documentDescriptorStore = documentDescriptorStore;
         this.baseUrl = baseUrl;
         this.authEnabled = authEnabled;
         this.oidcAuthServerUrl = oidcAuthServerUrl.orElse(null);
@@ -60,11 +64,11 @@ public class AgentCardService {
      */
     public AgentCard getAgentCard(String agentId) {
         try {
-            var resourceId = restAgentStore.getCurrentResourceId(agentId);
+            var resourceId = agentStore.getCurrentResourceId(agentId);
             if (resourceId == null) {
                 return null;
             }
-            AgentConfiguration config = restAgentStore.readAgent(agentId, resourceId.getVersion());
+            AgentConfiguration config = agentStore.read(agentId, resourceId.getVersion());
             if (config == null || !config.isA2aEnabled()) {
                 return null;
             }
@@ -84,7 +88,13 @@ public class AgentCardService {
     public List<AgentCard> listA2AAgents() {
         List<AgentCard> cards = new ArrayList<>();
         try {
-            List<DocumentDescriptor> descriptors = restAgentStore.readAgentDescriptors("", 0, 100);
+            // Unrestricted deliberately: an Agent Card is published to A2A *peers*, which
+            // are
+            // remote systems rather than EDDI users, so the caller has no workspace to
+            // scope
+            // to. The gate for this surface is `isA2aEnabled()` on the agent plus whatever
+            // authentication fronts the A2A endpoints — not the workspace model.
+            List<DocumentDescriptor> descriptors = documentDescriptorStore.readDescriptors("ai.labs.agent", "", 0, 100, false);
             if (descriptors == null) {
                 return cards;
             }
@@ -119,8 +129,30 @@ public class AgentCardService {
     /**
      * Build an AgentCard from an agent configuration.
      */
+    /**
+     * The agent's human name, as its descriptor records it.
+     * <p>
+     * A2A Agent Cards are how other systems discover what an agent <em>is</em>, and
+     * every card announced "EDDI Agent 6a1f…" — the raw id, for every agent. The
+     * name an operator gave the agent lives on its {@link DocumentDescriptor}, not
+     * on {@link AgentConfiguration}, which is why it was never reached for. Falls
+     * back to the old form when the descriptor is missing or unnamed, so a card is
+     * still served rather than dropped.
+     */
+    private String agentDisplayName(String agentId, Integer version) {
+        try {
+            DocumentDescriptor descriptor = documentDescriptorStore.readDescriptor(agentId, version);
+            if (descriptor != null && !isNullOrEmpty(descriptor.getName())) {
+                return descriptor.getName();
+            }
+        } catch (Exception e) {
+            LOGGER.debugf("No descriptor name for A2A agent %s: %s", sanitize(agentId), e.getMessage());
+        }
+        return "EDDI Agent " + agentId;
+    }
+
     AgentCard buildAgentCard(String agentId, AgentConfiguration config, Integer version) {
-        String name = "EDDI Agent " + agentId;
+        String name = agentDisplayName(agentId, version);
 
         String description = !isNullOrEmpty(config.getDescription()) ? config.getDescription() : "EDDI conversational AI agent";
 

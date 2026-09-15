@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 package ai.labs.eddi.integrations.slack;
+import ai.labs.eddi.datastore.IResourceStore;
 
 import ai.labs.eddi.engine.events.HitlResumeCompletedEvent;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
@@ -166,7 +167,7 @@ class SlackHitlResumeObserverTest {
     @Test
     void onResumeCompleted_storeError_swallowed() throws Exception {
         when(userConversationStore.readUserConversationByConversationId(any()))
-                .thenThrow(new ai.labs.eddi.datastore.IResourceStore.ResourceStoreException("boom"));
+                .thenThrow(new IResourceStore.ResourceStoreException("boom"));
 
         // Must not throw — observer failures are best-effort.
         assertDoesNotThrow(() -> observer.onResumeCompleted(new HitlResumeCompletedEvent(

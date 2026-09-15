@@ -29,7 +29,7 @@ Behavior Rules examine the conversation memory (including parsed input, context 
 
 ## Behavior Rules Structure
 
-`Behavior Rules` are very flexible in structure to cover most use cases that you will come across. `Behavior Rules` are clustered in `Groups`. `Behavior Rules` are executed sequentially within each `Group`. As soon as one `Behavior Rule` succeeds, all remaining `Behavior Rules` in this `Group` will be skipped.
+`Behavior Rules` are very flexible in structure to cover most use cases that you will come across. `Behavior Rules` are clustered in `Groups`. `Behavior Rules` are executed sequentially within each `Group`. By default, as soon as one `Behavior Rule` succeeds, all remaining `Behavior Rules` in this `Group` will be skipped. A `Group` may override this with the optional `executionStrategy` field (default `executeUntilFirstSuccess`): with `"executionStrategy": "executeAll"`, every rule in the group whose conditions match fires and contributes its actions. Any other value fails ruleset deserialization.
 
 ## **Groups**
 
@@ -80,6 +80,13 @@ Each `Behavior Rule` has a list of `conditions`, that, depending on the `conditi
 - [Dependency](behavior-rules.md#dependency)
 - [Action Matcher](behavior-rules.md#action-matcher)
 - [Dynamic Value Matcher](behavior-rules.md#dynamic-value-matcher)
+- [Size Matcher](behavior-rules.md#size-matcher)
+- [Deployment Context](behavior-rules.md#deployment-context)
+- [Capability Match](capability-match-guide.md) — type `capabilityMatch`, matches on the agent's declared capabilities
+- [Content Type Matcher](attachments-guide.md) — type `contentTypeMatcher`, matches on an attachment's media type
+
+All twelve registered condition types are listed above. The registry is the `ID` constant on each
+class under `modules/rules/impl/conditions`; check against that if this list ever looks short.
 
 ### General Structure
 
@@ -356,6 +363,38 @@ The example above matches whenever the API call stored between 1 and 10 result e
 
 If `min`, `max` and `equal` are all `-1`, the condition reports `NOT_EXECUTED` — it neither succeeds nor fails, and a wrapping `negation` propagates that state instead of inverting it.
 
+### Deployment Context
+
+This condition matches on the deployment environment the instance is running in, so one agent
+configuration can behave differently in production and in test without the client having to send
+anything.
+
+```json
+(...)
+{
+  "type": "deploymentContext",
+  "configs": {
+    "when": "production",
+    "tagMatches": "high-risk"
+  }
+}
+(...)
+```
+
+| Config       | Type   | Description                                                                       |
+| ------------ | ------ | --------------------------------------------------------------------------------- |
+| `when`       | string | Optional. Matched against the current deployment environment; skipped when absent or blank |
+| `tagMatches` | string | Optional. When set, the agent's tags (from context) must also contain this value           |
+
+Both are optional and both are checked when set, so a rule carrying only `tagMatches` matches on
+the tag alone in every environment. A rule with neither matches everywhere, which is rarely what
+anyone means — set at least one.
+
+The environment is read from the system property `eddi.deployment.env`, falling back to the
+environment variable `EDDI_DEPLOYMENT_ENV` and then to `development`. Prefer this over passing an
+`env` context variable from the client and matching it with `contextmatcher`: a client that forgets
+the variable makes a production agent behave like a test one, silently.
+
 ## The Behavior Rule API Endpoints
 
 The API Endpoints below will allow you to manage the `Behavior Rule`s in your EDDI instance.
@@ -364,23 +403,36 @@ The **`{id}`** is a path parameters that indicate which behavior rule you want t
 
 ### API Methods
 
-| HTTP Method | API Endpoint                                      | Request Body          | Response              |
-| ----------- | ------------------------------------------------- | --------------------- | --------------------- |
-| **DELETE**  | `/behaviorstore/behaviorsets/{id}`                | N/A                   | N/A                   |
-| **GET**     | `/behaviorstore/behaviorsets/{id}`                | N/A                   | **BehaviorSet model** |
-| **PUT**     | `/behaviorstore/behaviorsets/{id}`                | **BehaviorSet model** | N/A                   |
-| **GET**     | `/behaviorstore/behaviorsets/descriptors`         | N/A                   | **BehaviorSet model** |
-| **POST**    | `/behaviorstore/behaviorsets`                     | **BehaviorSet model** | N/A                   |
-| **GET**     | `/behaviorstore/behaviorsets/{id}/currentversion` | N/A                   | **BehaviorSet model** |
-| **POST**    | `/behaviorstore/behaviorsets/{id}/currentversion` | **BehaviorSet model** | N/A                   |
+| HTTP Method | API Endpoint                                      | Request Body                | Response                             |
+| ----------- | ------------------------------------------------- | --------------------------- | ------------------------------------ |
+| **GET**     | `/rulestore/rulesets/descriptors`                 | N/A                         | **DocumentDescriptor[]**             |
+| **POST**    | `/rulestore/rulesets`                             | **RuleSetConfiguration**    | `201 Created` + `Location` and `X-Resource-URI` headers naming the new id and version |
+| **GET**     | `/rulestore/rulesets/{id}?version=N`              | N/A                         | **RuleSetConfiguration**             |
+| **PUT**     | `/rulestore/rulesets/{id}?version=N`              | **RuleSetConfiguration**    | `200 OK` + `Location` of the **new** version |
+| **POST**    | `/rulestore/rulesets/{id}?version=N`              | N/A                         | Duplicates the ruleset               |
+| **DELETE**  | `/rulestore/rulesets/{id}?version=N`              | N/A                         | N/A                                  |
+| **GET**     | `/rulestore/rulesets/{id}/currentversion`         | N/A                         | **`text/plain` integer** — the version number, *not* the ruleset |
+| **POST**    | `/rulestore/rulesets/{id}/currentversion`         | N/A                         | `303 See Other` → `/rulestore/rulesets/{id}?version=N` |
+
+> **`/currentversion` returns a version, not a document.** The `GET` answers with
+> a bare integer in `text/plain`, and the `POST` takes no body at all — it only
+> redirects you to the current version's URL. To fetch the ruleset itself, use
+> `GET /rulestore/rulesets/{id}?version=N`.
+>
+> Configurations are **immutable and versioned**: a `PUT` does not overwrite,
+> it creates version `N+1` and returns its `Location`. `?version=` is mandatory
+> on every read — omitting it fails the request with
+> `Argument must not be null (version)`. Use
+> `GET /rulestore/rulesets/{id}/currentversion` to look up the current version
+> number first.
 
 ### Example
 
-We will demonstrate here the creation of a `BehaviorSet`
+We will demonstrate here the creation of a `RuleSetConfiguration`
 
 _Request URL_
 
-`POST http://localhost:7070/behaviorstore/behaviorsets`
+`POST http://localhost:7070/rulestore/rulesets`
 
 _Request Body_
 
@@ -485,5 +537,5 @@ _Response Code_
 The `Location` response header contains the URI of the newly created resource:
 
 ```
-Location: eddi://ai.labs.behavior/behaviorstore/behaviorsets/{id}?version=1
+Location: eddi://ai.labs.rules/rulestore/rulesets/{id}?version=1
 ```

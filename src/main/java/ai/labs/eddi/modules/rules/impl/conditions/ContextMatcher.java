@@ -22,6 +22,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * @author ginccc
@@ -278,12 +279,12 @@ public class ContextMatcher implements IRuleCondition {
             if (o == null || getClass() != o.getClass())
                 return false;
             ObjectValue that = (ObjectValue) o;
-            return java.util.Objects.equals(objectKeyPath, that.objectKeyPath) && java.util.Objects.equals(objectValue, that.objectValue);
+            return Objects.equals(objectKeyPath, that.objectKeyPath) && Objects.equals(objectValue, that.objectValue);
         }
 
         @Override
         public int hashCode() {
-            return java.util.Objects.hash(objectKeyPath, objectValue);
+            return Objects.hash(objectKeyPath, objectValue);
         }
     }
 }

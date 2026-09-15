@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.runtime.internal;
 
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.ConversationMemory;
@@ -30,7 +31,7 @@ public class Agent implements IAgent {
     private Deployment.Status deploymentStatus;
     private AgentConfiguration.UserMemoryConfig userMemoryConfig;
     private AgentConfiguration.MemoryPolicy memoryPolicy;
-    private ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig toolApprovalsConfig;
+    private ToolApprovalsConfig toolApprovalsConfig;
 
     public Agent(String agentId, Integer agentVersion) {
         this.agentId = agentId;
@@ -100,7 +101,7 @@ public class Agent implements IAgent {
         this.userMemoryConfig = userMemoryConfig;
     }
 
-    public void setToolApprovalsConfig(ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig toolApprovalsConfig) {
+    public void setToolApprovalsConfig(ToolApprovalsConfig toolApprovalsConfig) {
         this.toolApprovalsConfig = toolApprovalsConfig;
     }
 

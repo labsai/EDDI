@@ -8,8 +8,6 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ConvergenceConfig;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionPhase;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.GroupMember;
-import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.PhaseType;
-import ai.labs.eddi.configs.groups.model.DiscussionStylePresets;
 import ai.labs.eddi.configs.groups.model.GroupConversation.DecisionRecord;
 import ai.labs.eddi.configs.groups.model.GroupConversation.DecisionType;
 import ai.labs.eddi.configs.groups.model.GroupConversation.Dissent;
@@ -24,7 +22,7 @@ import ai.labs.eddi.engine.internal.GroupConversationService.MemberTurnCancellat
 import ai.labs.eddi.engine.internal.GroupConversationService.MemberTurnCancelledException;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
-import ai.labs.eddi.engine.tenancy.QuotaExceededException;
+import ai.labs.eddi.engine.tenancy.QuotaRefusal;
 import ai.labs.eddi.utils.LogSanitizer;
 import org.jboss.logging.Logger;
 
@@ -862,7 +860,7 @@ public class PhaseExecutionEngine {
                         // convert a cancellation into an error transcript entry.
                         throw new CompletionException(e);
                     } catch (GroupDiscussionException e) {
-                        if (e.getCause() instanceof QuotaExceededException) {
+                        if (e.getCause() instanceof QuotaRefusal) {
                             throw new CompletionException(e);
                         }
                         LOGGER.errorf("Parallel phase failed for %s: %s", speaker.agentId(), e.getMessage());
@@ -920,7 +918,7 @@ public class PhaseExecutionEngine {
                         Instant.now(), "Timeout", null));
             } catch (ExecutionException e) {
                 // Unwrap: CompletionException → GroupDiscussionException →
-                // QuotaExceededException
+                // QuotaRefusal (over-limit or accounting outage)
                 Throwable cause = e.getCause();
                 if (cause instanceof CompletionException ce) {
                     cause = ce.getCause();
@@ -933,7 +931,7 @@ public class PhaseExecutionEngine {
                     continue;
                 }
                 if (cause instanceof GroupDiscussionException gde
-                        && gde.getCause() instanceof QuotaExceededException) {
+                        && gde.getCause() instanceof QuotaRefusal) {
                     // Release the remaining speakers and propagate
                     cancellation.cancel();
                     throw gde;

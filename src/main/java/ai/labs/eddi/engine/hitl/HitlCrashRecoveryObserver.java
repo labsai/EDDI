@@ -28,6 +28,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.BooleanSupplier;
 
 /**
  * Startup observer that REPAIRS HITL state after a crash or restart — it never
@@ -453,7 +454,7 @@ public class HitlCrashRecoveryObserver {
      */
     private boolean rearmSchedule(String scheduleName, String surface, String conversationId,
                                   String agentId, HitlTimeoutPolicy policy, String approvalTimeout,
-                                  Instant pausedAt, java.util.function.BooleanSupplier stillPaused) {
+                                  Instant pausedAt, BooleanSupplier stillPaused) {
         return rearmSchedule(scheduleName, surface, conversationId, agentId, policy.name(), approvalTimeout,
                 pausedAt, stillPaused);
     }
@@ -465,7 +466,7 @@ public class HitlCrashRecoveryObserver {
      */
     private boolean rearmSchedule(String scheduleName, String surface, String conversationId,
                                   String agentId, String policyName, String approvalTimeout,
-                                  Instant pausedAt, java.util.function.BooleanSupplier stillPaused) {
+                                  Instant pausedAt, BooleanSupplier stillPaused) {
         if (approvalTimeout == null || approvalTimeout.isBlank() || pausedAt == null) {
             LOGGER.warnf("Cannot re-arm HITL timeout for %s: missing approvalTimeout/pausedAt in bookmark",
                     conversationId);

@@ -29,14 +29,41 @@ spec:
       labels:
         {{- include "eddi.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: server
-      {{- with .Values.eddi.podAnnotations }}
       annotations:
+        {{- /*
+          Every setting EDDI reads arrives from exactly two objects: eddi-config,
+          consumed through `envFrom` below, and eddi-secrets, consumed through the
+          projected volume. Neither is part of this pod template, so a
+          `helm upgrade` that changed only them left this Deployment's spec
+          byte-identical — no new ReplicaSet, no rollout, and the running pod kept
+          the environment it started with. Enabling OIDC, moving to an external
+          datastore or rotating the vault master key therefore reported a
+          successful upgrade and changed nothing until somebody restarted the pod
+          by hand.
+
+          `envFrom` is the sharper half: a ConfigMap mounted as a VOLUME is at
+          least refreshed in place by the kubelet, but environment variables are
+          fixed at container start and no amount of waiting updates them.
+
+          Hashing the rendered templates puts that change back INTO the pod spec,
+          which is what makes the rollout happen. Rendered, not `.Values` —
+          configmap.yaml derives most of what it emits (the validated datastore
+          type, the derived unauthenticated flags, the trimmed public URL), so a
+          hash of the inputs would miss a change that only the output shows.
+        */}}
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+      {{- with .Values.eddi.podAnnotations }}
         {{- toYaml . | nindent 8 }}
       {{- end }}
     spec:
-      {{- if .Values.serviceAccount.create }}
+      # Always rendered. Gating this on serviceAccount.create discarded
+      # serviceAccount.name whenever create=false — the bring-your-own-SA shape
+      # used for EKS IRSA, GKE Workload Identity and AKS pod identity — and the
+      # pod then ran under the namespace's `default` ServiceAccount, so the
+      # cloud IAM role bound to the named SA was never assumed and Helm printed
+      # nothing. The helper returns the right name in both branches.
       serviceAccountName: {{ include "eddi.serviceAccountName" . }}
-      {{- end }}
       securityContext:
         runAsNonRoot: true
         runAsUser: 185

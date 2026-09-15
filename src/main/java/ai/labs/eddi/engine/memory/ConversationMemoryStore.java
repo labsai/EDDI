@@ -7,8 +7,11 @@ package ai.labs.eddi.engine.memory;
 import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
+import ai.labs.eddi.engine.lifecycle.exceptions.ConversationPauseException;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
+import ai.labs.eddi.engine.model.PendingApprovalSummary;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Filters;
@@ -26,6 +29,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 
+import com.mongodb.client.FindIterable;
 import static ai.labs.eddi.engine.model.Context.ContextType.valueOf;
 import static ai.labs.eddi.engine.memory.model.ConversationState.ENDED;
 
@@ -159,7 +163,11 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
 
             Document query = new Document();
             query.put(KEY_AGENT_ID, agentId);
-            query.put(KEY_AGENT_VERSION, agentVersion);
+            if (agentVersion != null) {
+                // null means every version; putting it would match only documents
+                // that carry no version at all.
+                query.put(KEY_AGENT_VERSION, agentVersion);
+            }
             query.put(KEY_CONVERSATION_STATE, new Document("$ne", ENDED.toString()));
 
             conversationCollectionObject.find(query).forEach(retRet::add);
@@ -247,7 +255,7 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
             "hitlPauseType", "hitlPendingToolCalls.calls.toolName");
 
     @Override
-    public List<ai.labs.eddi.engine.model.PendingApprovalSummary> findPendingApprovalSummaries(int limit) {
+    public List<PendingApprovalSummary> findPendingApprovalSummaries(int limit) {
         // Single bounded, projected query on the indexed state field — the
         // (potentially multi-MB) step/output data of paused conversations is
         // never deserialized, and there are no per-id point-reads (this listing
@@ -259,7 +267,7 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     }
 
     @Override
-    public List<ai.labs.eddi.engine.model.PendingApprovalSummary> findPendingApprovalSummaries(String ownerUserId, int limit) {
+    public List<PendingApprovalSummary> findPendingApprovalSummaries(String ownerUserId, int limit) {
         // Owner filter INSIDE the query: the limit applies after the restriction,
         // so a user's inbox is complete even behind a large global backlog.
         return collectPendingSummaries(
@@ -270,19 +278,24 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
                         .limit(limit));
     }
 
-    private List<ai.labs.eddi.engine.model.PendingApprovalSummary> collectPendingSummaries(
-                                                                                           com.mongodb.client.FindIterable<ConversationMemorySnapshot> snapshots) {
-        List<ai.labs.eddi.engine.model.PendingApprovalSummary> out = new ArrayList<>();
+    private List<PendingApprovalSummary> collectPendingSummaries(
+                                                                 FindIterable<ConversationMemorySnapshot> snapshots) {
+        List<PendingApprovalSummary> out = new ArrayList<>();
         snapshots.forEach(snapshot -> {
-            var summary = new ai.labs.eddi.engine.model.PendingApprovalSummary(
+            var summary = new PendingApprovalSummary(
                     snapshot.getConversationId(), snapshot.getAgentId(), snapshot.getUserId(),
                     snapshot.getHitlPausedAt(), snapshot.getHitlPauseReason(),
                     snapshot.getHitlTimeoutPolicy() != null ? snapshot.getHitlTimeoutPolicy().name() : null);
             summary.setApprovalTimeout(snapshot.getHitlApprovalTimeout());
-            summary.setPauseType(snapshot.getHitlPauseType());
+            // A rule pause written before the pause type survived clearToolPauseState()
+            // is stored with a null type; every pause that is not a tool gate is a RULE
+            // pause, and docs/hitl.md promises the field on every entry.
+            summary.setPauseType(snapshot.getHitlPauseType() != null
+                    ? snapshot.getHitlPauseType()
+                    : ConversationPauseException.PauseOrigin.RULE.name());
             if (snapshot.getHitlPendingToolCalls() != null && snapshot.getHitlPendingToolCalls().getCalls() != null) {
                 summary.setToolNames(snapshot.getHitlPendingToolCalls().getCalls().stream()
-                        .map(ai.labs.eddi.engine.memory.model.PendingToolCallBatch.PendingToolCall::getToolName)
+                        .map(PendingToolCallBatch.PendingToolCall::getToolName)
                         .toList());
             }
             out.add(summary);

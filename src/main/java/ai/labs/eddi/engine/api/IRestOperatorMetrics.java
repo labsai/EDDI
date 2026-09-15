@@ -5,11 +5,14 @@
 package ai.labs.eddi.engine.api;
 
 import ai.labs.eddi.engine.api.model.OperatorCanaryReport;
+import ai.labs.eddi.engine.api.model.OperatorGateDryRunRequest;
+import ai.labs.eddi.engine.api.model.OperatorGateDryRunResult;
 import ai.labs.eddi.engine.api.model.OperatorGateStatusReport;
 import jakarta.annotation.security.RolesAllowed;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
+import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import org.eclipse.microprofile.openapi.annotations.Operation;
@@ -59,4 +62,45 @@ public interface IRestOperatorMetrics {
                        + "with a sound approval gate, 0 otherwise. This is the meter worth alerting on.")
     @APIResponse(responseCode = "204", description = "Recorded.")
     Response reportGateStatus(OperatorGateStatusReport report);
+
+    /**
+     * Unlike the two reporting endpoints above, this one IS a verification: it
+     * answers from this deployment's own stored agent document, using the same
+     * {@code ToolApprovalGate.classify} the tool loop runs at execution time.
+     * <p>
+     * It exists so the Manager's write canary has a deterministic first check. The
+     * empirical probe — a synthetic conversation provoking a real gated write —
+     * depends on an LLM choosing to call a tool, which makes it probabilistic by
+     * construction: a cautious model that declines to write proves nothing about
+     * the gate, and treating that as failure deleted healthy operators.
+     * Classification, by contrast, is a pure function of the stored policy and the
+     * call's address; it cannot flake and writes nothing.
+     * <p>
+     * What it does NOT prove: that the runtime wiring delivers the policy to the
+     * gate on a real turn. That end-to-end property is what the empirical probe is
+     * for — the two checks answer different questions, and the Manager runs both.
+     * <p>
+     * Scope: classification runs against the AGENT-LEVEL
+     * {@code hitlConfig.toolApprovals} only. At runtime,
+     * {@code TaskToolApprovalsResolver} may resolve a different effective config
+     * when the agent's LLM task carries its own {@code toolApprovals} (in
+     * {@code replace} mode a looser task-level config wins wholesale). The operator
+     * provisioned via setup-api carries no task-level approvals, so its verdicts
+     * are exact; for hand-authored agents with task-level approvals this endpoint
+     * answers about the agent-level policy, not the resolved one.
+     */
+    @POST
+    @Path("/gate-dry-run")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
+    @Operation(summary = "Classify a synthetic tool call against an agent's approval policy",
+               description = "Runs the runtime gate classification (ToolApprovalGate.classify) for one synthetic tool call against the "
+                       + "agent document's stored AGENT-LEVEL toolApprovals, without executing anything. Deterministic: same policy plus "
+                       + "same call address always yields the same answer. Task-level toolApprovals overrides are not resolved here.")
+    @APIResponse(responseCode = "200", description = "Classification result.")
+    @APIResponse(responseCode = "400", description = "agentId, version or toolName missing or invalid, or an unknown source.")
+    @APIResponse(responseCode = "404", description = "No agent document at that id and version.")
+    @APIResponse(responseCode = "500", description = "The agent document could not be read. Deliberately NOT policyPresent:false — "
+            + "a store failure must never read as having no policy.")
+    OperatorGateDryRunResult gateDryRun(OperatorGateDryRunRequest request);
 }

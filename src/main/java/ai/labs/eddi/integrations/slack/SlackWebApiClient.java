@@ -15,10 +15,12 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.io.IOException;
 
 /**
  * Lightweight Slack Web API client using {@link HttpClient}. No external SDK
@@ -60,7 +62,7 @@ public class SlackWebApiClient {
     public SlackWebApiClient(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
         this.httpClient = HttpClient.newBuilder()
-                .connectTimeout(java.time.Duration.ofSeconds(10))
+                .connectTimeout(Duration.ofSeconds(10))
                 .build();
     }
 
@@ -203,7 +205,7 @@ public class SlackWebApiClient {
 
         } catch (SlackDeliveryException e) {
             throw e; // re-throw — don't wrap in another exception
-        } catch (java.io.IOException e) {
+        } catch (IOException e) {
             throw new SlackDeliveryException("Network error calling Slack API: " + e.getMessage(), e);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();

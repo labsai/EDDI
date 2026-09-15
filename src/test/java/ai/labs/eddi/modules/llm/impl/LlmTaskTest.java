@@ -5,9 +5,9 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.engine.security.CallerIdentityContext;
-import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
-import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
+import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.lifecycle.TaskId;
@@ -22,6 +22,7 @@ import ai.labs.eddi.modules.apicalls.impl.PrePostUtils;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.Task;
 import ai.labs.eddi.modules.llm.tools.impl.*;
+import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -62,9 +63,9 @@ class LlmTaskTest {
     @Mock
     private IApiCallExecutor apiCallExecutor;
     @Mock
-    private IRestAgentStore restAgentStore;
+    private IAgentStore restAgentStore;
     @Mock
-    private IRestWorkflowStore restWorkflowStore;
+    private IWorkflowStore restWorkflowStore;
     @Mock
     private RagContextProvider ragContextProvider;
     @Mock
@@ -483,7 +484,7 @@ class LlmTaskTest {
                     "Non-blank text should pass the output guard");
 
             // Verify TextOutputItem can be created with valid text
-            var outputItem = new ai.labs.eddi.modules.output.model.types.TextOutputItem("Valid output", 0);
+            var outputItem = new TextOutputItem("Valid output", 0);
             assertEquals("Valid output", outputItem.getText());
         }
 

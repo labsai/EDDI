@@ -79,7 +79,7 @@ class ApiCallExecutorValidationErrorTest {
 
         CallerIdentityResolver callerIdentityResolver = mock(CallerIdentityResolver.class);
         executor = new ApiCallExecutor(httpClient, jsonSerialization, runtime, prePostUtils, globalVariableResolver, secretResolver,
-                callerIdentityResolver, new CallerIdentityContext(null, null), new RequestRedactor(callerIdentityResolver), false,
+                callerIdentityResolver, new CallerIdentityContext(null, null), new RequestRedactor(callerIdentityResolver), null, false,
                 DEFAULT_TIMEOUT_MILLIS, DEFAULT_MAX_RESPONSE_SIZE);
 
         memory = mock(IConversationMemory.class);
@@ -153,8 +153,13 @@ class ApiCallExecutorValidationErrorTest {
         verify(prePostUtils).createMemoryEntry(currentStep, 500, "responseHttpCode", KEY_HTTP_CALLS);
         assertEquals("x".repeat(2000), templateDataObjects.get("responseError"));
         assertEquals(500, templateDataObjects.get("responseHttpCode"));
-        // An error body is never promoted to the response object / result body.
-        assertFalse(result.containsKey("body"), "an unsuccessful response must not be stored as the response body");
+        // An error body is never promoted to the response OBJECT (memory sees it
+        // only under the *Error key, verified above) — but it IS the tool result:
+        // an LLM whose failed call returned "{}" could not report the failure, so
+        // the result map carries the same truncated body plus the code.
+        assertEquals("x".repeat(2000), result.get("body"),
+                "the truncated error body must reach the tool result");
+        assertEquals(500, result.get("httpCode"));
         verify(prePostUtils, times(1)).runPostResponse(eq(memory), eq(call.getPostResponse()), any(), eq(500), eq(false));
     }
 

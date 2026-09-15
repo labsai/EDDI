@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.memory;
 
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
+import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ConversationStepSnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ResultSnapshot;
@@ -21,6 +22,7 @@ import org.junit.jupiter.api.Test;
 import java.time.Instant;
 import java.util.Date;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -201,6 +203,7 @@ class ConversationMemoryUtilitiesHitlTest {
         private static final String CANARY_TRANSCRIPT = "[{\"type\":\"AI\",\"text\":\"" + CANARY_SECRET + "\"}]";
         private static final String CANARY_FINGERPRINT = "sha256-request-fingerprint-CANARY";
         private static final String CANARY_PREVIEW_URI = "https://eddi.internal/CANARY-should-not-leak/{id}";
+        private static final String CANARY_INTERIM = "CANARY-interim-narration-not-in-projection";
 
         private ConversationMemorySnapshot toolPausedSnapshot() {
             var snapshot = buildMinimalSnapshot();
@@ -227,12 +230,13 @@ class ConversationMemoryUtilitiesHitlTest {
             batch.setPauseEpoch("epoch-1");
             batch.setLlmTaskId("task-a");
             batch.setChatTranscriptJson(CANARY_TRANSCRIPT);
-            batch.setTraceSoFar(List.of(java.util.Map.of("args", CANARY_ARGS)));
+            batch.setTraceSoFar(List.of(Map.of("args", CANARY_ARGS)));
+            batch.setInterimText(CANARY_INTERIM);
             batch.setFingerprint("sha256-" + CANARY_SECRET);
             batch.setCalls(List.of(call));
             // Fix #1: the batch carries the effective tool-approval config — it must NOT
             // enter the fix-#4 names-only projection (config, not user data).
-            var effective = new ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig();
+            var effective = new ToolApprovalsConfig();
             effective.setPendingMessage("Awaiting review for {toolNames}");
             batch.setEffectiveToolApprovals(effective);
             snapshot.setHitlPendingToolCalls(batch);
@@ -264,6 +268,13 @@ class ConversationMemoryUtilitiesHitlTest {
                     "trace must be projected to null in generic simple-snapshot JSON");
             assertTrue(json.contains("\"fingerprint\":null"),
                     "fingerprint must be projected to null in generic simple-snapshot JSON");
+            // The narration is deliberately NOT carried by the projected batch — it is
+            // already in the step's public output where it belongs, and the projection
+            // is names-only by contract.
+            assertTrue(json.contains("\"interimText\":null"),
+                    "interimText must be projected to null in generic simple-snapshot JSON");
+            assertFalse(json.contains(CANARY_INTERIM),
+                    "interim narration leaked through the names-only projection: " + json);
             // And per-call argument fields must never carry a value.
             assertFalse(json.contains("\"argumentsRaw\":\""),
                     "argumentsRaw value leaked into generic simple-snapshot JSON");
@@ -348,5 +359,100 @@ class ConversationMemoryUtilitiesHitlTest {
         snapshot.getConversationSteps().add(step);
 
         return snapshot;
+    }
+
+    // =========================================================================
+    // approver sanitation (detail=full surface)
+    // =========================================================================
+
+    @Nested
+    @DisplayName("sanitizePendingToolCallsForApprover")
+    class SanitizeForApprover {
+
+        /**
+         * A key only the CURRENT filter catches (underscores) — a pause stored before
+         * the filter fix carries it inside its "redacted" arguments.
+         */
+        private static final String STALE_LEAKED_KEY = "sk-ant-api03-CeIJ4onq59Mf_oN4mICgfgScyJO5bfxFSS3Sdvo1Zgo2F7zUfEvx";
+
+        private ConversationMemorySnapshot pausedSnapshot() {
+            var snapshot = new ConversationMemorySnapshot();
+            var batch = new PendingToolCallBatch();
+            batch.setChatTranscriptJson("{\"messages\":[{\"args\":\"" + STALE_LEAKED_KEY + "\"}]}");
+            batch.setTraceSoFar(List.of(Map.of("type", "tool_call", "arguments", STALE_LEAKED_KEY)));
+            var call = new PendingToolCallBatch.PendingToolCall();
+            call.setCallId("c1");
+            call.setToolName("setupAgent");
+            call.setArgumentsRaw("{\"apiKey\": \"" + STALE_LEAKED_KEY + "\"}");
+            call.setArgumentsRedacted("{\"apiKey\": \"" + STALE_LEAKED_KEY + "\"}");
+            call.setRequestFingerprint("sha256:deadbeef");
+            var preview = new PendingToolCallBatch.ResolvedRequestPreview();
+            preview.setMethod("POST");
+            preview.setUri("http://localhost:7070/administration/agents/setup?key=" + STALE_LEAKED_KEY);
+            preview.setBody("{\"llm\": {\"apiKey\": \"" + STALE_LEAKED_KEY + "\"}}");
+            preview.setQueryParams(Map.of("token", STALE_LEAKED_KEY));
+            preview.setHeaders(Map.of("Authorization", "Bearer " + STALE_LEAKED_KEY));
+            call.setRequestPreview(preview);
+            batch.setCalls(List.of(call));
+            snapshot.setHitlPendingToolCalls(batch);
+            return snapshot;
+        }
+
+        @Test
+        @DisplayName("strips the resume machinery that carries raw arguments")
+        void stripsRawCarriers() {
+            var snapshot = ConversationMemoryUtilities.sanitizePendingToolCallsForApprover(pausedSnapshot());
+
+            var batch = snapshot.getHitlPendingToolCalls();
+            assertNull(batch.getChatTranscriptJson());
+            assertNull(batch.getTraceSoFar());
+            assertNull(batch.getCalls().get(0).getArgumentsRaw());
+        }
+
+        @Test
+        @DisplayName("re-redacts stale argumentsRedacted through the CURRENT filter")
+        void reRedactsStaleArguments() {
+            var snapshot = ConversationMemoryUtilities.sanitizePendingToolCallsForApprover(pausedSnapshot());
+
+            String served = snapshot.getHitlPendingToolCalls().getCalls().get(0).getArgumentsRedacted();
+            assertNotNull(served);
+            assertFalse(served.contains("CeIJ4onq59Mf"),
+                    "a pause stored before a filter improvement must not keep serving its old, leaky redaction");
+        }
+
+        @Test
+        @DisplayName("re-redacts every string surface of the request preview")
+        void reRedactsPreview() {
+            var snapshot = ConversationMemoryUtilities.sanitizePendingToolCallsForApprover(pausedSnapshot());
+
+            var preview = snapshot.getHitlPendingToolCalls().getCalls().get(0).getRequestPreview();
+            assertFalse(preview.getUri().contains("CeIJ4onq59Mf"));
+            assertFalse(preview.getBody().contains("CeIJ4onq59Mf"));
+            assertFalse(preview.getQueryParams().get("token").contains("CeIJ4onq59Mf"));
+            assertFalse(preview.getHeaders().get("Authorization").contains("CeIJ4onq59Mf"));
+            assertEquals("POST", preview.getMethod(), "the method is a fixed verb, never user data");
+        }
+
+        @Test
+        @DisplayName("keeps the fingerprint contract: marker, not null")
+        void fingerprintMarker() {
+            var snapshot = ConversationMemoryUtilities.sanitizePendingToolCallsForApprover(pausedSnapshot());
+
+            assertEquals("<REDACTED>",
+                    snapshot.getHitlPendingToolCalls().getCalls().get(0).getRequestFingerprint());
+        }
+
+        @Test
+        @DisplayName("null-safe on every level")
+        void nullSafe() {
+            assertNull(ConversationMemoryUtilities.sanitizePendingToolCallsForApprover(null));
+
+            var noBatch = new ConversationMemorySnapshot();
+            assertSame(noBatch, ConversationMemoryUtilities.sanitizePendingToolCallsForApprover(noBatch));
+
+            var emptyBatch = new ConversationMemorySnapshot();
+            emptyBatch.setHitlPendingToolCalls(new PendingToolCallBatch());
+            assertSame(emptyBatch, ConversationMemoryUtilities.sanitizePendingToolCallsForApprover(emptyBatch));
+        }
     }
 }

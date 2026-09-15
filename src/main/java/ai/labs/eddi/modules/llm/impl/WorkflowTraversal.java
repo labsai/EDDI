@@ -4,9 +4,9 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
-import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
-import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
+import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
@@ -101,9 +101,9 @@ class WorkflowTraversal {
      *            the step type URI to match (e.g., "eddi://ai.labs.httpcalls")
      * @param configClass
      *            the class to deserialize the configuration into
-     * @param restAgentStore
+     * @param agentStore
      *            agent store for loading agent configurations
-     * @param restWorkflowStore
+     * @param workflowStore
      *            workflow store for loading workflow configurations
      * @param resourceClientLibrary
      *            resource client for loading extension configurations
@@ -112,16 +112,16 @@ class WorkflowTraversal {
      * @return list of discovered configurations (never null)
      */
     static <T> List<StepConfig<T>> discoverConfigs(IConversationMemory memory, String stepTypeUri, Class<T> configClass,
-                                                   IRestAgentStore restAgentStore, IRestWorkflowStore restWorkflowStore,
+                                                   IAgentStore agentStore, IWorkflowStore workflowStore,
                                                    IResourceClientLibrary resourceClientLibrary) {
 
-        return discoverConfigs(memory, stepTypeUri, configClass, restAgentStore, restWorkflowStore, resourceClientLibrary,
+        return discoverConfigs(memory, stepTypeUri, configClass, agentStore, workflowStore, resourceClientLibrary,
                 System.currentTimeMillis());
     }
 
     /**
      * As
-     * {@link #discoverConfigs(IConversationMemory, String, Class, IRestAgentStore, IRestWorkflowStore, IResourceClientLibrary)},
+     * {@link #discoverConfigs(IConversationMemory, String, Class, IAgentStore, IWorkflowStore, IResourceClientLibrary)},
      * with an explicit clock reading so TTL expiry is deterministically testable
      * instead of requiring a real {@value #CACHE_TTL_MILLIS} ms sleep.
      *
@@ -129,7 +129,7 @@ class WorkflowTraversal {
      *            the current time in milliseconds
      */
     static <T> List<StepConfig<T>> discoverConfigs(IConversationMemory memory, String stepTypeUri, Class<T> configClass,
-                                                   IRestAgentStore restAgentStore, IRestWorkflowStore restWorkflowStore,
+                                                   IAgentStore agentStore, IWorkflowStore workflowStore,
                                                    IResourceClientLibrary resourceClientLibrary, long nowMillis) {
 
         List<StepConfig<T>> results = new ArrayList<>();
@@ -164,7 +164,7 @@ class WorkflowTraversal {
 
         AgentConfiguration agentConfig;
         try {
-            agentConfig = restAgentStore.readAgent(agentId, agentVersion);
+            agentConfig = agentStore.read(agentId, agentVersion);
         } catch (Exception e) {
             LOGGER.warnf("Failed to load agent config for %s v%d: %s", agentId, agentVersion, e.getMessage());
             return results;
@@ -210,7 +210,7 @@ class WorkflowTraversal {
             }
 
             try {
-                WorkflowConfiguration workflowConfig = restWorkflowStore.readWorkflow(workflowId, workflowVersion);
+                WorkflowConfiguration workflowConfig = workflowStore.read(workflowId, workflowVersion);
                 for (var step : workflowConfig.getWorkflowSteps()) {
                     if (step.getType() != null && stepTypeUri.equals(step.getType().toString())) {
                         String uri = (String) step.getConfig().get("uri");

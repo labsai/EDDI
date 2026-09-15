@@ -4,7 +4,7 @@
  */
 package ai.labs.eddi.integrations.channels;
 
-import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration.ChannelConnector;
 import ai.labs.eddi.configs.channels.IChannelIntegrationStore;
@@ -18,6 +18,7 @@ import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.model.AgentDeploymentStatus;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.secrets.SecretResolver;
+import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -26,6 +27,7 @@ import java.time.Duration;
 import java.util.*;
 import java.util.Locale;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static ai.labs.eddi.utils.RestUtilities.extractResourceId;
 
@@ -58,7 +60,7 @@ public class ChannelTargetRouter {
     private final IChannelIntegrationStore channelStore;
     private final IDocumentDescriptorStore descriptorStore;
     private final IRestAgentAdministration agentAdmin;
-    private final IRestAgentStore agentStore;
+    private final IAgentStore agentStore;
     private final SecretResolver secretResolver;
 
     // ─── Cached state (atomic reference swap) ──────────────────────────────────
@@ -82,6 +84,25 @@ public class ChannelTargetRouter {
     private final AtomicBoolean refreshInProgress = new AtomicBoolean(false);
 
     /**
+     * Counts invalidations, so a refresh can tell whether one landed while it was
+     * reading. Without it the marker this class exists to set was simply lost — see
+     * {@link #refreshIfNeeded}.
+     */
+    private final AtomicLong invalidationGeneration = new AtomicLong();
+
+    /**
+     * Guards the pair {@code (invalidationGeneration, lastRefreshTime)}.
+     * <p>
+     * Reading the generation and then stamping the timestamp is a check-then-act,
+     * and an invalidation landing between those two steps is exactly the case being
+     * defended against: it would zero the timestamp only for the stamp to overwrite
+     * it a moment later. The counter alone narrows that window, it does not close
+     * it. Both sides take this lock, so the check and the stamp are one step, as
+     * are the increment and the zeroing.
+     */
+    private final Object cacheStateLock = new Object();
+
+    /**
      * Thread → locked target (prevents mid-thread target switching). TTL-evicted.
      */
     private final ICache<String, ChannelTarget> threadTargetLock;
@@ -90,7 +111,7 @@ public class ChannelTargetRouter {
     public ChannelTargetRouter(IChannelIntegrationStore channelStore,
             IDocumentDescriptorStore descriptorStore,
             IRestAgentAdministration agentAdmin,
-            IRestAgentStore agentStore,
+            IAgentStore agentStore,
             SecretResolver secretResolver,
             ICacheFactory cacheFactory) {
         this.channelStore = channelStore;
@@ -311,6 +332,43 @@ public class ChannelTargetRouter {
     }
 
     /**
+     * The observe-mode targets configured for this channel, in configuration order.
+     *
+     * Deliberately separate from {@link #resolveTarget}, which answers "who was
+     * this message addressed to". An observer is addressed to nobody: it watches
+     * traffic it was not part of, so it must never be reachable as a trigger match
+     * or as the default target for a mention, and a channel with no observers must
+     * keep behaving exactly as it did before this existed. Whether any of these
+     * should actually answer is {@code ObserveGate}'s decision, not the router's.
+     *
+     * Legacy {@code ChannelConnector} entries have no observe configuration and so
+     * never appear here.
+     *
+     * @return the observers for this channel, or an empty list — never null
+     */
+    public List<ChannelTarget> observeCandidates(String channelType, String platformChannelId) {
+        refreshIfNeeded();
+        String normalizedType = channelType != null ? channelType.toLowerCase(Locale.ROOT) : "";
+        ChannelIntegrationConfiguration integration = integrationMap.get(normalizedType + ":" + platformChannelId);
+        if (integration == null || integration.getTargets() == null) {
+            return List.of();
+        }
+        return integration.getTargets().stream()
+                .filter(ChannelTarget::isObserveMode)
+                .toList();
+    }
+
+    /**
+     * The integration serving this channel, for a caller that already holds a
+     * target from {@link #observeCandidates} and needs its credentials.
+     */
+    public ChannelIntegrationConfiguration integrationFor(String channelType, String platformChannelId) {
+        refreshIfNeeded();
+        String normalizedType = channelType != null ? channelType.toLowerCase(Locale.ROOT) : "";
+        return integrationMap.get(normalizedType + ":" + platformChannelId);
+    }
+
+    /**
      * Get the bot token for a channel, checking new-style integrations first, then
      * legacy. Returns {@code null} if no token is configured for this channel.
      */
@@ -385,6 +443,18 @@ public class ChannelTargetRouter {
             var targets = integration.getTargets();
             if (targets != null) {
                 for (ChannelTarget target : targets) {
+                    // Observers are excluded here for the same reason
+                    // `findDefaultTarget` excludes them: an observer watches
+                    // traffic it was not part of, under a cooldown and daily caps
+                    // that the addressed path does not apply. Its `triggers` are
+                    // an addressed-routing field it has no use for — keyword and
+                    // MIME matching for an observer live in `ObserveConfig` — so
+                    // one left set made the observer reachable as
+                    // `architect: ...`, running its agent with no limits at all,
+                    // as often as anyone cared to type it.
+                    if (target.isObserveMode()) {
+                        continue;
+                    }
                     if (target.getTriggers() != null) {
                         for (String trigger : target.getTriggers()) {
                             if (trigger != null && trigger.toLowerCase(Locale.ROOT).trim().equals(candidateTrigger)) {
@@ -407,6 +477,17 @@ public class ChannelTargetRouter {
         return null;
     }
 
+    /**
+     * The target an addressed message falls back to when no trigger matched.
+     * <p>
+     * Observers are excluded. An observer watches traffic it was not part of, so
+     * making it the answer to "the user mentioned the bot and named no trigger"
+     * inverts what it is for — and would let the same target answer both addressed
+     * and unaddressed messages, each under a different set of limits.
+     * {@code RestChannelIntegrationStore} refuses to store that pairing, so this
+     * only fires for a document written straight to the datastore, past the REST
+     * validation.
+     */
     private ChannelTarget findDefaultTarget(ChannelIntegrationConfiguration integration) {
         String defaultName = integration.getDefaultTargetName();
         if (defaultName == null || integration.getTargets() == null)
@@ -414,11 +495,38 @@ public class ChannelTargetRouter {
         return integration.getTargets().stream()
                 .filter(t -> t.getName() != null
                         && t.getName().equalsIgnoreCase(defaultName))
+                .filter(t -> !t.isObserveMode())
                 .findFirst()
                 .orElse(null);
     }
 
     // ─── Refresh ───────────────────────────────────────────────────────────────
+
+    /**
+     * Drop the resolved-secret cache the moment a vault secret changes, instead of
+     * waiting out the poll interval.
+     * <p>
+     * This cache holds bot tokens and signing secrets already RESOLVED to their
+     * plaintext values, so after a rotation it keeps presenting the revoked
+     * credential — for up to a minute of inbound webhooks, every one of which fails
+     * against the platform. Every other credential-holding cache in the codebase
+     * registers for this; the poll made the gap look bounded rather than absent,
+     * which is why it went unnoticed.
+     * <p>
+     * Zeroing the timestamp rather than refreshing inline: refreshing here would
+     * run store reads on whatever thread happened to write a secret, and the next
+     * inbound message rebuilds the maps anyway.
+     */
+    @PostConstruct
+    void registerSecretInvalidation() {
+        secretResolver.registerInvalidationListener(reference -> {
+            synchronized (cacheStateLock) {
+                invalidationGeneration.incrementAndGet();
+                lastRefreshTime = 0;
+            }
+            LOGGER.info("Channel integration cache marked stale after a vault secret change");
+        });
+    }
 
     private void refreshIfNeeded() {
         long now = System.currentTimeMillis();
@@ -428,12 +536,27 @@ public class ChannelTargetRouter {
         if (!refreshInProgress.compareAndSet(false, true)) {
             return;
         }
+        // Read BEFORE the store reads below. An invalidation that arrives while
+        // they are in flight would otherwise zero the timestamp only for this
+        // method to stamp it fresh again a moment later — with maps built from
+        // rows read before the rotation. The cache would then serve the revoked
+        // credential for a full interval, which is exactly the window the
+        // invalidation listener exists to close.
+        long generationAtStart = invalidationGeneration.get();
         try {
             refreshInternal();
-            lastRefreshTime = now;
+            synchronized (cacheStateLock) {
+                if (invalidationGeneration.get() == generationAtStart) {
+                    lastRefreshTime = now;
+                }
+            }
         } catch (Exception e) {
             LOGGER.warn("Failed to refresh channel target router", e);
-            lastRefreshTime = now; // Avoid hammering on repeated failures
+            // Stamped even when an invalidation raced, unlike the success path: the
+            // maps are stale either way, and a store that just failed will fail
+            // again on the next inbound message. Retrying it per webhook trades a
+            // stale cache for a hot loop against a store that is already down.
+            lastRefreshTime = now;
         } finally {
             refreshInProgress.set(false);
         }
@@ -494,7 +617,7 @@ public class ChannelTargetRouter {
                 }
                 String agentId = status.getAgentId();
                 try {
-                    AgentConfiguration agentConfig = agentStore.readAgent(
+                    AgentConfiguration agentConfig = agentStore.read(
                             agentId, status.getAgentVersion());
                     if (agentConfig != null && agentConfig.getChannels() != null) {
                         for (ChannelConnector connector : agentConfig.getChannels()) {

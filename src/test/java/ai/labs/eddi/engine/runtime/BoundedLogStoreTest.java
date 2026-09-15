@@ -14,7 +14,10 @@ import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
 
+import org.jboss.logmanager.ExtLogRecord;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -323,7 +326,7 @@ class BoundedLogStoreTest {
 
         @Test
         void captureWithEmptyMessage_shouldBeNoOp() {
-            var record = new java.util.logging.LogRecord(java.util.logging.Level.INFO, "");
+            var record = new LogRecord(Level.INFO, "");
             record.setLoggerName("test.Logger");
 
             store.capture(record);
@@ -332,7 +335,7 @@ class BoundedLogStoreTest {
 
         @Test
         void captureWithNullMessage_shouldBeNoOp() {
-            var record = new java.util.logging.LogRecord(java.util.logging.Level.INFO, null);
+            var record = new LogRecord(Level.INFO, null);
             record.setLoggerName("test.Logger");
 
             store.capture(record);
@@ -341,7 +344,7 @@ class BoundedLogStoreTest {
 
         @Test
         void captureFromBoundedLogStoreLogger_shouldSkipToPreventRecursion() {
-            var record = new java.util.logging.LogRecord(java.util.logging.Level.INFO, "This is a real message");
+            var record = new LogRecord(Level.INFO, "This is a real message");
             record.setLoggerName("ai.labs.eddi.engine.runtime.BoundedLogStore");
 
             store.capture(record);
@@ -351,7 +354,7 @@ class BoundedLogStoreTest {
 
         @Test
         void captureFromBoundedLogStoreSubLogger_shouldSkipToPreventRecursion() {
-            var record = new java.util.logging.LogRecord(java.util.logging.Level.WARNING, "Sub-logger message");
+            var record = new LogRecord(Level.WARNING, "Sub-logger message");
             record.setLoggerName("ai.labs.eddi.engine.runtime.BoundedLogStore.internal");
 
             store.capture(record);
@@ -363,7 +366,7 @@ class BoundedLogStoreTest {
         void captureWithRegularLogRecord_shouldFallbackToSlf4jMdc() {
             // Use a plain JUL LogRecord (not ExtLogRecord) — capture should
             // fall through to the SLF4J MDC branch
-            var record = new java.util.logging.LogRecord(java.util.logging.Level.WARNING, "SLF4J fallback test");
+            var record = new LogRecord(Level.WARNING, "SLF4J fallback test");
             record.setLoggerName("com.example.MyService");
 
             // Set SLF4J MDC values before capture
@@ -395,7 +398,7 @@ class BoundedLogStoreTest {
 
         @Test
         void captureWithInvalidAgentVersionMdc_shouldHandleGracefully() {
-            var record = new java.util.logging.LogRecord(java.util.logging.Level.INFO, "Invalid version test");
+            var record = new LogRecord(Level.INFO, "Invalid version test");
             record.setLoggerName("com.example.MyService");
 
             org.slf4j.MDC.put("agentVersion", "not-a-number");
@@ -412,8 +415,8 @@ class BoundedLogStoreTest {
 
         @Test
         void captureWithExtLogRecordAndMdc_shouldExtractMdcFields() {
-            var extRecord = new org.jboss.logmanager.ExtLogRecord(
-                    java.util.logging.Level.SEVERE, "ExtLogRecord test",
+            var extRecord = new ExtLogRecord(
+                    Level.SEVERE, "ExtLogRecord test",
                     "com.example.ExtService");
             extRecord.setLoggerName("com.example.ExtService");
 
@@ -441,8 +444,8 @@ class BoundedLogStoreTest {
 
         @Test
         void captureWithExtLogRecord_invalidAgentVersion_shouldHandleGracefully() {
-            var extRecord = new org.jboss.logmanager.ExtLogRecord(
-                    java.util.logging.Level.INFO, "Invalid ext version",
+            var extRecord = new ExtLogRecord(
+                    Level.INFO, "Invalid ext version",
                     "com.example.ExtService");
             extRecord.setLoggerName("com.example.ExtService");
             extRecord.putMdc("agentVersion", "abc");
@@ -456,7 +459,7 @@ class BoundedLogStoreTest {
 
         @Test
         void captureWithPrintfFormatPattern_shouldFormatCorrectly() {
-            var record = new java.util.logging.LogRecord(java.util.logging.Level.WARNING, "%s, line %d in %s");
+            var record = new LogRecord(Level.WARNING, "%s, line %d in %s");
             record.setLoggerName("com.example.ScriptEngine");
             record.setParameters(new Object[]{"hitlConfig is configured but nothing in this agent can trigger a pause", 42, "rules.js"});
 
@@ -469,8 +472,8 @@ class BoundedLogStoreTest {
 
         @Test
         void captureWithExtLogRecordPrintfPattern_shouldFormatCorrectly() {
-            var extRecord = new org.jboss.logmanager.ExtLogRecord(
-                    java.util.logging.Level.WARNING, "%s, line %d in %s",
+            var extRecord = new ExtLogRecord(
+                    Level.WARNING, "%s, line %d in %s",
                     "com.example.ScriptEngine");
             extRecord.setLoggerName("com.example.ScriptEngine");
             extRecord.setParameters(new Object[]{"Syntax error", 10, "agent.js"});
@@ -492,8 +495,8 @@ class BoundedLogStoreTest {
         void captureWithIndexedPrintfSpecifiers_shouldFormatCorrectly() {
             // Neither "%1$s" nor "%2$d" contains the literal "%s"/"%d" the old check
             // looked for, so this reached the viewer as the raw pattern.
-            var record = new java.util.logging.LogRecord(
-                    java.util.logging.Level.WARNING, "agent %1$s failed after %2$d attempts");
+            var record = new LogRecord(
+                    Level.WARNING, "agent %1$s failed after %2$d attempts");
             record.setLoggerName("com.example.Retry");
             record.setParameters(new Object[]{"support-bot", 7});
 
@@ -507,8 +510,8 @@ class BoundedLogStoreTest {
         @Test
         void captureWithPaddedPrintfSpecifier_shouldFormatCorrectly() {
             // "%03d" likewise does not contain "%d".
-            var record = new java.util.logging.LogRecord(
-                    java.util.logging.Level.INFO, "retrying in %03d ms");
+            var record = new LogRecord(
+                    Level.INFO, "retrying in %03d ms");
             record.setLoggerName("com.example.Retry");
             record.setParameters(new Object[]{5});
 
@@ -522,8 +525,8 @@ class BoundedLogStoreTest {
         void captureWithMessageFormatPatternContainingPercent_shouldStillUseMessageFormat() {
             // A literal percent must not drag a MessageFormat pattern down the printf
             // path: String.format rejects "% f", so it falls through as intended.
-            var record = new java.util.logging.LogRecord(
-                    java.util.logging.Level.INFO, "progress 50% for {0}");
+            var record = new LogRecord(
+                    Level.INFO, "progress 50% for {0}");
             record.setLoggerName("com.example.Progress");
             record.setParameters(new Object[]{"batch-1"});
 

@@ -20,11 +20,18 @@ spec:
     - Ingress
     - Egress
   ingress:
-    # Allow traffic from within the namespace (Ingress controller, Manager, etc.)
+    # Allow traffic from within the policy's own namespace.
+    #
+    # A bare podSelector — with no namespaceSelector beside it — means "every
+    # pod in the same namespace as this NetworkPolicy", whatever that namespace
+    # turns out to be. This used to be a namespaceSelector matching the literal
+    # name "eddi", and kustomize's namespace transformer does not rewrite
+    # matchLabels VALUES: an operator who changed `namespace:` in
+    # kustomization.yaml got a policy whose only in-namespace ingress rule
+    # selected a namespace that did not exist, and — with policyTypes: Ingress
+    # in force — nothing could reach EDDI on 7070.
     - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: eddi
+        - podSelector: {}
       ports:
         - protocol: TCP
           port: 7070

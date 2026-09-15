@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.memory;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.memory.model.Attachment;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
+import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.model.Context;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
@@ -499,7 +500,7 @@ class AttachmentContextExtractorTest {
             ConversationMemory memory = new ConversationMemory("conv-1", "agent-1", 1, "user-1");
             Attachment pdf = new Attachment("application/pdf", "report.pdf", 1234L, "ref-1");
             memory.getCurrentStep().storeData(
-                    new ai.labs.eddi.engine.memory.model.Data<>(MemoryKeys.ATTACHMENTS.key(), List.of(pdf)));
+                    new Data<>(MemoryKeys.ATTACHMENTS.key(), List.of(pdf)));
             memory.startNextStep(); // the follow-up turn, carrying no file of its own
 
             // Persist and reload the way both stores do: Jackson to JSON and back

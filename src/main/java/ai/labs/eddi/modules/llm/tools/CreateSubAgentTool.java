@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.llm.tools;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DynamicAgentConfig;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResult;
+import ai.labs.eddi.engine.memory.ConversationOutputExtractor;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.setup.AgentSetupService;
@@ -30,6 +31,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.Objects;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 
 /**
  * LLM tool for dynamically creating sub-agents during group conversations.
@@ -254,12 +256,28 @@ public class CreateSubAgentTool {
                     null, // mcpServerUrls
                     true, // deploy
                     null, // environment
-                    null // hitlConfig — dynamic sub-agents are not gated; see the
-                         // dynamicAgents.allowCreation escalation flag on the group
-                         // that provisioned this one
+                    null, // hitlConfig — dynamic sub-agents are not gated; see the
+                          // dynamicAgents.allowCreation escalation flag on the group
+                          // that provisioned this one
+                    null // vaultKeyName — a sub-agent inherits the parent's ${vault:...}
+                         // reference through inheritedApiKey above, which is already the
+                         // shared-key case this field exists for
             );
 
-            SetupResult result = agentSetupService.setupAgent(request);
+            SetupResult result;
+            try {
+                result = agentSetupService.setupAgent(request);
+            } catch (AgentSetupException e) {
+                // Inheritance was asked for but supplied no key: say why, instead of
+                // leaving the model with a bare "API key is required" it cannot act on.
+                if (config.isInheritParentModel() && inheritedApiKey == null) {
+                    String reason = parentProfile == null
+                            ? "the parent agent's LLM configuration could not be read (see the server log)"
+                            : "the parent agent has no vault-referenced key for provider '" + resolvedProvider + "'";
+                    throw new AgentSetupException(e.getMessage() + " — nothing was inherited: " + reason);
+                }
+                throw e;
+            }
             String agentId = result.agentId();
             createdAgentIds.add(agentId);
             if (Boolean.TRUE.equals(retain)) {
@@ -373,8 +391,8 @@ public class CreateSubAgentTool {
      * Extracts the human-readable text from a conversation memory snapshot.
      * Delegates to shared utility.
      */
-    private String extractResponse(ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot snapshot) {
-        return ai.labs.eddi.engine.memory.ConversationOutputExtractor.extractResponse(snapshot);
+    private String extractResponse(SimpleConversationMemorySnapshot snapshot) {
+        return ConversationOutputExtractor.extractResponse(snapshot);
     }
 
     /**
@@ -382,7 +400,7 @@ public class CreateSubAgentTool {
      * the gated tool NAMES (names ONLY — never arguments, raw or redacted). Empty
      * for a RULE pause so the existing message shape is preserved.
      */
-    private String toolPauseSuffix(ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot snapshot) {
+    private String toolPauseSuffix(SimpleConversationMemorySnapshot snapshot) {
         if (snapshot == null || !"TOOL_CALL".equals(snapshot.getHitlPauseType())) {
             return "";
         }
@@ -390,7 +408,7 @@ public class CreateSubAgentTool {
         var batch = snapshot.getHitlPendingToolCalls();
         if (batch != null && batch.getCalls() != null) {
             var toolNames = batch.getCalls().stream()
-                    .map(ai.labs.eddi.engine.memory.model.PendingToolCallBatch.PendingToolCall::getToolName)
+                    .map(PendingToolCallBatch.PendingToolCall::getToolName)
                     .filter(Objects::nonNull)
                     .toList();
             if (!toolNames.isEmpty()) {

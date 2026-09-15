@@ -6,6 +6,7 @@ package ai.labs.eddi.datastore.postgres;
 
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.JsonSerialization;
+import ai.labs.eddi.datastore.serialization.SerializationCustomizer;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.TriggerType;
@@ -43,7 +44,7 @@ class PostgresScheduleStoreTest extends PostgresTestBase {
         var dsInstance = createDataSourceInstance();
         ds = dsInstance.get();
         store = new PostgresScheduleStore(dsInstance,
-                new JsonSerialization(ai.labs.eddi.datastore.serialization.SerializationCustomizer.configureObjectMapper(new ObjectMapper(), false)),
+                new JsonSerialization(SerializationCustomizer.configureObjectMapper(new ObjectMapper(), false)),
                 100);
     }
 
@@ -430,6 +431,30 @@ class PostgresScheduleStoreTest extends PostgresTestBase {
             assertEquals(scheduleId, logs.getFirst().scheduleId());
             assertEquals("COMPLETED", logs.getFirst().status());
             assertEquals("conv-123", logs.getFirst().conversationId());
+        }
+
+        /**
+         * The write-side half of the erasure guarantee: the insert is conditional on
+         * the schedule still existing, so a fire that is in flight when a cascade
+         * delete or GDPR erasure runs cannot commit its log afterwards. That log would
+         * carry a conversationId findable only by a scheduleId that no longer resolves
+         * — personal data no erasure path could reach again. Exercises the real
+         * {@code WHERE EXISTS} against PostgreSQL, which the mocked-driver unit test
+         * cannot.
+         */
+        @Test
+        @DisplayName("logFire — writes no row once the schedule is gone")
+        void logFireAfterScheduleDeleted() throws Exception {
+            String scheduleId = store.createSchedule(createCronSchedule("Erased", "a", "t"));
+            store.deleteSchedule(scheduleId);
+
+            store.logFire(new ScheduleFireLog(
+                    UUID.randomUUID().toString(), scheduleId, "fire_late",
+                    Instant.now(), Instant.now(), Instant.now(),
+                    "COMPLETED", "node-1", "conv-erased", null, 1, 0.0));
+
+            assertTrue(store.readFireLogs(scheduleId, 10).isEmpty(),
+                    "a fire log must not outlive the schedule it belongs to");
         }
 
         @Test

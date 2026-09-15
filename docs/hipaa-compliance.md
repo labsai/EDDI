@@ -15,7 +15,7 @@ GDPR/CCPA operations, see [gdpr-compliance.md](gdpr-compliance.md).
 
 | HIPAA Safeguard | EDDI Feature | Status |
 |---|---|---|
-| **Access Control** (§164.312(a)) | Keycloak OIDC + RBAC roles (`admin`, `editor`, `viewer`) | ✅ Built-in |
+| **Access Control** (§164.312(a)) | Keycloak OIDC + RBAC roles (`eddi-admin`, `eddi-editor`, `eddi-user`, `eddi-viewer`, `eddi-approver`) — enumerated per endpoint, no hierarchy | ✅ Built-in |
 | **Audit Controls** (§164.312(b)) | HMAC-signed immutable audit ledger | ✅ Built-in |
 | **Integrity Controls** (§164.312(c)) | HMAC tamper detection on all audit entries | ✅ Built-in |
 | **Person Authentication** (§164.312(d)) | Keycloak with JWT/OIDC, MFA-capable | ✅ Built-in |
@@ -125,9 +125,12 @@ communicates with the proxy over localhost.
 ### Option 2: TLS Directly in EDDI
 
 ```properties
-quarkus.http.ssl.certificate.file=/path/to/cert.pem
-quarkus.http.ssl.certificate.key-file=/path/to/key.pem
+quarkus.http.ssl.certificate.files=/path/to/cert.pem
+quarkus.http.ssl.certificate.key-files=/path/to/key.pem
 quarkus.http.ssl-port=8443
+# Required. Configuring TLS does not switch plaintext off: quarkus.http.insecure-requests
+# defaults to `enabled`, so port 7070 keeps serving cleartext alongside 8443.
+quarkus.http.insecure-requests=disabled
 ```
 
 ---
@@ -243,8 +246,10 @@ As the HIPAA-covered entity or business associate deploying EDDI:
 - [ ] **RBAC**: Assign minimum necessary roles to each operator
 - [ ] **Data Retention**: Review `eddi.conversations.deleteEndedConversationsOnceOlderThanDays`
       — reduce from 365 to minimum necessary
-- [ ] **User Memory Purge**: Configure `eddi.usermemory.auto-purge-days` if
-      PHI is stored in user memories
+- [ ] **User Memory Purge**: Configure `eddi.usermemories.deleteOlderThanDays`
+      if PHI is stored in user memories. It ships as `-1`, which disables the
+      sweep entirely — persistent user memories are kept forever until you set a
+      positive number of days
 - [ ] **Emergency Access**: Document emergency access procedure with
       two-person authorization
 - [ ] **Risk Assessment**: Complete HIPAA Security Risk Assessment for your

@@ -208,6 +208,22 @@ jobs:
                   continue;
                 }
 
+                // "Every check that ran was green" is not the same claim as "CI
+                // ran". A merge-conflicted PR never triggers CI/CD at all, so the
+                // loop above sees only CodeQL et al. and finds nothing failing —
+                // and the approval body would then assert that all CI checks
+                // passed on a commit that was never built. Require the gating
+                // jobs to be PRESENT by name, so absence is a reason to wait
+                // rather than a silent pass.
+                const REQUIRED_CHECKS = ['Build & Test', 'Integration Tests'];
+                const present = new Set(relevant.map(c => c.name));
+                const absent = REQUIRED_CHECKS.filter(name => !present.has(name));
+                if (absent.length > 0) {
+                  core.info(`PR #${number}: required check(s) never reported: ${absent.join(', ')} `
+                    + `(merge conflict, or CI did not trigger). Not approving.`);
+                  continue;
+                }
+
                 await github.rest.pulls.createReview({
                   owner, repo, pull_number: number, event: 'APPROVE',
                   body: 'Auto-approved: GitHub Copilot reviewed with no unresolved comments and all CI checks passed.\n\n'

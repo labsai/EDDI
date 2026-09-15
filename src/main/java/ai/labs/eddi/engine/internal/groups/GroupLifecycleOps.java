@@ -151,6 +151,15 @@ public class GroupLifecycleOps {
                 groupConversationService.deleteGroupHitlTimeoutSchedule(groupConversationId);
                 groupConversationService.cleanupAfterTerminalState(gc);
             }
+            // Member conversations are ENDED, not deleted — deliberately, and the tool
+            // description and docs now say so. They were previously advertised as
+            // cascade-DELETED while this loop only ended them, which left every deleted
+            // discussion with N readable documents behind and no one expecting them.
+            // Making them actually disappear is a separate, irreversible behaviour
+            // change: a member conversation holds the agent's own transcript, and GDPR
+            // erasure (which does delete conversations) is the path that is meant to
+            // destroy it. Note the inconsistency this leaves — artifacts and ephemeral
+            // agents below ARE deleted.
             for (String privateConvId : gc.getMemberConversationIds().values()) {
                 try {
                     conversationService.endConversation(privateConvId);

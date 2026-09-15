@@ -15,6 +15,8 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import com.fasterxml.jackson.annotation.JsonValue;
+import com.fasterxml.jackson.annotation.JsonCreator;
 
 /**
  * Versioned configuration for a group of agents that can participate in
@@ -391,6 +393,19 @@ public class AgentGroupConfiguration {
      * participant.
      */
     public record GroupMember(String agentId, String displayName, Integer speakingOrder, String role, MemberType memberType) {
+
+        /**
+         * An absent {@code memberType} is an AGENT, as the Javadoc above has always
+         * said. Without this the canonical constructor — the one Jackson and template
+         * instantiation use — kept the null, and every check of the form
+         * {@code memberType() == AGENT} silently excluded the member: the packaged
+         * ops-task-force template found zero bidders and never auctioned.
+         */
+        public GroupMember {
+            if (memberType == null) {
+                memberType = MemberType.AGENT;
+            }
+        }
 
         /** Convenience constructor defaulting to AGENT member type. */
         public GroupMember(String agentId, String displayName, Integer speakingOrder, String role) {
@@ -1196,12 +1211,12 @@ public class AgentGroupConfiguration {
     public enum LifecyclePolicy {
         EPHEMERAL, KEEP_DEPLOYED, UNDEPLOY_ONLY, AGENT_DECIDES;
 
-        @com.fasterxml.jackson.annotation.JsonValue
+        @JsonValue
         public String toJson() {
             return name().toLowerCase().replace('_', '-');
         }
 
-        @com.fasterxml.jackson.annotation.JsonCreator
+        @JsonCreator
         public static LifecyclePolicy fromJson(String value) {
             if (value == null)
                 return EPHEMERAL;

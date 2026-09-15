@@ -3,7 +3,7 @@
 #
 #   docker compose -f docker-compose.openwebui.yml up --build
 #
-# Then open http://localhost:3000 and pick "agent-father-…" from the model list.
+# Then open http://localhost:3000 and pick "eddi-demo-agent-…" from the model list.
 #
 # EDDI is BUILT FROM THIS WORKING TREE, not pulled from Docker Hub: the adapter
 # is not in any published image yet, so `labsai/eddi:latest` would start fine
@@ -28,6 +28,8 @@ services:
       # DEMO ONLY: no OIDC, so EDDI's own REST API is wide open. This is what
       # lets the seeder below call the (normally role-gated) import endpoint.
       - "EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true"
+      - "EDDI_MCP_ALLOW_UNAUTHENTICATED=true"
+      - "EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED=true"
 
       # ── The OpenAI-compatible adapter ──
       - "EDDI_OPENAI_COMPAT_ENABLED=true"
@@ -73,11 +75,9 @@ services:
       start_period: 10s
 
   # One-shot: creates and deploys a small rule-based agent so the model list is
-  # not empty on first start. EDDI seeds nothing automatically.
-  #
-  # It does NOT use POST /backup/import/initialAgents — see the note in
-  # seed-demo-agent.sh for why that path cannot import the bundled Agent Father
-  # on Linux today.
+  # not empty on first start. EDDI seeds nothing automatically — there is no
+  # bundled starter agent and no import-on-startup path; agents are authored
+  # through the Manager's Platform Operator, its wizard, or the setup API.
   eddi-seed:
     image: curlimages/curl:8.11.1
     restart: "no"
@@ -102,7 +102,19 @@ services:
     entrypoint: ["/bin/sh", "/seed.sh"]
 
   open-webui:
-    image: ghcr.io/open-webui/open-webui:main
+    # The one image in the compose set that is NOT version-pinned, and the only
+    # one that floats deliberately rather than by oversight. `:main` is
+    # open-webui's rolling development tag, so the same `docker compose up`
+    # produces a different UI on every run and a breaking change upstream turns
+    # this documented demo of the /v1 adapter into an unreproducible bug report.
+    #
+    # Pin it: set OPEN_WEBUI_VERSION to a released tag from
+    # https://github.com/open-webui/open-webui/releases (e.g.
+    # `OPEN_WEBUI_VERSION=v0.6.5 docker compose -f docker-compose.openwebui.yml up`),
+    # or add it to .env. The default stays `main` because a wrong literal here
+    # fails the pull outright, which is a worse first run than a drifting UI —
+    # so choosing the tag is left to whoever can check the release list.
+    image: ghcr.io/open-webui/open-webui:${OPEN_WEBUI_VERSION:-main}
     ports:
       - "${OPEN_WEBUI_PORT:-3000}:8080"
     environment:

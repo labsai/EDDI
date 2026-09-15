@@ -1,6 +1,17 @@
 # Multimodal Attachments — Completion Plan v3 (Unified Upload → LLM, 1:1 + Groups)
 
-> **Status:** Planning only. No code changes yet.
+> **Status: IMPLEMENTED.** Kept as the design record. User-facing documentation is
+> [`docs/attachments-guide.md`](../docs/attachments-guide.md).
+>
+> **What shipped vs. this plan.** Every root defect below is resolved. The two blob-store
+> abstractions were unified into `IAttachmentStore` (`IAttachmentStorage` no longer exists;
+> see the historical note in `IAttachmentStore`), so conversation deletion and GDPR erasure
+> cascade through the same store uploads write to. Conversation-scoped ownership with explicit
+> member grants is the shipped model. PDF, audio and text extraction ships as
+> `AttachmentTextExtractor`; the capability gate as `ModelCapabilityService`. Also shipped and
+> not in this plan by name: `ReadAttachmentTool`, `AttachmentForwarder`, `ContentTypeMatcher`
+> and `MaxInlineAttachmentSizeValidator`. Read the paragraphs below as the reasoning behind
+> those decisions, not as a description of current behaviour.
 > **v3 (second critical pass):** Major corrections vs v2 —
 > (1) **Unify the two parallel blob-store abstractions** (`IAttachmentStore` vs `IAttachmentStorage`) — today conversation-deletion/GDPR cascade through a *different* store than the one uploads write to;
 > (2) **Ownership reverted to conversation-scoped + explicit member grants** — v2's user-scoped model broke anonymous deployments and invited a context-injection privilege escalation;

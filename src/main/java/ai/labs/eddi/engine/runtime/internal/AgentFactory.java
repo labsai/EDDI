@@ -26,6 +26,7 @@ import org.jboss.logging.Logger;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 import java.util.*;
+import java.util.Objects;
 import java.util.concurrent.*;
 
 /**
@@ -418,12 +419,12 @@ public class AgentFactory implements IAgentFactory {
             if (o == null || getClass() != o.getClass())
                 return false;
             AgentId that = (AgentId) o;
-            return java.util.Objects.equals(id, that.id) && java.util.Objects.equals(version, that.version);
+            return Objects.equals(id, that.id) && Objects.equals(version, that.version);
         }
 
         @Override
         public int hashCode() {
-            return java.util.Objects.hash(id, version);
+            return Objects.hash(id, version);
         }
     }
 }

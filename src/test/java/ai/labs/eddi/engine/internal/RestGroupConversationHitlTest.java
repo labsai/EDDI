@@ -8,9 +8,13 @@ import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
+import ai.labs.eddi.engine.hitl.HitlAccessGuard;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
+import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
+import ai.labs.eddi.engine.model.PendingApprovalSummary;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
@@ -21,8 +25,11 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.security.Principal;
+import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 
+import jakarta.ws.rs.NotFoundException;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -57,10 +64,10 @@ class RestGroupConversationHitlTest {
 
         // Real guard wired with the same mocks + real OwnershipValidator, so the group
         // HITL ownership + listing assertions still exercise that logic end-to-end.
-        var hitlAccessGuard = new ai.labs.eddi.engine.hitl.HitlAccessGuard(
+        var hitlAccessGuard = new HitlAccessGuard(
                 identity, ownershipValidator,
-                mock(ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore.class),
-                mock(ai.labs.eddi.engine.api.IConversationService.class),
+                mock(IConversationDescriptorStore.class),
+                mock(IConversationService.class),
                 groupService);
         restGroupConversation = new RestGroupConversation(
                 groupService, jsonSerialization, identity, ownershipValidator, hitlAccessGuard);
@@ -307,9 +314,9 @@ class RestGroupConversationHitlTest {
     @DisplayName("Pending approvals listing")
     class PendingApprovalsListing {
 
-        private ai.labs.eddi.engine.model.PendingApprovalSummary summaryOwnedBy(String gcId, String ownerId) {
-            var summary = new ai.labs.eddi.engine.model.PendingApprovalSummary(
-                    gcId, null, ownerId, java.time.Instant.now(), "needs review", "WAIT_INDEFINITELY");
+        private PendingApprovalSummary summaryOwnedBy(String gcId, String ownerId) {
+            var summary = new PendingApprovalSummary(
+                    gcId, null, ownerId, Instant.now(), "needs review", "WAIT_INDEFINITELY");
             summary.setGroupId(GROUP_ID);
             return summary;
         }
@@ -318,7 +325,7 @@ class RestGroupConversationHitlTest {
         @DisplayName("admin sees all of the group's pending summaries")
         void adminSeesAll() throws Exception {
             asAdmin(ADMIN_ID);
-            when(groupService.listGroupPendingApprovals(eq(GROUP_ID), anyInt())).thenReturn(java.util.List.of(
+            when(groupService.listGroupPendingApprovals(eq(GROUP_ID), anyInt())).thenReturn(List.of(
                     summaryOwnedBy("gc-1", OWNER_ID), summaryOwnedBy("gc-2", "someone-else")));
 
             var result = restGroupConversation.listGroupPendingApprovals(GROUP_ID, 100);
@@ -329,12 +336,12 @@ class RestGroupConversationHitlTest {
         @Test
         @DisplayName("approver sees all of the group's pending summaries")
         void approverSeesAll() throws Exception {
-            var principal = mock(java.security.Principal.class);
+            var principal = mock(Principal.class);
             when(principal.getName()).thenReturn("reviewer");
             when(identity.getPrincipal()).thenReturn(principal);
             when(identity.hasRole("eddi-admin")).thenReturn(false);
             when(identity.hasRole("eddi-approver")).thenReturn(true);
-            when(groupService.listGroupPendingApprovals(eq(GROUP_ID), anyInt())).thenReturn(java.util.List.of(
+            when(groupService.listGroupPendingApprovals(eq(GROUP_ID), anyInt())).thenReturn(List.of(
                     summaryOwnedBy("gc-1", OWNER_ID), summaryOwnedBy("gc-2", "someone-else")));
 
             var result = restGroupConversation.listGroupPendingApprovals(GROUP_ID, 100);
@@ -346,7 +353,7 @@ class RestGroupConversationHitlTest {
         @DisplayName("regular user sees ONLY their own conversations")
         void ownerSeesOnlyOwn() throws Exception {
             asUser(OWNER_ID);
-            when(groupService.listGroupPendingApprovals(eq(GROUP_ID), anyInt())).thenReturn(java.util.List.of(
+            when(groupService.listGroupPendingApprovals(eq(GROUP_ID), anyInt())).thenReturn(List.of(
                     summaryOwnedBy("gc-mine", OWNER_ID),
                     summaryOwnedBy("gc-theirs", "someone-else"),
                     summaryOwnedBy("gc-unowned", null)));
@@ -362,7 +369,7 @@ class RestGroupConversationHitlTest {
         void anonymousSeesNothing() throws Exception {
             when(identity.getPrincipal()).thenReturn(null);
             when(identity.hasRole(anyString())).thenReturn(false);
-            when(groupService.listGroupPendingApprovals(eq(GROUP_ID), anyInt())).thenReturn(java.util.List.of(
+            when(groupService.listGroupPendingApprovals(eq(GROUP_ID), anyInt())).thenReturn(List.of(
                     summaryOwnedBy("gc-1", OWNER_ID)));
 
             var result = restGroupConversation.listGroupPendingApprovals(GROUP_ID, 100);
@@ -374,7 +381,7 @@ class RestGroupConversationHitlTest {
         @DisplayName("null limit param defaults to 100")
         void nullLimitDefaults() throws Exception {
             asAdmin(ADMIN_ID);
-            when(groupService.listGroupPendingApprovals(GROUP_ID, 100)).thenReturn(java.util.List.of());
+            when(groupService.listGroupPendingApprovals(GROUP_ID, 100)).thenReturn(List.of());
 
             restGroupConversation.listGroupPendingApprovals(GROUP_ID, null);
 
@@ -596,7 +603,7 @@ class RestGroupConversationHitlTest {
             decision.setVerdict(HitlVerdict.APPROVED);
             request.setDecision(decision);
 
-            assertThrows(jakarta.ws.rs.NotFoundException.class,
+            assertThrows(NotFoundException.class,
                     () -> restGroupConversation.approveGroupPhase(OTHER_GROUP, GC_ID, request),
                     "approving under the wrong group path must 404, not act on the conversation");
         }
@@ -607,7 +614,7 @@ class RestGroupConversationHitlTest {
             asAdmin(ADMIN_ID);
             when(groupService.readGroupConversation(GC_ID)).thenReturn(makeGc(OWNER_ID));
 
-            assertThrows(jakarta.ws.rs.NotFoundException.class,
+            assertThrows(NotFoundException.class,
                     () -> restGroupConversation.cancelDiscussion(OTHER_GROUP, GC_ID),
                     "cancelling under the wrong group path must 404");
         }
@@ -618,7 +625,7 @@ class RestGroupConversationHitlTest {
             asAdmin(ADMIN_ID);
             when(groupService.readGroupConversation(GC_ID)).thenReturn(makeGc(OWNER_ID));
 
-            assertThrows(jakarta.ws.rs.NotFoundException.class,
+            assertThrows(NotFoundException.class,
                     () -> restGroupConversation.getGroupApprovalStatus(OTHER_GROUP, GC_ID, "summary"),
                     "reading approval-status under the wrong group path must 404");
         }

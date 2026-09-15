@@ -29,10 +29,17 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionException;
+import ai.labs.eddi.engine.api.IGroupConversationService;
+import ai.labs.eddi.engine.audit.AuditLedgerService;
+import ai.labs.eddi.engine.audit.model.AuditEntry;
+import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
+import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
+import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
+import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -47,9 +54,18 @@ import org.mockito.MockitoAnnotations;
 import java.lang.reflect.Method;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -286,9 +302,9 @@ class GroupConversationServiceHitlTest {
             // the returned object would race the async resumed leg, which mutates the
             // shared gc (and flips it to COMPLETED) — the CAS point is where the
             // clear-pause block deterministically runs.
-            var casState = new java.util.concurrent.atomic.AtomicReference<GroupConversationState>();
-            var casPhaseIndex = new java.util.concurrent.atomic.AtomicInteger(Integer.MIN_VALUE);
-            var casPausedAtWasNull = new java.util.concurrent.atomic.AtomicBoolean(false);
+            var casState = new AtomicReference<GroupConversationState>();
+            var casPhaseIndex = new AtomicInteger(Integer.MIN_VALUE);
+            var casPausedAtWasNull = new AtomicBoolean(false);
             doAnswer(inv -> {
                 GroupConversation g = inv.getArgument(0);
                 if (casState.compareAndSet(null, g.getState())) {
@@ -465,7 +481,7 @@ class GroupConversationServiceHitlTest {
             // executeDiscussion can seed turnCounter from it (M3). Capturing here (not
             // on the live gc after return) removes the race with the async discussion
             // completing and resetting pausedTurnCount to 0.
-            var capturedTurnCount = new java.util.concurrent.atomic.AtomicInteger(-1);
+            var capturedTurnCount = new AtomicInteger(-1);
             doAnswer(inv -> {
                 GroupConversation g = inv.getArgument(0);
                 capturedTurnCount.compareAndSet(-1, g.getPausedTurnCount());
@@ -675,14 +691,14 @@ class GroupConversationServiceHitlTest {
             var field = GroupConversationService.class.getDeclaredField("activeTokens");
             field.setAccessible(true);
             @SuppressWarnings("unchecked")
-            var activeTokens = (java.util.concurrent.ConcurrentHashMap<String, ?>) field.get(service);
+            var activeTokens = (ConcurrentHashMap<String, ?>) field.get(service);
             assertFalse(activeTokens.containsKey("gc-real-pause"),
                     "NEW-2: activeTokens MUST be empty after pause (finally block removes token)");
 
             // Step 3: Cancel. With no token, cancelDiscussion takes the DB-write branch.
             doReturn(gc).when(conversationStore).read("gc-real-pause");
             service.cancelDiscussion("gc-real-pause",
-                    ai.labs.eddi.engine.lifecycle.model.ControlSignal.CANCEL_GRACEFUL);
+                    ControlSignal.CANCEL_GRACEFUL);
 
             assertEquals(GroupConversationState.CANCELLED, gc.getState(),
                     "Paused GC should be CANCELLED via DB write");
@@ -725,7 +741,7 @@ class GroupConversationServiceHitlTest {
 
             // Agent factory must return a non-null agent so executeAgentTurn
             // doesn't skip with SKIPPED entry
-            doReturn(mock(ai.labs.eddi.engine.runtime.IAgent.class))
+            doReturn(mock(IAgent.class))
                     .when(agentFactory).getLatestReadyAgent(any(), eq(AGENT_A));
 
             // startConversation must return a result with a conversation ID
@@ -733,12 +749,12 @@ class GroupConversationServiceHitlTest {
             doReturn(convResult).when(conversationService).startConversation(any(), any(), any(), any());
 
             // Latch: agent say blocks until cancel fires
-            var agentBlocked = new java.util.concurrent.CountDownLatch(1);
-            var cancelFired = new java.util.concurrent.CountDownLatch(1);
+            var agentBlocked = new CountDownLatch(1);
+            var cancelFired = new CountDownLatch(1);
 
             doAnswer(inv -> {
                 agentBlocked.countDown(); // signal: agent is running
-                cancelFired.await(5, java.util.concurrent.TimeUnit.SECONDS); // block until cancel
+                cancelFired.await(5, TimeUnit.SECONDS); // block until cancel
 
                 // Return a minimal response
                 var snapshot = new SimpleConversationMemorySnapshot();
@@ -754,8 +770,8 @@ class GroupConversationServiceHitlTest {
             }).when(conversationService).say(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), any());
 
             // Run discuss on a separate thread
-            var resultHolder = new java.util.concurrent.atomic.AtomicReference<GroupConversation>();
-            var exHolder = new java.util.concurrent.atomic.AtomicReference<Exception>();
+            var resultHolder = new AtomicReference<GroupConversation>();
+            var exHolder = new AtomicReference<Exception>();
 
             Thread discussThread = new Thread(() -> {
                 try {
@@ -769,7 +785,7 @@ class GroupConversationServiceHitlTest {
             discussThread.start();
 
             // Wait for the agent to be in-flight
-            boolean started = agentBlocked.await(5, java.util.concurrent.TimeUnit.SECONDS);
+            boolean started = agentBlocked.await(5, TimeUnit.SECONDS);
 
             if (!started || exHolder.get() != null) {
                 discussThread.join(5_000);
@@ -779,7 +795,7 @@ class GroupConversationServiceHitlTest {
 
             // Fire GRACEFUL cancel
             service.cancelDiscussion("gc-inflight",
-                    ai.labs.eddi.engine.lifecycle.model.ControlSignal.CANCEL_GRACEFUL);
+                    ControlSignal.CANCEL_GRACEFUL);
 
             // Unblock the agent
             cancelFired.countDown();
@@ -826,7 +842,7 @@ class GroupConversationServiceHitlTest {
                 return "gc-immediate";
             }).when(conversationStore).create(any());
 
-            doReturn(mock(ai.labs.eddi.engine.runtime.IAgent.class))
+            doReturn(mock(IAgent.class))
                     .when(agentFactory).getLatestReadyAgent(any(), eq(AGENT_A));
 
             var convResult = new IConversationService.ConversationResult("conv-imm", null);
@@ -836,12 +852,12 @@ class GroupConversationServiceHitlTest {
             // executeTaskExecutionPhase's CompletableFuture.runAsync, so
             // the allOf.get() is blocked, and CANCEL_IMMEDIATE fires
             // cancelActiveFuture() → CancellationException.
-            var agentBlocked = new java.util.concurrent.CountDownLatch(1);
-            var cancelFired = new java.util.concurrent.CountDownLatch(1);
+            var agentBlocked = new CountDownLatch(1);
+            var cancelFired = new CountDownLatch(1);
 
             doAnswer(inv -> {
                 agentBlocked.countDown();
-                cancelFired.await(5, java.util.concurrent.TimeUnit.SECONDS);
+                cancelFired.await(5, TimeUnit.SECONDS);
 
                 var snapshot = new SimpleConversationMemorySnapshot();
                 var output = new ConversationOutput();
@@ -855,8 +871,8 @@ class GroupConversationServiceHitlTest {
                 return null;
             }).when(conversationService).say(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), any());
 
-            var resultHolder = new java.util.concurrent.atomic.AtomicReference<GroupConversation>();
-            var exHolder = new java.util.concurrent.atomic.AtomicReference<Exception>();
+            var resultHolder = new AtomicReference<GroupConversation>();
+            var exHolder = new AtomicReference<Exception>();
 
             Thread discussThread = new Thread(() -> {
                 try {
@@ -868,7 +884,7 @@ class GroupConversationServiceHitlTest {
             });
             discussThread.start();
 
-            boolean started = agentBlocked.await(5, java.util.concurrent.TimeUnit.SECONDS);
+            boolean started = agentBlocked.await(5, TimeUnit.SECONDS);
             if (!started || exHolder.get() != null) {
                 discussThread.join(5_000);
                 fail("discuss() failed before reaching say(): " +
@@ -878,7 +894,7 @@ class GroupConversationServiceHitlTest {
             // Fire IMMEDIATE cancel — triggers cancelActiveFuture() on the allOf
             // future inside executeTaskExecutionPhase, producing CancellationException
             service.cancelDiscussion("gc-immediate",
-                    ai.labs.eddi.engine.lifecycle.model.ControlSignal.CANCEL_IMMEDIATE);
+                    ControlSignal.CANCEL_IMMEDIATE);
 
             cancelFired.countDown();
 
@@ -921,18 +937,18 @@ class GroupConversationServiceHitlTest {
                 return "gc-r1";
             }).when(conversationStore).create(any());
 
-            doReturn(mock(ai.labs.eddi.engine.runtime.IAgent.class))
+            doReturn(mock(IAgent.class))
                     .when(agentFactory).getLatestReadyAgent(any(), eq(AGENT_A));
 
             var convResult = new IConversationService.ConversationResult("conv-r1", null);
             doReturn(convResult).when(conversationService).startConversation(any(), any(), any(), any());
 
-            var agentBlocked = new java.util.concurrent.CountDownLatch(1);
-            var cancelFired = new java.util.concurrent.CountDownLatch(1);
+            var agentBlocked = new CountDownLatch(1);
+            var cancelFired = new CountDownLatch(1);
 
             doAnswer(inv -> {
                 agentBlocked.countDown();
-                cancelFired.await(5, java.util.concurrent.TimeUnit.SECONDS);
+                cancelFired.await(5, TimeUnit.SECONDS);
 
                 var snapshot = new SimpleConversationMemorySnapshot();
                 var output = new ConversationOutput();
@@ -946,8 +962,8 @@ class GroupConversationServiceHitlTest {
                 return null;
             }).when(conversationService).say(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), any());
 
-            var resultHolder = new java.util.concurrent.atomic.AtomicReference<GroupConversation>();
-            var exHolder = new java.util.concurrent.atomic.AtomicReference<Exception>();
+            var resultHolder = new AtomicReference<GroupConversation>();
+            var exHolder = new AtomicReference<Exception>();
 
             Thread discussThread = new Thread(() -> {
                 try {
@@ -959,7 +975,7 @@ class GroupConversationServiceHitlTest {
             });
             discussThread.start();
 
-            boolean started = agentBlocked.await(5, java.util.concurrent.TimeUnit.SECONDS);
+            boolean started = agentBlocked.await(5, TimeUnit.SECONDS);
             if (!started || exHolder.get() != null) {
                 discussThread.join(5_000);
                 fail("discuss() failed before reaching say(): "
@@ -968,7 +984,7 @@ class GroupConversationServiceHitlTest {
 
             // Cancel lands while the requiresApproval phase is mid-flight
             service.cancelDiscussion("gc-r1",
-                    ai.labs.eddi.engine.lifecycle.model.ControlSignal.CANCEL_GRACEFUL);
+                    ControlSignal.CANCEL_GRACEFUL);
             cancelFired.countDown();
 
             discussThread.join(10_000);
@@ -1071,7 +1087,7 @@ class GroupConversationServiceHitlTest {
             return gc;
         }
 
-        private GroupApprovalRequest approvedRequest(java.util.Map<String, String> taskApprovals) {
+        private GroupApprovalRequest approvedRequest(Map<String, String> taskApprovals) {
             var request = new GroupApprovalRequest();
             var decision = new HitlDecision();
             decision.setVerdict(HitlVerdict.APPROVED);
@@ -1088,7 +1104,7 @@ class GroupConversationServiceHitlTest {
 
             var ex = assertThrows(IllegalArgumentException.class,
                     () -> service.resumeDiscussion("gc-approvals",
-                            approvedRequest(java.util.Map.of("no-such-task", "APPROVED")), null));
+                            approvedRequest(Map.of("no-such-task", "APPROVED")), null));
             assertTrue(ex.getMessage().contains("no-such-task"), ex.getMessage());
 
             assertTrue(gc.getTaskList().hasAwaitingApproval(), "no task may be mutated on a rejected request");
@@ -1108,7 +1124,7 @@ class GroupConversationServiceHitlTest {
 
             var ex = assertThrows(IllegalArgumentException.class,
                     () -> service.resumeDiscussion("gc-approvals",
-                            approvedRequest(java.util.Map.of(assignedTaskId, "APPROVED")), null));
+                            approvedRequest(Map.of(assignedTaskId, "APPROVED")), null));
             assertTrue(ex.getMessage().contains("not awaiting approval"), ex.getMessage());
             verify(conversationStore, never()).updateIfState(any(), any());
         }
@@ -1124,7 +1140,7 @@ class GroupConversationServiceHitlTest {
 
             var ex = assertThrows(IllegalArgumentException.class,
                     () -> service.resumeDiscussion("gc-approvals",
-                            approvedRequest(java.util.Map.of(awaitingTaskId, "MAYBE")), null));
+                            approvedRequest(Map.of(awaitingTaskId, "MAYBE")), null));
             assertTrue(ex.getMessage().contains("APPROVED or REJECTED"), ex.getMessage());
 
             assertTrue(gc.getTaskList().hasAwaitingApproval(), "no task may be mutated on a rejected request");
@@ -1141,7 +1157,7 @@ class GroupConversationServiceHitlTest {
                     .findFirst().orElseThrow().id();
 
             service.resumeDiscussion("gc-approvals",
-                    approvedRequest(java.util.Map.of(awaitingTaskId, "approved")), null);
+                    approvedRequest(Map.of(awaitingTaskId, "approved")), null);
 
             assertFalse(gc.getTaskList().hasAwaitingApproval(), "lowercase 'approved' must be accepted");
         }
@@ -1152,7 +1168,7 @@ class GroupConversationServiceHitlTest {
             var gc = pausedGcWithTasks();
             doReturn(gc).when(conversationStore).read("gc-approvals");
 
-            service.resumeDiscussion("gc-approvals", approvedRequest(java.util.Map.of()), null);
+            service.resumeDiscussion("gc-approvals", approvedRequest(Map.of()), null);
 
             assertFalse(gc.getTaskList().hasAwaitingApproval(),
                     "an explicit {} must auto-approve like an absent map — otherwise the phase instantly re-pauses");
@@ -1167,12 +1183,12 @@ class GroupConversationServiceHitlTest {
     @DisplayName("HITL audit emission")
     class AuditEmission {
 
-        private ai.labs.eddi.engine.audit.AuditLedgerService auditLedger;
+        private AuditLedgerService auditLedger;
         private GroupConversationService auditedService;
 
         @BeforeEach
         void setUpAuditedService() {
-            auditLedger = mock(ai.labs.eddi.engine.audit.AuditLedgerService.class);
+            auditLedger = mock(AuditLedgerService.class);
             when(auditLedger.isEnabled()).thenReturn(true);
             auditedService = new GroupConversationService(
                     groupStore, conversationStore, conversationService,
@@ -1210,7 +1226,7 @@ class GroupConversationServiceHitlTest {
 
             auditedService.resumeDiscussion("gc-audit-resume", request, null);
 
-            var captor = org.mockito.ArgumentCaptor.forClass(ai.labs.eddi.engine.audit.model.AuditEntry.class);
+            var captor = org.mockito.ArgumentCaptor.forClass(AuditEntry.class);
             verify(auditLedger).submit(captor.capture());
             var entry = captor.getValue();
             assertEquals("hitl.approval", entry.taskId(), "audit event type must be hitl.approval");
@@ -1230,10 +1246,10 @@ class GroupConversationServiceHitlTest {
             doReturn(null).when(groupStore).getCurrentResourceId(GROUP_ID);
 
             boolean cancelled = auditedService.cancelDiscussion("gc-audit-cancel",
-                    ai.labs.eddi.engine.lifecycle.model.ControlSignal.CANCEL_GRACEFUL);
+                    ControlSignal.CANCEL_GRACEFUL);
 
             assertTrue(cancelled);
-            var captor = org.mockito.ArgumentCaptor.forClass(ai.labs.eddi.engine.audit.model.AuditEntry.class);
+            var captor = org.mockito.ArgumentCaptor.forClass(AuditEntry.class);
             verify(auditLedger).submit(captor.capture());
             var entry = captor.getValue();
             assertEquals("hitl.approval", entry.taskId());
@@ -1317,22 +1333,22 @@ class GroupConversationServiceHitlTest {
             request.setDecision(dec);
 
             // Capture phase indices via a listener
-            var observedPhaseIndices = java.util.Collections.synchronizedList(new java.util.ArrayList<Integer>());
-            var resumeDone = new java.util.concurrent.CountDownLatch(1);
+            var observedPhaseIndices = Collections.synchronizedList(new ArrayList<Integer>());
+            var resumeDone = new CountDownLatch(1);
 
-            var listener = new ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener() {
+            var listener = new IGroupConversationService.GroupDiscussionEventListener() {
                 @Override
-                public void onPhaseStart(ai.labs.eddi.engine.lifecycle.GroupConversationEventSink.PhaseStartEvent event) {
+                public void onPhaseStart(GroupConversationEventSink.PhaseStartEvent event) {
                     observedPhaseIndices.add(event.phaseIndex());
                 }
 
                 @Override
-                public void onGroupComplete(ai.labs.eddi.engine.lifecycle.GroupConversationEventSink.GroupCompleteEvent event) {
+                public void onGroupComplete(GroupConversationEventSink.GroupCompleteEvent event) {
                     resumeDone.countDown();
                 }
 
                 @Override
-                public void onGroupError(ai.labs.eddi.engine.lifecycle.GroupConversationEventSink.GroupErrorEvent event) {
+                public void onGroupError(GroupConversationEventSink.GroupErrorEvent event) {
                     resumeDone.countDown();
                 }
             };
@@ -1340,7 +1356,7 @@ class GroupConversationServiceHitlTest {
             service.resumeDiscussion("gc-task-resume", request, listener);
 
             // Wait for async resume to complete
-            assertTrue(resumeDone.await(5, java.util.concurrent.TimeUnit.SECONDS),
+            assertTrue(resumeDone.await(5, TimeUnit.SECONDS),
                     "Async resume should complete within 5s");
 
             // TASK resume: first phase seen must be the PAUSED phase (1), not +1
@@ -1387,29 +1403,29 @@ class GroupConversationServiceHitlTest {
             dec.setVerdict(HitlVerdict.APPROVED);
             request.setDecision(dec);
 
-            var observedPhaseIndices = java.util.Collections.synchronizedList(new java.util.ArrayList<Integer>());
-            var resumeDone = new java.util.concurrent.CountDownLatch(1);
+            var observedPhaseIndices = Collections.synchronizedList(new ArrayList<Integer>());
+            var resumeDone = new CountDownLatch(1);
 
-            var listener = new ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener() {
+            var listener = new IGroupConversationService.GroupDiscussionEventListener() {
                 @Override
-                public void onPhaseStart(ai.labs.eddi.engine.lifecycle.GroupConversationEventSink.PhaseStartEvent event) {
+                public void onPhaseStart(GroupConversationEventSink.PhaseStartEvent event) {
                     observedPhaseIndices.add(event.phaseIndex());
                 }
 
                 @Override
-                public void onGroupComplete(ai.labs.eddi.engine.lifecycle.GroupConversationEventSink.GroupCompleteEvent event) {
+                public void onGroupComplete(GroupConversationEventSink.GroupCompleteEvent event) {
                     resumeDone.countDown();
                 }
 
                 @Override
-                public void onGroupError(ai.labs.eddi.engine.lifecycle.GroupConversationEventSink.GroupErrorEvent event) {
+                public void onGroupError(GroupConversationEventSink.GroupErrorEvent event) {
                     resumeDone.countDown();
                 }
             };
 
             service.resumeDiscussion("gc-phase-resume", request, listener);
 
-            assertTrue(resumeDone.await(5, java.util.concurrent.TimeUnit.SECONDS),
+            assertTrue(resumeDone.await(5, TimeUnit.SECONDS),
                     "Async resume should complete within 5s");
 
             // PHASE resume: first phase seen must be pausedAt + 1 = 2
@@ -1461,24 +1477,24 @@ class GroupConversationServiceHitlTest {
             dec.setVerdict(HitlVerdict.APPROVED);
             request.setDecision(dec);
 
-            var errorMessage = new java.util.concurrent.atomic.AtomicReference<String>();
-            var resumeDone = new java.util.concurrent.CountDownLatch(1);
-            var listener = new ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener() {
+            var errorMessage = new AtomicReference<String>();
+            var resumeDone = new CountDownLatch(1);
+            var listener = new IGroupConversationService.GroupDiscussionEventListener() {
                 @Override
-                public void onGroupError(ai.labs.eddi.engine.lifecycle.GroupConversationEventSink.GroupErrorEvent event) {
+                public void onGroupError(GroupConversationEventSink.GroupErrorEvent event) {
                     errorMessage.set(event.error());
                     resumeDone.countDown();
                 }
 
                 @Override
-                public void onGroupComplete(ai.labs.eddi.engine.lifecycle.GroupConversationEventSink.GroupCompleteEvent event) {
+                public void onGroupComplete(GroupConversationEventSink.GroupCompleteEvent event) {
                     resumeDone.countDown();
                 }
             };
 
             service.resumeDiscussion("gc-speaker-drift", request, listener);
 
-            assertTrue(resumeDone.await(5, java.util.concurrent.TimeUnit.SECONDS),
+            assertTrue(resumeDone.await(5, TimeUnit.SECONDS),
                     "Async resume should complete within 5s");
 
             assertNotNull(errorMessage.get(), "a roster shrink below the bookmarked speaker index must fire onGroupError");
@@ -1533,31 +1549,31 @@ class GroupConversationServiceHitlTest {
             dec.setVerdict(HitlVerdict.APPROVED);
             request.setDecision(dec);
 
-            var completedSpeakers = java.util.Collections.synchronizedSet(new java.util.HashSet<String>());
-            var resumeDone = new java.util.concurrent.CountDownLatch(1);
-            var listener = new ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener() {
+            var completedSpeakers = Collections.synchronizedSet(new HashSet<String>());
+            var resumeDone = new CountDownLatch(1);
+            var listener = new IGroupConversationService.GroupDiscussionEventListener() {
                 @Override
-                public void onSpeakerComplete(ai.labs.eddi.engine.lifecycle.GroupConversationEventSink.SpeakerCompleteEvent event) {
+                public void onSpeakerComplete(GroupConversationEventSink.SpeakerCompleteEvent event) {
                     completedSpeakers.add(event.agentId());
                 }
 
                 @Override
-                public void onGroupComplete(ai.labs.eddi.engine.lifecycle.GroupConversationEventSink.GroupCompleteEvent event) {
+                public void onGroupComplete(GroupConversationEventSink.GroupCompleteEvent event) {
                     resumeDone.countDown();
                 }
 
                 @Override
-                public void onGroupError(ai.labs.eddi.engine.lifecycle.GroupConversationEventSink.GroupErrorEvent event) {
+                public void onGroupError(GroupConversationEventSink.GroupErrorEvent event) {
                     resumeDone.countDown();
                 }
             };
 
             service.resumeDiscussion("gc-parallel-resume", request, listener);
 
-            assertTrue(resumeDone.await(5, java.util.concurrent.TimeUnit.SECONDS),
+            assertTrue(resumeDone.await(5, TimeUnit.SECONDS),
                     "Async resume should complete within 5s");
 
-            assertEquals(java.util.Set.of(AGENT_A, "agent-b"), completedSpeakers,
+            assertEquals(Set.of(AGENT_A, "agent-b"), completedSpeakers,
                     "a PARALLEL resume must run every speaker — the speaker bookmark is not honored for PARALLEL phases");
             assertNull(gc.getResumePoint(), "the bookmark must be consumed/cleared even though its offset was ignored");
         }
@@ -1640,7 +1656,7 @@ class GroupConversationServiceHitlTest {
             doReturn(config).when(groupStore).read(GROUP_ID, 1);
             doReturn("gc-member-pause").when(conversationStore).create(any());
 
-            doReturn(mock(ai.labs.eddi.engine.runtime.IAgent.class))
+            doReturn(mock(IAgent.class))
                     .when(agentFactory).getLatestReadyAgent(any(), eq(AGENT_A));
             var convResult = new IConversationService.ConversationResult("member-conv", null);
             doReturn(convResult).when(conversationService).startConversation(any(), any(), any(), any());
@@ -1650,7 +1666,7 @@ class GroupConversationServiceHitlTest {
             doAnswer(inv -> {
                 var snapshot = new SimpleConversationMemorySnapshot();
                 snapshot.setConversationState(
-                        ai.labs.eddi.engine.memory.model.ConversationState.AWAITING_HUMAN);
+                        ConversationState.AWAITING_HUMAN);
                 IConversationService.ConversationResponseHandler handler = inv.getArgument(8);
                 if (handler != null) {
                     handler.onComplete(snapshot);
@@ -1663,7 +1679,7 @@ class GroupConversationServiceHitlTest {
             // The stranded member pause must have been cancelled, attributed to the
             // group system actor in the audit trail.
             verify(conversationService).cancelConversation(eq("member-conv"),
-                    eq(ai.labs.eddi.engine.lifecycle.model.ControlSignal.CANCEL_GRACEFUL), eq("system:group"));
+                    eq(ControlSignal.CANCEL_GRACEFUL), eq("system:group"));
 
             // The member turn is recorded SKIPPED with the explanatory note — never
             // as an empty OPINION contribution.
@@ -1704,7 +1720,7 @@ class GroupConversationServiceHitlTest {
             doReturn(config).when(groupStore).read(GROUP_ID, 1);
             doReturn("gc-member-say-throws").when(conversationStore).create(any());
 
-            doReturn(mock(ai.labs.eddi.engine.runtime.IAgent.class))
+            doReturn(mock(IAgent.class))
                     .when(agentFactory).getLatestReadyAgent(any(), eq(AGENT_A));
             var convResult = new IConversationService.ConversationResult("member-conv-throws", null);
             doReturn(convResult).when(conversationService).startConversation(any(), any(), any(), any());
@@ -1719,7 +1735,7 @@ class GroupConversationServiceHitlTest {
             // The stranded member pause must have been cancelled (handleMemberPause),
             // attributed to the group system actor — NOT left armed by handleAgentFailure.
             verify(conversationService).cancelConversation(eq("member-conv-throws"),
-                    eq(ai.labs.eddi.engine.lifecycle.model.ControlSignal.CANCEL_GRACEFUL), eq("system:group"));
+                    eq(ControlSignal.CANCEL_GRACEFUL), eq("system:group"));
 
             // The member turn is recorded SKIPPED with the group-HITL note — NOT FAILURE.
             var memberEntries = gc.getTranscript().stream()
@@ -1794,16 +1810,16 @@ class GroupConversationServiceHitlTest {
             var field = GroupConversationService.class.getDeclaredField("activeTokens");
             field.setAccessible(true);
             @SuppressWarnings("unchecked")
-            var activeTokens = (java.util.concurrent.ConcurrentHashMap<String, ?>) field.get(service);
+            var activeTokens = (ConcurrentHashMap<String, ?>) field.get(service);
 
-            var tokenPresentInWindow = new java.util.concurrent.atomic.AtomicBoolean(false);
-            var cancelReturnedTrue = new java.util.concurrent.atomic.AtomicBoolean(false);
-            var cancelThrew = new java.util.concurrent.atomic.AtomicReference<Throwable>();
-            var resumeDone = new java.util.concurrent.CountDownLatch(1);
+            var tokenPresentInWindow = new AtomicBoolean(false);
+            var cancelReturnedTrue = new AtomicBoolean(false);
+            var cancelThrew = new AtomicReference<Throwable>();
+            var resumeDone = new CountDownLatch(1);
 
-            var listener = new ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener() {
+            var listener = new IGroupConversationService.GroupDiscussionEventListener() {
                 @Override
-                public void onHitlResume(ai.labs.eddi.engine.lifecycle.GroupConversationEventSink.HitlResumeEvent event) {
+                public void onHitlResume(GroupConversationEventSink.HitlResumeEvent event) {
                     // We are now in the CAS→submit window, on the resume thread.
                     // O2 guarantees the token is ALREADY registered here.
                     tokenPresentInWindow.set(activeTokens.containsKey("gc-o2-window"));
@@ -1811,26 +1827,26 @@ class GroupConversationServiceHitlTest {
                         // Concurrent cancel: with the token present it must take the
                         // SIGNAL path (setSignal + return true), NOT the DB branch.
                         cancelReturnedTrue.set(service.cancelDiscussion("gc-o2-window",
-                                ai.labs.eddi.engine.lifecycle.model.ControlSignal.CANCEL_GRACEFUL));
+                                ControlSignal.CANCEL_GRACEFUL));
                     } catch (Throwable t) {
                         cancelThrew.set(t);
                     }
                 }
 
                 @Override
-                public void onCancelled(ai.labs.eddi.engine.lifecycle.GroupConversationEventSink.CancelledEvent event) {
+                public void onCancelled(GroupConversationEventSink.CancelledEvent event) {
                     // The resumed leg honoured the in-window cancel signal at its
                     // top-of-phase check → notifyCancelled → onCancelled.
                     resumeDone.countDown();
                 }
 
                 @Override
-                public void onGroupComplete(ai.labs.eddi.engine.lifecycle.GroupConversationEventSink.GroupCompleteEvent event) {
+                public void onGroupComplete(GroupConversationEventSink.GroupCompleteEvent event) {
                     resumeDone.countDown();
                 }
 
                 @Override
-                public void onGroupError(ai.labs.eddi.engine.lifecycle.GroupConversationEventSink.GroupErrorEvent event) {
+                public void onGroupError(GroupConversationEventSink.GroupErrorEvent event) {
                     resumeDone.countDown();
                 }
             };
@@ -1850,7 +1866,7 @@ class GroupConversationServiceHitlTest {
 
             // The resumed leg observes the cancelled token at its top-of-phase check and
             // stops with CANCELLED — it must NEVER run a member turn or complete normally.
-            assertTrue(resumeDone.await(5, java.util.concurrent.TimeUnit.SECONDS),
+            assertTrue(resumeDone.await(5, TimeUnit.SECONDS),
                     "resumed leg should terminate quickly");
             assertEquals(GroupConversationState.CANCELLED, gc.getState(),
                     "the resumed leg must end CANCELLED, honouring the in-window signal");
@@ -1917,15 +1933,15 @@ class GroupConversationServiceHitlTest {
             gc.setHitlLastPauseFingerprint("phase=0;" + taskId + ":ASSIGNED,");
             doReturn(gc).when(conversationStore).read("gc-noprogress");
 
-            var resumeDone = new java.util.concurrent.CountDownLatch(1);
-            var errored = new java.util.concurrent.atomic.AtomicBoolean(false);
-            var listener = new ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener() {
+            var resumeDone = new CountDownLatch(1);
+            var errored = new AtomicBoolean(false);
+            var listener = new IGroupConversationService.GroupDiscussionEventListener() {
                 @Override
-                public void onGroupComplete(ai.labs.eddi.engine.lifecycle.GroupConversationEventSink.GroupCompleteEvent event) {
+                public void onGroupComplete(GroupConversationEventSink.GroupCompleteEvent event) {
                     resumeDone.countDown();
                 }
                 @Override
-                public void onGroupError(ai.labs.eddi.engine.lifecycle.GroupConversationEventSink.GroupErrorEvent event) {
+                public void onGroupError(GroupConversationEventSink.GroupErrorEvent event) {
                     errored.set(true);
                     resumeDone.countDown();
                 }
@@ -1941,7 +1957,7 @@ class GroupConversationServiceHitlTest {
 
             service.resumeDiscussion("gc-noprogress", request, listener);
 
-            assertTrue(resumeDone.await(5, java.util.concurrent.TimeUnit.SECONDS),
+            assertTrue(resumeDone.await(5, TimeUnit.SECONDS),
                     "resumed leg should terminate quickly, not loop");
             assertTrue(errored.get(), "no-progress resume must emit a terminal group_error");
             assertEquals(GroupConversationState.FAILED, gc.getState(),
@@ -1976,7 +1992,7 @@ class GroupConversationServiceHitlTest {
             var dec = new HitlDecision();
             dec.setVerdict(HitlVerdict.APPROVED);
             request.setDecision(dec);
-            request.setTaskApprovals(java.util.Map.of("some-task", "APPROVED"));
+            request.setTaskApprovals(Map.of("some-task", "APPROVED"));
 
             var ex = assertThrows(IllegalArgumentException.class,
                     () -> service.resumeDiscussion("gc-phase-only", request, null),

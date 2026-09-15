@@ -73,9 +73,9 @@ class AgentOrchestratorBuiltInToolWiringTest {
         orchestrator = new AgentOrchestrator(
                 null, null, null, null,
                 null, null, null, null,
-                null, null,
-                null, null,
+                null,
                 null, null, null,
+                null, null,
                 null, null, null,
                 null, null, null,
                 null,

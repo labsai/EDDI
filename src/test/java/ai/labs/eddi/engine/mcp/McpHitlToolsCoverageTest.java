@@ -26,8 +26,11 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.security.Principal;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
+import jakarta.ws.rs.NotFoundException;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -87,7 +90,7 @@ class McpHitlToolsCoverageTest {
 
     @Test
     void listPendingApprovals_nullLimit_usesDefaultAndSucceeds() throws Exception {
-        when(guard.listScopedPendingApprovals(anyInt())).thenReturn(java.util.List.of());
+        when(guard.listScopedPendingApprovals(anyInt())).thenReturn(List.of());
         when(json.serialize(any())).thenReturn("[]");
         String out = tools.listPendingApprovals(null);
         assertTrue(out.equals("[]"), out);
@@ -273,7 +276,7 @@ class McpHitlToolsCoverageTest {
 
     @Test
     void listGroupPending_happyPath_serializes() throws Exception {
-        when(guard.listScopedGroupPendingApprovals(eq("g1"), anyInt())).thenReturn(java.util.List.of());
+        when(guard.listScopedGroupPendingApprovals(eq("g1"), anyInt())).thenReturn(List.of());
         when(json.serialize(any())).thenReturn("[]");
         String out = tools.listGroupPendingApprovals("g1", "100");
         assertTrue(out.equals("[]"), out);
@@ -320,7 +323,7 @@ class McpHitlToolsCoverageTest {
     @Test
     void getGroupApprovalStatus_jaxrsNotFound_returnsNotFound() throws Exception {
         when(groupConversationService.readGroupConversation("gc1"))
-                .thenThrow(new jakarta.ws.rs.NotFoundException("gone"));
+                .thenThrow(new NotFoundException("gone"));
         String out = tools.getGroupApprovalStatus("g1", "gc1", "summary");
         assertTrue(out.contains("\"errorCode\":\"NOT_FOUND\""), out);
     }
@@ -380,7 +383,7 @@ class McpHitlToolsCoverageTest {
         // deserialize returns a map whose value is not a String => value-type
         // validation fails
         when(json.deserialize(eq("{\"t1\":5}"), eq(Map.class)))
-                .thenReturn(new java.util.LinkedHashMap<>(Map.of("t1", 5)));
+                .thenReturn(new LinkedHashMap<>(Map.of("t1", 5)));
         String out = tools.approveGroupPhase("g1", "gc1", "APPROVED", null, "{\"t1\":5}");
         assertTrue(out.contains("\"errorCode\":\"BAD_REQUEST\""), out);
         verifyNoInteractions(groupConversationService);
@@ -389,7 +392,7 @@ class McpHitlToolsCoverageTest {
     @Test
     void approveGroup_blankTaskApprovalValue_returnsBadRequest() throws Exception {
         when(json.deserialize(eq("{\"t1\":\"\"}"), eq(Map.class)))
-                .thenReturn(new java.util.LinkedHashMap<>(Map.of("t1", "")));
+                .thenReturn(new LinkedHashMap<>(Map.of("t1", "")));
         String out = tools.approveGroupPhase("g1", "gc1", "APPROVED", null, "{\"t1\":\"\"}");
         assertTrue(out.contains("\"errorCode\":\"BAD_REQUEST\""), out);
         verifyNoInteractions(groupConversationService);
@@ -406,7 +409,7 @@ class McpHitlToolsCoverageTest {
     @Test
     void approveGroup_jaxrsNotFound_returnsNotFound() throws Exception {
         when(groupConversationService.resumeDiscussion(eq("gc1"), any(), isNull()))
-                .thenThrow(new jakarta.ws.rs.NotFoundException("gone"));
+                .thenThrow(new NotFoundException("gone"));
         String out = tools.approveGroupPhase("g1", "gc1", "APPROVED", null, null);
         assertTrue(out.contains("\"errorCode\":\"NOT_FOUND\""), out);
     }
@@ -462,7 +465,7 @@ class McpHitlToolsCoverageTest {
     @Test
     void approveGroup_validTaskApprovals_delegatesAndSucceeds() throws Exception {
         when(json.deserialize(eq("{\"t1\":\"APPROVED\"}"), eq(Map.class)))
-                .thenReturn(new java.util.LinkedHashMap<>(Map.of("t1", "APPROVED")));
+                .thenReturn(new LinkedHashMap<>(Map.of("t1", "APPROVED")));
         when(groupConversationService.resumeDiscussion(eq("gc1"), any(), isNull()))
                 .thenReturn(mock(GroupConversation.class));
         when(json.serialize(any())).thenReturn("{\"ok\":true}");
@@ -505,7 +508,7 @@ class McpHitlToolsCoverageTest {
     @Test
     void cancelGroup_jaxrsNotFound_returnsNotFound() throws Exception {
         when(groupConversationService.cancelDiscussion(eq("gc1"), any()))
-                .thenThrow(new jakarta.ws.rs.NotFoundException("gone"));
+                .thenThrow(new NotFoundException("gone"));
         String out = tools.cancelGroupDiscussion("g1", "gc1");
         assertTrue(out.contains("\"errorCode\":\"NOT_FOUND\""), out);
     }

@@ -5,20 +5,25 @@
 package ai.labs.eddi.configs.mcpcalls.rest;
 
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.mcpcalls.IMcpCallsStore;
 import ai.labs.eddi.configs.mcpcalls.IRestMcpCallsStore;
 import ai.labs.eddi.configs.mcpcalls.model.McpCallsConfiguration;
+import ai.labs.eddi.configs.mcpcalls.model.McpToolDiscoveryRequest;
 import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.modules.apicalls.impl.RequestRedactor;
 import ai.labs.eddi.modules.llm.impl.McpToolProviderManager;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
+import ai.labs.eddi.secrets.sanitize.UriRedactor;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.UriInfo;
 import org.jboss.logging.Logger;
 
 import java.util.ArrayList;
@@ -26,6 +31,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 
 /**
@@ -43,8 +49,9 @@ public class RestMcpCallsStore implements IRestMcpCallsStore {
 
     @Inject
     public RestMcpCallsStore(IMcpCallsStore mcpCallsStore, IDocumentDescriptorStore documentDescriptorStore, IJsonSchemaCreator jsonSchemaCreator,
-            McpToolProviderManager mcpToolProviderManager) {
-        restVersionInfo = new RestVersionInfo<>(resourceURI, mcpCallsStore, documentDescriptorStore);
+            McpToolProviderManager mcpToolProviderManager,
+            ResourceAccessGuard resourceAccessGuard) {
+        restVersionInfo = new RestVersionInfo<>(resourceURI, mcpCallsStore, documentDescriptorStore, resourceAccessGuard);
         this.mcpCallsStore = mcpCallsStore;
         this.jsonSchemaCreator = jsonSchemaCreator;
         this.mcpToolProviderManager = mcpToolProviderManager;
@@ -61,7 +68,7 @@ public class RestMcpCallsStore implements IRestMcpCallsStore {
 
     @Override
     public List<DocumentDescriptor> readMcpCallsDescriptors(String filter, Integer index, Integer limit) {
-        return restVersionInfo.readDescriptors("ai.labs.mcpcalls", filter, index, limit);
+        return restVersionInfo.readDescriptors(filter, index, limit);
     }
 
     @Override
@@ -123,24 +130,102 @@ public class RestMcpCallsStore implements IRestMcpCallsStore {
     }
 
     @Override
-    public Response discoverTools(String url, String transport, String apiKey) {
+    public Response discoverTools(McpToolDiscoveryRequest request, String apiKey) {
+        if (request == null) {
+            return badRequest("a request body with a 'url' is required");
+        }
+        return probe(request.url(), request.transport(), apiKey);
+    }
+
+    @Override
+    public Response discoverToolsUnauthenticated(String url, String transport, UriInfo uriInfo) {
+        String strayCredential = findCredentialQueryParam(uriInfo);
+        if (strayCredential != null) {
+            return badRequest("'" + strayCredential + "' is no longer accepted as a query parameter — a credential in a URL is logged by "
+                    + "every hop before EDDI sees it. Use POST /mcpcallsstore/mcpcalls/discover-tools with the "
+                    + MCP_AUTHORIZATION_HEADER + " header instead.");
+        }
+        return probe(url, transport, null);
+    }
+
+    /**
+     * Names a credential-bearing query parameter if the caller sent one.
+     * <p>
+     * Checked against every parameter present rather than a fixed name, because a
+     * client that has not migrated may have been passing any of the historical
+     * spellings, and the point is to tell them once rather than to enumerate.
+     */
+    private static String findCredentialQueryParam(UriInfo uriInfo) {
+        if (uriInfo == null) {
+            return null;
+        }
+        for (String name : uriInfo.getQueryParameters().keySet()) {
+            if (RequestRedactor.isSensitiveHeaderName(name)) {
+                return name;
+            }
+        }
+        return null;
+    }
+
+    private static Response badRequest(String message) {
+        return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", message)).build();
+    }
+
+    /**
+     * The caller's server URL, safe to write to a log.
+     * <p>
+     * {@code LogSanitizer.sanitize} answers a different question — it stops a
+     * forged log line — and leaves credential material alone, so
+     * {@code https://user:token@mcp.example.com/rpc} was logged with the token in
+     * it. The URL is caller-supplied and reaches the log on every probe, including
+     * the failures, where a URL carrying credentials is most likely.
+     */
+    private static String forLog(String url) {
+        return sanitize(UriRedactor.redactUri(url));
+    }
+
+    /**
+     * Connects to an MCP server and lists its tools.
+     * <p>
+     * The failure branch reports the exception TYPE and not its message. The
+     * message from a failed outbound connection routinely contains the resolved
+     * URL, and with a credential templated into it that URL is the credential;
+     * handing it back to the HTTP caller turned a connection error into a
+     * disclosure. The full throwable still reaches the log, which is where an
+     * operator debugging a bad URL should be looking anyway. Same discipline as
+     * {@code HttpCallToolsProvider}.
+     */
+    private Response probe(String url, String transport, String apiKey) {
         if (url == null || url.isBlank()) {
-            return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", "url parameter is required")).build();
+            return badRequest("url is required");
         }
 
         try {
-            LOGGER.infof("Discovering tools from MCP server at '%s'", url);
+            LOGGER.infof("Discovering tools from MCP server at '%s'", forLog(url));
 
             // Build a temporary McpServerConfig for probing
             McpServerConfig tempConfig = new McpServerConfig();
             tempConfig.setUrl(url);
-            tempConfig.setTransport(transport != null ? transport : "http");
+            tempConfig.setTransport(transport != null && !transport.isBlank() ? transport : "http");
             tempConfig.setName("discovery-probe");
             if (apiKey != null && !apiKey.isBlank()) {
                 tempConfig.setApiKey(apiKey);
             }
 
             McpToolProviderManager.McpToolsResult result = mcpToolProviderManager.discoverTools(List.of(tempConfig));
+
+            // A configuration the manager refused outright (blocked address, bad
+            // transport, malformed URL) contributes no tools and throws nothing, so it
+            // used to come back as 200 {"tools":[],"count":0} — indistinguishable from
+            // a server that genuinely exposes no tools. Say why instead.
+            if (result.hasConfigurationErrors()) {
+                String reason = result.failures().stream()
+                        .filter(failure -> failure.kind() == McpToolProviderManager.McpFailureKind.INVALID_CONFIGURATION)
+                        .map(McpToolProviderManager.McpServerFailure::message)
+                        .findFirst()
+                        .orElse("the MCP server configuration is invalid");
+                return badRequest(reason);
+            }
 
             // Convert to a simple JSON-serializable list of tool info
             List<Map<String, Object>> tools = new ArrayList<>();
@@ -157,8 +242,10 @@ public class RestMcpCallsStore implements IRestMcpCallsStore {
             return Response.ok(Map.of("tools", tools, "count", tools.size())).build();
 
         } catch (Exception e) {
-            LOGGER.warnf(e, "Failed to discover tools from MCP server at '%s'", url);
-            return Response.status(Response.Status.BAD_GATEWAY).entity(Map.of("error", "Failed to connect to MCP server: " + e.getMessage())).build();
+            LOGGER.warnf(e, "Failed to discover tools from MCP server at '%s'", forLog(url));
+            return Response.status(Response.Status.BAD_GATEWAY)
+                    .entity(Map.of("error", "Failed to connect to MCP server (" + e.getClass().getSimpleName() + ") — see server logs for details"))
+                    .build();
         }
     }
 

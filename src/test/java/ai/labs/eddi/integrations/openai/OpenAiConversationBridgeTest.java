@@ -4,12 +4,14 @@
  */
 package ai.labs.eddi.integrations.openai;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
+import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
@@ -26,7 +28,9 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 
+import java.io.ByteArrayOutputStream;
 import static ai.labs.eddi.integrations.openai.OpenAiTestFixtures.AGENT_ID_SUPPORT;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -82,7 +86,7 @@ class OpenAiConversationBridgeTest {
         bridge = new OpenAiConversationBridge(conversationService, userConversationStore,
                 new OpenAiMessageMapper(objectMapper, 5),
                 OpenAiTestFixtures.config(b -> b.requestTimeoutSeconds = 2),
-                new SimpleMeterRegistry());
+                new SimpleMeterRegistry(), permissiveUseGuard());
         bridge.initMetrics();
     }
 
@@ -122,7 +126,7 @@ class OpenAiConversationBridgeTest {
     }
 
     /** Drive sayStreaming's handler with the given script. */
-    private void givenStreamingEmits(java.util.function.Consumer<IConversationService.StreamingResponseHandler> script)
+    private void givenStreamingEmits(Consumer<IConversationService.StreamingResponseHandler> script)
             throws Exception {
         doAnswer(invocation -> {
             script.accept(invocation.getArgument(5));
@@ -437,7 +441,7 @@ class OpenAiConversationBridgeTest {
     void streamingAlsoRequestsDetailedSnapshots() throws Exception {
         givenStreamingEmits(handler -> handler.onComplete(snapshotWithText("Hi", ConversationState.READY)));
 
-        bridge.stream(statelessTurn(), new OpenAiSseWriter(new java.io.ByteArrayOutputStream(),
+        bridge.stream(statelessTurn(), new OpenAiSseWriter(new ByteArrayOutputStream(),
                 objectMapper, "id", "m", 1L, false));
 
         verify(conversationService).sayStreaming(any(), eq(true), eq(true), any(), any(), any());
@@ -570,7 +574,7 @@ class OpenAiConversationBridgeTest {
         // Rule-based agents produce text at onComplete, not as tokens.
         givenStreamingEmits(handler -> handler.onComplete(snapshotWithText("block reply", ConversationState.READY)));
         var turn = statelessTurn();
-        var out = new java.io.ByteArrayOutputStream();
+        var out = new ByteArrayOutputStream();
 
         bridge.stream(turn, new OpenAiSseWriter(out, objectMapper, "id", "m", 1L, false));
 
@@ -586,7 +590,7 @@ class OpenAiConversationBridgeTest {
             handler.onComplete(snapshotWithText("streamed", ConversationState.READY));
         });
         var turn = statelessTurn();
-        var out = new java.io.ByteArrayOutputStream();
+        var out = new ByteArrayOutputStream();
 
         bridge.stream(turn, new OpenAiSseWriter(out, objectMapper, "id", "m", 1L, false));
 
@@ -601,7 +605,7 @@ class OpenAiConversationBridgeTest {
         // otherwise read.
         givenStreamingEmits(handler -> handler.onError(new NullPointerException()));
         var turn = statelessTurn();
-        var out = new java.io.ByteArrayOutputStream();
+        var out = new ByteArrayOutputStream();
 
         bridge.stream(turn, new OpenAiSseWriter(out, objectMapper, "id", "m", 1L, false));
 
@@ -634,7 +638,7 @@ class OpenAiConversationBridgeTest {
         }).when(conversationService).sayStreaming(any(), anyBoolean(), anyBoolean(), any(), any(), any());
 
         var turn = statelessTurn();
-        var out = new java.io.ByteArrayOutputStream();
+        var out = new ByteArrayOutputStream();
 
         bridge.stream(turn, new OpenAiSseWriter(out, objectMapper, "id", "m", 1L, false));
 
@@ -651,7 +655,7 @@ class OpenAiConversationBridgeTest {
             // Deliberately silent: an undocumented path must not hang the client.
         });
         var turn = statelessTurn();
-        var out = new java.io.ByteArrayOutputStream();
+        var out = new ByteArrayOutputStream();
 
         bridge.stream(turn, new OpenAiSseWriter(out, objectMapper, "id", "m", 1L, false));
 
@@ -673,6 +677,16 @@ class OpenAiConversationBridgeTest {
     }
 
     @Test
+    void inputOverTheCap_is400NotServerError() {
+        var direct = bridge.asApiException(new IConversationService.InputTooLargeException(5_000, 100));
+        assertEquals(400, direct.getStatus());
+        assertTrue(direct.getMessage().contains("100"), direct.getMessage());
+
+        var wrapped = bridge.asApiException(new RuntimeException("turn failed", new IConversationService.InputTooLargeException(5_000, 100)));
+        assertEquals(400, wrapped.getStatus());
+    }
+
+    @Test
     void agentNotReady_is503() throws Exception {
         when(conversationService.startConversation(any(), any(), any(), any()))
                 .thenThrow(new IConversationService.AgentNotReadyException("not deployed"));
@@ -690,8 +704,16 @@ class OpenAiConversationBridgeTest {
 
         bridge.prepare(statefulModel, simpleRequest(), headers("chat-a"), USER_ID);
 
-        ArgumentCaptor<Map<String, ai.labs.eddi.engine.model.Context>> captor = ArgumentCaptor.forClass(Map.class);
+        ArgumentCaptor<Map<String, Context>> captor = ArgumentCaptor.forClass(Map.class);
         verify(conversationService).startConversation(any(), any(), any(), captor.capture());
         assertTrue(captor.getValue().containsKey(OpenAiConversationBridge.CONTEXT_CHANNEL_INTENT));
+    }
+
+    /**
+     * A guard that admits every agent: a bare mock's void requireAgentUseAccess
+     * does nothing. The /v1 USE gate has its own tests.
+     */
+    private static ResourceAccessGuard permissiveUseGuard() {
+        return mock(ResourceAccessGuard.class);
     }
 }

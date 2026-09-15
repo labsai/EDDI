@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.llm.tools.impl;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.attachments.IAttachmentStore.Attachment;
 import ai.labs.eddi.modules.llm.tools.impl.AttachmentTextExtractor.AttachmentExtractionException;
+import ai.labs.eddi.utils.LogSanitizer;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 import jakarta.enterprise.inject.Vetoed;
@@ -82,6 +83,18 @@ public class ReadAttachmentTool {
                 text = textExtractor.extractPdfText(bytes, page, page, textExtractor.getDefaultMaxChars());
             } else if (textExtractor.canExtractText(match.mimeType())) {
                 text = textExtractor.extractText(bytes, match.mimeType());
+            } else if (mime.startsWith("image/")) {
+                // Dead-ending in "no extractable text" made models tell users that
+                // OCR was missing. Say what actually works — carefully: recent
+                // images are re-sent only on turns WITHOUT new attachments, so
+                // claiming "you already see it" would invite a vision model to
+                // describe an image it was never shown (on a mixed turn, or past
+                // the re-inline cap). Never assert visibility; state the rule.
+                return "Attachment '" + display(match) + "' is an image (" + match.mimeType()
+                        + ") — there is no OCR, so it cannot be read as text. Recent images are re-sent to "
+                        + "vision-capable models on turns that carry no new attachments; if you cannot currently "
+                        + "see this image, do not describe it from memory — ask the user to re-attach it to their "
+                        + "next message.";
             } else {
                 return "Attachment '" + display(match) + "' is a " + match.mimeType()
                         + " and has no extractable text.";
@@ -91,10 +104,10 @@ public class ReadAttachmentTool {
             }
             return "Content of '" + display(match) + "' (" + match.mimeType() + "):\n" + text;
         } catch (IAttachmentStore.AttachmentStoreException e) {
-            LOGGER.debugf("readAttachment load failed for '%s': %s", nameOrRef, e.getMessage());
+            LOGGER.debugf("readAttachment load failed for '%s': %s", LogSanitizer.sanitize(nameOrRef), LogSanitizer.sanitize(e.getMessage()));
             return "Could not read attachment '" + nameOrRef + "': " + e.getMessage();
         } catch (AttachmentExtractionException e) {
-            LOGGER.debugf("readAttachment extraction failed for '%s': %s", nameOrRef, e.getMessage());
+            LOGGER.debugf("readAttachment extraction failed for '%s': %s", LogSanitizer.sanitize(nameOrRef), LogSanitizer.sanitize(e.getMessage()));
             return "Could not extract text from '" + display(match) + "': " + e.getMessage();
         }
     }

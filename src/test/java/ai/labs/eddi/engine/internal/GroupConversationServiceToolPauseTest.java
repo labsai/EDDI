@@ -22,12 +22,15 @@ import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationStat
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
+import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
+import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -38,7 +41,9 @@ import org.mockito.MockitoAnnotations;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 
+import io.micrometer.core.instrument.Counter;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -75,7 +80,7 @@ class GroupConversationServiceToolPauseTest {
     @Mock
     private NonceCacheService nonceCacheService;
     @Mock
-    private ai.labs.eddi.engine.schedule.IScheduleStore scheduleStore;
+    private IScheduleStore scheduleStore;
 
     private GroupConversationService service;
 
@@ -149,7 +154,7 @@ class GroupConversationServiceToolPauseTest {
     private double skippedCount() throws Exception {
         var field = GroupConversationService.class.getDeclaredField("counterGroupMemberPauseSkipped");
         field.setAccessible(true);
-        var counter = (io.micrometer.core.instrument.Counter) field.get(service);
+        var counter = (Counter) field.get(service);
         return counter.count();
     }
 
@@ -161,7 +166,7 @@ class GroupConversationServiceToolPauseTest {
         doReturn(config).when(groupStore).read(GROUP_ID, 1);
         doReturn("gc-tool-graceful").when(conversationStore).create(any());
 
-        doReturn(mock(ai.labs.eddi.engine.runtime.IAgent.class))
+        doReturn(mock(IAgent.class))
                 .when(agentFactory).getLatestReadyAgent(any(), eq(AGENT_A));
         doReturn(new IConversationService.ConversationResult("member-conv", null))
                 .when(conversationService).startConversation(any(), any(), any(), any());
@@ -175,7 +180,7 @@ class GroupConversationServiceToolPauseTest {
 
         // The graceful system:group REJECTED resume completes synchronously with a
         // coherent tool-less answer that becomes the member's contribution.
-        var rejectDecision = new java.util.concurrent.atomic.AtomicReference<HitlDecision>();
+        var rejectDecision = new AtomicReference<HitlDecision>();
         doAnswer(inv -> {
             rejectDecision.set(inv.getArgument(1));
             IConversationService.ConversationResponseHandler handler = inv.getArgument(2);
@@ -220,7 +225,7 @@ class GroupConversationServiceToolPauseTest {
         doReturn(config).when(groupStore).read(GROUP_ID, 1);
         doReturn("gc-tool-repause").when(conversationStore).create(any());
 
-        doReturn(mock(ai.labs.eddi.engine.runtime.IAgent.class))
+        doReturn(mock(IAgent.class))
                 .when(agentFactory).getLatestReadyAgent(any(), eq(AGENT_A));
         doReturn(new IConversationService.ConversationResult("member-conv", null))
                 .when(conversationService).startConversation(any(), any(), any(), any());
@@ -245,7 +250,7 @@ class GroupConversationServiceToolPauseTest {
         // Fallback path: the stranded pause is cancelled (audited system:group) and the
         // turn is recorded SKIPPED with the explanatory note.
         verify(conversationService).cancelConversation(eq("member-conv"),
-                eq(ai.labs.eddi.engine.lifecycle.model.ControlSignal.CANCEL_GRACEFUL), eq("system:group"));
+                eq(ControlSignal.CANCEL_GRACEFUL), eq("system:group"));
         assertEquals(1.0, skippedCount(), "the fallback must count exactly one member-pause skip");
 
         var memberEntries = gc.getTranscript().stream()
@@ -268,7 +273,7 @@ class GroupConversationServiceToolPauseTest {
         doReturn(config).when(groupStore).read(GROUP_ID, 1);
         doReturn("gc-rule-pause").when(conversationStore).create(any());
 
-        doReturn(mock(ai.labs.eddi.engine.runtime.IAgent.class))
+        doReturn(mock(IAgent.class))
                 .when(agentFactory).getLatestReadyAgent(any(), eq(AGENT_A));
         doReturn(new IConversationService.ConversationResult("member-conv", null))
                 .when(conversationService).startConversation(any(), any(), any(), any());
@@ -289,7 +294,7 @@ class GroupConversationServiceToolPauseTest {
         // rejection resume. It stays exactly as before: SKIP + cancel + skip metric.
         verify(conversationService, never()).resumeConversation(any(), any(), any());
         verify(conversationService).cancelConversation(eq("member-conv"),
-                eq(ai.labs.eddi.engine.lifecycle.model.ControlSignal.CANCEL_GRACEFUL), eq("system:group"));
+                eq(ControlSignal.CANCEL_GRACEFUL), eq("system:group"));
         assertEquals(1.0, skippedCount(), "a RULE member pause still counts a skip");
 
         var memberEntries = gc.getTranscript().stream()

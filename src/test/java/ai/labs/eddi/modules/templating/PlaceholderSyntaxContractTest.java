@@ -68,11 +68,16 @@ public class PlaceholderSyntaxContractTest {
     }
 
     /**
-     * How a snippet with {@code templateEnabled=false} protects its content. Qute's
-     * unparsed block is <code>{|...|}</code>; the Jinja2 <code>{% raw %}</code>
-     * form that PromptSnippetService used to emit is doubly wrong — Qute leaves the
-     * tags in the prompt verbatim AND still resolves the markers they were meant to
+     * How generated text concatenated into a template's SOURCE is protected — the
+     * setup wizard's OpenAPI endpoint summary is the live case. Qute's unparsed
+     * block is <code>{|...|}</code>; the Jinja2 <code>{% raw %}</code> form that
+     * PromptSnippetService once emitted is doubly wrong — Qute leaves the tags in
+     * the prompt verbatim AND still resolves the markers they were meant to
      * protect.
+     * <p>
+     * Note this is the SOURCE case. A value arriving through the data map needs no
+     * protection and must not be wrapped; see
+     * {@code PromptSnippetServiceTest#rendersMarkersLiterallyWithoutLeakingDelimiters}.
      */
     @Test
     @DisplayName("Qute unparsed blocks protect content; Jinja2 raw tags do not")
@@ -80,6 +85,26 @@ public class PlaceholderSyntaxContractTest {
         assertEquals("Use {properties.company_name} here", render("{|Use {properties.company_name} here|}"));
         assertEquals("{% raw %}Use ACME here{% endraw %}", render("{% raw %}Use {properties.company_name} here{% endraw %}"),
                 "the Jinja2 form leaks the value and leaves its own tags behind");
+    }
+
+    /**
+     * An unparsed block must be recognised as worth rendering even when it is the
+     * <em>only</em> marker in the template.
+     * <p>
+     * {@code TemplatingEngine} short-circuits templates that contain no control
+     * characters, and its pattern originally required a letter, {@code #},
+     * {@code /} or {@code !} after the brace — none of which {@code {|} has. So a
+     * template whose sole marker was an unparsed block was returned untouched,
+     * delimiters and all. The escape therefore worked only when something else in
+     * the same template happened to trigger a render: wrapping generated text that
+     * contains no other marker (an OpenAPI summary with no path parameters, a
+     * plain-prose snippet) leaked {@code {|…|}} straight into the system prompt.
+     */
+    @Test
+    @DisplayName("an unparsed block is stripped even when it is the only marker")
+    void unparsedBlockIsStrippedWhenItIsTheOnlyMarker() throws Exception {
+        assertEquals("Available endpoints:\n- GET /pets: List pets", render("{|Available endpoints:\n- GET /pets: List pets|}"));
+        assertEquals("plain prose, no markers", render("{|plain prose, no markers|}"));
     }
 
     /**

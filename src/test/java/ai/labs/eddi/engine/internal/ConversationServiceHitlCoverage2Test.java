@@ -58,6 +58,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
@@ -292,7 +293,7 @@ class ConversationServiceHitlCoverage2Test {
             // The coordinator rejects the resume submission (e.g. saturation) → the inner
             // catch removes the in-flight entry, restores the pause with rearm=true, and
             // wraps the failure.
-            doThrow(new java.util.concurrent.RejectedExecutionException("coordinator full"))
+            doThrow(new RejectedExecutionException("coordinator full"))
                     .when(conversationCoordinator).submitInOrder(eq(CONVERSATION_ID), any());
             doReturn(true).when(conversationMemoryStore).compareAndSetState(
                     CONVERSATION_ID, ConversationState.IN_PROGRESS, ConversationState.AWAITING_HUMAN);
@@ -326,7 +327,7 @@ class ConversationServiceHitlCoverage2Test {
             doReturn(agent).when(agentFactory).getAgent(ENV, AGENT_ID, AGENT_VERSION);
             doReturn(conversation).when(agent).continueConversation(any(IConversationMemory.class), any(), any());
 
-            doThrow(new java.util.concurrent.RejectedExecutionException("coordinator full"))
+            doThrow(new RejectedExecutionException("coordinator full"))
                     .when(conversationCoordinator).submitInOrder(eq(CONVERSATION_ID), any());
             // A concurrent end/cancel already moved the persisted state off IN_PROGRESS →
             // the restore CAS misses, so the pause is NOT restored and nothing is re-armed.

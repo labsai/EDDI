@@ -29,6 +29,44 @@ public class ToolApprovalsConfig {
      * number would silently raise the effective budget.
      */
     public static final int DEFAULT_MAX_AUTO_APPROVALS_PER_TURN = 2;
+
+    /**
+     * Sentinel meaning <b>the agent's approval policy could not be read</b> — as
+     * distinct from "this agent has no policy", which is a null carrier and
+     * correctly leaves the gate inert.
+     * <p>
+     * Those two were indistinguishable: a store error while resolving the agent
+     * config produced a null carrier, so every tool call — writes included —
+     * executed with no approval. For the Platform Operator that is an ungated-write
+     * window opened by a transient database blip.
+     * <p>
+     * Identity is the contract ({@link #isUndetermined}), but the VALUES fail
+     * closed too — {@code requireApproval: ["*"]} with no exemptions gates every
+     * tool even if some future path copies the fields and loses the reference.
+     * Defence in depth: losing this open is silent, losing it closed is loud.
+     * <p>
+     * Deliberately not {@code equals}-based. A hand-written config carrying
+     * {@code ["*"]} is an ordinary strict policy, not a failed read, and must not
+     * be treated as unmergeable.
+     */
+    public static final ToolApprovalsConfig UNDETERMINED = createUndetermined();
+
+    private static ToolApprovalsConfig createUndetermined() {
+        var config = new ToolApprovalsConfig();
+        config.setRequireApproval(List.of("*"));
+        config.setPauseReason("The agent's tool-approval policy could not be read, so every tool call requires "
+                + "approval until it can be. This is a fail-closed fallback, not the agent's configured policy.");
+        return config;
+    }
+
+    /**
+     * Whether {@code config} is the {@link #UNDETERMINED} sentinel. Reference
+     * equality on purpose — see that field's javadoc.
+     */
+    public static boolean isUndetermined(ToolApprovalsConfig config) {
+        return config == UNDETERMINED;
+    }
+
     /** Glob patterns of tools requiring approval, e.g. "mcp:*", "delete_*". */
     private List<String> requireApproval;
     /** Exemptions — always beat requireApproval. */

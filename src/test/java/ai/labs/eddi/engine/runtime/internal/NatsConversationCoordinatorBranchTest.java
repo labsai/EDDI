@@ -23,9 +23,11 @@ import org.mockito.ArgumentCaptor;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeoutException;
 
+import io.nats.client.impl.NatsJetStreamMetaData;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -104,7 +106,7 @@ class NatsConversationCoordinatorBranchTest {
             when(msg.getData()).thenReturn(payload.getBytes(StandardCharsets.UTF_8));
             when(msg.getSubject()).thenReturn("eddi.deadletter.conv-1");
 
-            io.nats.client.impl.NatsJetStreamMetaData metaData = mock(io.nats.client.impl.NatsJetStreamMetaData.class);
+            NatsJetStreamMetaData metaData = mock(NatsJetStreamMetaData.class);
             when(metaData.streamSequence()).thenReturn(42L);
             when(msg.metaData()).thenReturn(metaData);
 
@@ -197,7 +199,7 @@ class NatsConversationCoordinatorBranchTest {
 
         // The queue for conv-1 should have 2 entries
         var method = NatsConversationCoordinator.class
-                .getDeclaredMethod("computeTotalQueueDepth", java.util.Map.class);
+                .getDeclaredMethod("computeTotalQueueDepth", Map.class);
         method.setAccessible(true);
 
         var queuesField = NatsConversationCoordinator.class.getDeclaredField("conversationQueues");

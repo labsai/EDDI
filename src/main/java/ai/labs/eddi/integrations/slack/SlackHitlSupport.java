@@ -5,6 +5,7 @@
 package ai.labs.eddi.integrations.slack;
 
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
+import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.modules.output.model.OutputItem;
 
@@ -297,7 +298,11 @@ public final class SlackHitlSupport {
         for (int i = 0; i < rendered; i++) {
             var call = calls.get(i);
             String toolName = safe(call.getToolName());
-            String args = truncateForDisplay(call.getArgumentsRedacted());
+            // Re-redacted through the CURRENT filter at send time, same as the
+            // REST approval surfaces: argumentsRedacted was computed once, at
+            // pause time, and a Slack message cannot be un-sent if a stored
+            // pause predates a filter improvement.
+            String args = truncateForDisplay(SecretRedactionFilter.redact(call.getArgumentsRedacted()));
             detailBlocks.add(context(toolName + " — " + args));
         }
         int remaining = calls.size() - rendered;
