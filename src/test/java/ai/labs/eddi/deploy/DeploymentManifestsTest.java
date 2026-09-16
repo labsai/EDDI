@@ -2919,10 +2919,31 @@ class DeploymentManifestsTest {
                             + "carries jobs a job actually depends on, so that reference resolves to the "
                             + "empty string, the condition is permanently false, and the job is SKIPPED on "
                             + "every run — reported as a grey check, never a red one");
-            assertTrue(dependencies.contains("build-and-test"),
-                    name + " must still run after build-and-test (" + dependencies + "): publishing an SBOM "
-                            + "or a preflight image for a commit whose tests never passed is the ordering "
-                            + "this job existed to enforce");
+            if (name.equals("sbom")) {
+                assertTrue(dependencies.contains("build-and-test"),
+                        name + " must still run after build-and-test (" + dependencies + "): uploading an SBOM "
+                                + "for a commit whose tests never passed is the ordering this job exists to "
+                                + "enforce");
+            } else {
+                // preflight-check is a pull-request dry run: it pushes to a registry inside the
+                // job and
+                // submits nothing, so there is no publication to hold back until the tests
+                // pass. What it
+                // needs is the image it certifies. And it must NOT wait on build-and-test,
+                // which gates on
+                // `backend`: on a UI-only pull request that job is skipped, GitHub then skips
+                // this one
+                // before evaluating its `if`, and the image the PR would publish goes
+                // uncertified.
+                // BuildQualityGatesTest grades that trap for every job; this pins the fix here.
+                assertTrue(dependencies.contains("build-image"),
+                        name + " must depend on build-image, which supplies the eddi-ci-image artifact it "
+                                + "certifies (" + dependencies + ")");
+                assertFalse(dependencies.contains("build-and-test"),
+                        name + " waits on build-and-test again (" + dependencies + "). build-and-test gates on "
+                                + "`backend`, so a UI-only pull request skips it, and GitHub then skips this job "
+                                + "too without evaluating its `code` condition");
+            }
         }
     }
 

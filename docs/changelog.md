@@ -243,6 +243,12 @@ whole review.
   `BuildQualityGatesTest` now grades it for every job: a pull-request-reachable job gated on `code`
   alone may not wait on `build-and-test` without `always()`. Mutation-checked — restoring the old
   `needs` fails the test naming `preflight-check`.
+  - That broke `Build & Test` on the push: `DeploymentManifestsTest` still required both `sbom` and
+    `preflight-check` to need `build-and-test`, so "don't publish untested code" was pinning the very
+    dependency that skips the job. The assertion now holds for `sbom` alone, which uploads; for
+    `preflight-check`, a dry run that pushes only to a registry inside the job, it requires
+    `build-image` and forbids `build-and-test`. The local guard run had missed it because it named
+    its test classes by hand; the re-run covered every test that reads `ci.yml`.
 - **`.github/dependabot.yml` was in no filter a Java test reads.** `BuildQualityGatesTest` parses it
   to check the Docker ecosystems it declares stay in step with `base-image-check.yml`'s skip logic;
   Dependabot's own check validates the schema, not that contract. A PR changing only that file
