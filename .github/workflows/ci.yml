@@ -2517,7 +2517,7 @@ jobs:
     runs-on: ubuntu-latest
     if: always()
     needs:
-      [detect-changes, build-and-test, integration-test, ui-gate, build-image, e2e-fullstack, docker, smoke-test, codeql, trivy-scan, gitleaks, preflight-check, preflight-push]
+      [detect-changes, build-and-test, integration-test, ui-gate, build-image, e2e-fullstack, e2e-auth, docker, smoke-test, codeql, trivy-scan, gitleaks, preflight-check, preflight-push]
 
     steps:
       - name: Send build notification
@@ -2546,6 +2546,9 @@ jobs:
           UI="${{ needs.ui-gate.result }}"
           IMAGE="${{ needs.build-image.result }}"
           E2E="${{ needs.e2e-fullstack.result }}"
+          # The auth tier reports under the same Backend E2E line. Without folding it in,
+          # a run whose only failure was e2e-auth would be announced as "Build Passed".
+          if [ "${{ needs.e2e-auth.result }}" = "failure" ]; then E2E="failure"; fi
           DOCKER="${{ needs.docker.result }}"
           SMOKE="${{ needs.smoke-test.result }}"
           CODEQL="${{ needs.codeql.result }}"
