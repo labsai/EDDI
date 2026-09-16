@@ -25,7 +25,14 @@ const BASE_URL = `http://localhost:${PORT}`;
  * — rather than a dev-mode build of the same source. The `ui` tier cannot run
  * this way: it needs the dev server's MSW worker.
  */
-const AGAINST_BACKEND = process.env.E2E_AGAINST_BACKEND === "1";
+const AGAINST_BACKEND =
+  process.env.E2E_AGAINST_BACKEND === "1" ||
+  // The auth tier has no dev-server mode at all: it drives a backend running with
+  // OIDC enforced, which only the Keycloak compose file stands up. Deriving it here
+  // rather than leaving it to the caller means `npm run test:e2e:auth` cannot fail
+  // with "localhost:7070 is already used" — which is what it reports when Playwright
+  // tries to start Vite on the port the backend already holds.
+  process.argv.includes("--project=auth");
 
 /**
  * Seeded localStorage (onboarding already dismissed), re-pointed at whatever
@@ -108,7 +115,13 @@ function withForcedMocks(state: typeof storageState) {
  *   npm run test:e2e:all          → all tiers
  */
 export default defineConfig({
-  fullyParallel: true,
+  // Only the mock-backed `ui` tier is safely parallel. The three backend-facing
+  // tiers share one EDDI and one datastore, so running their files at once means
+  // one spec deleting or undeploying an agent another is asserting on — locally
+  // that surfaced as `chat page loads and allows agent selection` failing
+  // whenever the suite ran wide enough. CI never saw it because `workers: 1`
+  // below serialises everything there; this makes the local run agree.
+  fullyParallel: false,
   forbidOnly: isCI,
   retries: isCI ? 2 : 0,
   workers: isCI ? 1 : undefined,
@@ -129,7 +142,11 @@ export default defineConfig({
     {
       name: "ui",
       testDir: "./e2e",
-      testIgnore: ["**/integration/**", "**/fullstack/**"],
+      // Nothing under e2e/ is this tier's except its own specs.
+      testIgnore: ["**/integration/**", "**/fullstack/**", "**/auth/**"],
+      // Mock-backed, so it has no shared backend to race over and keeps the
+      // parallelism the top-level `fullyParallel: false` turns off.
+      fullyParallel: true,
       use: {
         ...devices["Desktop Chrome"],
         // This tier is "MSW mocks, no backend" — so say so, rather than letting
@@ -152,6 +169,16 @@ export default defineConfig({
     {
       name: "fullstack",
       testDir: "./e2e/fullstack",
+      use: { ...devices["Desktop Chrome"] },
+    },
+
+    // ── Tier 4: Auth (real backend with OIDC ENFORCED, + Keycloak) ──
+    // Its own tier because it needs a different backend: every other
+    // backend-facing tier runs EDDI with EDDI_SECURITY_ALLOW_UNAUTHENTICATED,
+    // where @RolesAllowed is a no-op. See docker-compose.integration-keycloak.yml.
+    {
+      name: "auth",
+      testDir: "./e2e/auth",
       use: { ...devices["Desktop Chrome"] },
     },
 

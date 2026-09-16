@@ -151,6 +151,65 @@ in code the import brought in unchanged:
   typecheck pass; both workflows parse, and `backend` still equals `code` without `ui/**` plus the
   test-only entries.
 
+### Auth E2E tier, and the role mapping it found broken
+
+Asked whether the full backend E2E really passes, whether it passes on PostgreSQL, and whether
+anything covers Keycloak. The first two: yes. The third found a production bug.
+
+**PostgreSQL is clean.** Ran the built image against
+`ui/manager/docker-compose.integration-postgres.yml` locally: 44 API integration tests and 35
+full-stack browser tests, every one passing first try, no retries. CI runs MongoDB only on pull
+requests and both stores on `main`, so this leg had never actually executed on this branch.
+
+- One local-only flake surfaced on the way: `chat page loads and allows agent selection` failed when
+  the tier ran wide. `fullyParallel: true` applied to the backend-facing tiers too, and they share one
+  EDDI and one datastore — so one spec undeployed the agent another was asserting on. CI never saw it
+  because `workers: 1` serialises everything there. `fullyParallel` is now off at the top level and
+  re-enabled on the mock-backed `ui` tier alone, so a local run behaves like CI.
+
+**Nothing had ever exercised an authenticated request.** Every backend-facing compose file sets
+`EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true`, which ties `authorization.enabled` to false and makes
+every `@RolesAllowed` a no-op. So a new tier: `ui/manager/docker-compose.integration-keycloak.yml`
+(EDDI + MongoDB + Keycloak 26, OIDC enforced), a Playwright `auth` project, and a CI job
+`Auth E2E (Keycloak)` folded into the E2E Gate.
+
+- **What it found, on its first run: the administrator the shipped realm seeds is refused
+  everything.** Quarkus OIDC reads roles from the `groups` claim whenever that claim is present and
+  never falls back to `realm_access`. EDDI already owns `groups` — workspaces resolve `team:<group>`
+  spaces from it (`WorkspaceSettings.eddi.workspaces.groups-claim`, same default). And
+  `helm/eddi/files/eddi-realm.json` — byte-identical to `k8s/overlays/auth/eddi-realm.json` — puts the
+  seeded `eddi` administrator in the `engineering` group. So installing the chart with
+  `keycloak.enabled=true` and giving `eddi` a password as NOTES.txt instructs produced an
+  administrator who authenticated and was then denied every endpoint, `/administration/*` included.
+  The unprivileged fixtures belong to no group and behaved correctly, which is why nothing showed it.
+  Fixed with `quarkus.oidc.roles.role-claim-path=realm_access/roles`.
+  - Verified by experiment, not by reading: with the property, `eddi` gets 200 on
+    `/agentstore/agents/descriptors` and `/administration/orphans`; without it, 403 on both while the
+    token plainly carries `realm_access.roles=[eddi-admin, eddi-editor]`. Mutation-checked against the
+    unfixed image: exactly one test fails, the administrator one, with the other six green.
+  - **Pre-existing, not caused by the migration** — the backend and the chart realm both predate it.
+    The migration is only why it was finally executed.
+- **The Manager's committed Keycloak realm was dead code that could not have worked.**
+  `ui/manager/keycloak/eddi-realm.json` named the client `eddi-manager` while the backend hardcodes
+  `eddi-frontend` into `/manage/__auth_config__.js`, and its roles were `admin`/`editor`/`viewer`
+  against a backend that enforces `eddi-admin`/`eddi-editor`/`eddi-user`/`eddi-viewer`/`eddi-approver`.
+  Deleted. Both the dev-aid compose and the new tier now mount the chart's realm, so there is one
+  realm in the repo that anything runs against and it cannot drift again.
+- The tier's realm is **generated, never committed** (`scripts/make-test-realm.mjs`): it reads the
+  chart realm and adds a throwaway password for `eddi`, which the shipped realm deliberately omits.
+  Every assumption it makes — the client id, its public/direct-access flags, each fixture's roles and
+  passwords, and that `eddi` still ships credential-less — is asserted, so a change to the shipped
+  realm fails the script by name instead of leaving the tier testing nothing.
+- Issuer handling is the part that usually breaks: the tests fetch tokens through the published port
+  on `localhost:8180` while EDDI validates against `http://keycloak:8080/realms/eddi` on the compose
+  network. `KC_HOSTNAME` pins the issuer to the compose-network URL regardless of the request's Host
+  header, so both sides agree; without it every token would claim an issuer EDDI rejects and the tier
+  would report 401 for reasons unrelated to the code under test.
+- Coverage is API-level on purpose — which token is accepted and which role opens which door —
+  rather than driving Keycloak's login form, whose failures are mostly its own. Seven tests: the
+  SPA's auth config, anonymous 401, malformed-token 401, the admin's claims, the admin allowed
+  through, and `user`/`viewer` authenticated but refused.
+
 ### Copilot review findings on PR #757
 
 Four unresolved threads, all confirmed against the code before being fixed. CodeRabbit skipped the

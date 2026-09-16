@@ -333,6 +333,7 @@ The Manager's checks run in the EDDI repository's root workflow,
 | **Build Image**       | The production build of both UIs through Maven, and a check of what it emitted and packaged | Every change that affects the image |
 | **OpenAPI Snapshot**  | Compares `src/test/mocks/openapi-operations.json` with the OpenAPI document the Maven build stores — no running backend, a minute after the image build | Every change that affects the image |
 | **Backend E2E**       | Builds EDDI **from the same commit**, boots it, checks the shipped shells, then runs the Playwright API-integration and full-stack tiers against the bundle that backend serves (not a Vite dev server), and re-checks the OpenAPI snapshot against the running API | MongoDB on every PR that changes code; MongoDB and PostgreSQL on push to main |
+| **Auth E2E (Keycloak)** | Boots that same image with `QUARKUS_OIDC_TENANT_ENABLED=true` beside a Keycloak importing the realm the Helm chart ships, and runs the `auth` tier: anonymous and malformed tokens are refused, the `eddi` administrator is let through, and `user`/`viewer` are authenticated but denied. Locally: `npm run infra:up:keycloak && npm run test:e2e:auth` | Every PR that changes code |
 
 The **OpenAPI snapshot check** is blocking everywhere. The backend under test is
 built from your branch, so a stale `src/test/mocks/openapi-operations.json` means

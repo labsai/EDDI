@@ -213,6 +213,7 @@ Every PR runs through these automated gates:
 | **UI Manager E2E (MSW)** | Manager Playwright tier against mocked API — when `ui/` changes | Blocks publishing |
 | **UI Chat**           | Chat UI typecheck and tests — when `ui/` changes | Blocks publishing |
 | **Backend E2E**       | The Manager's Playwright API and full-stack tiers against the image built from the PR | Blocks publishing |
+| **Auth E2E (Keycloak)** | The same image with OIDC **enforced**, behind Keycloak: which token is accepted, and which role opens which door. The only job where `@RolesAllowed` is not a no-op | Blocks publishing |
 | **Dependency Review** | Blocks vulnerable or incompatibly-licensed deps      | ✅ Yes         |
 | **CodeRabbit**        | AI code review with line-by-line feedback            | Advisory       |
 | **Checkstyle**        | Java code style validation                           | ⚠️ Warnings    |

@@ -1,19 +1,33 @@
+# Manual dev aid: EDDI behind Keycloak, for clicking through the SPA login by hand.
+#
+# For the automated auth tier use docker-compose.integration-keycloak.yml instead
+# (npm run infra:up:keycloak && npm run test:e2e:auth) — that one pins the issuer,
+# health-gates its services and is what CI runs.
 services:
   keycloak:
     image: quay.io/keycloak/keycloak:26.7
-    command: start-dev --import-realm
+    command: ["start-dev", "--import-realm"]
     ports:
-      - "8180:8080"
+      - "127.0.0.1:8180:8080"
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
       KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_HOSTNAME: http://keycloak:8080
+      KC_HOSTNAME_STRICT: "false"
     volumes:
-      - ./keycloak/eddi-realm.json:/opt/keycloak/data/import/eddi-realm.json:ro
+      # The realm EDDI actually ships. This used to mount a copy committed at
+      # ./keycloak/eddi-realm.json, which drifted until its client id
+      # (eddi-manager) and role names (admin/editor/viewer) matched nothing the
+      # backend serves or enforces — so this file could not have logged anyone in.
+      # Mounted read-only from the chart's copy so it cannot drift again.
+      - ../../helm/eddi/files/eddi-realm.json:/opt/keycloak/data/import/eddi-realm.json:ro
 
   eddi:
-    image: labsai/eddi:6
+    # Same default as the other compose files here, so EDDI_IMAGE can point this
+    # at a locally built image instead of a published tag.
+    image: ${EDDI_IMAGE:-labsai/eddi:latest}
     ports:
-      - "7070:7070"
+      - "127.0.0.1:7070:7070"
     depends_on:
       - mongodb
       - keycloak
@@ -21,7 +35,8 @@ services:
       QUARKUS_OIDC_TENANT_ENABLED: "true"
       QUARKUS_OIDC_AUTH_SERVER_URL: "http://keycloak:8080/realms/eddi"
       QUARKUS_OIDC_CLIENT_ID: "eddi-backend"
-      QUARKUS_HTTP_CORS_ORIGINS: "http://localhost:3000,http://localhost:5173"
+      EDDI_KEYCLOAK_PUBLIC_URL: "http://localhost:8180"
+      QUARKUS_HTTP_CORS_ORIGINS: "http://localhost:3000,http://localhost:5173,http://localhost:7070"
 
   mongodb:
     image: mongo:6.0
@@ -31,3 +46,7 @@ services:
 
 volumes:
   mongodb-db:
+
+# Log in as viewer/viewer or user/user. The `eddi` administrator ships without a
+# credential (helm/eddi/templates/NOTES.txt explains why) — set one in the Keycloak
+# admin console at http://localhost:8180 (admin/admin) if you need admin rights.

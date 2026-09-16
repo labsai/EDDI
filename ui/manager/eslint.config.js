@@ -143,7 +143,9 @@ export default tseslint.config(
         // any new subdirectory ran in the ui tier without the fixture, silently
         // losing the unhandled-API-call assertion that is the point of it.
         files: ["e2e/**/*.spec.{ts,tsx}"],
-        ignores: ["e2e/**/integration/**", "e2e/**/fullstack/**"],
+        // The three real-backend tiers are exempt: the fixture's guard asserts that
+        // nothing reached an unmocked API, which is exactly what they are for.
+        ignores: ["e2e/**/integration/**", "e2e/**/fullstack/**", "e2e/**/auth/**"],
         rules: {
           "no-restricted-imports": ["error", { paths: [IMPORT_THE_FIXTURE] }],
         },

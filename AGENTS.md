@@ -634,7 +634,7 @@ When designing any new feature, always consider these before finalizing the desi
 | `src/main/resources/application.properties` | Quarkus config (CORS, health, OpenAPI, MongoDB)             |
 | `.github/workflows/ci.yml`                  | CI/CD pipeline (build, test, Docker push, smoke test)       |
 | `docs/`                                     | Markdown documentation, published at docs.labs.ai           |
-| `ui/manager/`, `ui/chat/` | The Manager and Chat UI sources (React, Vite, TypeScript). Each has its own `AGENTS.md`; CI runs them in `UI Manager Checks`, `UI Manager E2E (MSW)`, `UI Chat` and `Backend E2E` |
+| `ui/manager/`, `ui/chat/` | The Manager and Chat UI sources (React, Vite, TypeScript). Each has its own `AGENTS.md`; CI runs them in `UI Manager Checks`, `UI Manager E2E (MSW)`, `UI Chat`, `Backend E2E` and `Auth E2E (Keycloak)` |
 | `docker-compose.yml`                        | EDDI + MongoDB local setup                                  |
 | `mise.toml`                                 | Optional [mise](https://mise.jdx.dev) toolchain (pinned JDK 25 + Maven) + task shortcuts |
 | `docs/agent-configs/`                       | Worked agent config sources — reference for AI; partially swept by two unit tests (scope in §5.6) |

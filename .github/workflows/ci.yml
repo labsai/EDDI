@@ -1707,6 +1707,103 @@ jobs:
         if: always()
         run: docker compose -f "$E2E_COMPOSE_FILE" down -v
 
+  # ─── Job 3d: Auth E2E ───────────────────────────────────────────
+  # The only job that runs EDDI with OIDC ENFORCED. Every other backend-facing
+  # job sets EDDI_SECURITY_ALLOW_UNAUTHENTICATED, which ties authorization.enabled
+  # to false and makes every @RolesAllowed a no-op — so before this job existed,
+  # nothing in CI had ever sent a token or watched a role decide anything. Its
+  # first local run found that the administrator the shipped realm seeds was
+  # refused every endpoint (see quarkus.oidc.roles.role-claim-path).
+  #
+  # MongoDB only: authorization is not a datastore concern, and the Postgres leg
+  # of e2e-fullstack already proves the store swap.
+  e2e-auth:
+    name: Auth E2E (Keycloak)
+    runs-on: ubuntu-latest
+    needs: [detect-changes, build-image]
+    if: needs.detect-changes.outputs.code == 'true'
+    env:
+      EDDI_IMAGE: labsai/eddi:ci
+      COMPOSE: ui/manager/docker-compose.integration-keycloak.yml
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Download the image
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: eddi-ci-image
+
+      - name: Load the image
+        run: |
+          set -euo pipefail
+          gunzip -c eddi-ci.tar.gz | docker load
+          rm eddi-ci.tar.gz
+
+      - name: Set up Node 20
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: ui/manager/package-lock.json
+
+      - name: Generate the test realm
+        # From helm/eddi/files/eddi-realm.json — the realm EDDI ships — plus a
+        # password for the `eddi` administrator, which that realm deliberately
+        # omits. The script asserts the realm still has the clients, users and
+        # roles the tier expects, so a change there fails here by name rather
+        # than leaving the tier quietly testing nothing.
+        working-directory: ui/manager
+        run: npm run realm:test
+
+      - name: Start EDDI, MongoDB and Keycloak
+        run: docker compose -f "$COMPOSE" up -d --wait
+        timeout-minutes: 6
+
+      - name: Wait for EDDI health
+        run: |
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:7070/q/health/live | grep -q '"UP"'; then
+              echo "Backend is healthy after $((i * 2))s"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::Backend did not become healthy within 120s"
+          docker compose -f "$COMPOSE" logs
+          exit 1
+
+      - name: Install dependencies
+        working-directory: ui/manager
+        run: npm ci
+
+      - name: Install Playwright browsers
+        working-directory: ui/manager
+        run: npx playwright install --with-deps chromium
+
+      - name: Run auth tests
+        working-directory: ui/manager
+        run: npm run test:e2e:auth
+
+      - name: Collect logs
+        if: ${{ !cancelled() }}
+        run: docker compose -f "$COMPOSE" logs > auth-logs.txt 2>&1
+
+      - name: Upload report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: auth-e2e-report
+          path: |
+            ui/manager/playwright-report/
+            auth-logs.txt
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f "$COMPOSE" down -v
+
   # ─── Job 3a-gate: E2E Gate ──────────────────────────────────────
   # The requirable form of e2e-fullstack. A matrix job's check names carry the
   # matrix value, and when the job is skipped before its matrix expands the check
@@ -1715,7 +1812,7 @@ jobs:
   e2e-gate:
     name: E2E Gate
     runs-on: ubuntu-latest
-    needs: [detect-changes, build-image, openapi-snapshot, e2e-fullstack]
+    needs: [detect-changes, build-image, openapi-snapshot, e2e-fullstack, e2e-auth]
     if: always()
     steps:
       - name: Require E2E success whenever the code changed
@@ -1725,16 +1822,17 @@ jobs:
           IMAGE: ${{ needs.build-image.result }}
           OPENAPI: ${{ needs.openapi-snapshot.result }}
           E2E: ${{ needs.e2e-fullstack.result }}
+          AUTH: ${{ needs.e2e-auth.result }}
         run: |
           if [ "$DETECT" != "success" ]; then
             echo "::error::detect-changes=$DETECT, so whether the code changed is unknown"
             exit 1
           fi
-          if [ "$CODE" = "true" ] && { [ "$IMAGE" != "success" ] || [ "$OPENAPI" != "success" ] || [ "$E2E" != "success" ]; }; then
-            echo "::error::the code changed but build-image=$IMAGE, openapi-snapshot=$OPENAPI, e2e-fullstack=$E2E"
+          if [ "$CODE" = "true" ] && { [ "$IMAGE" != "success" ] || [ "$OPENAPI" != "success" ]               || [ "$E2E" != "success" ] || [ "$AUTH" != "success" ]; }; then
+            echo "::error::the code changed but build-image=$IMAGE, openapi-snapshot=$OPENAPI,"                  "e2e-fullstack=$E2E, e2e-auth=$AUTH"
             exit 1
           fi
-          echo "code changed=$CODE, build-image=$IMAGE, openapi-snapshot=$OPENAPI, e2e-fullstack=$E2E — gate satisfied"
+          echo "code changed=$CODE, build-image=$IMAGE, openapi-snapshot=$OPENAPI,"                "e2e-fullstack=$E2E, e2e-auth=$AUTH — gate satisfied"
 
   # ─── Job 3: Docker Build & Push ─────────────────────────────────
   docker:

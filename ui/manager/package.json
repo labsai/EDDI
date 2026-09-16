@@ -21,12 +21,16 @@
     "test:e2e:ui": "playwright test --project=ui --ui",
     "test:e2e:integration": "playwright test --project=integration",
     "test:e2e:fullstack": "playwright test --project=fullstack",
+    "test:e2e:auth": "playwright test --project=auth",
     "test:e2e:all": "playwright test --project=ui --project=integration --project=fullstack",
     "test:all": "vitest run && playwright test --project=ui",
     "infra:up:mongo": "docker compose -f docker-compose.integration.yml up -d --wait",
     "infra:up:postgres": "docker compose -f docker-compose.integration-postgres.yml up -d --wait",
+    "realm:test": "node scripts/make-test-realm.mjs",
+    "infra:up:keycloak": "npm run realm:test && docker compose -f docker-compose.integration-keycloak.yml up -d --wait",
     "infra:down:mongo": "docker compose -f docker-compose.integration.yml down -v",
-    "infra:down:postgres": "docker compose -f docker-compose.integration-postgres.yml down -v"
+    "infra:down:postgres": "docker compose -f docker-compose.integration-postgres.yml down -v",
+    "infra:down:keycloak": "docker compose -f docker-compose.integration-keycloak.yml down -v"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
