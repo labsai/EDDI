@@ -1,0 +1,1035 @@
+import { useState, useCallback, useMemo, useRef, useEffect, useId } from "react";
+import { useTranslation } from "react-i18next";
+import {
+  KeyRound,
+  Eye,
+  EyeOff,
+  AlertTriangle,
+  Plus,
+  Plug,
+  X,
+  Loader2,
+  Search,
+  ChevronDown,
+} from "lucide-react";
+import { useSecrets, useStoreSecret, useVaultHealth } from "@/hooks/use-secrets";
+import { toast } from "sonner";
+import { createPortal } from "react-dom";
+import {
+  canonicalizeReference,
+  hasConnectionPrefix,
+  hasReferencePrefix,
+  isSecretReference,
+  isVaultScheme,
+  parseConnectionReference,
+  referenceLabel,
+} from "@/lib/secret-reference";
+import { ConnectionReferenceButton } from "@/components/shared/connection-reference-picker";
+
+// ─── Types ───────────────────────────────────────────────────────────────────
+
+interface SecretKeyPickerProps {
+  /** Current value — plain text or `vault:<keyName>` */
+  value: string;
+  /** Callback when value changes */
+  onChange: (value: string) => void;
+  /** Whether the field is read-only */
+  readOnly?: boolean;
+  /** Vault tenant ID (default: "default") */
+  tenantId?: string;
+  /** Placeholder text for the plain-text input */
+  placeholder?: string;
+  /** data-testid attribute */
+  testId?: string;
+  /**
+   * Forwarded to the control the user actually focuses, so a caller's
+   * `<label htmlFor>` resolves. Without it the label pointed at nothing and
+   * a required marker or error message was announced to nobody.
+   */
+  id?: string;
+  /** Forwarded alongside `id`, so the field itself carries its error state. */
+  "aria-invalid"?: boolean;
+  /** Id(s) of the element(s) describing this field — typically its error text. */
+  "aria-describedby"?: string;
+  /**
+   * Names the control directly, for a caller whose visible label belongs to a
+   * composite group rather than to this one input (see `HeaderValueField`).
+   */
+  ariaLabel?: string;
+  /**
+   * Refuse a literal: the field may hold only a `${vault:…}` / `${vars:…}`
+   * reference.
+   *
+   * Added for connections, whose backend rejects a plaintext secret in
+   * `oauth.clientSecret` and `staticAuth.passwordRef` outright — a literal
+   * there would sit outside the vault, outside export scrubbing and outside
+   * deploy-time grant enforcement at once. Without this mode the picker
+   * cheerfully accepts a pasted key and the failure arrives as a 400 on save,
+   * naming a field the user can no longer see.
+   *
+   * Three things change, and nothing changes for callers that leave it off:
+   *
+   *  - the plain-text branch stops being a password box (there is no secret to
+   *    mask — only a reference is admissible) and says so when the value is not
+   *    one yet;
+   *  - a pasted `vault:key` is normalised to the braced `${vault:key}` the
+   *    backend's anchored pattern actually accepts. The unbraced spellings are
+   *    recognised here for reading, and would have been saved verbatim and
+   *    refused;
+   *  - `${vars:…}` counts as a reference, because the backend accepts it.
+   */
+  referenceOnly?: boolean;
+  /**
+   * Offer `${connection:name}` beside the vault, from the deployment's
+   * connection list.
+   *
+   * Opt-in per field, because the backend resolves a connection reference in
+   * exactly three places — an httpcall header, an MCP server's `apiKey`, an
+   * A2A agent's `apiKey` — and refuses it everywhere else a secret goes. A
+   * picker that offered it in a language-model parameter would be offering a
+   * value that fails at build time. Ignored in `referenceOnly` mode, where a
+   * connection reference is never admissible.
+   */
+  connections?: boolean;
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/**
+ * Whether a value is heading towards a reference — braced or not, finished or
+ * not.
+ *
+ * Delegates to the shared grammar so the scheme list has exactly one owner;
+ * before that, this component's copy was missing `vars` and refused a
+ * reference the backend accepts.
+ */
+function isVaultRef(value: string): boolean {
+  return hasReferencePrefix(value);
+}
+
+/**
+ * Extract just the bare key name, stripping any tenant prefix.
+ * `"openaiKey"` → `"openaiKey"`, `"myTenant/openaiKey"` → `"openaiKey"`.
+ * Used to match against the vault key list (which stores bare key names).
+ */
+function bareKeyName(vaultKey: string): string {
+  const slashIdx = vaultKey.indexOf("/");
+  return slashIdx >= 0 ? vaultKey.slice(slashIdx + 1) : vaultKey;
+}
+
+/**
+ * Extract the tenant portion from a vault key, if present.
+ * `"myTenant/openaiKey"` → `"myTenant"`, `"openaiKey"` → `undefined`.
+ */
+function extractTenantFromKey(vaultKey: string): string | undefined {
+  const slashIdx = vaultKey.indexOf("/");
+  return slashIdx >= 0 ? vaultKey.slice(0, slashIdx) : undefined;
+}
+
+/** Create a vault reference string in the canonical `${vault:...}` format */
+function toVaultRef(keyName: string): string {
+  return `\${vault:${keyName}}`;
+}
+
+// ─── CreateSecretModal ───────────────────────────────────────────────────────
+
+function CreateSecretModal({
+  onClose,
+  tenantId,
+  onSuccess,
+}: {
+  onClose: () => void;
+  tenantId: string;
+  onSuccess: (keyName: string) => void;
+}) {
+  const { t } = useTranslation();
+  const [newKeyName, setNewKeyName] = useState("");
+  const [newValue, setNewValue] = useState("");
+  const [newDescription, setNewDescription] = useState("");
+  const [valueVisible, setValueVisible] = useState(false);
+  const storeMut = useStoreSecret();
+
+  // Reset form state whenever the modal closes (security: clear secret value from memory)
+  const resetForm = useCallback(() => {
+    setNewKeyName("");
+    setNewValue("");
+    setNewDescription("");
+    setValueVisible(false);
+  }, []);
+
+  const handleClose = useCallback(() => {
+    resetForm();
+    onClose();
+  }, [resetForm, onClose]);
+
+  const handleCreate = () => {
+    if (!newKeyName.trim() || !newValue.trim()) return;
+    storeMut.mutate(
+      {
+        tenantId,
+        keyName: newKeyName.trim(),
+        value: newValue.trim(),
+        description: newDescription.trim() || undefined,
+      },
+      {
+        onSuccess: () => {
+          toast.success(
+            t("secrets.storeSuccess", {
+              key: newKeyName.trim(),
+              defaultValue: `Secret "${newKeyName.trim()}" stored`,
+            })
+          );
+          const savedKey = newKeyName.trim();
+          resetForm();
+          onSuccess(savedKey);
+          onClose();
+        },
+        onError: (err) =>
+          toast.error(err instanceof Error ? err.message : String(err)),
+      }
+    );
+  };
+
+  const modalContent = (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+      onClick={handleClose}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") handleClose();
+      }}
+    >
+      <div
+        className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+      >
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-foreground">
+            {t("secrets.createTitle", "Add Secret")}
+          </h2>
+          <button
+            onClick={handleClose}
+            className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted transition-colors"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="mt-4 space-y-4">
+          <div>
+            <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+              {t("secrets.keyNameLabel", "Key Name")}
+            </label>
+            <input
+              type="text"
+              value={newKeyName}
+              onChange={(e) => setNewKeyName(e.target.value)}
+              placeholder={t("secrets.keyNamePlaceholder", "e.g. openaiKey")}
+              className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+              autoFocus
+              autoComplete="off"
+            />
+          </div>
+          <div>
+            <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+              {t("secrets.valueLabel", "Secret Value")}
+            </label>
+            <div className="relative">
+              <input
+                type={valueVisible ? "text" : "password"}
+                value={newValue}
+                onChange={(e) => setNewValue(e.target.value)}
+                placeholder={t("secrets.valuePlaceholder", "Enter secret value…")}
+                className="h-9 w-full rounded-lg border border-input bg-background pe-10 ps-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+                autoComplete="off"
+              />
+              <button
+                type="button"
+                onClick={() => setValueVisible(!valueVisible)}
+                className="absolute inset-e-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              >
+                {valueVisible ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+              </button>
+            </div>
+          </div>
+          <div>
+            <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+              {t("secrets.descriptionLabel", "Description (optional)")}
+            </label>
+            <input
+              type="text"
+              value={newDescription}
+              onChange={(e) => setNewDescription(e.target.value)}
+              className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+              autoComplete="off"
+            />
+          </div>
+        </div>
+
+        <div className="mt-6 flex justify-end gap-2">
+          <button
+            onClick={handleClose}
+            className="rounded-lg px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted"
+          >
+            {t("common.cancel", "Cancel")}
+          </button>
+          <button
+            onClick={handleCreate}
+            disabled={!newKeyName.trim() || !newValue.trim() || storeMut.isPending}
+            className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+          >
+            {storeMut.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            {t("secrets.store", "Store Secret")}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  return createPortal(modalContent, document.body);
+}
+
+// ─── VaultPopup ──────────────────────────────────────────────────────────────
+
+interface VaultPopupProps {
+  /**
+   * The keys to show, already filtered — by the parent, which also owns
+   * `highlightedIndex`.
+   *
+   * Passed in rather than filtered here again. Both sides used to apply the
+   * same predicate to the same list independently, and `highlightedIndex` is
+   * an index *into* that list: two copies of the filtering meant the number
+   * and the array it indexes were derived in different places, which is what
+   * let the keyboard handling drift apart from what was on screen.
+   */
+  filtered: { keyName: string; description: string | null }[];
+  secretsLoading: boolean;
+  vaultAvailable: boolean;
+  filter: string;
+  onFilterChange: (v: string) => void;
+  highlightedIndex: number;
+  /** The parent's key handler — it owns the highlight, so it must see the keys. */
+  onKeyDown: (e: React.KeyboardEvent) => void;
+  onSelect: (keyName: string) => void;
+  onCreate: () => void;
+  vaultError?: string;
+}
+
+function VaultPopup({
+  filtered,
+  secretsLoading,
+  vaultAvailable,
+  filter,
+  onFilterChange,
+  highlightedIndex,
+  onKeyDown,
+  onSelect,
+  onCreate,
+  vaultError,
+}: VaultPopupProps) {
+  const { t } = useTranslation();
+  const filterRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+
+  /*
+   * Ids for the listbox relationship, generated rather than spelled out.
+   *
+   * Keyed by position, not by key name: nothing validates a vault key name —
+   * the create dialog only trims it — so a key called `my key` is reachable
+   * from this very UI, and an id with a space in it is one that
+   * `aria-activedescendant` can never resolve. A generated base also keeps
+   * two pickers on the same page from claiming the same id.
+   */
+  const baseId = useId();
+  const listId = `${baseId}-list`;
+  const optionId = (index: number) => `${baseId}-option-${index}`;
+
+  // Auto-focus the filter input on open
+  useEffect(() => {
+    // Small delay so the popup renders before focusing
+    const timer = setTimeout(() => filterRef.current?.focus(), 50);
+    return () => clearTimeout(timer);
+  }, []);
+
+  // Scroll highlighted item into view
+  useEffect(() => {
+    if (highlightedIndex < 0 || !listRef.current) return;
+    const items = listRef.current.querySelectorAll("[data-vault-item]");
+    const item = items[highlightedIndex];
+    // Feature-detected because `scrollIntoView` is not implemented everywhere
+    // — jsdom being the case that matters here. This line could not throw
+    // while the arrows were being swallowed, since nothing ever moved the
+    // highlight; making them work is what put it on a live path.
+    if (typeof item?.scrollIntoView === "function") {
+      item.scrollIntoView({ block: "nearest" });
+    }
+  }, [highlightedIndex]);
+
+  return (
+    <div
+      className="absolute inset-x-0 top-full z-50 mt-1 overflow-hidden rounded-lg border border-border bg-popover shadow-xl animate-in fade-in-0 zoom-in-95 slide-in-from-top-2 duration-150"
+      /*
+       * The parent's handler, not one of our own.
+       *
+       * Opening the popup moves focus into the filter input below, so the main
+       * input's `onKeyDown` — which owns `highlightedIndex` — stops receiving
+       * anything, and the popup is a sibling of that input rather than a child,
+       * so nothing reaches it by bubbling either. What lived here instead
+       * called `preventDefault()` on both arrows and left a comment saying the
+       * parent would handle them. Nothing did: the arrows were swallowed, the
+       * highlight never moved, and the list could only be used with a mouse.
+       *
+       * Scoped, because this container also sees every key bubbling from the
+       * option buttons and the create button. Passing those to the parent
+       * handler swallows their own Enter — it calls `preventDefault()` and then
+       * acts on the *highlight* instead — so tabbing to "Create new secret" and
+       * pressing Enter opened nothing and could select a key the user was not
+       * on. Same defect as the one the cards had.
+       *
+       * Escape is the exception on purpose: it means "close this popup" from
+       * anywhere inside it, including from a button.
+       */
+      onKeyDown={(e) => {
+        if (e.key === "Escape") {
+          onKeyDown(e);
+          return;
+        }
+        // Navigation belongs to the combobox alone. That is also what
+        // `aria-activedescendant` describes: a highlight that only means
+        // anything while focus is in the filter.
+        if (e.target !== filterRef.current) return;
+        onKeyDown(e);
+      }}
+      data-testid="vault-popup"
+    >
+      {/* Search filter */}
+      <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+        <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        <input
+          ref={filterRef}
+          type="text"
+          value={filter}
+          onChange={(e) => onFilterChange(e.target.value)}
+          placeholder={t("secretPicker.filterPlaceholder", "Search vault keys…")}
+          className="h-6 flex-1 border-none bg-transparent text-xs text-foreground placeholder:text-muted-foreground/60 focus:outline-none"
+          autoComplete="off"
+          /*
+           * The highlight is a background colour, which is nothing at all to a
+           * screen reader. `aria-activedescendant` is what makes the arrows
+           * announce anything: focus stays in this input while the referenced
+           * option is reported as the current one.
+           */
+          role="combobox"
+          aria-expanded
+          aria-controls={listId}
+          aria-activedescendant={
+            highlightedIndex >= 0 && highlightedIndex < filtered.length
+              ? optionId(highlightedIndex)
+              : undefined
+          }
+          data-testid="vault-popup-filter"
+        />
+      </div>
+
+      {/* Key list */}
+      <div
+        ref={listRef}
+        id={listId}
+        role="listbox"
+        className="max-h-48 overflow-y-auto"
+      >
+        {!vaultAvailable ? (
+          <div className="flex items-center gap-2 px-3 py-3 text-xs text-muted-foreground">
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+            <span>
+              {vaultError ||
+                t(
+                  "secretPicker.vaultDown",
+                  "Vault is not configured — set up a secret provider in the EDDI backend",
+                )}
+            </span>
+          </div>
+        ) : secretsLoading ? (
+          <div className="flex items-center justify-center gap-2 py-4 text-xs text-muted-foreground">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            {t("secretPicker.loading", "Loading keys…")}
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="px-3 py-3 text-center text-xs text-muted-foreground">
+            {filter.trim()
+              ? t("secretPicker.noMatch", 'No keys matching "{{filter}}"', {
+                  filter,
+                })
+              : t("secretPicker.emptyVault", "No secrets stored yet")}
+          </div>
+        ) : (
+          filtered.map((secret, idx) => (
+            <button
+              key={secret.keyName}
+              type="button"
+              data-vault-item
+              id={optionId(idx)}
+              role="option"
+              aria-selected={idx === highlightedIndex}
+              onClick={() => onSelect(secret.keyName)}
+              className={`flex w-full items-start gap-2 px-3 py-2 text-start text-xs transition-colors ${
+                idx === highlightedIndex
+                  ? "bg-primary/10 text-foreground"
+                  : "text-foreground hover:bg-secondary/50"
+              }`}
+              data-testid={`vault-key-${secret.keyName}`}
+            >
+              <KeyRound className="mt-0.5 h-3 w-3 shrink-0 text-amber-500" />
+              <div className="min-w-0 flex-1">
+                <span className="block truncate font-mono font-medium">
+                  {secret.keyName}
+                </span>
+                {secret.description && (
+                  <span className="block truncate text-[10px] text-muted-foreground">
+                    {secret.description}
+                  </span>
+                )}
+              </div>
+            </button>
+          ))
+        )}
+      </div>
+
+      {/* Create button */}
+      {vaultAvailable && (
+        <div className="border-t border-border">
+          <button
+            type="button"
+            onClick={onCreate}
+            className="flex w-full items-center gap-2 px-3 py-2 text-xs text-muted-foreground transition-colors hover:bg-secondary/50 hover:text-foreground"
+            data-testid="vault-popup-create"
+          >
+            <Plus className="h-3 w-3" />
+            {t("secretPicker.createNew", "Create new secret")}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── SecretKeyPicker (main component) ────────────────────────────────────────
+
+/**
+ * Unified combobox for API keys & vault secrets.
+ *
+ * - **Direct value**: password input with show/hide toggle
+ * - **Vault reference**: amber chip showing the resolved key name
+ * - **Vault picker popup**: searchable list of existing vault keys with descriptions,
+ *   keyboard navigation, and inline secret creation
+ *
+ * When a vault key is selected → value becomes `${vault:<keyName>}`.
+ * When a value starts with `vault:` or `${vault:` (or legacy `eddivault:`) → auto-shows vault chip.
+ */
+export function SecretKeyPicker({
+  value,
+  onChange,
+  readOnly,
+  tenantId = "default",
+  placeholder,
+  testId = "secret-key-picker",
+  id,
+  "aria-invalid": ariaInvalid,
+  "aria-describedby": ariaDescribedBy,
+  ariaLabel,
+  referenceOnly = false,
+  connections = false,
+}: SecretKeyPickerProps) {
+  const { t } = useTranslation();
+  const offerConnections = connections && !referenceOnly;
+
+  // UI state
+  const [showPassword, setShowPassword] = useState(false);
+  const [popupOpen, setPopupOpen] = useState(false);
+  const [filter, setFilter] = useState("");
+  const [highlightedIndex, setHighlightedIndex] = useState(-1);
+  const [showCreateDialog, setShowCreateDialog] = useState(false);
+
+  // Refs
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Vault data
+  const { data: secrets, isLoading: secretsLoading } = useSecrets(tenantId);
+  const { data: vaultHealth } = useVaultHealth();
+
+  const vaultAvailable = vaultHealth?.available !== false;
+  const vaultError = vaultHealth?.reason || vaultHealth?.error;
+
+  const secretList = useMemo(
+    () =>
+      (secrets ?? [])
+        .map((s) => ({ keyName: s.keyName, description: s.description }))
+        .sort((a, b) => a.keyName.localeCompare(b.keyName)),
+    [secrets],
+  );
+
+  const secretKeyNames = useMemo(
+    () => new Set(secretList.map((s) => s.keyName)),
+    [secretList],
+  );
+
+  // Derived state
+  //
+  // In reference-only mode the chip stands for "this value will resolve", so it
+  // may only appear for the braced form the backend's anchored pattern accepts.
+  // Showing it for `vault:key` would tell the user the field is fine and then
+  // fail the save.
+  const isCanonicalRef = isSecretReference(value);
+  /**
+   * A connection reference is a reference, but not a vault one: there is no
+   * key to look up, no secret to mask, and nothing to offer storing. It gets
+   * its own chip below. In reference-only mode it is not admissible at all
+   * and falls through to the literal warning like any other non-secret.
+   *
+   * The chip is for a *finished* reference only. Keying it off the prefix
+   * swapped the input for a chip the moment `${connection:` was typed, so the
+   * name and the closing brace could never be typed after it. An unfinished or
+   * malformed one (`${connection:bad name}`) stays an editable input, unmasked.
+   */
+  const connectionPrefix = !referenceOnly && hasConnectionPrefix(value);
+  const connection = connectionPrefix ? parseConnectionReference(value) : null;
+  const connectionRef = connection !== null;
+  const connectionInProgress = connectionPrefix && !connectionRef;
+  const connectionName = connection?.name ?? "";
+  // `hasReferencePrefix` also matches the connection prefix, so an unfinished
+  // connection reference must be excluded here or it lands in the vault chip.
+  const hasVaultRef = referenceOnly ? isCanonicalRef : isVaultRef(value) && !connectionPrefix;
+  const currentVaultKey = hasVaultRef ? referenceLabel(value) : "";
+  /** A non-empty value that is not (yet) an admissible reference. */
+  const literalRejected = referenceOnly && value.trim() !== "" && !isCanonicalRef;
+  /**
+   * The warning's own id, appended to `aria-describedby` when it is showing.
+   *
+   * Without it the input announces "invalid" and nothing else: the sentence
+   * explaining that only a reference is admissible was a sibling paragraph
+   * unreachable from the field it describes.
+   */
+  const literalWarningId = `${testId}-literal-warning`;
+  const describedBy =
+    [ariaDescribedBy, literalRejected ? literalWarningId : null]
+      .filter(Boolean)
+      .join(" ") || undefined;
+  // Only strip the tenant prefix when it matches this picker's tenantId;
+  // otherwise a reference like ${vault:tenantA/key} would incorrectly
+  // resolve against the current tenant's key list.
+  const refTenant = extractTenantFromKey(currentVaultKey);
+  const currentBareKey =
+    refTenant === undefined || refTenant === tenantId
+      ? bareKeyName(currentVaultKey)
+      : currentVaultKey; // keep as-is so the lookup correctly fails
+  // A `${vars:…}` reference resolves against the global variable store, which
+  // this picker cannot see. Checking it against the vault key list would flag
+  // every one of them as missing.
+  const pointsAtVault = isVaultScheme(value);
+  const currentKeyExists = !pointsAtVault || secretKeyNames.has(currentBareKey);
+  const currentDescription =
+    hasVaultRef && pointsAtVault
+      ? secretList.find((s) => s.keyName === currentBareKey)?.description ?? null
+      : null;
+
+  // Filtered list for keyboard nav count
+  const filteredForNav = useMemo(() => {
+    if (!filter.trim()) return secretList;
+    const q = filter.toLowerCase();
+    return secretList.filter(
+      (s) =>
+        s.keyName.toLowerCase().includes(q) ||
+        (s.description ?? "").toLowerCase().includes(q),
+    );
+  }, [secretList, filter]);
+
+  // ─── Handlers ──────────────────────────────────────────────────────────────
+
+  const openPopup = useCallback(() => {
+    if (readOnly) return;
+    setFilter("");
+    setHighlightedIndex(-1);
+    setPopupOpen(true);
+  }, [readOnly]);
+
+  const closePopup = useCallback(() => {
+    setPopupOpen(false);
+    setFilter("");
+    setHighlightedIndex(-1);
+  }, []);
+
+  const handleSelectKey = useCallback(
+    (keyName: string) => {
+      onChange(toVaultRef(keyName));
+      closePopup();
+    },
+    [onChange, closePopup],
+  );
+
+  const handleClearVault = useCallback(() => {
+    if (readOnly) return;
+    onChange("");
+  }, [readOnly, onChange]);
+
+  const handleDirectChange = useCallback(
+    (newValue: string) => {
+      // Auto-detect a pasted reference and normalise it to the canonical form.
+      // Emitting the raw paste instead would send a trailing newline along with
+      // the reference as the api key — which the backend has to trim on its side
+      // to recognise, and which the chip below would render with the stray
+      // whitespace baked in.
+      //
+      // Keyed off isVaultRef alone, deliberately. Gating on endsWith("}") too
+      // covered only the braced form, so the unbraced spellings isVaultRef also
+      // accepts ("vault:key", legacy "eddivault:key") fell through untrimmed: the
+      // chip rendered from the trimmed value while the parent kept — and
+      // submitted — the raw paste.
+      // Trimmed for every reference spelling, braced or not. Keyed off the
+      // shared prefix test rather than a local list, so `${vars:…}` pasted with
+      // a trailing newline is normalised like every other scheme instead of
+      // being stored with the whitespace and refused by the backend's anchored
+      // pattern.
+      if (isVaultRef(newValue) || isSecretReference(newValue)) {
+        onChange(newValue.trim());
+        closePopup();
+        return;
+      }
+      onChange(newValue);
+    },
+    [onChange, closePopup],
+  );
+
+  /**
+   * Put an unbraced reference into the braced form on the way out of the field.
+   *
+   * Reference-only fields are saved to a backend that matches an *anchored*
+   * `${…}` pattern, so the unbraced spellings this component accepts for
+   * reading (`vault:key`, legacy `eddivault:key`) would be stored verbatim and
+   * refused with a 400 naming a field the user can no longer see.
+   *
+   * On blur, deliberately, and not on every keystroke: rewriting the value
+   * while somebody is typing it destroys the half-typed reference — `${vault:`
+   * canonicalises to `${vault:}` and the rest of the word lands after the
+   * closing brace. Nothing is normalised until they are done.
+   */
+  const handleBlur = useCallback(() => {
+    // `readOnly` guarded like every other mutating handler here. A read-only
+    // input is still focusable, so without this a viewer could rewrite the
+    // value — and dirty the parent's form — just by tabbing through it.
+    if (!referenceOnly || readOnly) return;
+    const canonical = canonicalizeReference(value);
+    if (canonical) onChange(canonical);
+  }, [referenceOnly, readOnly, value, onChange]);
+
+  const handleInputKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (!popupOpen) {
+        // Open popup on ArrowDown when closed
+        if (e.key === "ArrowDown" && vaultAvailable) {
+          e.preventDefault();
+          openPopup();
+        }
+        return;
+      }
+
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closePopup();
+      } else if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setHighlightedIndex((prev) =>
+          prev < filteredForNav.length - 1 ? prev + 1 : 0,
+        );
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setHighlightedIndex((prev) =>
+          prev > 0 ? prev - 1 : filteredForNav.length - 1,
+        );
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        if (
+          highlightedIndex >= 0 &&
+          highlightedIndex < filteredForNav.length
+        ) {
+          handleSelectKey(filteredForNav[highlightedIndex]!.keyName);
+        }
+      }
+    },
+    [
+      popupOpen,
+      vaultAvailable,
+      openPopup,
+      closePopup,
+      filteredForNav,
+      highlightedIndex,
+      handleSelectKey,
+    ],
+  );
+
+  // Click outside to close
+  useEffect(() => {
+    if (!popupOpen) return;
+    const handleMouseDown = (e: MouseEvent) => {
+      if (
+        containerRef.current &&
+        !containerRef.current.contains(e.target as Node)
+      ) {
+        closePopup();
+      }
+    };
+    document.addEventListener("mousedown", handleMouseDown);
+    return () => document.removeEventListener("mousedown", handleMouseDown);
+  }, [popupOpen, closePopup]);
+
+  // ─── Render ────────────────────────────────────────────────────────────────
+
+  // State B′: a connection reference — a pointer to a connection document,
+  // resolved to a credential per request. Its own chip, not the vault's: "not
+  // found in the vault" would be wrong, and so would masking it.
+  if (connectionRef) {
+    return (
+      <div ref={containerRef} className="relative" data-testid={testId}>
+        <div
+          id={id}
+          role="group"
+          aria-label={ariaLabel}
+          aria-invalid={ariaInvalid}
+          aria-describedby={describedBy}
+          className={`flex h-7 items-center gap-1.5 rounded-md border px-2 ${
+            readOnly ? "border-primary/30 bg-primary/5" : "border-primary/50 bg-primary/10"
+          }`}
+          title={t(
+            "secretPicker.connectionChipTitle",
+            "A connection reference — EDDI resolves it to the credential on every request",
+          )}
+          data-testid={`${testId}-connection-chip`}
+        >
+          <Plug className="h-3 w-3 shrink-0 text-primary" aria-hidden="true" />
+          <span className="shrink-0 text-[10px] font-medium uppercase tracking-wide text-primary/80">
+            {t("secretPicker.connectionChip", "Connection")}
+          </span>
+          <span className="flex-1 truncate font-mono text-xs font-medium text-foreground">
+            {connectionName}
+          </span>
+          {!readOnly && (
+            <button
+              type="button"
+              onClick={handleClearVault}
+              className="rounded p-0.5 text-primary/70 transition-colors hover:text-primary"
+              aria-label={t("secretPicker.clearConnection", "Clear connection reference")}
+              data-testid={`${testId}-clear`}
+            >
+              <X className="h-3 w-3" />
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // State B: Vault reference selected — show chip
+  if (hasVaultRef) {
+    return (
+      <div ref={containerRef} className="relative" data-testid={testId}>
+        <div
+          id={id}
+          role="group"
+          aria-label={ariaLabel}
+          aria-invalid={ariaInvalid}
+          aria-describedby={describedBy}
+          className={`flex h-7 items-center gap-1.5 rounded-md border px-2 ${
+            readOnly
+              ? "border-amber-500/30 bg-amber-500/5"
+              : "border-amber-500/50 bg-amber-500/10"
+          }`}
+          title={
+            currentDescription
+              ? `${currentVaultKey} — ${currentDescription}`
+              : currentVaultKey
+          }
+        >
+          <KeyRound className="h-3 w-3 shrink-0 text-amber-600 dark:text-amber-400" />
+          <span className="flex-1 truncate font-mono text-xs font-medium text-amber-700 dark:text-amber-300">
+            {currentVaultKey}
+          </span>
+          {/* Warning if key not found in vault */}
+          {!secretsLoading && !currentKeyExists && currentVaultKey && (
+            <span
+              title={t(
+                "secretPicker.keyNotFound",
+                "This key was not found in the vault",
+              )}
+            >
+              <AlertTriangle className="h-3 w-3 shrink-0 text-amber-500" />
+            </span>
+          )}
+          {/* Clear button */}
+          {!readOnly && (
+            <button
+              type="button"
+              onClick={handleClearVault}
+              className="rounded p-0.5 text-amber-600/70 transition-colors hover:text-amber-700 dark:text-amber-400/70 dark:hover:text-amber-300"
+              aria-label={t("secretPicker.clearVault", "Clear vault reference")}
+              data-testid={`${testId}-clear`}
+            >
+              <X className="h-3 w-3" />
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // State A: Empty or direct value — show input with vault opener
+  return (
+    <div ref={containerRef} className="relative" data-testid={testId}>
+      <div className="flex items-stretch">
+        {/* Password input */}
+        <div className="relative flex-1">
+          <input
+            id={id}
+            // Nothing to mask: in reference-only mode the only admissible value
+            // is a pointer, and masking it hides the one thing worth reading.
+            // The same holds for a connection reference still being typed.
+            type={referenceOnly || connectionInProgress || showPassword ? "text" : "password"}
+            value={value}
+            onChange={(e) => handleDirectChange(e.target.value)}
+            onKeyDown={handleInputKeyDown}
+            onBlur={handleBlur}
+            readOnly={readOnly}
+            placeholder={
+              placeholder ??
+              (referenceOnly
+                ? t("secretPicker.referencePlaceholder", "${vault:key-name}")
+                : t("secretPicker.placeholder", "API key or ${vault:key-name}"))
+            }
+            dir="ltr"
+            aria-label={ariaLabel}
+            aria-describedby={describedBy}
+            // `||`, not `??`: a caller passing an explicit `false` (the common
+            // `aria-invalid={Boolean(error)}` shape) must not suppress the
+            // invalid state this component derived for itself, or the one field
+            // that is actually wrong is the one "jump to first invalid" skips.
+            aria-invalid={ariaInvalid || literalRejected || undefined}
+            className={`h-7 w-full border bg-background ps-2 font-mono text-xs text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-ring ${
+              referenceOnly ? "pe-2" : "pe-14"
+            } ${literalRejected ? "border-destructive" : "border-input"} ${
+              (vaultAvailable || offerConnections) && !readOnly
+                ? "rounded-s-md rounded-e-none"
+                : "rounded-md"
+            }`}
+            data-testid={`${testId}-input`}
+          />
+          {/* Eye toggle */}
+          {!referenceOnly && (
+            <button
+              type="button"
+              onClick={() => setShowPassword((p) => !p)}
+              disabled={readOnly}
+              className="absolute inset-e-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground"
+              tabIndex={-1}
+              aria-label={showPassword ? "Hide" : "Show"}
+            >
+              {showPassword ? (
+                <EyeOff className="h-3 w-3" />
+              ) : (
+                <Eye className="h-3 w-3" />
+              )}
+            </button>
+          )}
+        </div>
+
+        {/* Vault opener button */}
+        {vaultAvailable && !readOnly && (
+          <button
+            type="button"
+            // Keeps focus in the input, so `handleBlur` does not fire, so the
+            // value is not canonicalised into a chip mid-click — which used to
+            // unmount this very button between mousedown and mouseup, and the
+            // click never landed.
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => (popupOpen ? closePopup() : openPopup())}
+            title={t("secretPicker.pickFromVault", "Pick from vault")}
+            className={`flex h-7 items-center gap-0.5 border border-s-0 border-input px-1.5 text-xs transition-colors ${
+              offerConnections ? "" : "rounded-e-md"
+            } ${
+              popupOpen
+                ? "bg-primary/10 text-primary"
+                : "bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground"
+            }`}
+            data-testid={`${testId}-vault-btn`}
+          >
+            <KeyRound className="h-3 w-3" />
+            <ChevronDown
+              className={`h-2.5 w-2.5 transition-transform ${popupOpen ? "rotate-180" : ""}`}
+            />
+          </button>
+        )}
+
+        {/* Connection opener — only where the backend resolves one. */}
+        {offerConnections && !readOnly && (
+          <ConnectionReferenceButton
+            onInsert={(reference) => {
+              closePopup();
+              onChange(reference);
+            }}
+            testId={`${testId}-connection-btn`}
+          />
+        )}
+      </div>
+
+      {/* A literal was typed or pasted into a field that only takes a pointer.
+          Said here, while the value is still on screen and fixable, rather than
+          arriving as a 400 after Save has thrown the focus away. */}
+      {literalRejected && (
+        <p
+          id={literalWarningId}
+          className="mt-1 flex items-start gap-1 text-[11px] text-destructive"
+          data-testid={literalWarningId}
+        >
+          <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+          <span>
+            {t(
+              "secretPicker.mustBeReference",
+              "This field takes a vault reference, not the secret itself. Pick a key, or store the value in the vault first.",
+            )}
+          </span>
+        </p>
+      )}
+
+      {/* Vault suggestion popup */}
+      {popupOpen && (
+        <VaultPopup
+          filtered={filteredForNav}
+          secretsLoading={secretsLoading}
+          vaultAvailable={vaultAvailable}
+          filter={filter}
+          onFilterChange={(v) => {
+            setFilter(v);
+            setHighlightedIndex(-1);
+          }}
+          highlightedIndex={highlightedIndex}
+          onKeyDown={handleInputKeyDown}
+          onSelect={handleSelectKey}
+          onCreate={() => {
+            closePopup();
+            setShowCreateDialog(true);
+          }}
+          vaultError={vaultError}
+        />
+      )}
+
+      {/* Create secret modal */}
+      {showCreateDialog && (
+        <CreateSecretModal
+          onClose={() => setShowCreateDialog(false)}
+          tenantId={tenantId}
+          onSuccess={(keyName) => {
+            onChange(toVaultRef(keyName));
+          }}
+        />
+      )}
+    </div>
+  );
+}

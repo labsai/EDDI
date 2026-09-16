@@ -1,6 +1,9 @@
 [tools]
 java = "temurin-25.0.3+9.0.LTS"
 maven = "3.9.12"
+# One Node for the repo: the version Maven vendors for the UI build (pom.xml node.version)
+# and CI uses. ui/manager no longer pins its own (it pinned v25 while CI ran 20).
+node = "20.20.2"
 "npm:chromadb" = "3.4.3"
 
 [tasks.dev]
@@ -9,14 +12,14 @@ description = "Start dev mode with live reload (port 7070)"
 
 [tasks.compile]
 run = "mvn compile"
-description = "Compile sources only (fast feedback)"
+description = "Compile sources only (fast feedback; never builds the UIs)"
 
 [tasks.test]
-run = "mvn verify"
-description = "Compile + unit tests + package (ITs skipped - use `mise run test-it`)"
+run = "mvn verify -DskipUi=true"
+description = "Compile + unit tests + package, without the UI build (ITs skipped - use `mise run test-it`)"
 
 [tasks.test-it]
-run = "mvn verify -DskipITs=false"
+run = "mvn verify -DskipITs=false -DskipUi=true"
 description = "Compile + unit tests + integration tests + the 90/80 coverage gate (requires Docker)"
 
 [tasks.clean-compile]

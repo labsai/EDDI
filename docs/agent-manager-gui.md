@@ -89,4 +89,4 @@ When Keycloak is enabled (`QUARKUS_OIDC_TENANT_ENABLED=true`), the Manager uses 
 
 ## Source Code
 
-The Manager is developed in the [EDDI-Manager](https://github.com/labsai/EDDI-Manager) repository and bundled into the EDDI Docker image at build time.
+The Manager is developed in [`ui/manager`](https://github.com/labsai/EDDI/tree/main/ui/manager) of the EDDI repository (it was the separate `EDDI-Manager` repository until September 2026) and is built into the EDDI jar, and therefore the Docker image, by the Maven build.

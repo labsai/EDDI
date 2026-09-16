@@ -1,0 +1,15 @@
+# CodeQL configuration for the javascript-typescript analysis (ci.yml `codeql-ui` and the
+# scheduled codeql.yml). It scans the application code that ships in the image: the Manager
+# and Chat UI sources.
+#
+# Everything else is out of scope on purpose, not overlooked:
+#   - ui/manager/public/mockServiceWorker.js is MSW's generated dev worker; the Maven build
+#     excludes it from the jar.
+#   - ui/manager/scripts, e2e/, .ds-sync/ and .design-sync/ are CI and developer tooling.
+#   - Without `paths` the JavaScript extractor also reads YAML across the repository, so it
+#     graded backend files such as helm/eddi/values.yaml, which the java-kotlin analysis and
+#     the manifest tests already own.
+name: EDDI UI
+paths:
+  - ui/manager/src
+  - ui/chat/src

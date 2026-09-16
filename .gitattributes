@@ -1,11 +1,5 @@
 licenses/** linguist-generated
 
-# Chat UI bundles are built by the separate eddi-chat-ui repo and committed here
-# so the backend ships a matching widget. Reviewing minified output line by line
-# is meaningless -- review the source in eddi-chat-ui instead.
-src/main/resources/META-INF/resources/scripts/js/chat-ui.*.js linguist-generated
-src/main/resources/META-INF/resources/scripts/css/chat-ui.*.css linguist-generated
-src/main/resources/META-INF/resources/assets/** linguist-generated
 
 # Install scripts -- enforce correct line endings per platform
 *.sh text eol=lf
@@ -16,3 +10,8 @@ src/main/resources/META-INF/resources/assets/** linguist-generated
 # execute on Linux and macOS ("bad interpreter"), which would silently disarm the
 # force-push guard for everyone who activated it.
 .githooks/** text eol=lf
+
+# Lockfiles are LF in the index already; pin it so a Windows checkout with
+# core.autocrlf cannot churn them. CRLF normalisation at commit time is what made
+# a committed chat bundle differ byte-for-byte from a fresh build of the same name.
+ui/*/package-lock.json text eol=lf
