@@ -35,10 +35,16 @@ public final class CrawlUrls {
      * Tracking parameters that never change what a page says. Stripped so a page
      * linked from a campaign is not ingested a second time under a different query
      * string.
+     *
+     * <p>
+     * Deliberately conservative. {@code ref} and {@code referrer} look like
+     * tracking but are real, content-selecting parameters on plenty of sites (a git
+     * forge's {@code ?ref=branch}, for one), and collapsing those loses pages
+     * silently — the more expensive mistake of the two.
      */
     private static final Set<String> TRACKING_PARAMETERS = Set.of(
             "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "utm_id",
-            "gclid", "fbclid", "msclkid", "mc_cid", "mc_eid", "ref", "referrer", "_ga");
+            "gclid", "fbclid", "msclkid", "mc_cid", "mc_eid", "_ga");
 
     /** Index documents that address the same resource as their directory. */
     private static final Set<String> INDEX_FILENAMES = Set.of("index.html", "index.htm", "index.php", "default.html");

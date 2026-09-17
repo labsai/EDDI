@@ -217,6 +217,50 @@ class SafeHttpPageFetcherTest {
     }
 
     @Test
+    @DisplayName("a body that trickles forever is cut off instead of holding the thread")
+    void slowBodyHitsTheReadDeadline() throws Exception {
+        // HttpRequest.timeout covers the response HEADERS only. Without a deadline on
+        // the body, a server sending one byte per second holds this thread for weeks,
+        // and the crawl's own budget is only checked between pages.
+        HttpResponse<InputStream> response = mock(HttpResponse.class);
+        when(response.statusCode()).thenReturn(200);
+        when(response.uri()).thenReturn(URI.create("https://example.com/a"));
+        when(response.headers()).thenReturn(HttpHeaders.of(Map.of("Content-Type", List.of("text/html")),
+                (k, v) -> true));
+        when(response.body()).thenReturn(new TrickleStream());
+        when(httpClient.sendValidated(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenReturn(response);
+
+        long start = System.nanoTime();
+        FetchedPage page = fetcher.fetch(new FetchCommand("https://example.com/a", "EDDI-Crawler/1.0",
+                Duration.ofMillis(50), null, null, 10_000_000));
+        long elapsedMillis = (System.nanoTime() - start) / 1_000_000;
+
+        assertTrue(page.truncated(), "the read must give up rather than run forever");
+        assertTrue(elapsedMillis < 5_000, "gave up after " + elapsedMillis + "ms");
+    }
+
+    /** Never ends, and never blocks long enough to look like a network failure. */
+    private static final class TrickleStream extends InputStream {
+        @Override
+        public int read() {
+            return 'x';
+        }
+
+        @Override
+        public int read(byte[] buffer, int offset, int length) throws IOException {
+            try {
+                Thread.sleep(5);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IOException(e);
+            }
+            buffer[offset] = 'x';
+            return 1;
+        }
+    }
+
+    @Test
     @DisplayName("content-type classification decides what is worth parsing")
     void contentTypeClassification() {
         assertTrue(page("text/html").isHtml());

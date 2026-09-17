@@ -33,6 +33,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class WebCrawlerTest {
 
     private static final String SITE = "https://example.com";
+    private static final String NEWLINE = System.lineSeparator();
 
     private static String linkTo(String... urls) {
         StringBuilder html = new StringBuilder("<html><head><title>Page</title></head><body>");
@@ -504,6 +505,89 @@ class WebCrawlerTest {
             assertEquals(0, summary.errors(), "a docs site legitimately links images");
             assertEquals(1, summary.pagesSkipped());
             assertEquals(1, sink.pages().size());
+        }
+    }
+
+    @Nested
+    @DisplayName("review findings")
+    class ReviewFindings {
+
+        @Test
+        @DisplayName("a dead link in a site-wide footer is fetched once, not once per page")
+        void failedUrlIsNotRefetched() {
+            // Only successful pages entered the visited set, so a 404 linked from every
+            // page was fetched once per referring page: N requests, N errors, and a
+            // fetch budget so exhausted that the crawl never reported full coverage —
+            // which silently disabled deletion reconciliation for that site forever.
+            FakeSite site = new FakeSite()
+                    .page(SITE + "/", linkTo(SITE + "/a", SITE + "/b", SITE + "/legal"))
+                    .page(SITE + "/a", linkTo(SITE + "/legal"))
+                    .page(SITE + "/b", linkTo(SITE + "/legal"))
+                    .status(SITE + "/legal", 404);
+            RecordingSink sink = new RecordingSink();
+
+            CrawlSummary summary = new WebCrawler(site).crawl(request(SITE + "/"), sink);
+
+            assertEquals(1, site.requestCount(SITE + "/legal"), "the dead link must be tried once");
+            assertEquals(1, summary.errors(), "and counted once");
+            assertEquals(StopReason.COMPLETED, summary.stopReason(),
+                    "a site with one dead link must still report full coverage");
+        }
+
+        @Test
+        @DisplayName("a page linked from many others is queued once")
+        void queueDoesNotGrowWithEveryLink() {
+            FakeSite site = new FakeSite()
+                    .page(SITE + "/", linkTo(SITE + "/a", SITE + "/b", SITE + "/shared"))
+                    .page(SITE + "/a", linkTo(SITE + "/shared"))
+                    .page(SITE + "/b", linkTo(SITE + "/shared"))
+                    .page(SITE + "/shared", "<html><body>shared</body></html>");
+            RecordingSink sink = new RecordingSink();
+
+            new WebCrawler(site).crawl(request(SITE + "/"), sink);
+
+            assertEquals(1, site.requestCount(SITE + "/shared"));
+        }
+
+        @Test
+        @DisplayName("a sitemap or feed is not ingested as a document")
+        void xmlIsNotADocument() {
+            // "xml" in the content type used to be treated as HTML, so a docs site
+            // linking its own sitemap.xml got a knowledge-base entry made of
+            // concatenated <loc> URLs, which retrieval then returned.
+            FakeSite site = new FakeSite()
+                    .page(SITE + "/", linkTo(SITE + "/sitemap.xml", SITE + "/feed.xml"))
+                    .sitemap(SITE + "/sitemap.xml", SITE + "/a")
+                    .binary(SITE + "/feed.xml", "application/rss+xml", 512);
+            RecordingSink sink = new RecordingSink();
+
+            new WebCrawler(site).crawl(request(SITE + "/"), sink);
+
+            assertFalse(sink.documentIds().contains(SITE + "/sitemap.xml"), sink.documentIds().toString());
+            assertFalse(sink.documentIds().contains(SITE + "/feed.xml"), sink.documentIds().toString());
+        }
+
+        @Test
+        @DisplayName("each host's own robots.txt is honoured, not the seed's")
+        void robotsIsFetchedPerHost() {
+            // With subdomains included a crawl reaches several hosts; applying the
+            // seed's rules to all of them means obeying one site and ignoring another.
+            FakeSite site = new FakeSite()
+                    .robots(SITE, "User-agent: *" + NEWLINE + "Disallow:")
+                    .robots("https://docs.example.com", "User-agent: *" + NEWLINE + "Disallow: /private/")
+                    .page(SITE + "/", linkTo("https://docs.example.com/private/x",
+                            "https://docs.example.com/public"))
+                    .page("https://docs.example.com/private/x", "<html><body>private</body></html>")
+                    .page("https://docs.example.com/public", "<html><body>public</body></html>");
+            RecordingSink sink = new RecordingSink();
+
+            new WebCrawler(site).crawl(new CrawlRequest(SITE + "/",
+                    new Scope(true, true, "/", 3, List.of()), Limits.defaults(),
+                    new Politeness(Duration.ZERO, "EDDI-Crawler/1.0", true)), sink);
+
+            assertFalse(site.wasRequested("https://docs.example.com/private/x"),
+                    "the subdomain's own Disallow must be obeyed");
+            assertTrue(sink.documentIds().contains("https://docs.example.com/public"));
         }
     }
 

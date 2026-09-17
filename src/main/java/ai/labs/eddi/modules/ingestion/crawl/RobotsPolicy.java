@@ -112,7 +112,7 @@ public final class RobotsPolicy {
                         inWildcardGroup = false;
                     }
                     String declared = value.toLowerCase(Locale.ROOT);
-                    if (!declared.isEmpty() && !agent.isEmpty() && agent.contains(declared)) {
+                    if (!declared.isEmpty() && !agent.isEmpty() && matchesAgent(agent, declared)) {
                         inSpecificGroup = true;
                     } else if ("*".equals(declared)) {
                         inWildcardGroup = true;
@@ -190,6 +190,28 @@ public final class RobotsPolicy {
     /** Sitemap URLs the site advertises — the cheapest way to discover pages. */
     public List<String> sitemaps() {
         return sitemaps;
+    }
+
+    /**
+     * Whether a {@code User-agent} line names this crawler.
+     *
+     * <p>
+     * Matched against the product token — the part before any {@code /} or space —
+     * rather than by substring. Substring matching meant a robots.txt containing
+     * {@code User-agent: a} captured every crawler whose name contains an "a",
+     * which is all of them.
+     */
+    private static boolean matchesAgent(String ourAgent, String declared) {
+        String ourToken = productToken(ourAgent);
+        String declaredToken = productToken(declared);
+        return ourToken.equals(declaredToken) || ourAgent.startsWith(declaredToken + "/");
+    }
+
+    private static String productToken(String userAgent) {
+        int slash = userAgent.indexOf('/');
+        int space = userAgent.indexOf(' ');
+        int end = slash < 0 ? space : space < 0 ? slash : Math.min(slash, space);
+        return (end < 0 ? userAgent : userAgent.substring(0, end)).trim();
     }
 
     private static String stripComment(String line) {
