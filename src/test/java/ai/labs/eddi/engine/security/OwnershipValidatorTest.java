@@ -459,6 +459,39 @@ class OwnershipValidatorTest {
 
         @ParameterizedTest(name = "name=[{0}]")
         @MethodSource("namelessNames")
+        @DisplayName("requireOwnerOrAdmin() denies with 403 on an unowned (legacy) resource too")
+        void requireOwnerOrAdmin_deniesUnowned(String name) {
+            var identity = authenticatedIdentity(name, false);
+            assertThrows(ForbiddenException.class, () -> validator.requireOwnerOrAdmin(identity, null, "conversation"));
+            assertThrows(ForbiddenException.class, () -> validator.requireOwnerOrAdmin(identity, "  ", "conversation"));
+        }
+
+        @ParameterizedTest(name = "name=[{0}]")
+        @MethodSource("namelessNames")
+        @DisplayName("requireOwnerOrAdmin() still lets an admin through, owned or unowned")
+        void requireOwnerOrAdmin_adminUnowned(String name) {
+            var identity = authenticatedIdentity(name, true);
+            assertDoesNotThrow(() -> validator.requireOwnerOrAdmin(identity, null, "conversation"));
+        }
+
+        @ParameterizedTest(name = "name=[{0}]")
+        @MethodSource("namelessNames")
+        @DisplayName("isNamelessCaller() is true for an authenticated identity without a name")
+        void isNamelessCaller_true(String name) {
+            assertTrue(OwnershipValidator.isNamelessCaller(authenticatedIdentity(name, false)));
+        }
+
+        @Test
+        @DisplayName("isNamelessCaller() is false for null, anonymous and named identities")
+        void isNamelessCaller_false() {
+            assertFalse(OwnershipValidator.isNamelessCaller(null));
+            assertFalse(OwnershipValidator.isNamelessCaller(anonymousIdentity()));
+            assertFalse(OwnershipValidator.isNamelessCaller(authenticatedIdentity(CALLER_ID, false)));
+            assertTrue(OwnershipValidator.isNamelessCaller(principalLessIdentity()));
+        }
+
+        @ParameterizedTest(name = "name=[{0}]")
+        @MethodSource("namelessNames")
         @DisplayName("requireOwnerOrAdmin() still lets an admin through")
         void requireOwnerOrAdmin_admin(String name) {
             var identity = authenticatedIdentity(name, true);
@@ -490,6 +523,7 @@ class OwnershipValidatorTest {
             assertThrows(ForbiddenException.class, () -> validator.validateUserAccess(identity, OTHER_USER));
             assertThrows(ForbiddenException.class, () -> validator.validateAndResolveUserId(identity, null));
             assertThrows(ForbiddenException.class, () -> validator.requireOwnerOrAdmin(identity, OTHER_USER, "conversation"));
+            assertThrows(ForbiddenException.class, () -> validator.requireOwnerOrAdmin(identity, null, "conversation"));
             assertThrows(ForbiddenException.class, () -> validator.requireOwnerOrAdminStrict(identity, OTHER_USER, "conversation"));
         }
 

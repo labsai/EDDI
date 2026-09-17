@@ -84,6 +84,12 @@ identity provider or hand-built realm that can produce the same token.
   `isOwner` is `false`, `validateUserAccess`/`requireOwnerOrAdmin` (and so `requireOwnerOrAdminStrict` and
   `requireOwnerAdminOrApprover`) throw `ForbiddenException`, and `validateAndResolveUserId` throws rather
   than resolving to `null`.
+- **The legacy-owner exemption no longer admits a nameless caller** (Copilot review on PR #773).
+  `requireOwnerOrAdmin` returned for an unowned resource *before* it looked at the caller's name, so a
+  nameless non-admin still reached legacy conversations and group conversations through it. It now resolves
+  the name first and only then applies the exemption; `ConversationAccessGuard.canAccessConversation`,
+  which must admit exactly what that check admits, uses the new `OwnershipValidator.isNamelessCaller` to
+  hide unowned conversations from the same caller. Anonymous and admin callers are unchanged.
 - **Group conversation listings** (`RestGroupConversation`, `McpGroupTools`) use `principalName` and return
   nothing for a nameless caller — including legacy rows with no owner, which a null-to-null comparison would
   otherwise have matched.
@@ -120,6 +126,9 @@ identity provider or hand-built realm that can produce the same token.
   fail with `AuthenticationFailedException`; the diagnostic names the default or configured claim and the
   sanitized issuer/client; the WARN throttle.
 - `RestGroupConversationTest`, `McpGroupToolsTest` — a nameless caller lists nothing, including an unowned row.
+- `OwnershipValidatorTest`, `ConversationAccessGuardTest` — a nameless caller is refused an unowned resource by
+  `requireOwnerOrAdmin`, `requireConversationOwner` and `canAccessConversation`; an admin is not. With the
+  reordering reverted, 5 of these fail.
 - **Mutation-checked:** with `OwnershipValidator` and both listings reverted to `origin/main` and the augmentor
   short-circuited, 22 of the new tests fail (NPEs, missing 403s, missing 401s). The blank-name cases that
   pass against the old code do so because a blank name never equalled a real owner; they stay as regression

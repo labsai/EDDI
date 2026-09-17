@@ -99,6 +99,15 @@ public class OwnershipValidator {
         return name == null || name.isBlank() ? null : name;
     }
 
+    /**
+     * Whether the identity is authenticated but has no usable principal name — the
+     * caller {@link #requireOwnerOrAdmin} refuses even on an unowned resource.
+     * {@code false} for a null or anonymous identity.
+     */
+    public static boolean isNamelessCaller(SecurityIdentity identity) {
+        return identity != null && !identity.isAnonymous() && principalName(identity) == null;
+    }
+
     private static ForbiddenException namelessCaller(String action) {
         LOGGER.warnf("Ownership check failed: the authenticated identity has no principal name, so it cannot %s", action);
         return new ForbiddenException("Access denied: the authenticated identity has no principal name");
@@ -196,7 +205,9 @@ public class OwnershipValidator {
      *
      * <p>
      * No-op when authorization is disabled, or when {@code resourceOwnerId} is
-     * null/blank (legacy data without ownership tracking).
+     * null/blank (legacy data without ownership tracking) — except for an
+     * authenticated non-admin caller with no principal name, who is refused either
+     * way.
      * </p>
      *
      * @param identity
@@ -212,9 +223,6 @@ public class OwnershipValidator {
         if (!authEnabled) {
             return;
         }
-        if (resourceOwnerId == null || resourceOwnerId.isBlank()) {
-            return; // legacy data without ownership — allow access
-        }
         if (identity == null || identity.isAnonymous()) {
             return; // let @RolesAllowed handle anonymous access
         }
@@ -222,9 +230,15 @@ public class OwnershipValidator {
             return;
         }
 
+        // Resolved before the legacy exemption: a nameless caller is refused even
+        // on an unowned resource, rather than slipping through the one branch that
+        // never looks at the name.
         String callerId = principalName(identity);
         if (callerId == null) {
-            throw namelessCaller("own a " + resourceType);
+            throw namelessCaller("access a " + resourceType);
+        }
+        if (resourceOwnerId == null || resourceOwnerId.isBlank()) {
+            return; // legacy data without ownership — allow access
         }
         if (!callerId.equals(resourceOwnerId)) {
             LOGGER.warnf("Ownership check failed: caller denied access to %s owned by another user", resourceType);
