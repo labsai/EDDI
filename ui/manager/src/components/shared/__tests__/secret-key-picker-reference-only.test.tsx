@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { server } from "@/test/mocks/server";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
@@ -225,6 +225,136 @@ describe("SecretKeyPicker in reference-only mode", () => {
     await user.click(await screen.findByTestId("secret-key-picker-vault-btn"));
 
     expect(await screen.findByTestId("vault-popup")).toBeInTheDocument();
+  });
+
+  it("keeps the vault popup open once it moves focus into its own filter", async () => {
+    // The popup focuses its filter 50 ms after opening. That blurred the input,
+    // blur canonicalised the value into a chip, and the chip state renders no
+    // popup — it vanished a moment after opening. The test above only passed
+    // because it asserted before the timer fired, and failed under load.
+    const user = userEvent.setup();
+    renderWithProviders(<ControlledPicker initial="vault:jira-client-secret" referenceOnly />);
+
+    await user.click(screen.getByTestId("secret-key-picker-input"));
+    await user.click(await screen.findByTestId("secret-key-picker-vault-btn"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("vault-popup-filter")).toHaveFocus(),
+    );
+    expect(screen.getByTestId("vault-popup")).toBeInTheDocument();
+  });
+
+  // Keeping the popup open defers the input's blur, so every way OUT of the
+  // popup must normalise instead — otherwise dismissing it leaves an unbraced
+  // reference that fails the save until the field is focused and left again.
+  describe("dismissing the popup still normalises an unbraced reference", () => {
+    /**
+     * Render a controlled picker holding `initial`, followed by a focusable
+     * "next field" and some non-focusable page text, then open the vault popup
+     * and wait until it has moved focus into its filter — the point at which
+     * the input's blur has been deferred.
+     */
+    async function openPopupOn(initial: string) {
+      const user = userEvent.setup();
+      renderWithProviders(
+        <>
+          <ControlledPicker initial={initial} referenceOnly />
+          <button type="button">next field</button>
+          <p>page text</p>
+        </>,
+      );
+      await user.click(screen.getByTestId("secret-key-picker-input"));
+      await user.click(await screen.findByTestId("secret-key-picker-vault-btn"));
+      await waitFor(() =>
+        expect(screen.getByTestId("vault-popup-filter")).toHaveFocus(),
+      );
+      return user;
+    }
+
+    /**
+     * The normalised chip is showing: the input is gone and so is the popup.
+     * Checked by structure, not by the key's text alone — the popup lists the
+     * same key as an option, so text on its own also matches a popup that
+     * never closed and a value that was never normalised.
+     */
+    async function expectNormalisedChip(keyName: string) {
+      await waitFor(() =>
+        expect(screen.queryByTestId("secret-key-picker-input")).not.toBeInTheDocument(),
+      );
+      expect(screen.queryByTestId("vault-popup")).not.toBeInTheDocument();
+      expect(screen.getByText(keyName)).toBeInTheDocument();
+    }
+
+    it("Escape returns focus to the input, which normalises once the user moves on", async () => {
+      const user = await openPopupOn("vault:jira-client-secret");
+
+      await user.keyboard("{Escape}");
+      expect(screen.queryByTestId("vault-popup")).not.toBeInTheDocument();
+      expect(screen.getByTestId("secret-key-picker-input")).toHaveFocus();
+
+      await user.tab();
+      await expectNormalisedChip("jira-client-secret");
+    });
+
+    it("clicking away from the popup normalises", async () => {
+      const user = await openPopupOn("vault:jira-client-secret");
+
+      // Non-focusable on purpose: focus falls to <body>, so the popup's blur
+      // carries no relatedTarget and only the outside-mousedown path can
+      // normalise. Clicking a button would pass through the tab-out path.
+      await user.click(screen.getByText("page text"));
+
+      await expectNormalisedChip("jira-client-secret");
+    });
+
+    it("tabbing out of the popup normalises", async () => {
+      const user = await openPopupOn("vault:jira-client-secret");
+      const nextField = screen.getByRole("button", { name: "next field" });
+
+      // Through the popup's own controls and out the other side.
+      for (let i = 0; i < 10 && !nextField.matches(":focus"); i++) {
+        await user.tab();
+      }
+
+      expect(nextField).toHaveFocus();
+      await expectNormalisedChip("jira-client-secret");
+    });
+
+    it("cancelling the create-secret dialog normalises rather than stranding the value", async () => {
+      const user = await openPopupOn("vault:jira-client-secret");
+
+      await user.click(screen.getByTestId("vault-popup-create"));
+      await user.click(
+        within(await screen.findByRole("dialog")).getByRole("button", { name: "Cancel" }),
+      );
+
+      await expectNormalisedChip("jira-client-secret");
+    });
+
+    it("keeps the newly created key when the dialog succeeds", async () => {
+      // The trap in normalising on close: onSuccess runs first, but the parent
+      // has not re-rendered, so a normalise on the way out would write the OLD
+      // value over the key just created.
+      const user = await openPopupOn("vault:jira-client-secret");
+
+      await user.click(screen.getByTestId("vault-popup-create"));
+      const dialog = within(await screen.findByRole("dialog"));
+      await user.type(dialog.getByPlaceholderText(/openaiKey/), "brand-new-key");
+      await user.type(dialog.getByPlaceholderText(/secret value/i), "s3cret");
+      await user.click(dialog.getByRole("button", { name: "Store Secret" }));
+
+      await expectNormalisedChip("brand-new-key");
+      expect(screen.queryByText("jira-client-secret")).not.toBeInTheDocument();
+    });
+
+    it("picking a key is not overwritten by normalising the value it replaced", async () => {
+      const user = await openPopupOn("vault:some-other-key");
+
+      await user.click(await screen.findByTestId("vault-key-jira-client-secret"));
+
+      await expectNormalisedChip("jira-client-secret");
+      expect(screen.queryByText("some-other-key")).not.toBeInTheDocument();
+    });
   });
 
   it("emits a canonical reference when a vault key is picked", async () => {

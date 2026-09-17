@@ -136,6 +136,106 @@ so concurrent users overwrite each other's value. `secretInput` only hides the t
 
 ---
 
+## 🔒 fix(ui): clear the 30 npm advisories Scorecard reports (2026-09-17)
+
+**Repo:** EDDI (`fix/ui-npm-vulnerabilities`)
+
+OpenSSF Scorecard's *Vulnerabilities* check reported 30 open advisories. All 30 were npm and all were
+in the two UI lockfiles that arrived with the monorepo migration (`ui/manager`, `ui/chat`); none were
+in `pom.xml` or `ui/manager/.ds-sync`. Every one is a devDependency (test runner, bundler, Stryker
+and their transitives), so nothing affected ships in the jar — but Scorecard counts them regardless.
+
+### What changed
+
+- **vitest `^3` → `^4.1.11` in both UIs** (plus `@vitest/coverage-v8` in the Manager). This is the
+  only fix line for GHSA-82fw-gwwq-j7x9 (`@vitest/mocker` path traversal): no 3.x backport exists.
+  Chat also moves `vite` to `^6.4.3` (GHSA-fx2h-pf6j-xcff, GHSA-v6wh-96g9-6wx3) and clears the
+  critical GHSA-5xrq-8626-4rwp, which its locked vitest 3.2.4 was still exposed to.
+- **Stryker `9.2.0` → `9.6.1`** (still exact-pinned) — drops the old `minimatch`/`ajv`/`@babel/core`
+  chain.
+- **`overrides` → `typed-rest-client` → `qs: ^6.16.0` in the Manager.** `typed-rest-client@2.3.1`
+  (via `@stryker-mutator/core`) pins `qs` to exactly `6.15.1`; no 2.x release relaxes it and Stryker
+  10 still takes `~2.3.0`, so an override scoped to that one parent is the only fix
+  (GHSA-4mjr-xmp4-gh2g, GHSA-x5fp-wj9c-mxmx). `typed-rest-client@3` itself requires `qs ^6.16.0`.
+- **The remaining transitives** (`browserslist`, `fast-uri`, `js-yaml`, `minimatch`, `brace-expansion`,
+  `nanoid`, `postcss`, `ws`) were refreshed in place in the lockfiles.
+- **Four Manager test files fixed for Vitest 4's mocking changes** (one tsc error, 29 failures):
+  - `bearer-event-source.test.ts` — `ReturnType<typeof vi.spyOn>` no longer carries `fetch`'s parameter
+    types; typed as `MockInstance<typeof fetch>`.
+  - `infinite-scroll-sentinel.test.tsx` — a `vi.fn` called with `new` must now be a `function`, not an
+    arrow.
+  - `workforce-coverage-2.test.tsx` (24 failures) — the ExportMenu tests spied on
+    `document.createElement` and never restored it. Vitest 3 stacked the second spy on the first;
+    Vitest 4 returns the *same* mock, so the captured "original" was the mock itself — infinite
+    recursion, and the leaked spy broke every later describe. Now restored after each ExportMenu test.
+  - `use-operator-chat.test.tsx` — `restoreAllMocks` no longer resets `vi.fn()`s created in `vi.mock`
+    factories, so call history leaked across tests (a "called once" assertion saw 43). `resetAllMocks`
+    added beside it, which is what `restoreAllMocks` used to do for those mocks. The other 11 files
+    calling `restoreAllMocks` were checked: none holds a module-scope `vi.fn`, so none can now pass on
+    history left by an earlier test.
+- **Manager coverage floors recalibrated: lines 85 → 83, statements 85 → 81** (`vitest.config.ts`).
+  Not a relaxation. Vitest 3's `v8-to-istanbul` counted every source *line* as a statement, so JSX
+  markup, which runs on every render, padded both figures — `main` measured 90.25 / 90.25. Vitest 4
+  remaps against the AST and counts real statements: the unchanged suite reads 83.45 % lines and
+  81.83 % statements. The *uncovered code* is identical — `view-toggle.tsx` was flagged at lines 23–33
+  under both — only the denominator moved. Branches (84.03 → 76.44) and functions (74.29 → 76.37) still
+  clear 75 / 70 and were left alone. The new floors sit under half a point below the measurement, far
+  tighter than the ~5-point slack the old ones had; whether that slack should be restored is open.
+- **A real bug the upgrade surfaced: the vault popup closed itself** (`secret-key-picker.tsx`, own
+  commit). With a canonicalisable value such as `vault:jira-client-secret` in a reference-only picker,
+  the popup focuses its filter 50 ms after opening; that blurred the input, blur canonicalised the value
+  into a chip, and the chip state renders no popup, so it vanished right after opening. The existing
+  test only passed because it asserted before the timer fired; under Vitest 4 on a loaded run it failed
+  2 of 3 times. `handleBlur` now ignores focus moving into the popup (scoped to the popup, not the whole
+  picker: tabbing on to the vault button still canonicalises, which two existing tests pin). A new
+  test waits for the filter to take focus and fails with the fix reverted.
+  Deferring that blur made every way *out* of the popup responsible for normalising instead (Copilot
+  review): Escape and the opener button hand focus back to the input, whose own blur then normalises;
+  clicking away or tabbing out of the popup normalises directly. A blur with no `relatedTarget` is
+  deliberately ignored — that is what picking a key looks like, and normalising the stale value there
+  would overwrite the key just picked. Four tests, one per path, each mutation-checked; they assert
+  the chip by structure, because the popup lists the same key as an option and a text match alone
+  passed with the popup still open.
+  A fifth exit, found by CodeRabbit: **"Create new secret"**. It closes the popup and opens the modal,
+  so focus leaves the field and the deferred blur never comes — cancel the dialog and the unbraced
+  reference was stranded. Normalising as the dialog *opens* (the suggested fix) cannot work: it
+  switches the picker to its chip state, which returns before the modal is rendered, so the dialog
+  would never appear. It normalises on *close* instead, and only when the user cancelled — `onSuccess`
+  runs before `onClose` without a re-render in between, so an unconditional normalise there would
+  write the old value over the key just created. Both halves are pinned by a test and each fails
+  under the mutation the other guards.
+- **Dependabot: `vitest` + `@vitest/*` (both UIs) and `@stryker-mutator/*` (Manager) are grouped.**
+  These packages peer-depend on each other at the exact same version, so a single-package bump can never
+  pass `npm ci`. That is precisely what happened: #766 (vitest 4.1.11), #768 (Stryker 10) and the
+  security-updates groups #762/#764 were all red with `ERESOLVE`, and #762 would have left vitest on
+  3.2.6, still vulnerable. This branch supersedes all four.
+
+### Decisions
+
+- **Vitest 4, not 5.** Vitest 5.0.1 is `latest`, but it (and Stryker 10) requires Node ≥ 22.12, while
+  `pom.xml` pins `node.version` v20.20.2 and every UI job in `ci.yml` uses Node 20. 4.1.11 fixes the
+  advisory on the Node the build actually runs. Node 20 reached end of life in April 2026, so the Node 22
+  move — and with it Vitest 5 / Stryker 10 — is the follow-up.
+- **Vite stays on 6** (6.4.3 carries the fixes); Vite 7/8 are a separate migration.
+- **Windows lockfile pruning, again.** `npm install` on Windows dropped
+  `@tailwindcss/oxide-wasm32-wasi`'s `@emnapi/core` and `@emnapi/runtime` from the Manager lock (see
+  `ui/manager/AGENTS.md`); both were restored from `main`'s lock. Both lockfiles were then proven with
+  `npm ci` in a `node:20` Linux container.
+
+### Verification
+
+- OSV ranges for all 30 advisories evaluated against every `packages` entry of the three lockfiles:
+  41 affected instances (30 distinct IDs) on `main`, 0 on this branch. `npm audit` is clean in all three.
+- Chat: typecheck, 278/278 unit tests, build. Manager: lint, typecheck, i18n check, all 411 test files (6,515 tests)
+  with coverage (the same 411 `main` collects — Vitest 4 narrowed its default `exclude`, but this config
+  sets its own), build.
+- Stryker 9.6.1 on Vitest 4 (the runner gained Vitest 4 support in 9.3.0): a scoped run over
+  `src/lib/api/updates.ts` completed at 82.49 %, above `thresholds.break` 82.
+- The production dependency tree is untouched: no non-dev entry changed in either lockfile. Every
+  transitive major (chai 6, `@inquirer/*` 5, zod 4, …) is inside the Vitest 4 or Stryker 9.6 trees.
+
+---
+
 ## 🔐 fix(auth): the shipped realm gives tokens an identity again (2026-09-17)
 
 **Repo:** EDDI (`fix/keycloak-realm-client-scopes`)
