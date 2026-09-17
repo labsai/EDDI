@@ -2527,6 +2527,9 @@ jobs:
           GH_ACTOR: ${{ github.actor }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           RUN_NUMBER: ${{ github.run_number }}
+          EVENT_NAME: ${{ github.event_name }}
+          BACKEND_CHANGED: ${{ needs.detect-changes.outputs.backend }}
+          OPERATOR_DOCS_CHANGED: ${{ needs.detect-changes.outputs.operator_docs }}
         run: |
           # Skip if no webhook configured
           if [ -z "$SLACK_WEBHOOK" ]; then
@@ -2578,6 +2581,20 @@ jobs:
           # code=true for them, so build-and-test and integration-test really run
           # and docker only starts if they pass. Nothing to normalise here.
 
+          # build-and-test is skipped BY DESIGN on a pull request that touches neither
+          # the backend nor the operator docs (a ui/-only change: see its `if`). That
+          # skip is not a failure. Requiring `success` here announced every such PR as
+          # "Build Failed" — and, with nothing failed, posted to Slack anyway. Any
+          # other result that is not success (a skip on push or tag, a cancel, a
+          # failure) still fails the build.
+          BUILD_OK=false
+          if [ "$BUILD" = "success" ]; then
+            BUILD_OK=true
+          elif [ "$BUILD" = "skipped" ] && [ "$EVENT_NAME" = "pull_request" ] \
+              && [ "$BACKEND_CHANGED" != "true" ] && [ "$OPERATOR_DOCS_CHANGED" != "true" ]; then
+            BUILD_OK=true
+          fi
+
           # Overall status
           # PREFLIGHT belongs in this condition, not only in the icon list below.
           # Without it a run where everything else was green but preflight failed
@@ -2585,7 +2602,7 @@ jobs:
           # posting anything - so the one signal saying the image would not pass
           # Red Hat certification never left GitHub. On a tag it did post, with
           # "Build Passed" in the header beside a red Red Hat Preflight field.
-          if [ "$BUILD" = "success" ] && [ "$IT" != "failure" ] && [ "$UI" != "failure" ] && [ "$IMAGE" != "failure" ] && [ "$E2E" != "failure" ] && [ "$DOCKER" != "failure" ] && [ "$SMOKE" != "failure" ] && [ "$GITLEAKS" != "failure" ] && [ "$TRIVY" != "failure" ] && [ "$CODEQL" != "failure" ] && [ "$PREFLIGHT" != "failure" ]; then
+          if [ "$BUILD_OK" = "true" ] && [ "$IT" != "failure" ] && [ "$UI" != "failure" ] && [ "$IMAGE" != "failure" ] && [ "$E2E" != "failure" ] && [ "$DOCKER" != "failure" ] && [ "$SMOKE" != "failure" ] && [ "$GITLEAKS" != "failure" ] && [ "$TRIVY" != "failure" ] && [ "$CODEQL" != "failure" ] && [ "$PREFLIGHT" != "failure" ]; then
             OVERALL_ICON="✅"
             OVERALL_TEXT="Build Passed"
           else

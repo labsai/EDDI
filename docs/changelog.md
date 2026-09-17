@@ -75,6 +75,14 @@ bottom of this file and are never archived.
 - Tests: `user-display.test.ts` (18), plus the no-claims token shape in `top-bar.test.tsx` and
   `sidebar.test.tsx`. Mutation-checked: restoring the `"?"` fallback fails three of them.
 
+- **CI: a UI-only pull request no longer reports "Build Failed" to Slack.** `notify-slack` required
+  `build-and-test` to be `success`, but that job is skipped by design on a pull request touching neither the
+  backend nor the operator docs, so this PR's run was classified a failure with nothing failed and tried to
+  post. A skip now counts as passing only in exactly that case; a skip on push or tag, a cancel or a failure
+  still fails. Checked against a seven-case truth table. Separately, the webhook itself answers HTTP 4xx
+  (`curl` exit 22, also on a genuinely failed run on 2026-09-16), so the job stays red on any real failure
+  until the `SLACK_WEBHOOK_URL` secret is replaced.
+
 ### Why the claims were empty
 
 The shipped realm (6.1.0 through 6.4.0) defines only the `openid` client scope, so Keycloak never created
