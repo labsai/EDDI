@@ -24,7 +24,8 @@
     "sessionExpired": "セッションが期限切れです。再度ログインしてください。",
     "profile": "プロフィール",
     "guest": "ゲスト",
-    "userMenu": "ユーザーメニュー"
+    "userMenu": "ユーザーメニュー",
+    "signedIn": "サインイン済み"
   },
   "nav": {
     "dashboard": "ダッシュボード",

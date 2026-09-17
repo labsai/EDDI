@@ -1170,6 +1170,12 @@ describe("a turn orphaned by a mid-stream reset", () => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  // Since Vitest 4, restoreAllMocks only restores vi.spyOn spies. It no longer
+  // resets the vi.fn()s in the vi.mock factories above, so their call history
+  // and any queued mockImplementationOnce would leak into the next test (a
+  // "called once" assertion counted 43). resetAllMocks returns each one to its
+  // factory implementation, which is what restoreAllMocks used to do.
+  vi.resetAllMocks();
 });
 
 /**
