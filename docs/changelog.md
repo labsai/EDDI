@@ -94,6 +94,14 @@ and their transitives), so nothing affected ships in the jar — but Scorecard c
   under both — only the denominator moved. Branches (84.03 → 76.44) and functions (74.29 → 76.37) still
   clear 75 / 70 and were left alone. The new floors sit under half a point below the measurement, far
   tighter than the ~5-point slack the old ones had; whether that slack should be restored is open.
+- **A real bug the upgrade surfaced: the vault popup closed itself** (`secret-key-picker.tsx`, own
+  commit). With a canonicalisable value such as `vault:jira-client-secret` in a reference-only picker,
+  the popup focuses its filter 50 ms after opening; that blurred the input, blur canonicalised the value
+  into a chip, and the chip state renders no popup, so it vanished right after opening. The existing
+  test only passed because it asserted before the timer fired; under Vitest 4 on a loaded run it failed
+  2 of 3 times. `handleBlur` now ignores focus moving into the popup (scoped to the popup, not the whole
+  picker: tabbing on to the vault button still canonicalises, which two existing tests pin). A new
+  test waits for the filter to take focus and fails with the fix reverted.
 - **Dependabot: `vitest` + `@vitest/*` (both UIs) and `@stryker-mutator/*` (Manager) are grouped.**
   These packages peer-depend on each other at the exact same version, so a single-package bump can never
   pass `npm ci`. That is precisely what happened: #766 (vitest 4.1.11), #768 (Stryker 10) and the
@@ -116,7 +124,7 @@ and their transitives), so nothing affected ships in the jar — but Scorecard c
 
 - OSV ranges for all 30 advisories evaluated against every `packages` entry of the three lockfiles:
   41 affected instances (30 distinct IDs) on `main`, 0 on this branch. `npm audit` is clean in all three.
-- Chat: typecheck, 278/278 unit tests, build. Manager: lint, typecheck, i18n check, all 411 test files
+- Chat: typecheck, 278/278 unit tests, build. Manager: lint, typecheck, i18n check, all 411 test files (6,515 tests)
   with coverage (the same 411 `main` collects — Vitest 4 narrowed its default `exclude`, but this config
   sets its own), build.
 - Stryker 9.6.1 on Vitest 4 (the runner gained Vitest 4 support in 9.3.0): a scoped run over

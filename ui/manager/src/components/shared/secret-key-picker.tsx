@@ -314,6 +314,8 @@ interface VaultPopupProps {
   onSelect: (keyName: string) => void;
   onCreate: () => void;
   vaultError?: string;
+  /** The popup's root, so the parent can tell focus moving INTO the popup from focus leaving the field. */
+  popupRef: React.RefObject<HTMLDivElement | null>;
 }
 
 function VaultPopup({
@@ -327,6 +329,7 @@ function VaultPopup({
   onSelect,
   onCreate,
   vaultError,
+  popupRef,
 }: VaultPopupProps) {
   const { t } = useTranslation();
   const filterRef = useRef<HTMLInputElement>(null);
@@ -368,6 +371,7 @@ function VaultPopup({
 
   return (
     <div
+      ref={popupRef}
       className="absolute inset-x-0 top-full z-50 mt-1 overflow-hidden rounded-lg border border-border bg-popover shadow-xl animate-in fade-in-0 zoom-in-95 slide-in-from-top-2 duration-150"
       /*
        * The parent's handler, not one of our own.
@@ -553,6 +557,7 @@ export function SecretKeyPicker({
 
   // Refs
   const containerRef = useRef<HTMLDivElement>(null);
+  const popupRef = useRef<HTMLDivElement>(null);
 
   // Vault data
   const { data: secrets, isLoading: secretsLoading } = useSecrets(tenantId);
@@ -713,11 +718,19 @@ export function SecretKeyPicker({
    * canonicalises to `${vault:}` and the rest of the word lands after the
    * closing brace. Nothing is normalised until they are done.
    */
-  const handleBlur = useCallback(() => {
+  const handleBlur = useCallback((e: React.FocusEvent<HTMLInputElement>) => {
     // `readOnly` guarded like every other mutating handler here. A read-only
     // input is still focusable, so without this a viewer could rewrite the
     // value — and dirty the parent's form — just by tabbing through it.
     if (!referenceOnly || readOnly) return;
+    // Focus moving into this picker's own popup is not the user leaving the
+    // field. The popup focuses its filter 50 ms after opening; canonicalising
+    // on that blur swapped the input for a chip, and the chip state renders no
+    // popup — so the popup the user had just opened vanished again. Scoped to
+    // the popup: tabbing on to the vault button IS leaving the field.
+    if (e.relatedTarget instanceof Node && popupRef.current?.contains(e.relatedTarget)) {
+      return;
+    }
     const canonical = canonicalizeReference(value);
     if (canonical) onChange(canonical);
   }, [referenceOnly, readOnly, value, onChange]);
@@ -1017,6 +1030,7 @@ export function SecretKeyPicker({
             setShowCreateDialog(true);
           }}
           vaultError={vaultError}
+          popupRef={popupRef}
         />
       )}
 

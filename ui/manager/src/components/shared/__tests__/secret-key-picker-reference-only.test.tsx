@@ -227,6 +227,23 @@ describe("SecretKeyPicker in reference-only mode", () => {
     expect(await screen.findByTestId("vault-popup")).toBeInTheDocument();
   });
 
+  it("keeps the vault popup open once it moves focus into its own filter", async () => {
+    // The popup focuses its filter 50 ms after opening. That blurred the input,
+    // blur canonicalised the value into a chip, and the chip state renders no
+    // popup — it vanished a moment after opening. The test above only passed
+    // because it asserted before the timer fired, and failed under load.
+    const user = userEvent.setup();
+    renderWithProviders(<ControlledPicker initial="vault:jira-client-secret" referenceOnly />);
+
+    await user.click(screen.getByTestId("secret-key-picker-input"));
+    await user.click(await screen.findByTestId("secret-key-picker-vault-btn"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("vault-popup-filter")).toHaveFocus(),
+    );
+    expect(screen.getByTestId("vault-popup")).toBeInTheDocument();
+  });
+
   it("emits a canonical reference when a vault key is picked", async () => {
     const user = userEvent.setup();
     renderWithProviders(<SecretKeyPicker value="" onChange={onChange} referenceOnly />);
