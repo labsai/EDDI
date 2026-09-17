@@ -75,7 +75,7 @@ Not all five were meant to be anonymous, so this is not "add a permit entry for 
 | `GET /.well-known/agent.json` | **permit** | The A2A discovery convention. A peer reads the card *before* it holds any credential |
 | `GET /a2a/agents/{agentId}/agent.json` | **permit** | The card EDDI's own client fetches — `A2AToolProviderManager.fetchAgentCard` sends `apiKey` only if one is configured. Needs the agent id, so it discloses one agent, not the roster |
 | `GET /a2a/agents` | **authenticated** — `@PermitAll` removed | The whole roster: every A2A agent's name, description, skills and URL. Strictly more than the skill-name list that sits behind `eddi.a2a.capabilities.public`, and nothing in the protocol or in this repo fetches it |
-| `GET /.well-known/capabilities` | **permit** at the HTTP layer | `eddi.a2a.capabilities.public` (default `false`) is the only gate: while it is off the handler answers 404 to authenticated and anonymous callers alike, so permitting the path widens nothing — and while it is on, "public" has to mean *without a token* |
+| `GET /.well-known/capabilities` | **permit** at the HTTP layer | `eddi.a2a.capabilities.public` (default `false`) is the only *authorization* gate — `eddi.a2a.enabled` gates it as well, but neither looks at the caller. While either is off the handler answers 404 to authenticated and anonymous callers alike, so permitting the path widens nothing — and while both are on, "public" has to mean *without a token* |
 | `GET /.well-known/capabilities/skills` | **permit** at the HTTP layer | Same flag, same reasoning |
 
 Where code and config disagreed, the **code** was changed: `listA2AAgents` lost `@PermitAll` and
@@ -146,6 +146,21 @@ Three findings, all valid, all fixed on the branch:
   `CapabilityMatch` is `(agentId, skill, confidence, attributes)` — ids. The surface is smaller
   than the doc claimed, which if anything strengthens the case for leaving `/a2a/agents` (names,
   descriptions, URLs) authenticated.
+
+**Second pass** (CodeRabbit's first review was rate-limited before it saw the fix commits, so both bots
+were asked for a fresh look):
+
+- `eddi.a2a.capabilities.public` was described as "the only gate". `eddi.a2a.enabled` gates the
+  capability endpoints too (`if (!a2aEnabled || !capabilitiesPublic) → 404`). Reworded in all five
+  places that said it to "the only *authorization* gate — neither flag inspects the caller", which
+  is the claim the permit entry actually rests on.
+- The Agent Card's `authentication.credentials` is built from `quarkus.oidc.auth-server-url`, i.e.
+  the URL **EDDI** uses to reach the IdP. The shapes that bundle Keycloak set that to an in-cluster
+  or compose hostname, so the token endpoint advertised to an outside peer does not resolve — which
+  this PR makes consequential, because the card is now anonymously readable under auth. Not a leak
+  (an internal hostname is not a credential) and not this PR's code, so `docs/a2a-protocol.md`
+  gained a caveat and the fix is filed as follow-up: give the advertised issuer its own config
+  source falling back to `auth-server-url`, and assert the public URL in the auth E2E tier.
 
 ### What's next
 

@@ -159,10 +159,12 @@ public class RestA2AEndpoint {
      * {@code eddi.a2a.capabilities.public} (default {@code false}).
      * <p>
      * Path follows the well-known URI convention. {@code capabilitiesPublic} is the
-     * only gate: while it is {@code false} this answers 404 to authenticated and
-     * anonymous callers alike, so the {@code a2a-capabilities} permission entry can
-     * permit the path unconditionally without widening anything. While it is
-     * {@code true}, anonymous is what "public" means.
+     * only <em>authorization</em> gate — {@code a2aEnabled} gates it too, but
+     * neither of them inspects the caller. While either is {@code false} this
+     * answers 404 to authenticated and anonymous callers alike, so the
+     * {@code a2a-capabilities} permission entry can permit the path unconditionally
+     * without widening anything. While both are {@code true}, anonymous is what
+     * "public" means.
      */
     @PermitAll
     @GET

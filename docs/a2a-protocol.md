@@ -43,17 +43,26 @@ Add A2A fields to your agent configuration:
 
 On a deployment with `quarkus.oidc.tenant-enabled=false` — the shipped default —
 no endpoint requires a token, so the column above says nothing there. It is still
-not a promise that every row returns data: `eddi.a2a.capabilities.public` is an
-independent switch, and while it is off the two capability endpoints answer 404
-whether or not a token was sent. With authentication on, the column is the
-contract:
+not a promise that every row returns data: `eddi.a2a.enabled` and
+`eddi.a2a.capabilities.public` are independent switches, and an endpoint whose
+switch is off answers 404 whether or not a token was sent. With authentication
+on, the column is the contract:
 
 - **Agent Cards are anonymous by design.** A peer is handed a URL and fetches
   `{url}/agent.json` before it holds any credential for your deployment; EDDI's
   own client does exactly that, with `apiKey` optional. Reading a card needs the
   agent id, so it discloses one agent, not the roster. When authentication is on,
-  the card advertises how to authenticate for the JSON-RPC call that follows
-  (`authentication.credentials` points at your OIDC token endpoint).
+  the card carries an `authentication` block for the JSON-RPC call that follows.
+
+  > **Caveat.** `authentication.credentials` is derived from
+  > `quarkus.oidc.auth-server-url`, which is the URL **EDDI** uses to reach the
+  > IdP. Point that at a publicly resolvable issuer and the value is usable as
+  > published. The shapes that bundle Keycloak do not: the Helm chart sets it to
+  > the in-cluster service and `docker-compose.integration-keycloak.yml` to the
+  > compose hostname, so the advertised token endpoint does not resolve for an
+  > outside peer, which must be told its token endpoint out of band. Nothing
+  > leaks — an internal hostname is not a credential — but do not rely on the
+  > card alone for token discovery there.
 - **`GET /a2a/agents` requires authentication.** It enumerates every A2A-enabled
   agent — name, description, skills, URL — which no part of the protocol needs,
   and which is strictly more than the skill-name list gated behind
@@ -61,8 +70,10 @@ contract:
 - **The JSON-RPC endpoint requires authentication.** `tasks/send` runs a
   conversation on your LLM budget.
 - **Capability discovery follows its flag.** `eddi.a2a.capabilities.public` is the
-  only gate: off (the default) it answers 404 to everyone; on, it is anonymous,
-  which is what "public" means there.
+  only *authentication* gate — no token is ever required or checked. It is not the
+  only gate: `eddi.a2a.enabled` still has to be on, and with either off the two
+  endpoints answer 404 to everyone. With both on they are anonymous, which is what
+  "public" means there.
 
 > **Implementation note.** `@PermitAll` on the JAX-RS method is only half of
 > this. Quarkus evaluates the `quarkus.http.auth.permission.*` path policies
