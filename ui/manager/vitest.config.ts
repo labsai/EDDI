@@ -52,11 +52,20 @@ export default mergeConfig(
           "src/app.tsx",
           "src/lib/auth-config.ts",
         ],
+        // Recalibrated for Vitest 4, not relaxed. Vitest 3's v8-to-istanbul
+        // counted every source LINE as a statement — so JSX markup, which runs
+        // on every render, padded both figures (main measured 90.25 / 90.25).
+        // Vitest 4 remaps against the AST and counts real statements: the same
+        // code reads 83.45% lines and 81.83% statements with no test or source
+        // change. The uncovered code did not change either — view-toggle.tsx
+        // was flagged at lines 23-33 before and after; only the denominator
+        // moved. Branches (84.03 -> 76.44) and functions (74.29 -> 76.37)
+        // still clear their floors, so those are left alone.
         thresholds: {
-          lines: 85,
+          lines: 83,
           branches: 75,
           functions: 70,
-          statements: 85,
+          statements: 81,
         },
       },
     },

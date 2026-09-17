@@ -115,6 +115,19 @@ updates:
         applies-to: security-updates
         patterns:
           - "*"
+      # vitest and every @vitest/* package peer-depend on each other at the EXACT
+      # same version, so bumping one alone fails `npm ci` with ERESOLVE. That is
+      # how the vitest 4.1.11 security fix (GHSA-82fw-gwwq-j7x9) arrived as a PR
+      # that could never go green. No update-types filter: majors must move
+      # together too. Declared before minor-and-patch so these land here instead.
+      vitest:
+        patterns:
+          - "vitest"
+          - "@vitest/*"
+      # Same shape: @stryker-mutator/vitest-runner pins @stryker-mutator/core exactly.
+      stryker:
+        patterns:
+          - "@stryker-mutator/*"
       minor-and-patch:
         patterns:
           - "*"
@@ -147,6 +160,11 @@ updates:
         applies-to: security-updates
         patterns:
           - "*"
+      # vitest and @vitest/* must move together; see the Manager entry above.
+      vitest:
+        patterns:
+          - "vitest"
+          - "@vitest/*"
       minor-and-patch:
         patterns:
           - "*"

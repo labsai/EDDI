@@ -20,6 +20,7 @@ import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.IDataFactory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.memory.MemoryKeys;
+import ai.labs.eddi.engine.memory.SecretValueScrubber;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.configs.properties.model.Property.Scope;
@@ -535,10 +536,7 @@ public class PropertySetterTask implements ILifecycleTask {
             if (INPUT_INITIAL_IDENTIFIER.equals(key) || INPUT_NORMALIZED_IDENTIFIER.equals(key)) {
                 continue;
             }
-            Object result = data.getResult();
-            Object cleaned = result instanceof Context context
-                    ? scrubContext(context, plaintext)
-                    : scrubValue(result, plaintext);
+            Object cleaned = SecretValueScrubber.scrubValue(data.getResult(), plaintext, SECRET_INPUT_PLACEHOLDER);
             if (cleaned != null) {
                 storeScrubbed(currentStep, key, cleaned);
                 anythingScrubbed = true;
@@ -550,7 +548,7 @@ public class PropertySetterTask implements ILifecycleTask {
         var conversationOutput = currentStep.getConversationOutput();
         if (conversationOutput != null) {
             for (var outputEntry : conversationOutput.entrySet()) {
-                Object cleaned = scrubValue(outputEntry.getValue(), plaintext);
+                Object cleaned = SecretValueScrubber.scrubValue(outputEntry.getValue(), plaintext, SECRET_INPUT_PLACEHOLDER);
                 if (cleaned != null) {
                     outputEntry.setValue(cleaned);
                     anythingScrubbed = true;
@@ -626,52 +624,6 @@ public class PropertySetterTask implements ILifecycleTask {
         var builder = new StringBuilder(value.length());
         value.codePoints().filter(Character::isLetterOrDigit).forEach(builder::appendCodePoint);
         return builder.toString();
-    }
-
-    /**
-     * A copy of {@code context} with the plaintext removed from its value, or
-     * {@code null} when it does not carry it. A client-supplied secret arrives this
-     * way ({@code valueString: "{context.apiKey}"}) and {@code Conversation} stores
-     * every context entry as a step datum, so it lands in the conversation document
-     * just like the input does.
-     */
-    private static Object scrubContext(Context context, String plaintext) {
-        Object cleaned = scrubValue(context.getValue(), plaintext);
-        return cleaned != null ? new Context(context.getType(), cleaned) : null;
-    }
-
-    /**
-     * Returns a copy of {@code value} with every occurrence of {@code plaintext}
-     * replaced, or {@code null} when it does not carry the plaintext at all (so the
-     * caller can tell "nothing to do" from "replaced").
-     */
-    private static Object scrubValue(Object value, String plaintext) {
-        if (value instanceof String text) {
-            return text.contains(plaintext) ? text.replace(plaintext, SECRET_INPUT_PLACEHOLDER) : null;
-        }
-        if (value instanceof List<?> list) {
-            List<Object> copy = new ArrayList<>(list);
-            boolean changed = false;
-            for (int i = 0; i < copy.size(); i++) {
-                Object cleaned = scrubValue(copy.get(i), plaintext);
-                if (cleaned != null) {
-                    copy.set(i, cleaned);
-                    changed = true;
-                }
-            }
-            return changed ? copy : null;
-        }
-        if (value instanceof Map<?, ?> map) {
-            Map<String, Object> copy = new LinkedHashMap<>();
-            boolean changed = false;
-            for (var entry : map.entrySet()) {
-                Object cleaned = scrubValue(entry.getValue(), plaintext);
-                copy.put(String.valueOf(entry.getKey()), cleaned != null ? cleaned : entry.getValue());
-                changed |= cleaned != null;
-            }
-            return changed ? copy : null;
-        }
-        return null;
     }
 
     /**

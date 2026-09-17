@@ -18,6 +18,7 @@ import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.*;
 import ai.labs.eddi.engine.memory.IConversationMemory.IConversationProperties;
 import ai.labs.eddi.engine.memory.model.Data;
+import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.runtime.IExecutableWorkflow;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.memory.model.ConversationState;
@@ -73,6 +74,26 @@ public class Conversation implements IConversation {
      * are persisted regardless of the diff.
      */
     private final Map<String, Property> longTermBaseline = new HashMap<>();
+
+    /**
+     * Keys of the context entries this turn's client marked {@code "secret": true}.
+     * Their stored copy is replaced wholesale when the turn ends.
+     */
+    private final Set<String> secretContextKeys = new LinkedHashSet<>();
+
+    /**
+     * Every string form found in those entries — what is searched for in the rest
+     * of the step, the properties and the audit entries, because a template may
+     * have copied the value anywhere.
+     */
+    private final Set<String> secretContextValues = new LinkedHashSet<>();
+
+    /**
+     * Shorter secret values are only removed from their own context entry, not
+     * searched for elsewhere: replacing every "12" in a turn's output would destroy
+     * it, and a value that short is not a credential.
+     */
+    static final int MIN_SCRUBBED_SECRET_CONTEXT_LENGTH = 8;
 
     Conversation(List<IExecutableWorkflow> executableWorkflows, IConversationMemory conversationMemory, IPropertiesHandler propertiesHandler,
             IConversationOutputRenderer outputProvider) {
@@ -469,7 +490,15 @@ public class Conversation implements IConversation {
     private void addContextToConversationOutput(IWritableConversationStep currentStep, List<IData<Context>> contextData) {
 
         if (!contextData.isEmpty()) {
-            var context = ConversationMemoryUtilities.prepareContext(contextData);
+            // The output is returned to the client and may be streamed before the turn
+            // ends, so a secret entry never enters it — unlike the step datum, which
+            // must hold the live value until the pipeline has run.
+            List<IData<Context>> visible = contextData.stream()
+                    .map(datum -> isSecretContextKey(datum.getKey())
+                            ? new Data<>(datum.getKey(), secretContextPlaceholder())
+                            : datum)
+                    .toList();
+            var context = ConversationMemoryUtilities.prepareContext(visible);
             currentStep.addConversationOutputMap(KEY_CONTEXT, context);
         }
     }
@@ -524,8 +553,11 @@ public class Conversation implements IConversation {
                 paused = true;
             }
         } finally {
+            // First, so nothing below — the audit flush, the longTerm write, the
+            // stored snapshot, the rendered output — sees a secret context value.
+            scrubSecretContextValues();
             if (auditBuffer != null) {
-                auditBuffer.flush(conversationMemory);
+                auditBuffer.flush(conversationMemory, searchableSecretContextValues());
             }
             // BEFORE the persist decision below, and on every exit including the
             // exception path: note which longTerm properties this turn changed. If the
@@ -794,10 +826,139 @@ public class Conversation implements IConversation {
         return prop;
     }
 
+    private boolean isSecretContextKey(String dataKey) {
+        return dataKey.startsWith(KEY_CONTEXT + ":") && secretContextKeys.contains(dataKey.substring(KEY_CONTEXT.length() + 1));
+    }
+
+    private static Context secretContextPlaceholder() {
+        var placeholder = new Context(Context.ContextType.string, MemoryKeys.SECRET_CONTEXT_PLACEHOLDER);
+        placeholder.setSecret(true);
+        return placeholder;
+    }
+
+    /** The secret values worth searching for, longest first. */
+    private List<String> searchableSecretContextValues() {
+        return secretContextValues.stream()
+                .filter(value -> value.length() >= MIN_SCRUBBED_SECRET_CONTEXT_LENGTH)
+                .sorted(Comparator.comparingInt(String::length).reversed())
+                .toList();
+    }
+
+    /**
+     * Removes this turn's secret context values from everything that outlives the
+     * turn: the context entries themselves (replaced wholesale), the conversation
+     * properties (a property instruction may have stored the value;
+     * {@code longTerm} ones would otherwise be written to the user memory store),
+     * and every other datum of the step and its conversation output (a template may
+     * have copied the value there).
+     * <p>
+     * Runs when the pipeline stops for any reason — completed, stopped, paused or
+     * failed. A tool-call pause persists its pending batch (the model's arguments,
+     * the transcript, the request previews), so that is scrubbed too. Tasks that
+     * run after a HITL resume therefore see the placeholder — including a resumed
+     * tool call whose arguments carried the value: a secret context value lives for
+     * the request that carried it, not longer.
+     * <p>
+     * Objects the plain walk cannot enter (output items, records) are scrubbed
+     * through their JSON form and replaced by the scrubbed tree, which is stored
+     * and returned exactly as the object would have been — see
+     * {@link SecretValueScrubber#scrubDeep}.
+     */
+    private void scrubSecretContextValues() {
+        if (secretContextKeys.isEmpty()) {
+            return;
+        }
+        var step = conversationMemory.getCurrentStep();
+        if (step == null) {
+            return;
+        }
+        List<String> needles = searchableSecretContextValues();
+
+        // Properties first: their step mirrors hold the same Property objects, which
+        // must be clean before those mirrors are checked below.
+        IConversationProperties properties = conversationMemory.getConversationProperties();
+        if (properties != null && !needles.isEmpty()) {
+            properties.values().stream().filter(Objects::nonNull).forEach(property -> scrubProperty(property, needles));
+        }
+
+        PendingToolCallBatch pendingToolCalls = conversationMemory.getHitlPendingToolCalls();
+        if (pendingToolCalls != null && !needles.isEmpty()) {
+            PendingToolCallBatch cleaned = SecretValueScrubber.scrubTyped(pendingToolCalls, PendingToolCallBatch.class, needles,
+                    MemoryKeys.SECRET_CONTEXT_PLACEHOLDER);
+            if (cleaned != null) {
+                conversationMemory.setHitlPendingToolCalls(cleaned);
+            }
+        }
+
+        for (IData<?> datum : step.getAllElements()) {
+            @SuppressWarnings("unchecked")
+            var writable = (IData<Object>) datum;
+            if (isSecretContextKey(datum.getKey())) {
+                writable.setResult(secretContextPlaceholder());
+                writable.setPossibleResults(null);
+                continue;
+            }
+            Object cleaned = scrubSecretsFrom(datum.getResult(), needles);
+            if (cleaned != null) {
+                writable.setResult(cleaned);
+            }
+            if (scrubSecretsFrom(writable.getPossibleResults(), needles) instanceof List<?> cleanedPossible) {
+                writable.setPossibleResults(castList(cleanedPossible));
+            }
+        }
+
+        var conversationOutput = step.getConversationOutput();
+        if (conversationOutput != null) {
+            for (var entry : conversationOutput.entrySet()) {
+                Object cleaned = scrubSecretsFrom(entry.getValue(), needles);
+                if (cleaned != null) {
+                    entry.setValue(cleaned);
+                }
+            }
+        }
+    }
+
+    /**
+     * {@code value} with the secrets replaced, or {@code null} when it carries
+     * none.
+     */
+    private static Object scrubSecretsFrom(Object value, List<String> needles) {
+        return SecretValueScrubber.scrubDeep(value, needles, MemoryKeys.SECRET_CONTEXT_PLACEHOLDER);
+    }
+
+    private static void scrubProperty(Property property, List<String> needles) {
+        if (scrubSecretsFrom(property.getValueString(), needles) instanceof String cleaned) {
+            property.setValueString(cleaned);
+        }
+        if (scrubSecretsFrom(property.getValueObject(), needles) instanceof Map<?, ?> cleaned) {
+            property.setValueObject(castMap(cleaned));
+        }
+        if (scrubSecretsFrom(property.getValueList(), needles) instanceof List<?> cleaned) {
+            property.setValueList(castList(cleaned));
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<Object> castList(List<?> list) {
+        return (List<Object>) list;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> castMap(Map<?, ?> map) {
+        return (Map<String, Object>) map;
+    }
+
     private List<IData<Context>> createContextData(Map<String, Context> context) {
         List<IData<Context>> contextData = new LinkedList<>();
+        secretContextKeys.clear();
+        secretContextValues.clear();
         if (context != null) {
             for (String key : context.keySet()) {
+                Context entry = context.get(key);
+                if (entry != null && Boolean.TRUE.equals(entry.getSecret())) {
+                    secretContextKeys.add(key);
+                    SecretValueScrubber.collectPlaintexts(entry.getValue(), secretContextValues);
+                }
                 // Persisted copy is scrubbed of inline base64 payloads; the live payload
                 // has already been captured into ATTACHMENTS memory for this turn.
                 Context persistedCopy = AttachmentContextExtractor.scrubInlinePayload(key, context.get(key));
