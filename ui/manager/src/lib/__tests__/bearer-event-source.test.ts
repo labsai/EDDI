@@ -1,4 +1,12 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import {
+  describe,
+  it,
+  expect,
+  vi,
+  beforeEach,
+  afterEach,
+  type MockInstance,
+} from "vitest";
 import { BearerEventSource } from "@/lib/bearer-event-source";
 import {
   SSE_RECONNECT_MAX_ATTEMPTS,
@@ -24,11 +32,11 @@ function createSSEStream(chunks: string[]): ReadableStream<Uint8Array> {
 }
 
 describe("BearerEventSource", () => {
-  let fetchSpy: ReturnType<typeof vi.spyOn>;
+  let fetchSpy: MockInstance<typeof fetch>;
 
   beforeEach(() => {
     vi.useFakeTimers();
-    fetchSpy = vi.spyOn(globalThis, "fetch") as ReturnType<typeof vi.spyOn>;
+    fetchSpy = vi.spyOn(globalThis, "fetch");
   });
 
   afterEach(() => {
