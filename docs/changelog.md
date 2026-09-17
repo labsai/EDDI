@@ -37,7 +37,7 @@ which neither a reader nor an agent's context window could usefully hold.
 
 | Period | Entries | Size |
 |---|---|---|
-| [September 2026](changelog/2026-09.md) | 3 | 7 KB |
+| [September 2026](changelog/2026-09.md) | 4 | 11 KB |
 | [August 2026](changelog/2026-08.md) | 211 | 832 KB |
 | [July 2026](changelog/2026-07.md) | 147 | 648 KB |
 | [June 2026](changelog/2026-06.md) | 26 | 67 KB |
@@ -113,6 +113,95 @@ Stryker 10 dropped Node 20 (Dependabot #768 was red for that reason) and Vitest 
   recur; all four entries are present. `npm audit`: 0 vulnerabilities in both UIs.
 
 ---
+
+## 🔒 fix(security): a token with no principal name fails closed — 401 up front, 403 in the ownership checks (2026-09-17)
+
+**Repo:** EDDI (`fix/nameless-principal-fail-closed`)
+
+### Problem
+
+Measured against `labsai/eddi` with OIDC enforced and a Keycloak realm whose access tokens carried no
+`upn`, `preferred_username` or `sub`: Quarkus authenticates the token but resolves the principal name to
+`null`. Two consequences followed.
+
+- `OwnershipValidator.validateAndResolveUserId` returned that `null` as the resolved userId, and
+  `ConversationSetup.computeAnonymousUserIdIfEmpty` then stamped an authenticated user's conversation with
+  a random `anonymous-<hex>` owner the user could never read back.
+- `GET`/`POST /agents/{conversationId}` by a non-admin owner answered **500**:
+  `requireOwnerOrAdmin` called `callerId.equals(...)` on the null. `validateUserAccess`,
+  `validateAndResolveUserId` and `isOwner` had the same unguarded `getName().equals`, as did the group
+  conversation owner filters in `RestGroupConversation.listGroupConversations` and
+  `McpGroupTools.list_group_conversations`.
+
+The shipped realm is fixed separately (`fix/keycloak-realm-client-scopes`); this change is for every other
+identity provider or hand-built realm that can produce the same token.
+
+### What changed
+
+- **`NamelessPrincipalAugmentor`** (new, `engine/security`) — a `SecurityIdentityAugmentor` that fails
+  authentication (`AuthenticationFailedException` → **401**) for a non-anonymous identity whose principal is
+  missing or whose name is null or blank. It logs a `[SECURITY]` WARN naming the claims it looked for (the
+  configured `quarkus.oidc.token.principal-claim`, else `upn`/`preferred_username`/`sub`) and the token's
+  issuer and `azp`, log-sanitized, never the token. A misconfigured realm fails every request, so the WARN is
+  throttled to once per five minutes and the rest log at DEBUG. Anonymous identities pass untouched.
+- **`OwnershipValidator`** — a public static `principalName(identity)` normalises a missing principal and a
+  null/blank name to `null`. Every check denies a nameless non-admin with **403** instead of NPE-ing:
+  `isOwner` is `false`, `validateUserAccess`/`requireOwnerOrAdmin` (and so `requireOwnerOrAdminStrict` and
+  `requireOwnerAdminOrApprover`) throw `ForbiddenException`, and `validateAndResolveUserId` throws rather
+  than resolving to `null`.
+- **The legacy-owner exemption no longer admits a nameless caller** (Copilot review on PR #773).
+  `requireOwnerOrAdmin` returned for an unowned resource *before* it looked at the caller's name, so a
+  nameless non-admin still reached legacy conversations and group conversations through it. It now resolves
+  the name first and only then applies the exemption; `ConversationAccessGuard.canAccessConversation`,
+  which must admit exactly what that check admits, uses the new `OwnershipValidator.isNamelessCaller` to
+  hide unowned conversations from the same caller. Anonymous and admin callers are unchanged.
+- **Group conversation listings** (`RestGroupConversation`, `McpGroupTools`) use `principalName` and return
+  nothing for a nameless caller — including legacy rows with no owner, which a null-to-null comparison would
+  otherwise have matched.
+- **`docs/security.md`** — new "The Token Must Name the User" section: the claims Quarkus reads, the 401 and
+  its WARN, and the two fixes (add the claim, or set `QUARKUS_OIDC_TOKEN_PRINCIPAL_CLAIM`).
+
+### Design decisions
+
+- **Reject at authentication, and keep the 403s.** The augmentor is the legible failure: one 401 and one WARN
+  that say what is missing, rather than a 500 on one endpoint, a silently orphaned conversation on another
+  and an empty list on a third. The null-safe validator is defence in depth for any identity that reaches a
+  resource without passing through the augmentor (a future auth mechanism, a test identity).
+- **401, not 403.** The token is not *forbidden* something; it cannot identify the caller at all, which is an
+  authentication failure. The Manager and Chat UI treat 401 and 403 alike, so there is no redirect loop.
+- **Admins keep their role-based bypass in the validator.** `requireOwnerOrAdmin` and an admin naming an
+  explicit `userId` are authorized by the role, not the name. An admin with *no* `userId` to resolve is still
+  denied — there is nobody to file the conversation under. In practice the augmentor rejects the admin's
+  nameless token first.
+- **No escape hatch.** A nameless identity cannot own anything, so there is no configuration in which letting
+  it through is useful; the remedy is `quarkus.oidc.token.principal-claim`.
+- **Background paths are unaffected.** Schedule fires, group members and sub-agents never authenticate a
+  request, so they never reach the augmentor, and the validator's `identity == null` branches are unchanged.
+- **Other principal reads left alone.** `HitlAccessGuard`, `RestConnectionAuthorization`,
+  `RestConnectionSettings`, `A2ATaskHandler`, `OpenAiAuthFilter`, `SpaceContext`, `RestScheduleStore`,
+  `CallerIdentityContext` and `RestAgentEngine` already null-check the name; the audit stamps in
+  `RestAgentEngine` (`endedBy`, `cancelledBy`) and `RestGroupConversation` (`submittedBy`, `decidedBy`) record
+  `null` rather than failing, which the augmentor now makes unreachable.
+
+### Tests
+
+- `OwnershipValidatorTest` — new `nameless principal` nested class: every method with a null, empty and
+  whitespace name (plus an identity with no principal), admin and non-admin (32 cases).
+- `NamelessPrincipalAugmentorTest` (new) — named and anonymous pass through; null/blank/missing principal
+  fail with `AuthenticationFailedException`; the diagnostic names the default or configured claim and the
+  sanitized issuer/client; the WARN throttle.
+- `RestGroupConversationTest`, `McpGroupToolsTest` — a nameless caller lists nothing, including an unowned row.
+- `OwnershipValidatorTest`, `ConversationAccessGuardTest` — a nameless caller is refused an unowned resource by
+  `requireOwnerOrAdmin`, `requireConversationOwner` and `canAccessConversation`; an admin is not. With the
+  reordering reverted, 5 of these fail.
+- **Mutation-checked:** with `OwnershipValidator` and both listings reverted to `origin/main` and the augmentor
+  short-circuited, 22 of the new tests fail (NPEs, missing 403s, missing 401s). The blank-name cases that
+  pass against the old code do so because a blank name never equalled a real owner; they stay as regression
+  guards.
+- **Not run end to end against a live Keycloak.** That a failing augmentor answers 401 was checked in the
+  Quarkus 3.39.3 sources instead: `QuarkusIdentityProviderManagerImpl` chains the augmentors into the
+  authentication `Uni`, and `HttpSecurityRecorder.DefaultAuthFailureHandler` answers an
+  `AuthenticationFailedException` with the mechanism's challenge (401). No unit test covers that HTTP step.
 
 ## 🔒 feat(context): secret context values — usable for one turn, never stored or returned (2026-09-17)
 
@@ -3084,70 +3173,6 @@ names `EddiImageDockerfile.forTestContext()` and states the two-stage rule.
 [`ContainerBaseIT.java`](../src/test/java/ai/labs/eddi/integration/ContainerBaseIT.java),
 [`.github/workflows/base-image-check.yml`](../.github/workflows/base-image-check.yml),
 [`AGENTS.md`](../AGENTS.md), [`docs/redhat-openshift.md`](redhat-openshift.md)
-
----
-
-## 🎲 test(caching): de-flake the cache-wide TTL expiry test (2026-09-06)
-
-**Repo:** EDDI (`fix/flaky-cache-ttl-test`)
-
-`CacheFactoryTest.cacheWideTtlStillExpires` reddened CI on an unrelated branch
-(run `34047771699`, `expected: <value1> but was: <null>`, 1 failure in 20,556 tests). A rerun of
-the same commit passed, so this was a race, not a regression.
-
-The test built a cache with a **1 ms** cache-wide TTL, wrote an entry, and read it straight back:
-
-```java
-ICache<String, String> cache = factory.getCache("cacheWideTtl", Duration.ofMillis(1));
-cache.put("key1", "value1");
-assertEquals("value1", cache.get("key1"));   // loses if the thread stalls for 1 ms
-```
-
-One millisecond of scheduling stall between two adjacent statements is unremarkable on a shared
-runner, and that is all it takes. The behaviour under test — that the entry eventually expires —
-was never in question.
-
-### Why the fix is a wider margin and not a fake clock
-
-`CacheFactory` builds Caffeine inline and exposes no `Ticker` seam, so a deterministic clock
-would mean adding a test-only seam to production code. That is not worth it here, because the
-deterministic coverage **already exists**: `CacheImplTest.DefaultTtlTests` drives a `FakeTicker`
-over a directly constructed `CacheImpl` carrying `WriteExpiry.of(Duration.ofSeconds(60))` and
-pins the semantics exactly — expiry on an untimed put, reads not extending it, re-writes
-restarting it.
-
-What that deterministic test cannot see is the factory itself: it constructs `CacheImpl` by hand,
-so `CacheFactory.getCache(name, ttl)` could stop installing the policy entirely and every
-assertion there would stay green. That wiring check is this test's actual job, and it is worth
-keeping. So the TTL moves to **500 ms** with a 1.5 s sleep past it. The test costs ~1.5 s, which
-against a 20,556-test suite is nothing.
-
-### The read that looks redundant is the one holding the test up
-
-The obvious "fix" is deleting the pre-expiry read, since the test is named for expiry. That would
-make it pass vacuously: with nothing asserting the entry was ever stored, a `put` that silently
-dropped the write would satisfy `assertNull` just as well as a working TTL. Its neighbours avoid
-the race by writing a *second, untimed* key as their non-vacuity guard and only reading after the
-sleep — but a cache-wide TTL expires everything, so no such key exists here and the guard has to
-be a read before expiry. That is why this one test needs a TTL its siblings do not, and the
-constant's Javadoc says so, with the failing run id.
-
-### Both assertions mutation-checked
-
-Per the house rule that a behavioural test is not trusted until it has been seen to fail:
-
-| Mutation | Expected | Result |
-|---|---|---|
-| `getCache(name, ttl)` installs `WriteExpiry.never()` instead of `of(ttl)` | the entry survives | fails at `assertNull` — *the cache-wide TTL must still remove the entry, expected `<null>` but was `<value1>`* |
-| `CacheImpl.put(K,V)` stores nothing | the entry is never there | fails at the pre-read in 0.002 s — *the entry must be readable before its TTL elapses* |
-
-Both production files were restored afterwards; this change touches **test code only**.
-
-`perEntryLifespanOverridesCacheTtl` was checked as well, as suspected: it writes a 1 ms entry and
-an untimed one into a **1 hour** cache and reads neither before sleeping, so it has no race. Same
-for `perEntryTtlIsHonoured` and `negativeLifespanIsUnlimited`.
-
-**Files:** [`CacheFactoryTest.java`](../src/test/java/ai/labs/eddi/engine/caching/CacheFactoryTest.java)
 
 ---
 
